@@ -30,8 +30,10 @@ from lintro.ai.exceptions import AICostBudgetExceededError, AIProviderError
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.registry import AIProvider
 from lintro.ai.review.coverage_degradation import (
+    GENERATED_QUESTIONS_FAILED_NOTE,
     PARTIAL_REVIEW_LABEL,
     describe_coverage_degradations,
+    format_narrative_note,
 )
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
@@ -344,10 +346,17 @@ async def test_both_depth_passes_failing_still_keeps_the_main_pass(
 
     note = describe_coverage_degradations(metadata=result.metadata)
 
-    assert_that(note).contains(
-        "the per-PR question pass failed, so every chunk was reviewed against "
-        "the rubric alone",
+    # The failed question pass is a narrative note of its own since #2803,
+    # never a clause of the coverage-limited warning.
+    assert_that(format_narrative_note(metadata=result.metadata)).is_equal_to(
+        GENERATED_QUESTIONS_FAILED_NOTE,
     )
+    # The wording itself is pinned, not only the constant.
+    assert_that(GENERATED_QUESTIONS_FAILED_NOTE).is_equal_to(
+        "The per-PR question pass failed, so every chunk was reviewed against "
+        "the rubric alone.",
+    )
+    assert_that(note).does_not_contain("question pass")
     assert_that(note).contains(
         "1 chunk kept only the main pass after the depth-3 adversarial sweep failed",
     )

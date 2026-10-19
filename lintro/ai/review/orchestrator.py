@@ -34,11 +34,9 @@ import time
 from typing import TYPE_CHECKING
 
 from lintro.ai.provenance import model_ledger
+from lintro.ai.review.empty_result import empty_review_result
 from lintro.ai.review.pr_head import remove_pr_head
-from lintro.ai.review.result_assembly import (
-    assemble_review_result,
-    empty_review_result,
-)
+from lintro.ai.review.result_assembly import assemble_review_result
 from lintro.ai.review.run_execution import execute_run
 from lintro.ai.review.run_planning import plan_run
 from lintro.ai.review.run_provenance import in_run_shadow_model, stamp_run_provenance

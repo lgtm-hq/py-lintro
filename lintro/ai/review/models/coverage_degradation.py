@@ -46,6 +46,11 @@ class CoverageDegradation:
         detail: Why the limit applied, when a reason has more than one cause:
             the failed question pass's kind, plus "; retried once" after a
             failed retry (#2813). Serialized only when set.
+        paths: The files of the chunk the degradation hit, stamped when the
+            chunk finishes (#2803). A rerun redoes the work by path because
+            chunk indices are not stable across rounds. Kept in the review
+            state's run record only, never in :meth:`to_dict`, so the JSON
+            envelope is unchanged.
     """
 
     reason: CoverageDegradationReason
@@ -53,6 +58,7 @@ class CoverageDegradation:
     split: bool = True
     limit: int | None = None
     detail: str = ""
+    paths: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the degradation for JSON and MCP payloads.

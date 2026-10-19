@@ -15,6 +15,9 @@ from assertpy import assert_that
 
 from lintro.ai.provenance import LedgerCall, RunProvenance
 from lintro.ai.providers.reported_model import ReportedModel
+from lintro.ai.review.enums.coverage_degradation_reason import (
+    CoverageDegradationReason,
+)
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.incremental_coverage import (
@@ -24,6 +27,7 @@ from lintro.ai.review.incremental_coverage import (
 )
 from lintro.ai.review.merge import ChunkReviewPartial
 from lintro.ai.review.models.changed_file import ChangedFile
+from lintro.ai.review.models.coverage_degradation import CoverageDegradation
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_coverage import RunCoverage
@@ -410,3 +414,46 @@ def test_the_error_only_surface_appears_when_only_a_checkpoint_is_stored() -> No
     )
 
     assert_that(body).does_not_contain("showing round")
+
+
+def test_a_checkpoint_record_carries_the_degradations_so_far(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A redo that degraded again before runner loss is on the checkpoint (#2803)."""
+    degraded = ChunkReviewPartial(
+        findings=(),
+        input_tokens=1,
+        output_tokens=1,
+        cost_estimate=0.0,
+        files=("src/app.py",),
+        coverage_degradations=(
+            CoverageDegradation(
+                reason=CoverageDegradationReason.ADVERSARIAL_SWEEP_FAILED,
+                chunk_index=0,
+                paths=("src/app.py",),
+            ),
+        ),
+    )
+
+    loaded = _checkpoint(
+        tmp_path,
+        monkeypatch,
+        prior=None,
+        stamp=CheckpointStamp(
+            pr_number=_PR,
+            round_spend_usd=0.0,
+            identity=_IDENTITY,
+            cost_basis="unpriceable",
+        ),
+        collected=[degraded],
+    )
+
+    partial = loaded.runs[-1]
+    assert_that(partial.coverage.checkpoint).is_true()
+    assert_that(partial.coverage.degradations).is_length(1)
+    record = partial.coverage.degradations[0]
+    assert_that(record.reason).is_equal_to(
+        CoverageDegradationReason.ADVERSARIAL_SWEEP_FAILED,
+    )
+    assert_that(record.degradation.paths).is_equal_to(("src/app.py",))

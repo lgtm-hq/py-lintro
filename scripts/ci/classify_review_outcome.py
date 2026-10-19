@@ -185,6 +185,31 @@ CONVERGED_OUTCOME: Final[str] = "converged"
 DEPTH_COMPLETE_KEY: Final[str] = "findings_coverage_complete"
 DEPTH_DEGRADATIONS_KEY: Final[str] = "coverage_degradations"
 
+# Degradation reasons that never clear ``findings_coverage_complete`` (#2702,
+# #2803). Mirrors lintro.ai.review.enums.coverage_degradation_reason
+# .NARRATIVE_DEGRADATION_REASONS; a contract test pins the pair. A review
+# carrying only these passes the check with a ``::warning::`` per reason
+# group instead of reddening it.
+NARRATIVE_DEGRADATION_REASONS: Final[frozenset[str]] = frozenset(
+    {
+        "synthesis_truncated",
+        "synthesis_failed",
+        "generated_questions_failed",
+        "verification_failed",
+        "delegated_diff_embedded",
+        "no_tree_for_agent",
+    },
+)
+
+# The warning a failed per-PR question pass leaves (#2803). Mirrors
+# lintro.ai.review.coverage_degradation.GENERATED_QUESTIONS_FAILED_NOTE, the note
+# the sticky and the terminal show; a contract test pins the pair.
+GENERATED_QUESTIONS_FAILED_NOTE: Final[str] = (
+    "The per-PR question pass failed, so every chunk was reviewed against "
+    "the rubric alone."
+)
+GENERATED_QUESTIONS_FAILED_REASON: Final[str] = "generated_questions_failed"
+
 # Kind labels refined for the active transport. Shared kinds stay as-is;
 # transport-specific labels make CI summaries self-diagnosing (#1923).
 _API_KIND_LABELS: Final[dict[str, str]] = {
@@ -328,6 +353,9 @@ class OutcomeReport:
         warnings: Lines surfaced as ``::warning::`` annotations beside the
             outcome: a fallback lane answered, or a gateway's model cannot be
             verified.
+        notes: Narrative degradations the review recorded (#2803): each is
+            emitted as a ``::warning::`` and a job-summary line, and none
+            changes the exit code.
     """
 
     outcome: ReviewOutcome
@@ -337,6 +365,7 @@ class OutcomeReport:
     transport: str = DEFAULT_TRANSPORT
     status: str = ""
     warnings: tuple[str, ...] = ()
+    notes: tuple[str, ...] = ()
 
 
 def _payload_has_p1_findings(payload: Mapping[str, Any]) -> bool:
@@ -461,6 +490,47 @@ def _parse_degraded_envelope(*, text: str) -> dict[str, Any] | None:
             "has_p1_findings": _payload_has_p1_findings(payload),
         }
     return None
+
+
+def _narrative_notes(*, text: str) -> tuple[str, ...]:
+    """Return the warnings for the narrative degradations a review recorded.
+
+    Read from the same envelope as :func:`_parse_degraded_envelope`, but
+    whether or not the finding depth was complete: a narrative reason is
+    reported the same way on a green run and on a red one.
+
+    Args:
+        text: Combined stdout/stderr captured from the review run.
+
+    Returns:
+        The question-pass note when that pass failed, then one line naming
+        any other narrative reasons; empty when there are none.
+    """
+    for payload in _iter_json_objects(text=text):
+        if "readiness_verdict" not in payload:
+            continue
+        raw = payload.get(DEPTH_DEGRADATIONS_KEY)
+        reasons: list[str] = []
+        for item in raw if isinstance(raw, list) else []:
+            reason = (
+                str(item.get("reason") or "").strip()
+                if isinstance(item, Mapping)
+                else ""
+            )
+            if reason in NARRATIVE_DEGRADATION_REASONS and reason not in reasons:
+                reasons.append(reason)
+        notes: list[str] = []
+        if GENERATED_QUESTIONS_FAILED_REASON in reasons:
+            notes.append(GENERATED_QUESTIONS_FAILED_NOTE)
+        others = [
+            reason for reason in reasons if reason != GENERATED_QUESTIONS_FAILED_REASON
+        ]
+        if others:
+            notes.append(
+                f"Recorded without failing this check: {', '.join(others)}.",
+            )
+        return tuple(notes)
+    return ()
 
 
 def _degraded_report(
@@ -908,6 +978,42 @@ def classify(
     transport: str = DEFAULT_TRANSPORT,
     env: Mapping[str, str] | None = None,
 ) -> OutcomeReport:
+    """Classify a review invocation and attach its narrative notes.
+
+    Args:
+        status: Exit status from ``lintro review``, or one of
+            :data:`NO_CREDENTIAL_STATUS` / :data:`NOT_INVOKED_STATUS` when the
+            review was never reached.
+        output: Combined stdout/stderr captured from the run.
+        reason: Wrapper-supplied explanation for a never-invoked run.
+        transport: Active transport (``api`` or ``cli``); named on every line.
+        env: The environment holding the lane facts the wrapper exported
+            (#2871); the process environment when ``None``.
+
+    Returns:
+        The outcome, the copy to surface, and the exit code to terminate
+        with; a produced review also carries its narrative notes (#2803).
+    """
+    report = _classify(
+        status=status,
+        output=output,
+        reason=reason,
+        transport=transport,
+        env=env,
+    )
+    if not report.outcome.produced_review or status == REVIEW_STATUS_ERROR:
+        return report
+    return replace(report, notes=_narrative_notes(text=output))
+
+
+def _classify(
+    *,
+    status: int,
+    output: str,
+    reason: str = "",
+    transport: str = DEFAULT_TRANSPORT,
+    env: Mapping[str, str] | None = None,
+) -> OutcomeReport:
     """Classify a review invocation into a CI-facing outcome.
 
     Args:
@@ -1254,8 +1360,8 @@ def render_summary(*, report: OutcomeReport) -> str:
         )
     if report.detail:
         lines.extend(["> " + report.detail, ""])
-    for warning in report.warnings:
-        lines.extend([f"> ⚠️ {warning}", ""])
+    for line in (*report.warnings, *report.notes):
+        lines.extend([f"> ⚠️ {line}", ""])
     if report.outcome.review_unavailable:
         lines.extend(
             [
@@ -1267,6 +1373,20 @@ def render_summary(*, report: OutcomeReport) -> str:
             ],
         )
     return "\n".join(lines) + "\n"
+
+
+def _command_data(*, text: str) -> str:
+    """Escape text for a workflow-command payload.
+
+    Args:
+        text: The annotation text.
+
+    Returns:
+        The text with `%` and CR percent-encoded, in that order (escaping `%`
+        last would re-escape the escapes), and LF folded to a space so the
+        annotation stays one line.
+    """
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", " ")
 
 
 def _emit(*, report: OutcomeReport) -> None:
@@ -1290,13 +1410,12 @@ def _emit(*, report: OutcomeReport) -> None:
     body = report.headline
     if report.detail:
         body = f"{body}: {report.detail}"
-    # Workflow-command payloads need `%`, CR and LF percent-encoded, in that
-    # order -- escaping `%` last would re-escape the escapes.
-    escaped = body.replace("%", "%25").replace("\r", "%0D").replace("\n", " ")
-    print(f"::{annotation} title={title}::{escaped}")
+    print(f"::{annotation} title={title}::{_command_data(text=body)}")
     for warning in report.warnings:
-        line = warning.replace("%", "%25").replace("\r", "%0D").replace("\n", " ")
-        print(f"::warning title={title}::{line}")
+        print(f"::warning title={title}::{_command_data(text=warning)}")
+    for note in report.notes:
+        # A narrative degradation warns without reddening the check (#2803).
+        print(f"::warning title={title}::{_command_data(text=note)}")
 
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_path:

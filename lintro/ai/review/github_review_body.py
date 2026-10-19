@@ -40,9 +40,7 @@ from lintro.ai.review.github_notes import (
     format_downgrade_note,
     format_lint_facts_note,
     format_partial_review_label,
-    format_synthesis_note_line,
     format_timings_note,
-    format_verification_note_line,
 )
 from lintro.ai.review.github_render import (
     Section,
@@ -54,6 +52,7 @@ from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.skipped_file import SkippedFile
+from lintro.ai.review.pass_notes import format_pass_note_lines
 from lintro.ai.review.posting_tiers import inline_tier_findings
 
 __all__ = ["REVIEW_BODY_FOOTER", "build_review_body"]
@@ -351,16 +350,9 @@ def _run_stats_section(
     if cross_chunk_note:
         # The cross-chunk guard's downgrades, same posture (#2265).
         lines.extend(["", cross_chunk_note])
-    synthesis_note = format_synthesis_note_line(metadata=metadata)
-    if synthesis_note:
-        # Rendered only when the optional cross-chunk pass ran (#2269), so a
-        # default round's run-stats block is byte-identical to before.
-        lines.extend(["", synthesis_note])
-    verification_note = format_verification_note_line(metadata=metadata)
-    if verification_note:
-        # What the verifier confirmed, refuted or lowered (#2728); the
-        # refutations themselves live in the JSON output and the log.
-        lines.extend(["", verification_note])
+    # Synthesis (#2269), verification (#2728) and a failed question pass
+    # (#2803), each only when it applies.
+    lines.extend(format_pass_note_lines(metadata=metadata))
     timings_note = format_timings_note(metadata=metadata)
     if timings_note:
         lines.extend(["", timings_note])
