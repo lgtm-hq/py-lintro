@@ -330,17 +330,16 @@ findings that clear the posting policy; the rest become _notes_:
   which case questions that clear the same floor open threads too. These open threads,
   count in the review body's header, feed the derived verdict, and are tracked across
   rounds.
-- **Notes** — everything else: `low` confidence findings, findings whose `category` is
-  listed in `ai.review_note_categories` (default `[code-smell]`, whatever their
+- **Notes** — everything else: `low` confidence findings, P3 findings whose `category`
+  is listed in `ai.review_note_categories` (default `[code-smell]`, whatever their
   confidence), and questions unless `ai.review_post_questions_inline` is `true`. Notes
-  render in the sticky comment under
-  a collapsed **💬 Notes and questions (N)** block, each linked to its `file:line` at
-  the reviewed commit. They open no thread, are excluded from the verdict, the severity
-  tiles, the open-findings table and the fix prompts, and open no record of their own.
-  Notes are round-scoped, like the summary and the reasoning block: nothing persists
-  them, so a sticky comment re-rendered from state alone — a converged skip, an error
-  surface — shows no notes block. The comment posted by the round that routed them still
-  carries it.
+  render in the sticky comment under a collapsed **💬 Notes and questions (N)** block,
+  each linked to its `file:line` at the reviewed commit. They open no thread, are
+  excluded from the verdict, the severity tiles, the open-findings table and the fix
+  prompts, and open no record of their own. Notes are round-scoped, like the summary and
+  the reasoning block: nothing persists them, so a sticky comment re-rendered from state
+  alone — a converged skip, an error surface — shows no notes block. The comment posted
+  by the round that routed them still carries it.
 
 A note never resolves an existing thread. When a finding posted inline in an earlier
 round comes back as a note, its record is carried forward open — the model still asserts
@@ -375,15 +374,17 @@ inline. Questions stay in the notes block regardless of the floor — set
 `review_post_questions_inline: true` to open threads for them too. The keys are
 independent; restoring the pre-#2572 behaviour of a thread per entry takes all three.
 
-`review_note_categories` routes whole categories to the notes block. It defaults to
-`code-smell` because, on the review corpus (32 labelled bugs across 26 pull requests, two
-models), only 2 of the 35 distinct `code-smell` findings described a defect, both P3 nits,
-and none sat on a labelled bug; routing keeps them readable in the notes block without a
-thread each. Values are review categories (`logic-bug`,
-`silent-failure`, `integration`, `test-gap`, `contract-drift`, `security`,
-`breaking-change`, `code-smell`, `architecture`), compared after the same
-normalization the parser applies to a model's label; a label that is not a category is a
-configuration error. An empty list routes by confidence alone.
+`review_note_categories` routes a category's P3 findings to the notes block; a P1 or P2
+in a routed category still goes through the confidence floor and opens a thread, so the
+routing can shorten the nit list but never hide a blocking finding. It defaults to
+`code-smell` because, on the review corpus (32 labelled bugs across 26 pull requests,
+two models), only 2 of the 35 distinct `code-smell` findings described a defect, both P3
+nits, and none sat on a labelled bug; routing keeps them readable in the notes block
+without a thread each. Values are review categories (`logic-bug`, `silent-failure`,
+`integration`, `test-gap`, `contract-drift`, `security`, `breaking-change`,
+`code-smell`, `architecture`), compared after the same normalization the parser applies
+to a model's label; a label that is not a category is a configuration error. An empty
+list routes by confidence alone.
 
 ### Posting tiers: P1/P2 inline, P3 in the sticky
 

@@ -22,7 +22,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from lintro.ai.review.finding_identity import normalize_category
-from lintro.ai.review.models.review_finding import ReviewFinding
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.enums.confidence_level import ConfidenceLevel
 from lintro.enums.review_category import ReviewCategory
 
@@ -35,6 +35,11 @@ if TYPE_CHECKING:
 #: P3-only in practice, so routing it away touches no inline thread and only
 #: shortens the sticky's P3 list; nothing is dropped.
 DEFAULT_NOTE_CATEGORIES: frozenset[str] = frozenset({str(ReviewCategory.CODE_SMELL)})
+
+#: Severities that category routing never touches: the inline tier
+#: (:mod:`lintro.ai.review.posting_tiers`) opens threads for these and the
+#: verdict counts them, so a routed category must not hide one.
+_BLOCKING_SEVERITIES: frozenset[Severity] = frozenset({Severity.P1, Severity.P2})
 
 __all__ = [
     "DEFAULT_NOTE_CATEGORIES",
@@ -109,13 +114,20 @@ class PostingPolicy:
     def routes_category_to_notes(self, *, finding: ReviewFinding) -> bool:
         """Return True when the finding's category is routed to the notes block.
 
+        Only a P3 is routed by category. A P1 or P2 in a routed category
+        still goes through the confidence floor and, when it clears it, opens
+        a thread and counts in the verdict: the routing shortens the sticky's
+        nit list, it never lets a blocking finding slip past the merge gate.
+
         Args:
             finding: Finding to test.
 
         Returns:
-            True when the finding's canonical category is one of
+            True when the finding is a P3 whose canonical category is one of
             :attr:`note_categories`.
         """
+        if finding.severity in _BLOCKING_SEVERITIES:
+            return False
         return normalize_category(raw=finding.category) in self.note_categories
 
     def posts_inline(self, *, finding: ReviewFinding) -> bool:

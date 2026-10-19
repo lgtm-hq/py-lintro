@@ -440,13 +440,14 @@ class AIConfig(BaseModel):
     review_note_categories: list[str] = Field(
         default_factory=lambda: [str(ReviewCategory.CODE_SMELL)],
         description=(
-            "Finding categories routed to the sticky comment's 'Notes and "
-            "questions' block instead of an inline thread, whatever their "
-            "confidence. Defaults to ['code-smell']: on the review corpus "
+            "Finding categories whose P3 findings are routed to the sticky "
+            "comment's 'Notes and questions' block instead of its nit list, "
+            "whatever their confidence; a P1 or P2 in a routed category still "
+            "opens a thread. Defaults to ['code-smell']: on the review corpus "
             "2 of 35 distinct code-smell findings were defects, both P3 "
-            "nits, so the category is routed away from threads, not dropped. "
-            "Values are review categories ('logic-bug', 'test-gap', ...); "
-            "an empty list routes every category by confidence alone."
+            "nits, so the category is routed away, not dropped. Values are "
+            "review categories ('logic-bug', 'test-gap', ...); an empty list "
+            "routes every category by confidence alone."
         ),
     )
     review_chunk_diff_tokens: int = Field(
