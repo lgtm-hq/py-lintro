@@ -134,8 +134,8 @@ def evaluate_already_reviewed(
 
     The guard fails toward review: any condition it cannot establish from the
     state means a round runs. In particular a prior that stores coverage but
-    no run records, a trailing checkpoint record with no finished run before
-    it, a partial or degraded last round, a changed patch hash, a never
+    no run records, a trailing checkpoint record (an interrupted round whose
+    work never reached the PR), a partial or degraded last round, a changed patch hash, a never
     reviewed file, a model flag, a pending invalidation, or coverage the
     reuse gate does not inherit all run a round.
 
@@ -152,6 +152,11 @@ def evaluate_already_reviewed(
         The decision when the round can be skipped, else ``None``.
     """
     if force_full or force_requested(env=env) or prior is None:
+        return None
+    if prior.runs and prior.runs[-1].coverage.checkpoint:
+        # A round was interrupted after the last finished one: its
+        # checkpoint may carry coverage and findings that never reached the
+        # PR, so the next round must finish that work, not skip past it.
         return None
     run = latest_finished_run(prior=prior)
     head = str(getattr(context, "head_ref", "") or "")

@@ -362,6 +362,29 @@ def test_a_trailing_checkpoint_is_not_a_finished_run() -> None:
     ).is_none()
 
 
+def test_an_interrupted_round_after_a_finished_one_at_this_head_reviews() -> None:
+    """A trailing checkpoint at the same head is unfinished work, not a covered head.
+
+    A forced round after a finished one can checkpoint a new finding and stop
+    before posting; the next unforced run must finish it rather than skip.
+    """
+    context = _context()
+    prior = _state(
+        context=context,
+        runs=(_run(sha=_HEAD), _run(sha=_HEAD, round_number=2, checkpoint=True)),
+    )
+
+    assert_that(
+        evaluate_already_reviewed(
+            context=context,
+            prior=prior,
+            force_full=False,
+            reusable_rounds=None,
+            env={},
+        ),
+    ).is_none()
+
+
 def test_a_prior_without_run_records_reviews() -> None:
     """Coverage with no run record cannot say which head it reviewed."""
     context = _context()
