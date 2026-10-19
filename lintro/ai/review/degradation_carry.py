@@ -196,16 +196,36 @@ def _degraded_hashes(*, prior: ReviewState | None) -> dict[str, str]:
     if prior is None or run is None:
         return {}
     # The latest credit per file from the degrading round on, so a
-    # checkpointed redo's row is judged at the hash that redo saw.
-    credited: dict[str, tuple[int, str]] = {}
-    for record in prior.coverage:
+    # checkpointed redo's row is judged at the hash that redo saw. On
+    # equal rounds (a resumed round's checkpoints share its number) the
+    # record written at the head the last checkpoint saw wins, and only
+    # then position, since the state's dict merges keep a rewritten key
+    # where it first appeared.
+    latest_sha = _latest_checkpoint_sha(prior=prior, after=run)
+    credited: dict[str, tuple[tuple[int, bool, int], str]] = {}
+    for position, record in enumerate(prior.coverage):
         if record.round < run.identity.round:
             continue
-        # Newest wins on equal rounds too: a resumed round's checkpoints share
-        # its number, and the later record is the one whose hash it saw.
-        if record.path not in credited or credited[record.path][0] <= record.round:
-            credited[record.path] = (record.round, record.patch_hash)
+        rank = (record.round, record.reviewed_sha == latest_sha, position)
+        if record.path not in credited or credited[record.path][0] <= rank:
+            credited[record.path] = (rank, record.patch_hash)
     return {path: patch_hash for path, (_, patch_hash) in credited.items()}
+
+
+def _latest_checkpoint_sha(*, prior: ReviewState, after: RunRecord) -> str:
+    """Return the head the last checkpoint after the finished run reviewed.
+
+    Args:
+        prior: The resumed state.
+        after: The latest finished run.
+
+    Returns:
+        The checkpoint's head sha, or an empty string without one.
+    """
+    for run in reversed(prior.runs):
+        if run.coverage.checkpoint and run.identity.round > after.identity.round:
+            return run.identity.sha
+    return ""
 
 
 def _redone_paths(

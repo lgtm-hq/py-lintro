@@ -39,7 +39,8 @@ def format_pass_note_lines(*, metadata: ReviewMetadata) -> list[str]:
         format_verification_note_line(metadata=metadata),
         format_narrative_note_line(metadata=metadata),
     )
-    return [line for note in notes if note for line in ("", note)]
+    # Each helper renders at most one line; the pair is a blank line and it.
+    return [part for note in notes if note for part in ("", note)]
 
 
 def format_narrative_note_line(*, metadata: ReviewMetadata) -> str:

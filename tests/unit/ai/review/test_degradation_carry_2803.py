@@ -957,7 +957,10 @@ def test_a_checkpointed_redo_that_failed_again_is_still_owed() -> None:
 
 
 def test_a_failed_sweep_checkpointed_at_a_newer_hash_is_still_owed() -> None:
-    """Two records in one round: the later hash is the one the failure hit."""
+    """Two same-round records: the hash at the checkpoint's head wins.
+
+    The state's dict merge can leave the newer record before the older one.
+    """
     failed_again = DegradationRecord.from_degradation(
         degradation=CoverageDegradation(
             reason=_Reason.ADVERSARIAL_SWEEP_FAILED,
@@ -979,8 +982,20 @@ def test_a_failed_sweep_checkpointed_at_a_newer_hash_is_still_owed() -> None:
             ),
         ),
         coverage=(
-            CoverageRecord(path="a.py", patch_hash="old", round=2),
-            CoverageRecord(path="a.py", patch_hash="ha", round=2),
+            # A key rewritten in a dict merge keeps its first position, so
+            # the newer record can sit before the older one.
+            CoverageRecord(
+                path="a.py",
+                patch_hash="ha",
+                round=2,
+                reviewed_sha=_OTHER_HEAD,
+            ),
+            CoverageRecord(
+                path="a.py",
+                patch_hash="old",
+                round=2,
+                reviewed_sha=_HEAD,
+            ),
         ),
     )
 

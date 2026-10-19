@@ -109,10 +109,11 @@ class DegradationRecord:
             degradation=CoverageDegradation(
                 reason=reason,
                 chunk_index=coerce_int(payload.get("chunk_index")),
-                # Strict: only a real ``false`` clears it; a missing key keeps
-                # the dataclass default and a string never coerces.
-                split=payload.get("split", True) is not False
-                and not isinstance(payload.get("split", True), str),
+                # Only a real bool is authoritative; a missing key, a string
+                # or any other value keeps the dataclass default.
+                split=(
+                    payload["split"] if isinstance(payload.get("split"), bool) else True
+                ),
                 limit=(
                     limit
                     if isinstance(limit, int) and not isinstance(limit, bool)
