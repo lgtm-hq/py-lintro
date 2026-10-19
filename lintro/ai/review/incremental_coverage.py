@@ -24,6 +24,7 @@ from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.finding_matcher import match_findings
 from lintro.ai.review.github_constants import MAX_STORED_RUNS
 from lintro.ai.review.merge import truncated_paths
+from lintro.ai.review.models.degradation_record import DegradationRecord
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_coverage import RunCoverage
 from lintro.ai.review.models.run_identity import RunIdentity
@@ -198,6 +199,14 @@ def write_incremental_coverage_part(
         snapshot=snapshot,
         round_number=round_number,
         basis=basis,
+        degradations=tuple(
+            DegradationRecord.from_degradation(
+                degradation=item,
+                head_sha=context.head_ref,
+            )
+            for partial in collected
+            for item in partial.coverage_degradations
+        ),
         round_figure=round_figure,
         shadow_basis=shadow_basis,
     )
@@ -265,6 +274,7 @@ def _runs_with_checkpoint(
     basis: str,
     round_figure: float,
     shadow_basis: bool,
+    degradations: tuple[DegradationRecord, ...] = (),
 ) -> tuple[tuple[RunRecord, ...], bool]:
     """Return the stored history plus this round's checkpoint record, when stamped.
 
@@ -276,6 +286,9 @@ def _runs_with_checkpoint(
         basis: The basis the partial record carries.
         round_figure: What the round has spent, or its shadow, so far.
         shadow_basis: Whether the round's figure is a shadow.
+        degradations: What the chunks finished so far degraded (#2803), so
+            a resume after runner loss sees a redo that failed again rather
+            than crediting its coverage as a success.
 
     Returns:
         The runs to persist, capped like the sticky's history, and whether
@@ -302,7 +315,11 @@ def _runs_with_checkpoint(
             model_verification=snapshot.state,
             reported_models=tuple(seen.values()),
         ),
-        coverage=RunCoverage(partial=True, checkpoint=True),
+        coverage=RunCoverage(
+            partial=True,
+            checkpoint=True,
+            degradations=degradations,
+        ),
         usage=RunUsage(
             cost=0.0 if shadow_basis else round_figure,
             cost_shadow=round_figure if shadow_basis else 0.0,

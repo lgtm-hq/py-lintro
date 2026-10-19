@@ -147,7 +147,40 @@ def latest_degradations(*, prior: ReviewState | None) -> tuple[DegradationRecord
         its redo.
     """
     run = _degrading_run(prior=prior)
-    return run.coverage.degradations if run is not None else ()
+    if run is None:
+        return ()
+    return (
+        *run.coverage.degradations,
+        *_checkpoint_degradations(prior=prior, after=run),
+    )
+
+
+def _checkpoint_degradations(
+    *,
+    prior: ReviewState | None,
+    after: RunRecord,
+) -> tuple[DegradationRecord, ...]:
+    """Return what the checkpoints after the finished run recorded.
+
+    A redo round that degraded again and was then interrupted left its
+    failure only on its checkpoint record (#2867); without it the redo's
+    coverage would read as a success.
+
+    Args:
+        prior: The resumed state, or ``None``.
+        after: The latest finished run.
+
+    Returns:
+        The degradation records of every trailing checkpoint, in order.
+    """
+    if prior is None:
+        return ()
+    return tuple(
+        record
+        for run in prior.runs
+        if run.coverage.checkpoint and run.identity.round > after.identity.round
+        for record in run.coverage.degradations
+    )
 
 
 def _degraded_hashes(*, prior: ReviewState | None) -> dict[str, str]:
@@ -162,11 +195,15 @@ def _degraded_hashes(*, prior: ReviewState | None) -> dict[str, str]:
     run = _degrading_run(prior=prior)
     if prior is None or run is None:
         return {}
-    return {
-        record.path: record.patch_hash
-        for record in prior.coverage
-        if record.round == run.identity.round
-    }
+    # The latest credit per file from the degrading round on, so a
+    # checkpointed redo's row is judged at the hash that redo saw.
+    credited: dict[str, tuple[int, str]] = {}
+    for record in prior.coverage:
+        if record.round < run.identity.round:
+            continue
+        if record.path not in credited or credited[record.path][0] < record.round:
+            credited[record.path] = (record.round, record.patch_hash)
+    return {path: patch_hash for path, (_, patch_hash) in credited.items()}
 
 
 def _redone_paths(
@@ -192,11 +229,20 @@ def _redone_paths(
     run = _degrading_run(prior=prior)
     if prior is None or run is None:
         return frozenset()
+    # A checkpoint that recorded the redo degrading again earned its
+    # coverage without succeeding: that file is still owed.
+    failed_again = {
+        path
+        for record in _checkpoint_degradations(prior=prior, after=run)
+        if _needs_redo(record)
+        for path in record.degradation.paths
+    }
     return frozenset(
         record.path
         for record in prior.coverage
         if record.round > run.identity.round
         and record.patch_hash == hashes.get(record.path)
+        and record.path not in failed_again
     )
 
 

@@ -914,3 +914,43 @@ def test_a_whole_head_redo_keeps_what_a_checkpoint_already_redid() -> None:
     assert_that(scope.whole_head).is_true()
     kept = scope.filter_coverage(coverage=coverage, hashes=_HASHES)
     assert_that([record.path for record in kept]).is_equal_to(["a.py"])
+
+
+def test_a_checkpointed_redo_that_failed_again_is_still_owed() -> None:
+    """Coverage a failed redo earned before runner loss is not a successful redo."""
+    failed_again = DegradationRecord.from_degradation(
+        degradation=CoverageDegradation(
+            reason=_Reason.ADVERSARIAL_SWEEP_FAILED,
+            chunk_index=0,
+            paths=("a.py",),
+        ),
+        head_sha=_HEAD,
+    )
+    prior = ReviewState(
+        runs=(
+            *_state(_record(_Reason.ADVERSARIAL_SWEEP_FAILED, paths=("a.py",))).runs,
+            RunRecord(
+                identity=RunIdentity(round=2, sha=_HEAD),
+                coverage=RunCoverage(
+                    partial=True,
+                    checkpoint=True,
+                    degradations=(failed_again,),
+                ),
+            ),
+        ),
+        coverage=(CoverageRecord(path="a.py", patch_hash="ha", round=2),),
+    )
+
+    assert_that(latest_degradations(prior=prior)).is_length(2)
+    scope = redo_scope(prior=prior, hashes=_HASHES)
+    assert_that(scope.paths).is_equal_to(frozenset({"a.py"}))
+    assert_that(scope.redone).is_empty()
+    carried = carried_degradations(
+        prior=prior,
+        current=(),
+        reviewed=(),
+        steps_ran=(),
+        hashes=_HASHES,
+    )
+    assert_that(carried).is_length(1)
+    assert_that(carried[0].paths).is_equal_to(("a.py",))
