@@ -10,6 +10,7 @@ from assertpy import assert_that
 
 from lintro.ai.review.coverage_degradation import (
     CARRIED_SYNTHESIS_NOTE,
+    CARRIED_SYNTHESIS_TRUNCATED_NOTE,
     CARRIED_VERIFICATION_NOTE,
     GENERATED_QUESTIONS_FAILED_NOTE,
     describe_coverage_degradations,
@@ -814,3 +815,19 @@ def test_a_fresh_pass_failure_keeps_its_own_note_not_the_carried_one() -> None:
 
     assert_that(" ".join(lines)).does_not_contain(CARRIED_SYNTHESIS_NOTE)
     assert_that(" ".join(lines)).contains("did not complete")
+
+
+def test_a_carried_truncated_synthesis_says_it_ran_short_not_that_it_failed() -> None:
+    """A truncated pass merged what it saw; its carried note must not claim otherwise."""
+    metadata = _metadata(
+        CoverageDegradation(
+            reason=_Reason.SYNTHESIS_TRUNCATED,
+            chunk_index=SYNTHESIS_CHUNK_INDEX,
+        ),
+    )
+
+    lines = format_pass_note_lines(metadata=metadata)
+
+    assert_that(lines).is_length(2)
+    assert_that(lines[1]).contains(CARRIED_SYNTHESIS_TRUNCATED_NOTE)
+    assert_that(lines[1]).does_not_contain(CARRIED_SYNTHESIS_NOTE)

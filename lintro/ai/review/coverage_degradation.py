@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING
 
 from lintro.ai.review.enums.coverage_degradation_reason import (
     NARRATIVE_DEGRADATION_REASONS,
-    SYNTHESIS_DEGRADATION_REASONS,
     CoverageDegradationReason,
 )
 from lintro.ai.review.models.coverage_degradation import (
@@ -30,6 +29,7 @@ __all__ = [
     "COVERAGE_LIMITED_HEADLINE",
     "PARTIAL_REVIEW_LABEL",
     "CARRIED_SYNTHESIS_NOTE",
+    "CARRIED_SYNTHESIS_TRUNCATED_NOTE",
     "CARRIED_VERIFICATION_NOTE",
     "GENERATED_QUESTIONS_FAILED_NOTE",
     "describe_coverage_degradations",
@@ -54,6 +54,10 @@ GENERATED_QUESTIONS_FAILED_NOTE = (
 CARRIED_SYNTHESIS_NOTE = (
     "The synthesis pass did not complete on the round this one repeats, so "
     "cross-chunk duplicate merging was not applied."
+)
+CARRIED_SYNTHESIS_TRUNCATED_NOTE = (
+    "The synthesis pass saw less than its whole input on the round this one "
+    "repeats, so cross-chunk duplicate merging may be incomplete."
 )
 CARRIED_VERIFICATION_NOTE = (
     "Verification did not complete on the round this one repeats, so the "
@@ -329,8 +333,13 @@ def format_narrative_note(*, metadata: ReviewMetadata) -> str:
     sentences = []
     if CoverageDegradationReason.GENERATED_QUESTIONS_FAILED in reasons:
         sentences.append(GENERATED_QUESTIONS_FAILED_NOTE)
-    if metadata.synthesis is None and reasons & SYNTHESIS_DEGRADATION_REASONS:
-        sentences.append(CARRIED_SYNTHESIS_NOTE)
+    if metadata.synthesis is None:
+        # A truncated pass did run and merge what it saw; only a failed
+        # pass applied nothing. The two carry different sentences.
+        if CoverageDegradationReason.SYNTHESIS_FAILED in reasons:
+            sentences.append(CARRIED_SYNTHESIS_NOTE)
+        elif CoverageDegradationReason.SYNTHESIS_TRUNCATED in reasons:
+            sentences.append(CARRIED_SYNTHESIS_TRUNCATED_NOTE)
     if (
         metadata.verification is None
         and CoverageDegradationReason.VERIFICATION_FAILED in reasons
