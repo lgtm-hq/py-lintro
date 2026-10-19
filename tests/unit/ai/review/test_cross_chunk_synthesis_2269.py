@@ -1174,6 +1174,67 @@ def test_a_digest_only_trim_tells_the_model_the_diff_is_complete() -> None:
     assert_that(user_prompt).does_not_contain("only part of this PR")
 
 
+def test_a_cut_digest_and_a_cut_diff_are_both_named() -> None:
+    """When both spans were cut the model is told about both.
+
+    A note that named only the diff would leave the model thinking the
+    digest is complete and restating findings it was never shown.
+    """
+    from lintro.ai.review.synthesis_prompt import SynthesisPromptPlan
+
+    context = _pr_context()
+    plan = SynthesisPromptPlan(
+        changed_files="- a.py\n- b.py\n",
+        chunk_digest="Piece 1 reviewed a.py\n",
+        diff=context.unified_diff[:40],
+        truncated=True,
+        diff_files_included=0,
+        diff_files_total=2,
+        digest_truncated=True,
+    )
+
+    _system, user_prompt = build_synthesis_prompt(
+        context=context,
+        plan=plan,
+        max_findings=5,
+    )
+
+    assert_that(user_prompt).contains("only part of this PR")
+    assert_that(user_prompt).contains("digest above was trimmed too")
+
+
+def test_the_plan_records_a_trimmed_digest_beside_a_cut_diff() -> None:
+    """``plan_synthesis_prompt`` keeps the digest's own flag when the diff is cut."""
+    context = _pr_context()
+    summaries = tuple(
+        ChunkSummary(
+            chunk_id=index,
+            files=(f"pkg/mod{index}.py",),
+            findings=tuple(
+                ReviewFinding(
+                    severity=Severity.P3,
+                    category="code-smell",
+                    file=f"pkg/mod{index}.py",
+                    line=line,
+                    title=f"finding {index}-{line} with a long enough title",
+                    description="",
+                    cause="",
+                    fix="",
+                    confidence="medium",
+                )
+                for line in range(1, 40)
+            ),
+        )
+        for index in range(6)
+    )
+
+    plan = plan_synthesis_prompt(context=context, summaries=summaries, diff_budget=60)
+
+    assert_that(plan.truncated).is_true()
+    assert_that(plan.digest_truncated).is_true()
+    assert_that(plan.diff_files_included).is_less_than(plan.diff_files_total)
+
+
 def test_rule_four_scopes_blindness_to_files_the_budget_left_out() -> None:
     """The hard rule no longer says the model cannot see any changed file."""
     from lintro.ai.prompts.review import REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE
