@@ -46,12 +46,15 @@ Hard rules:
    That is what the earlier passes were for.
 3. Both halves must be visible in the diff above. If a file you want to blame
    is not in the diff you were given, say nothing about it.
-4. Never claim that a file "was never updated". If a path is in the
-   changed-file list above, this PR changed it and you cannot see how. If a
-   path is absent from that list, it is not part of this PR at all and is not
-   in your prompt, so its absence is not evidence of anything. Report an
-   inconsistency only when both halves of it are visible in the diff you were
-   given.
+4. Never claim that a file "was never updated". Every path in the
+   changed-file list above was changed by this PR; when its hunks are not in
+   the diff below, the budget left them out and you cannot see how it
+   changed. The list alone is not evidence of a file's behaviour, and a file
+   with some hunks shown is not a file you can see whole: do not infer what
+   you were not shown. If a path is absent from that list, it is not part of
+   this PR at all and is not in your prompt, so its absence is not evidence
+   of anything. Report an inconsistency only when the evidence for both
+   sides of it is in the diff you were given.
 5. Report at most {max_findings} cross-file findings. Fewer is normal. An
    empty list is the correct answer when the pieces are consistent.
 6. `duplicates` references use the finding ids printed above (`F1`, `F2`, ...),

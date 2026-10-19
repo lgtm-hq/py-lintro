@@ -980,6 +980,7 @@ def test_a_cut_input_is_declared_to_the_model_in_the_prompt() -> None:
 
     assert_that(plan.truncated).is_true()
     assert_that(user_prompt).contains("only part of this PR")
+    assert_that(user_prompt).does_not_contain("digest above was trimmed")
 
 
 # --- (g) config validation ----------------------------------------------------
@@ -1140,6 +1141,48 @@ def test_the_digest_is_charged_against_the_prompt_budget() -> None:
     assert_that(len(plan.diff)).is_less_than(len(context.unified_diff))
     assert_that(plan.chunk_digest).is_equal_to(digest)
     assert_that(user_prompt).contains("Piece 6 reviewed")
+    # The diff was cut here, so the note blames the diff, not the digest.
+    assert_that(user_prompt).contains("only part of this PR")
+
+
+def test_a_digest_only_trim_tells_the_model_the_diff_is_complete() -> None:
+    """When every diff section reached the prompt, the note must not say otherwise.
+
+    A note that blamed the diff would make the model withhold findings it has
+    the evidence for (#2269 follow-up on PR #2316).
+    """
+    from lintro.ai.review.synthesis_prompt import SynthesisPromptPlan
+
+    context = _pr_context()
+    plan = SynthesisPromptPlan(
+        changed_files="- a.py\n- b.py\n",
+        chunk_digest="Piece 1 reviewed a.py\n",
+        diff=context.unified_diff,
+        truncated=True,
+        diff_files_included=2,
+        diff_files_total=2,
+    )
+
+    _system, user_prompt = build_synthesis_prompt(
+        context=context,
+        plan=plan,
+        max_findings=5,
+    )
+
+    assert_that(user_prompt).contains("digest above was trimmed")
+    assert_that(user_prompt).contains("the diff below are complete")
+    assert_that(user_prompt).does_not_contain("only part of this PR")
+
+
+def test_rule_four_scopes_blindness_to_files_the_budget_left_out() -> None:
+    """The hard rule no longer says the model cannot see any changed file."""
+    from lintro.ai.prompts.review import REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE
+
+    text = REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE
+
+    assert_that(text).contains("the budget left them out")
+    assert_that(text).contains("do not infer what")
+    assert_that(text).does_not_contain("this PR changed it and you cannot see how")
 
 
 def test_a_digest_over_the_whole_budget_sheds_its_finding_lines() -> None:

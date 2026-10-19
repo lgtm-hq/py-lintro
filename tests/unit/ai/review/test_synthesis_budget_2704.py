@@ -222,6 +222,20 @@ def test_the_synthesis_note_names_the_files_seen_and_the_merge_caveat() -> None:
     )
     assert_that(failed).contains("did not complete")
     assert_that(failed).contains("duplicate merging was not applied")
+    assert_that(failed).does_not_contain("changed files")
+    # A pass that was cut and then failed says both, as the banner does
+    # (#2269 follow-up).
+    cut_and_failed = format_synthesis_note_line(
+        metadata=_metadata(
+            CoverageDegradationReason.SYNTHESIS_TRUNCATED,
+            CoverageDegradationReason.SYNTHESIS_FAILED,
+        ),
+    )
+    assert_that(cut_and_failed).contains("did not complete")
+    # A failed pass consumed nothing: the note names what it was given.
+    assert_that(cut_and_failed).contains("held the hunks of 2 of 5 changed files")
+    assert_that(cut_and_failed).does_not_contain("It saw")
+    assert_that(cut_and_failed).does_not_contain("may be incomplete")
 
 
 def test_a_note_without_file_counts_falls_back_to_the_generic_wording() -> None:
