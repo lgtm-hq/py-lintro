@@ -218,7 +218,11 @@ def resolve_transport_settings(
         # (CliBareMode.AUTO, #1859): the call then bills the key, not the
         # subscription, so report api_key/estimated instead of claiming
         # subscription/unpriceable (#1923 cost provenance).
-        bare_billing = cli_bare_billing(ai_config, cwd=cwd)
+        # Billing and the credential read the environment the subprocess
+        # will see, re-exported key included (#2549), so a paid call under
+        # a renamed variable is priced and capped as one.
+        env = cli_runtime_env(ai_config)
+        bare_billing = cli_bare_billing(ai_config, cwd=cwd, env=env)
         # The credential present decides auth_mode, not the --bare policy:
         # a gateway token must not read as a subscription (#2867). A
         # subscription run pointed off the provider's host is priced on the
@@ -227,6 +231,7 @@ def resolve_transport_settings(
             provider=ai_config.provider,
             transport=transport,
             bare=bare_billing,
+            env=env,
             cwd=cwd,
         )
         # A metered key bills the API whichever way it reached the CLI: the

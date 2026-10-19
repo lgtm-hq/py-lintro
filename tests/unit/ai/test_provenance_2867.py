@@ -1267,3 +1267,24 @@ def test_the_default_key_name_leaves_the_runtime_env_as_the_process_env(
     assert_that(env).does_not_contain_key("ANTHROPIC_API_KEY")
     assert_that(set(env)).is_equal_to(set(os.environ))
     del tmp_path
+
+
+@pytest.mark.usefixtures("_isolated_profile_env")
+def test_a_renamed_key_under_never_bare_resolves_as_metered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The profile prices a paid call made on a re-exported key, so caps apply."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("MY_CLAUDE_KEY", "sk-ant-renamed")
+    monkeypatch.setenv("LINTRO_CLI_BARE", "never")
+
+    resolved = resolve_transport_settings(
+        AIConfig(
+            transport=AITransport.CLI,
+            provider=AIProvider.ANTHROPIC,
+            api_key_env="MY_CLAUDE_KEY",
+        ),
+    )
+
+    assert_that(resolved.auth_mode).is_equal_to("api_key")
+    assert_that(resolved.cost_basis).is_equal_to(CostBasis.ESTIMATED)

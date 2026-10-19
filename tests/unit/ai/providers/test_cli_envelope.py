@@ -226,6 +226,27 @@ def test_decode_usage_keeps_the_defaults_for_a_missing_counter() -> None:
     assert_that(counters).is_equal_to((9, 5))
 
 
+@pytest.mark.parametrize(
+    ("payload", "field"),
+    [
+        ({"usage": {"input_tokens": "\u00b2"}}, "usage.input_tokens"),
+        ({"usage": {"input_tokens": "-3"}}, "usage.input_tokens"),
+        ({"total_cost_usd": 10**400}, "total_cost_usd"),
+        ({"total_cost_usd": "1e999"}, "total_cost_usd"),
+    ],
+)
+def test_a_value_the_conversion_rejects_is_a_schema_error_not_a_bare_exception(
+    payload: dict[str, object],
+    field: str,
+) -> None:
+    """A superscript digit passes ``isdigit``; a huge integer overflows ``float``."""
+    with pytest.raises(CliEnvelopeError) as excinfo:
+        decode_envelope(json.dumps({"result": "ok", **payload}), provider=_PROVIDER)
+
+    assert_that(excinfo.value.kind).is_equal_to(CliEnvelopeErrorKind.SCHEMA)
+    assert_that(str(excinfo.value)).contains(repr(field))
+
+
 @pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
 def test_a_non_finite_cost_is_a_schema_error(literal: str) -> None:
     """``json.loads`` accepts the non-finite literals; a price is never one."""

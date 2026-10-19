@@ -286,8 +286,14 @@ def _coerce_count(value: object) -> int | None:
         return value
     if isinstance(value, float) and value.is_integer() and value >= 0:
         return int(value)
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
+    if isinstance(value, str):
+        # ``isdigit`` is wider than ``int`` (a superscript digit passes it),
+        # so the conversion itself is the test.
+        try:
+            count = int(value.strip())
+        except ValueError:
+            return None
+        return count if count >= 0 else None
     return None
 
 
@@ -399,12 +405,13 @@ def _decode_cost(value: object, *, provider: str) -> float | None:
     if value is None:
         return None
     number: float | None = None
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        number = float(value)
-    elif isinstance(value, str):
+    if isinstance(value, (int, float, str)) and not isinstance(value, bool):
+        # A JSON integer can exceed what a float holds (``OverflowError``)
+        # and a string can be anything (``ValueError``); either is not a
+        # price.
         try:
-            number = float(value.strip())
-        except ValueError:
+            number = float(value.strip() if isinstance(value, str) else value)
+        except (ValueError, OverflowError):
             number = None
     if number is None or not math.isfinite(number) or number < 0:
         _fail_schema(
