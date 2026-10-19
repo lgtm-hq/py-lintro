@@ -214,14 +214,14 @@ lanes manifest carries `smoke_row`, the smoke table row that stands for the lane
 secret down the lane's own path, so a dead token and a dead path both go red (`zai` via
 `zai-anthropic-api`, not the OpenAI-protocol `zai-api` route that shares its token;
 `kimi`). `host`: the lane's credential is a subscription session the raw API cannot
-take, so the row sends the provider's metered key to the host and path the CLI calls and
-proves the host answers, not that the session is alive (`anthropic`). `provider`: the
-session's own route is one no API smoke can reach, so the row proves only that the
-provider's API answers (`openai`: the Codex session calls the ChatGPT backend, while
-`openai-api` calls `api.openai.com`). An expired session is reported by the dogfood's
-own `auth_failed` verdict on the next review, never by the smoke. A lane no smoke can
-reach at all (`cursor`, no API protocol lintro implements) carries `smoke_row: null` and
-a `smoke_gap` saying why. `tests/scripts/ci/test_smoke_rows_match_lanes.py` pins the
+take, so the row sends the provider's metered key to the host the CLI calls and proves
+the host answers, not that the session is alive (`anthropic`). `provider`: the session's
+own route is one no API smoke can reach, so the row proves only that the provider's API
+answers (`openai`: the Codex session calls the ChatGPT backend, while `openai-api` calls
+`api.openai.com`). An expired session is reported by the dogfood's own `auth_failed`
+verdict on the next review, never by the smoke. A lane no smoke can reach at all
+(`cursor`, no API protocol lintro implements) carries `smoke_row: null` and a
+`smoke_gap` saying why. `tests/scripts/ci/test_smoke_rows_match_lanes.py` pins the
 metered key and the level each session lane may claim, and fails when the two files
 drift apart.
 

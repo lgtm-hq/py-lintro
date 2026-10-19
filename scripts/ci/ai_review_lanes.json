@@ -40,7 +40,7 @@
     "the lane that call proves. 'route': the row sends the lane's own secret down",
     "the lane's own path, so a dead token and a dead path both go red (zai, kimi).",
     "'host': the lane's credential is a subscription session the raw API cannot",
-    "take, so the row sends the provider's metered key to the same host and path",
+    "take, so the row sends the provider's metered key to the same host",
     "the CLI calls; it proves the host answers, not that the session is alive",
     "(anthropic: the claude CLI calls api.anthropic.com/v1/messages). 'provider':",
     "the session's own route is one no API smoke can reach, so the row proves",

@@ -486,11 +486,14 @@ and the initial manifest contents are the edits this ADR invites.
 
 ## Amendment 2026-10-19: what a lane's smoke row proves ([#2873](https://github.com/lgtm-hq/py-lintro/issues/2873))
 
-Decision A says adding a lane requires a smoke row whose credential matches the row's
-binding. That holds for a token lane and cannot hold for a session lane: a subscription
-session (the Claude OAuth token, the Codex `auth.json`) drives a CLI, not the raw API
-the weekly smoke calls, so no smoke row can send it. Each manifest row therefore
-declares `smoke_row` and `smoke_covers`, the level the row honestly reaches:
+Decision A requires "a weekly smoke row per lane against its real endpoint", and
+[#2873](https://github.com/lgtm-hq/py-lintro/issues/2873) asked that the row's
+credential match the lane's binding. The `host` and `provider` levels below relax "real
+endpoint" (and the credential) for the session lanes; `cursor` has no row at all. That
+holds for a token lane and cannot hold for a session lane: a subscription session (the
+Claude OAuth token, the Codex `auth.json`) drives a CLI, not the raw API the weekly
+smoke calls, so no smoke row can send it. Each manifest row therefore declares
+`smoke_row` and `smoke_covers`, the level the row honestly reaches:
 
 - `route`: the lane's own secret down the lane's own path (`zai`, `kimi`);
 - `host`: the provider's metered key to the host and path the CLI calls (`anthropic`);

@@ -399,7 +399,7 @@ def _check_smoke(lane_id: str, row: dict[str, Any], lanes: dict[str, Any]) -> No
         if covers is not None:
             _fail(f"lane {lane_id!r} has no smoke row but a 'smoke_covers'", lanes)
         return
-    if not isinstance(smoke_row, str) or not _LANE_ID_RE.match(smoke_row):
+    if not isinstance(smoke_row, str) or not _LANE_ID_RE.fullmatch(smoke_row):
         _fail(f"lane {lane_id!r} field 'smoke_row' is not a smoke row name", lanes)
     if gap is not None:
         _fail(

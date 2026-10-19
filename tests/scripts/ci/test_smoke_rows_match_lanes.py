@@ -201,17 +201,19 @@ def test_a_lane_cannot_overstate_or_understate_its_coverage(
         _check_lane(lane_id, lane, rows)
 
 
-def test_a_gateway_lane_is_smoked_on_its_own_path_not_the_hosts_other_route(
+def test_a_route_level_row_is_the_lanes_own_path_not_the_hosts_other_route(
     lanes: dict[str, dict[str, Any]],
     rows: dict[str, dict[str, Any]],
 ) -> None:
-    """A gateway serves several protocols on one host; the lane's path must match.
+    """``route`` means the lane's own path and model, not just its host.
 
-    Z.ai's OpenAI route and its Anthropic route share a host and a token and
-    go red together, but only the latter is what the claude CLI calls.
+    A gateway serves several protocols on one host: Z.ai's OpenAI route and
+    its Anthropic route share a host and a token and go red together, but
+    only the latter is what the claude CLI calls. Keyed on the declared level,
+    so a future first-party token lane claiming ``route`` is held to it too.
     """
     for lane_id, lane in lanes.items():
-        if lane["first_party"] or lane["smoke_row"] is None:
+        if lane.get("smoke_covers") != "route":
             continue
         row = rows[lane["smoke_row"]]
         assert_that(row["base_url"].rstrip("/")).described_as(lane_id).is_equal_to(
@@ -269,6 +271,8 @@ def _refuses(resolver: ModuleType, document: dict[str, Any], fragment: str) -> N
         (lambda row: row.update(smoke_row=None, smoke_gap="  "), "no 'smoke_gap'"),
         (lambda row: row.update(smoke_row=7), "has the wrong type"),
         (lambda row: row.update(smoke_row="Not A Row"), "not a smoke row name"),
+        # ``$`` alone would accept a trailing line break; fullmatch does not.
+        (lambda row: row.update(smoke_row="kimi-api\n"), "not a smoke row name"),
         (lambda row: row.update(smoke_gap="also"), "cannot be both"),
         (lambda row: row.pop("smoke_covers"), "'smoke_covers' must be one of"),
         (lambda row: row.update(smoke_covers="all"), "'smoke_covers' must be one of"),
