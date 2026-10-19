@@ -330,8 +330,10 @@ findings that clear the posting policy; the rest become _notes_:
   which case questions that clear the same floor open threads too. These open threads,
   count in the review body's header, feed the derived verdict, and are tracked across
   rounds.
-- **Notes** — everything else: `low` confidence findings, and questions unless
-  `ai.review_post_questions_inline` is `true`. Notes render in the sticky comment under
+- **Notes** — everything else: `low` confidence findings, findings whose `category` is
+  listed in `ai.review_note_categories` (default `[code-smell]`, whatever their
+  confidence), and questions unless `ai.review_post_questions_inline` is `true`. Notes
+  render in the sticky comment under
   a collapsed **💬 Notes and questions (N)** block, each linked to its `file:line` at
   the reviewed commit. They open no thread, are excluded from the verdict, the severity
   tiles, the open-findings table and the fix prompts, and open no record of their own.
@@ -365,12 +367,23 @@ finding blocks again.
 ai:
   review_inline_min_confidence: medium # low | medium | high
   review_post_questions_inline: false # true opens a thread per question
+  review_note_categories: [code-smell] # categories that are always notes
 ```
 
 Set `review_inline_min_confidence: low` to restore posting every `kind: finding` entry
 inline. Questions stay in the notes block regardless of the floor — set
-`review_post_questions_inline: true` to open threads for them too. The two keys are
-independent; restoring the pre-#2572 behaviour of a thread per entry takes both.
+`review_post_questions_inline: true` to open threads for them too. The keys are
+independent; restoring the pre-#2572 behaviour of a thread per entry takes all three.
+
+`review_note_categories` routes whole categories to the notes block. It defaults to
+`code-smell` because, on the review corpus (32 labelled bugs across 26 pull requests, two
+models), only 2 of the 35 distinct `code-smell` findings described a defect, both P3 nits,
+and none sat on a labelled bug; routing keeps them readable in the notes block without a
+thread each. Values are review categories (`logic-bug`,
+`silent-failure`, `integration`, `test-gap`, `contract-drift`, `security`,
+`breaking-change`, `code-smell`, `architecture`), compared after the same
+normalization the parser applies to a model's label; a label that is not a category is a
+configuration error. An empty list routes by confidence alone.
 
 ### Posting tiers: P1/P2 inline, P3 in the sticky
 

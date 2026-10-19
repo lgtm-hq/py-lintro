@@ -57,6 +57,7 @@ from lintro.ai.provider_config import (
 from lintro.ai.provider_enum import accepted_provider_values
 from lintro.ai.registry import AIProvider
 from lintro.ai.resolved_ai_config import ResolvedAIConfig
+from lintro.enums.review_category import ReviewCategory
 
 #: What ``ai.api_key_env`` may hold: a variable name, so the reports that
 #: print it can never print a key.
@@ -436,6 +437,18 @@ class AIConfig(BaseModel):
             "a zero-unresolved-threads rule."
         ),
     )
+    review_note_categories: list[str] = Field(
+        default_factory=lambda: [str(ReviewCategory.CODE_SMELL)],
+        description=(
+            "Finding categories routed to the sticky comment's 'Notes and "
+            "questions' block instead of an inline thread, whatever their "
+            "confidence. Defaults to ['code-smell']: on the review corpus "
+            "2 of 35 distinct code-smell findings were defects, both P3 "
+            "nits, so the category is routed away from threads, not dropped. "
+            "Values are review categories ('logic-bug', 'test-gap', ...); "
+            "an empty list routes every category by confidence alone."
+        ),
+    )
     review_chunk_diff_tokens: int = Field(
         default=7_000,
         ge=1_000,
@@ -630,6 +643,43 @@ class AIConfig(BaseModel):
                 ) from exc
         migrated["providers"] = blocks
         return migrated
+
+    @field_validator("review_note_categories")
+    @classmethod
+    def _note_categories_are_review_categories(cls, value: list[str]) -> list[str]:
+        """Canonicalize ``review_note_categories`` and refuse unknown labels.
+
+        Spelling is normalized the way the finding parser normalizes a
+        model-reported category (case, whitespace, underscores for hyphens),
+        so ``CODE_SMELL`` and ``code smell`` both route; a label that is not
+        a review category is a typo and is refused rather than silently
+        routing nothing.
+
+        Args:
+            value: The configured category labels.
+
+        Returns:
+            The canonical wire values, in the order given, without repeats.
+
+        Raises:
+            ValueError: When a label is not a review category.
+        """
+        canonical: list[str] = []
+        for raw in value:
+            words = str(raw).lower().replace("_", " ").replace("-", " ").split()
+            text = "-".join(words)
+            try:
+                category = str(ReviewCategory(text))
+            except ValueError:
+                known = ", ".join(str(member) for member in ReviewCategory)
+                msg = (
+                    f"ai.review_note_categories: {raw!r} is not a review "
+                    f"category (one of: {known})"
+                )
+                raise ValueError(msg) from None
+            if category not in canonical:
+                canonical.append(category)
+        return canonical
 
     @field_validator("api_key_env")
     @classmethod

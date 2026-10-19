@@ -34,19 +34,23 @@ __all__ = ["_notes_section"]
 #: a question is never below the floor, it is simply not posted inline.
 _CARRIED_FINDING_TAG = "(below the inline confidence floor this round)"
 _CARRIED_QUESTION_TAG = "(questions are not posted inline)"
+_CARRIED_CATEGORY_TAG = "(category routed to notes this round)"
 
 
-def _carried_tag(*, finding: ReviewFinding) -> str:
+def _carried_tag(*, finding: ReviewFinding, policy: PostingPolicy) -> str:
     """Name the reason this note did not re-open its still-open thread.
 
     Args:
         finding: The note being rendered.
+        policy: Posting policy applied to this round's findings.
 
     Returns:
-        The parenthetical tag for the finding's kind.
+        The parenthetical tag for the finding's kind and routing reason.
     """
     if finding.is_question:
         return _CARRIED_QUESTION_TAG
+    if policy.routes_category_to_notes(finding=finding):
+        return _CARRIED_CATEGORY_TAG
     return _CARRIED_FINDING_TAG
 
 
@@ -84,6 +88,10 @@ def _notes_caption(*, policy: PostingPolicy) -> str:
         "Not posted as threads and not counted in the verdict: findings below "
         f"the inline confidence floor ({policy.inline_min_confidence})"
     )
+    if policy.note_categories:
+        categories = ", ".join(sorted(policy.note_categories))
+        caption += f", findings in the {categories} "
+        caption += "category" if len(policy.note_categories) == 1 else "categories"
     if not policy.post_questions_inline:
         caption += " and open questions"
     return f"<sub>{caption}.</sub>"
@@ -94,6 +102,7 @@ def _note_line(
     finding: ReviewFinding,
     repo: str,
     head_sha: str,
+    policy: PostingPolicy,
     carried: bool = False,
 ) -> str:
     """Render one notes-block entry with its ``file:line`` link.
@@ -102,6 +111,8 @@ def _note_line(
         finding: Finding the posting policy routed to the notes block.
         repo: ``owner/name`` slug used to build the file link.
         head_sha: Commit the link pins, so it survives later pushes.
+        policy: Posting policy applied to this round's findings; names the
+            routing reason on a carried entry.
         carried: True when this note was paired with a prior open record whose
             inline thread was posted, so the entry is tagged with the reason
             that thread was not resolved.
@@ -132,7 +143,7 @@ def _note_line(
     where = f"[`{location}`]({url})" if url else f"`{location}`"
     line = f"- {label} — **{title}** · {where}"
     if carried:
-        line = f"{line} {_carried_tag(finding=finding)}"
+        line = f"{line} {_carried_tag(finding=finding, policy=policy)}"
     # Collapsed the way ``_cell`` flattens a table cell: the description is a
     # continuation of one list item, so an internal newline would drop the rest
     # of it out of the list and render it at column 0.
@@ -188,16 +199,18 @@ def _notes_section(
         return ""
     notes = note_findings(findings=result.findings)
     shown = notes if limit is None else notes[:limit]
+    effective = policy or PostingPolicy()
     lines = [
         f"<details><summary>💬 {summary}</summary>",
         "",
-        _notes_caption(policy=policy or PostingPolicy()),
+        _notes_caption(policy=effective),
         "",
         *(
             _note_line(
                 finding=finding,
                 repo=repo,
                 head_sha=head_sha,
+                policy=effective,
                 carried=(
                     fingerprint_for(
                         file=finding.file,

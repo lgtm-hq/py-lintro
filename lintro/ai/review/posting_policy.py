@@ -21,13 +21,23 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
+from lintro.ai.review.finding_identity import normalize_category
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.enums.confidence_level import ConfidenceLevel
+from lintro.enums.review_category import ReviewCategory
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
 
+#: Categories routed to the notes block by default. ``code-smell`` is the
+#: lowest-yield category on the review corpus: 2 of 35 distinct findings were
+#: defects, both P3 nits, under a blind regrade with the label hidden. It is
+#: P3-only in practice, so routing it away touches no inline thread and only
+#: shortens the sticky's P3 list; nothing is dropped.
+DEFAULT_NOTE_CATEGORIES: frozenset[str] = frozenset({str(ReviewCategory.CODE_SMELL)})
+
 __all__ = [
+    "DEFAULT_NOTE_CATEGORIES",
     "PostingPolicy",
     "apply_posting_policy",
     "coerce_confidence",
@@ -76,6 +86,7 @@ class PostingPolicy:
 
     inline_min_confidence: ConfidenceLevel = ConfidenceLevel.MEDIUM
     post_questions_inline: bool = False
+    note_categories: frozenset[str] = DEFAULT_NOTE_CATEGORIES
 
     @classmethod
     def from_ai_config(cls, ai_config: AIConfig) -> PostingPolicy:
@@ -85,13 +96,27 @@ class PostingPolicy:
             ai_config: Resolved AI configuration for this run.
 
         Returns:
-            The policy ``ai.review_inline_min_confidence`` and
-            ``ai.review_post_questions_inline`` describe.
+            The policy ``ai.review_inline_min_confidence``,
+            ``ai.review_post_questions_inline`` and
+            ``ai.review_note_categories`` describe.
         """
         return cls(
             inline_min_confidence=ai_config.review_inline_min_confidence,
             post_questions_inline=ai_config.review_post_questions_inline,
+            note_categories=frozenset(ai_config.review_note_categories),
         )
+
+    def routes_category_to_notes(self, *, finding: ReviewFinding) -> bool:
+        """Return True when the finding's category is routed to the notes block.
+
+        Args:
+            finding: Finding to test.
+
+        Returns:
+            True when the finding's canonical category is one of
+            :attr:`note_categories`.
+        """
+        return normalize_category(raw=finding.category) in self.note_categories
 
     def posts_inline(self, *, finding: ReviewFinding) -> bool:
         """Return True when the policy posts this finding inline.
@@ -100,10 +125,13 @@ class PostingPolicy:
             finding: Finding to test.
 
         Returns:
-            True when the finding's confidence meets the floor and it is
-            either a defect claim or a question the policy lets through.
+            True when the finding's confidence meets the floor, its category
+            is not routed to notes, and it is either a defect claim or a
+            question the policy lets through.
         """
         if finding.is_question and not self.post_questions_inline:
+            return False
+        if self.routes_category_to_notes(finding=finding):
             return False
         confidence = coerce_confidence(raw=finding.confidence)
         return confidence.numeric_order >= self.inline_min_confidence.numeric_order
