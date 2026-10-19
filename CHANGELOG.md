@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.173.0] - 2026-10-19
+
+### Added
+
+- **ai/review**: skip a head the last finished round already covered (#2913) (eb7a446)
+
 ## [0.172.0] - 2026-10-19
 
 ### Added
