@@ -249,13 +249,43 @@ _unbind_attempt() {
 		_bound_base_url_env=""
 	fi
 }
+# The lane id at index $1 of the chain, for messages about a lane whose
+# binding failed before the gate could export it.
+_lane_at() {
+	printf '%s' "$LINTRO_REVIEW_CHAIN" | python3 -I -c '
+import json, sys
+value = json.load(sys.stdin)
+index = int(sys.argv[1])
+print(value[index] if isinstance(value, list) and 0 <= index < len(value) else "?")
+' "$1" 2>/dev/null || echo "?"
+}
+# A binding refusal. On attempt 0 it is the whole run's verdict, as before:
+# the no-credential status ($2) or a not-invoked report with the reason ($1).
+# On a later attempt the review has already run and died on an earlier lane,
+# so the refusal is reported and the walk goes on (the caller records the
+# lane as unbound); the EXIT trap, the inline upload and the classify of the
+# real outcome must all still happen.
+_bind_refused() {
+	if [[ "${_binding_attempt:-0}" != "0" ]]; then
+		echo "::warning::lane $(_lane_at "$_binding_attempt") could not be bound: $1"
+		return 1
+	fi
+	if [[ -n "${2:-}" ]]; then
+		python3 "${script_dir}/classify_review_outcome.py" \
+			--status "$2" \
+			--transport "$transport"
+		exit $?
+	fi
+	report_not_invoked "$1"
+}
 _bind_attempt() {
 	export LINTRO_REVIEW_ATTEMPT="$1"
+	_binding_attempt="$1"
 	_lane_env_file="$(mktemp)"
 	if ! python3 -I "${script_dir}/review_lane_env.py" --phase env >"$_lane_env_file"; then
 		rm -f "$_lane_env_file"
 		transport="$(printf '%s' "${LINTRO_AI_TRANSPORT:-cli}" | tr '[:upper:]' '[:lower:]')"
-		report_not_invoked "The resolved review lane could not be bound; see the error above."
+		_bind_refused "The resolved review lane could not be bound; see the error above." || return 1
 	fi
 	_apply_lane_exports <"$_lane_env_file"
 	rm -f "$_lane_env_file"
@@ -320,7 +350,7 @@ print(json.dumps(value.get("ai", value) if isinstance(value, dict) else {}))
 	fi
 	if [[ -z "$effective_ai_json" ]]; then
 		if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-			report_not_invoked "The effective ai config could not be read (lintro config --json), so the lane binding cannot be verified."
+			_bind_refused "The effective ai config could not be read (lintro config --json), so the lane binding cannot be verified." || return 1
 		fi
 		echo "[ai-review] effective-config check skipped: lintro config --json is unavailable here"
 	fi
@@ -329,20 +359,23 @@ print(json.dumps(value.get("ai", value) if isinstance(value, dict) else {}))
 	# status=no-credential, never a fallback trigger; a competing credential, a
 	# base-URL override naming another host, or a config that disagrees with
 	# the row is a refusal with its reason.
+	# errexit is restored to what it was: attempt 0 binds under set -e, a
+	# fallback attempt binds inside the loop, which runs under set +e so a
+	# failed command there reaches classify instead of killing the script.
+	_had_errexit=0
+	[[ $- == *e* ]] && _had_errexit=1
 	set +e
 	LINTRO_EFFECTIVE_AI_JSON="$effective_ai_json" \
 		python3 -I "${script_dir}/review_lane_env.py" --phase check
 	_lane_check_status=$?
-	set -e
+	[[ "$_had_errexit" == 1 ]] && set -e
 	case "$_lane_check_status" in
 	0) ;;
 	2)
-		exec python3 "${script_dir}/classify_review_outcome.py" \
-			--status "$NO_CREDENTIAL_STATUS" \
-			--transport "$transport"
+		_bind_refused "the lane's credential is absent" "$NO_CREDENTIAL_STATUS" || return 1
 		;;
 	*)
-		report_not_invoked "The resolved review lane refused to run; see the error above."
+		_bind_refused "The resolved review lane refused to run; see the error above." || return 1
 		;;
 	esac
 
@@ -352,21 +385,19 @@ print(json.dumps(value.get("ai", value) if isinstance(value, dict) else {}))
 	# neither overwritten nor deleted, and the attempt is refused.
 	if [[ "${LANE_CREDENTIAL_FORM:-}" == "file" ]]; then
 		if [[ -e "${LANE_CREDENTIAL_FILE//\$HOME/${HOME:-}}" ]]; then
-			report_not_invoked "The lane's credential file already exists at ${LANE_CREDENTIAL_FILE}; this attempt would overwrite a session it does not own."
+			_bind_refused "The lane's credential file already exists at ${LANE_CREDENTIAL_FILE}; this attempt would overwrite a session it does not own." || return 1
 		fi
 		_lane_credential_path="${LANE_CREDENTIAL_FILE//\$HOME/${HOME:-}}"
 		if ! "${script_dir}/restore-codex-session.sh"; then
-			report_not_invoked "The lane's file credential could not be materialised; see the error above."
+			_bind_refused "The lane's file credential could not be materialised; see the error above." || return 1
 		fi
 		# The file is the credential now; the subprocess holds one copy of it.
 		unset "$LANE_CREDENTIAL_SOURCE_ENV"
 		if [[ ! -s "$_lane_credential_path" ]]; then
-			exec python3 "${script_dir}/classify_review_outcome.py" \
-				--status "$NO_CREDENTIAL_STATUS" \
-				--transport "$transport"
+			_bind_refused "the lane's file credential is empty" "$NO_CREDENTIAL_STATUS" || return 1
 		fi
 	fi
-
+	return 0
 }
 _bind_attempt 0
 
@@ -379,14 +410,33 @@ _track_lane_down() {
 		return 0
 	fi
 	title="AI review lane down: ${lane}"
-	body="Lane \`${lane}\` failed with \`${kind}\` before any chunk completed in run ${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID:-?} (PR #${pr_number:-?}); the review fell back to the next lane of the chain (ADR-0011 D). Close this issue once the lane's credential or balance is restored."
+	if [[ "$kind" == "unbound" ]]; then
+		body="Lane \`${lane}\` could not be bound as a fallback lane (its credential is absent, or the gate refused it; see the run log) in run ${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID:-?} (PR #${pr_number:-?}). The walk went on to the next lane when one was left (ADR-0011 D). Close this issue once the lane's credential is configured."
+	else
+		body="Lane \`${lane}\` failed with \`${kind}\` before any chunk completed in run ${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID:-?} (PR #${pr_number:-?}). The walk went on to the next lane when one was left (ADR-0011 D). Close this issue once the lane's credential or balance is restored."
+	fi
 	(
 		export GH_TOKEN="$GITHUB_TOKEN"
 		gh label create ai-review-lane-down --repo "$GITHUB_REPOSITORY" --color B60205 \
 			--description "A dogfood review lane failed before any chunk completed (ADR-0011 D)" \
 			--force >/dev/null 2>&1 || true
+		# The label list is exact and not index-delayed, unlike --search; the
+		# title is compared whole so one lane id cannot match another's issue.
 		existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --label ai-review-lane-down \
-			--state open --search "\"${title}\" in:title" --json number --jq '.[0].number' 2>/dev/null || true)"
+			--state open --json number,title 2>/dev/null | python3 -I -c '
+import json, sys
+title = sys.argv[1]
+try:
+    issues = json.load(sys.stdin)
+except ValueError:
+    issues = []
+for issue in issues if isinstance(issues, list) else []:
+    if isinstance(issue, dict) and issue.get("title") == title:
+        number = issue.get("number")
+        if isinstance(number, int) and not isinstance(number, bool):
+            print(number)
+            break
+' "$title" 2>/dev/null || true)"
 		if [[ -n "$existing" ]]; then
 			gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body" >/dev/null
 		else
@@ -520,11 +570,20 @@ unset ACTIONS_RUNTIME_TOKEN ACTIONS_RESULTS_URL
 # grace so classify still runs. Mid-run checkpoints keep the longer cap.
 _CANCEL_UPLOAD_BUDGET_SECONDS=2
 _CHECKPOINT_UPLOAD_BUDGET_SECONDS=24
+# The upload never needs a provider credential, and the heartbeat that runs
+# it forks after attempt 0 is bound: strip every lane credential name so no
+# second process tree holds one (ADR-0011 D).
+_credential_unset_args=()
+for _name in $_LANE_CREDENTIAL_NAMES; do
+	_credential_unset_args+=(-u "$_name")
+done
+unset _name
 _upload_review_state() {
 	local suffix="$1"
 	local budget="${2:-$_CHECKPOINT_UPLOAD_BUDGET_SECONDS}"
 	timeout --signal=TERM --kill-after=1 "$budget" \
-		env ACTIONS_RUNTIME_TOKEN="${REVIEW_STATE_RUNTIME_TOKEN}" \
+		env "${_credential_unset_args[@]}" \
+		ACTIONS_RUNTIME_TOKEN="${REVIEW_STATE_RUNTIME_TOKEN}" \
 		ACTIONS_RESULTS_URL="${REVIEW_STATE_RESULTS_URL}" \
 		python3 "${script_dir}/review_state_artifacts.py" \
 		upload --suffix "$suffix" --budget-seconds "$budget" || true
@@ -564,7 +623,11 @@ _cleanup_review() {
 trap '_cleanup_review' EXIT
 # Forward SIGTERM to lintro (runner may signal only this shell) and keep
 # the log mirror alive so the JSON envelope still reaches $output_file.
+_cancelled=""
 _forward_term() {
+	# Remembered for the chain loop: a fallback attempt is never started
+	# after the runner asked this step to stop (ADR-0011 D).
+	_cancelled=1
 	if [[ -n "${lintro_pid:-}" ]]; then
 		kill -TERM "$lintro_pid" 2>/dev/null || true
 		# uv run may wrap Python; signal non-session-leader children if uv
@@ -600,6 +663,13 @@ set +e
 # CLI_REVIEW_TIMEOUT_SECONDS documents the profile default the job budget
 # must cover; tests/scripts/test_run_ai_review.py asserts it matches
 # lintro.ai.transport.DEFAULT_CLI_TIMEOUT.
+#
+# The budget is per attempt. A chain walk (ADR-0011 D) happens only after a
+# lane died before any chunk completed, which a dead credential or an
+# exhausted account does on its first call, so a fallback attempt normally
+# starts within seconds. A lane that takes most of the budget to fail that
+# way is not covered: the fallback attempt may then be cut by the job
+# timeout with no envelope, and the check reads as runner loss (#2296).
 # shellcheck disable=SC2034  # documentation variable read by the wiring test
 CLI_REVIEW_TIMEOUT_SECONDS=1800
 echo "CLI timeout ${CLI_REVIEW_TIMEOUT_SECONDS}s; persist-on-SIGTERM enabled."
@@ -721,10 +791,13 @@ _run_review_attempt() {
 # The chain walk (ADR-0011 D, #2872). After each attempt the stdlib decider
 # says whether to advance: only the review error status, only the
 # dead-credential or exhausted-account kinds, only when no chunk of the
-# attempt completed (no checkpoint part newer than the attempt's marker),
-# and only while a lane is left. A dead lane is recorded for the
-# classifier (LINTRO_REVIEW_LANES_DOWN), tracked in one issue, and named
-# to lintro for the sticky's fallback line (LINTRO_REVIEW_FALLBACK_FROM).
+# attempt completed (the envelope's completed_chunks is zero and no
+# checkpoint part is newer than the attempt's marker), and only while a
+# lane is left. A dead lane is recorded for the classifier
+# (LINTRO_REVIEW_LANES_DOWN), tracked in one issue, and named to lintro
+# for the sticky's fallback line (LINTRO_REVIEW_FALLBACK_FROM). A fallback
+# lane that cannot be bound (no credential, a gate refusal) is recorded as
+# `unbound` and the walk goes on; a cancel ends the walk at once.
 _chain_length="$(printf '%s' "$LINTRO_REVIEW_CHAIN" | python3 -I -c '
 import json, sys
 value = json.load(sys.stdin)
@@ -751,22 +824,45 @@ while :; do
 		--state-dir "$LINTRO_REVIEW_STATE_DIR" --since "$_attempt_marker" \
 		--attempt "$_attempt" --chain-length "$_chain_length" 2>/dev/null || echo "stop decider failed")"
 	rm -f "$_attempt_marker"
+	if [[ -n "$_cancelled" && "$_decision" == advance* ]]; then
+		_decision="stop cancelled during the attempt; no fallback attempt is started"
+	fi
 	case "$_decision" in
 	advance\ *)
 		_dead_kind="${_decision#advance }"
 		_dead_lane="${LINTRO_REVIEW_LANE:-?}"
 		echo "::warning::lane ${_dead_lane} unavailable (${_dead_kind}) before any chunk completed; falling back to the next lane (ADR-0011 D)"
-		_record_lane_down "$_dead_lane" "$_dead_kind"
+		# Take the dead lane's credential back before anything else runs.
 		_unbind_attempt
+		_record_lane_down "$_dead_lane" "$_dead_kind"
 		# The sticky names the primary lane: the first one that died, not
 		# whichever preceded the lane that finally answered.
 		if [[ -z "${LINTRO_REVIEW_FALLBACK_FROM:-}" ]]; then
 			export LINTRO_REVIEW_FALLBACK_FROM="$_dead_lane" LINTRO_REVIEW_FALLBACK_REASON="$_dead_kind"
 		fi
-		_attempt=$((_attempt + 1))
-		rm -f "$output_file"
-		output_file="$(mktemp)"
-		_bind_attempt "$_attempt"
+		# Bind the next lane. One that cannot be bound is a dead lane too:
+		# it is recorded as unbound and the next is tried, until a lane
+		# binds or none is left. The last real attempt's status and output
+		# stand for the classifier either way.
+		while :; do
+			if [[ -n "$_cancelled" ]]; then
+				echo "[ai-review] chain: cancelled; no fallback attempt is started"
+				break 2
+			fi
+			_attempt=$((_attempt + 1))
+			if _bind_attempt "$_attempt"; then
+				rm -f "$output_file"
+				output_file="$(mktemp)"
+				break
+			fi
+			_unbound_lane="$(_lane_at "$_attempt")"
+			_unbind_attempt
+			_record_lane_down "$_unbound_lane" unbound
+			if ((_attempt + 1 >= _chain_length)); then
+				echo "[ai-review] chain: lane ${_unbound_lane} could not be bound; no lane left"
+				break 2
+			fi
+		done
 		;;
 	exhausted\ *)
 		# Dead before any chunk, but the last lane: record it like the

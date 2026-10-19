@@ -83,21 +83,26 @@ def _json_objects(text: str) -> Iterator[dict[str, Any]]:
         index = text.find("{", index + 1)
 
 
-def last_error(text: str) -> dict[str, Any]:
-    """Return the last review error envelope in *text*, or an empty dict.
+def envelope_error(text: str) -> dict[str, Any]:
+    """Return the review error envelope in *text*, or an empty dict.
+
+    The same rule as the classifier's ``_parse_error_envelope``: the first
+    JSON object carrying an ``error`` mapping, whether or not it names a
+    ``kind``. The two scripts read the same attempt output and must agree
+    on which envelope is the attempt's, or a walk could be recorded that
+    the verdict does not see.
 
     Args:
         text: The attempt's captured stdout and stderr.
 
     Returns:
-        The ``error`` object of the last envelope naming a ``kind``.
+        The ``error`` object of the first envelope found.
     """
-    found: dict[str, Any] = {}
     for payload in _json_objects(text):
         error = payload.get("error")
-        if isinstance(error, dict) and isinstance(error.get("kind"), str):
-            found = error
-    return found
+        if isinstance(error, dict):
+            return error
+    return {}
 
 
 def error_kind(text: str) -> str:
@@ -109,7 +114,8 @@ def error_kind(text: str) -> str:
     Returns:
         The envelope's ``error.kind``, or an empty string when none is found.
     """
-    return str(last_error(text).get("kind", ""))
+    kind = envelope_error(text).get("kind", "")
+    return kind if isinstance(kind, str) else ""
 
 
 def completed_chunks(error: dict[str, Any]) -> int | None:
@@ -145,8 +151,11 @@ def chunk_completed(state_dir: Path, since: Path) -> bool:
         return True
     if not state_dir.is_dir():
         return False
+    # ``>=``: on a filesystem with one-second mtimes a part written in the
+    # marker's second must still count; a downloaded prior part is minutes
+    # older than the marker.
     return any(
-        part.is_file() and part.stat().st_mtime > started
+        part.is_file() and part.stat().st_mtime >= started
         for part in state_dir.glob("part-*.json")
     )
 
@@ -177,8 +186,9 @@ def decide(
     """
     if status != REVIEW_STATUS_ERROR:
         return STOP, f"review exited {status}, not the error status"
-    error = last_error(output)
-    kind = str(error.get("kind", ""))
+    error = envelope_error(output)
+    kind = error.get("kind", "")
+    kind = kind if isinstance(kind, str) else ""
     if kind not in FALLBACK_KINDS:
         return STOP, f"error kind {kind or '(none)'!r} is not a fallback trigger"
     completed = completed_chunks(error)

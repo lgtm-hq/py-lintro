@@ -155,7 +155,12 @@ line naming the dead lane, its error kind and the lane that answered, the job su
 carries the same as a `::warning::`, and one issue labelled `ai-review-lane-down` is
 opened or updated per dead lane through the App token. When a chain of two or more lanes
 has every lane fail before any chunk completed, the check is red with
-`status=lanes-exhausted`.
+`status=lanes-exhausted`. A fallback lane that cannot be bound (its credential is
+absent, or the gate refuses it) is recorded as `unbound` and the next lane is tried; a
+cancel ends the walk at once. Two edges to know: the walk keys on the envelope's `kind`,
+so a thin envelope the classifier upgrades to `auth_failed` from its prose does not
+walk, and the first attempt's error sticky stays on the PR until the fallback attempt
+replaces it.
 
 The dogfood `openai` lane always sends its row's model (`gpt-6.1-sol`, or the
 `LINTRO_AI_MODEL` override). Outside a lane, on the openai `cli` transport lintro sends

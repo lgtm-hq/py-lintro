@@ -85,6 +85,54 @@ def test_the_fallback_round_trips_through_the_run_record() -> None:
     assert_that(RunRecord.from_dict(plain.to_dict()).identity.fallback_from).is_empty()
 
 
+def test_the_final_record_keeps_the_fallback(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The record the run persists at the end carries what the checkpoints did.
+
+    The final persist replaces every checkpoint part, so a board re-rendered
+    from state alone would otherwise lose the fallback line.
+    """
+    from dataclasses import replace
+
+    from lintro.ai.review.enums.review_verdict import ReviewVerdict
+    from lintro.ai.review.run_record_factory import RoundTotals, run_record_from_result
+
+    result = replace(
+        sample_review_result,
+        metadata=replace(
+            sample_review_result.metadata,
+            lane="openai",
+            fallback_from="anthropic",
+            fallback_reason="insufficient_credits",
+        ),
+    )
+
+    record = run_record_from_result(
+        request=StickyRequest(
+            result=result,
+            head_sha="abc1234",
+            transport="cli",
+            auth_mode="oauth",
+        ),
+        totals=RoundTotals(
+            round_number=2,
+            verdict=ReviewVerdict.READY,
+            resolved=0,
+            open_after=0,
+            convergence_score=5.0,
+        ),
+    )
+    restored = RunRecord.from_dict(record.to_dict())
+
+    assert_that(record.identity.fallback_from).is_equal_to("anthropic")
+    assert_that(record.identity.fallback_reason).is_equal_to("insufficient_credits")
+    assert_that(restored.identity.fallback_from).is_equal_to("anthropic")
+    assert_that(render_state_sticky(state=ReviewState(runs=(restored,)))).contains(
+        "**Fallback lane**",
+    )
+
+
 def test_the_banner_names_both_lanes_and_the_reason() -> None:
     """The line says which lane died, why, and which lane answered."""
     view = ProvenanceView(

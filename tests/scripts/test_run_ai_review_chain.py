@@ -36,7 +36,7 @@ log="$CHAIN_STUB_DIR/gh-argv"
 printf '%s\\n' "$*" >>"$log"
 if [[ "$1" == "label" ]]; then exit 0; fi
 if [[ "$1" == "issue" && "$2" == "list" ]]; then
-    if [[ -f "$CHAIN_STUB_DIR/open-issue" ]]; then cat "$CHAIN_STUB_DIR/open-issue"; fi
+    if [[ -f "$CHAIN_STUB_DIR/open-issues" ]]; then cat "$CHAIN_STUB_DIR/open-issues"; else echo "[]"; fi
     exit 0
 fi
 if [[ "$1" == "issue" && "$2" == "create" ]]; then echo "https://github.com/lgtm-hq/py-lintro/issues/4242"; exit 0; fi
@@ -69,6 +69,7 @@ n=$(cat "$dir/attempts" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s\\n' "$n
     printf 'codex_env=%s\\n' "${CODEX_AUTH_JSON:+set}"
     printf 'codex_file=%s\\n' "$([[ -s "$HOME/.codex/auth.json" ]] && echo present || echo absent)"
     printf 'cursor=%s\\n' "${CURSOR_API_KEY:+set}"
+    printf 'captured=%s\\n' "$(env | grep -c '^_captured_' || true)"
     printf 'fallback_from=%s\\n' "${LINTRO_REVIEW_FALLBACK_FROM:-}"
     printf 'fallback_reason=%s\\n' "${LINTRO_REVIEW_FALLBACK_REASON:-}"
     printf 'lanes_down=%s\\n' "${LINTRO_REVIEW_LANES_DOWN:-}"
@@ -116,7 +117,8 @@ def _run_chain(
     *,
     chain: list[str],
     plan: list[str],
-    open_issue: int | None = None,
+    open_issues: list[tuple[int, str]] | None = None,
+    without: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Run the wrapper with a chain and a per-attempt plan for the review stub.
 
@@ -127,8 +129,9 @@ def _run_chain(
             ``fail:<kind>+chunk`` (count 1 and a checkpoint part written),
             ``fail:<kind>+counted`` (count 1, no part: the checkpoint write
             failed) or ``fail:<kind>+unknown`` (no count on the envelope).
-        open_issue: An existing lane-down issue number the ``gh`` stub
-            reports, or ``None`` for none.
+        open_issues: Open lane-down issues (number, title) the ``gh`` stub
+            lists, or ``None`` for none.
+        without: Environment names left unset, e.g. a lane's credential.
 
     Returns:
         The wrapper's exit code and output, the recorded environment of each
@@ -144,8 +147,11 @@ def _run_chain(
     home = tmp_path / "home"
     home.mkdir()
     (stub_dir / "plan").write_text("\n".join(plan) + "\n", encoding="utf-8")
-    if open_issue is not None:
-        (stub_dir / "open-issue").write_text(f"{open_issue}\n", encoding="utf-8")
+    if open_issues is not None:
+        (stub_dir / "open-issues").write_text(
+            json.dumps([{"number": n, "title": t} for n, t in open_issues]),
+            encoding="utf-8",
+        )
     _write_stub(bin_dir, "gh", _GH_STUB)
     _write_stub(bin_dir, "uv", _UV_STUB)
     rows = json.loads(MANIFEST.read_text(encoding="utf-8"))["lanes"]
@@ -169,6 +175,8 @@ def _run_chain(
         "LINT_REPORT_WAIT_SECONDS": "0",
         "LINT_REPORT_POLL_SECONDS": "1",
     }
+    for name in without:
+        env.pop(name, None)
     output = tmp_path / "output.log"
     with output.open("w", encoding="utf-8") as sink:
         completed = subprocess.run(  # nosec B603 - fixed argv run against a repo script in a controlled test; shell=False, no user shell input
@@ -233,6 +241,8 @@ def test_a_dead_primary_lane_falls_back_with_only_the_next_lanes_credential(
     assert_that(json.loads(second["lanes_down"])).is_equal_to(
         [{"lane": "anthropic", "kind": "insufficient_credits"}],
     )
+    # The captured copies never reach the subprocess on either attempt.
+    assert_that([a["captured"] for a in run["attempts"]]).is_equal_to(["0", "0"])
     assert_that(run["exit"]).is_equal_to(0)
     assert_that(run["output"]).contains(
         "::warning::lane anthropic unavailable (insufficient_credits) before any chunk completed",
@@ -257,7 +267,11 @@ def test_a_dead_lane_opens_one_tracker_issue_or_updates_the_open_one(
         tmp_path / "update",
         chain=["anthropic", "openai"],
         plan=["fail:auth_failed", "ok"],
-        open_issue=4242,
+        # A lane id that is a prefix of another must not match its issue.
+        open_issues=[
+            (4100, "AI review lane down: anthropic-api"),
+            (4242, "AI review lane down: anthropic"),
+        ],
     )
 
     creates = [call for call in created["gh"] if call.startswith("issue create ")]
@@ -355,6 +369,84 @@ def test_a_three_lane_walk_names_the_first_dead_lane_as_primary(
     )
     creates = [c for c in run["gh"] if c.startswith("issue create ")]
     assert_that(creates).is_length(2)
+
+
+def test_a_fallback_lane_without_a_credential_is_unbound_and_the_walk_goes_on(
+    tmp_path: Path,
+) -> None:
+    """No Codex session configured: openai is recorded unbound, cursor answers.
+
+    The refusal happens inside the loop, after the heartbeat and the traps
+    exist, so it must not exit the script: the primary lane's death is still
+    classified and the third lane still gets its turn.
+    """
+    run = _run_chain(
+        tmp_path,
+        chain=["anthropic", "openai", "cursor"],
+        plan=["fail:insufficient_credits", "ok"],
+        without=("CODEX_AUTH_JSON",),
+    )
+
+    assert_that(run["attempts"]).is_length(2)
+    second = run["attempts"][1]
+    assert_that(second["lane"]).is_equal_to("cursor")
+    assert_that(second["fallback_from"]).is_equal_to("anthropic")
+    assert_that(json.loads(second["lanes_down"])).is_equal_to(
+        [
+            {"lane": "anthropic", "kind": "insufficient_credits"},
+            {"lane": "openai", "kind": "unbound"},
+        ],
+    )
+    assert_that(run["exit"]).is_equal_to(0)
+    assert_that(run["output"]).contains("::warning::lane openai could not be bound")
+    creates = [c for c in run["gh"] if c.startswith("issue create ")]
+    assert_that(creates).is_length(2)
+    assert_that(creates[1]).contains("AI review lane down: openai")
+    assert_that(creates[1]).contains("could not be bound")
+
+
+def test_a_last_lane_that_cannot_be_bound_exhausts_the_chain(tmp_path: Path) -> None:
+    """Primary dead, the only fallback has no credential: red, both lanes named."""
+    run = _run_chain(
+        tmp_path,
+        chain=["anthropic", "openai"],
+        plan=["fail:insufficient_credits"],
+        without=("CODEX_AUTH_JSON",),
+    )
+
+    assert_that(run["attempts"]).is_length(1)
+    assert_that(run["exit"]).is_equal_to(1)
+    assert_that(run["output"]).contains("status=lanes-exhausted")
+    assert_that(run["output"]).contains("anthropic (insufficient_credits)")
+    assert_that(run["output"]).contains("openai (unbound)")
+    assert_that(run["output"]).contains("no lane left")
+    # Classify ran through the normal tail of the script, not an early exit.
+    assert_that(run["output"]).does_not_contain("not invoked")
+
+
+def test_a_file_credential_lane_is_unbound_before_an_env_credential_lane(
+    tmp_path: Path,
+) -> None:
+    """Openai first, then anthropic: the Codex file is gone before Claude binds."""
+    run = _run_chain(
+        tmp_path,
+        chain=["openai", "anthropic"],
+        plan=["fail:auth_failed", "ok"],
+    )
+
+    assert_that(run["attempts"]).is_length(2)
+    first, second = run["attempts"]
+    assert_that(first["lane"]).is_equal_to("openai")
+    assert_that(first["codex_file"]).is_equal_to("present")
+    assert_that(first["claude"]).is_empty()
+    assert_that(second["lane"]).is_equal_to("anthropic")
+    assert_that(second["codex_file"]).is_equal_to("absent")
+    assert_that(second["codex_env"]).is_empty()
+    assert_that(second["claude"]).is_equal_to("set")
+    assert_that(run["exit"]).is_equal_to(0)
+    assert_that(run["output"]).contains(
+        "primary lane openai unavailable (auth_failed); reviewed by anthropic",
+    )
 
 
 def test_every_lane_dead_is_lanes_exhausted(tmp_path: Path) -> None:

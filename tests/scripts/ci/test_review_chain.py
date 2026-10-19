@@ -119,6 +119,8 @@ def test_a_dead_lane_before_any_chunk_advances(
     [
         (0, "insufficient_credits", "not the error status"),
         (1, "insufficient_credits", "not the error status"),
+        # SIGTERM: the runner asked the step to stop.
+        (143, "insufficient_credits", "not the error status"),
         (2, "rate_limited", "not a fallback trigger"),
         (2, "server_error", "not a fallback trigger"),
         (2, "timeout", "not a fallback trigger"),
@@ -226,7 +228,7 @@ def test_a_part_older_than_the_attempt_does_not_count(
     state_dir.mkdir()
     stale = state_dir / "part-0001.json"
     stale.write_text("{}", encoding="utf-8")
-    old = time.time() - 60
+    old = time.time() - 300
     os.utime(stale, (old, old))
     marker = _marker(tmp_path)
 
@@ -287,23 +289,46 @@ def test_a_missing_marker_is_read_as_a_completed_chunk(
     assert_that(detail).contains("after a chunk completed")
 
 
-def test_the_last_envelope_wins(chain: ModuleType, tmp_path: Path) -> None:
-    """Interleaved logs may carry an earlier envelope; the last one is the attempt's."""
+def _load_classifier() -> ModuleType:
+    script = ROOT / "scripts" / "ci" / "classify_review_outcome.py"
+    spec = importlib.util.spec_from_file_location("classify_review_outcome", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_decider_reads_the_envelope_the_classifier_reads(
+    chain: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Two envelopes in one output: both scripts pick the same one.
+
+    Otherwise the walk could record a dead lane the verdict never sees, or
+    the verdict could name a kind the walk ignored.
+    """
+    classifier = _load_classifier()
     state_dir = tmp_path / "state"
     state_dir.mkdir()
-    output = _envelope("rate_limited") + _envelope("auth_failed")
-
-    verb, detail = chain.decide(
-        status=2,
-        output=output,
-        state_dir=state_dir,
-        since=_marker(tmp_path),
-        attempt=0,
-        chain_length=2,
+    thin_first = '{"error": {"message": "logged by a provider"}}\n' + _envelope(
+        "auth_failed",
     )
+    kind_first = _envelope("rate_limited") + _envelope("auth_failed")
 
-    assert_that(verb).is_equal_to(chain.ADVANCE)
-    assert_that(detail).is_equal_to("auth_failed")
+    for output in (thin_first, kind_first):
+        verdict = classifier._parse_error_envelope(text=output) or {}
+        verb, _detail = chain.decide(
+            status=2,
+            output=output,
+            state_dir=state_dir,
+            since=_marker(tmp_path),
+            attempt=0,
+            chain_length=2,
+        )
+
+        assert_that(chain.envelope_error(output)).is_equal_to(verdict)
+        assert_that(verb).is_equal_to(chain.STOP)
 
 
 def test_lanes_down_appends_and_validates(chain: ModuleType) -> None:
