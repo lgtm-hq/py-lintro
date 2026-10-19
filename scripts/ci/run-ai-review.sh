@@ -863,14 +863,26 @@ while :; do
 		# binding exports the candidate's row, so when no lane binds the
 		# facts of the lane that actually ran are put back before classify
 		# (its credential label, not the unbound lane's).
+		# The gate exports the same fixed set of names for every row and never
+		# a value with a line break, so the snapshot is line-per-name; a
+		# job-level variable with a line break would come back cut, which the
+		# restore tolerates (the gate's own keys are what matter).
 		_lane_facts="$(mktemp)"
 		env | grep -E '^(LINTRO_REVIEW_|LINTRO_AI_|LANE_)[A-Z0-9_]*=' |
 			grep -vE '^LINTRO_REVIEW_(LANES_DOWN|FALLBACK_FROM|FALLBACK_REASON|ATTEMPT|CHAIN|LANES|STATE_DIR)=' \
 				>"$_lane_facts" || true
+		# Put the facts of the attempt that ran back, for classify.
+		_restore_lane_facts() {
+			_apply_lane_exports <"$_lane_facts"
+			rm -f "$_lane_facts"
+			transport="$(printf '%s' "${LINTRO_AI_TRANSPORT:-cli}" | tr '[:upper:]' '[:lower:]')"
+			provider="$(printf '%s' "${LINTRO_AI_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
+		}
 		while :; do
 			if [[ -n "$_cancelled" ]]; then
+				# A refused candidate may already have exported its row.
 				echo "[ai-review] chain: cancelled; no fallback attempt is started"
-				rm -f "$_lane_facts"
+				_restore_lane_facts
 				break 2
 			fi
 			_attempt=$((_attempt + 1))
@@ -880,10 +892,7 @@ while :; do
 				if [[ -n "$_cancelled" ]]; then
 					echo "[ai-review] chain: cancelled while binding; no fallback attempt is started"
 					_unbind_attempt
-					_apply_lane_exports <"$_lane_facts"
-					rm -f "$_lane_facts"
-					transport="$(printf '%s' "${LINTRO_AI_TRANSPORT:-cli}" | tr '[:upper:]' '[:lower:]')"
-					provider="$(printf '%s' "${LINTRO_AI_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
+					_restore_lane_facts
 					break 2
 				fi
 				rm -f "$_lane_facts" "$output_file"
@@ -895,10 +904,7 @@ while :; do
 			_record_lane_down "$_unbound_lane" unbound
 			if ((_attempt + 1 >= _chain_length)); then
 				echo "[ai-review] chain: lane ${_unbound_lane} could not be bound; no lane left"
-				_apply_lane_exports <"$_lane_facts"
-				rm -f "$_lane_facts"
-				transport="$(printf '%s' "${LINTRO_AI_TRANSPORT:-cli}" | tr '[:upper:]' '[:lower:]')"
-				provider="$(printf '%s' "${LINTRO_AI_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
+				_restore_lane_facts
 				break 2
 			fi
 		done

@@ -436,10 +436,8 @@ def main(argv: list[str] | None = None) -> int:
         # not carry a red annotation. A lane that cannot even be resolved
         # (env phase: a bad index, a missing row) is a configuration error
         # whatever the attempt.
-        fallback_attempt = env.get("LINTRO_REVIEW_ATTEMPT", "0").strip() not in {
-            "",
-            "0",
-        }
+        raw_attempt = env.get("LINTRO_REVIEW_ATTEMPT", "0").strip()
+        fallback_attempt = raw_attempt.isdigit() and int(raw_attempt) > 0
         level = "warning" if args.phase == "check" and fallback_attempt else "error"
         sys.stderr.write(f"::{level}::review lane: {exc}\n")
         return exc.status

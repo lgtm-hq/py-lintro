@@ -104,17 +104,19 @@ def envelope_error(text: str) -> dict[str, Any]:
     Returns:
         The ``error`` object of the attempt's envelope.
     """
-    first: dict[str, Any] = {}
-    with_kind: dict[str, Any] = {}
+    first: dict[str, Any] | None = None
+    with_kind: dict[str, Any] | None = None
     for payload in _json_objects(text):
         error = payload.get("error")
         if not isinstance(error, dict):
             continue
-        if not first:
+        if first is None:
             first = error
         if isinstance(error.get("kind"), str):
             with_kind = error
-    return with_kind or first
+    if with_kind is not None:
+        return with_kind
+    return first if first is not None else {}
 
 
 def error_kind(text: str) -> str:

@@ -328,6 +328,7 @@ def test_the_decider_reads_the_envelope_the_classifier_reads(
     )
     kind_first = _envelope("rate_limited") + _envelope("auth_failed")
     thin_only = '{"error": {"message": "no kind at all"}}\n'
+    empty_first = '{"error": {}}\n{"error": {"message": "second, still thin"}}\n'
 
     for output, expected_verb in (
         (anthropic_logged, chain.ADVANCE),
@@ -335,6 +336,7 @@ def test_the_decider_reads_the_envelope_the_classifier_reads(
         (thin_first, chain.ADVANCE),
         (kind_first, chain.ADVANCE),
         (thin_only, chain.STOP),
+        (empty_first, chain.STOP),
     ):
         verdict = classifier._parse_error_envelope(text=output) or {}
         verb, _detail = chain.decide(
