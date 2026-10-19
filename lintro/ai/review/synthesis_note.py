@@ -43,8 +43,9 @@ def format_synthesis_note(*, metadata: ReviewMetadata) -> str:
         )
         # A pass that was cut and then failed is both; the coverage banner
         # carries both degradations and the note must not drop one. A failed
-        # pass consumed nothing, so this names what it was given, not what
-        # it saw.
+        # pass produced nothing the run could use, whether or not the model
+        # read the prompt (an unparseable reply and a turn limit both land
+        # here), so the note names what it was given, not what it saw.
         if outcome.truncated:
             sentence += (
                 f" {_what_it_was_given(outcome=outcome)} (whole-PR token budget)."

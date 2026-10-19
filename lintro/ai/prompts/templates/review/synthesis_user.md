@@ -48,8 +48,9 @@ Hard rules:
    is not in the diff you were given, say nothing about it.
 4. Never claim that a file "was never updated". Every path in the
    changed-file list above was changed by this PR; when its hunks are not in
-   the diff below, the budget left them out and you cannot see how it
-   changed. The list alone is not evidence of a file's behaviour, and a file
+   the diff below, either the budget left them out or the change has no text
+   hunks (a rename, a mode change, a binary file), and either way you cannot
+   see how it changed. The list alone is not evidence of a file's behaviour, and a file
    with some hunks shown is not a file you can see whole: do not infer what
    you were not shown. If a path is absent from that list, it is not part of
    this PR at all and is not in your prompt, so its absence is not evidence

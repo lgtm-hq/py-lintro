@@ -1180,7 +1180,7 @@ def test_rule_four_scopes_blindness_to_files_the_budget_left_out() -> None:
 
     text = REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE
 
-    assert_that(text).contains("the budget left them out")
+    assert_that(text).contains("the budget left them out or the change has no text")
     assert_that(text).contains("do not infer what")
     assert_that(text).does_not_contain("this PR changed it and you cannot see how")
 
