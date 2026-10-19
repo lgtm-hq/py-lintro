@@ -119,14 +119,17 @@ def completed_chunks_of(error: BaseException) -> int | None:
         error: The exception the run raised.
 
     Returns:
-        The larger of the execution error's own count and the run-boundary
-        annotation, or ``None`` when neither is present: the count is unknown
-        and a wrapper must not restart the review elsewhere.
+        The run-boundary annotation when present: it counts the partials the
+        run collected, and wins over the execution error's own field, which
+        the chunk pass fills with the failing chunk's position (under
+        concurrency a later chunk can fail first, so that position is not a
+        count). Without an annotation, the execution error's field; ``None``
+        when neither is present, so the count is unknown and a wrapper must
+        not restart the review elsewhere.
     """
-    counts: list[int] = []
-    if isinstance(error, ReviewExecutionError) and error.completed_chunks is not None:
-        counts.append(max(int(error.completed_chunks), 0))
     annotated = getattr(error, COMPLETED_CHUNKS_ATTR, None)
     if isinstance(annotated, int) and not isinstance(annotated, bool):
-        counts.append(annotated)
-    return max(counts) if counts else None
+        return max(annotated, 0)
+    if isinstance(error, ReviewExecutionError) and error.completed_chunks is not None:
+        return max(int(error.completed_chunks), 0)
+    return None

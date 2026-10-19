@@ -230,6 +230,22 @@ def test_completed_chunks_comes_from_the_execution_error_or_the_annotation(
     )
     annotate_completed_chunks(wrapped, completed=3)
     fresh = ReviewExecutionError(message="aborted", cause_message="401")
+    # The chunk pass fills the field with the failing chunk's position; when
+    # chunk 2 fails first under concurrency nothing has completed, and the
+    # run boundary's count must win over that position.
+    positional = ReviewExecutionError(
+        message="aborted",
+        chunk_index=2,
+        completed_chunks=2,
+        cause_message="401",
+    )
+    annotate_completed_chunks(positional, completed=0)
+    unannotated = ReviewExecutionError(
+        message="aborted",
+        chunk_index=2,
+        completed_chunks=2,
+        cause_message="401",
+    )
 
     assert_that(
         build_error_contract(provider="anthropic", error=auth_error)["error"][
@@ -241,6 +257,16 @@ def test_completed_chunks_comes_from_the_execution_error_or_the_annotation(
             "completed_chunks"
         ],
     ).is_equal_to(3)
+    assert_that(
+        build_error_contract(provider="anthropic", error=positional)["error"][
+            "completed_chunks"
+        ],
+    ).is_equal_to(0)
+    assert_that(
+        build_error_contract(provider="anthropic", error=unannotated)["error"][
+            "completed_chunks"
+        ],
+    ).is_equal_to(2)
     # A raise site that did not count reads as unknown, never as zero.
     assert_that(
         build_error_contract(provider="anthropic", error=fresh)["error"][
