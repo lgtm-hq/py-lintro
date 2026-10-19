@@ -52,11 +52,14 @@ changed is reviewed on its own merits. A per-file reason whose files were still 
 review. A redo that succeeds clears the reason. A redo that fails again, or that the
 cost cap or PR budget stops, records the reason again and fails the check as the first
 attempt did. A narrative reason whose step did not run again (a failed question pass on
-a rerun with nothing left to review) is recorded again with the same warning.
-`turn_limit_reached` and `split_half_failed` go through the same redo. Their files were
-not credited in the failing round, so usually there is no coverage to set aside, but an
-earlier round's coverage for one of those files is set aside too. A cut diff
-(`diff_truncated`) is already re-reported by its coverage record until the file changes.
+a rerun with nothing left to review) is recorded again with the same warning. A mid-run
+checkpoint does not reset the carry: the next round reads the latest finished round's
+list, and a file the interrupted round already reviewed again at its current content is
+neither reviewed a third time nor carried. `turn_limit_reached` and `split_half_failed`
+go through the same redo. Their files were not credited in the failing round, so usually
+there is no coverage to set aside, but an earlier round's coverage for one of those
+files is set aside too. A cut diff (`diff_truncated`) is already re-reported by its
+coverage record until the file changes.
 
 ## Update in place
 

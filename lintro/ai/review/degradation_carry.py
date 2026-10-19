@@ -37,6 +37,7 @@ from lintro.ai.review.models.coverage_degradation import (
 from lintro.ai.review.models.coverage_record import CoverageRecord
 from lintro.ai.review.models.degradation_record import DegradationRecord
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_record import RunRecord
 
 __all__ = [
     "RedoScope",
@@ -67,10 +68,15 @@ class RedoScope:
         paths: Files whose carried coverage is set aside this round.
         whole_head: True when a per-file reason names no files, so every
             eligible file is reviewed again (fail toward more review).
+        redone: Files a later round already reviewed again at their
+            current content, as a mid-run checkpoint recorded before the
+            round finished (#2867). Their coverage is kept even under a
+            whole-head redo, so an interrupted redo is not paid for twice.
     """
 
     paths: frozenset[str] = frozenset()
     whole_head: bool = False
+    redone: frozenset[str] = frozenset()
 
     def filter_coverage(
         self,
@@ -89,7 +95,12 @@ class RedoScope:
             hash goes too, so a same-hash sibling cannot credit the file back.
         """
         if self.whole_head:
-            return ()
+            return tuple(
+                record
+                for record in coverage
+                if record.path in self.redone
+                and record.patch_hash == hashes.get(record.path)
+            )
         if not self.paths:
             return tuple(coverage)
         redo_hashes = {hashes[path] for path in self.paths if path in hashes}
@@ -100,41 +111,93 @@ class RedoScope:
         )
 
 
-def latest_degradations(*, prior: ReviewState | None) -> tuple[DegradationRecord, ...]:
-    """Return the degradations the latest round recorded.
+def _degrading_run(*, prior: ReviewState | None) -> RunRecord | None:
+    """Return the latest finished run, whose degradations the next round owes.
+
+    A mid-run checkpoint (#2867) appends a partial record for the interrupted
+    round with no degradations of its own; reading it as the latest run would
+    hide what the round before it still owes.
 
     Args:
         prior: The resumed state, or ``None``.
 
     Returns:
-        The latest run's records; empty when there is no prior run or its
-        record predates v6. The head the round reviewed does not matter:
+        The last run record that is not a checkpoint, or ``None``.
+    """
+    if prior is None:
+        return None
+    for run in reversed(prior.runs):
+        if not run.coverage.checkpoint:
+            return run
+    return None
+
+
+def latest_degradations(*, prior: ReviewState | None) -> tuple[DegradationRecord, ...]:
+    """Return the degradations the latest finished round recorded.
+
+    Args:
+        prior: The resumed state, or ``None``.
+
+    Returns:
+        The latest finished run's records; empty when there is no prior
+        run or its record predates v6. A trailing checkpoint record is
+        skipped. The head the round reviewed does not matter:
         what a record owes is keyed by each file's patch hash, as coverage
         is, so a later head that leaves a degraded file unchanged still owes
         its redo.
     """
-    if prior is None or not prior.runs:
-        return ()
-    return prior.runs[-1].coverage.degradations
+    run = _degrading_run(prior=prior)
+    return run.coverage.degradations if run is not None else ()
 
 
 def _degraded_hashes(*, prior: ReviewState | None) -> dict[str, str]:
-    """Return the patch hash each file had when the latest round credited it.
+    """Return the patch hash each file had when the degrading round credited it.
 
     Args:
         prior: The resumed state, or ``None``.
 
     Returns:
-        Path to hash for the coverage records the latest round wrote.
+        Path to hash for the coverage records the degrading round wrote.
     """
-    if prior is None or not prior.runs:
+    run = _degrading_run(prior=prior)
+    if prior is None or run is None:
         return {}
-    latest_round = prior.runs[-1].identity.round
     return {
         record.path: record.patch_hash
         for record in prior.coverage
-        if record.round == latest_round
+        if record.round == run.identity.round
     }
+
+
+def _redone_paths(
+    *,
+    prior: ReviewState | None,
+    hashes: dict[str, str],
+) -> frozenset[str]:
+    """Return the files a later round already reviewed again at their content.
+
+    A redo round that checkpointed its coverage and was then interrupted
+    (#2867) leaves records at a round after the degrading one. Those files
+    owe nothing while unchanged: evicting them again would pay for the same
+    review twice and never converge.
+
+    Args:
+        prior: The resumed state, or ``None``.
+        hashes: Current patch hash per file in this round's diff.
+
+    Returns:
+        The files with a coverage record from a round after the degrading
+        run, at the file's current hash.
+    """
+    run = _degrading_run(prior=prior)
+    if prior is None or run is None:
+        return frozenset()
+    return frozenset(
+        record.path
+        for record in prior.coverage
+        if record.round > run.identity.round
+        and record.patch_hash == hashes.get(record.path)
+    )
 
 
 def _owed_paths(
@@ -186,6 +249,7 @@ def redo_scope(*, prior: ReviewState | None, hashes: dict[str, str]) -> RedoScop
         record for record in latest_degradations(prior=prior) if _needs_redo(record)
     ]
     degraded = _degraded_hashes(prior=prior)
+    redone = _redone_paths(prior=prior, hashes=hashes)
     return RedoScope(
         paths=frozenset(
             path
@@ -195,8 +259,10 @@ def redo_scope(*, prior: ReviewState | None, hashes: dict[str, str]) -> RedoScop
                 degraded=degraded,
                 hashes=hashes,
             )
+            if path not in redone
         ),
         whole_head=any(not record.degradation.paths for record in records),
+        redone=redone,
     )
 
 
@@ -245,6 +311,7 @@ def carried_degradations(
         for path in item.paths
     }
     degraded = _degraded_hashes(prior=prior)
+    redone = _redone_paths(prior=prior, hashes=hashes)
     carried: list[CoverageDegradation] = []
     for record in latest_degradations(prior=prior):
         if record.reason in _CARRIED_BY_COVERAGE or record.step is DegradationStep.RUN:
@@ -258,7 +325,7 @@ def carried_degradations(
                     degraded=degraded,
                     hashes=hashes,
                 )
-                if path not in reviewed and path not in attempted
+                if path not in reviewed and path not in attempted and path not in redone
             )
             if degradation.paths and not owed:
                 continue

@@ -831,3 +831,86 @@ def test_a_carried_truncated_synthesis_says_it_ran_short_not_that_it_failed() ->
     assert_that(lines).is_length(2)
     assert_that(lines[1]).contains(CARRIED_SYNTHESIS_TRUNCATED_NOTE)
     assert_that(lines[1]).does_not_contain(CARRIED_SYNTHESIS_NOTE)
+
+
+def _checkpointed(prior: ReviewState, *coverage: CoverageRecord) -> ReviewState:
+    """Return ``prior`` with an interrupted round-2 checkpoint appended.
+
+    Args:
+        prior: The state whose round 1 degraded.
+        *coverage: Round-2 coverage records the checkpoint wrote.
+
+    Returns:
+        The state a rerun resumes after runner loss.
+    """
+    return ReviewState(
+        runs=(
+            *prior.runs,
+            RunRecord(
+                identity=RunIdentity(round=2, sha=_HEAD),
+                coverage=RunCoverage(partial=True, checkpoint=True),
+            ),
+        ),
+        coverage=(*prior.coverage, *coverage),
+    )
+
+
+def test_a_trailing_checkpoint_does_not_hide_the_degrading_run() -> None:
+    """After runner loss the rerun still owes the finished round's degradations."""
+    record = _record(_Reason.ADVERSARIAL_SWEEP_FAILED, paths=("a.py",))
+    prior = _checkpointed(_state(record))
+
+    assert_that(latest_degradations(prior=prior)).is_equal_to((record,))
+    assert_that(redo_scope(prior=prior, hashes=_HASHES)).is_equal_to(
+        RedoScope(paths=frozenset({"a.py"})),
+    )
+    carried = carried_degradations(
+        prior=prior,
+        current=(),
+        reviewed=(),
+        steps_ran=(),
+        hashes=_HASHES,
+    )
+    assert_that([item.reason for item in carried]).is_equal_to([record.reason])
+
+
+def test_a_checkpointed_redo_is_neither_evicted_again_nor_carried() -> None:
+    """A redo the interrupted round completed at the current hash owes nothing."""
+    record = _record(_Reason.ADVERSARIAL_SWEEP_FAILED, paths=("a.py", "b.py"))
+    redone = CoverageRecord(path="a.py", patch_hash="ha", round=2)
+    prior = _checkpointed(_state(record), redone)
+
+    scope = redo_scope(prior=prior, hashes=_HASHES)
+
+    assert_that(scope.paths).is_equal_to(frozenset({"b.py"}))
+    assert_that(scope.redone).is_equal_to(frozenset({"a.py"}))
+    assert_that(scope.filter_coverage(coverage=(redone,), hashes=_HASHES)).is_equal_to(
+        (redone,),
+    )
+    carried = carried_degradations(
+        prior=prior,
+        current=(),
+        reviewed=(),
+        steps_ran=(),
+        hashes=_HASHES,
+    )
+    assert_that(carried).is_length(1)
+    assert_that(carried[0].paths).is_equal_to(("b.py",))
+
+
+def test_a_whole_head_redo_keeps_what_a_checkpoint_already_redid() -> None:
+    """Runner loss mid-way through a whole-head redo does not restart it."""
+    prior = _checkpointed(
+        _state(_record(_Reason.ADVERSARIAL_SWEEP_FAILED, paths=())),
+        CoverageRecord(path="a.py", patch_hash="ha", round=2),
+    )
+    coverage = (
+        CoverageRecord(path="a.py", patch_hash="ha", round=2),
+        CoverageRecord(path="b.py", patch_hash="hb", round=1),
+    )
+
+    scope = redo_scope(prior=prior, hashes=_HASHES)
+
+    assert_that(scope.whole_head).is_true()
+    kept = scope.filter_coverage(coverage=coverage, hashes=_HASHES)
+    assert_that([record.path for record in kept]).is_equal_to(["a.py"])
