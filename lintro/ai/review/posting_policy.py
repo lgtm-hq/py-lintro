@@ -87,6 +87,10 @@ class PostingPolicy:
             threads. Off by default: a question is suspicion without proof
             and belongs in the notes block, not in a thread that blocks the
             merge until someone resolves it.
+        note_categories: Canonical categories whose P3 findings become
+            notes whatever their confidence. Defaults to
+            :data:`DEFAULT_NOTE_CATEGORIES`; a P1 or P2 is never routed by
+            category.
     """
 
     inline_min_confidence: ConfidenceLevel = ConfidenceLevel.MEDIUM
