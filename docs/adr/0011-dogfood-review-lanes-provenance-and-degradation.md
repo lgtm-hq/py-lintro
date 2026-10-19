@@ -488,15 +488,16 @@ and the initial manifest contents are the edits this ADR invites.
 
 Decision A requires "a weekly smoke row per lane against its real endpoint", and
 [#2873](https://github.com/lgtm-hq/py-lintro/issues/2873) asked that the row's
-credential match the lane's binding. The `host` and `provider` levels below relax "real
-endpoint" (and the credential) for the session lanes; `cursor` has no row at all. That
-holds for a token lane and cannot hold for a session lane: a subscription session (the
-Claude OAuth token, the Codex `auth.json`) drives a CLI, not the raw API the weekly
-smoke calls, so no smoke row can send it. Each manifest row therefore declares
-`smoke_row` and `smoke_covers`, the level the row honestly reaches:
+credential match the lane's binding. Both hold for a token lane. Neither can hold for a
+session lane: a subscription session (the Claude OAuth token, the Codex `auth.json`)
+drives a CLI, not the raw API the weekly smoke calls, so no smoke row can send it, and
+the Codex session's route is not the provider's API at all. The `host` and `provider`
+levels below therefore relax "real endpoint" (and the credential) for the session lanes,
+and `cursor` has no row at all. Each manifest row declares `smoke_row` and
+`smoke_covers`, the level the row honestly reaches:
 
 - `route`: the lane's own secret down the lane's own path (`zai`, `kimi`);
-- `host`: the provider's metered key to the host and path the CLI calls (`anthropic`);
+- `host`: the provider's metered key to the host the CLI calls (`anthropic`);
 - `provider`: the provider's API only, because the session's route is one no API smoke
   can reach (`openai`: the Codex session calls the ChatGPT backend);
 - `smoke_row: null` with a `smoke_gap` when no API protocol lintro implements can reach
