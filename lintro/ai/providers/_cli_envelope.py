@@ -187,10 +187,12 @@ def _looks_like_json(text: str) -> bool:
 def _fail_decode(*, provider: str, text: str, exc: json.JSONDecodeError) -> NoReturn:
     """Raise the error for text that ``json.loads`` rejected.
 
-    A document that opens like JSON and fails at its end, or inside an
-    unterminated string, was cut off; anything else is simply not JSON.
-    The heuristic is only applied to JSON-looking input so that a prose
-    answer with an unbalanced bracket is never reported as truncated.
+    A document that opens like JSON and runs out of input before it closes,
+    or stops inside an unterminated string, was cut off; anything else is
+    simply not JSON. A document that closed and has junk after it ("Extra
+    data") is not truncated. The heuristic is only applied to JSON-looking
+    input so that a prose answer with an unbalanced bracket is never
+    reported as truncated.
 
     Args:
         provider: Display name for the message prefix.
@@ -201,8 +203,8 @@ def _fail_decode(*, provider: str, text: str, exc: json.JSONDecodeError) -> NoRe
         CliEnvelopeError: Always; kind ``TRUNCATED`` or ``NOT_JSON``.
     """
     fragment = _bounded_fragment(text, position=exc.pos)
-    ran_out = exc.pos >= len(text) - 1 or exc.msg.startswith("Unterminated")
-    if _looks_like_json(text) and ran_out:
+    ran_out = exc.pos >= len(text) or exc.msg.startswith("Unterminated")
+    if _looks_like_json(text) and ran_out and not exc.msg.startswith("Extra data"):
         raise CliEnvelopeError(
             f"{provider} CLI returned invalid JSON: {exc} "
             f"(output appears truncated at position {exc.pos} of {len(text)})",
@@ -266,11 +268,35 @@ def _is_count(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
+def _coerce_count(value: object) -> int | None:
+    """Read a token counter the way the transports always have.
+
+    The CLIs are not consistent about number types, and the transports used
+    to coerce with ``int()``: an integral float (``12.0``) and a digit
+    string (``"12"``) were counts. They still are; what ``int()`` rejected
+    (``"many"``, ``1.5``, a bool, a negative) is a contract break.
+
+    Args:
+        value: Any decoded JSON value.
+
+    Returns:
+        The count, or ``None`` when *value* is not one.
+    """
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    if isinstance(value, float) and value.is_integer() and value >= 0:
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
 def _usage_counter(
     usage: Mapping[str, Any],
     *,
     provider: str,
     names: tuple[str, ...],
+    default: int,
 ) -> int:
     """Read one token counter from a usage block under either spelling.
 
@@ -282,43 +308,52 @@ def _usage_counter(
         provider: Display name for the message prefix.
         names: Accepted keys, first match wins (``input_tokens`` and the
             camel-case ``inputTokens`` are both seen in the wild).
+        default: What to return when none of *names* is present.
 
     Returns:
-        The counter, or 0 when none of *names* is present.
+        The counter, or *default* when none of *names* is present.
     """
     for name in names:
         if name in usage and usage[name] is not None:
             value = usage[name]
-            if not _is_count(value):
+            count = _coerce_count(value)
+            if count is None:
                 _fail_schema(
                     provider=provider,
                     name=f"usage.{name}",
                     expected="a non-negative integer",
                     value=value,
                 )
-            return int(value)
-    return 0
+            return count
+    return default
 
 
-def decode_usage(usage: object, *, provider: str) -> tuple[int, int]:
+def decode_usage(
+    usage: object,
+    *,
+    provider: str,
+    defaults: tuple[int, int] = (0, 0),
+) -> tuple[int, int]:
     """Validate a ``usage`` block and return its two token counters.
 
     Shared with the JSON Lines path, where ``turn.completed`` carries the
-    same block.
+    same block and a later event may carry only one of the counters.
 
     Args:
         usage: The decoded ``usage`` value, or ``None`` when absent.
         provider: Display name for the message prefix.
+        defaults: What a missing block or a missing counter reads as, so a
+            partial block does not zero a counter an earlier one reported.
 
     Returns:
-        ``(input_tokens, output_tokens)``, zeros when absent.
+        ``(input_tokens, output_tokens)``, *defaults* where absent.
 
     Raises:
         CliEnvelopeError: When ``usage`` is present but not an object, or a
             counter is not a non-negative integer.
     """
     if usage is None:
-        return 0, 0
+        return defaults
     if not isinstance(usage, Mapping):
         raise CliEnvelopeError(
             _schema_message(
@@ -331,11 +366,17 @@ def decode_usage(usage: object, *, provider: str) -> tuple[int, int]:
             fragment=_bounded_fragment(json.dumps(usage, default=str)),
         )
     return (
-        _usage_counter(usage, provider=provider, names=("input_tokens", "inputTokens")),
+        _usage_counter(
+            usage,
+            provider=provider,
+            names=("input_tokens", "inputTokens"),
+            default=defaults[0],
+        ),
         _usage_counter(
             usage,
             provider=provider,
             names=("output_tokens", "outputTokens"),
+            default=defaults[1],
         ),
     )
 
@@ -343,9 +384,10 @@ def decode_usage(usage: object, *, provider: str) -> tuple[int, int]:
 def _decode_cost(value: object, *, provider: str) -> float | None:
     """Validate ``total_cost_usd``.
 
-    ``json.loads`` accepts ``NaN`` and ``Infinity``, and a bool is an int in
-    Python; neither is a price, and both fail the envelope through
-    :func:`_fail_schema`, as does a negative number.
+    The transports used to coerce with ``float()``, so a numeric string is
+    still a price. ``json.loads`` accepts ``NaN`` and ``Infinity``, and a
+    bool is an int in Python; neither is a price, and both fail the envelope
+    through :func:`_fail_schema`, as does a negative number.
 
     Args:
         value: The decoded value, or ``None`` when absent.
@@ -356,19 +398,22 @@ def _decode_cost(value: object, *, provider: str) -> float | None:
     """
     if value is None:
         return None
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(value)
-        or value < 0
-    ):
+    number: float | None = None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        number = float(value)
+    elif isinstance(value, str):
+        try:
+            number = float(value.strip())
+        except ValueError:
+            number = None
+    if number is None or not math.isfinite(number) or number < 0:
         _fail_schema(
             provider=provider,
             name="total_cost_usd",
             expected="a finite non-negative number",
             value=value,
         )
-    return float(value)
+    return number
 
 
 def _decode_result(data: Mapping[str, Any], *, provider: str) -> str:
@@ -403,32 +448,18 @@ def _decode_result(data: Mapping[str, Any], *, provider: str) -> str:
     )
 
 
-def _decode_optional_str(
-    data: Mapping[str, Any],
-    *,
-    name: str,
-    provider: str,
-) -> str | None:
-    """Return a string field, ``None`` when absent, null or blank.
-
-    A field that is present and not a string fails the envelope through
-    :func:`_fail_schema`.
+def _lenient_str(value: object) -> str | None:
+    """Return *value* stripped when it is a non-blank string, else ``None``.
 
     Args:
-        data: The decoded envelope.
-        name: Field name.
-        provider: Display name for the message prefix.
+        value: Any decoded JSON value.
 
     Returns:
-        The stripped value, or ``None``.
+        The stripped string, or ``None``.
     """
-    value = data.get(name)
-    if value is None:
-        return None
     if not isinstance(value, str):
-        _fail_schema(provider=provider, name=name, expected="a string", value=value)
-    stripped = value.strip()
-    return stripped or None
+        return None
+    return value.strip() or None
 
 
 def _error_markers(data: Mapping[str, Any]) -> dict[str, object]:
@@ -550,9 +581,10 @@ def decode_envelope(raw: str, *, provider: str) -> CliEnvelope:
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         total_cost_usd=_decode_cost(data.get("total_cost_usd"), provider=provider),
-        session_id=_decode_optional_str(data, name="session_id", provider=provider),
-        # Informational: a count that is not one reads as unknown rather
-        # than failing the call, and a bool is never a turn count.
+        # Informational fields read leniently: a session id that is not a
+        # string, or a turn count that is not a count, is unknown rather
+        # than a failed call. A bool is never a turn count.
+        session_id=_lenient_str(data.get("session_id")),
         num_turns=raw_turns if _is_count(raw_turns) else None,
         model_usage=data.get("modelUsage"),
         raw=data,

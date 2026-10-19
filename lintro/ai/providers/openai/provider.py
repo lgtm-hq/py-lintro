@@ -210,11 +210,13 @@ class _CodexCliTransport(CliTransport):
                     if isinstance(text, str):
                         final_text = text
             elif event_type == "turn.completed":
-                if event.get("usage") is not None:
-                    input_tokens, output_tokens = decode_usage(
-                        event.get("usage"),
-                        provider="Codex",
-                    )
+                # A later block may carry only one counter; the other keeps
+                # what an earlier block reported.
+                input_tokens, output_tokens = decode_usage(
+                    event.get("usage"),
+                    provider="Codex",
+                    defaults=(input_tokens, output_tokens),
+                )
                 structured = event.get("structured_output")
                 if structured is not None:
                     final_text = json.dumps(structured)
@@ -260,6 +262,13 @@ class _CodexCliTransport(CliTransport):
                     ),
                     provider=AIProvider.OPENAI,
                 )
+            if decoded.is_error:
+                cause = decoded.result or describe_raw_response(
+                    provider="Codex",
+                    stage=CLI_ENVELOPE_STAGE,
+                    raw=stdout,
+                )
+                raise AIProviderError(f"Codex CLI reported error: {cause}")
             final_text = decoded.result or _output_alias(decoded.raw)
             input_tokens = decoded.input_tokens
             output_tokens = decoded.output_tokens

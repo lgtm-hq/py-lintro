@@ -92,7 +92,10 @@ credential:
   under that name into the subprocess environment, for that process only
   (`lintro/ai/providers/claude_auth.py`). When both are set, the renamed variable wins,
   as it does on the `api` transport. The bare-mode decision reads the same child
-  environment, so a renamed key still selects `--bare` under `auto`.
+  environment, so a renamed key still selects `--bare` under `auto`. Before this landed
+  a renamed key never reached the binary, so a subscription user who keeps one exported
+  (say for an `api` profile) and runs the `cli` transport now bills that key under
+  `auto`; set `cli_bare: never` or `LINTRO_CLI_BARE=never` to keep the login session.
 
 | Variable / setting                                    | Transport | Role                                                   |
 | ----------------------------------------------------- | --------- | ------------------------------------------------------ |

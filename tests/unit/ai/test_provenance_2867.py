@@ -10,6 +10,7 @@ transport profile resolves before the run.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -1206,3 +1207,63 @@ def test_an_anthropic_key_under_cli_bare_never_is_still_metered(
 
     assert_that(resolved.auth_mode).is_equal_to("api_key")
     assert_that(resolved.cost_basis).is_equal_to(CostBasis.ESTIMATED)
+
+
+# --- a renamed ai.api_key_env is billed and attributed as the key it is (#2549) --
+
+
+def test_bare_billing_and_credential_see_a_renamed_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The run is reported as API-key spend when only the renamed variable is set.
+
+    The transport re-exports the renamed variable for its child; billing and
+    provenance read that same environment, or the run would be reported as
+    subscription spend while it bills the key.
+    """
+    from lintro.ai.transport import cli_bare_billing, cli_runtime_env
+
+    for name, value in _env(tmp_path).items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("LINTRO_CLI_BARE", raising=False)
+    monkeypatch.setenv("MY_CLAUDE_KEY", "sk-ant-renamed")
+    config = AIConfig(
+        transport=AITransport.CLI,
+        provider=AIProvider.ANTHROPIC,
+        api_key_env="MY_CLAUDE_KEY",
+    )
+
+    env = cli_runtime_env(config)
+    bare = cli_bare_billing(config, cwd=str(tmp_path), env=env)
+    provenance = detect_run_provenance(
+        provider=AIProvider.ANTHROPIC,
+        transport=AITransport.CLI,
+        bare=bare,
+        env=env,
+        home=tmp_path,
+        cwd=str(tmp_path),
+    )
+
+    assert_that(env["ANTHROPIC_API_KEY"]).is_equal_to("sk-ant-renamed")
+    assert_that(bare).is_true()
+    assert_that(provenance.credential).is_equal_to(CredentialKind.API_KEY)
+    assert_that(os.environ).does_not_contain_key("ANTHROPIC_API_KEY")
+
+
+def test_the_default_key_name_leaves_the_runtime_env_as_the_process_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a rename the runtime environment adds nothing."""
+    from lintro.ai.transport import cli_runtime_env
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    config = AIConfig(transport=AITransport.CLI, provider=AIProvider.ANTHROPIC)
+
+    env = cli_runtime_env(config)
+
+    assert_that(env).does_not_contain_key("ANTHROPIC_API_KEY")
+    assert_that(set(env)).is_equal_to(set(os.environ))
+    del tmp_path

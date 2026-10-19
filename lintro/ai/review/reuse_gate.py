@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from lintro.ai.enums.model_verification import ModelVerification
 from lintro.ai.provenance import RunProvenance, detect_run_provenance
-from lintro.ai.transport import cli_bare_billing
+from lintro.ai.transport import cli_bare_billing, cli_runtime_env
 
 if TYPE_CHECKING:
     from lintro.ai.review.models.review_state import ReviewState
@@ -206,10 +206,14 @@ def reusable_rounds_for(*, options: ReviewSessionOptions) -> frozenset[int] | No
         return frozenset()
     workspace = options.workspace_root
     cwd = str(workspace) if workspace is not None else None
+    # The environment the claude subprocess will run under (#2549), so the
+    # credential and the bare-billing decision describe the run as made.
+    env = cli_runtime_env(options.ai_config)
     provenance = detect_run_provenance(
         provider=options.provider.name,
         transport=options.ai_config.transport,
-        bare=cli_bare_billing(options.ai_config, cwd=cwd),
+        bare=cli_bare_billing(options.ai_config, cwd=cwd, env=env),
+        env=env,
         cwd=cwd,
         configured_base_url=options.ai_config.api_base_url,
     )

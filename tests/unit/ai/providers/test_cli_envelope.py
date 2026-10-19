@@ -143,14 +143,13 @@ def test_prose_with_an_unbalanced_bracket_is_not_called_truncated() -> None:
     ("payload", "field"),
     [
         ({"result": "ok", "usage": "lots"}, "usage"),
-        ({"result": "ok", "usage": {"input_tokens": "12"}}, "usage.input_tokens"),
+        ({"result": "ok", "usage": {"input_tokens": "many"}}, "usage.input_tokens"),
         ({"result": "ok", "usage": {"input_tokens": True}}, "usage.input_tokens"),
         ({"result": "ok", "usage": {"outputTokens": -1}}, "usage.outputTokens"),
         ({"result": "ok", "usage": {"output_tokens": 1.5}}, "usage.output_tokens"),
         ({"result": "ok", "total_cost_usd": "free"}, "total_cost_usd"),
         ({"result": "ok", "total_cost_usd": True}, "total_cost_usd"),
         ({"result": "ok", "total_cost_usd": -0.1}, "total_cost_usd"),
-        ({"result": "ok", "session_id": 7}, "session_id"),
         ({"result": "ok", "subtype": 1}, "subtype"),
         ({"result": 12}, "result"),
         ({"result": True}, "result"),
@@ -166,6 +165,65 @@ def test_a_wrong_typed_field_is_a_schema_error_naming_the_field(
 
     assert_that(excinfo.value.kind).is_equal_to(CliEnvelopeErrorKind.SCHEMA)
     assert_that(str(excinfo.value)).contains(repr(field))
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        ({"usage": {"input_tokens": 12.0, "output_tokens": "7"}}, (12, 7)),
+        ({"usage": {"inputTokens": " 3 ", "outputTokens": 0.0}}, (3, 0)),
+    ],
+)
+def test_counters_keep_the_old_int_coercion(
+    payload: dict[str, object],
+    expected: tuple[int, int],
+) -> None:
+    """An integral float or a digit string was a count under ``int()`` and still is."""
+    envelope = decode_envelope(
+        json.dumps({"result": "ok", **payload}),
+        provider=_PROVIDER,
+    )
+
+    assert_that((envelope.input_tokens, envelope.output_tokens)).is_equal_to(expected)
+
+
+def test_a_numeric_string_cost_is_still_a_price() -> None:
+    """``float()`` accepted it before; a quoted number is a reported cost."""
+    envelope = decode_envelope(
+        '{"result": "ok", "total_cost_usd": "0.25"}',
+        provider=_PROVIDER,
+    )
+
+    assert_that(envelope.total_cost_usd).is_equal_to(0.25)
+
+
+@pytest.mark.parametrize("raw_session", [7, True, ["a"], "   "])
+def test_a_session_id_that_is_not_a_string_reads_as_unknown(
+    raw_session: object,
+) -> None:
+    """``session_id`` only feeds session reuse, so a bad value is None, not a failure."""
+    envelope = decode_envelope(
+        json.dumps({"result": "ok", "session_id": raw_session}),
+        provider=_PROVIDER,
+    )
+
+    assert_that(envelope.session_id).is_none()
+
+
+def test_a_closed_document_with_junk_after_it_is_not_truncated() -> None:
+    """``{...}x`` closed; the failure is extra data, not a cut-off stream."""
+    with pytest.raises(CliEnvelopeError) as excinfo:
+        decode_envelope('{"result": "ok"}x', provider=_PROVIDER)
+
+    assert_that(excinfo.value.kind).is_equal_to(CliEnvelopeErrorKind.NOT_JSON)
+    assert_that(str(excinfo.value)).does_not_contain("truncated")
+
+
+def test_decode_usage_keeps_the_defaults_for_a_missing_counter() -> None:
+    """A partial block updates only the counter it carries."""
+    counters = decode_usage({"input_tokens": 9}, provider=_PROVIDER, defaults=(1, 5))
+
+    assert_that(counters).is_equal_to((9, 5))
 
 
 @pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
@@ -451,12 +509,53 @@ async def test_codex_turn_usage_of_the_wrong_type_is_a_schema_error() -> None:
                     "item": {"type": "agent_message", "text": "hi"},
                 },
             ),
-            json.dumps({"type": "turn.completed", "usage": {"input_tokens": "12"}}),
+            json.dumps({"type": "turn.completed", "usage": {"input_tokens": "many"}}),
         ],
     )
     with patch_cli_exec() as mock_run:
         mock_run.return_value = _completed(stdout)
         with pytest.raises(CliEnvelopeError, match="'usage.input_tokens'"):
+            await provider.complete("Review this diff")
+
+
+@pytest.mark.usefixtures("_binaries_on_path", "_isolated_captures")
+async def test_codex_partial_turn_usage_keeps_the_other_counter() -> None:
+    """A second usage block naming one counter does not zero the other."""
+    provider = _provider("openai")
+    stdout = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "turn.completed",
+                    "usage": {"input_tokens": 3, "output_tokens": 8},
+                },
+            ),
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {"type": "agent_message", "text": "hi"},
+                },
+            ),
+            json.dumps({"type": "turn.completed", "usage": {"input_tokens": 5}}),
+        ],
+    )
+    with patch_cli_exec() as mock_run:
+        mock_run.return_value = _completed(stdout)
+        response = await provider.complete("Review this diff")
+
+    assert_that((response.input_tokens, response.output_tokens)).is_equal_to((5, 8))
+
+
+@pytest.mark.usefixtures("_binaries_on_path", "_isolated_captures")
+async def test_codex_single_object_error_envelope_is_raised_not_answered() -> None:
+    """The single-object fallback raises on an error envelope like the other CLIs."""
+    provider = _provider("openai")
+    stdout = json.dumps(
+        {"is_error": True, "subtype": "error", "result": "quota exhausted"},
+    )
+    with patch_cli_exec() as mock_run:
+        mock_run.return_value = _completed(stdout)
+        with pytest.raises(AIProviderError, match="reported error: quota exhausted"):
             await provider.complete("Review this diff")
 
 
