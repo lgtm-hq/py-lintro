@@ -135,9 +135,9 @@ def evaluate_already_reviewed(
     The guard fails toward review: any condition it cannot establish from the
     state means a round runs. In particular a prior that stores coverage but
     no run records, a trailing checkpoint record (an interrupted round whose
-    work never reached the PR), a partial or degraded last round, a changed patch hash, a never
-    reviewed file, a model flag, a pending invalidation, or coverage the
-    reuse gate does not inherit all run a round.
+    work never reached the PR), a partial or degraded last round, a changed
+    patch hash, a never reviewed file, a model flag, a pending invalidation,
+    or coverage the reuse gate does not inherit all run a round.
 
     Args:
         context: Collected review context for this run.
