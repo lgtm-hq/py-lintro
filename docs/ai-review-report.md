@@ -30,8 +30,17 @@ round past the
 once it has fired — later pushes stay skipped until a `--full` run records a fresh
 score. A skipped round's banner names any open P1 findings the last reviewed round left
 behind; like a reviewed round's P1s, they do not redden the check.
-`--max-cost-usd uncapped` lifts a flag/env cap. Overlay `0` is rejected; use `uncapped`
-or a positive value.
+
+A head the last finished round already covered is not reviewed again (#2338): a rerun on
+the same commit, or a push that does not change it, makes no provider call, writes no
+state and leaves the sticky comment alone, and reports `already_reviewed` (exit 1 only
+when an open P1 record remains, as a converged skip does). The guard needs the last
+finished round to have reviewed this head completely, without a degradation, with every
+eligible file covered or only carrying an open thread, and, under `--post`, the sticky
+present and every inline-tier open finding holding its thread id, since state is written
+before posting and a failed post must post on retry. `--full` or `LINTRO_REVIEW_FORCE=1`
+forces a round. `--max-cost-usd uncapped` lifts a flag/env cap. Overlay `0` is rejected;
+use `uncapped` or a positive value.
 
 When the per-PR question pass fails, every chunk is reviewed with the rubric alone. The
 run log then says why, as one of `empty`, `not_json`, `not_list`, `no_question`,

@@ -14,7 +14,8 @@ set -euo pipefail
 #
 #   exit 0  a review was produced (findings or clean), or the convergence stop
 #           rule (#2099) deliberately skipped the round with nothing open that
-#           blocks — so exit 0 is "not blocked", not "a review ran"
+#           blocks, or the last finished round already covered this head
+#           (#2338) — so exit 0 is "not blocked", not "a review ran"
 #   exit 1  no review was produced — no credential, dead credential, depleted
 #           balance, unreachable provider, or a lintro-side failure — or a
 #           converged skip whose last real round left open P1 findings

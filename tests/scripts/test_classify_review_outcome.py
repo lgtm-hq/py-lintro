@@ -1603,3 +1603,139 @@ def test_degraded_and_reviewed_share_one_findings_vocabulary(
 
     news = reviewed.headline.split("reviewed — ", 1)[1]
     assert_that(degraded.headline).contains(news)
+
+
+# --- already-reviewed heads (#2338) ------------------------------------------
+
+
+def _already_reviewed_output(*, open_p1: int = 0) -> str:
+    """Render what ``lintro review`` prints when a covered head is skipped.
+
+    Args:
+        open_p1: Open P1 records the last finished round left behind.
+
+    Returns:
+        Captured-output text containing the envelope.
+    """
+    from lintro.ai.review.already_reviewed import AlreadyReviewed
+    from lintro.ai.review.output import render_already_reviewed_outcome_json
+
+    decision = AlreadyReviewed(
+        head_sha="b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+        round=4,
+        files_covered=27,
+        open_findings=2,
+    )
+    return (
+        "some log line\n"
+        f"{render_already_reviewed_outcome_json(decision=decision, open_p1=open_p1)}"
+    )
+
+
+def test_already_reviewed_envelope_is_its_own_green_outcome(
+    classifier: ModuleType,
+) -> None:
+    """A head the last finished round covered is neither a review nor a failure.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    report = classifier.classify(status=0, output=_already_reviewed_output())
+
+    assert_that(str(report.outcome)).is_equal_to("already_reviewed")
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that(report.outcome.produced_review).is_false()
+    assert_that(report.outcome.review_unavailable).is_false()
+    assert_that(report.headline).contains("already reviewed")
+    assert_that(report.headline).contains("head b0153e2")
+    assert_that(report.headline).contains("round 4")
+    assert_that(report.detail).contains("27 files covered, 2 open findings carried")
+
+
+def test_already_reviewed_names_open_p1s_without_reddening(
+    classifier: ModuleType,
+) -> None:
+    """The skip reports the count the way a converged skip does and exits 0.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    report = classifier.classify(status=1, output=_already_reviewed_output(open_p1=2))
+
+    assert_that(str(report.outcome)).is_equal_to("already_reviewed")
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that(report.headline).contains("2 open P1 findings remain")
+
+
+def test_already_reviewed_summary_says_the_review_stands(
+    classifier: ModuleType,
+) -> None:
+    """The summary explains the skip and does not advise falling back.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    report = classifier.classify(status=0, output=_already_reviewed_output())
+    summary = classifier.render_summary(report=report)
+
+    assert_that(summary).contains("No provider call was made")
+    assert_that(summary).contains("stand as posted")
+    assert_that(summary).contains("LINTRO_REVIEW_FORCE=1")
+    assert_that(summary).does_not_contain("fall back to CodeRabbit")
+
+
+def test_already_reviewed_envelope_keys_match_the_producer(
+    classifier: ModuleType,
+) -> None:
+    """The classifier keys on the exact key and discriminator lintro writes.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    from lintro.ai.review.output import (
+        ALREADY_REVIEWED_ENVELOPE_KEY,
+        ALREADY_REVIEWED_OUTCOME,
+    )
+
+    assert_that(classifier.ALREADY_REVIEWED_ENVELOPE_KEY).is_equal_to(
+        ALREADY_REVIEWED_ENVELOPE_KEY,
+    )
+    assert_that(classifier.ALREADY_REVIEWED_OUTCOME).is_equal_to(
+        ALREADY_REVIEWED_OUTCOME,
+    )
+
+
+def test_an_unreadable_already_reviewed_open_p1_fails_closed(
+    classifier: ModuleType,
+) -> None:
+    """A malformed count cannot become a green check.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    output = json.dumps(
+        {
+            "outcome": "already_reviewed",
+            "already_reviewed": {"head_sha": "abc", "round": 1, "open_p1": "many"},
+            "detail": "x",
+        },
+    )
+
+    report = classifier.classify(status=0, output=output)
+
+    assert_that(str(report.outcome)).is_equal_to("broken")
+    assert_that(report.exit_code).is_equal_to(1)
+
+
+def test_a_status_two_after_the_already_reviewed_envelope_is_a_failure(
+    classifier: ModuleType,
+) -> None:
+    """Something broke after the skip was printed; the failure is the news.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    report = classifier.classify(status=2, output=_already_reviewed_output())
+
+    assert_that(str(report.outcome)).is_not_equal_to("already_reviewed")
+    assert_that(report.exit_code).is_equal_to(1)
