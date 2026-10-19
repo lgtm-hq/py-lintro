@@ -21,6 +21,61 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.172.0] - 2026-10-19
+
+### Added
+
+- **ai/review**: route configured finding categories to the notes block (#2910)
+  (e724bb4)
+- **ci**: walk the declared fallback chain on a dead lane (ADR-0011 D) (#2907) (b85e3c7)
+- **ci**: fail the review check when the run endpoint or model contradicts its lane
+  (#2906) (85ee9bf)
+- **ci**: drive the dogfood review from the lane manifest, selected by repo variable
+  (#2901) (92d99a3)
+- **ci**: add the review-lanes manifest and its resolver, inert (#2899) (a8a62a0)
+- **ai/review**: show the endpoint, model verification and cost basis on the sticky
+  (#2896) (6538bcc)
+- **ai/review**: record endpoint, credential and reported model on each run (#2886)
+  (33790c8)
+
+### Changed
+
+- **adr**: add ADR-0011 dogfood review lanes, provenance and degradation (#2875)
+  (d9e1662)
+- **ci**: name a weekly smoke row for every dogfood lane's real endpoint (ADR-0011 A)
+  (#2908) (b5e322b)
+- **security**: suppress GHSA-84m7-p3x7-pcfv on the semgrep-pinned mcp 1.29.0 (#2905)
+  (1e684c5)
+- **deps**: update test-tools to 5.0.4 (patch) (#2902) (d8447bb)
+- **deps**: update dependency smol-toml to 1.9.1 (patch) (#2892) (dd15914)
+- **deps**: update dependency oven-sh/bun to 1.4.3 (patch) (#2891) (6ef0fc4)
+- **deps**: update dependency svelte to 5.57.2 (patch) (#2894) (22a630c)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to 777fb0a
+  (#2888) (399c065)
+- **deps**: update dependency golang to 1.27.2 (patch) (#2885) (49102fc)
+- **deps**: update dependency golangci/golangci-lint to 2.14.0 (minor) (#2819) (1307233)
+- **deps**: update docker/dockerfile:1 docker digest to 4edf897 (#2879) (24b4968)
+- **deps**: update dependency @types/sanitize-html to 2.16.2 (patch) (#2884) (d94f999)
+- **deps**: update python:3.14-slim docker digest to a2b82f3 (#2883) (f2e0afd)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to f7e3c13
+  (#2881) (38d0f28)
+- **deps**: update dependency google/osv-scanner to 2.7.0 (minor) (#2776) (99514cc)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to 378cdb3
+  (#2717) (fd6e664)
+- **deps**: update github-actions (#2779) (6825b04)
+- **deps**: update dependency checkov to 3.3.29 (patch) (#2769) (3199aa7)
+
+### Fixed
+
+- **ai/providers**: CLI transport correctness (#2911) (64fb262)
+- **ai-review**: keep a rerun's verdict and warn on a failed question pass (#2836)
+  (9517671)
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.44.23 (patch) (#2903) (9281499)
+- **deps**: update linting tools (#2493) (ace4e4e)
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.44.15 (minor) (#2492) (18ad07b)
+- **deps**: update smol-toml to 1.9.0 and patch npm advisories [security] (#2861)
+  (e33f35f)
+
 ## [0.171.3] - 2026-10-04
 
 ### Changed
