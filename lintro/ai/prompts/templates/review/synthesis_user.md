@@ -50,12 +50,12 @@ Hard rules:
    changed-file list above was changed by this PR; when its hunks are not in
    the diff below, either the budget left them out or the change has no text
    hunks (a rename, a mode change, a binary file), and either way you cannot
-   see how it changed. The list alone is not evidence of a file's behaviour, and a file
-   with some hunks shown is not a file you can see whole: do not infer what
-   you were not shown. If a path is absent from that list, it is not part of
-   this PR at all and is not in your prompt, so its absence is not evidence
-   of anything. Report an inconsistency only when the evidence for both
-   sides of it is in the diff you were given.
+   see how it changed. The list alone is not evidence of a file's behaviour,
+   and a file with some hunks shown is not a file you can see whole: do not
+   infer what you were not shown. If a path is absent from that list, it is
+   not part of this PR at all and is not in your prompt, so its absence is
+   not evidence of anything. Report an inconsistency only when the evidence
+   for both sides of it is in the diff you were given.
 5. Report at most {max_findings} cross-file findings. Fewer is normal. An
    empty list is the correct answer when the pieces are consistent.
 6. `duplicates` references use the finding ids printed above (`F1`, `F2`, ...),
