@@ -126,7 +126,9 @@ class PostingPolicy:
             True when the finding is a P3 whose canonical category is one of
             :attr:`note_categories`.
         """
-        if finding.severity in _BLOCKING_SEVERITIES:
+        if finding.is_question or finding.severity in _BLOCKING_SEVERITIES:
+            # A question follows the question setting and the floor; the
+            # category rule is documented for defect claims only.
             return False
         return normalize_category(raw=finding.category) in self.note_categories
 

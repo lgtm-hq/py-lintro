@@ -90,7 +90,7 @@ def _notes_caption(*, policy: PostingPolicy) -> str:
     )
     if policy.note_categories:
         categories = ", ".join(sorted(policy.note_categories))
-        caption += f", findings in the {categories} "
+        caption += f", P3 findings in the {categories} "
         caption += "category" if len(policy.note_categories) == 1 else "categories"
     if not policy.post_questions_inline:
         caption += " and open questions"

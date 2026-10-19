@@ -372,7 +372,9 @@ ai:
 Set `review_inline_min_confidence: low` to restore posting every `kind: finding` entry
 inline. Questions stay in the notes block regardless of the floor — set
 `review_post_questions_inline: true` to open threads for them too. The keys are
-independent; restoring the pre-#2572 behaviour of a thread per entry takes all three.
+independent; making every entry eligible for a thread again takes all three (an empty
+`review_note_categories`), and even then P3 findings stay in the sticky comment under
+the posting tiers described below.
 
 `review_note_categories` routes a category's P3 findings to the notes block; a P1 or P2
 in a routed category still goes through the confidence floor and opens a thread, so the

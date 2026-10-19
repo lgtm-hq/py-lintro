@@ -652,7 +652,7 @@ def test_notes_caption_names_the_configured_floor(
     notes = _notes_body(result=result, policy=policy)
 
     assert_that(notes).contains(
-        "findings below the inline confidence floor (high), findings in the "
+        "findings below the inline confidence floor (high), P3 findings in the "
         "code-smell category and open questions.",
     )
     assert_that(notes).contains("**medium**")
@@ -671,7 +671,7 @@ def test_notes_caption_drops_questions_when_they_post_inline(
     notes = _notes_body(result=result, policy=policy)
 
     assert_that(notes).contains(
-        "findings below the inline confidence floor (medium), findings in the "
+        "findings below the inline confidence floor (medium), P3 findings in the "
         "code-smell category.",
     )
     assert_that(notes).does_not_contain("open questions")
@@ -971,6 +971,7 @@ def test_carried_tag_names_the_routing_reason() -> None:
     routed = _finding(category="code-smell", severity=Severity.P3, confidence="low")
     below = _finding(category="logic-bug", severity=Severity.P3, confidence="low")
 
+    assert_that(policy.routes_category_to_notes(finding=question)).is_false()
     assert_that(_carried_tag(finding=question, policy=policy)).is_equal_to(
         "(questions are not posted inline)",
     )
@@ -984,3 +985,18 @@ def test_carried_tag_names_the_routing_reason() -> None:
     assert_that(
         _carried_tag(finding=routed, policy=PostingPolicy(note_categories=frozenset())),
     ).is_equal_to("(below the inline confidence floor this round)")
+
+
+def test_a_question_in_a_routed_category_follows_the_question_setting() -> None:
+    """Category routing is for defect claims; a question keeps its own rule."""
+    question = _finding(
+        kind=FindingKind.QUESTION,
+        category="code-smell",
+        severity=Severity.P3,
+        confidence="high",
+    )
+
+    assert_that(PostingPolicy().posts_inline(finding=question)).is_false()
+    assert_that(
+        PostingPolicy(post_questions_inline=True).posts_inline(finding=question),
+    ).is_true()
