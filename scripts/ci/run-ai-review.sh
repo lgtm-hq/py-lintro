@@ -230,6 +230,7 @@ _apply_lane_exports() {
 # first takes back what this one exported (_unbind_attempt).
 _bound_credential_env=""
 _bound_base_url_env=""
+_bound_source_env=""
 _lane_credential_path=""
 _lane_cleanup() {
 	if [[ -n "$_lane_credential_path" ]]; then
@@ -247,6 +248,13 @@ _unbind_attempt() {
 	if [[ -n "$_bound_base_url_env" ]]; then
 		unset "$_bound_base_url_env"
 		_bound_base_url_env=""
+	fi
+	# A file-form lane re-arms its source variable for the restore script and
+	# unsets it once the file exists; a refusal in between would leave it
+	# exported, and every later lane would be refused as competing.
+	if [[ -n "$_bound_source_env" ]]; then
+		unset "$_bound_source_env"
+		_bound_source_env=""
 	fi
 }
 # The lane id at index $1 of the chain, for messages about a lane whose
@@ -316,6 +324,7 @@ _bind_attempt() {
 			printf -v "$LANE_CREDENTIAL_SOURCE_ENV" '%s' "${!_lane_capture_name}"
 			# shellcheck disable=SC2163  # a manifest name, validated by the gate
 			export "$LANE_CREDENTIAL_SOURCE_ENV"
+			_bound_source_env="$LANE_CREDENTIAL_SOURCE_ENV"
 		fi
 		unset _lane_capture_name
 	fi
@@ -393,6 +402,7 @@ print(json.dumps(value.get("ai", value) if isinstance(value, dict) else {}))
 		fi
 		# The file is the credential now; the subprocess holds one copy of it.
 		unset "$LANE_CREDENTIAL_SOURCE_ENV"
+		_bound_source_env=""
 		if [[ ! -s "$_lane_credential_path" ]]; then
 			_bind_refused "the lane's file credential is empty" "$NO_CREDENTIAL_STATUS" || return 1
 		fi
@@ -805,14 +815,20 @@ print(len(value) if isinstance(value, list) else 0)
 ' 2>/dev/null || echo 0)"
 _attempt=0
 export LINTRO_REVIEW_LANES_DOWN='[]'
+# Nothing inherited from the job may pre-name a fallback: both are set by
+# the first advance below and kept for the rest of the walk.
+unset LINTRO_REVIEW_FALLBACK_FROM LINTRO_REVIEW_FALLBACK_REASON
 # Record a lane that failed before any chunk completed: on the list the
 # classifier reads, and in the lane-down tracker issue.
 _record_lane_down() {
 	local _lane="$1" _kind="$2" _next_down
-	if _next_down="$(python3 -I "${script_dir}/review_chain.py" lanes-down \
+	if ! _next_down="$(python3 -I "${script_dir}/review_chain.py" lanes-down \
 		--current "$LINTRO_REVIEW_LANES_DOWN" --lane "$_lane" --kind "$_kind")"; then
-		export LINTRO_REVIEW_LANES_DOWN="$_next_down"
+		# Not a lane id (an unset LINTRO_REVIEW_LANE, a malformed chain):
+		# nothing to record and no issue to open under that name.
+		return 0
 	fi
+	export LINTRO_REVIEW_LANES_DOWN="$_next_down"
 	_track_lane_down "$_lane" "$_kind"
 }
 
@@ -843,15 +859,34 @@ while :; do
 		# Bind the next lane. One that cannot be bound is a dead lane too:
 		# it is recorded as unbound and the next is tried, until a lane
 		# binds or none is left. The last real attempt's status and output
-		# stand for the classifier either way.
+		# stand for the classifier either way, and so do its lane facts:
+		# binding exports the candidate's row, so when no lane binds the
+		# facts of the lane that actually ran are put back before classify
+		# (its credential label, not the unbound lane's).
+		_lane_facts="$(mktemp)"
+		env | grep -E '^(LINTRO_REVIEW_|LINTRO_AI_|LANE_)[A-Z0-9_]*=' |
+			grep -vE '^LINTRO_REVIEW_(LANES_DOWN|FALLBACK_FROM|FALLBACK_REASON|ATTEMPT|CHAIN|LANES|STATE_DIR)=' \
+				>"$_lane_facts" || true
 		while :; do
 			if [[ -n "$_cancelled" ]]; then
 				echo "[ai-review] chain: cancelled; no fallback attempt is started"
+				rm -f "$_lane_facts"
 				break 2
 			fi
 			_attempt=$((_attempt + 1))
 			if _bind_attempt "$_attempt"; then
-				rm -f "$output_file"
+				# A cancel that landed while the lane was binding ends the
+				# walk too: the attempt is never started.
+				if [[ -n "$_cancelled" ]]; then
+					echo "[ai-review] chain: cancelled while binding; no fallback attempt is started"
+					_unbind_attempt
+					_apply_lane_exports <"$_lane_facts"
+					rm -f "$_lane_facts"
+					transport="$(printf '%s' "${LINTRO_AI_TRANSPORT:-cli}" | tr '[:upper:]' '[:lower:]')"
+					provider="$(printf '%s' "${LINTRO_AI_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
+					break 2
+				fi
+				rm -f "$_lane_facts" "$output_file"
 				output_file="$(mktemp)"
 				break
 			fi
@@ -860,6 +895,10 @@ while :; do
 			_record_lane_down "$_unbound_lane" unbound
 			if ((_attempt + 1 >= _chain_length)); then
 				echo "[ai-review] chain: lane ${_unbound_lane} could not be bound; no lane left"
+				_apply_lane_exports <"$_lane_facts"
+				rm -f "$_lane_facts"
+				transport="$(printf '%s' "${LINTRO_AI_TRANSPORT:-cli}" | tr '[:upper:]' '[:lower:]')"
+				provider="$(printf '%s' "${LINTRO_AI_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
 				break 2
 			fi
 		done
@@ -871,6 +910,8 @@ while :; do
 		_dead_kind="${_decision#exhausted }"
 		_dead_lane="${LINTRO_REVIEW_LANE:-?}"
 		echo "[ai-review] chain: lane ${_dead_lane} unavailable (${_dead_kind}) before any chunk completed; no lane left"
+		# The credential is taken back before the tracker and the upload run.
+		_unbind_attempt
 		_record_lane_down "$_dead_lane" "$_dead_kind"
 		break
 		;;

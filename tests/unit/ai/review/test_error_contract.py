@@ -160,7 +160,7 @@ def test_invalid_response_envelope_shape(
                 "retryable": False,
                 "provider_unavailable": False,
                 "message": "Expecting value: line 1 column 1 (char 0)",
-                "completed_chunks": 0,
+                "completed_chunks": None,
             },
         },
     )
@@ -241,11 +241,12 @@ def test_completed_chunks_comes_from_the_execution_error_or_the_annotation(
             "completed_chunks"
         ],
     ).is_equal_to(3)
+    # A raise site that did not count reads as unknown, never as zero.
     assert_that(
         build_error_contract(provider="anthropic", error=fresh)["error"][
             "completed_chunks"
         ],
-    ).is_equal_to(0)
+    ).is_none()
 
 
 def test_retryable_kinds_membership() -> None:

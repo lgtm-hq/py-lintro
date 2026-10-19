@@ -673,7 +673,15 @@ def _parse_error_envelope(*, text: str) -> dict[str, Any] | None:
     """Extract the ``error`` object from captured review output.
 
     The captured output interleaves lintro's logging with the JSON envelope, so
-    the JSON is located rather than assumed to be the whole payload.
+    the JSON is located rather than assumed to be the whole payload. A logged
+    provider body can carry an ``error`` object of its own (an Anthropic
+    ``{"type":"error","error":{...}}`` or a gateway's ``{"error":{"code":...}}``)
+    ahead of lintro's envelope, so the envelope is the last object whose
+    ``error`` names a string ``kind``: lintro's always does, and it is written
+    after the logging that precedes it. Only when no object names a kind does
+    the first ``error`` object stand in, so a thin envelope can still be
+    refined from its prose. ``scripts/ci/review_chain.py`` applies the same
+    rule; the two must agree on which object is the attempt's.
 
     Args:
         text: Combined stdout/stderr captured from the review run.
@@ -681,11 +689,17 @@ def _parse_error_envelope(*, text: str) -> dict[str, Any] | None:
     Returns:
         The ``error`` mapping, or ``None`` when no envelope is present.
     """
+    first: dict[str, Any] | None = None
+    with_kind: dict[str, Any] | None = None
     for payload in _iter_json_objects(text=text):
         error = payload.get("error")
-        if isinstance(error, dict):
-            return error
-    return None
+        if not isinstance(error, dict):
+            continue
+        if first is None:
+            first = error
+        if isinstance(error.get("kind"), str):
+            with_kind = error
+    return with_kind if with_kind is not None else first
 
 
 def _normalize_transport(transport: str) -> str:

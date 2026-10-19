@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -65,7 +66,9 @@ STOP: Final[str] = "stop"
 
 #: A lane id as the manifest resolver accepts it; anything else is refused
 #: before it can reach an export or an annotation.
-_LANE_ID_LIMIT: Final[int] = 64
+_LANE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+#: An error kind as the taxonomy spells them.
+_KIND_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 def _json_objects(text: str) -> Iterator[dict[str, Any]]:
@@ -86,27 +89,36 @@ def _json_objects(text: str) -> Iterator[dict[str, Any]]:
 def envelope_error(text: str) -> dict[str, Any]:
     """Return the review error envelope in *text*, or an empty dict.
 
-    The same rule as the classifier's ``_parse_error_envelope``: the first
-    JSON object carrying an ``error`` mapping, whether or not it names a
-    ``kind``. The two scripts read the same attempt output and must agree
-    on which envelope is the attempt's, or a walk could be recorded that
-    the verdict does not see.
+    The same rule as the classifier's ``_parse_error_envelope``: the last
+    JSON object whose ``error`` names a string ``kind``, because a logged
+    provider body (``{"type":"error","error":{...}}``) can carry an ``error``
+    object of its own ahead of lintro's envelope, and lintro's always names
+    a kind. When no object names one, the first ``error`` object stands in.
+    The two scripts read the same attempt output and must agree on which
+    object is the attempt's, or a walk could be recorded that the verdict
+    does not see.
 
     Args:
         text: The attempt's captured stdout and stderr.
 
     Returns:
-        The ``error`` object of the first envelope found.
+        The ``error`` object of the attempt's envelope.
     """
+    first: dict[str, Any] = {}
+    with_kind: dict[str, Any] = {}
     for payload in _json_objects(text):
         error = payload.get("error")
-        if isinstance(error, dict):
-            return error
-    return {}
+        if not isinstance(error, dict):
+            continue
+        if not first:
+            first = error
+        if isinstance(error.get("kind"), str):
+            with_kind = error
+    return with_kind or first
 
 
 def error_kind(text: str) -> str:
-    """Return the kind of the last review error envelope in *text*, or empty.
+    """Return the kind of the attempt's review error envelope, or empty.
 
     Args:
         text: The attempt's captured stdout and stderr.
@@ -223,10 +235,10 @@ def lanes_down(current: str, *, lane: str, kind: str) -> str:
         ValueError: When the lane or kind is not a plain identifier, or the
             current value is not a JSON list.
     """
-    if not lane or len(lane) > _LANE_ID_LIMIT or not lane.replace("-", "").isalnum():
+    if not _LANE_ID_RE.fullmatch(lane):
         msg = f"lane {lane!r} is not a lane id"
         raise ValueError(msg)
-    if not kind or not kind.replace("_", "").isalnum():
+    if not _KIND_RE.fullmatch(kind):
         msg = f"kind {kind!r} is not an error kind"
         raise ValueError(msg)
     try:

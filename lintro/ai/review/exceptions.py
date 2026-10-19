@@ -54,7 +54,8 @@ class ReviewExecutionError(AIError):
         chunk_index: Zero-based index of the chunk that failed, if known.
         total_chunks: Total chunks planned for the review.
         step: Sub-step within the chunk (e.g. "reviewing").
-        completed_chunks: Number of chunks successfully reviewed before failure.
+        completed_chunks: Number of chunks successfully reviewed before
+            failure, or ``None`` when the raise site did not count.
         cause_message: Original provider or parser error text.
         error_kind: Canonical classification of the underlying cause, resolved
             provider-aware at the raise site. ``None`` when not yet classified.
@@ -64,7 +65,7 @@ class ReviewExecutionError(AIError):
     chunk_index: int | None = None
     total_chunks: int | None = None
     step: str | None = None
-    completed_chunks: int = 0
+    completed_chunks: int | None = None
     cause_message: str = ""
     error_kind: ReviewErrorKind | None = None
 
@@ -100,7 +101,9 @@ def annotate_completed_chunks(error: BaseException, *, completed: int) -> None:
     A CI wrapper deciding whether to restart the review on another lane
     (ADR-0011 D) must not infer that from checkpoint files, which are
     best-effort and may have failed to write. The run boundary stamps the
-    count on whatever exception escapes, raw provider errors included.
+    count on the exceptions it catches and re-raises, ``AIError`` and
+    ``ReviewExecutionError``; any other exception leaves the count unknown,
+    which the wrapper reads as "stay on this lane".
 
     Args:
         error: The exception leaving the run.
@@ -121,7 +124,7 @@ def completed_chunks_of(error: BaseException) -> int | None:
         and a wrapper must not restart the review elsewhere.
     """
     counts: list[int] = []
-    if isinstance(error, ReviewExecutionError):
+    if isinstance(error, ReviewExecutionError) and error.completed_chunks is not None:
         counts.append(max(int(error.completed_chunks), 0))
     annotated = getattr(error, COMPLETED_CHUNKS_ATTR, None)
     if isinstance(annotated, int) and not isinstance(annotated, bool):

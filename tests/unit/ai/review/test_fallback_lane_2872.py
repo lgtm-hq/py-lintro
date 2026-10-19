@@ -154,15 +154,24 @@ def test_the_banner_sanitises_what_it_quotes() -> None:
     """A lane id or kind from the environment cannot inject markup or run long."""
     view = ProvenanceView(
         lane="openai",
-        fallback_from="x" * 200 + "<script>",
+        # Short enough that the clamp never applies: the span must hold on
+        # its own. A backtick would end it and let the markup render.
+        fallback_from="zai`<script>`",
         fallback_reason="kind\n::error::injected",
     )
+    long_view = ProvenanceView(lane="openai", fallback_from="x" * 200)
 
     banner = fallback_banner(view)
+    clamped = fallback_banner(long_view)
 
-    assert_that(banner).does_not_contain("<script>")
-    assert_that(banner).does_not_contain("\n::error::")
-    assert_that(len(banner)).is_less_than(300)
+    # Every quoted value is one intact code span: the injected backticks are
+    # gone, so the markup stays literal text inside the span.
+    assert_that(banner).contains("`zai<script>`")
+    assert_that(banner.count("`")).is_equal_to(6)
+    assert_that(banner).does_not_contain("\n")
+    assert_that(banner).contains("`kind ::error::injected`")
+    assert_that(clamped).contains("…`")
+    assert_that(len(clamped)).is_less_than(160)
 
 
 def test_the_sticky_leads_with_the_fallback_line(

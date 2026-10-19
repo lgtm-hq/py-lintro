@@ -119,6 +119,7 @@ def _run_chain(
     plan: list[str],
     open_issues: list[tuple[int, str]] | None = None,
     without: tuple[str, ...] = (),
+    overrides: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Run the wrapper with a chain and a per-attempt plan for the review stub.
 
@@ -132,6 +133,7 @@ def _run_chain(
         open_issues: Open lane-down issues (number, title) the ``gh`` stub
             lists, or ``None`` for none.
         without: Environment names left unset, e.g. a lane's credential.
+        overrides: Environment values replaced, e.g. a malformed secret.
 
     Returns:
         The wrapper's exit code and output, the recorded environment of each
@@ -177,6 +179,7 @@ def _run_chain(
     }
     for name in without:
         env.pop(name, None)
+    env.update(overrides or {})
     output = tmp_path / "output.log"
     with output.open("w", encoding="utf-8") as sink:
         completed = subprocess.run(  # nosec B603 - fixed argv run against a repo script in a controlled test; shell=False, no user shell input
@@ -399,10 +402,49 @@ def test_a_fallback_lane_without_a_credential_is_unbound_and_the_walk_goes_on(
     )
     assert_that(run["exit"]).is_equal_to(0)
     assert_that(run["output"]).contains("::warning::lane openai could not be bound")
+    # The gate's own refusal line is a warning on a fallback attempt: a
+    # green run carries no red annotation.
+    assert_that(run["output"]).contains(
+        "::warning::review lane: no provider credential",
+    )
+    assert_that(run["output"]).does_not_contain("::error::")
     creates = [c for c in run["gh"] if c.startswith("issue create ")]
     assert_that(creates).is_length(2)
     assert_that(creates[1]).contains("AI review lane down: openai")
     assert_that(creates[1]).contains("could not be bound")
+
+
+def test_a_malformed_file_secret_in_the_middle_lane_does_not_poison_the_next(
+    tmp_path: Path,
+) -> None:
+    """Openai's Codex secret cannot be decoded: cursor still binds and reviews.
+
+    The restore script fails after the source variable was re-armed; the
+    refusal must take that variable back, or cursor is refused as running
+    beside a competing credential and a healthy lane reads as exhausted.
+    """
+    run = _run_chain(
+        tmp_path,
+        chain=["anthropic", "openai", "cursor"],
+        plan=["fail:auth_failed", "ok"],
+        overrides={"CODEX_AUTH_JSON": "not base64 at all !!"},
+    )
+
+    assert_that(run["attempts"]).is_length(2)
+    second = run["attempts"][1]
+    assert_that(second["lane"]).is_equal_to("cursor")
+    assert_that(second["cursor"]).is_equal_to("set")
+    assert_that(second["codex_env"]).is_empty()
+    assert_that(second["codex_file"]).is_equal_to("absent")
+    assert_that(run["exit"]).is_equal_to(0)
+    assert_that(run["output"]).does_not_contain("competing credentials")
+    assert_that(run["output"]).does_not_contain("lanes-exhausted")
+    assert_that(json.loads(second["lanes_down"])).is_equal_to(
+        [
+            {"lane": "anthropic", "kind": "auth_failed"},
+            {"lane": "openai", "kind": "unbound"},
+        ],
+    )
 
 
 def test_a_last_lane_that_cannot_be_bound_exhausts_the_chain(tmp_path: Path) -> None:
@@ -410,18 +452,21 @@ def test_a_last_lane_that_cannot_be_bound_exhausts_the_chain(tmp_path: Path) -> 
     run = _run_chain(
         tmp_path,
         chain=["anthropic", "openai"],
-        plan=["fail:insufficient_credits"],
+        plan=["fail:auth_failed"],
         without=("CODEX_AUTH_JSON",),
     )
 
     assert_that(run["attempts"]).is_length(1)
     assert_that(run["exit"]).is_equal_to(1)
     assert_that(run["output"]).contains("status=lanes-exhausted")
-    assert_that(run["output"]).contains("anthropic (insufficient_credits)")
+    assert_that(run["output"]).contains("anthropic (auth_failed)")
     assert_that(run["output"]).contains("openai (unbound)")
     assert_that(run["output"]).contains("no lane left")
     # Classify ran through the normal tail of the script, not an early exit.
     assert_that(run["output"]).does_not_contain("not invoked")
+    # The lane that ran is anthropic: nothing in the verdict is labelled
+    # with the unbound lane's credential kind.
+    assert_that(run["output"]).does_not_contain("codex_session")
 
 
 def test_a_file_credential_lane_is_unbound_before_an_env_credential_lane(

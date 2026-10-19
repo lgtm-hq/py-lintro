@@ -761,6 +761,10 @@ def test_the_reader_matches_the_state_lintro_really_writes(tmp_path: Path) -> No
     )
     assert verdict is not None and verdict.loader is not None
     module = importlib.util.module_from_spec(verdict)
+    # Registered before execution: a dataclass under ``from __future__ import
+    # annotations`` resolves its module through ``sys.modules`` on 3.14, so
+    # the test must not depend on the classifier fixture having loaded it.
+    sys.modules["review_lane_verdict"] = module
     verdict.loader.exec_module(module)
     earlier = RunRecord(identity=RunIdentity(round=1, lane="anthropic"))
     current = RunRecord(

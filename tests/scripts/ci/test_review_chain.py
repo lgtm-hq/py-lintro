@@ -3,9 +3,10 @@
 """The chain decider advances only on the dead-lane class, before any chunk.
 
 ADR-0011 decision D (#2872): exactly ``auth_failed``, ``insufficient_credits``
-and ``quota_exceeded``, only on the review error status, only when no
-checkpoint part was written during the attempt, and only while a lane is
-left. Everything else stops with its reason.
+and ``quota_exceeded``, only on the review error status, only when the
+envelope reports zero completed chunks and no checkpoint part was written
+during the attempt, and only while a lane is left. Everything else stops
+with its reason.
 """
 
 from __future__ import annotations
@@ -311,12 +312,30 @@ def test_the_decider_reads_the_envelope_the_classifier_reads(
     classifier = _load_classifier()
     state_dir = tmp_path / "state"
     state_dir.mkdir()
+    # A logged Anthropic body and a logged gateway body, each with an
+    # ``error`` object of its own, ahead of lintro's envelope.
+    anthropic_logged = (
+        "cause: Claude CLI reported error: API Error: 401 "
+        '{"type":"error","error":{"type":"authentication_error","message":"x"}}\n'
+        + _envelope("auth_failed")
+    )
+    gateway_logged = (
+        'cause: {"error":{"code":"1113","message":"balance"}}\n'
+        + _envelope("insufficient_credits")
+    )
     thin_first = '{"error": {"message": "logged by a provider"}}\n' + _envelope(
         "auth_failed",
     )
     kind_first = _envelope("rate_limited") + _envelope("auth_failed")
+    thin_only = '{"error": {"message": "no kind at all"}}\n'
 
-    for output in (thin_first, kind_first):
+    for output, expected_verb in (
+        (anthropic_logged, chain.ADVANCE),
+        (gateway_logged, chain.ADVANCE),
+        (thin_first, chain.ADVANCE),
+        (kind_first, chain.ADVANCE),
+        (thin_only, chain.STOP),
+    ):
         verdict = classifier._parse_error_envelope(text=output) or {}
         verb, _detail = chain.decide(
             status=2,
@@ -327,8 +346,10 @@ def test_the_decider_reads_the_envelope_the_classifier_reads(
             chain_length=2,
         )
 
-        assert_that(chain.envelope_error(output)).is_equal_to(verdict)
-        assert_that(verb).is_equal_to(chain.STOP)
+        assert_that(chain.envelope_error(output)).described_as(output).is_equal_to(
+            verdict,
+        )
+        assert_that(verb).described_as(output).is_equal_to(expected_verb)
 
 
 def test_lanes_down_appends_and_validates(chain: ModuleType) -> None:
@@ -342,7 +363,7 @@ def test_lanes_down_appends_and_validates(chain: ModuleType) -> None:
             {"lane": "openai", "kind": "auth_failed"},
         ],
     )
-    for bad_lane in ("", "zai\nlane", "a b", "x" * 65, "lane;rm"):
+    for bad_lane in ("", "zai\nlane", "a b", "x" * 65, "lane;rm", "-x", "Zai", "é"):
         with pytest.raises(ValueError, match="not a lane id"):
             chain.lanes_down("[]", lane=bad_lane, kind="auth_failed")
     with pytest.raises(ValueError, match="not an error kind"):
