@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.173.1] - 2026-10-20
+
+### Changed
+
+- **mcp**: invalidate the import caches before the second finder lookup (#2916)
+  (9fc0281)
+
+### Fixed
+
+- **ai/review**: synthesis prompt and note say what the budget cut (#2918) (af70d13)
+
 ## [0.173.0] - 2026-10-19
 
 ### Added
