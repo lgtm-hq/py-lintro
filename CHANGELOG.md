@@ -1037,6 +1037,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [0.151.0] - 2026-09-07
 
+### Breaking (recorded retroactively, 2026-10-20)
+
+- **core**: #2427 made tool order derive from declared capabilities. Hard breaks:
+  `list-tools --show-conflicts` is gone (use `lintro check --explain-order`), and the
+  `ToolDefinition.priority` / `conflicts_with` plugin fields are removed.
+- **core**: #2427 also retired the config keys `execution.tool_order`,
+  `execution.tool_order_custom`, `execution.tool_priorities` and
+  `[tool.lintro.post_checks]`. Leftover keys are ignored. Only the flat `[tool.lintro]`
+  form and `[tool.lintro.post_checks]` log an unknown-key warning on a run; a nested
+  `[tool.lintro.execution]` table and `.lintro-config.yaml` drop them silently, so run
+  `lintro config validate` to find them. See
+  `docs/configuration.md#tool-ordering-configuration`.
+
 ### Added
 
 - **core**: make derived DAG ordering authoritative, delete priority scalars (#2427)
@@ -1123,6 +1136,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **golangci-lint**: allow parallel runners so findings never vanish (#2396) (2cb6fcd)
 
 ## [0.147.5] - 2026-09-06
+
+### Breaking (recorded retroactively, 2026-10-20)
+
+- **core**: #2362 removed the `lintro setup` command, the `--score` / `--fail-under`
+  flags, the `score:` config block, the `health_score` key in JSON output and the
+  `score` / `fail_under` parameters of `lintro.api.check`. This shipped as a patch
+  release without a breaking-change marker.
 
 ### Changed
 
