@@ -1039,11 +1039,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Breaking (recorded retroactively, 2026-10-20)
 
-- **core**: #2427 removed the user-visible config keys `execution.tool_order`,
+- **core**: #2427 made tool order derive from declared capabilities. Hard breaks:
+  `list-tools --show-conflicts` is gone (use `lintro check --explain-order`), and the
+  `ToolDefinition.priority` / `conflicts_with` plugin fields are removed.
+- **core**: #2427 also retired the config keys `execution.tool_order`,
   `execution.tool_order_custom`, `execution.tool_priorities` and
-  `[tool.lintro.post_checks]`, the `list-tools --show-conflicts` flag, and the
-  `ToolDefinition.priority` / `conflicts_with` fields. Tool order is derived from
-  declared capabilities; see the Upgrading section of `docs/configuration.md`.
+  `[tool.lintro.post_checks]`; leftover keys warn as unknown and are ignored. See
+  `docs/configuration.md#tool-ordering-configuration`.
 
 ### Added
 
