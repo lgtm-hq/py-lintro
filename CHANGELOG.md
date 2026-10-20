@@ -1044,7 +1044,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `ToolDefinition.priority` / `conflicts_with` plugin fields are removed.
 - **core**: #2427 also retired the config keys `execution.tool_order`,
   `execution.tool_order_custom`, `execution.tool_priorities` and
-  `[tool.lintro.post_checks]`; leftover keys warn as unknown and are ignored. See
+  `[tool.lintro.post_checks]`. Leftover keys are ignored: in `pyproject.toml` they log an
+  unknown-key warning on every run, while in `.lintro-config.yaml` they are dropped
+  silently and only `lintro config validate` reports them. See
   `docs/configuration.md#tool-ordering-configuration`.
 
 ### Added
