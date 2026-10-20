@@ -980,6 +980,7 @@ def test_a_cut_input_is_declared_to_the_model_in_the_prompt() -> None:
 
     assert_that(plan.truncated).is_true()
     assert_that(user_prompt).contains("only part of this PR")
+    assert_that(user_prompt).does_not_contain("digest above was trimmed")
 
 
 # --- (g) config validation ----------------------------------------------------
@@ -1140,6 +1141,109 @@ def test_the_digest_is_charged_against_the_prompt_budget() -> None:
     assert_that(len(plan.diff)).is_less_than(len(context.unified_diff))
     assert_that(plan.chunk_digest).is_equal_to(digest)
     assert_that(user_prompt).contains("Piece 6 reviewed")
+    # The diff was cut here, so the note blames the diff, not the digest.
+    assert_that(user_prompt).contains("only part of this PR")
+
+
+def test_a_digest_only_trim_tells_the_model_the_diff_is_complete() -> None:
+    """When every diff section reached the prompt, the note must not say otherwise.
+
+    A note that blamed the diff would make the model withhold findings it has
+    the evidence for (#2269 follow-up on PR #2316).
+    """
+    from lintro.ai.review.synthesis_prompt import SynthesisPromptPlan
+
+    context = _pr_context()
+    plan = SynthesisPromptPlan(
+        changed_files="- a.py\n- b.py\n",
+        chunk_digest="Piece 1 reviewed a.py\n",
+        diff=context.unified_diff,
+        truncated=True,
+        diff_files_included=2,
+        diff_files_total=2,
+    )
+
+    _system, user_prompt = build_synthesis_prompt(
+        context=context,
+        plan=plan,
+        max_findings=5,
+    )
+
+    assert_that(user_prompt).contains("digest above was trimmed")
+    assert_that(user_prompt).contains("the diff below are complete")
+    assert_that(user_prompt).does_not_contain("only part of this PR")
+
+
+def test_a_cut_digest_and_a_cut_diff_are_both_named() -> None:
+    """When both spans were cut the model is told about both.
+
+    A note that named only the diff would leave the model thinking the
+    digest is complete and restating findings it was never shown.
+    """
+    from lintro.ai.review.synthesis_prompt import SynthesisPromptPlan
+
+    context = _pr_context()
+    plan = SynthesisPromptPlan(
+        changed_files="- a.py\n- b.py\n",
+        chunk_digest="Piece 1 reviewed a.py\n",
+        diff=context.unified_diff[:40],
+        truncated=True,
+        diff_files_included=0,
+        diff_files_total=2,
+        digest_truncated=True,
+    )
+
+    _system, user_prompt = build_synthesis_prompt(
+        context=context,
+        plan=plan,
+        max_findings=5,
+    )
+
+    assert_that(user_prompt).contains("only part of this PR")
+    assert_that(user_prompt).contains("digest above was trimmed too")
+
+
+def test_the_plan_records_a_trimmed_digest_beside_a_cut_diff() -> None:
+    """``plan_synthesis_prompt`` keeps the digest's own flag when the diff is cut."""
+    context = _pr_context()
+    summaries = tuple(
+        ChunkSummary(
+            chunk_id=index,
+            files=(f"pkg/mod{index}.py",),
+            findings=tuple(
+                ReviewFinding(
+                    severity=Severity.P3,
+                    category="code-smell",
+                    file=f"pkg/mod{index}.py",
+                    line=line,
+                    title=f"finding {index}-{line} with a long enough title",
+                    description="",
+                    cause="",
+                    fix="",
+                    confidence="medium",
+                )
+                for line in range(1, 40)
+            ),
+        )
+        for index in range(6)
+    )
+
+    plan = plan_synthesis_prompt(context=context, summaries=summaries, diff_budget=60)
+
+    assert_that(plan.truncated).is_true()
+    assert_that(plan.digest_truncated).is_true()
+    assert_that(plan.diff_files_included).is_less_than(plan.diff_files_total)
+
+
+def test_rule_four_scopes_blindness_to_files_the_budget_left_out() -> None:
+    """The hard rule no longer says the model cannot see any changed file."""
+    from lintro.ai.prompts.review import REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE
+
+    text = REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE
+
+    assert_that(text).contains("the budget left them out or the change has no text")
+    assert_that(text).contains("not a file you can see whole")
+    assert_that(text).does_not_contain("this PR changed it and you cannot see how")
 
 
 def test_a_digest_over_the_whole_budget_sheds_its_finding_lines() -> None:
@@ -1918,7 +2022,7 @@ def test_a_cut_synthesis_input_records_the_files_it_kept() -> None:
     assert_that(outcome.diff_files_included).is_less_than(2)
     note = format_synthesis_note_line(metadata=result.metadata)
     assert_that(note).contains(
-        f"saw {outcome.diff_files_included} of 2 changed files, less than its whole input",
+        f"saw the complete diff of {outcome.diff_files_included} of 2 changed files, less than its whole input",
     )
 
 

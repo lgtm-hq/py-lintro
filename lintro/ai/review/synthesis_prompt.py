@@ -211,6 +211,9 @@ class SynthesisPromptPlan:
             prompt whole (#2704). A cut section does not count, so
             ``included == total`` means only the finding digest was trimmed.
         diff_files_total: Changed files in the PR's diff.
+        digest_truncated: True when the per-chunk digest shed finding lines
+            or was cut, whatever happened to the diff, so the prompt can say
+            so even when the diff was cut as well.
     """
 
     changed_files: str
@@ -219,6 +222,7 @@ class SynthesisPromptPlan:
     truncated: bool
     diff_files_included: int = 0
     diff_files_total: int = 0
+    digest_truncated: bool = False
 
 
 def _trim_chunk_digest(
@@ -322,6 +326,7 @@ def plan_synthesis_prompt(
         diff_files_total=len(
             split_unified_diff_by_file(unified_diff=context.unified_diff),
         ),
+        digest_truncated=digest_truncated,
     )
 
 
@@ -341,6 +346,45 @@ def _count_whole_files(*, kept: str, unified_diff: str) -> int:
         return 0
     sections = split_unified_diff_by_file(unified_diff=unified_diff)
     return sum(1 for section in sections.values() if section and section in kept)
+
+
+def _truncation_note(*, plan: SynthesisPromptPlan) -> str:
+    """Tell the model what the budget cut, when it cut anything.
+
+    A plan whose every diff section reached the prompt whole was trimmed in
+    its finding digest only (#2704): the diff is complete and the note must
+    not tell the model otherwise, or it will withhold findings it has the
+    evidence for.
+
+    Args:
+        plan: Prompt spans already fitted to the pass's token budget.
+
+    Returns:
+        The note to splice into the user prompt, or an empty string.
+    """
+    if not plan.truncated:
+        return ""
+    diff_whole = (
+        plan.diff_files_total > 0 and plan.diff_files_included == plan.diff_files_total
+    )
+    if diff_whole:
+        return (
+            "\nNote: the per-chunk digest above was trimmed to fit a token "
+            "budget, so some already-reported findings are not listed. The "
+            "changed-file list and the diff below are complete.\n"
+        )
+    digest_clause = (
+        " The per-chunk digest above was trimmed too, so some already-reported "
+        "findings are not listed."
+        if plan.digest_truncated
+        else ""
+    )
+    return (
+        "\nNote: the diff below is only part of this PR — it was cut to fit a "
+        "token budget. The changed-file list above is complete; the diff is "
+        f"not.{digest_clause} Say nothing about a file whose diff you cannot "
+        "see.\n"
+    )
 
 
 def build_synthesis_prompt(
@@ -371,13 +415,7 @@ def build_synthesis_prompt(
     """
     pr_title = context.pr_metadata.title if context.pr_metadata else "Local changes"
     pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
-    truncation_note = (
-        "\nNote: the diff below is only part of this PR — it was cut to fit a "
-        "token budget. The changed-file list above is complete; the diff is "
-        "not. Say nothing about a file whose diff you cannot see.\n"
-        if plan.truncated
-        else ""
-    )
+    truncation_note = _truncation_note(plan=plan)
     user_prompt = REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE.format(
         pr_title=redact_prompt_text(text=pr_title, source="PR title"),
         pr_summary=redact_prompt_text(text=pr_summary, source="PR metadata"),

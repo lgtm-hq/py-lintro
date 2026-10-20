@@ -10,6 +10,8 @@ this file pins the budget the pass now gets and the record it writes.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from assertpy import assert_that
 from pydantic import ValidationError
@@ -194,7 +196,9 @@ def test_the_synthesis_note_names_the_files_seen_and_the_merge_caveat() -> None:
     note = format_synthesis_note_line(
         metadata=_metadata(CoverageDegradationReason.SYNTHESIS_TRUNCATED),
     )
-    assert_that(note).contains("saw 2 of 5 changed files, less than its whole input")
+    assert_that(note).contains(
+        "saw the complete diff of 2 of 5 changed files, less than its whole input",
+    )
     assert_that(note).contains("cross-chunk duplicate merging may be incomplete")
     # Every file kept but the digest trimmed: never claim files were dropped.
     digest_only = ReviewMetadata(
@@ -222,6 +226,52 @@ def test_the_synthesis_note_names_the_files_seen_and_the_merge_caveat() -> None:
     )
     assert_that(failed).contains("did not complete")
     assert_that(failed).contains("duplicate merging was not applied")
+    assert_that(failed).does_not_contain("changed files")
+    # A pass that was cut and then failed says both, as the banner does
+    # (#2269 follow-up).
+    cut_and_failed = format_synthesis_note_line(
+        metadata=_metadata(
+            CoverageDegradationReason.SYNTHESIS_TRUNCATED,
+            CoverageDegradationReason.SYNTHESIS_FAILED,
+        ),
+    )
+    assert_that(cut_and_failed).contains("did not complete")
+    # A failed pass produced nothing usable: the note names what it was given.
+    assert_that(cut_and_failed).contains(
+        "held the complete diff of 2 of 5 changed files",
+    )
+    assert_that(cut_and_failed).does_not_contain("It saw")
+    assert_that(cut_and_failed).does_not_contain("may be incomplete")
+    # The other two shapes of a cut input: a digest-only trim, and a record
+    # from before the file counts existed.
+    digest_only_failed = replace(
+        digest_only,
+        synthesis=SynthesisOutcome(
+            truncated=True,
+            failed=True,
+            diff_files_included=5,
+            diff_files_total=5,
+        ),
+    )
+    note = format_synthesis_note_line(metadata=digest_only_failed)
+    assert_that(note).contains("did not complete")
+    assert_that(note).contains("had its finding digest trimmed")
+    assert_that(note).does_not_contain("changed files")
+    legacy_failed = ReviewMetadata(
+        model="m",
+        provider="anthropic",
+        context_window=1,
+        depth=1,
+        chunks_total=1,
+        chunks_current=1,
+        files_reviewed=1,
+        files_total=1,
+        checklist_items=0,
+        synthesis=SynthesisOutcome(truncated=True, failed=True),
+    )
+    note = format_synthesis_note_line(metadata=legacy_failed)
+    assert_that(note).contains("did not complete")
+    assert_that(note).contains("Its prepared input was cut")
 
 
 def test_a_note_without_file_counts_falls_back_to_the_generic_wording() -> None:
