@@ -21,3 +21,14 @@ ignore:
     package:
       name: braces
       type: npm
+  # markdown-it 15.0.1: pinned exactly by markdownlint-cli2 0.23.3 (latest);
+  # parses repository Markdown only, DoS-only impact. Mirrors .osv-scanner.toml,
+  # review by 2026-11-03.
+  - vulnerability: GHSA-r7fv-28h4-cvq7
+    package:
+      name: markdown-it
+      type: npm
+  - vulnerability: GHSA-vfgh-jcmw-g37q
+    package:
+      name: markdown-it
+      type: npm
