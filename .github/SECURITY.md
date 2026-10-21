@@ -2,10 +2,13 @@
 
 ## Supported Versions
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.173.x | :white_check_mark: |
-| < 0.173 | :x:                |
+| Version                     | Supported          |
+| --------------------------- | ------------------ |
+| Latest minor release line   | :white_check_mark: |
+| Earlier minor release lines | :x:                |
+
+The current line is listed in the repository root
+[SECURITY.md](https://github.com/lgtm-hq/py-lintro/blob/main/SECURITY.md#supported-versions).
 
 ## Reporting a Vulnerability
 

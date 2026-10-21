@@ -11,9 +11,9 @@ committed. This orchestrator runs the two repo-side finalizers in order:
 1. Reflow ``CHANGELOG.md`` to lintro's 88-column markdown budget so the release
    PR passes dogfooding-lint (#1117), via
    :func:`format_changelog.format_changelog`.
-2. Stamp every ``SECURITY.md`` supported-versions table to the current release
-   ``major.minor`` line so minor/major bumps do not go stale and break the
-   unattended release PR (#1372), via
+2. Stamp the root ``SECURITY.md`` supported-versions table to the current
+   release ``major.minor`` line so minor/major bumps do not go stale and break
+   the unattended release PR (#1372), via
    :func:`update_security_support.main`.
 3. Point the pinned py-lintro release image at the newest published release so
    the digest-lag gate cannot drift (#1590), via
