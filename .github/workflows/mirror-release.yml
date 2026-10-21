@@ -159,7 +159,7 @@ jobs:
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: b777111fb3aaa6f09589fb029f0094a05dd76003 # v0.77.7
+          ref: 9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
           sparse-checkout: scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false

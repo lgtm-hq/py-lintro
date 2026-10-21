@@ -244,7 +244,7 @@ jobs:
     name: Publish npm package set
     needs: stage
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-npm-set.yml@b777111fb3aaa6f09589fb029f0094a05dd76003 # v0.77.7
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-npm-set.yml@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
     permissions:
       # read: checkout of this repository inside the reusable
       contents: read
@@ -290,7 +290,7 @@ jobs:
       # Runs inside the scratch install of the published meta package.
       smoke-command: ./node_modules/.bin/lintro --version
       node-version: '24'
-      tooling-ref: 'b777111fb3aaa6f09589fb029f0094a05dd76003' # v0.77.7
+      tooling-ref: '9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb' # v0.78.0
       egress-policy: block
       egress-preset: npm-publish
       # Full list (replace semantics): the reusable passes allowed-endpoints
