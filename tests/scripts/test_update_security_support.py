@@ -179,17 +179,22 @@ def test_main_stamps_the_root_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The CLI stamps the root SECURITY.md support table."""
+    """The CLI stamps the root SECURITY.md and leaves the .github copy alone."""
     repo = tmp_path
     root_security = repo / "SECURITY.md"
     root_security.write_text(_ROOT_TABLE, encoding="utf-8")
+    github_dir = repo / ".github"
+    github_dir.mkdir()
+    github_security = github_dir / "SECURITY.md"
+    github_security.write_text(_GITHUB_TABLE, encoding="utf-8")
 
-    # ``main`` derives the repo root from its own file location; redirect the
-    # file discovery to the temp tree instead.
+    # ``main`` derives the repo root from its own file location; point the
+    # real file discovery at the temp tree instead.
+    real_security_files = module._security_files
     monkeypatch.setattr(
         module,
         "_security_files",
-        lambda root: [root_security],
+        lambda root: real_security_files(repo),
     )
 
     # Version supplied via argv so no pyproject.toml is required.
@@ -198,6 +203,9 @@ def test_main_stamps_the_root_file(
     assert_that(exit_code).is_equal_to(0)
     assert_that(root_security.read_text(encoding="utf-8")).contains(
         "| 0.81.x  | ✅        |",
+    )
+    assert_that(github_security.read_text(encoding="utf-8")).is_equal_to(
+        _GITHUB_TABLE,
     )
 
 
