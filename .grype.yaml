@@ -5,7 +5,9 @@
 # are also suppressed in .osv-scanner.toml, where the full rationale and the
 # time box (ignoreUntil) live. Grype ignore rules cannot expire on their own,
 # so remove an entry here whenever its .osv-scanner.toml counterpart is
-# removed or lapses.
+# removed or lapses. Exception: rules scoped by location to the lgtm-ci
+# tooling checkout (/.lgtm-ci-tooling/**) have no OSV counterpart; their time
+# box is _TOOLING_CHECKOUT_EXPIRY in tests/unit/test_vuln_suppression_parity.py.
 
 ---
 ignore:
@@ -46,8 +48,10 @@ ignore:
   # lgtm-ci main by lgtm-hq/lgtm-ci#1186, shipping in v0.77.8 via
   # lgtm-hq/lgtm-ci#1187). There is no .osv-scanner.toml counterpart because
   # osv-scanner never sees the tooling checkout. Remove this entry when
-  # sbom-on-main.yml moves to an lgtm-ci release with certifi >= 2026.10.19.
-  # Re-verified 2026-10-21; review by 2026-11-21.
+  # sbom-on-main.yml AND publish-pypi-on-tag.yml (same reusable-sbom.yml pin)
+  # move to an lgtm-ci release with certifi >= 2026.10.19 (expected v0.77.8).
+  # Re-verified 2026-10-21; expires 2026-11-21 (enforced by
+  # tests/unit/test_vuln_suppression_parity.py).
   - vulnerability: GHSA-6q48-6c7w-9gw2
     package:
       name: certifi
