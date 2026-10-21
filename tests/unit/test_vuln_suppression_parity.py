@@ -33,11 +33,7 @@ _TOOLING_CHECKOUT_PREFIX = "/.lgtm-ci-tooling/"
 # Time boxes for grype ignores scoped to the lgtm-ci tooling checkout. Each
 # entry must match exactly one such rule in .grype.yaml. Re-verify the
 # upstream lgtm-ci release before extending a date.
-_TOOLING_CHECKOUT_EXPIRY: dict[str, datetime.date] = {
-    # certifi 2026.7.22 in lgtm-ci v0.75.1's uv.lock; fixed by lgtm-ci#1186,
-    # unreleased until v0.77.8 (lgtm-ci#1187). Re-verified 2026-10-21.
-    "GHSA-6q48-6c7w-9gw2": datetime.date(2026, 11, 21),
-}
+_TOOLING_CHECKOUT_EXPIRY: dict[str, datetime.date] = {}
 
 
 def _grype_ignores() -> list[dict[str, Any]]:
@@ -156,27 +152,24 @@ def test_grype_ignore_package_matches_osv_reason(rule: dict[str, Any]) -> None:
     ).starts_with(f"{rule['package']['name']}@")
 
 
-@pytest.mark.parametrize(
-    "rule",
-    _TOOLING_RULES,
-    ids=[str(rule.get("vulnerability")) for rule in _TOOLING_RULES],
-)
-def test_tooling_checkout_ignore_is_time_boxed(rule: dict[str, Any]) -> None:
-    """A tooling-checkout grype ignore needs an open time box in this module.
+def test_tooling_checkout_ignores_are_time_boxed() -> None:
+    """Every tooling-checkout grype ignore needs an open time box here.
 
-    Args:
-        rule: One ``.grype.yaml`` rule scoped to ``/.lgtm-ci-tooling/``.
+    A plain loop rather than a parametrized test: with no tooling-checkout
+    rules in ``.grype.yaml`` (the normal state) a parametrized test would only
+    report an empty-parameter-set skip.
     """
-    vuln_id = rule["vulnerability"]
-    assert_that(_TOOLING_CHECKOUT_EXPIRY).described_as(
-        f"{vuln_id} is ignored for the lgtm-ci tooling checkout but has no "
-        "_TOOLING_CHECKOUT_EXPIRY entry",
-    ).contains_key(vuln_id)
-    expiry = _TOOLING_CHECKOUT_EXPIRY[vuln_id]
-    assert_that(expiry).described_as(
-        f"{vuln_id}: tooling-checkout ignore expired on {expiry}; adopt the "
-        "lgtm-ci release that fixes it, or re-verify and renew",
-    ).is_greater_than(datetime.date.today())
+    for rule in _TOOLING_RULES:
+        vuln_id = rule["vulnerability"]
+        assert_that(_TOOLING_CHECKOUT_EXPIRY).described_as(
+            f"{vuln_id} is ignored for the lgtm-ci tooling checkout but has no "
+            "_TOOLING_CHECKOUT_EXPIRY entry",
+        ).contains_key(vuln_id)
+        expiry = _TOOLING_CHECKOUT_EXPIRY[vuln_id]
+        assert_that(expiry).described_as(
+            f"{vuln_id}: tooling-checkout ignore expired on {expiry}; adopt the "
+            "lgtm-ci release that fixes it, or re-verify and renew",
+        ).is_greater_than(datetime.date.today())
 
 
 def test_tooling_checkout_expiry_entries_have_rules() -> None:
