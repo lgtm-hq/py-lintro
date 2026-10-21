@@ -1,0 +1,29 @@
+---
+name: PR - All Checks Gate
+# One required check, `gate / ✅ All Checks Passed`, that passes only when
+# every other check on the PR head (or merge-queue head) finished success,
+# skipped or neutral, so native auto-merge and the merge queue wait for all
+# checks, not just the required ones. Keep it in its own workflow file: runs
+# of this file are excluded so the gate never waits on itself.
+
+'on':
+  pull_request:
+    # `edited` too: PR - Title Validation re-runs on title edits.
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+  merge_group:
+
+permissions: {}
+
+concurrency:
+  group: all-checks-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-all-checks-gate.yml@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      statuses: read
