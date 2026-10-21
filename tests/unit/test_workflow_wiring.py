@@ -1089,6 +1089,24 @@ def test_long_docker_ci_jobs_carry_no_githubapp_grant(job_id: str) -> None:
         )
 
 
+def test_docker_ci_dogfood_skip_gate_can_reach_artifact_results_service() -> None:
+    """The authoritative-report download needs artifact API egress (#2963)."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate = docker_ci["jobs"]["dogfood-skip-gate"]
+    harden = next(
+        step
+        for step in gate["steps"]
+        if str(step.get("uses", "")).startswith("step-security/harden-runner@")
+    )
+    allowed = set(str(harden["with"]["allowed-endpoints"]).split())
+
+    assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
+    assert_that(allowed).contains(
+        "pipelines.actions.githubusercontent.com:443",
+        "results-receiver.actions.githubusercontent.com:443",
+    )
+
+
 def test_docker_ci_dogfood_skip_gate_consumes_authoritative_lint_report() -> None:
     """Full-repo skip checks wait for retry and consume its final report."""
     docker_ci = _load_workflow(name="docker-ci.yml")

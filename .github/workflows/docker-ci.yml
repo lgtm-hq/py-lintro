@@ -800,13 +800,15 @@ jobs:
         # GitHub's hosted-runner watchdog hosts (*.githubapp.com) need no entry
         # here: harden-runner v2.21.1 allows them from GitHub meta (#2352,
         # #2488).
-        # Same allowlist as dogfooding-lint-changed: the container sets
-        # LINTRO_AUTO_INSTALL_DEPS=1 and may fetch project deps before linting.
+        # Same allowlist as dogfooding-lint-changed, plus the artifact results
+        # service: this gate downloads the authoritative lint report (#2963).
+        # Keep blocking egress; the container may fetch project deps too.
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
           egress-policy: 'block'
           allowed-endpoints: >
+            results-receiver.actions.githubusercontent.com:443
             github.com:443
             api.github.com:443
             codeload.github.com:443
