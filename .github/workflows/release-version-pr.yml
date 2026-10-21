@@ -93,9 +93,12 @@ jobs:
       # Finalize the generated version PR before it is committed: reflow
       # CHANGELOG.md to lintro's 88-column markdown budget so release PRs pass
       # dogfooding-lint without CHANGELOG.md being ignored (#1117), and stamp
-      # every SECURITY.md supported-versions table to the current major.minor
-      # line so minor/major bumps do not go stale and block the unattended
-      # release PR (#1372). Logic lives in dedicated scripts, not inline runs.
+      # the root SECURITY.md supported-versions table to the current
+      # major.minor line so minor/major bumps do not go stale and block the
+      # unattended release PR (#1372). The hook runs without a token and
+      # lgtm-ci (v0.76+) rejects its diff if it touches .github/**, so
+      # .github/SECURITY.md keeps a version-agnostic table. Logic lives in
+      # dedicated scripts, not inline runs.
       version-update-script: scripts/ci/finalize-version-pr.py
       tooling-ref: '9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb' # v0.78.0
       egress-policy: block

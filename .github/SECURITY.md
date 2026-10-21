@@ -8,7 +8,7 @@
 | Earlier minor release lines | :x:                |
 
 The current line is listed in the repository root
-[SECURITY.md](../SECURITY.md#supported-versions).
+[SECURITY.md](https://github.com/lgtm-hq/py-lintro/blob/main/SECURITY.md#supported-versions).
 
 ## Reporting a Vulnerability
 
