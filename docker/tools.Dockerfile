@@ -66,6 +66,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+# Release downloads retry transient transport errors (e.g. curl 92, an HTTP/2
+# stream reset): one dropped connection on a single platform otherwise fails the
+# whole multi-arch candidate build and leaves a merged PR without a candidate
+# (#2946). Checksum verification still guards every artifact.
 # hadolint ignore=DL3003,SC2086
 RUN --mount=type=cache,target=/root/.cache/bun,sharing=locked \
     ARCH=$(uname -m) && \
@@ -75,8 +79,8 @@ RUN --mount=type=cache,target=/root/.cache/bun,sharing=locked \
     BUN_ZIP="bun-linux-${BUN_ARCH}.zip" && \
     BUN_URL="https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/${BUN_ZIP}" && \
     CHECKSUM_URL="https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/SHASUMS256.txt" && \
-    curl -fsSL "$BUN_URL" -o "/tmp/${BUN_ZIP}" && \
-    curl -fsSL "$CHECKSUM_URL" -o /tmp/SHASUMS256.txt && \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 "$BUN_URL" -o "/tmp/${BUN_ZIP}" && \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 "$CHECKSUM_URL" -o /tmp/SHASUMS256.txt && \
     cd /tmp && grep "${BUN_ZIP}" SHASUMS256.txt | sha256sum -c - && \
     unzip -q "${BUN_ZIP}" && \
     mv "bun-linux-${BUN_ARCH}/bun" /usr/local/bin/bun && \
@@ -93,8 +97,8 @@ RUN ARCH=$(uname -m) && \
     UV_TAR="uv-${UV_ARCH}-unknown-linux-gnu.tar.gz" && \
     UV_URL="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${UV_TAR}" && \
     CHECKSUM_URL="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${UV_TAR}.sha256" && \
-    curl -fsSL "$UV_URL" -o "/tmp/${UV_TAR}" && \
-    curl -fsSL "$CHECKSUM_URL" -o "/tmp/${UV_TAR}.sha256" && \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 "$UV_URL" -o "/tmp/${UV_TAR}" && \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 "$CHECKSUM_URL" -o "/tmp/${UV_TAR}.sha256" && \
     cd /tmp && sha256sum -c "${UV_TAR}.sha256" && \
     tar -xzf "${UV_TAR}" && \
     mv "uv-${UV_ARCH}-unknown-linux-gnu/uv" /usr/local/bin/uv && \
@@ -114,8 +118,8 @@ RUN ARCH=$(uname -m) && \
     else echo "Unsupported arch: $ARCH" && exit 1; fi && \
     GO_TAR="go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" && \
     GO_URL="https://dl.google.com/go/${GO_TAR}" && \
-    curl -fsSL "$GO_URL" -o "/tmp/${GO_TAR}" && \
-    curl -fsSL "${GO_URL}.sha256" -o "/tmp/${GO_TAR}.sha256" && \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 "$GO_URL" -o "/tmp/${GO_TAR}" && \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 "${GO_URL}.sha256" -o "/tmp/${GO_TAR}.sha256" && \
     echo "$(cat /tmp/${GO_TAR}.sha256)  /tmp/${GO_TAR}" | sha256sum -c - && \
     tar -C /usr/local -xzf "/tmp/${GO_TAR}" && \
     rm -rf /tmp/go*
