@@ -5,6 +5,13 @@ their rationale. The time box lives in ``.osv-scanner.toml`` (``ignoreUntil``),
 and ``.grype.yaml`` may only mirror entries that are still suppressed there.
 These tests fail CI when a grype ignore has no OSV counterpart, when that
 counterpart has lapsed, or when the two files disagree on the package.
+
+One exception: rules scoped by ``package.location`` to the lgtm-ci tooling
+checkout (``/.lgtm-ci-tooling/**``). The reusable SBOM workflow clones lgtm-ci
+into the scanned directory, so grype sees lgtm-ci's own lockfile, which
+osv-scanner never reads. An OSV counterpart would wrongly suppress the advisory
+in lintro's own lockfiles too, so these rules carry their time box in
+``_TOOLING_CHECKOUT_EXPIRY`` below instead, and CI fails once it lapses.
 """
 
 from __future__ import annotations
@@ -21,6 +28,16 @@ from assertpy import assert_that
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _GRYPE_CONFIG = _REPO_ROOT / ".grype.yaml"
 _OSV_CONFIG = _REPO_ROOT / ".osv-scanner.toml"
+_TOOLING_CHECKOUT_PREFIX = "/.lgtm-ci-tooling/"
+
+# Time boxes for grype ignores scoped to the lgtm-ci tooling checkout. Each
+# entry must match exactly one such rule in .grype.yaml. Re-verify the
+# upstream lgtm-ci release before extending a date.
+_TOOLING_CHECKOUT_EXPIRY: dict[str, datetime.date] = {
+    # certifi 2026.7.22 in lgtm-ci v0.75.1's uv.lock; fixed by lgtm-ci#1186,
+    # unreleased until v0.77.8 (lgtm-ci#1187). Re-verified 2026-10-21.
+    "GHSA-6q48-6c7w-9gw2": datetime.date(2026, 11, 21),
+}
 
 
 def _grype_ignores() -> list[dict[str, Any]]:
@@ -64,7 +81,23 @@ def _ignore_until(entry: dict[str, Any]) -> datetime.date:
     return datetime.date.fromisoformat(str(value)[:10])
 
 
+def _is_tooling_checkout_rule(rule: dict[str, Any]) -> bool:
+    """Return whether a grype rule is scoped to the lgtm-ci tooling checkout.
+
+    Args:
+        rule: One ``ignore`` rule from ``.grype.yaml``.
+
+    Returns:
+        True when ``package.location`` lies under the tooling checkout.
+    """
+    package = rule.get("package") or {}
+    location = str(package.get("location") or "")
+    return location.startswith(_TOOLING_CHECKOUT_PREFIX)
+
+
 _GRYPE_RULES = _grype_ignores()
+_TOOLING_RULES = [rule for rule in _GRYPE_RULES if _is_tooling_checkout_rule(rule)]
+_MIRRORED_RULES = [rule for rule in _GRYPE_RULES if not _is_tooling_checkout_rule(rule)]
 
 
 def test_grype_ignores_all_name_a_vulnerability_and_package() -> None:
@@ -77,8 +110,8 @@ def test_grype_ignores_all_name_a_vulnerability_and_package() -> None:
 
 @pytest.mark.parametrize(
     "rule",
-    _GRYPE_RULES,
-    ids=[str(rule.get("vulnerability")) for rule in _GRYPE_RULES],
+    _MIRRORED_RULES,
+    ids=[str(rule.get("vulnerability")) for rule in _MIRRORED_RULES],
 )
 def test_grype_ignore_has_unexpired_osv_counterpart(rule: dict[str, Any]) -> None:
     """A grype ignore needs a matching OSV entry whose time box is still open.
@@ -101,8 +134,8 @@ def test_grype_ignore_has_unexpired_osv_counterpart(rule: dict[str, Any]) -> Non
 
 @pytest.mark.parametrize(
     "rule",
-    _GRYPE_RULES,
-    ids=[str(rule.get("vulnerability")) for rule in _GRYPE_RULES],
+    _MIRRORED_RULES,
+    ids=[str(rule.get("vulnerability")) for rule in _MIRRORED_RULES],
 )
 def test_grype_ignore_package_matches_osv_reason(rule: dict[str, Any]) -> None:
     """The grype package name matches the package the OSV reason names first.
@@ -121,3 +154,32 @@ def test_grype_ignore_package_matches_osv_reason(rule: dict[str, Any]) -> None:
         f"{vuln_id}: .osv-scanner.toml reason must start with "
         f"'{rule['package']['name']}@' to match .grype.yaml",
     ).starts_with(f"{rule['package']['name']}@")
+
+
+@pytest.mark.parametrize(
+    "rule",
+    _TOOLING_RULES,
+    ids=[str(rule.get("vulnerability")) for rule in _TOOLING_RULES],
+)
+def test_tooling_checkout_ignore_is_time_boxed(rule: dict[str, Any]) -> None:
+    """A tooling-checkout grype ignore needs an open time box in this module.
+
+    Args:
+        rule: One ``.grype.yaml`` rule scoped to ``/.lgtm-ci-tooling/``.
+    """
+    vuln_id = rule["vulnerability"]
+    assert_that(_TOOLING_CHECKOUT_EXPIRY).described_as(
+        f"{vuln_id} is ignored for the lgtm-ci tooling checkout but has no "
+        "_TOOLING_CHECKOUT_EXPIRY entry",
+    ).contains_key(vuln_id)
+    expiry = _TOOLING_CHECKOUT_EXPIRY[vuln_id]
+    assert_that(expiry).described_as(
+        f"{vuln_id}: tooling-checkout ignore expired on {expiry}; adopt the "
+        "lgtm-ci release that fixes it, or re-verify and renew",
+    ).is_greater_than(datetime.date.today())
+
+
+def test_tooling_checkout_expiry_entries_have_rules() -> None:
+    """Every ``_TOOLING_CHECKOUT_EXPIRY`` entry still has a matching rule."""
+    rule_ids = sorted(str(rule["vulnerability"]) for rule in _TOOLING_RULES)
+    assert_that(rule_ids).is_equal_to(sorted(_TOOLING_CHECKOUT_EXPIRY))

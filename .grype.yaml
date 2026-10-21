@@ -5,7 +5,9 @@
 # are also suppressed in .osv-scanner.toml, where the full rationale and the
 # time box (ignoreUntil) live. Grype ignore rules cannot expire on their own,
 # so remove an entry here whenever its .osv-scanner.toml counterpart is
-# removed or lapses.
+# removed or lapses. Exception: rules scoped by location to the lgtm-ci
+# tooling checkout (/.lgtm-ci-tooling/**) have no OSV counterpart; their time
+# box is _TOOLING_CHECKOUT_EXPIRY in tests/unit/test_vuln_suppression_parity.py.
 
 ---
 ignore:
@@ -36,3 +38,22 @@ ignore:
     package:
       name: markdown-it
       type: npm
+  # certifi < 2026.10.19 (GHSA-6q48-6c7w-9gw2, critical: emSign roots with
+  # compromised intermediates). Scoped by location to the lgtm-ci tooling
+  # checkout ONLY: reusable-sbom.yml clones lgtm-ci@v0.75.1 into
+  # .lgtm-ci-tooling/ inside the scanned dir, and its uv.lock still pins
+  # certifi 2026.7.22. That lock is lgtm-ci's, not lintro's; lintro's own
+  # uv.lock and requirements-semgrep.txt already pin 2026.10.19, and this rule
+  # does not cover them. No lgtm-ci release carries the fix yet (fixed on
+  # lgtm-ci main by lgtm-hq/lgtm-ci#1186, shipping in v0.77.8 via
+  # lgtm-hq/lgtm-ci#1187). There is no .osv-scanner.toml counterpart because
+  # osv-scanner never sees the tooling checkout. Remove this entry when
+  # sbom-on-main.yml AND publish-pypi-on-tag.yml (same reusable-sbom.yml pin)
+  # move to an lgtm-ci release with certifi >= 2026.10.19 (expected v0.77.8).
+  # Re-verified 2026-10-21; expires 2026-11-21 (enforced by
+  # tests/unit/test_vuln_suppression_parity.py).
+  - vulnerability: GHSA-6q48-6c7w-9gw2
+    package:
+      name: certifi
+      type: python
+      location: '/.lgtm-ci-tooling/**'

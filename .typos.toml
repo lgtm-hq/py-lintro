@@ -54,6 +54,9 @@ edn = "edn"
 # Sigstore bundle name the release gate attaches next to every release asset
 # (#2562), which Scorecard's Signed-Releases check recognises.
 intoto = "intoto"
+# "certifi" is the Python CA-bundle package (PyPI ``certifi``), named in
+# .grype.yaml vulnerability ignores; typos would "correct" it to "certify".
+certifi = "certifi"
 
 [files]
 extend-exclude = [
