@@ -57,6 +57,11 @@ jobs:
       # Hard-false: see file-header note on #2108 / interpolated job names.
       pipeline-skip: false
       job-name: Python Compatibility
+      # lgtm-ci v0.76+ (#1091): two reusable-test-python calls in one run
+      # need distinct artifact prefixes, or test-coverage's
+      # python-results-3.14 replaces this call's. test-coverage keeps the
+      # default `python` so stage-coverage-html still finds python-coverage.
+      artifact-prefix: python_compat
       runner-image: ubuntu-24.04
       tooling-ref: '9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb' # v0.78.0
       egress-policy: block
@@ -174,6 +179,9 @@ jobs:
         pipelines.actions.githubusercontent.com:443
         results-receiver.actions.githubusercontent.com:443
     permissions:
+      # lgtm-ci v0.76+: the aggregate job reads the run's artifact listing
+      # with GITHUB_TOKEN; a caller without actions: read fails at startup.
+      actions: read
       contents: read
       # The reusable's summary job declares pull-requests: write statically;
       # a caller that grants less fails at startup even with the summary off.

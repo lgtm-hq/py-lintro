@@ -101,7 +101,10 @@ jobs:
       run-attempt: ${{ format('{0}', github.event.workflow_run.run_attempt) }}
       max-reruns: '3'
       egress-policy: block
-      egress-preset: github-minimal
+      # github-results (lgtm-ci v0.76+ default): github-minimal plus GitHub's
+      # results blob storage. Since v0.76 an explicit preset is enforced, and
+      # github-minimal blocks the job-log downloads the rerun matcher reads.
+      egress-preset: github-results
       # Extra transient-infra signatures, appended to lgtm-ci's built-in
       # defaults and matched with grep -qF. Keep every line a FIXED string
       # (no regex, no anchors) and narrow enough that it cannot absorb a

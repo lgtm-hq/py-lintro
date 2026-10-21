@@ -1325,8 +1325,9 @@ def test_test_ci_runs_the_bats_suites_and_gates_on_them() -> None:
         "github.com:443",
         "api.github.com:443",
     )
+    # actions: read since lgtm-ci v0.76 (the aggregate job lists artifacts).
     assert_that(job["permissions"]).is_equal_to(
-        {"contents": "read", "pull-requests": "write"},
+        {"actions": "read", "contents": "read", "pull-requests": "write"},
     )
     assert_that((_REPO_ROOT / "tests" / "bats").is_dir()).is_true()
 
