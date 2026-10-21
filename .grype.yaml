@@ -52,4 +52,4 @@ ignore:
     package:
       name: certifi
       type: python
-      location: "/.lgtm-ci-tooling/**"
+      location: '/.lgtm-ci-tooling/**'
