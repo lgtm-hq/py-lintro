@@ -109,7 +109,8 @@ jobs:
       # preset resolution, so the preset's extra hosts never reach it and
       # pip is blocked from PyPI (#1287, lgtm-hq/lgtm-ci#512). Pass the
       # complete list explicitly; harden-runner splits on spaces, so keep
-      # the folded scalar.
+      # the folded scalar. Include the results service for the isolated
+      # version hook's release metadata download (#2965).
       allowed-endpoints: >-
         github.com:443
         api.github.com:443
@@ -118,6 +119,7 @@ jobs:
         raw.githubusercontent.com:443
         uploads.github.com:443
         pipelines.actions.githubusercontent.com:443
+        results-receiver.actions.githubusercontent.com:443
         pypi.org:443
         files.pythonhosted.org:443
     secrets:
