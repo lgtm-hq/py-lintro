@@ -21,6 +21,44 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.173.2] - 2026-10-23
+
+### Changed
+
+- **changelog**: record the #2362 and #2427 public-surface removals as breaking (#2920)
+  (47d7632)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to 5049c07
+  (#2957) (a8fe26a)
+- **deps**: update test-tools to 5.0.5 (patch) (#2958) (452f28e)
+- **deps**: update dependency golang to 1.27.3 (patch) (#2955) (7b983a2)
+- **deps**: update github-actions (#2956) (3f6bf2b)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to 61db776
+  (#2954) (8261d57)
+- **deps**: update dependency checkov to 3.3.30 (patch) (#2945) (1f507d6)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.78.0 (minor) (#2951) (c4ff6e8)
+- **deps**: update python:3.14-slim docker digest to fbecd46 (#2948) (341e370)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to 0a20c41
+  (#2943) (f9842cf)
+- **deps**: update python:3.14-slim docker digest to 29e1fe7 (#2944) (94c343f)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.173.1 (minor) (#2897)
+  (c533f64)
+- **deps**: update dependency astral-sh/uv to 0.13.4 (minor) (#2904) (5e7e409)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to e235dd0
+  (#2900) (91825d3)
+
+### Fixed
+
+- **ci**: allow artifact results receiver in version hook (#2966) (2b418b2)
+- **ci**: allow artifact results receiver in dogfood gate (#2964) (85d34e0)
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.44.52 (patch) (#2960) (76b1b13)
+- **ci**: drop the certifi .lgtm-ci-tooling grype workaround now on lgtm-ci v0.78.0
+  (#2953) (91d7afe)
+- **ci**: ignore certifi GHSA-6q48-6c7w-9gw2 in the lgtm-ci tooling checkout only
+  (#2950) (9771108)
+- **docker**: retry transient download errors in the tools image build (#2947) (e704fa8)
+- **deps**: resolve the certifi and npm advisories published 2026-10-20 (#2941)
+  (06ce776)
+
 ## [0.173.1] - 2026-10-20
 
 ### Changed
