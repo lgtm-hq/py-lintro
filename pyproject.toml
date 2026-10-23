@@ -39,6 +39,7 @@ dependencies = [
   # (GHSA-47fr-3ffg-hgmw, High); fixed in 8.3.3.
   "click>=8.3.3",
   "loguru>=0.7.3",
+  "jinja2>=3.1.6",
   "packaging>=25.0",
   "pathspec>=0.12.1",
   "pydantic>=2.12.5",
