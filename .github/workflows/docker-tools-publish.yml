@@ -31,6 +31,7 @@ name: Build - Lintro Tools Image
       - 'lintro_build/**'
       - 'scripts/utils/install-tools.sh'
       - 'scripts/utils/install-semgrep.sh'
+      - 'scripts/utils/installers/**'
       - 'scripts/utils/utils.sh'
       - 'package.json'
       - 'pyproject.toml'

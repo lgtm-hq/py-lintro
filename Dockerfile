@@ -38,6 +38,7 @@ COPY scripts/ci/generate-tool-versions.py /app/scripts/ci/generate-tool-versions
 COPY scripts/ci/generate-builtin-tool-index.py /app/scripts/ci/generate-builtin-tool-index.py
 COPY scripts/utils/install-semgrep.sh /app/scripts/utils/install-semgrep.sh
 COPY scripts/utils/install-tools.sh /app/scripts/utils/install-tools.sh
+COPY scripts/utils/installers/ /app/scripts/utils/installers/
 COPY scripts/utils/utils.sh /app/scripts/utils/utils.sh
 
 # Regenerate the version artifacts from their sources (#2179): this COPY of
