@@ -68,6 +68,18 @@ def test_every_pip_audit_ignore_is_a_live_osv_suppression() -> None:
             ).is_true()
 
 
+def test_semgrep_telemetry_exception_is_paired_with_pip_audit() -> None:
+    """Both scanners cover the same remaining, time-boxed Semgrep blocker."""
+    if not any(
+        entry.get("id") == "GHSA-xcq7-p3pf-p88h" for entry in _osv_suppressions()
+    ):
+        return
+    assert_that(_ignored_by_pip_audit()).contains(
+        "CVE-2026-114603",
+        "GHSA-xcq7-p3pf-p88h",
+    )
+
+
 def test_the_alias_match_is_whole_id_only() -> None:
     """A prefix of an id, or a bare year, must not satisfy the pairing."""
     entry: dict[str, object] = {
