@@ -141,22 +141,36 @@ class ToolRegistry:
             >>> tool = ToolRegistry.get("hadolint")
             >>> result = tool.check(["."], {})
         """
-        name_lower = name.lower()
-
         with cls._lock:
             # Auto-discover tools if not yet done
             cls._ensure_discovered()
+            resolved = cls._resolve_registered_name(name=name)
+            if resolved is None:
+                available = ", ".join(sorted(cls._tools.keys()))
+                raise ValueError(
+                    f"Unknown tool: {name!r}. Available tools: {available or 'none'}",
+                )
+            if resolved not in cls._instances:
+                cls._instances[resolved] = cls._tools[resolved]()
 
-            if name_lower not in cls._instances:
-                if name_lower not in cls._tools:
-                    available = ", ".join(sorted(cls._tools.keys()))
-                    raise ValueError(
-                        f"Unknown tool: {name!r}. "
-                        f"Available tools: {available or 'none'}",
-                    )
-                cls._instances[name_lower] = cls._tools[name_lower]()
+            return cls._instances[resolved]
 
-            return cls._instances[name_lower]
+    @classmethod
+    def _resolve_registered_name(cls, *, name: str) -> str | None:
+        """Map a caller name onto a registered registry key.
+
+        Args:
+            name: Tool name in any hyphen/underscore spelling.
+
+        Returns:
+            The registered lowercase key, or None when no alias matches.
+        """
+        from lintro.enums.tool_name import tool_name_aliases
+
+        for candidate in tool_name_aliases(name):
+            if candidate in cls._tools:
+                return candidate
+        return None
 
     @classmethod
     def get_all(cls) -> dict[str, BaseToolPlugin]:
@@ -210,26 +224,31 @@ class ToolRegistry:
 
         Returns:
             ``"builtin"`` for tools shipped with lintro, or the distribution
-            name for a third-party plugin. Returns ``"unknown"`` if the tool
+            name for a third-party plugin. Hyphen and underscore spellings
+            resolve to the registered key. Returns ``"unknown"`` if the tool
             has no recorded origin (e.g. registered by legacy code paths).
         """
         with cls._lock:
             cls._ensure_discovered()
-            return cls._origins.get(name.lower(), "unknown")
+            resolved = cls._resolve_registered_name(name=name)
+            if resolved is None:
+                return "unknown"
+            return cls._origins.get(resolved, "unknown")
 
     @classmethod
     def is_registered(cls, name: str) -> bool:
         """Check if a tool is registered.
 
         Args:
-            name: Tool name (case-insensitive).
+            name: Tool name (case-insensitive; hyphen and underscore aliases
+                match the registered key).
 
         Returns:
             True if the tool is registered, False otherwise.
         """
         with cls._lock:
             cls._ensure_discovered()
-            return name.lower() in cls._tools
+            return cls._resolve_registered_name(name=name) is not None
 
     @classmethod
     def clear(cls) -> None:
