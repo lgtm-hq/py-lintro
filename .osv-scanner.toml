@@ -46,6 +46,17 @@ id = "GHSA-gfr2-rv44-r23c"
 ignoreUntil = 2026-11-03
 reason = "markdown-it@15.0.1 in the root bun.lock: markdownlint-cli2 0.23.3 (latest release, pinned by the tools manifest) requires markdown-it==15.0.1 exactly, so no resolvable upgrade exists. The flaw is quadratic-time rendering of a multi-line link reference definition. markdownlint-cli2 parses repository Markdown, including files a pull request adds, in a one-shot lint process locally or on a CI runner; it does not serve or parse network input. Worst case is a slow or stuck lint job on a crafted file (DoS of that job only, no confidentiality or integrity impact). Upstream pin: markdownlint-cli2 package.json"
 
+# --- opentelemetry-api (PyPI, isolated Semgrep tool environment) ---
+# Reverified 2026-10-23: current Semgrep 1.179.0 and latest 1.182.1 both
+# require opentelemetry-api~=1.37.0, excluding the fixed release 1.45.1.
+# Remove this temporary ignore when Semgrep permits the fixed telemetry stack.
+# Track: https://github.com/lgtm-hq/py-lintro/issues/2972
+
+[[IgnoredVulns]]
+id = "GHSA-xcq7-p3pf-p88h"
+ignoreUntil = 2026-11-23
+reason = "Reverified 2026-10-23: opentelemetry-api@1.37.0 in requirements-semgrep.txt (CVE-2026-114603) remains constrained by current Semgrep 1.179.0 and latest published Semgrep 1.182.1, which both require opentelemetry-api~=1.37.0 and exclude fixed 1.45.1. No open PR fixes the isolated Semgrep lock; #2821 updates the separate uv.lock but retains opentelemetry-api==1.37.0 in requirements-semgrep.txt. Operator-owned one-calendar-month temporary ignore under the unpatched-upstream policy, not an owner waiver or a claim of non-reachability. The flaw is quadratic CPU denial of service in TraceState.from_header on untrusted tracestate input; this dependency is in the isolated one-shot Semgrep CLI environment, not Lintro's application server. Recheck upstream constraints before expiry and remove once a compatible Semgrep release admits the fixed telemetry stack. Track: https://github.com/lgtm-hq/py-lintro/issues/2972"
+
 # --- mcp (PyPI, transitive via semgrep) ---
 # GHSA-84m7-p3x7-pcfv (published 2026-10-15) is fixed in mcp 1.30.0, but the
 # pinned semgrep and every available upgrade through 1.181.0 require
