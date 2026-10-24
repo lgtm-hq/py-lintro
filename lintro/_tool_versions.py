@@ -81,7 +81,7 @@ _MANIFEST_PATH = Path(__file__).parent / "tools" / "manifest.json"
 # ``_generated_versions.py`` (versions).
 TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.ACTIONLINT: "1.7.12",
-    ToolName.BUF: "1.73.0",
+    ToolName.BUF: "1.75.0",
     ToolName.CARGO_AUDIT: "0.22.0",
     ToolName.CARGO_DENY: "0.20.0",
     # checkov is a pypi distribution but deliberately not a pypi *seed*: it
@@ -115,9 +115,9 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.SHELLCHECK: "0.11.0",
     ToolName.SHFMT: "3.14.1",
     ToolName.TAPLO: "0.10.0",
-    ToolName.TRUFFLEHOG: "3.99.2",
+    ToolName.TRUFFLEHOG: "3.99.7",
     ToolName.TYPOS: "1.49.0",
-    ToolName.VALE: "3.24.0",
+    ToolName.VALE: "3.25.1",
 }
 
 _NPM_PACKAGE_TO_TOOL: dict[str, ToolName] = {
