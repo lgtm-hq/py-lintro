@@ -114,6 +114,8 @@ scripts/ci/generate-builtin-tool-index.py
 scripts/utils/install-tools.sh
 scripts/utils/install-semgrep.sh
 scripts/utils/utils.sh
+scripts/utils/gitleaks/go.mod
+scripts/utils/gitleaks/go.sum
 docker/tools.Dockerfile
 '
 

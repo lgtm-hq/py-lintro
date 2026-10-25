@@ -36,6 +36,8 @@ CANDIDATE_PATHS = frozenset(
         "package.json",
         "pyproject.toml",
         "requirements-semgrep.txt",
+        "scripts/utils/gitleaks/go.mod",
+        "scripts/utils/gitleaks/go.sum",
     },
 )
 BUILD_PATHS = frozenset(

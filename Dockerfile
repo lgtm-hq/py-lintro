@@ -76,10 +76,13 @@ RUN chmod +x /app/scripts/utils/install-tools.sh && \
     /app/scripts/utils/install-tools.sh --docker --tools typos,spectral,buf,import-linter,pylint,cppcheck,checkov && \
     rm -rf /var/lib/apt/lists/*
 
+# Refresh the decoder even while FROM still pins an older tools image.
+# CVE-2026-111497 is backported in Debian trixie's 1.1.0-2+deb13u1.
 # hadolint ignore=DL3008
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends gosu && \
+    apt-get update && apt-get install -y --no-install-recommends gosu libbrotli1 && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libbrotli1)" ge '1.1.0-2+deb13u1' && \
     rm -rf /var/lib/apt/lists/* && \
     gosu nobody true
 
@@ -136,7 +139,7 @@ CMD ["--help"]
 # -----------------------------------------------------------------------------
 # Stage: base — minimal runtime without external toolchains
 # -----------------------------------------------------------------------------
-FROM python:3.14-slim@sha256:fbecd461fc72d21b2143c6eaba25143738079154a6d0ea3da3aec724f50eed4a AS base
+FROM python:3.14-slim@sha256:35caba83af2fe6da9a5d922f9b0156f21d1246a48278c58a08bd253303ba42e8 AS base
 
 LABEL org.opencontainers.image.description="Lintro base image (no external tools); GHCR package py-lintro-base"
 
@@ -147,13 +150,24 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# This stage does not FROM `tools`, so it must prove its own base seeds a safe
+# pip: `python -m venv` installs CPython's bundled ensurepip wheel, which ships
+# its own private CA bundle. Probe a throwaway venv from its own interpreter and
+# require pip >= 26.2.2 (the release that drops the compromised root) before
+# installing anything.
+RUN python3 -m venv /tmp/lintro-seed-check && \
+    /tmp/lintro-seed-check/bin/python -c 'import pip; from pip._vendor.packaging.version import Version; assert Version(pip.__version__) >= Version("26.2.2"), pip.__version__' && \
+    rm -rf /tmp/lintro-seed-check
+
 WORKDIR /app
 
 # hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
+    libbrotli1 \
     gosu && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libbrotli1)" ge '1.1.0-2+deb13u1' && \
     gosu nobody true && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*

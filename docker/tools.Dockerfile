@@ -20,10 +20,11 @@
 # root Dockerfile until the FROM flip lands (see issue #1360).
 # =============================================================================
 
-FROM python:3.14-slim@sha256:fbecd461fc72d21b2143c6eaba25143738079154a6d0ea3da3aec724f50eed4a AS tools
+FROM python:3.14-slim@sha256:35caba83af2fe6da9a5d922f9b0156f21d1246a48278c58a08bd253303ba42e8 AS tools
 
 ARG BUN_VERSION=1.4.3
 ARG UV_VERSION=0.13.4
+ARG PIP_VERSION=26.2.2
 ARG GO_VERSION=1.27.3
 
 LABEL maintainer="lgtm-hq"
@@ -50,12 +51,15 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 WORKDIR /app
 
+# The Debian trixie backport fixes CVE-2026-111497 without changing SONAME.
+# Refresh an inherited libbrotli1 and fail closed if the mirror lacks the fix.
 # hadolint ignore=DL3008
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
+    libbrotli1 \
     build-essential \
     cppcheck \
     git \
@@ -63,6 +67,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     pkg-config \
     unzip \
     jq && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libbrotli1)" ge '1.1.0-2+deb13u1' && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -105,6 +110,18 @@ RUN ARCH=$(uname -m) && \
     chmod +x /usr/local/bin/uv && \
     rm -rf /tmp/uv*
 
+# The Python base ships pip's private CA bundle. Updating the application
+# trust store does not replace that copy; pip 26.2.2 removes the compromised root.
+RUN uv pip install --system --no-deps "pip==${PIP_VERSION}"
+
+# The system pip above never reaches a fresh venv: `python -m venv` seeds pip
+# from CPython's bundled ensurepip wheel, which carries its own private CA
+# bundle. Prove the base image seeds a patched pip (>= 26.2.2) by probing a
+# throwaway venv from its own interpreter.
+RUN python3 -m venv /tmp/lintro-seed-check && \
+    /tmp/lintro-seed-check/bin/python -c 'import pip; from pip._vendor.packaging.version import Version; assert Version(pip.__version__) >= Version("26.2.2"), pip.__version__' && \
+    rm -rf /tmp/lintro-seed-check
+
 # Bundle a pinned Go toolchain so Go-based linters (e.g. golangci-lint) have a
 # working compiler. GOTOOLCHAIN=local (set above) keeps this toolchain
 # authoritative — Go never auto-downloads a different version at runtime.
@@ -138,6 +155,27 @@ COPY requirements-semgrep.txt /app/requirements-semgrep.txt
 # they stop being committed (epic #2176 phase 4).
 RUN python3 scripts/ci/generate-tool-versions.py && \
     python3 scripts/ci/generate-builtin-tool-index.py
+
+# The upstream Gitleaks release embeds Go 1.24.11 and vulnerable archive/crypto
+# dependencies. Build its unchanged, checksum-verified module through our locked
+# security closure using the pinned compiler and upstream regex/version flags.
+# Fail closed if the canonical tool pin and reviewed closure diverge. Dependency
+# updates belong in the committed go.mod/go.sum, never a floating build-time get.
+# Install before install-tools.sh so its existing-binary path retains this copy.
+# DL3062 cannot see the exact versions and checksums in our readonly module lock.
+# hadolint ignore=DL3062
+RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
+    --mount=type=cache,target=/root/go/pkg/mod,sharing=locked \
+    GITLEAKS_VERSION=$(python3 -c "import runpy; m = runpy.run_path('lintro/_tool_versions.py'); print(m['get_tool_version']('gitleaks'))") && \
+    export GOTOOLCHAIN=local CGO_ENABLED=0 GOSUMDB=sum.golang.org \
+    GOPROXY=https://proxy.golang.org GOBIN=/usr/local/bin GOWORK=off \
+    GONOSUMDB='' GONOPROXY='' GOPRIVATE='' && \
+    test "$(go -C /app/scripts/utils/gitleaks list -mod=readonly -m -f '{{.Version}}' github.com/zricethezav/gitleaks/v8)" = "v${GITLEAKS_VERSION}" && \
+    go -C /app/scripts/utils/gitleaks install -mod=readonly -trimpath -tags gore2regex \
+    -ldflags "-s -w -X=github.com/zricethezav/gitleaks/v8/version.Version=${GITLEAKS_VERSION}" \
+    github.com/zricethezav/gitleaks/v8 && \
+    go version -m /usr/local/bin/gitleaks | grep -Fx "/usr/local/bin/gitleaks: go${GO_VERSION}" && \
+    test "$(gitleaks version)" = "${GITLEAKS_VERSION}"
 
 RUN groupadd -r tools && \
     mkdir -p /opt/bun /opt/cargo /opt/rustup /opt/uv-tools

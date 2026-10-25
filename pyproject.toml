@@ -64,7 +64,7 @@ content-type = "text/markdown"
 typing = ["types-setuptools>=80.9.0.20251223", "types-tabulate>=0.9.0.20241207"]
 full = [
   "ruff>=0.15.9",
-  "black>=26.3.1",
+  "black>=26.10.1",
   "bandit>=1.9.4",
   "import-linter>=2.15",
   "mypy>=1.19.1",
@@ -81,7 +81,7 @@ mcp = ["mcp>=2.2,<3"]
 # Semgrep is intentionally absent: it ships from the isolated lockfile
 # ``requirements-semgrep.txt`` (#2104) so its pins cannot collide with
 # lintro's shared resolver. sqlfluff and pip-audit remain here.
-tools = ["sqlfluff>=4.0.0", "pip-audit>=2.10.1"]
+tools = ["sqlfluff>=4.3.0", "pip-audit>=2.10.1"]
 
 [project.scripts]
 lintro = "lintro.cli:main"
@@ -120,7 +120,7 @@ dev = [
   "assertpy>=1.1",
   "pytest-mock>=3.15.1",
   "bandit>=1.9.4",
-  "black>=26.3.1",
+  "black>=26.10.1",
   "ruff>=0.15.9",
   "yamllint>=1.37.1",
   "pytest-timeout>=2.4.0",
