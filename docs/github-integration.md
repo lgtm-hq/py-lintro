@@ -302,13 +302,10 @@ alike. It is unset by default: there is no check and no sticky line.
     it is.
   - Coverage carried from earlier rounds is complete: every file is already covered at
     the head, so the check is green (exit 0), like any complete review.
-- **Choosing a figure:** on #2806, the round on the second head cost
-  **$10.03** and the
-  round on the third **$7.63**, so two rounds cost about
-  $17.66. A budget that stops a
+- **Choosing a figure:** on #2806, the round on the second head cost **$10.03** and the
+  round on the third **$7.63**, so two rounds cost about $17.66. A budget that stops a
   runaway pull request without cutting off a normal three-to-four-round one sits around
-  **$40–60**.
-  Unset keeps today's behaviour.
+  **$40–60**. Unset keeps today's behaviour.
 
 ### 5. Docker Image Publishing
 

@@ -109,7 +109,7 @@ def _python_base_digest(dockerfile: Path, stage: str) -> str:
     Returns:
         str: The 64-hex sha256 digest pinned on the ``python:3.14-slim`` tag.
     """
-    matches = PYTHON_BASE_FROM.findall(dockerfile.read_text())
+    matches: list[tuple[str, str]] = PYTHON_BASE_FROM.findall(dockerfile.read_text())
     assert len(matches) == 1, f"{dockerfile.name} must pin {PYTHON_BASE_TAG} once"
     digest, found_stage = matches[0]
     assert found_stage == stage

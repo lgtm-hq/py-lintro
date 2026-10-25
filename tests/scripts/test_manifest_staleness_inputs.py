@@ -51,6 +51,7 @@ _GUARD_ONLY_PATHS = frozenset(
         "scripts/utils/utils.sh",
         "scripts/utils/gitleaks/go.mod",
         "scripts/utils/gitleaks/go.sum",
+        "scripts/utils/gitleaks/verify_imports.py",
     },
 )
 
@@ -111,6 +112,7 @@ def test_guard_watches_only_the_gitleaks_dependency_inputs() -> None:
     watched = _guard_paths()
     assert "scripts/utils/gitleaks/go.mod" in watched
     assert "scripts/utils/gitleaks/go.sum" in watched
+    assert "scripts/utils/gitleaks/verify_imports.py" in watched
     assert "scripts/utils/gitleaks/" not in watched
     assert "scripts/utils/gitleaks/README.md" not in watched
 

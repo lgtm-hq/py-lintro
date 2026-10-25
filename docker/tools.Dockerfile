@@ -171,6 +171,8 @@ RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     GOPROXY=https://proxy.golang.org GOBIN=/usr/local/bin GOWORK=off \
     GONOSUMDB='' GONOPROXY='' GOPRIVATE='' && \
     test "$(go -C /app/scripts/utils/gitleaks list -mod=readonly -m -f '{{.Version}}' github.com/zricethezav/gitleaks/v8)" = "v${GITLEAKS_VERSION}" && \
+    go -C /app/scripts/utils/gitleaks list -mod=readonly -deps -tags gore2regex \
+    github.com/zricethezav/gitleaks/v8 | python3 scripts/utils/gitleaks/verify_imports.py && \
     go -C /app/scripts/utils/gitleaks install -mod=readonly -trimpath -tags gore2regex \
     -ldflags "-s -w -X=github.com/zricethezav/gitleaks/v8/version.Version=${GITLEAKS_VERSION}" \
     github.com/zricethezav/gitleaks/v8 && \

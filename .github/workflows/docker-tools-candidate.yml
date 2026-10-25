@@ -23,6 +23,7 @@ name: Build - Lintro Tools Candidate
       - 'requirements-semgrep.txt'
       - 'scripts/utils/gitleaks/go.mod'
       - 'scripts/utils/gitleaks/go.sum'
+      - 'scripts/utils/gitleaks/verify_imports.py'
 
 permissions: {}
 

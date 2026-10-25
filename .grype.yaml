@@ -17,12 +17,6 @@ ignore:
     package:
       name: http-cache-semantics
       type: npm
-  # braces <= 3.0.3: no patched release; dev/lint tooling glob expansion only.
-  # Mirrors .osv-scanner.toml, review by 2026-11-02.
-  - vulnerability: GHSA-vfj7-8cjw-p6xm
-    package:
-      name: braces
-      type: npm
   # markdown-it 15.0.1: pinned exactly by markdownlint-cli2 0.23.3 (latest);
   # DoS-only quadratic parsing of linted Markdown. Mirrors .osv-scanner.toml,
   # review by 2026-11-03.

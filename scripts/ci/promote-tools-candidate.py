@@ -38,6 +38,7 @@ CANDIDATE_PATHS = frozenset(
         "requirements-semgrep.txt",
         "scripts/utils/gitleaks/go.mod",
         "scripts/utils/gitleaks/go.sum",
+        "scripts/utils/gitleaks/verify_imports.py",
     },
 )
 BUILD_PATHS = frozenset(

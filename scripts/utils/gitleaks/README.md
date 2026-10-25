@@ -5,7 +5,7 @@ dependency graph. `docker/tools.Dockerfile` checks this module's Gitleaks versio
 against `get_tool_version('gitleaks')` before installing anything; it builds with
 `-mod=readonly`, the image's pinned Go compiler, `CGO_ENABLED=0`, and the upstream
 `gore2regex` tag and Version ldflag. No source fork, replacement module, floating
-build-time update, or vulnerability ignore is involved.
+build-time update is involved.
 
 The seven changed embedded dependencies are:
 
@@ -46,8 +46,12 @@ The module-level, no-fixed-version `GO-2026-5932` advisory concerns
 `golang.org/x/crypto/openpgp`. The current `gore2regex`, CGO-disabled amd64 and arm64
 command builds do not import any of its affected packages. Keep that narrow
 package-absence evidence separate from saying the module is patched; recheck when
-source, flags, platform or dependencies change. There is no scanner suppression for this
-advisory.
+source, flags, platform or dependencies change. Every image build now checks the actual
+target-specific import closure with `verify_imports.py` before installing Gitleaks and
+fails if an affected OpenPGP package is present. A time-limited root OSV exception
+expires on 2026-11-25; it records package absence, not a patched module. A regression
+rejects additional non-fixture Go modules so that advisory-wide exception cannot
+silently cover a new consumer. Reassess applicability and upstream status before expiry.
 
 This closure is not whole-image security clearance. Other installed binaries,
 pip-private dependency copies, distro packages, and the normal image

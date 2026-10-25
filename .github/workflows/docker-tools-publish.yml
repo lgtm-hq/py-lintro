@@ -37,6 +37,7 @@ name: Build - Lintro Tools Image
       - 'requirements-semgrep.txt'
       - 'scripts/utils/gitleaks/go.mod'
       - 'scripts/utils/gitleaks/go.sum'
+      - 'scripts/utils/gitleaks/verify_imports.py'
   schedule:
     # Weekly rebuild (Monday 03:17 UTC) for CVE freshness in tool binaries.
     - cron: '17 3 * * 1'
