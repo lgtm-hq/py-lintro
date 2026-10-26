@@ -19,19 +19,6 @@ reason = "http-cache-semantics@4.2.0: no patched release (advisory first_patched
 # first_patched_version is null. Track: https://github.com/micromatch/braces/issues/70
 
 [[IgnoredVulns]]
-id = "GHSA-vfj7-8cjw-p6xm"
-ignoreUntil = 2026-11-02
-reason = "braces@3.0.3: no patched release (advisory first_patched_version = none; 3.0.3 is latest). Dev/lint tooling only (root package.json devDependencies, also bundled in the lintro tools image): reached via micromatch/fast-glob from markdownlint-cli2, stylelint and spectral-cli, plus vite/rollup at build time. Input is glob patterns from the operator's own CLI args and lint configs, never network or end-user input; worst case is a stack-exhaustion crash of a single local lint/build process (DoS only, no confidentiality or integrity impact). Upstream: https://github.com/micromatch/braces/issues/70"
-
-# --- markdown-it (npm, transitive via markdownlint-cli2) ---
-# GHSA-r7fv-28h4-cvq7, GHSA-vfgh-jcmw-g37q and GHSA-gfr2-rv44-r23c (all
-# published 2026-10-20) are fixed in markdown-it 15.0.2 / 15.0.3, but
-# markdownlint-cli2 0.23.3 (the latest release, and the version the tools
-# manifest pins) depends on markdown-it==15.0.1 exactly, so the lock cannot
-# move. Drop these entries once a markdownlint-cli2 release moves its pin.
-# Track: https://github.com/DavidAnson/markdownlint-cli2/blob/main/package.json
-
-[[IgnoredVulns]]
 id = "GHSA-r7fv-28h4-cvq7"
 ignoreUntil = 2026-11-03
 reason = "markdown-it@15.0.1 in the root bun.lock: markdownlint-cli2 0.23.3 (latest release, pinned by the tools manifest) requires markdown-it==15.0.1 exactly, so no resolvable upgrade exists. The flaw is quadratic-time parsing of unmatched closing quotes in the smartquotes rule. markdownlint-cli2 parses repository Markdown, including files a pull request adds, in a one-shot lint process locally or on a CI runner; it does not serve or parse network input. Worst case is a slow or stuck lint job on a crafted file (DoS of that job only, no confidentiality or integrity impact). Upstream pin: markdownlint-cli2 package.json"
