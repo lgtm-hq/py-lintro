@@ -21,7 +21,7 @@ jobs:
     with:
       # v0.52.4 drops lgtm-ci composites from this job so scorecard-action
       # publish_results passes workflow verification (#518, lgtm-ci #535).
-      egress-policy: block
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       # Full list: v0.52.4 feeds allowed-endpoints verbatim to harden-runner
       # (no preset resolution in the scorecard job).
       allowed-endpoints: >
