@@ -192,6 +192,7 @@ jobs:
       contents: read # repository context for the issue body
       issues: write # open or ping the deduplicated failure issue
     with:
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       workflow-key: ai-provider-api-smoke
       failure-issue-labels: 'bug,ci,ai,ai-provider-smoke'
       tooling-ref: '9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb' # v0.78.0
