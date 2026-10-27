@@ -82,7 +82,7 @@ jobs:
     # explicit `false` — a publish that really did fail — stops the version PR.
     if: always() && needs.publish-gate.outputs.publish_green != 'false'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     with:
       ecosystems: python
       # Never armed: a version PR is merged deliberately after its generated
@@ -100,7 +100,7 @@ jobs:
       # .github/SECURITY.md keeps a version-agnostic table. Logic lives in
       # dedicated scripts, not inline runs.
       version-update-script: scripts/ci/finalize-version-pr.py
-      tooling-ref: '9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb' # v0.78.0
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
       egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       # Paired with release-auto-tag.yml (egress-preset: github-tooling).
       # Guarded by test_release_workflows_use_paired_egress_presets.
