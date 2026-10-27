@@ -13,6 +13,7 @@ from lintro._tool_versions import get_tool_version
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _INSTALL_TOOLS = _REPO_ROOT / "scripts" / "utils" / "install-tools.sh"
+_PYTHON_INSTALLER = _REPO_ROOT / "scripts" / "utils" / "installers" / "python-tools.sh"
 _DOCKERFILE = _REPO_ROOT / "Dockerfile"
 _TOOLS_DOCKERFILE = _REPO_ROOT / "docker" / "tools.Dockerfile"
 
@@ -101,7 +102,7 @@ def test_install_block_stages_the_console_script_into_bin_dir() -> None:
     import-linter block therefore has to stage the binary itself; without this
     assertion, deleting that copy would leave the suite green.
     """
-    script = _INSTALL_TOOLS.read_text(encoding="utf-8")
+    script = _PYTHON_INSTALLER.read_text(encoding="utf-8")
     block_at = script.find('install_python_package "import-linter"')
     assert_that(block_at).is_not_equal_to(-1)
     block = script[block_at : script.index("fi # import-linter", block_at)]
@@ -117,7 +118,7 @@ def test_install_block_fails_when_the_console_script_is_absent() -> None:
     Reporting success there would let the tools image build green and only
     surface as ``binary_missing`` much later, in the manifest-vs-image gate.
     """
-    script = _INSTALL_TOOLS.read_text(encoding="utf-8")
+    script = _PYTHON_INSTALLER.read_text(encoding="utf-8")
     block_at = script.find('install_python_package "import-linter"')
     block = script[block_at : script.index("fi # import-linter", block_at)]
 

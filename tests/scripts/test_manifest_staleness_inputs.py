@@ -47,6 +47,7 @@ _GUARD_ONLY_PATHS = frozenset(
         _GENERATE_SCRIPT,
         "scripts/ci/generate-builtin-tool-index.py",
         "scripts/utils/install-tools.sh",
+        "scripts/utils/installers/",
         "scripts/utils/install-semgrep.sh",
         "scripts/utils/utils.sh",
     },
