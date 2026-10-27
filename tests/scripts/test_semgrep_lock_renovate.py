@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: MIT
 """Behavior and security contracts for Renovate semgrep lock regeneration."""
 
+# Temporary audit-mode contract: lgtm-hq/lgtm-ci#1207.
+# Endpoint assertions remain mandatory for the eventual return to block mode.
+
 from __future__ import annotations
 
 import os
@@ -240,7 +243,7 @@ def test_workflow_restricts_writes_and_uses_the_candidate_signing_contract() -> 
     for action in source:
         assert_that(actions[action]["uses"]).is_equal_to(source[action]["uses"])
     assert_that(steps[0]["uses"]).starts_with("step-security/harden-runner@")
-    assert_that(steps[0]["with"]["egress-policy"]).is_equal_to("block")
+    assert_that(steps[0]["with"]["egress-policy"]).is_equal_to("audit")
     checkout = actions["actions/checkout"]
     assert_that(checkout["with"]["persist-credentials"]).is_false()
     assert_that(checkout["with"]["ref"]).is_equal_to("${{ github.sha }}")
