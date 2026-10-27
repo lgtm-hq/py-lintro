@@ -69,7 +69,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: block
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           # lgtm-ci egress preset `sbom` (scripts/ci/lib/egress/presets.sh),
           # minus the sigstore/uploads hosts that only release-asset signing
           # needs. The anchore hosts serve the syft/grype binaries and the

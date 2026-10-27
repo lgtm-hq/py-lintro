@@ -96,6 +96,6 @@ jobs:
       # Block mode with the reusable's own default allowlist (probes for
       # PyPI, npm and GHCR, the GitHub API and artifact service, and the
       # Sigstore hosts for the npm resume).
-      egress-policy: block
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
     # No Homebrew dispatch: the tap has no recovery lane; a missing formula
     # update is re-driven by the tap's update-formula dispatch instead.

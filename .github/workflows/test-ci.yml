@@ -64,7 +64,7 @@ jobs:
       artifact-prefix: python_compat
       runner-image: ubuntu-24.04
       tooling-ref: '9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb' # v0.78.0
-      egress-policy: block
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: pypi
       # Full list (v0.50.0+ replace semantics): the reusable passes
       # allowed-endpoints verbatim to step-security/harden-runner, so a
@@ -117,7 +117,7 @@ jobs:
       job-name: Python Coverage
       runner-image: ubuntu-24.04
       tooling-ref: '9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb' # v0.78.0
-      egress-policy: block
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: pypi
       # Full list (v0.50.0+ replace semantics): the reusable passes
       # allowed-endpoints verbatim to step-security/harden-runner, so a
@@ -164,7 +164,7 @@ jobs:
       draft-pr-skip: true
       runner-image: ubuntu-24.04
       tooling-ref: '9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb' # v0.78.0
-      egress-policy: block
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: github-tooling
       # Replace semantics (see test-compat): the github-tooling baseline plus
       # nothing else. bats-core and its helper libraries are cloned from
@@ -235,7 +235,7 @@ jobs:
       runner-image: ubuntu-24.04
       upstream-result: ${{ needs.test-gate.outputs.result }}
       passed-output: ${{ needs.test-gate.outputs.passed }}
-      egress-policy: block
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: github-tooling
 
   stage-coverage-html:
@@ -256,7 +256,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: block
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           # raw.githubusercontent.com is required by astral-sh/setup-uv (versions
           # manifest). Omitting it fails this job and turns CI - Tests red on
           # main even when tests passed (see #1227).

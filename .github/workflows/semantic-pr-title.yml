@@ -28,7 +28,7 @@ jobs:
       # suffix, so a title that passes here cannot fail post-merge (#2553:
       # 9 of the last 269 main commits did).
       max-length: '90'
-      egress-policy: block
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: github-tooling
     permissions:
       contents: read
