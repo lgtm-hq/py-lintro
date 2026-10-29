@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.parsers.golangci_lint.golangci_lint_issue import GolangciLintIssue
@@ -516,3 +517,81 @@ def test_fix_invokes_golangci_lint_with_parallel_runners_allowed(
     for argv in recorded:
         assert_that(argv).contains("golangci-lint", "run", "--allow-parallel-runners")
     assert_that([argv for argv in recorded if "--fix" in argv]).is_not_empty()
+
+
+@pytest.mark.parametrize("operation", ["check", "fix"])
+def test_dependency_only_module_has_no_lintable_source(
+    golangci_lint_plugin: GolangciLintPlugin,
+    tmp_path: Path,
+    operation: str,
+) -> None:
+    """A command dependency lock must not invoke a source-code linter.
+
+    Args:
+        golangci_lint_plugin: Plugin under test.
+        tmp_path: Dependency-only module directory.
+        operation: Check or fix entry point.
+    """
+    (tmp_path / "go.mod").write_text("module example.com/tools\n\ngo 1.21\n")
+    with patch.object(
+        golangci_lint_plugin,
+        "_run_subprocess",
+        side_effect=AssertionError("a dependency lock has no source to lint"),
+    ):
+        result = getattr(golangci_lint_plugin, operation)([str(tmp_path)], {})
+    assert_that(result.success).is_true()
+    assert_that(result.no_files).is_true()
+    assert_that(result.output).contains("No go.mod with Go source")
+
+
+@pytest.mark.parametrize("directory", ["vendor", "testdata", ".hidden", "_ignored"])
+def test_ignored_directories_do_not_make_a_module_lintable(
+    tmp_path: Path,
+    directory: str,
+) -> None:
+    """Go-ignored source trees must not turn a dependency lock into a package.
+
+    Args:
+        tmp_path: Dependency-only module directory.
+        directory: Directory omitted by Go recursive package selection.
+    """
+    from lintro.tools.golangci_lint.definition import _find_go_module_roots
+
+    (tmp_path / "go.mod").write_text("module example.com/tools\n\ngo 1.21\n")
+    child = tmp_path / directory
+    child.mkdir()
+    (child / "ignored.go").write_text("package ignored\n")
+    assert_that(_find_go_module_roots([str(tmp_path / "go.mod")])).is_empty()
+
+
+def test_nested_source_does_not_make_its_dependency_only_parent_lintable(
+    tmp_path: Path,
+) -> None:
+    """A nested module is linted without invoking its empty parent module.
+
+    Args:
+        tmp_path: Parent dependency-only module directory.
+    """
+    from lintro.tools.golangci_lint.definition import _find_go_module_roots
+
+    (tmp_path / "go.mod").write_text("module example.com/tools\n\ngo 1.21\n")
+    child = tmp_path / "child"
+    child.mkdir()
+    _make_go_module(child)
+    roots = _find_go_module_roots([str(tmp_path / "go.mod"), str(child / "main.go")])
+    assert_that(roots).is_equal_to([child])
+
+
+def test_unreadable_module_is_not_reported_as_empty(tmp_path: Path) -> None:
+    """Failure to discover packages must fail rather than skip the module.
+
+    Args:
+        tmp_path: Module directory whose scan will fail.
+    """
+    from lintro.tools.golangci_lint.definition import _module_has_go_sources
+
+    with (
+        patch("os.scandir", side_effect=PermissionError("unreadable module")),
+        pytest.raises(PermissionError, match="unreadable module"),
+    ):
+        _module_has_go_sources(tmp_path)

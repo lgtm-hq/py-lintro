@@ -66,7 +66,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -103,17 +103,17 @@ jobs:
     # Same reusable workflow and tool options as the docker-ci.yml full run
     # (dogfooding-lint) so nightly coverage matches the pre-merge gate.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: '9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb' # v0.78.0
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
       job-name: '🌙 Nightly Dogfooding Lint'
       # black:timeout=120: the 30s default timed out on the full repo (#2352).
       lintro-tool-options: >-
         pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
-      egress-policy: block
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       # No CI build in this workflow: lint main with the image resolve-image
       # resolved for this run (#2602). Never a literal here — a hand-edited
       # pin is what left the nightly four releases behind the manifest it
@@ -147,17 +147,17 @@ jobs:
         )
       )
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: '9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb' # v0.78.0
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
       job-name: '🌙 Nightly Dogfooding Lint (retry)'
       # black:timeout=120: the 30s default timed out on the full repo (#2352).
       lintro-tool-options: >-
         pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
-      egress-policy: block
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       # No CI build in this workflow: lint main with the image resolve-image
       # resolved for this run (#2602). Never a literal here — a hand-edited
       # pin is what left the nightly four releases behind the manifest it
@@ -191,7 +191,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -256,7 +256,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -354,7 +354,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -446,7 +446,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -516,11 +516,12 @@ jobs:
     # first failure opens `fix(ci): main workflow failed: dogfood-nightly`,
     # repeat failures comment on the open issue instead of piling up.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     permissions:
       actions: read # read workflow/job metadata for the failure context
       contents: read # repository context for the issue body
       issues: write # open or ping the deduplicated failure issue
     with:
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       workflow-key: dogfood-nightly
-      tooling-ref: '9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb' # v0.78.0
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1

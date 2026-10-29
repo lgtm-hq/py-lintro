@@ -69,7 +69,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: block
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           # lgtm-ci egress preset `sbom` (scripts/ci/lib/egress/presets.sh),
           # minus the sigstore/uploads hosts that only release-asset signing
           # needs. The anchore hosts serve the syft/grype binaries and the
@@ -101,7 +101,7 @@ jobs:
         # filter true, so infrastructure trouble scans rather than silently
         # skipping the gate.
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/detect-changes@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/detect-changes@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
         with:
           filters: |
             # Anything that can change the dependency graph the release gate
@@ -175,7 +175,7 @@ jobs:
           steps.changes.outputs.changes == '' ||
           fromJSON(steps.changes.outputs.changes).deps
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/generate-sbom@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/generate-sbom@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
         with:
           target: .
           target-type: dir
@@ -190,7 +190,7 @@ jobs:
           steps.changes.outputs.changes == '' ||
           fromJSON(steps.changes.outputs.changes).deps
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/scan-vulnerabilities@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/scan-vulnerabilities@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
         with:
           target: ${{ steps.sbom.outputs.sbom-file }}
           target-type: sbom

@@ -1,5 +1,8 @@
 """Contract tests for critical GitHub Actions workflow wiring."""
 
+# Temporary audit-mode contract: lgtm-hq/lgtm-ci#1207.
+# Endpoint assertions remain mandatory for the eventual return to block mode.
+
 from __future__ import annotations
 
 import ast
@@ -1015,7 +1018,7 @@ def test_dogfood_lint_callers_carry_no_githubapp_grant(job_id: str) -> None:
     job_with = docker_ci["jobs"][job_id]["with"]
     allowed = set(str(job_with["allowed-endpoints"]).split())
 
-    assert_that(job_with["egress-policy"]).is_equal_to("block")
+    assert_that(job_with["egress-policy"]).is_equal_to("audit")
     assert_that(job_with["allowed-endpoints-mode"]).is_equal_to("append")
     for endpoint in allowed:
         assert_that(endpoint.lower()).described_as(endpoint).does_not_contain(
@@ -1079,7 +1082,7 @@ def test_long_docker_ci_jobs_carry_no_githubapp_grant(job_id: str) -> None:
     )
     allowed = set(str(harden["with"]["allowed-endpoints"]).split())
 
-    assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
+    assert_that(harden["with"]["egress-policy"]).is_equal_to("audit")
     assert_that(job["timeout-minutes"]).is_greater_than(10)
     # Keep a positive floor so the guard cannot be satisfied by emptying the list.
     assert_that(allowed).contains("github.com:443", "api.github.com:443")
@@ -1087,6 +1090,37 @@ def test_long_docker_ci_jobs_carry_no_githubapp_grant(job_id: str) -> None:
         assert_that(endpoint.lower()).described_as(endpoint).does_not_contain(
             "githubapp.com",
         )
+
+
+def test_version_hook_can_reach_artifact_results_service() -> None:
+    """The release metadata download needs artifact API egress (#2965)."""
+    release = _load_workflow(name="release-version-pr.yml")
+    options = release["jobs"]["version-pr"]["with"]
+    allowed = set(str(options["allowed-endpoints"]).split())
+
+    assert_that(options["egress-policy"]).is_equal_to("audit")
+    assert_that(allowed).contains(
+        "pipelines.actions.githubusercontent.com:443",
+        "results-receiver.actions.githubusercontent.com:443",
+    )
+
+
+def test_docker_ci_dogfood_skip_gate_can_reach_artifact_results_service() -> None:
+    """The authoritative-report download needs artifact API egress (#2963)."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate = docker_ci["jobs"]["dogfood-skip-gate"]
+    harden = next(
+        step
+        for step in gate["steps"]
+        if str(step.get("uses", "")).startswith("step-security/harden-runner@")
+    )
+    allowed = set(str(harden["with"]["allowed-endpoints"]).split())
+
+    assert_that(harden["with"]["egress-policy"]).is_equal_to("audit")
+    assert_that(allowed).contains(
+        "pipelines.actions.githubusercontent.com:443",
+        "results-receiver.actions.githubusercontent.com:443",
+    )
 
 
 def test_docker_ci_dogfood_skip_gate_consumes_authoritative_lint_report() -> None:
@@ -1319,7 +1353,7 @@ def test_test_ci_runs_the_bats_suites_and_gates_on_them() -> None:
     with_block = job["with"]
     assert_that(with_block["test-path"]).is_equal_to("tests/bats")
     assert_that(with_block["tooling-ref"]).is_equal_to(_canonical_lgtm_ci_pin())
-    assert_that(with_block["egress-policy"]).is_equal_to("block")
+    assert_that(with_block["egress-policy"]).is_equal_to("audit")
     assert_that(with_block["allowed-endpoints-mode"]).is_equal_to("replace")
     assert_that(set(str(with_block["allowed-endpoints"]).split())).contains(
         "github.com:443",
@@ -1865,7 +1899,7 @@ def test_publish_npm_reusable_allowlist_carries_the_publish_hosts() -> None:
     attestation verify) and the artifact download service.
     """
     with_block = _publish_npm_jobs()["publish"]["with"]
-    assert_that(with_block["egress-policy"]).is_equal_to("block")
+    assert_that(with_block["egress-policy"]).is_equal_to("audit")
     assert_that(with_block["allowed-endpoints-mode"]).is_equal_to("replace")
     endpoints = _endpoint_set(with_block["allowed-endpoints"])
     assert endpoints is not None  # literal list, narrow for mypy
@@ -2229,7 +2263,7 @@ def test_build_linux_carries_no_githubapp_grant() -> None:
     )
     endpoints = str(harden["with"]["allowed-endpoints"]).split()
 
-    assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
+    assert_that(harden["with"]["egress-policy"]).is_equal_to("audit")
     for endpoint in endpoints:
         assert_that(endpoint.lower()).described_as(endpoint).does_not_contain(
             "githubapp.com",
@@ -2394,6 +2428,10 @@ _DELIBERATELY_UNWATCHED = frozenset(
         # it, so an automatic rerun could double-tag or resurrect a version PR.
         "Release - Auto Tag",
         "Release - Version PR",
+        # Aggregate failures need exact-head producer/attempt reconciliation
+        # before recovery. Do not give this safety gate a new automatic retry
+        # budget; an operator diagnoses and reruns proven infra loss manually.
+        "PR - All Checks Gate",
         # The watcher itself. Adding it to its own `workflows:` list would let
         # a failed rerun attempt trigger another rerun attempt.
         "Auto Rerun on Infra Failure",
@@ -2923,27 +2961,33 @@ def test_every_attestation_verifying_job_allows_the_attestation_store() -> None:
 
 
 def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
-    """Every lgtm-ci ref in workflows must match the single canonical pin.
+    """Keep canonical pins except the independently adopted aggregate gate.
 
     Guards the repo-wide invariant from #1280: `uses:` refs,
     `tooling-ref:` inputs, and manual `actions/checkout` steps targeting
     lgtm-hq/lgtm-ci all point at the same lgtm-ci commit, so pins cannot
-    silently drift apart again. Any ref shape (tag, branch, short SHA,
-    any quoting) that is not the canonical pin is an offender.
+    silently drift apart again. Only the named aggregate caller has an
+    independent exact pin; tags, branches and short SHAs remain offenders.
     """
     canonical = _canonical_lgtm_ci_pin()
+    # Gate-only adoption needs the released #1197 retry recovery and #1207
+    # block-egress repair without migrating unrelated reusable callers.
+    independent_pins = {
+        "all-checks-gate.yml": "8f0fd9339df5d30a529aa572ceb51345b8be33a0",
+    }
     ref_pattern = re.compile(
         r"lgtm-hq/lgtm-ci/[^@\s]+@([^\s#]+)|tooling-ref:\s*[\"']?([^\"'\s#]+)",
     )
     offenders: list[str] = []
     for path in _workflow_paths():
+        expected_pin = independent_pins.get(path.name, canonical)
         for lineno, line in enumerate(
             path.read_text(encoding="utf-8").splitlines(),
             start=1,
         ):
             for match in ref_pattern.finditer(line):
                 ref = match.group(1) or match.group(2)
-                if ref != canonical:
+                if ref != expected_pin:
                     offenders.append(f"{path.name}:{lineno}: {ref}")
 
         # Manual lgtm-ci tooling checkouts pin via a separate `ref:` field
@@ -2955,7 +2999,7 @@ def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
                 with_block = step.get("with") or {}
                 if with_block.get("repository") != "lgtm-hq/lgtm-ci":
                     continue
-                if with_block.get("ref") != canonical:
+                if with_block.get("ref") != expected_pin:
                     offenders.append(
                         f"{path.name}:{job_id}: checkout ref {with_block.get('ref')!r}",
                     )
@@ -3793,13 +3837,13 @@ def test_mirror_release_job_is_read_only_in_source_repo() -> None:
     )
 
 
-def test_mirror_release_hardens_runner_with_blocked_egress() -> None:
-    """First step hardens the runner and blocks egress to an allowlist."""
+def test_mirror_release_hardens_runner_with_audited_egress() -> None:
+    """First step audits runner egress and retains the allowlist."""
     workflow = _load_workflow(name="mirror-release.yml")
     first = _job_steps(workflow, job="mirror-bump")[0]
 
     assert_that(first["uses"]).starts_with("step-security/harden-runner@")
-    assert_that(first["with"]["egress-policy"]).is_equal_to("block")
+    assert_that(first["with"]["egress-policy"]).is_equal_to("audit")
     endpoints = first["with"]["allowed-endpoints"]
     assert_that(endpoints).contains("pypi.org:443")
     assert_that(endpoints).contains("files.pythonhosted.org:443")
@@ -4594,7 +4638,7 @@ def test_binary_publish_jobs_allowlist_the_artifact_service() -> None:
             )
             assert_that(harden).described_as(f"{workflow_name}:{job_id}").is_not_none()
             assert harden is not None
-            assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
+            assert_that(harden["with"]["egress-policy"]).is_equal_to("audit")
             moves_artifact = any(
                 str(step.get("uses", "")).startswith(
                     ("actions/upload-artifact@", "actions/download-artifact@"),
@@ -5836,7 +5880,7 @@ def _harden_runner_endpoints(*, job: dict[str, Any]) -> set[str]:
         for step in job["steps"]
         if str(step.get("uses", "")).startswith("step-security/")
     )
-    assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
+    assert_that(harden["with"]["egress-policy"]).is_equal_to("audit")
     return set(str(harden["with"]["allowed-endpoints"]).split())
 
 
@@ -6391,7 +6435,7 @@ def test_version_skew_audit_allows_every_channel_endpoint() -> None:
     harden = next(
         step for step in steps if str(step.get("uses", "")).startswith("step-security/")
     )
-    assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
+    assert_that(harden["with"]["egress-policy"]).is_equal_to("audit")
     allowed = harden["with"]["allowed-endpoints"].split()
     for endpoint in (
         "pypi.org:443",
@@ -7392,12 +7436,12 @@ _UV_RELEASE_ASSET_HOSTS = frozenset(
 _SETUP_ENV_ACTION = "./.github/actions/setup-env"
 
 
-def _blocked_jobs_that_bootstrap_uv() -> dict[str, dict[str, Any]]:
-    """Return every egress-blocked job that installs uv through ``setup-env``.
+def _hardened_jobs_that_bootstrap_uv() -> dict[str, dict[str, Any]]:
+    """Return every hardened job that installs uv through ``setup-env``.
 
     Returns:
         ``{"<workflow file>:<job id>": job}`` for each job whose steps use the
-        local ``setup-env`` action under a harden-runner ``block`` policy.
+        local ``setup-env`` action under a harden-runner ``block`` or ``audit`` policy.
     """
     found: dict[str, dict[str, Any]] = {}
     for path in _workflow_paths():
@@ -7414,20 +7458,25 @@ def _blocked_jobs_that_bootstrap_uv() -> dict[str, dict[str, Any]]:
                 ),
                 None,
             )
-            if harden is None or harden["with"].get("egress-policy") != "block":
+            if harden is None or harden["with"].get("egress-policy") not in {
+                "block",
+                "audit",
+            }:
                 continue
             found[f"{path.name}:{job_id}"] = job
     return found
 
 
-def test_every_blocked_job_that_bootstraps_uv_allows_both_release_asset_hosts() -> None:
-    """Every egress-blocked uv bootstrap must allow both release-asset hosts.
+def test_every_hardened_job_that_bootstraps_uv_allows_both_release_asset_hosts() -> (
+    None
+):
+    """Every hardened uv bootstrap must allow both release-asset hosts.
 
     Pinned across all workflows rather than on the smoke alone so the next
     host move is caught wherever the bootstrap runs (#2741).
     """
-    jobs = _blocked_jobs_that_bootstrap_uv()
-    assert_that(jobs).described_as("blocked jobs using setup-env").contains_key(
+    jobs = _hardened_jobs_that_bootstrap_uv()
+    assert_that(jobs).described_as("hardened jobs using setup-env").contains_key(
         f"{_API_SMOKE_WORKFLOW}:{_API_SMOKE_JOB}",
     )
     missing = {
@@ -7436,7 +7485,7 @@ def test_every_blocked_job_that_bootstraps_uv_allows_both_release_asset_hosts() 
         if not _harden_runner_endpoints(job=job) >= _UV_RELEASE_ASSET_HOSTS
     }
     assert_that(missing).described_as(
-        "uv release-asset hosts missing from a blocked bootstrap job",
+        "uv release-asset hosts missing from a hardened bootstrap job",
     ).is_empty()
 
 
@@ -7591,7 +7640,7 @@ def test_artifact_jobs_allowlist_the_actions_results_service() -> None:
             if not moves_artifact or harden is None:
                 continue
             with_block = harden.get("with") or {}
-            if str(with_block.get("egress-policy", "")) != "block":
+            if str(with_block.get("egress-policy", "")) not in {"block", "audit"}:
                 continue
             allowlist = str(with_block.get("allowed-endpoints", ""))
             missing = [host for host in _ARTIFACT_ENDPOINTS if host not in allowlist]
@@ -8616,7 +8665,7 @@ def test_release_recovery_entry_calls_the_reusable_with_the_tag_path_values() ->
         ".github/workflows/publish-pypi-on-tag.yml",
     )
     assert_that(with_block["dry-run"]).is_equal_to("${{ inputs.dry-run }}")
-    assert_that(with_block["egress-policy"]).is_equal_to("block")
+    assert_that(with_block["egress-policy"]).is_equal_to("audit")
     # The npm resume must see exactly the package set the tag path staged.
     assert_that(with_block["npm-artifact-name"]).is_equal_to(
         publish_npm["artifact-name"],
@@ -8685,7 +8734,7 @@ def test_release_failure_notifier_runs_after_every_publish_job() -> None:
     assert_that(with_block["workflow-key"]).is_equal_to("publish-pypi-on-tag")
     assert_that(with_block["tag"]).is_equal_to("${{ github.ref_name }}")
     assert_that(with_block["channels"]).is_equal_to("${{ toJson(needs) }}")
-    assert_that(with_block["egress-policy"]).is_equal_to("block")
+    assert_that(with_block["egress-policy"]).is_equal_to("audit")
     assert_that(with_block["tooling-ref"]).is_equal_to(_canonical_lgtm_ci_pin())
     assert_that(job).does_not_contain_key("secrets")
     assert_that(list(publish["jobs"])[-1]).is_equal_to("notify-failure")

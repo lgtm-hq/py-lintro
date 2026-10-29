@@ -17,6 +17,8 @@ import tomllib
 from pathlib import Path
 
 from assertpy import assert_that
+from packaging.requirements import Requirement
+from packaging.version import Version
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -68,6 +70,18 @@ def test_every_pip_audit_ignore_is_a_live_osv_suppression() -> None:
             ).is_true()
 
 
+def test_semgrep_telemetry_exception_is_paired_with_pip_audit() -> None:
+    """Both scanners cover the same remaining, time-boxed Semgrep blocker."""
+    if not any(
+        entry.get("id") == "GHSA-xcq7-p3pf-p88h" for entry in _osv_suppressions()
+    ):
+        return
+    assert_that(_ignored_by_pip_audit()).contains(
+        "CVE-2026-114603",
+        "GHSA-xcq7-p3pf-p88h",
+    )
+
+
 def test_the_alias_match_is_whole_id_only() -> None:
     """A prefix of an id, or a bare year, must not satisfy the pairing."""
     entry: dict[str, object] = {
@@ -79,3 +93,23 @@ def test_the_alias_match_is_whole_id_only() -> None:
     assert_that(_names(entry, "CVE-2026-5995")).is_false()
     assert_that(_names(entry, "CVE-2026")).is_false()
     assert_that(_names(entry, "GHSA-84m7-p3x7")).is_false()
+
+
+def test_mcp_exceptions_do_not_cover_a_vulnerable_lintro_runtime() -> None:
+    """The scan-only exceptions must never hide an affected runtime SDK."""
+    project = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    dependencies = [
+        *project["project"]["optional-dependencies"]["mcp"],
+        *project["dependency-groups"]["dev"],
+    ]
+    mcp_requirements = [
+        req for item in dependencies if (req := Requirement(item)).name == "mcp"
+    ]
+    assert mcp_requirements
+    for requirement in mcp_requirements:
+        for vulnerable in ("1.29.0", "2.1.1"):
+            assert Version(vulnerable) not in requirement.specifier
+    lock = tomllib.loads((_ROOT / "uv.lock").read_text(encoding="utf-8"))
+    versions = [entry["version"] for entry in lock["package"] if entry["name"] == "mcp"]
+    assert versions
+    assert all(Version(version) >= Version("2.2.0") for version in versions)

@@ -49,6 +49,9 @@ _GUARD_ONLY_PATHS = frozenset(
         "scripts/utils/install-tools.sh",
         "scripts/utils/install-semgrep.sh",
         "scripts/utils/utils.sh",
+        "scripts/utils/gitleaks/go.mod",
+        "scripts/utils/gitleaks/go.sum",
+        "scripts/utils/gitleaks/verify_imports.py",
     },
 )
 
@@ -102,6 +105,16 @@ def test_guard_watches_every_rendered_manifest_input() -> None:
     assert_that(_guard_paths()).is_equal_to(
         _generator_input_paths() | set(_GUARD_ONLY_PATHS),
     )
+
+
+def test_guard_watches_only_the_gitleaks_dependency_inputs() -> None:
+    """Lock changes invalidate candidates without making README edits stale."""
+    watched = _guard_paths()
+    assert "scripts/utils/gitleaks/go.mod" in watched
+    assert "scripts/utils/gitleaks/go.sum" in watched
+    assert "scripts/utils/gitleaks/verify_imports.py" in watched
+    assert "scripts/utils/gitleaks/" not in watched
+    assert "scripts/utils/gitleaks/README.md" not in watched
 
 
 def test_guard_paths_exist_in_the_repository() -> None:

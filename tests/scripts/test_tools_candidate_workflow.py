@@ -102,6 +102,63 @@ def test_candidate_workflow_keeps_custom_tag_and_manifest_trigger(
     assert "candidate-tag" in candidate["with"]["tags"]
 
 
+@pytest.mark.parametrize("module_file", ["go.mod", "go.sum"])
+@pytest.mark.parametrize(
+    ("workflow_name", "event"),
+    [
+        ("docker-tools-candidate.yml", "push"),
+        ("docker-tools-publish.yml", "pull_request"),
+        ("docker-tools-promote.yml", "push"),
+    ],
+)
+def test_gitleaks_closure_changes_trigger_native_tools_builds(
+    module_file: str,
+    workflow_name: str,
+    event: str,
+) -> None:
+    """Each committed module input must independently trigger native validation."""
+    paths = _trigger(_load_workflow(workflow_name))[event]["paths"]
+    assert f"scripts/utils/gitleaks/{module_file}" in paths
+
+
+@pytest.mark.parametrize("module_file", ["go.mod", "go.sum"])
+def test_gitleaks_closure_requires_a_candidate_for_renovate(
+    promotion_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    module_file: str,
+) -> None:
+    """A lock-only Renovate merge must not bypass candidate-image validation."""
+    path = f"scripts/utils/gitleaks/{module_file}"
+    monkeypatch.setattr(
+        promotion_module,
+        "_merged_pr",
+        lambda **kwargs: {
+            "number": 2977,
+            "state": "closed",
+            "merged_at": "2026-10-25T00:00:00Z",
+            "user": {"login": "renovate[bot]"},
+            "head": {"ref": "renovate/gitleaks-closure"},
+        },
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "_pull_request_files",
+        lambda **kwargs: {path},
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "_candidate_tag_for_pr",
+        lambda **kwargs: None,
+    )
+    with pytest.raises(RuntimeError, match="has no candidate image"):
+        promotion_module.resolve_main_action(
+            repository="lgtm-hq/py-lintro",
+            merge_sha="c" * 40,
+            ref=promotion_module.MAIN_REF,
+        )
+    assert promotion_module._has_build_path({path})
+
+
 def test_candidate_workflow_preserves_digest_push_security_contract() -> None:
     """Candidate writes stay limited to Renovate and the digest app token."""
     workflow = _load_workflow("docker-tools-candidate.yml")

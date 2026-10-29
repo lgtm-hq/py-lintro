@@ -48,7 +48,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: block
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           # The gate script itself talks to api.github.com only; the remaining
           # hosts are what actions/checkout needs to fetch the script.
           allowed-endpoints: >
@@ -82,7 +82,7 @@ jobs:
     # explicit `false` — a publish that really did fail — stops the version PR.
     if: always() && needs.publish-gate.outputs.publish_green != 'false'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     with:
       ecosystems: python
       # Never armed: a version PR is merged deliberately after its generated
@@ -100,8 +100,8 @@ jobs:
       # .github/SECURITY.md keeps a version-agnostic table. Logic lives in
       # dedicated scripts, not inline runs.
       version-update-script: scripts/ci/finalize-version-pr.py
-      tooling-ref: '9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb' # v0.78.0
-      egress-policy: block
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       # Paired with release-auto-tag.yml (egress-preset: github-tooling).
       # Guarded by test_release_workflows_use_paired_egress_presets.
       egress-preset: pypi
@@ -109,7 +109,8 @@ jobs:
       # preset resolution, so the preset's extra hosts never reach it and
       # pip is blocked from PyPI (#1287, lgtm-hq/lgtm-ci#512). Pass the
       # complete list explicitly; harden-runner splits on spaces, so keep
-      # the folded scalar.
+      # the folded scalar. Include the results service for the isolated
+      # version hook's release metadata download (#2965).
       allowed-endpoints: >-
         github.com:443
         api.github.com:443
@@ -118,6 +119,7 @@ jobs:
         raw.githubusercontent.com:443
         uploads.github.com:443
         pipelines.actions.githubusercontent.com:443
+        results-receiver.actions.githubusercontent.com:443
         pypi.org:443
         files.pythonhosted.org:443
     secrets:

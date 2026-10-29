@@ -25,7 +25,7 @@ permissions: {}
 # two stay equal. Artifact URL lookup may still consult the manifest, so the
 # continue-on-error retry below remains as belt-and-suspenders (#1487, #1513).
 env:
-  UV_VERSION: '0.13.4'
+  UV_VERSION: '0.13.6'
 
 jobs:
   generate-man-page:
@@ -41,7 +41,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -60,7 +60,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.14'
 
@@ -135,7 +135,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           # The sigstore hosts and token.actions.githubusercontent.com serve
           # the attest step (OIDC token, Fulcio certificate, Rekor entry).
           allowed-endpoints: >
@@ -165,7 +165,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.14'
 
@@ -378,7 +378,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -406,7 +406,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.14'
 

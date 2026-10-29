@@ -177,7 +177,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -231,7 +231,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -274,7 +274,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             api.github.com:443
 
@@ -486,7 +486,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -615,7 +615,7 @@ jobs:
         run: scripts/ci/install-codex-cli.sh
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.14'
 

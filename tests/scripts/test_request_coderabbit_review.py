@@ -8,6 +8,9 @@ its security shape is pinned here: the base-branch definition
 reaching only the script. The script itself is driven with a fake ``gh``.
 """
 
+# Temporary audit-mode contract: lgtm-hq/lgtm-ci#1207.
+# Endpoint assertions remain mandatory for the eventual return to block mode.
+
 from __future__ import annotations
 
 import os
@@ -159,12 +162,12 @@ def test_the_secret_reaches_only_the_script_step() -> None:
     )
 
 
-def test_egress_is_blocked_except_the_fetch_and_the_api() -> None:
-    """harden-runner blocks everything but the sparse fetch and the comment."""
+def test_egress_is_audited_with_the_fetch_and_api_allowlist() -> None:
+    """Audit mode retains the sparse-fetch and comment allowlist (#1207)."""
     (harden,) = _steps_using(action="step-security/harden-runner")
     options = harden["with"]
 
-    assert_that(options["egress-policy"]).is_equal_to("block")
+    assert_that(options["egress-policy"]).is_equal_to("audit")
     assert_that(options["allowed-endpoints"].split()).is_equal_to(
         ["github.com:443", "api.github.com:443"],
     )

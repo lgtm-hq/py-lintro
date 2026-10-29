@@ -35,6 +35,9 @@ name: Build - Lintro Tools Image
       - 'package.json'
       - 'pyproject.toml'
       - 'requirements-semgrep.txt'
+      - 'scripts/utils/gitleaks/go.mod'
+      - 'scripts/utils/gitleaks/go.sum'
+      - 'scripts/utils/gitleaks/verify_imports.py'
   schedule:
     # Weekly rebuild (Monday 03:17 UTC) for CVE freshness in tool binaries.
     - cron: '17 3 * * 1'
@@ -60,7 +63,7 @@ jobs:
   tools-image:
     name: 🐳 Lintro Tools Image
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     permissions:
       contents: read
       packages: write # push image, cache, and staging tags to GHCR
@@ -96,8 +99,8 @@ jobs:
       cosign-sign: true
       scan: true
       scan-exit-code: '0'
-      tooling-ref: '9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb' # v0.78.0
-      egress-policy: block
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: docker
       # Full list (v0.50.0+ replace semantics): the reusable passes
       # allowed-endpoints verbatim to step-security/harden-runner, so a
@@ -128,6 +131,9 @@ jobs:
         files.pythonhosted.org:443
         static.rust-lang.org:443
         dl.google.com:443
+        proxy.golang.org:443
+        sum.golang.org:443
+        storage.googleapis.com:443
         bun.sh:443
         astral.sh:443
         releases.astral.sh:443

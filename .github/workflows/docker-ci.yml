@@ -117,7 +117,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -130,7 +130,7 @@ jobs:
         id: detect
         if: github.event_name == 'pull_request'
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/detect-changes@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/detect-changes@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
         with:
           # Pipeline relevance is NOT decided here (#1369): the resolve
           # step below computes it deny-by-default from the changed-file
@@ -272,7 +272,7 @@ jobs:
       # path. Renovate keeps this in step with docker/tools.Dockerfile's
       # ARG UV_VERSION via the customManager on this line; a contract test
       # asserts the two stay equal.
-      UV_VERSION: '0.13.4'
+      UV_VERSION: '0.13.6'
     steps:
       - name: Harden Runner
         # astral.sh / releases.astral.sh and the GitHub releases CDN serve the
@@ -281,7 +281,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -362,7 +362,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -560,17 +560,17 @@ jobs:
       needs.changes.outputs.lint-scope != 'changed' &&
       needs.docker-build.result == 'success'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: '9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb' # v0.78.0
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
       job-name: '🛠️ Dogfooding Lint'
       # black:timeout=120: the 30s default timed out on the full repo (#2352).
       lintro-tool-options: >-
         pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
-      egress-policy: block
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       # The reusable's enforcing harden-runner step consumes this input
       # verbatim (the preset+append merge is only exposed as an output), so the
       # caller repeats the `quality` preset baseline here.
@@ -661,7 +661,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -800,13 +800,15 @@ jobs:
         # GitHub's hosted-runner watchdog hosts (*.githubapp.com) need no entry
         # here: harden-runner v2.21.1 allows them from GitHub meta (#2352,
         # #2488).
-        # Same allowlist as dogfooding-lint-changed: the container sets
-        # LINTRO_AUTO_INSTALL_DEPS=1 and may fetch project deps before linting.
+        # Same allowlist as dogfooding-lint-changed, plus the artifact results
+        # service: this gate downloads the authoritative lint report (#2963).
+        # Keep blocking egress; the container may fetch project deps too.
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
+            results-receiver.actions.githubusercontent.com:443
             github.com:443
             api.github.com:443
             codeload.github.com:443
@@ -908,17 +910,17 @@ jobs:
       needs.dogfooding-lint.result == 'failure' &&
       needs.docker-build.result == 'success'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: '9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb' # v0.78.0
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
       job-name: '🛠️ Dogfooding Lint (retry)'
       # black:timeout=120: the 30s default timed out on the full repo (#2352).
       lintro-tool-options: >-
         pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
-      egress-policy: block
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       # The reusable's enforcing harden-runner step consumes this input
       # verbatim (the preset+append merge is only exposed as an output), so the
       # caller repeats the `quality` preset baseline here.
@@ -1123,7 +1125,7 @@ jobs:
       github.event.pull_request.head.repo.fork == false &&
       github.event.pull_request.draft == false
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     permissions:
       contents: read
       pull-requests: write # post lintro results as PR comment
@@ -1137,9 +1139,9 @@ jobs:
           needs.dogfooding_lint_retry.outputs.exit-code
         )
         || needs.dogfooding-lint.outputs.exit-code }}
-      tooling-ref: '9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb' # v0.78.0
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
       job-name: '🛠️ Dogfooding Lint PR Comment'
-      egress-policy: block
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
 
   # Org ruleset (checks-py-lintro): lintro-code-quality / 🛠️ Lintro Code Quality
   # Always-green gate: reports success when the heavy jobs were path-skipped
@@ -1157,11 +1159,11 @@ jobs:
         github.event.pull_request.draft == false
       )
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     permissions:
       contents: read
     with:
-      tooling-ref: '9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb' # v0.78.0
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
       job-name: '🛠️ Lintro Code Quality'
       runner-image: ubuntu-24.04
       # Consumes the rolled-up gate verdict (#1313), which itself mirrors
@@ -1171,7 +1173,7 @@ jobs:
       passed-output: ${{ needs.code-quality-gate.outputs.passed }}
       status-output: ${{ needs.code-quality-gate.outputs.status }}
       status-expected: passed
-      egress-policy: block
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: github-tooling
 
   security-audit:
@@ -1198,7 +1200,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -1257,7 +1259,7 @@ jobs:
           github.event_name == 'pull_request'
         continue-on-error: true
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
         with:
           file: security-audit-comment.txt
           marker: security-audit-report
@@ -1307,7 +1309,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -1483,7 +1485,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443

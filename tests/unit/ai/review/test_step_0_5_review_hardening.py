@@ -529,7 +529,7 @@ def _prior_state_with_truncated_record(*, path: str) -> ReviewState:
     )
     # The reuse gate (#2867) inherits coverage only from a run it can place
     # on the current lane and endpoint; detect them as the run does.
-    provenance = detect_run_provenance(provider="anthropic", transport=AITransport.CLI)
+    provenance = detect_run_provenance(provider="anthropic", transport=AITransport.API)
     provider = _mock_provider()
     return ReviewState(
         runs=(
@@ -538,7 +538,7 @@ def _prior_state_with_truncated_record(*, path: str) -> ReviewState:
                     round=1,
                     model=provider.model_name,
                     provider="anthropic",
-                    transport="cli",
+                    transport="api",
                     endpoint=provenance.endpoint,
                     first_party=provenance.first_party,
                     lane=provenance.lane,

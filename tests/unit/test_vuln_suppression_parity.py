@@ -24,6 +24,7 @@ from typing import Any
 import pytest
 import yaml
 from assertpy import assert_that
+from packaging.version import Version
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _GRYPE_CONFIG = _REPO_ROOT / ".grype.yaml"
@@ -150,6 +151,24 @@ def test_grype_ignore_package_matches_osv_reason(rule: dict[str, Any]) -> None:
         f"{vuln_id}: .osv-scanner.toml reason must start with "
         f"'{rule['package']['name']}@' to match .grype.yaml",
     ).starts_with(f"{rule['package']['name']}@")
+
+
+def test_semgrep_telemetry_ignore_cannot_hide_vulnerable_application_lock() -> None:
+    """An advisory-global tool exception requires a patched application copy."""
+    if "GHSA-xcq7-p3pf-p88h" not in _osv_entries():
+        return
+    lock = tomllib.loads((_REPO_ROOT / "uv.lock").read_text(encoding="utf-8"))
+    versions = [
+        Version(package["version"])
+        for package in lock["package"]
+        if package["name"] == "opentelemetry-api"
+    ]
+    assert_that(versions).is_not_empty()
+    for version in versions:
+        assert_that(version >= Version("1.45.1")).described_as(
+            "The Semgrep-only exception must not hide GHSA-xcq7-p3pf-p88h "
+            "in uv.lock; patch application telemetry to at least 1.45.1",
+        ).is_true()
 
 
 def test_tooling_checkout_ignores_are_time_boxed() -> None:
