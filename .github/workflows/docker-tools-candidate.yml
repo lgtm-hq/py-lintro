@@ -21,6 +21,9 @@ name: Build - Lintro Tools Candidate
       - 'package.json'
       - 'pyproject.toml'
       - 'requirements-semgrep.txt'
+      - 'scripts/utils/gitleaks/go.mod'
+      - 'scripts/utils/gitleaks/go.sum'
+      - 'scripts/utils/gitleaks/verify_imports.py'
 
 permissions: {}
 
@@ -128,6 +131,9 @@ jobs:
         files.pythonhosted.org:443
         static.rust-lang.org:443
         dl.google.com:443
+        proxy.golang.org:443
+        sum.golang.org:443
+        storage.googleapis.com:443
         bun.sh:443
         astral.sh:443
         releases.astral.sh:443

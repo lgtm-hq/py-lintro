@@ -295,26 +295,27 @@ Notes:
 
 Shared utilities and helper scripts.
 
-| Script                               | Purpose                                               | Usage                                                                   |
-| ------------------------------------ | ----------------------------------------------------- | ----------------------------------------------------------------------- |
-| `check-pypi-version.py`              | Check if version exists on PyPI                       | `python scripts/utils/check-pypi-version.py <version>`                  |
-| `delete-previous-lintro-comments.py` | Delete old PR comments                                | `python scripts/utils/delete-previous-lintro-comments.py`               |
-| `merge_pr_comment.py`                | Merge-update PR comment body, collapsing history      | `python scripts/utils/merge_pr_comment.py --help`                       |
-| `extract-coverage.py`                | Extract coverage from XML files                       | `python scripts/utils/extract-coverage.py`                              |
-| `extract_comment_body.py`            | Extract comment body from GitHub API JSON by ID       | `python scripts/utils/extract_comment_body.py <json> <comment_id>`      |
-| `find_comment_with_marker.py`        | Find GitHub comment ID containing a specific marker   | `python scripts/utils/find_comment_with_marker.py <json> <marker>`      |
-| `install-ai-tools.sh`                | Install the AI agent CLIs (claude, codex, agent)      | `./scripts/utils/install-ai-tools.sh --help`                            |
-| `install-semgrep.sh`                 | Install lockfile-pinned semgrep into an isolated venv | `./scripts/utils/install-semgrep.sh --help`                             |
-| `install-tools.sh`                   | Install external tools (hadolint, prettier, etc.)     | `./scripts/utils/install-tools.sh [--dry-run] [--verbose] --local`      |
-| `install.sh`                         | Install Lintro with dependencies                      | `./scripts/utils/install.sh`                                            |
-| `json_encode_body.py`                | JSON encode comment body for GitHub API requests      | `python scripts/utils/json_encode_body.py <file_or_stdin>`              |
-| `utils.sh`                           | Shared utilities for other scripts                    | Sourced by other scripts                                                |
-| `bootstrap-env.sh`                   | Bootstrap CI env with uv and tools                    | `./scripts/utils/bootstrap-env.sh [--dry-run] [--verbose] --help`       |
-| `install-uv.sh`                      | Install uv from GitHub Releases                       | `./scripts/utils/install-uv.sh [--dry-run] [--verbose]`                 |
-| `setup-python.sh`                    | Install/configure specific Python via uv              | `./scripts/utils/setup-python.sh [--dry-run] [--verbose] [3.13]`        |
-| `sync-deps.sh`                       | Sync Python dependencies via uv                       | `./scripts/utils/sync-deps.sh [--dry-run] [--verbose] [--dev/--no-dev]` |
-| `bump_deps.py`                       | Bump exact pinned versions in pyproject               | `uv run python scripts/utils/bump_deps.py --help`                       |
-| `convert_asserts_to_assertpy.py`     | Migrate bare asserts in tests to assertpy             | `uv run python scripts/utils/convert_asserts_to_assertpy.py`            |
+| Script                               | Purpose                                                             | Usage                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `check-pypi-version.py`              | Check if version exists on PyPI                                     | `python scripts/utils/check-pypi-version.py <version>`                  |
+| `delete-previous-lintro-comments.py` | Delete old PR comments                                              | `python scripts/utils/delete-previous-lintro-comments.py`               |
+| `merge_pr_comment.py`                | Merge-update PR comment body, collapsing history                    | `python scripts/utils/merge_pr_comment.py --help`                       |
+| `extract-coverage.py`                | Extract coverage from XML files                                     | `python scripts/utils/extract-coverage.py`                              |
+| `extract_comment_body.py`            | Extract comment body from GitHub API JSON by ID                     | `python scripts/utils/extract_comment_body.py <json> <comment_id>`      |
+| `find_comment_with_marker.py`        | Find GitHub comment ID containing a specific marker                 | `python scripts/utils/find_comment_with_marker.py <json> <marker>`      |
+| `install-ai-tools.sh`                | Install the AI agent CLIs (claude, codex, agent)                    | `./scripts/utils/install-ai-tools.sh --help`                            |
+| `install-semgrep.sh`                 | Install lockfile-pinned semgrep into an isolated venv               | `./scripts/utils/install-semgrep.sh --help`                             |
+| `install-tools.sh`                   | Install external tools (hadolint, prettier, etc.)                   | `./scripts/utils/install-tools.sh [--dry-run] [--verbose] --local`      |
+| `install.sh`                         | Install Lintro with dependencies                                    | `./scripts/utils/install.sh`                                            |
+| `json_encode_body.py`                | JSON encode comment body for GitHub API requests                    | `python scripts/utils/json_encode_body.py <file_or_stdin>`              |
+| `utils.sh`                           | Shared utilities for other scripts                                  | Sourced by other scripts                                                |
+| `bootstrap-env.sh`                   | Bootstrap CI env with uv and tools                                  | `./scripts/utils/bootstrap-env.sh [--dry-run] [--verbose] --help`       |
+| `install-uv.sh`                      | Install uv from GitHub Releases                                     | `./scripts/utils/install-uv.sh [--dry-run] [--verbose]`                 |
+| `setup-python.sh`                    | Install/configure specific Python via uv                            | `./scripts/utils/setup-python.sh [--dry-run] [--verbose] [3.13]`        |
+| `sync-deps.sh`                       | Sync Python dependencies via uv                                     | `./scripts/utils/sync-deps.sh [--dry-run] [--verbose] [--dev/--no-dev]` |
+| `gitleaks/verify_imports.py`         | Reject incomplete or OpenPGP-dependent Gitleaks build import graphs | `uv run python scripts/utils/gitleaks/verify_imports.py < imports.txt`  |
+| `bump_deps.py`                       | Bump exact pinned versions in pyproject                             | `uv run python scripts/utils/bump_deps.py --help`                       |
+| `convert_asserts_to_assertpy.py`     | Migrate bare asserts in tests to assertpy                           | `uv run python scripts/utils/convert_asserts_to_assertpy.py`            |
 
 ## 🔍 Detailed Script Documentation
 

@@ -14,6 +14,7 @@ v1 ``--out-format`` flag with ``--output.<format>.path`` options.
 
 from __future__ import annotations
 
+import os
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,6 +49,46 @@ GOLANGCI_LINT_DEFAULT_TIMEOUT: int = 120
 GOLANGCI_LINT_FILE_PATTERNS: list[str] = ["*.go", "go.mod"]
 
 
+def _module_has_go_sources(module_root: Path) -> bool:
+    """Check whether a module owns source selected by Go's ``./...`` pattern.
+
+    Dependency-only build locks are not lintable packages. Nested modules,
+    vendor, testdata, and hidden directories do not belong to this module's
+    recursive package selection.
+
+    Args:
+        module_root: Directory containing the module's go.mod.
+
+    Returns:
+        Whether this module contains at least one eligible Go source file.
+    """
+
+    def fail_discovery(error: OSError) -> None:
+        """Propagate unreadable directories instead of reporting no source.
+
+        Args:
+            error: Filesystem error raised while discovering packages.
+
+        Raises:
+            error: The original filesystem discovery error.
+        """
+        raise error
+
+    for directory, children, files in os.walk(module_root, onerror=fail_discovery):
+        children[:] = [
+            name
+            for name in children
+            if not name.startswith((".", "_"))
+            and name not in {"vendor", "testdata"}
+            and not (Path(directory) / name / "go.mod").is_file()
+        ]
+        if any(
+            name.endswith(".go") and not name.startswith((".", "_")) for name in files
+        ):
+            return True
+    return False
+
+
 def _find_go_module_roots(paths: list[str]) -> list[Path]:
     """Return the distinct ``go.mod`` module roots covering the given paths.
 
@@ -59,7 +100,7 @@ def _find_go_module_roots(paths: list[str]) -> list[Path]:
         paths: List of file paths to search from.
 
     Returns:
-        Sorted list of module root directories (empty when none found).
+        Sorted list of module roots containing Go source (empty when none found).
     """
     roots: list[Path] = []
     for raw_path in paths:
@@ -76,7 +117,7 @@ def _find_go_module_roots(paths: list[str]) -> list[Path]:
 
     # Even when a parent module exists, nested modules are distinct
     # go.mod roots and must each be linted independently.
-    return sorted(set(roots))
+    return sorted(root for root in set(roots) if _module_has_go_sources(root))
 
 
 def _rebase_issue_paths(
@@ -276,7 +317,7 @@ class GolangciLintPlugin(BaseToolPlugin):
             return ToolResult(
                 name=self.definition.name,
                 success=True,
-                output="No go.mod found; skipping golangci-lint.",
+                output="No go.mod with Go source found; skipping golangci-lint.",
                 issues_count=0,
                 no_files=True,
             )
@@ -358,7 +399,7 @@ class GolangciLintPlugin(BaseToolPlugin):
             return ToolResult(
                 name=self.definition.name,
                 success=True,
-                output="No go.mod found; skipping golangci-lint.",
+                output="No go.mod with Go source found; skipping golangci-lint.",
                 issues_count=0,
                 initial_issues_count=0,
                 fixed_issues_count=0,
