@@ -11,12 +11,6 @@
 
 ---
 ignore:
-  # http-cache-semantics <= 4.2.0: no patched release; build-time only via
-  # astro (remote image cache). Mirrors .osv-scanner.toml, review by 2026-11-02.
-  - vulnerability: GHSA-ch52-4w7c-c8xp
-    package:
-      name: http-cache-semantics
-      type: npm
   # markdown-it 15.0.1: pinned exactly by markdownlint-cli2 0.23.3 (latest);
   # DoS-only quadratic parsing of linted Markdown. Mirrors .osv-scanner.toml,
   # review by 2026-11-03.

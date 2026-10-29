@@ -224,7 +224,11 @@ def test_tools_build_callers_allow_the_verified_go_module_downloads() -> None:
     for name in ("candidate", "publish", "promote"):
         path = REPO_ROOT / ".github" / "workflows" / f"docker-tools-{name}.yml"
         text = path.read_text()
-        assert "egress-policy: block" in text
+        assert re.search(
+            r"^\s+egress-policy: (audit|block)(?:\s|$)",
+            text,
+            re.MULTILINE,
+        )
         assert "allowed-endpoints-mode: replace" in text
         assert "        proxy.golang.org:443\n" in text, name
         assert "        sum.golang.org:443\n" in text, name

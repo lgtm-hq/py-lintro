@@ -46,6 +46,8 @@
     "smol-toml": "1.9.1",
     "katex": "0.18.2",
     "source-map-js": "1.2.2",
-    "tinypool": "2.1.2"
+    "tinypool": "2.1.2",
+    "undici": "8.12.3",
+    "zod": "4.6.7"
   }
 }

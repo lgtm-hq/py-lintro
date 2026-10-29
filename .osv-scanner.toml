@@ -5,15 +5,6 @@
 # necessary. Each entry is time-boxed via ignoreUntil so it cannot silently
 # outlive its rationale.
 
-# --- http-cache-semantics (npm, transitive via astro) ---
-# No patched release: GHSA-ch52-4w7c-c8xp covers <= 4.2.0 (latest) and
-# first_patched_version is null. Track: https://github.com/kornelski/http-cache-semantics/issues/56
-
-[[IgnoredVulns]]
-id = "GHSA-ch52-4w7c-c8xp"
-ignoreUntil = 2026-11-02
-reason = "http-cache-semantics@4.2.0: no patched release (advisory first_patched_version = none; 4.2.0 is latest, only 4.2.0-beta prereleases exist). Transitive via astro (root bun.lock dev tooling and apps/site/bun.lock), build-time only: astro imports it solely in dist/assets/build/remote.js to cache remote images during `astro build`. The docs site is static output with no SSR, no shared HTTP cache and no remote image config, so the cross-user max-stale disclosure has no reachable multi-user cache. Not exploitable. Upstream: https://github.com/kornelski/http-cache-semantics/issues/56"
-
 # --- markdown-it (npm, transitive via markdownlint-cli2) ---
 # GHSA-r7fv-28h4-cvq7, GHSA-vfgh-jcmw-g37q and GHSA-gfr2-rv44-r23c (all
 # published 2026-10-20) are fixed in markdown-it 15.0.2 / 15.0.3, but
@@ -50,7 +41,7 @@ reason = "Reverified 2026-10-23: opentelemetry-api@1.37.0 in requirements-semgre
 
 # --- mcp (PyPI, transitive via semgrep) ---
 # GHSA-84m7-p3x7-pcfv (published 2026-10-15) is fixed in mcp 1.30.0, but the
-# pinned semgrep and every available upgrade through 1.181.0 require
+# pinned semgrep and every available upgrade through 1.182.1 require
 # mcp==1.29.0 exactly, so the isolated semgrep lock cannot move. Drop this
 # entry once semgrep's pin does.
 # Track: https://github.com/semgrep/semgrep/blob/develop/cli/pyproject.toml
@@ -58,7 +49,29 @@ reason = "Reverified 2026-10-23: opentelemetry-api@1.37.0 in requirements-semgre
 [[IgnoredVulns]]
 id = "GHSA-84m7-p3x7-pcfv"
 ignoreUntil = 2026-11-15
-reason = "mcp@1.29.0 in requirements-semgrep.txt (alias CVE-2026-59951, also ignored by pip-audit through [tool.lintro.pip_audit] ignore_vulns): the pinned semgrep release and every available upgrade through 1.181.0 require mcp==1.29.0 exactly, so no resolvable upgrade exists. The flaw is unbounded session accumulation in mcp's StreamableHTTP server transport, reached only by a long-running MCP server. semgrep bundles mcp for its own `semgrep mcp` server command; lintro runs semgrep as a one-shot CLI linter on local files and never starts that server, in CI, locally or in the tools image, so the vulnerable transport is never opened. Not reachable. Upstream pin: semgrep cli/pyproject.toml"
+reason = "mcp@1.29.0 in requirements-semgrep.txt (alias CVE-2026-59951, also ignored by pip-audit through [tool.lintro.pip_audit] ignore_vulns): the pinned semgrep release and every available upgrade through 1.182.1 require mcp==1.29.0 exactly, so no resolvable upgrade exists. The flaw is unbounded session accumulation in mcp's StreamableHTTP server transport, reached only by a long-running MCP server. semgrep bundles mcp for its own `semgrep mcp` server command; lintro runs semgrep as a one-shot CLI linter on local files and never starts that server, in CI, locally or in the tools image, so the vulnerable transport is never opened. Not reachable. Upstream pin: semgrep cli/pyproject.toml"
+
+# --- Additional MCP advisories: isolated Semgrep scan-only use ---
+# Semgrep 1.179.0 and latest 1.182.1 still require mcp==1.29.0.
+# Track removal: https://github.com/lgtm-hq/py-lintro/issues/2981
+# Patched SDKs are 1.30.0 / 2.2.0; overriding Semgrep breaks its declared
+# dependency contract. Lintro invokes only `semgrep scan`; its own MCP SDK
+# is already >=2.2. Remove these exceptions when Semgrep updates its pin.
+
+[[IgnoredVulns]]
+id = "GHSA-5h93-6whr-6q8j"
+ignoreUntil = 2026-11-15
+reason = "Verified 2026-10-29: CVE-2026-116685 affects HTTP MCP client transports and OAuth requests following cross-origin redirects. The only vulnerable SDK is mcp==1.29.0 in isolated requirements-semgrep.txt; both pinned Semgrep 1.179.0 and latest 1.182.1 require that exact version. lintro/tools/semgrep/definition.py invokes semgrep scan, never an MCP client or the semgrep mcp server command. Those transports, tool calls and authentication paths are not used by this scan-only integration. Lintro's own MCP runtime is constrained and locked to >=2.2, guarded by test_mcp_exceptions_do_not_cover_a_vulnerable_lintro_runtime. This is an applicability exception for lintro scans, not clearance for running semgrep mcp or arbitrary MCP clients from the tools image. Remove or reassess before expiry; upstream: https://github.com/semgrep/semgrep/blob/develop/cli/pyproject.toml"
+
+[[IgnoredVulns]]
+id = "GHSA-rwrf-2pqf-9j8j"
+ignoreUntil = 2026-11-15
+reason = "Verified 2026-10-29: CVE-2026-116686 affects MCP clients validating tool-result schemas with external references. The only vulnerable SDK is mcp==1.29.0 in isolated requirements-semgrep.txt; both pinned Semgrep 1.179.0 and latest 1.182.1 require that exact version. lintro/tools/semgrep/definition.py invokes semgrep scan, never an MCP client or the semgrep mcp server command. Those transports, tool calls and authentication paths are not used by this scan-only integration. Lintro's own MCP runtime is constrained and locked to >=2.2, guarded by test_mcp_exceptions_do_not_cover_a_vulnerable_lintro_runtime. This is an applicability exception for lintro scans, not clearance for running semgrep mcp or arbitrary MCP clients from the tools image. Remove or reassess before expiry; upstream: https://github.com/semgrep/semgrep/blob/develop/cli/pyproject.toml"
+
+[[IgnoredVulns]]
+id = "GHSA-w4fh-qvv9-3v23"
+ignoreUntil = 2026-11-15
+reason = "Verified 2026-10-29: CVE-2026-116684 affects MCP HTTP servers using bearer-token authentication without audience validation. The only vulnerable SDK is mcp==1.29.0 in isolated requirements-semgrep.txt; both pinned Semgrep 1.179.0 and latest 1.182.1 require that exact version. lintro/tools/semgrep/definition.py invokes semgrep scan, never an MCP client or the semgrep mcp server command. Those transports, tool calls and authentication paths are not used by this scan-only integration. Lintro's own MCP runtime is constrained and locked to >=2.2, guarded by test_mcp_exceptions_do_not_cover_a_vulnerable_lintro_runtime. This is an applicability exception for lintro scans, not clearance for running semgrep mcp or arbitrary MCP clients from the tools image. Remove or reassess before expiry; upstream: https://github.com/semgrep/semgrep/blob/develop/cli/pyproject.toml"
 
 # --- Gitleaks build-only Go closure: affected packages are absent ---
 # The build checks the real target-specific import graph and fails if OpenPGP

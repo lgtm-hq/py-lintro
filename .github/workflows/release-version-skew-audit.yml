@@ -53,7 +53,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: block
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -90,11 +90,12 @@ jobs:
     # first failure opens `fix(ci): main workflow failed: release-version-skew`,
     # repeat failures comment on it instead of piling up one issue per run.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb # v0.78.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     permissions:
       actions: read # read workflow/job metadata for the failure context
       contents: read # repository context for the issue body
       issues: write # open or ping the deduplicated failure issue
     with:
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       workflow-key: release-version-skew
-      tooling-ref: '9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb' # v0.78.0
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1

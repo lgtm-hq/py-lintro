@@ -404,6 +404,8 @@ exclude = [
 # tests/unit/test_pip_audit_ignores.py fails when one is missing or expired.
 # GHSA-84m7-p3x7-pcfv / CVE-2026-59951: mcp 1.29.0, pinned exactly by semgrep;
 # see the osv entry. Drop both together once semgrep's pin moves.
+# Additional MCP client/server advisories are unreachable in Semgrep scan;
+# their individual OSV rows carry evidence and the 2026-11-15 expiry.
 # GHSA-xcq7-p3pf-p88h / CVE-2026-114603: only Semgrep's telemetry 1.37.0
 # remains blocked; uv.lock is patched to 1.45.1. The paired OSV row carries
 # the 2026-10-23 re-verification and 2026-11-23 expiry (#2972).
@@ -412,6 +414,12 @@ ignore_vulns = [
   "GHSA-84m7-p3x7-pcfv",
   "CVE-2026-114603",
   "GHSA-xcq7-p3pf-p88h",
+  "CVE-2026-116685",
+  "GHSA-5h93-6whr-6q8j",
+  "CVE-2026-116686",
+  "GHSA-rwrf-2pqf-9j8j",
+  "CVE-2026-116684",
+  "GHSA-w4fh-qvv9-3v23",
 ]
 
 # Duplicate-code ratchet gate (issue #2293). pylint's `duplicate-code` checker

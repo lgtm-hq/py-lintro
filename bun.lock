@@ -36,8 +36,10 @@
     "source-map-js": "1.2.2",
     "svgo": "^4.0.2",
     "tinypool": "2.1.2",
+    "undici": "8.12.3",
     "vite": "^8.0.16",
     "yaml": "2.9.1",
+    "zod": "4.6.7",
   },
   "packages": {
     "@astrojs/astro2tsx": ["@astrojs/astro2tsx@0.1.1", "", { "dependencies": { "@emnapi/core": "1.11.3", "@napi-rs/wasm-runtime": "1.2.4" } }, "sha512-VNhvoKzs0FXF3iq+2QVIjTqA6awKDKpd2U7khYg3AhcxjM1KMINEma4IeqQnMqJUakw0MNQygntLvLmSPS5pLA=="],
