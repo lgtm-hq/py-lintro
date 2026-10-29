@@ -1,7 +1,7 @@
 """Keep the dedicated aggregate caller complete and fail-closed."""
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -13,7 +13,7 @@ DEFAULT_PR_TYPES = {"opened", "synchronize", "reopened"}
 
 def _gate() -> dict[str, Any]:
     """Load the caller, including its quoted GitHub event key."""
-    return yaml.safe_load(GATE.read_text(encoding="utf-8"))
+    return cast("dict[str, Any]", yaml.safe_load(GATE.read_text(encoding="utf-8")))
 
 
 def test_gate_covers_every_head_pr_activity() -> None:
