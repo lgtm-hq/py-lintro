@@ -463,6 +463,10 @@ jobs:
           target: full
           push: true
           tags: ghcr.io/lgtm-hq/py-lintro:ci-${{ github.run_id }}
+          # The nightly resolver verifies this label, not the mutable sha tag.
+          # Override the revision inherited from the tools candidate image.
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: |
             type=gha
             type=registry,ref=ghcr.io/lgtm-hq/py-lintro:cache
@@ -498,6 +502,8 @@ jobs:
           target: base
           push: true
           tags: ghcr.io/lgtm-hq/py-lintro-base:ci-${{ github.run_id }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: |
             type=gha
             type=registry,ref=ghcr.io/lgtm-hq/py-lintro-base:cache
@@ -1458,7 +1464,16 @@ jobs:
     # Likewise, an absorbed infra flake keeps the required check green but
     # proves nothing about lint, so it must not promote an image (#1313).
     # Only a gate that observed a real successful lint run may publish.
+    # Override implicit success(): an unused full/changed/retry lint branch is
+    # skipped even when the rolled-up gate passed. Keep every direct prerequisite
+    # explicit so a failed audit, lock check or integration test still blocks.
     if: >-
+      !cancelled() &&
+      needs.changes.result == 'success' &&
+      needs.semgrep-lock.result == 'success' &&
+      needs.code-quality-gate.result == 'success' &&
+      needs.security-audit.result == 'success' &&
+      needs.integration-test.result == 'success' &&
       github.ref == 'refs/heads/main' &&
       github.event_name == 'push' &&
       needs.changes.outputs.pipeline != 'false' &&

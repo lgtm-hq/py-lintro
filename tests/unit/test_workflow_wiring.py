@@ -971,6 +971,37 @@ def test_docker_ci_publish_refuses_absorbed_infra_flake() -> None:
     )
 
 
+def test_docker_ci_publish_handles_skipped_transitive_dependencies() -> None:
+    """A successful gate must publish despite an unused lint retry branch."""
+    publish = _load_workflow(name="docker-ci.yml")["jobs"]["publish"]
+    condition = _normalize_github_expr(publish["if"])
+
+    # Override Actions' implicit success() across the mutually exclusive lint
+    # jobs, without allowing any failed or skipped direct prerequisite.
+    assert_that(condition).contains("!cancelled()")
+    for job_id in publish["needs"]:
+        assert_that(condition).contains(f"needs.{job_id}.result == 'success'")
+
+
+@pytest.mark.parametrize("target", ["full", "base"])
+def test_docker_ci_published_image_labels_identify_app_source(target: str) -> None:
+    """Digest promotion cannot replace revision labels inherited from tools.
+
+    Args:
+        target: Published application image build target.
+    """
+    builds = _load_workflow(name="docker-ci.yml")["jobs"]["docker-build"]["steps"]
+    build = next(
+        step["with"]
+        for step in builds
+        if step.get("with", {}).get("target") == target
+        and step.get("with", {}).get("push") is True
+    )
+    assert_that(build.get("labels", "")).contains(
+        "org.opencontainers.image.revision=${{ github.sha }}",
+    )
+
+
 def test_docker_ci_publish_skips_docs_only_pushes() -> None:
     """Docs-only pushes have no CI image to promote, so publish must not run."""
     docker_ci = _load_workflow(name="docker-ci.yml")
