@@ -150,9 +150,6 @@ class KnownFailOpen(NamedTuple):
 # Measured from the unmarked first run.
 # Keep exit-code variants separate so a fix cannot hide behind another variant.
 KNOWN_FAIL_OPEN: dict[tuple[str, str], KnownFailOpen] = {
-    ("cargo_deny", "case1"): KnownFailOpen(
-        "#2999 cargo-deny discards the failed exit status",
-    ),
     ("oxfmt", "case1"): KnownFailOpen(
         "#3000 batch success ignores the failed exit status",
     ),

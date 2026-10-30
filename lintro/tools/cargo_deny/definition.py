@@ -16,7 +16,9 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
-from lintro.parsers.cargo_deny.cargo_deny_parser import parse_cargo_deny_output
+from lintro.parsers.cargo_deny.cargo_deny_parser import (
+    parse_cargo_deny_output_with_stats,
+)
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
@@ -154,7 +156,7 @@ class CargoDenyPlugin(BaseToolPlugin):
         cmd = _build_cargo_deny_command()
 
         try:
-            _, output = run_subprocess_with_timeout(
+            process_success, output = run_subprocess_with_timeout(
                 tool=self,
                 cmd=cmd,
                 timeout=ctx.timeout,
@@ -177,17 +179,18 @@ class CargoDenyPlugin(BaseToolPlugin):
                 issues=timeout_result.issues,
             )
 
-        issues = parse_cargo_deny_output(output=output)
+        issues, parse_failures_count = parse_cargo_deny_output_with_stats(output=output)
         issues_count = len(issues)
 
-        # cargo-deny returns non-zero on any issues found
-        # Consider it successful if we parsed output correctly
+        # A non-zero exit can mean findings or an execution error. Zero parsed
+        # findings must never turn a failed invocation into a clean check.
         return ToolResult(
             name=self.definition.name,
-            success=issues_count == 0,
-            output=None,
+            success=process_success and issues_count == 0 and parse_failures_count == 0,
+            output=output if not process_success or parse_failures_count else None,
             issues_count=issues_count,
             issues=issues,
+            parse_failures_count=parse_failures_count,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
