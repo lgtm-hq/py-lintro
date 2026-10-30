@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools==84.0.0", "wheel"]
+requires = ["setuptools==84.1.0", "wheel"]
 # In-tree PEP 517 shim: generates the derived version artifacts before
 # delegating to setuptools.build_meta (#2180). lintro_build never ships
 # in the wheel; the sdist carries it via MANIFEST.in.
