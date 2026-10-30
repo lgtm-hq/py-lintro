@@ -8,18 +8,18 @@ list: remove an entry when its linked defect is fixed.
 from __future__ import annotations
 
 import io
+import re
 import subprocess  # nosec B404 - process results only; no real subprocesses
 from pathlib import Path
-from typing import Any
+from typing import NamedTuple
 from unittest.mock import MagicMock
 
 import pytest
+from _pytest.mark.structures import ParameterSet
 from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.registry import ToolRegistry
-
-REGISTERED_TOOLS = tuple(sorted(ToolRegistry.get_all()))
 
 # Explicit coverage makes a new registration require a harness decision.
 CASE1_TOOLS = frozenset(
@@ -74,93 +74,121 @@ CASE1_EXCLUSIONS = {
 }
 
 # Each pair is (null primary container, legitimate empty primary container).
-# None entries explain why there is no whole-JSON stdout container to replace.
-JSON_REPORTS: dict[str, tuple[str, str] | None] = {
-    "actionlint": None,  # Text output.
-    "astro-check": None,  # Text output.
+JSON_REPORTS: dict[str, tuple[str, str]] = {
     "bandit": ('{"results": null, "errors": []}', '{"results": [], "errors": []}'),
-    "black": None,  # Text output.
-    "buf": None,  # JSON Lines diagnostics; no primary container.
     "cargo_audit": (
         '{"vulnerabilities": {"found": false, "count": 0, "list": null}}',
         '{"vulnerabilities": {"found": false, "count": 0, "list": []}}',
     ),
-    "cargo_deny": None,  # JSON Lines diagnostics; no primary container.
     "checkov": (
         '{"results": {"failed_checks": null}}',
         '{"results": {"failed_checks": []}}',
     ),
-    "clippy": None,  # Cargo JSON Lines messages; no primary container.
-    "commitlint": None,  # Text output.
-    "cppcheck": None,  # XML output.
-    "dotenv_linter": None,  # Text output.
-    "gitleaks": None,  # JSON report is read from a file, not stdout.
     "golangci_lint": ('{"Issues": null}', '{"Issues": []}'),
-    "hadolint": None,  # Default check uses tty text output.
     "html_validate": ("null", "[]"),
-    "idiom-review": None,  # No subprocess report; disabled AI review.
-    "import-linter": None,  # Text output.
-    "markdownlint": None,  # Text output.
-    "mypy": None,  # Text output.
     "osv_scanner": ('{"results": null}', '{"results": []}'),
-    "oxfmt": None,  # Text output.
     "oxlint": ('{"diagnostics": null}', '{"diagnostics": []}'),
     "pip_audit": ('{"dependencies": null}', '{"dependencies": []}'),
-    "prettier": None,  # Text output.
-    "pydoclint": None,  # Text output.
     "pylint": (
         '{"messages": null, "statistics": {}}',
         '{"messages": [], "statistics": {}}',
     ),
-    "pytest": None,  # Text output; optional JSON report is a file artifact.
     "ruff": ("null", "[]"),
-    "rustfmt": None,  # Text diff output.
     "semgrep": ('{"results": null, "errors": []}', '{"results": [], "errors": []}'),
     "shellcheck": ('{"comments": null}', '{"comments": []}'),
-    "shfmt": None,  # Text diff output.
     "spectral": ("null", "[]"),
     "sqlfluff": ("null", "[]"),
     "stylelint": ("null", "[]"),
-    "svelte-check": None,  # Machine-readable text output, not JSON.
-    "taplo": None,  # Text output.
-    "trufflehog": None,  # JSON Lines findings; no primary container.
-    "tsc": None,  # Text output.
-    "typos": None,  # JSON Lines findings; no primary container.
     "vale": ("null", "{}"),
-    "vue-tsc": None,  # Text output.
-    "yamllint": None,  # Parsable text output, not JSON.
 }
 
-# Measured with this module's unmarked first run: 21 failed, 73 passed.
+NO_JSON_REPORT: dict[str, str] = {
+    "actionlint": "Text output.",
+    "astro-check": "Text output.",
+    "black": "Text output.",
+    "buf": "JSON Lines diagnostics; no primary container.",
+    "cargo_deny": "JSON Lines diagnostics; no primary container.",
+    "clippy": "Cargo JSON Lines messages; no primary container.",
+    "commitlint": "Text output.",
+    "cppcheck": "XML output.",
+    "dotenv_linter": "Text output.",
+    "gitleaks": "JSON report is read from a file, not stdout.",
+    "hadolint": "Default check uses tty text output.",
+    "idiom-review": "No subprocess report; disabled AI review.",
+    "import-linter": "Text output.",
+    "markdownlint": "Text output.",
+    "mypy": "Text output.",
+    "oxfmt": "Text output.",
+    "prettier": "Text output.",
+    "pydoclint": "Text output.",
+    "pytest": "Text output; optional JSON report is a file artifact.",
+    "rustfmt": "Text diff output.",
+    "shfmt": "Text diff output.",
+    "svelte-check": "Machine-readable text output, not JSON.",
+    "taplo": "Text output.",
+    "trufflehog": "JSON Lines findings; no primary container.",
+    "tsc": "Text output.",
+    "typos": "JSON Lines findings; no primary container.",
+    "vue-tsc": "Text output.",
+    "yamllint": "Parsable text output, not JSON.",
+}
+
+# Empty stdout is the default clean output for tools without an envelope.
+CLEAN_OUTPUTS = {name: reports[1] for name, reports in JSON_REPORTS.items()} | {
+    "gitleaks": "[]",
+}
+CLEAN_SUCCESS_EXCLUSIONS: dict[str, str] = {}
+
+
+class KnownFailOpen(NamedTuple):
+    """A measured defect's issue reference and narrowly expected exception."""
+
+    reason: str
+    raises: type[Exception] = AssertionError
+
+
+# Measured from the unmarked first run.
 # Keep exit-code variants separate so a fix cannot hide behind another variant.
-KNOWN_FAIL_OPEN: dict[tuple[str, str], str] = {
-    ("cargo_deny", "case1"): "#2999 cargo-deny discards the failed exit status",
-    ("oxfmt", "case1"): "#3000 batch success ignores the failed exit status",
-    ("oxlint", "case1"): "#3000 batch success ignores the failed exit status",
-    ("prettier", "case1"): "#3000 batch success ignores the failed exit status",
-    ("bandit", "case2-rc0"): "#3024 null results read as clean",
-    ("bandit", "case2-rc1"): "#3024 null results read as clean",
-    ("cargo_audit", "case2-rc0"): "#3003 null vulnerability list reads as clean",
-    ("checkov", "case2-rc0"): "#3026 null failed_checks read as clean",
-    (
-        "golangci_lint",
-        "case2-rc0",
-    ): "#3026 null Issues read as clean",
-    (
-        "html_validate",
-        "case2-rc0",
-    ): "#3026 null report reads as clean",
-    ("oxlint", "case2-rc0"): "#3005 null diagnostics read as clean",
-    ("oxlint", "case2-rc1"): "#3005 null diagnostics read as clean",
-    ("ruff", "case2-rc0"): "#3026 null report reads as clean",
-    ("semgrep", "case2-rc0"): "#3004 null results read as clean",
-    ("semgrep", "case2-rc1"): "#3004 null results read as clean",
-    ("shellcheck", "case2-rc0"): "#3025 null comments crash the parser",
-    ("shellcheck", "case2-rc1"): "#3025 null comments crash the parser",
-    ("sqlfluff", "case2-rc0"): "#3026 null report reads as clean",
-    ("stylelint", "case2-rc0"): "#3026 null report reads as clean",
-    ("vale", "case2-rc0"): "#3026 null report reads as clean",
-    ("cargo_audit", "case2-blank-rc0"): "#3003 missing report reads as clean",
+KNOWN_FAIL_OPEN: dict[tuple[str, str], KnownFailOpen] = {
+    ("cargo_deny", "case1"): KnownFailOpen(
+        "#2999 cargo-deny discards the failed exit status",
+    ),
+    ("oxfmt", "case1"): KnownFailOpen(
+        "#3000 batch success ignores the failed exit status",
+    ),
+    ("oxlint", "case1"): KnownFailOpen(
+        "#3000 batch success ignores the failed exit status",
+    ),
+    ("prettier", "case1"): KnownFailOpen(
+        "#3000 batch success ignores the failed exit status",
+    ),
+    ("bandit", "case2-rc0"): KnownFailOpen("#3024 null results read as clean"),
+    ("bandit", "case2-rc1"): KnownFailOpen("#3024 null results read as clean"),
+    ("cargo_audit", "case2-rc0"): KnownFailOpen(
+        "#3003 null vulnerability list reads as clean",
+    ),
+    ("checkov", "case2-rc0"): KnownFailOpen("#3026 null failed_checks read as clean"),
+    ("golangci_lint", "case2-rc0"): KnownFailOpen("#3026 null Issues read as clean"),
+    ("html_validate", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
+    ("oxlint", "case2-rc0"): KnownFailOpen("#3005 null diagnostics read as clean"),
+    ("oxlint", "case2-rc1"): KnownFailOpen("#3005 null diagnostics read as clean"),
+    ("ruff", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
+    ("semgrep", "case2-rc0"): KnownFailOpen("#3004 null results read as clean"),
+    ("semgrep", "case2-rc1"): KnownFailOpen("#3004 null results read as clean"),
+    ("shellcheck", "case2-rc0"): KnownFailOpen(
+        "#3025 null comments crash the parser",
+        TypeError,
+    ),
+    ("shellcheck", "case2-rc1"): KnownFailOpen(
+        "#3025 null comments crash the parser",
+        TypeError,
+    ),
+    ("sqlfluff", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
+    ("stylelint", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
+    ("vale", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
+    ("cargo_audit", "case2-blank-rc0"): KnownFailOpen(
+        "#3003 missing report reads as clean",
+    ),
 }
 
 _CARGO_PROJECT = {
@@ -197,7 +225,7 @@ def _failed_run_param(
     case: str,
     returncode: int,
     stdout: str,
-) -> Any:
+) -> ParameterSet:
     """Attach a strict expected failure only to a measured defective pair.
 
     Args:
@@ -209,14 +237,14 @@ def _failed_run_param(
     Returns:
         A pytest parameter with a stable, readable id.
     """
-    reason = KNOWN_FAIL_OPEN.get((tool_name, case))
-    marks = []
-    if reason:
+    defect = KNOWN_FAIL_OPEN.get((tool_name, case))
+    marks: list[pytest.MarkDecorator] = []
+    if defect:
         marks.append(
             pytest.mark.xfail(
                 strict=True,
-                reason=reason,
-                raises=TypeError if tool_name == "shellcheck" else AssertionError,
+                reason=defect.reason,
+                raises=defect.raises,
             ),
         )
     return pytest.param(
@@ -237,11 +265,32 @@ FAILED_RUNS = (
     + [
         _failed_run_param(name, f"case2-rc{rc}", rc, reports[0])
         for name, reports in JSON_REPORTS.items()
-        if reports is not None
         for rc in (0, 1)
     ]
     + [_failed_run_param("cargo_audit", f"case2-blank-rc{rc}", rc, "") for rc in (0, 1)]
 )
+
+
+def _fallback_layout(tool_name: str, patterns: list[str]) -> dict[str, str]:
+    """Derive a concrete filename only from an unambiguous file pattern.
+
+    Args:
+        tool_name: Plugin needing a project layout.
+        patterns: The plugin's declared discovery patterns.
+
+    Returns:
+        A minimal project with one discoverable file.
+    """
+    if not patterns:
+        pytest.fail(f"{tool_name}: add an explicit PROJECT_LAYOUTS entry (no patterns)")
+    pattern = patterns[0]
+    while pattern.startswith("**/"):
+        pattern = pattern.removeprefix("**/")
+    if pattern.count("*") > 1 or any(char in pattern for char in "?[]"):
+        pytest.fail(
+            f"{tool_name}: add an explicit PROJECT_LAYOUTS entry for {pattern!r}",
+        )
+    return {pattern.replace("*", "contract"): "\n"}
 
 
 def _run_tool(
@@ -250,7 +299,7 @@ def _run_tool(
     tool_name: str,
     returncode: int,
     stdout: str,
-) -> ToolResult:
+) -> tuple[ToolResult, list[list[str]]]:
     """Run the actual plugin against real files and a fake stdlib process.
 
     Args:
@@ -261,40 +310,91 @@ def _run_tool(
         stdout: Output for both process paths.
 
     Returns:
-        The plugin's observable check result.
+        The plugin's observable check result and every process argv.
     """
     plugin = type(ToolRegistry.get(tool_name))()
     layout = PROJECT_LAYOUTS.get(tool_name)
     if layout is None:
-        pattern = plugin.definition.file_patterns[0]
-        layout = {pattern.replace("*", "contract"): "\n"}
+        layout = _fallback_layout(tool_name, plugin.definition.file_patterns)
     for relative_path, content in layout.items():
         target = tmp_path / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
+    commands: list[list[str]] = []
 
-    def completed(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def record(args: list[str]) -> None:
+        """Record argv and emulate tools that write their report to a file.
+
+        Args:
+            args: Command assembled by the real plugin.
+        """
+        commands.append(list(args))
+        if tool_name == "gitleaks" and "--report-path" in args:
+            report_path = Path(args[args.index("--report-path") + 1])
+            report_path.write_text(stdout, encoding="utf-8")
+
+    def completed(
+        args: list[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str | bytes]:
         """Return the requested process result without launching a tool.
 
         Args:
             args: Command assembled by the real plugin.
-            **kwargs: Ignored subprocess execution settings.
+            **kwargs: Subprocess settings, including text mode and check.
 
         Returns:
             A completed process with the requested exit code and output.
-        """
-        return subprocess.CompletedProcess(args, returncode, stdout, "")
 
-    process = MagicMock()
-    process.stdout = io.StringIO(stdout)
-    process.returncode = returncode
-    process.wait.return_value = returncode
-    process.poll.return_value = returncode
-    process.communicate.return_value = (stdout, "")
-    process.__enter__.return_value = process
+        Raises:
+            subprocess.CalledProcessError: If check is true and the exit is nonzero.
+        """
+        record(args)
+        text_mode = kwargs.get("text", kwargs.get("universal_newlines", False))
+        output = stdout if text_mode else stdout.encode("utf-8")
+        stderr = "" if text_mode else b""
+        if kwargs.get("check") and returncode != 0:
+            raise subprocess.CalledProcessError(
+                returncode,
+                args,
+                output=output,
+                stderr=stderr,
+            )
+        return subprocess.CompletedProcess[str | bytes](
+            args,
+            returncode,
+            output,
+            stderr,
+        )
+
+    def popen(args: list[str], **kwargs: object) -> MagicMock:
+        """Give every streaming invocation an independent process and stream.
+
+        Args:
+            args: Command assembled by the real plugin.
+            **kwargs: Subprocess settings, including text mode.
+
+        Returns:
+            A fresh process with unread output and the requested exit code.
+        """
+        record(args)
+        text_mode = kwargs.get("text", kwargs.get("universal_newlines", False))
+        process = MagicMock()
+        process.stdout = (
+            io.StringIO(stdout) if text_mode else io.BytesIO(stdout.encode())
+        )
+        process.returncode = returncode
+        process.wait.return_value = returncode
+        process.poll.return_value = returncode
+        process.communicate.return_value = (
+            (stdout, "") if text_mode else (stdout.encode(), b"")
+        )
+        process.__enter__.return_value = process
+        return process
+
     monkeypatch.setattr("subprocess.run", completed)
-    monkeypatch.setattr("subprocess.Popen", MagicMock(return_value=process))
+    monkeypatch.setattr("subprocess.Popen", MagicMock(side_effect=popen))
     monkeypatch.setattr("shutil.which", MagicMock(return_value="/mock/bin/tool"))
     for gate in (
         "lintro.plugins.execution_preparation.verify_tool_version",
@@ -302,19 +402,52 @@ def _run_tool(
         "lintro.tools.osv_scanner.definition.verify_tool_version",
     ):
         monkeypatch.setattr(gate, MagicMock(return_value=None))
-    return plugin.check([str(tmp_path)], {})
+    return plugin.check([str(tmp_path)], {}), commands
+
+
+def _assert_tool_ran(
+    tool_name: str,
+    result: ToolResult,
+    commands: list[list[str]],
+) -> None:
+    """Require discovered targets and an actual check invocation without a skip.
+
+    Args:
+        tool_name: Plugin under test, for actionable diagnostics.
+        result: Observable plugin result.
+        commands: All argv recorded at the stdlib process boundary.
+    """
+    if result.no_files:
+        pytest.fail(f"{tool_name}: harness did not discover targets: {result.output}")
+    # Harness preconditions must fail even for a known fail-open parameter.
+    try:
+        assert_that(
+            any(
+                not {"--version", "-V", "version"}.intersection(argv)
+                for argv in commands
+            ),
+        ).described_as(f"{tool_name}: no check command ran: {commands}").is_true()
+        assert_that(result.skipped).described_as(f"{tool_name}: {result}").is_false()
+    except AssertionError as exc:
+        pytest.fail(str(exc))
 
 
 def test_registry_has_explicit_failed_run_coverage() -> None:
     """Require a subprocess coverage decision and a JSON decision for every tool."""
     registered = set(ToolRegistry.get_all())
-    assert_that(registered).is_not_empty().is_equal_to(set(REGISTERED_TOOLS))
+    assert_that(registered).is_not_empty()
     assert_that(CASE1_TOOLS & CASE1_EXCLUSIONS.keys()).is_empty()
     assert_that(CASE1_TOOLS | CASE1_EXCLUSIONS.keys()).is_equal_to(registered)
-    assert_that(set(JSON_REPORTS)).is_equal_to(registered)
-    assert_that(all(CASE1_EXCLUSIONS.values())).is_true()
+    assert_that(JSON_REPORTS.keys() & NO_JSON_REPORT.keys()).is_empty()
+    assert_that(JSON_REPORTS.keys() | NO_JSON_REPORT.keys()).is_equal_to(registered)
+    assert_that(set(CLEAN_OUTPUTS) - CASE1_TOOLS).is_empty()
+    assert_that(set(CLEAN_SUCCESS_EXCLUSIONS) - CASE1_TOOLS).is_empty()
+    for reasons in (CASE1_EXCLUSIONS, NO_JSON_REPORT, CLEAN_SUCCESS_EXCLUSIONS):
+        assert_that(all(reason.strip() for reason in reasons.values())).is_true()
     covered_pairs = {(param.values[0], param.values[1]) for param in FAILED_RUNS}
     assert_that(set(KNOWN_FAIL_OPEN) - covered_pairs).is_empty()
+    for defect in KNOWN_FAIL_OPEN.values():
+        assert_that(re.match(r"^#\d+\b", defect.reason)).is_not_none()
 
 
 @pytest.mark.parametrize(("tool_name", "case", "returncode", "stdout"), FAILED_RUNS)
@@ -336,42 +469,44 @@ def test_failed_run_never_reports_clean_success(
         monkeypatch: Fixture for process boundary and working-directory patches.
         tmp_path: Real project files used by discovery.
     """
-    result = _run_tool(monkeypatch, tmp_path, tool_name, returncode, stdout)
-    if result.no_files:
-        pytest.fail(f"{tool_name}: harness did not discover targets: {result.output}")
-    explained = (
-        result.timed_out or result.skipped or (result.parse_failures_count or 0) > 0
+    result, commands = _run_tool(
+        monkeypatch,
+        tmp_path,
+        tool_name,
+        returncode,
+        stdout,
     )
+    _assert_tool_ran(tool_name, result, commands)
+    explained = result.timed_out or (result.parse_failures_count or 0) > 0
     assert_that(
         result.success is True and result.issues_count == 0 and not explained,
     ).described_as(f"{tool_name} {case}: {result}").is_false()
 
 
 @pytest.mark.parametrize(
-    ("tool_name", "stdout"),
-    [
-        pytest.param(name, reports[1], id=name)
-        for name, reports in JSON_REPORTS.items()
-        if reports is not None
-    ],
+    "tool_name",
+    sorted(CASE1_TOOLS - CLEAN_SUCCESS_EXCLUSIONS.keys()),
 )
-def test_empty_json_report_is_a_clean_success(
+def test_clean_run_is_a_clean_success(
     tool_name: str,
-    stdout: str,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Prove the same harness accepts a legitimate empty report on exit zero.
+    """Prove the same harness accepts every tool's clean output on exit zero.
 
     Args:
-        tool_name: JSON-reporting plugin under test.
-        stdout: The null case's envelope with an empty container instead.
+        tool_name: Subprocess plugin under test.
         monkeypatch: Fixture for process boundary and working-directory patches.
         tmp_path: Real project files used by discovery.
     """
-    result = _run_tool(monkeypatch, tmp_path, tool_name, 0, stdout)
-    assert_that(result.no_files).is_false()
-    assert_that(result.skipped).is_false()
+    result, commands = _run_tool(
+        monkeypatch,
+        tmp_path,
+        tool_name,
+        0,
+        CLEAN_OUTPUTS.get(tool_name, ""),
+    )
+    _assert_tool_ran(tool_name, result, commands)
     assert_that(result.timed_out).is_false()
     assert_that(result.parse_failures_count or 0).is_zero()
     assert_that(result.success).described_as(str(result)).is_true()
