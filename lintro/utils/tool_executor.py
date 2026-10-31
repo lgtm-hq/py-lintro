@@ -921,7 +921,7 @@ def run_lint_tools_simple(
         )
         if acknowledgements is not None:
             apply_baseline(artifact, acknowledgements)
-            if not ctx.clean_stdout_output:
+            if on_tool_result is not None or not ctx.clean_stdout_output:
                 for result in artifact.tool_results:
                     result_display(result)
         if render_summary:
