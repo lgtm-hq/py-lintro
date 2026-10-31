@@ -137,11 +137,20 @@ class ToolResult:
     capability: Cap | None = field(default=None)
 
     def __post_init__(self) -> None:
-        """Validate that the issue counts and skip state are consistent.
+        """Validate collections, issue counts and execution state.
 
         Raises:
+            TypeError: If a collection field is None.
             ValueError: If issue counts are inconsistent or skip state is invalid.
         """
+        for field_name, value in (
+            ("issues", self.issues),
+            ("initial_issues", self.initial_issues),
+            ("metadata", self.metadata),
+        ):
+            if value is None:
+                raise TypeError(f"ToolResult.{field_name} must not be None")
+
         # Skipped tools are not failures — they just didn't run
         if self.skipped:
             self.success = True

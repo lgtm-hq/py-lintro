@@ -201,6 +201,48 @@ def test_batch_fix_scores_the_difference_between_the_two_checks(
     assert_that(result.output).contains("All issues were successfully auto-fixed")
 
 
+@pytest.mark.parametrize("always_report", [False, True])
+@pytest.mark.parametrize("initial_output", ["", OXFMT_DIFFERENT])
+def test_deprecated_initial_issues_policy_keyword_is_a_noop(
+    always_report: bool,
+    initial_output: str,
+    ts_file: Path,
+) -> None:
+    """Legacy plugin constructors keep working with either keyword value.
+
+    Args:
+        always_report: Deprecated keyword value supplied by an existing plugin.
+        initial_output: Initial check output with zero or one finding.
+        ts_file: File the batch formatter processes.
+    """
+    plugin = OxfmtPlugin()
+    policy = BatchFixPolicy(always_report_initial_issues=always_report)
+    with patch.object(
+        plugin,
+        "_run_subprocess_result",
+        side_effect=[
+            SubprocessResult(0, initial_output, "", initial_output),
+            SubprocessResult(0, "", "", ""),
+            SubprocessResult(0, "", "", ""),
+        ],
+    ):
+        result = run_batch_fix(
+            ExecutionContext(files=[str(ts_file)], rel_files=["app.ts"]),
+            plugin=plugin,
+            commands=BatchCommands(check=["oxfmt", "--check"], fix=["oxfmt"]),
+            parse=lambda output: parse_oxfmt_output(output=output),
+            policy=policy,
+        )
+
+    detected = parse_oxfmt_output(output=initial_output)
+    assert_that(result.initial_issues).is_equal_to(detected)
+    assert_that(result.initial_issues_count).is_equal_to(len(detected))
+    assert_that(result.fixed_issues_count).is_equal_to(len(detected))
+    assert_that(result.remaining_issues_count).is_zero()
+    assert_that(result.issues).is_empty()
+    assert_that(result.success).is_true()
+
+
 def test_a_fix_timeout_keeps_the_pre_fix_issues(ts_file: Path) -> None:
     """Issues detected before the timeout are reported as still remaining.
 

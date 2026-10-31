@@ -250,13 +250,22 @@ configuration guide.
 
 The `ToolResult` dataclass represents execution results:
 
-| Field          | Type                      | Description                  |
-| -------------- | ------------------------- | ---------------------------- |
-| `name`         | `str`                     | Tool name                    |
-| `success`      | `bool`                    | Whether execution succeeded  |
-| `output`       | `str \| None`             | Raw output (errors/warnings) |
-| `issues_count` | `int`                     | Number of issues found       |
-| `issues`       | `list[BaseIssue] \| None` | Parsed issues                |
+| Field            | Type                  | Description                          |
+| ---------------- | --------------------- | ------------------------------------ |
+| `name`           | `str`                 | Tool name                            |
+| `success`        | `bool`                | Whether execution succeeded          |
+| `output`         | `str \| None`         | Raw output (errors/warnings)          |
+| `issues_count`   | `int`                 | Number of issues found               |
+| `issues`         | `Sequence[BaseIssue]` | Parsed issues; defaults to `()`       |
+| `initial_issues` | `Sequence[BaseIssue]` | Pre-fix issues; defaults to `()`      |
+| `metadata`       | `dict[str, Any]`      | Tool metadata; defaults to a new `{}` |
+
+Omit empty collection arguments or pass an empty sequence or dictionary. Passing
+`None` for `issues`, `initial_issues` or `metadata` raises a `TypeError` naming the
+field when `ToolResult` is constructed. For example, use `issues=issues` rather than
+`issues=issues if issues else None`. Fix counts such as `initial_issues_count`,
+`fixed_issues_count` and `remaining_issues_count` still accept `None` to mean unknown;
+an empty collection does not establish a measured zero.
 
 ### BaseToolPlugin Helpers
 
@@ -396,10 +405,12 @@ emitting issue paths relative to it need).
 `run_batch_fix()` takes both fully built command lines as a
 `BatchCommands(check=..., fix=...)` bundle — the check command runs twice, once before
 the fix and once to score it — plus a `BatchFixPolicy` holding the wording of the
-summary (`fixed_label`, `all_fixed_message`, `verbose_output_label`) and two reporting
-switches: `report_initial_issues` prefixes `ToolResult.issues` with the pre-fix set for
-tools that render a two-table view, and `always_report_initial_issues` passes an empty
-list rather than `None` when nothing was detected.
+summary (`fixed_label`, `all_fixed_message`, `verbose_output_label`). The reporting
+switch `report_initial_issues` prefixes `ToolResult.issues` with the pre-fix set for
+tools that render a two-table view. The constructor still accepts
+`always_report_initial_issues` as a deprecated no-op for existing plugins; new plugins
+should omit it. `ToolResult.initial_issues` is always a sequence, including when
+nothing was detected.
 
 Both entry points take `on_timeout` and `on_error` hooks. Leave `on_timeout` out to get
 the standard `batch_timeout_result()` / `batch_fix_timeout_result()` shape, and pass it

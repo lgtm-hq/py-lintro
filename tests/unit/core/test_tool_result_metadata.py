@@ -13,12 +13,15 @@ from __future__ import annotations
 
 import dataclasses
 import warnings
+from collections.abc import Sequence
+from typing import Any
 
 import pytest
 from assertpy import assert_that
 
 from lintro.enums.capability import Cap
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
 from lintro.tools.core.verify_pass import (
     VerifyOutcome,
     VerifyScope,
@@ -37,6 +40,48 @@ def test_collection_defaults_are_empty_containers(field_name: str) -> None:
     expected: object = {} if field_name == "metadata" else ()
 
     assert_that(getattr(result, field_name)).is_equal_to(expected)
+
+
+@pytest.mark.parametrize("field_name", ["issues", "initial_issues", "metadata"])
+@pytest.mark.parametrize("skipped", [False, True])
+def test_none_collections_are_rejected_at_construction(
+    field_name: str,
+    skipped: bool,
+) -> None:
+    """Unchecked plugin payloads fail at the model boundary, even for skips.
+
+    Args:
+        field_name: Collection incorrectly supplied as None by a plugin.
+        skipped: Whether the plugin reports a skip instead of an execution.
+    """
+    payload: dict[str, Any] = {
+        field_name: None,
+        "skipped": skipped,
+        "skip_reason": "tool unavailable" if skipped else None,
+    }
+
+    with pytest.raises(TypeError, match=rf"ToolResult\.{field_name} must not be None"):
+        ToolResult(**payload)
+
+
+@pytest.mark.parametrize("empty", [(), []], ids=["tuple", "list"])
+def test_explicit_empty_collections_preserve_unknown_counts(
+    empty: Sequence[BaseIssue],
+) -> None:
+    """Empty plugin collections do not manufacture measured fix counts.
+
+    Args:
+        empty: A supported empty sequence supplied explicitly by a plugin.
+    """
+    result = ToolResult(issues=empty, initial_issues=empty, metadata={})
+
+    assert_that(result.issues).is_equal_to(empty)
+    assert_that(result.initial_issues).is_equal_to(empty)
+    assert_that(result.metadata).is_empty()
+    assert_that(result.initial_issues_count).is_none()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.success).is_false()
 
 
 def test_default_metadata_is_owned_by_each_result() -> None:

@@ -150,6 +150,8 @@ class BatchFixPolicy:
         report_initial_issues: Include the pre-fix issues ahead of the
             surviving ones in ``ToolResult.issues``. Tools that render a
             two-table fix view need this; the rest report only what remains.
+        always_report_initial_issues: Deprecated no-op kept for plugin
+            compatibility. ``ToolResult.initial_issues`` is always a sequence.
         tool_name: Name used in timeout messages when it differs from the
             registered tool name.
         report_cwd: Record the working directory on the ``ToolResult``.
@@ -168,6 +170,7 @@ class BatchFixPolicy:
     verbose_output_label: str = "Fix output"
     verbose: bool = False
     report_initial_issues: bool = False
+    always_report_initial_issues: bool = False
     tool_name: str | None = None
     report_cwd: bool = False
     findings_exit_codes: tuple[int, ...] = ()
