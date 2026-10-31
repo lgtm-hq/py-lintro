@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from assertpy import assert_that
 
 from lintro.parsers.shellcheck.shellcheck_parser import parse_shellcheck_output
 
 from .conftest import make_issue, make_shellcheck_output
+
+
+@pytest.mark.parametrize("value", [None, False, [], {}])
+def test_shellcheck_non_string_fields_use_defaults(value: object) -> None:
+    """Null text and malformed codes cannot leak into shellcheck findings."""
+    output = json.dumps([dict.fromkeys(["file", "level", "message", "code"], value)])
+    issues = parse_shellcheck_output(output)
+
+    assert_that(issues).is_length(1)
+    issue = issues[0]
+    assert_that((issue.file, issue.message, issue.code)).is_equal_to(("", "", ""))
+    assert_that(issue.level).is_equal_to("error")
 
 
 @pytest.mark.parametrize(

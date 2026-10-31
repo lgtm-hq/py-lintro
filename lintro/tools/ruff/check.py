@@ -11,7 +11,7 @@ from loguru import logger
 from lintro.parsers.ruff.ruff_format_issue import RuffFormatIssue
 from lintro.parsers.ruff.ruff_parser import (
     parse_ruff_format_check_output,
-    parse_ruff_output,
+    parse_ruff_output_with_stats,
 )
 from lintro.tools.core.timeout_utils import (
     create_timeout_result,
@@ -101,7 +101,7 @@ def execute_ruff_check(
         # formatted into tables, so no need to show it in console warnings
         logger.debug(f"[ruff] check full output:\n{output_lint}")
 
-    lint_issues = parse_ruff_output(output=output_lint)
+    lint_issues, parse_failures = parse_ruff_output_with_stats(output=output_lint)
     lint_issues_count: int = len(lint_issues)
 
     # Optional format check via `format_check` flag
@@ -136,6 +136,7 @@ def execute_ruff_check(
                 output=timeout_result.output,
                 issues_count=lint_issues_count + timeout_result.issues_count,
                 issues=lint_issues + timeout_result.issues,
+                parse_failures_count=parse_failures,
             )
 
         # Debug logging for CI diagnostics
@@ -157,7 +158,9 @@ def execute_ruff_check(
 
     # Combine results - respect subprocess exit codes and issue counts
     issues_count: int = lint_issues_count + format_issues_count
-    success: bool = success_lint and success_format and (issues_count == 0)
+    success: bool = (
+        success_lint and success_format and issues_count == 0 and parse_failures == 0
+    )
 
     # Diagnostic logging for the "ERROR" case (subprocess failed but no issues parsed)
     if not success and issues_count == 0:
@@ -178,4 +181,5 @@ def execute_ruff_check(
         output=output_summary,
         issues_count=issues_count,
         issues=all_issues,
+        parse_failures_count=parse_failures,
     )

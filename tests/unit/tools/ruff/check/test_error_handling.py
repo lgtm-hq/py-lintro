@@ -52,8 +52,8 @@ def test_execute_ruff_check_handles_format_timeout(
             "lintro.tools.ruff.check.run_subprocess_with_timeout",
         ) as mock_subprocess,
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=lint_issues,
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=(lint_issues, 0),
         ),
     ):
         # First call succeeds (lint), second call times out (format)
@@ -93,9 +93,9 @@ def test_execute_ruff_check_subprocess_failure_respected(
             return_value=(False, "[]"),
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
             # No issues parsed from output
-            return_value=[],
+            return_value=([], 0),
         ),
     ):
         result = execute_ruff_check(mock_ruff_tool, ["/test/project"])

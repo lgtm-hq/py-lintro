@@ -18,22 +18,30 @@ from lintro.parsers.base_parser import (
     extract_dict_field,
     extract_int_field,
     extract_str_field,
-    safe_parse_items,
+    safe_parse_items_with_stats,
 )
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.parsers.streaming import stream_json_array_fallback
 
 
-def _parse_ruff_item(item: dict[str, object]) -> RuffIssue | None:
+def _parse_ruff_item(item: dict[str, object]) -> RuffIssue:
     """Parse a single Ruff issue item into a RuffIssue object.
 
     Args:
         item: Dictionary containing issue data from Ruff JSON output.
 
     Returns:
-        RuffIssue object if parsing succeeds, None otherwise.
+        RuffIssue object with validated filename and message.
+
+    Raises:
+        ValueError: If filename or message is missing, blank, or not a string.
     """
     filename = extract_str_field(item, ["filename", "file"])
+    message = extract_str_field(item, ["message"])
+    if not filename.strip() or not message.strip():
+        raise ValueError(
+            "Ruff diagnostic requires nonblank filename and message strings",
+        )
     loc = extract_dict_field(item, ["location", "start"])
     end_loc = extract_dict_field(item, ["end_location", "end"])
 
@@ -43,7 +51,6 @@ def _parse_ruff_item(item: dict[str, object]) -> RuffIssue | None:
     end_column = extract_int_field(end_loc, ["column", "col"], default=column) or column
 
     code = extract_str_field(item, ["code", "rule"])
-    message = extract_str_field(item, ["message"])
     url_candidate = item.get("url")
     url: str | None = url_candidate if isinstance(url_candidate, str) else None
 
@@ -88,8 +95,25 @@ def parse_ruff_output(output: str) -> list[RuffIssue]:
     Returns:
         list[RuffIssue]: Parsed issues.
     """
+    issues, _failures = parse_ruff_output_with_stats(output)
+    return issues
+
+
+def parse_ruff_output_with_stats(output: str) -> tuple[list[RuffIssue], int]:
+    """Parse Ruff output and count records with unusable required fields.
+
+    Optional fields, including the null code on a syntax error, retain their
+    defaults. Invalid required fields raise inside ``safe_parse_items_with_stats``
+    so they count as parse failures rather than intentional filtering.
+
+    Args:
+        output: JSON array or JSON Lines output from Ruff.
+
+    Returns:
+        Parsed issues and the number of rejected diagnostic records.
+    """
     if not output or output.strip() in ("[]", "{}"):
-        return []
+        return [], 0
 
     # First try JSON array (with possible trailing non-JSON data)
     try:
@@ -101,7 +125,7 @@ def parse_ruff_output(output: str) -> list[RuffIssue]:
             ruff_data = json.loads(output)
 
         if isinstance(ruff_data, list):
-            return safe_parse_items(ruff_data, _parse_ruff_item, "ruff")
+            return safe_parse_items_with_stats(ruff_data, _parse_ruff_item, "ruff")
     except (json.JSONDecodeError, TypeError) as e:
         # Fall back to JSON Lines parsing below
         logger.debug(f"Ruff array JSON parsing failed, falling back to JSON Lines: {e}")
@@ -120,7 +144,7 @@ def parse_ruff_output(output: str) -> list[RuffIssue]:
             logger.debug(f"Failed to parse ruff JSON line '{line_str[:50]}': {e}")
             continue
 
-    return safe_parse_items(items, _parse_ruff_item, "ruff")
+    return safe_parse_items_with_stats(items, _parse_ruff_item, "ruff")
 
 
 def parse_ruff_format_check_output(output: str) -> list[str]:

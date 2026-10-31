@@ -2,9 +2,45 @@
 
 from __future__ import annotations
 
+import json
+
+import pytest
 from assertpy import assert_that
 
-from lintro.parsers.ruff.ruff_parser import parse_ruff_output
+from lintro.parsers.ruff.ruff_parser import parse_ruff_output, stream_ruff_output
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        {},
+        {"filename": "a.py"},
+        {"message": "bad syntax"},
+        {"filename": None, "message": "bad syntax"},
+        {"filename": "a.py", "message": None},
+        {"filename": 42, "message": "bad syntax"},
+        {"filename": "a.py", "message": []},
+        {"filename": "  ", "message": "bad syntax"},
+        {"filename": "a.py", "message": " "},
+    ],
+)
+def test_ruff_rejects_unusable_required_fields(item: dict[str, object]) -> None:
+    """Batch, JSON Lines and streaming paths reject incomplete records."""
+    for output in (json.dumps([item]), json.dumps(item) + "\n"):
+        assert_that(parse_ruff_output(output)).is_empty()
+        assert_that(list(stream_ruff_output(output))).is_empty()
+
+
+def test_ruff_null_code_keeps_syntax_error_and_file_alias() -> None:
+    """Syntax errors remain findings when Ruff supplies no rule code."""
+    output = '[{"file": "syntax.py", "message": "Expected expression", "code": null}]'
+    issues = parse_ruff_output(output)
+
+    assert_that(issues).is_length(1)
+    assert_that((issues[0].file, issues[0].message, issues[0].code)).is_equal_to(
+        ("syntax.py", "Expected expression", ""),
+    )
+    assert_that(list(stream_ruff_output(output))).is_equal_to(issues)
 
 
 def test_parse_ruff_output_plain_json_array() -> None:

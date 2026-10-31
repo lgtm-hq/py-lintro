@@ -14,7 +14,7 @@ The utilities include:
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, TypeVar
 
 from loguru import logger
@@ -26,6 +26,25 @@ IssueT = TypeVar("IssueT", bound="BaseIssue")
 
 # Pre-compiled regex for ANSI escape sequences
 _ANSI_ESCAPE_PATTERN: re.Pattern[str] = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def extract_optional_str(
+    item: Mapping[str, object],
+    key: str,
+    default: str = "",
+) -> str:
+    """Read optional text without stringifying null or other JSON types.
+
+    Args:
+        item: Decoded record containing the optional field.
+        key: Field name to read.
+        default: Value used for a missing, null, or non-string field.
+
+    Returns:
+        The string value unchanged, including empty strings, or the default.
+    """
+    value = item.get(key)
+    return value if isinstance(value, str) else default
 
 
 def extract_int_field(
