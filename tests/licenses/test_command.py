@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -77,11 +78,13 @@ def test_licenses_spdx_format() -> None:
     ["grid", "json", "csv", "spdx", "attribution"],
 )
 @pytest.mark.parametrize("check", [False, True])
+@pytest.mark.parametrize("failure", ["json", "dangling-symlink"])
 def test_licenses_reports_uncollected_npm(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     output_format: str,
     check: bool,
+    failure: str,
 ) -> None:
     """Every report identifies failed collection, including problems-only mode.
 
@@ -90,9 +93,14 @@ def test_licenses_reports_uncollected_npm(
         monkeypatch: Fixture for selecting the project directory.
         output_format: Report format, or attribution output.
         check: Whether collection failure must change the exit status.
+        failure: Invalid JSON or a manifest symlink with a missing target.
     """
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "package.json").write_text("{")
+    manifest = tmp_path / "package.json"
+    if failure == "dangling-symlink":
+        manifest.symlink_to(tmp_path / "missing.json")
+    else:
+        manifest.write_text("{")
     args = ["--lang", "npm", "--problems-only"]
     args += (
         ["--attribution"]
@@ -111,7 +119,11 @@ def test_licenses_reports_uncollected_npm(
         assert_that(payload).is_length(1)
         assert_that(payload[0]["status"]).is_equal_to("uncollected")
         assert_that(payload[0]["ecosystem"]).is_equal_to("npm")
-        assert_that(payload[0]["reason"]).contains("package.json", "Expecting")
+        assert_that(payload[0]["reason"]).contains("package.json")
+        if failure == "json":
+            assert_that(payload[0]["reason"]).contains("Expecting")
+        else:
+            assert_that(payload[0]["reason"]).contains("No such file")
         assert_that(payload[0]).does_not_contain_key("name")
     elif output_format == "csv":
         rows = list(csv.DictReader(io.StringIO(result.output)))
@@ -126,7 +138,12 @@ def test_licenses_reports_uncollected_npm(
 
 @pytest.mark.parametrize(
     "content",
-    [None, "{}", '{"dependencies": {}, "devDependencies": {}}'],
+    [
+        None,
+        "{}",
+        '{"dependencies": {}, "devDependencies": {}}',
+        '\ufeff{"dependencies": {"missing": "1"}}',
+    ],
 )
 def test_licenses_check_accepts_absent_and_empty_npm_inventory(
     tmp_path: Path,
@@ -149,6 +166,83 @@ def test_licenses_check_accepts_absent_and_empty_npm_inventory(
     )
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(json.loads(result.output)).is_empty()
+
+
+@pytest.mark.parametrize("failure", ["integer", "nesting"])
+def test_licenses_reports_json_decoder_limits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    """JSON decoder limits produce collection diagnostics instead of tracebacks.
+
+    Args:
+        tmp_path: Temporary project directory.
+        monkeypatch: Fixture for selecting the project directory and decoder.
+        failure: Integer conversion or nesting limit to exceed.
+    """
+    monkeypatch.chdir(tmp_path)
+    if failure == "integer":
+        limit = sys.get_int_max_str_digits()
+        if not limit:
+            pytest.skip("Integer conversion limit is disabled")
+        content = '{"value": ' + "1" * (limit + 1) + "}"
+        reason = "integer string conversion"
+    else:
+        content = "{}"
+        reason = "recursion depth"
+    (tmp_path / "package.json").write_text(content)
+
+    def fail_decode(document: str) -> object:
+        raise RecursionError("maximum recursion depth exceeded while decoding JSON")
+
+    with monkeypatch.context() as decoder_patch:
+        if failure == "nesting":
+            # Nesting limits differ between Python's JSON decoder versions.
+            decoder_patch.setattr(json, "loads", fail_decode)
+        result = CliRunner().invoke(
+            licenses_command,
+            ["--lang", "npm", "--check", "--format", "json"],
+        )
+
+    assert_that(result.exit_code).is_equal_to(1)
+    payload = json.loads(result.output)
+    assert_that(payload).is_length(1)
+    assert_that(payload[0]["status"]).is_equal_to("uncollected")
+    assert_that(payload[0]["reason"]).contains("npm", "package.json", reason)
+
+
+@pytest.mark.parametrize("name", ["@scope</text>/extra", "@scope<text>/pkg/extra"])
+def test_licenses_spdx_contains_invalid_dependency_diagnostic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+) -> None:
+    """Manifest-controlled delimiters stay inside one SPDX comment text block.
+
+    Args:
+        tmp_path: Temporary project directory.
+        monkeypatch: Fixture for selecting the project directory.
+        name: Invalid scoped dependency name containing an SPDX delimiter.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "package.json").write_text(
+        json.dumps({"dependencies": {name: "1"}}),
+    )
+
+    result = CliRunner().invoke(
+        licenses_command,
+        ["--lang", "npm", "--check", "--format", "spdx"],
+    )
+
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(result.output).contains(
+        "invalid scoped name",
+        "npm inventory uncollected",
+    )
+    assert_that(result.output.count("<text>")).is_equal_to(1)
+    assert_that(result.output.count("</text>")).is_equal_to(1)
+    assert_that(result.output.rstrip()).ends_with("</text>")
 
 
 @pytest.mark.parametrize("failure", ["directory", "encoding", "schema"])

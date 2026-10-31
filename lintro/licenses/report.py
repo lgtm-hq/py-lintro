@@ -188,7 +188,9 @@ def to_spdx(
         "",
     ]
     for error in errors:
-        lines.append(f"DocumentComment: <text>{error}</text>")
+        comment = str(error).replace("<text>", "&lt;text&gt;")
+        comment = comment.replace("</text>", "&lt;/text&gt;")
+        lines.append(f"DocumentComment: <text>{comment}</text>")
     for r in results:
         spdx_id = "".join(ch for ch in r.package.name if ch.isalnum())
         concluded = r.package.license_id or "NOASSERTION"

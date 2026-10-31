@@ -213,10 +213,12 @@ def _read_root_manifest(path: Path) -> dict[str, Any] | None:
         LicenseCollectionError: The manifest is unreadable or malformed.
     """
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except FileNotFoundError as error:
+        if path.is_symlink():
+            raise LicenseCollectionError("npm", path, str(error)) from error
         return None
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+    except (OSError, ValueError, RecursionError) as error:
         raise LicenseCollectionError("npm", path, str(error)) from error
 
     if not isinstance(data, dict):

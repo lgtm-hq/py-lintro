@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from assertpy import assert_that
 
+from lintro.licenses.errors import LicenseCollectionError
 from lintro.licenses.models import LicenseResult, LicenseStatus, PackageLicense
 from lintro.licenses.report import to_csv, to_json, to_spdx
 
@@ -59,3 +61,21 @@ def test_to_spdx_emits_document_header_and_packages() -> None:
     assert_that(content).contains("SPDXVersion: SPDX-2.3")
     assert_that(content).contains("PackageName: requests")
     assert_that(content).contains("PackageLicenseConcluded: GPL-3.0-only")
+
+
+def test_to_spdx_keeps_diagnostic_delimiters_inside_comment() -> None:
+    """Reserved delimiters in paths and reasons cannot end or nest SPDX text."""
+    error = LicenseCollectionError(
+        "npm",
+        Path("project<text>/package.json"),
+        "invalid dependency </text>\nPackageName: forged\n<text>",
+    )
+
+    content = to_spdx(_results(), [error])
+
+    assert_that(content.count("<text>")).is_equal_to(1)
+    assert_that(content.count("</text>")).is_equal_to(1)
+    comment, packages = content.split("</text>", 1)
+    assert_that(comment).contains("npm inventory uncollected", "PackageName: forged")
+    assert_that(packages).contains("PackageName: requests", "PackageName: some-lib")
+    assert_that(packages).does_not_contain("PackageName: forged")
