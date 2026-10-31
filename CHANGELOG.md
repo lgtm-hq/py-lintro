@@ -21,6 +21,23 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.173.5] - 2026-10-31
+
+### Changed
+
+- **release**: version 0.173.4 (#3051) (37b43f3)
+
+### Fixed
+
+- **ai/review**: reject malformed artifact collections (#3062) (aba3bbf)
+- **reporting**: reject unreported badge failures and scope baselines (#3048) (381ca89)
+- **oxlint**: reject invalid reports and normalize nullable diagnostics (#3005) (#3041)
+  (af235b7)
+- **semgrep**: fail closed on invalid scan reports (#3004) (#3037) (ad45a2f)
+- **black**: surface unmeasured E501 supplements (#3011) (#3044) (20fc4ee)
+- **licenses**: fail checks when npm inventory is uncollected (#3006) (#3053) (d1e6386)
+- **ci**: reject stale release candidates during publication (#3055) (f446566)
+
 ## [0.173.4] - 2026-10-31
 
 ### Fixed
