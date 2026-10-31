@@ -104,7 +104,7 @@ def cargo_deny_check(
             _ERROR_DIAGNOSTIC,
             False,
             ["license is not allowed"],
-            None,
+            _ERROR_DIAGNOSTIC,
             id="error",
         ),
         pytest.param(
@@ -120,7 +120,7 @@ def cargo_deny_check(
             _ERROR_DIAGNOSTIC + "\n" + _WARNING_DIAGNOSTIC,
             False,
             ["license is not allowed", "duplicate dependency"],
-            None,
+            _ERROR_DIAGNOSTIC + "\n" + _WARNING_DIAGNOSTIC,
             id="error-and-warning",
         ),
         pytest.param(
@@ -175,7 +175,7 @@ def test_check_exit_status(
         output: Captured tool output.
         expected_success: Expected overall check verdict.
         expected_messages: Expected parsed finding messages.
-        expected_output: Raw output retained for unexplained execution failures.
+        expected_output: Raw output retained for failed invocations.
     """
     result = cargo_deny_check(process_success, output)
 
@@ -247,6 +247,30 @@ def test_check_malformed_records_fail_closed(
     assert_that(result.issues).is_empty()
     assert_that(result.parse_failures_count).is_equal_to(1)
     assert_that(result.output).is_equal_to(combined)
+
+
+def test_check_keeps_plaintext_execution_error_alongside_parsed_finding(
+    cargo_deny_check: Callable[[bool, str], ToolResult],
+) -> None:
+    """Retain execution errors even when a valid diagnostic explains the exit.
+
+    Args:
+        cargo_deny_check: Callable running the plugin with controlled output.
+    """
+    output = (
+        f"{_ERROR_DIAGNOSTIC}\n"
+        "error: failed to fetch advisory database: connection refused\n"
+    )
+
+    result = cargo_deny_check(False, output)
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.issues).extracting("severity", "code", "message").is_equal_to(
+        [("error", "L001", "license is not allowed")],
+    )
+    assert_that(result.parse_failures_count).is_zero()
+    assert_that(result.output).is_equal_to(output)
 
 
 @pytest.mark.parametrize("process_success", [True, False], ids=["exit-0", "exit-1"])
