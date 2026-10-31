@@ -253,7 +253,7 @@ def test_run_ai_enhancement_fix_action_json_auto_applies_safe_style_suggestions(
     assert_that(mock_verify_fixes.call_count).is_equal_to(1)
     assert_that(result.metadata).is_not_none()
     assert_that(result.metadata).contains_key("fixed_count")
-    assert_that(result.metadata["fixed_count"]).is_equal_to(1)  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.metadata["fixed_count"]).is_equal_to(1)
 
 
 @patch("lintro.ai.orchestrator.require_ai")
@@ -331,7 +331,7 @@ def test_run_ai_enhancement_fix_action_json_uses_fresh_rerun_results(
     assert_that(ai_result.fixes_applied).is_equal_to(1)
     assert_that(result.metadata).is_not_none()
     assert_that(result.metadata).contains_key("fixed_count")
-    assert_that(result.metadata["fixed_count"]).is_equal_to(1)  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.metadata["fixed_count"]).is_equal_to(1)
 
 
 # ---------------------------------------------------------------------------
