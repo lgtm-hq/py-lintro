@@ -40,11 +40,11 @@ a simple success/failure:
 | 5   | 32    | Usage error          |
 
 Messages contribute the matching bits (`R0801` contributes 8), but configuration can
-override the final exit status. In Pylint 4.0.9, a score meeting `fail-under` exits 0;
-a score below it exits with the message bit field, or 1 when no message bits are set.
+override the final exit status. In Pylint 4.0.9, a score meeting `fail-under` exits 0; a
+score below it exits with the message bit field, or 1 when no message bits are set.
 There is no dedicated score-failure bit: 16 means convention messages, and an empty
-report can fail the score gate with exit 1. `exit-zero` forces 0; `fail-on` can force
-a failure even when the score meets the threshold. See
+report can fail the score gate with exit 1. `exit-zero` forces 0; `fail-on` can force a
+failure even when the score meets the threshold. See
 [Pylint's exit decision](https://github.com/pylint-dev/pylint/blob/v4.0.9/pylint/lint/run.py).
 
 ## Lintro Implementation Analysis
@@ -77,21 +77,20 @@ a failure even when the score meets the threshold. See
   configure it explicitly.
 - **Honour the native gate (Option A).** With a valid json2 report, a clean pass
   requires both exit 0 and no parsed issues. Every non-zero exit remains a failure,
-  including a `fail-under` failure with an empty `messages` array. Pylint resolves
-  the score, threshold and options such as `exit-zero` itself; Lintro preserves that
-  verdict rather than decoding a supposed score bit or independently comparing
-  `statistics.score` against a second interpretation of the config. A failure with
-  zero parsed issues keeps `issues_count=0` and carries the exit status, a native
+  including a `fail-under` failure with an empty `messages` array. Pylint resolves the
+  score, threshold and options such as `exit-zero` itself; Lintro preserves that verdict
+  rather than decoding a supposed score bit or independently comparing
+  `statistics.score` against a second interpretation of the config. A failure with zero
+  parsed issues keeps `issues_count=0` and carries the exit status, a native
   configuration hint and any stderr in `ToolResult.output`, so it remains visible
-  without inventing issue rows. Real messages still produce one issue each, even
-  when Pylint exits 0. A non-zero exit with _no_ report — a usage error such as a
-  missing rcfile (exit 32) — is also a failure. The exception is
-  `No files to lint: exiting.`, pylint's
-  usage message when nothing is left to analyse after its own ignore filters have run;
-  it carries that same exit 32 and is a clean pass. The phrase is only honoured outside
-  a json2 report, because an `R0801` body quotes the duplicated source and can contain
-  it. Output that is present but unreadable — invalid JSON, or JSON with no `messages`
-  array — is reported as a parse failure, never as a clean pass.
+  without inventing issue rows. Real messages still produce one issue each, even when
+  Pylint exits 0. A non-zero exit with _no_ report — a usage error such as a missing
+  rcfile (exit 32) — is also a failure. The exception is `No files to lint: exiting.`,
+  pylint's usage message when nothing is left to analyse after its own ignore filters
+  have run; it carries that same exit 32 and is a clean pass. The phrase is only
+  honoured outside a json2 report, because an `R0801` body quotes the duplicated source
+  and can contain it. Output that is present but unreadable — invalid JSON, or JSON with
+  no `messages` array — is reported as a parse failure, never as a clean pass.
 
 ### Issue mapping
 
