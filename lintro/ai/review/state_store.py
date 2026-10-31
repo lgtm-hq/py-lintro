@@ -363,7 +363,11 @@ def _load_artifact_file(
         if skipped is not None:
             skipped.append(path.name)
         return None
-    return ReviewState.from_artifact_dict(payload)
+    try:
+        return ReviewState.from_artifact_dict(payload)
+    except ValueError as exc:
+        logger.warning("Skipping unusable review-state part {}: {}", path.name, exc)
+        return None
 
 
 def _pr_key(raw: object) -> int | None:
