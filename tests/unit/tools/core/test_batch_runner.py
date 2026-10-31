@@ -20,7 +20,7 @@ from loguru import logger
 
 from lintro.parsers.clippy.clippy_issue import ClippyIssue
 from lintro.parsers.oxfmt.oxfmt_parser import parse_oxfmt_output
-from lintro.plugins.base import BaseToolPlugin, ExecutionContext
+from lintro.plugins.base import BaseToolPlugin, PreparedExecution
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.clippy.definition import ClippyPlugin
 from lintro.tools.core.batch_runner import (
@@ -377,7 +377,12 @@ def test_failed_fix_preserves_initial_accounting_and_reporting(
     plugin = OxfmtPlugin()
     with patch.object(plugin, "_run_subprocess_result", side_effect=processes):
         result = run_batch_fix(
-            ExecutionContext(files=[str(ts_file)], rel_files=["app.ts"]),
+            PreparedExecution(
+                files=[str(ts_file)],
+                rel_files=["app.ts"],
+                cwd=str(ts_file.parent),
+                timeout=plugin._get_effective_timeout(),
+            ),
             plugin=plugin,
             commands=BatchCommands(check=["oxfmt", "--list-different"], fix=["oxfmt"]),
             parse=parse_oxfmt_output,
@@ -466,7 +471,7 @@ def test_batch_check_keeps_timeout_warning_and_tool_name(
         success_policy: Check policy selecting the subprocess API.
     """
     plugin = OxfmtPlugin()
-    ctx = ExecutionContext(
+    ctx = PreparedExecution(
         files=["app.ts"],
         rel_files=["app.ts"],
         cwd="/tmp",
@@ -627,7 +632,12 @@ def test_batch_fix_default_does_not_accept_findings_status(ts_file: Path) -> Non
         return_value=SubprocessResult(1, OXFMT_DIFFERENT, "", OXFMT_DIFFERENT),
     ):
         result = run_batch_fix(
-            ExecutionContext(files=[str(ts_file)], rel_files=["app.ts"]),
+            PreparedExecution(
+                files=[str(ts_file)],
+                rel_files=["app.ts"],
+                cwd=str(ts_file.parent),
+                timeout=plugin._get_effective_timeout(),
+            ),
             plugin=plugin,
             commands=BatchCommands(check=["oxfmt", "--list-different"], fix=["oxfmt"]),
             parse=lambda output: list(_ONE_ISSUE),

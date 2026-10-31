@@ -237,7 +237,7 @@ class BlackPlugin(BaseToolPlugin):
 
     def _handle_timeout_error(
         self,
-        timeout_val: int,
+        timeout_val: float,
         initial_count: int | None = None,
         cwd: str | None = None,
     ) -> ToolResult:

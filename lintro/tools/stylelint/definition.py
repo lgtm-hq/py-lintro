@@ -174,7 +174,7 @@ class StylelintPlugin(BaseToolPlugin):
 
     def _create_timeout_result(
         self,
-        timeout_val: int,
+        timeout_val: float,
         cwd: str | None = None,
     ) -> ToolResult:
         """Create a ToolResult for timeout scenarios.

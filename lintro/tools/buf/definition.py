@@ -145,7 +145,7 @@ class BufPlugin(BaseToolPlugin):
 
     def _handle_timeout_error(
         self,
-        timeout_val: int,
+        timeout_val: float,
         initial_count: int | None = None,
         initial_issues: list[BufIssue] | None = None,
     ) -> ToolResult:

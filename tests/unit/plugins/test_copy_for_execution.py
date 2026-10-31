@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from assertpy import assert_that
 
@@ -20,10 +20,6 @@ from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 
 if TYPE_CHECKING:
-    from lintro.tools.pytest.pytest_executor import PytestExecutor
-    from lintro.tools.pytest.pytest_result_processor import (
-        PytestResultProcessor,
-    )
     from tests.unit.plugins.conftest import FakeToolPlugin
 
 
@@ -151,8 +147,8 @@ def test_copy_for_execution_isolates_pytest_config() -> None:
     assert_that(clone.pytest_config).is_not_same_as(template.pytest_config)
     assert_that(clone.executor).is_not_none()
     assert_that(clone.result_processor).is_not_none()
-    executor = cast("PytestExecutor", clone.executor)
-    result_processor = cast("PytestResultProcessor", clone.result_processor)
+    executor = clone.executor
+    result_processor = clone.result_processor
     assert_that(executor.config).is_same_as(clone.pytest_config)
     assert_that(executor.tool).is_same_as(clone)
     assert_that(result_processor.config).is_same_as(clone.pytest_config)
@@ -225,8 +221,8 @@ def test_reset_options_clears_stale_pytest_config() -> None:
     clone.reset_options()
 
     assert_that(clone.pytest_config.maxfail).is_none()
-    executor = cast("PytestExecutor", clone.executor)
-    result_processor = cast("PytestResultProcessor", clone.result_processor)
+    executor = clone.executor
+    result_processor = clone.result_processor
     assert_that(executor.config).is_same_as(clone.pytest_config)
     assert_that(result_processor.config).is_same_as(clone.pytest_config)
     # Template retains its own mutated value; reset only touched the copy.
