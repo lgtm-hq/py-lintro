@@ -59,7 +59,7 @@ def test_baseline_is_written_at_the_log_root_as_json(tmp_path: Path) -> None:
     path = tmp_path / SEVERITY_BASELINE_FILENAME
     assert_that(path.is_file()).is_true()
     assert_that(json.loads(path.read_text(encoding="utf-8"))).is_equal_to(
-        {"error": 1, "warning": 2, "info": 0, "total": 3, "scope": "scope-a"},
+        {"scopes": {"scope-a": {"error": 1, "warning": 2, "info": 0, "total": 3}}},
     )
 
 
@@ -123,24 +123,28 @@ def test_write_failure_is_swallowed(tmp_path: Path) -> None:
     assert_that(read_severity_baseline(blocker, "scope-a")).is_none()
 
 
-def test_baseline_scope_mismatch_neither_compares_nor_overwrites(
+def test_baseline_scopes_advance_independently(
     tmp_path: Path,
 ) -> None:
-    """A different population leaves the original baseline byte-for-byte intact.
+    """An A/B/A sequence preserves each population's latest counts.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
     counts = SeverityCounts(errors=9, warnings=2)
     write_severity_baseline(tmp_path, counts, "full-run")
-    path = tmp_path / SEVERITY_BASELINE_FILENAME
-    original = path.read_bytes()
-
     assert_that(read_severity_baseline(tmp_path, "scoped-run")).is_none()
-    write_severity_baseline(tmp_path, SeverityCounts(), "scoped-run")
+    scoped_counts = SeverityCounts(warnings=3)
+    write_severity_baseline(tmp_path, scoped_counts, "scoped-run")
 
-    assert_that(path.read_bytes()).is_equal_to(original)
     assert_that(read_severity_baseline(tmp_path, "full-run")).is_equal_to(counts)
+    write_severity_baseline(tmp_path, SeverityCounts(errors=8), "full-run")
+    assert_that(read_severity_baseline(tmp_path, "scoped-run")).is_equal_to(
+        scoped_counts,
+    )
+    assert_that(read_severity_baseline(tmp_path, "full-run")).is_equal_to(
+        SeverityCounts(errors=8),
+    )
 
 
 def test_matching_scope_updates_the_baseline(tmp_path: Path) -> None:
@@ -159,7 +163,7 @@ def test_matching_scope_updates_the_baseline(tmp_path: Path) -> None:
 
 
 def test_legacy_baseline_has_no_comparable_scope(tmp_path: Path) -> None:
-    """Legacy counts cannot be attributed to the current run's population.
+    """Unattributed legacy counts recover after one eligible measurement.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
@@ -171,7 +175,93 @@ def test_legacy_baseline_has_no_comparable_scope(tmp_path: Path) -> None:
     assert_that(read_severity_baseline(tmp_path, "scope-a")).is_none()
     write_severity_baseline(tmp_path, SeverityCounts(), "scope-a")
 
-    assert_that(path.read_text(encoding="utf-8")).is_equal_to(original)
+    assert_that(read_severity_baseline(tmp_path, "scope-a")).is_equal_to(
+        SeverityCounts(),
+    )
+
+
+def test_single_scope_baseline_migrates_without_losing_its_counts(
+    tmp_path: Path,
+) -> None:
+    """Adding a scope preserves counts written by the previous scoped format.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    counts = SeverityCounts(errors=6)
+    (tmp_path / SEVERITY_BASELINE_FILENAME).write_text(
+        json.dumps({**counts.to_dict(), "scope": "full-run"}),
+        encoding="utf-8",
+    )
+
+    assert_that(read_severity_baseline(tmp_path, "full-run")).is_equal_to(counts)
+    write_severity_baseline(tmp_path, SeverityCounts(warnings=1), "scoped-run")
+
+    assert_that(read_severity_baseline(tmp_path, "full-run")).is_equal_to(counts)
+    assert_that(read_severity_baseline(tmp_path, "scoped-run")).is_equal_to(
+        SeverityCounts(warnings=1),
+    )
+
+
+@pytest.mark.parametrize("single_scope", [False, True], ids=["map", "single-scope"])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        None,
+        [],
+        {},
+        {"error": -1},
+        {"warning": "2"},
+        {"info": 1.5},
+        {"error": True},
+        {"warning": None},
+        {"total": 99},
+        {"total": False},
+    ],
+    ids=[
+        "null",
+        "list",
+        "missing-fields",
+        "negative",
+        "string",
+        "float",
+        "boolean",
+        "null-count",
+        "inconsistent-total",
+        "boolean-total",
+    ],
+)
+def test_invalid_counts_are_incomparable_and_replaced(
+    tmp_path: Path,
+    payload: dict[str, object] | list[object] | None,
+    single_scope: bool,
+) -> None:
+    """Invalid counts cannot fabricate zero issues in either scoped format.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        payload: Invalid payload or overrides for otherwise valid counts.
+        single_scope: Whether to exercise the older single-scope format.
+    """
+    entry = (
+        {**SeverityCounts().to_dict(), **payload}
+        if isinstance(payload, dict) and payload
+        else payload
+    )
+    stored: dict[str, object] = {"scopes": {"scope-a": entry}}
+    if single_scope:
+        stored = {"scope": "scope-a"}
+        if isinstance(entry, dict):
+            stored.update(entry)
+    (tmp_path / SEVERITY_BASELINE_FILENAME).write_text(
+        json.dumps(stored),
+        encoding="utf-8",
+    )
+
+    assert_that(read_severity_baseline(tmp_path, "scope-a")).is_none()
+    replacement = SeverityCounts(warnings=2)
+    write_severity_baseline(tmp_path, replacement, "scope-a")
+    assert_that(read_severity_baseline(tmp_path, "scope-a")).is_equal_to(replacement)
 
 
 def test_scope_normalizes_paths_and_executed_tool_sets(

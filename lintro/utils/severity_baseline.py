@@ -6,10 +6,11 @@ to compare against. Lintro stores it next to the existing run artefacts, in
 than inside a ``run-*`` directory so run pruning never deletes it.
 
 Scope is a fingerprint of the sorted, normalised path arguments and the set
-of non-skipped tool names. Only matching scopes may compare or update an
-existing baseline: a scoped run leaves a full-run baseline unchanged. Legacy
-baselines without scope are incomparable and are also left intact. Remove
-the baseline file to establish a different scope.
+of non-skipped tool names. The file maps each scope to its latest counts, so
+scoped runs preserve the full-run entry and each scope advances independently.
+Older single-scope files are migrated on write. Legacy baselines without
+scope and unreadable files are incomparable and replaced by the next eligible
+run, restoring deltas automatically on the following run.
 
 Every operation here is best-effort: a workspace with no baseline, an
 unreadable file, or a read-only directory must never fail a lint run. The
@@ -98,13 +99,14 @@ def _baseline_path(base_dir: Path | str) -> Path:
 
 
 def _read_baseline(path: Path) -> dict[str, Any] | None:
-    """Read a baseline payload without assuming a comparable scope.
+    """Read scope entries, including the older single-scope format.
 
     Args:
         path: Location of the baseline file.
 
     Returns:
-        dict[str, Any] | None: The payload, or ``None`` if unreadable.
+        dict[str, Any] | None: Scope entries, or ``None`` if unreadable.
+        Legacy counts without scope yield an empty mapping.
     """
     try:
         raw = path.read_text(encoding="utf-8")
@@ -117,7 +119,32 @@ def _read_baseline(path: Path) -> dict[str, Any] | None:
         return None
     if not isinstance(data, dict):
         return None
-    return data
+    scopes = data.get("scopes")
+    if isinstance(scopes, dict):
+        return scopes
+    scope = data.get("scope")
+    return {scope: data} if isinstance(scope, str) else {}
+
+
+def _parse_counts(data: object) -> SeverityCounts | None:
+    """Reject damaged count payloads rather than interpreting them as clean.
+
+    Args:
+        data: One scope's serialized severity counts.
+
+    Returns:
+        SeverityCounts | None: Valid counts, or ``None`` for an invalid entry.
+    """
+    if not isinstance(data, dict):
+        return None
+    values = [data.get(key) for key in ("error", "warning", "info", "total")]
+    if any(
+        not isinstance(value, int) or isinstance(value, bool) or value < 0
+        for value in values
+    ):
+        return None
+    counts = SeverityCounts.from_dict(data)
+    return counts if data["total"] == counts.total else None
 
 
 def read_severity_baseline(base_dir: Path | str, scope: str) -> SeverityCounts | None:
@@ -131,10 +158,10 @@ def read_severity_baseline(base_dir: Path | str, scope: str) -> SeverityCounts |
         SeverityCounts | None: Recorded counts, or ``None`` for a missing,
         unreadable, legacy, or differently scoped baseline.
     """
-    data = _read_baseline(_baseline_path(base_dir))
-    if data is None or data.get("scope") != scope:
+    scopes = _read_baseline(_baseline_path(base_dir))
+    if scopes is None:
         return None
-    return SeverityCounts.from_dict(data)
+    return _parse_counts(scopes.get(scope))
 
 
 def write_severity_baseline(
@@ -153,13 +180,12 @@ def write_severity_baseline(
         scope: Fingerprint of the current run's paths and executed tools.
     """
     path = _baseline_path(base_dir)
-    existing = _read_baseline(path)
-    if existing is not None and existing.get("scope") != scope:
-        return
+    scopes = _read_baseline(path) or {}
+    scopes[scope] = counts.to_dict()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
-            json.dumps({**counts.to_dict(), "scope": scope}, indent=2) + "\n",
+            json.dumps({"scopes": scopes}, indent=2) + "\n",
             encoding="utf-8",
         )
     except OSError as exc:

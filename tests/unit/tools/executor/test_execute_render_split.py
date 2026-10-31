@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Never
 from unittest.mock import MagicMock
@@ -24,6 +25,7 @@ from lintro.models.core.severity_counts import SeverityCounts
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.tools import tool_manager
+from lintro.utils.execution.run_aggregation import finalize_artifact
 from lintro.utils.execution.run_context import RunContext
 from lintro.utils.execution.run_renderer import render_run
 from lintro.utils.execution.tool_configuration import SkippedTool, ToolsToRunResult
@@ -468,9 +470,7 @@ def _artifact_fixture() -> RunArtifact:
     Returns:
         RunArtifact: A one-tool artifact with two outstanding issues.
     """
-    results = [
-        ToolResult(name="ruff", success=False, issues_count=2, issues=[]),
-    ]
+    results = [_FakeTool(issues_count=2).check([], None)]
     return RunArtifact(
         tool_results=results,
         action=Action.CHECK,
@@ -742,7 +742,11 @@ def test_scoped_check_preserves_the_full_run_baseline(
     full = _run_execute(ctx=ctx, tools=None, output_format="json")
     render_run(full, ctx=ctx, output_format="grid")
     baseline = ctx.output_manager.base_dir / SEVERITY_BASELINE_FILENAME
-    original = baseline.read_bytes()
+    full_scope = severity_baseline_scope(
+        paths=full.paths,
+        tool_results=full.tool_results,
+    )
+    original = json.loads(baseline.read_text(encoding="utf-8"))["scopes"][full_scope]
     fake_logger.calls.clear()
 
     scoped = _run_execute(
@@ -755,13 +759,35 @@ def test_scoped_check_preserves_the_full_run_baseline(
 
     assert_that(scoped.severity_delta).is_none()
     assert_that(_console_texts(fake_logger)).does_not_contain("Change since last run")
-    assert_that(baseline.read_bytes()).is_equal_to(original)
+    assert_that(
+        json.loads(baseline.read_text(encoding="utf-8"))["scopes"][full_scope],
+    ).is_equal_to(original)
 
     monkeypatch.setattr(
         tool_manager,
         "get_tool",
         lambda name: _FakeTool(issues_count=1, name=name),
     )
+    fake_logger.calls.clear()
+    repeated_scoped = _run_execute(
+        ctx=ctx,
+        paths=scoped_paths,
+        tools=scoped_tools,
+        output_format="json",
+    )
+    render_run(repeated_scoped, ctx=ctx, output_format="grid")
+    assert_that(repeated_scoped.previous_severity_counts).is_equal_to(
+        scoped.severity_counts,
+    )
+    assert_that(_console_texts(fake_logger)).contains(
+        (
+            "Change since last run: -2 warnings"
+            if scoped_tools is None
+            else "Change since last run: -1 warning"
+        ),
+    )
+
+    fake_logger.calls.clear()
     repeated = _run_execute(ctx=ctx, tools=None, output_format="json")
     render_run(repeated, ctx=ctx, output_format="grid")
 
@@ -769,23 +795,46 @@ def test_scoped_check_preserves_the_full_run_baseline(
     assert_that(_console_texts(fake_logger)).contains(
         "Change since last run: -2 warnings",
     )
+    scoped_scope = severity_baseline_scope(
+        paths=scoped.paths,
+        tool_results=scoped.tool_results,
+    )
+    assert_that(
+        read_severity_baseline(ctx.output_manager.base_dir, scoped_scope),
+    ).is_equal_to(repeated_scoped.severity_counts)
 
 
+@pytest.mark.parametrize(
+    "initial_baseline",
+    [
+        None,
+        b'{"error": 8, "warning": 0, "info": 0, "total": 8}',
+        b"{not json",
+        b"\xff",
+    ],
+    ids=["new-workspace", "legacy-upgrade", "invalid-json", "invalid-utf8"],
+)
 def test_consecutive_scoped_checks_report_and_update_the_exact_delta(
     tmp_path: Path,
     fake_logger: Any,
     monkeypatch: pytest.MonkeyPatch,
     executor_doubles: None,
+    initial_baseline: bytes | None,
 ) -> None:
-    """A stable scoped population remains comparable after artifact refresh.
+    """New, upgraded and damaged baselines produce deltas from the second run.
 
     Args:
         tmp_path: Temporary directory standing in for the run directory.
         fake_logger: Console logger double.
         monkeypatch: Pytest fixture for substituting tool discovery.
         executor_doubles: Neutralized executor collaborators.
+        initial_baseline: Existing contents before the first scoped check.
     """
     ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger, output_format="json")
+    if initial_baseline is not None:
+        (ctx.output_manager.base_dir / SEVERITY_BASELINE_FILENAME).write_bytes(
+            initial_baseline,
+        )
     monkeypatch.setattr(
         te,
         "get_tools_to_run",
@@ -873,6 +922,27 @@ def _unmeasured_artifacts() -> list[tuple[str, RunArtifact]]:
         ("early-exit", early),
         ("fmt", RunArtifact(action=Action.FIX, tool_results=list(real))),
         ("test", RunArtifact(action=Action.TEST, tool_results=list(real))),
+        *[
+            (
+                label,
+                RunArtifact(
+                    action=Action.CHECK,
+                    tool_results=[
+                        *real,
+                        ToolResult(
+                            name="pylint",
+                            success=False,
+                            issues_count=count,
+                            issues=[],
+                        ),
+                    ],
+                ),
+            )
+            for label, count in (
+                ("crashed-with-clean-tool", 0),
+                ("gate-with-clean-tool", 3),
+            )
+        ],
     ]
 
 
@@ -909,11 +979,49 @@ def test_render_run_does_not_record_a_baseline_for_an_unmeasured_run(
         scope,
     )
 
+    ctx = replace(ctx, action=artifact.action, dry_run_preview=artifact.dry_run_preview)
+    refreshed = te.refresh_artifact(artifact, ctx=ctx)
+    assert_that(refreshed.previous_severity_counts).is_none()
     render_run(artifact, ctx=ctx, output_format="grid")
 
     assert_that(read_severity_baseline(ctx.output_manager.base_dir, scope)).is_equal_to(
         SeverityCounts(errors=9),
     )
+
+
+@pytest.mark.parametrize("reason", ["fmt", "dry-run", "no-log-root"])
+def test_aggregation_does_not_resolve_unused_baseline_paths(
+    tmp_path: Path,
+    fake_logger: Any,
+    reason: str,
+) -> None:
+    """An unused scope cannot break aggregation on a non-resolvable path.
+
+    Args:
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+        reason: Why the baseline is unused for this run.
+    """
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger)
+    if reason == "fmt":
+        ctx = replace(ctx, action=Action.FIX)
+    elif reason == "dry-run":
+        ctx = replace(ctx, dry_run_preview=True)
+    else:
+        ctx = replace(ctx, output_manager=object())
+
+    artifact = finalize_artifact(
+        ctx=ctx,
+        all_results=[ToolResult(name="ruff", success=True)],
+        total_issues=0,
+        total_fixed=0,
+        total_remaining=0,
+        paths=["invalid\x00path"],
+    )
+
+    assert_that(artifact.exit_code).is_equal_to(0)
+    assert_that(artifact.previous_severity_counts).is_none()
+    assert_that(artifact.paths).is_equal_to(("invalid\x00path",))
 
 
 def test_render_run_does_not_record_a_baseline_for_fmt(

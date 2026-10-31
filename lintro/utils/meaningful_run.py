@@ -147,11 +147,12 @@ def run_has_unreported_failure(results: Sequence[ToolResult]) -> bool:
         results: Every result the run produced, skipped placeholders included.
 
     Returns:
-        bool: ``True`` when a non-skipped tool failed with zero findings.
-        Failures with findings are ordinary lint verdicts.
+        bool: ``True`` when a non-skipped tool failed without parsed findings,
+        even if ``issues_count`` is positive (as for run-level gates).
+        Failures with parsed findings are ordinary lint verdicts.
     """
     return any(
-        not result.skipped and not result.success and result.issues_count == 0
+        not result.skipped and not result.success and not result.issues
         for result in results
     )
 
@@ -169,8 +170,8 @@ def baseline_is_eligible(
     *record* a baseline must not *compare against* one either, or it reports a
     delta between two different populations.
 
-    Baseline storage additionally requires a matching scope fingerprint for
-    both comparison and replacement of an existing baseline.
+    Baseline storage additionally uses a matching scope fingerprint for
+    comparison and updates only that scope's entry.
 
     A run qualifies only when all of the following hold:
 
@@ -184,6 +185,8 @@ def baseline_is_eligible(
       would make the next real check report every existing issue as newly
       introduced.
     * It did not exit before running anything.
+    * No tool failed without parsed findings. Such a failure would undercount
+      the population and make the next healthy run report spurious new issues.
 
     Args:
         action: The action the run executed.
@@ -196,4 +199,6 @@ def baseline_is_eligible(
     """
     if early_exit or dry_run_preview or action != Action.CHECK:
         return False
-    return run_inspected_files(tool_results)
+    return not run_has_unreported_failure(tool_results) and run_inspected_files(
+        tool_results,
+    )

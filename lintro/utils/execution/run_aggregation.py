@@ -90,8 +90,10 @@ def finalize_artifact(
         early_exit=False,
     )
     log_root = resolve_log_root(ctx.output_manager) if eligible else None
-    scope = severity_baseline_scope(paths=paths, tool_results=all_results)
-    previous_counts = read_severity_baseline(log_root, scope) if log_root else None
+    previous_counts = None
+    if log_root is not None:
+        scope = severity_baseline_scope(paths=paths, tool_results=all_results)
+        previous_counts = read_severity_baseline(log_root, scope)
 
     return RunArtifact(
         tool_results=all_results,

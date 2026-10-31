@@ -203,23 +203,33 @@ def test_badge_live_early_exit_prints_no_badge() -> None:
 
 
 @pytest.mark.parametrize("with_clean_tool", [False, True], ids=["alone", "mixed"])
-def test_badge_refuses_a_tool_failure_without_findings(with_clean_tool: bool) -> None:
+@pytest.mark.parametrize("issues_count", [0, 3], ids=["crash", "duplicate-code-gate"])
+def test_badge_refuses_a_tool_failure_without_findings(
+    with_clean_tool: bool,
+    issues_count: int,
+) -> None:
     """A crashed tool cannot produce a clean badge, even beside a clean tool.
 
     Args:
         with_clean_tool: Whether a second tool completed cleanly.
+        issues_count: Reported count, including gates without parsed findings.
     """
     results = [
         ToolResult(
             name="pylint",
             success=False,
-            issues_count=0,
+            issues_count=issues_count,
+            issues=[],
             output="pylint: invalid rcfile",
         ),
     ]
     if with_clean_tool:
         results.append(ToolResult(name="ruff", success=True))
-    artifact = RunArtifact(tool_results=results, exit_code=1)
+    artifact = RunArtifact(
+        tool_results=results,
+        severity_counts=count_severities(results),
+        exit_code=1,
+    )
 
     with patch("lintro.cli_utils.commands.badge.api.check_run", return_value=artifact):
         result = CliRunner().invoke(badge_command, [])
@@ -227,6 +237,36 @@ def test_badge_refuses_a_tool_failure_without_findings(with_clean_tool: bool) ->
     assert_that(result.exit_code).is_equal_to(1)
     assert_that(result.output).contains("failed without reporting findings")
     assert_that(result.output).does_not_contain("img.shields.io")
+
+
+@pytest.mark.parametrize(
+    "with_skipped_tool",
+    [False, True],
+    ids=["clean", "with-skipped"],
+)
+def test_badge_publishes_a_clean_live_run(with_skipped_tool: bool) -> None:
+    """Clean inspections remain publishable beside missing optional tools.
+
+    Args:
+        with_skipped_tool: Whether an optional tool could not run.
+    """
+    results = [ToolResult(name="ruff", success=True, issues=[])]
+    if with_skipped_tool:
+        results.append(
+            ToolResult(name="pylint", skipped=True, skip_reason="not installed"),
+        )
+    artifact = RunArtifact(
+        tool_results=results,
+        severity_counts=count_severities(results),
+    )
+
+    with patch("lintro.cli_utils.commands.badge.api.check_run", return_value=artifact):
+        result = CliRunner().invoke(badge_command, ["--url"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output.strip()).is_equal_to(
+        "https://img.shields.io/badge/lintro-0%20issues-brightgreen",
+    )
 
 
 def test_badge_publishes_findings_from_a_failed_tool() -> None:
