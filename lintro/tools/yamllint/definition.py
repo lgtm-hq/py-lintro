@@ -492,6 +492,7 @@ class YamllintPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=results["all_success"],
             output=combined_output,
             issues_count=results["total_issues"],

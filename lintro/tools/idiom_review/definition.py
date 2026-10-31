@@ -297,6 +297,7 @@ class IdiomReviewPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=IDIOM_REVIEW_TOOL_NAME,
+            inspected_files=True,
             success=len(filtered) == 0,
             output=None,
             issues_count=len(filtered),

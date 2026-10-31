@@ -10,7 +10,11 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.pylint.definition import PylintPlugin, find_pylint_config
+from lintro.tools.pylint.definition import (
+    PYLINT_NOTHING_TO_LINT,
+    PylintPlugin,
+    find_pylint_config,
+)
 from lintro.utils.output import format_tool_output
 from tests.unit.tools.pylint.conftest import make_result
 
@@ -275,8 +279,8 @@ def test_check_usage_error_is_a_failure_not_a_pass(
     ("returncode", "stdout", "stderr"),
     [
         (0, "", ""),
-        (32, "No files to lint: exiting.", ""),
-        (32, "", "No files to lint: exiting."),
+        (32, f"{PYLINT_NOTHING_TO_LINT}: exiting.", ""),
+        (32, "", f"{PYLINT_NOTHING_TO_LINT}: exiting."),
     ],
     ids=[
         "empty-clean-exit",
@@ -323,6 +327,7 @@ def test_check_non_report_output_is_clean(
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.output).is_none()
+    assert_that(result.no_files).is_equal_to(returncode == 32)
 
 
 def test_check_report_quoting_the_nothing_to_lint_phrase_is_parsed(

@@ -352,6 +352,7 @@ def execute_ruff_fix(
 
     return ToolResult(
         name=tool.definition.name,
+        inspected_files=True,
         success=overall_success,
         output=final_output,
         # For fix operations, issues_count represents remaining issues

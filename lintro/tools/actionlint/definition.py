@@ -228,6 +228,7 @@ class ActionlintPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=results["all_success"],
             output=combined_output,
             issues_count=len(results["all_issues"]),

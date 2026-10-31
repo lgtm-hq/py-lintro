@@ -80,6 +80,7 @@ class _FakeTool:
         ]
         return ToolResult(
             name=self._name,
+            inspected_files=True,
             success=self._issues_count == 0,
             issues_count=self._issues_count,
             issues=issues,
@@ -971,6 +972,7 @@ def _unmeasured_artifacts() -> list[tuple[str, RunArtifact]]:
                 success=True,
                 skipped=False,
                 output="No .py/.pyi files found to check.",
+                no_files=True,
             ),
         ],
     )
@@ -992,9 +994,29 @@ def _unmeasured_artifacts() -> list[tuple[str, RunArtifact]]:
             ),
         ],
     )
-    real = [ToolResult(name="ruff", success=True, output="All checks passed")]
+    real = [ToolResult(name="ruff", success=True, inspected_files=True)]
     return [
         ("empty", RunArtifact(action=Action.CHECK)),
+        (
+            "legacy-unknown",
+            RunArtifact(
+                action=Action.CHECK,
+                tool_results=[ToolResult(name="legacy", success=True)],
+            ),
+        ),
+        (
+            "declined",
+            RunArtifact(
+                action=Action.CHECK,
+                tool_results=[
+                    ToolResult(
+                        name="import-linter",
+                        success=True,
+                        inspected_files=False,
+                    ),
+                ],
+            ),
+        ),
         ("all-skipped", skipped_only),
         ("no-files-matched", no_files),
         ("all-timed-out", timed_out),
@@ -1028,8 +1050,7 @@ def _unmeasured_artifacts() -> list[tuple[str, RunArtifact]]:
 
 @pytest.mark.parametrize(
     "artifact",
-    [pair[1] for pair in _unmeasured_artifacts()],
-    ids=[pair[0] for pair in _unmeasured_artifacts()],
+    [pytest.param(artifact, id=label) for label, artifact in _unmeasured_artifacts()],
 )
 def test_render_run_does_not_record_a_baseline_for_an_unmeasured_run(
     tmp_path: Path,
@@ -1060,6 +1081,15 @@ def test_render_run_does_not_record_a_baseline_for_an_unmeasured_run(
     )
 
     ctx = replace(ctx, action=artifact.action, dry_run_preview=artifact.dry_run_preview)
+    finalized = finalize_artifact(
+        ctx=ctx,
+        all_results=artifact.tool_results,
+        total_issues=0,
+        total_fixed=0,
+        total_remaining=0,
+        paths=list(artifact.paths),
+    )
+    assert_that(finalized.previous_severity_counts).is_none()
     refreshed = te.refresh_artifact(artifact, ctx=ctx)
     assert_that(refreshed.previous_severity_counts).is_none()
     render_run(artifact, ctx=ctx, output_format="grid")

@@ -486,6 +486,7 @@ def run_per_file_fix(
 
     return ToolResult(
         name=plugin.definition.name,
+        inspected_files=True,
         success=result.all_success and remaining_count == 0,
         output=final_output,
         issues_count=remaining_count,

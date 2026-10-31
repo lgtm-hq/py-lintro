@@ -172,6 +172,7 @@ def _merge_fix_results(*, name: str, results: list[ToolResult]) -> ToolResult:
     any_timed_out = any(r.timed_out for r in results)
     return ToolResult(
         name=name,
+        inspected_files=True,
         success=all(r.success for r in results) and not any_timed_out,
         timed_out=any_timed_out,
         output="\n".join(outputs) if outputs else None,
@@ -369,6 +370,7 @@ class GolangciLintPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=overall_success,
             output="\n".join(failure_outputs) if failure_outputs else None,
             issues_count=len(all_issues),
@@ -526,6 +528,7 @@ class GolangciLintPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=success,
             output=output,
             issues_count=remaining_count,

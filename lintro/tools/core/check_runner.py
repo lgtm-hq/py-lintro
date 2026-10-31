@@ -177,6 +177,7 @@ def run_per_file_check(
 
     return ToolResult(
         name=plugin.definition.name,
+        inspected_files=True,
         success=result.all_success and result.total_issues == 0,
         output=result.build_output(timeout=ctx.timeout),
         issues_count=result.total_issues,

@@ -465,6 +465,7 @@ class BanditPlugin(BaseToolPlugin):
                 logger.debug("[bandit] Empty output received; treating as clean pass")
                 return ToolResult(
                     name=self.definition.name,
+                    inspected_files=True,
                     success=True,
                     output=None,
                     issues_count=0,
@@ -480,6 +481,7 @@ class BanditPlugin(BaseToolPlugin):
 
             return ToolResult(
                 name=self.definition.name,
+                inspected_files=True,
                 success=execution_success,
                 output=output if execution_failure else None,
                 issues_count=issues_count,

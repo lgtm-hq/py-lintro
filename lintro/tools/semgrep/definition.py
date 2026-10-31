@@ -434,6 +434,7 @@ class SemgrepPlugin(BaseToolPlugin):
 
             return ToolResult(
                 name=self.definition.name,
+                inspected_files=True,
                 success=execution_success,
                 output=output if not execution_success else None,
                 issues_count=issues_count,

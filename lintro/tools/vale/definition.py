@@ -151,6 +151,8 @@ class ValePlugin(BaseToolPlugin):
                 "(e.g. .vale.ini). Add one to enable prose linting."
             ),
             issues_count=0,
+            skipped=True,
+            skip_reason="No Vale configuration found",
         )
 
     def _build_command(self) -> list[str]:
@@ -226,6 +228,7 @@ class ValePlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=success,
             output=output if not success else None,
             issues_count=issues_count,

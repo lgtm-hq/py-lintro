@@ -449,6 +449,7 @@ def _check_multi_project(
         success = any_succeeded and not had_subproject_error and total_issues == 0
         return ToolResult(
             name=plugin.definition.name,
+            inspected_files=True,
             success=success,
             output=output_text,
             issues_count=total_issues,
@@ -609,6 +610,7 @@ def _run_and_parse(
 
     return ToolResult(
         name=plugin.definition.name,
+        inspected_files=True,
         success=success and issues_count == 0,
         output=None,
         issues_count=issues_count,

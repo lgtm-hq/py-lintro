@@ -500,3 +500,4 @@ def test_clean_run_is_a_clean_success(
     assert_that(result.parse_failures_count or 0).is_zero()
     assert_that(result.success).described_as(str(result)).is_true()
     assert_that(result.issues_count).is_zero()
+    assert_that(result.inspected_files).is_true()

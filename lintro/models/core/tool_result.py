@@ -136,12 +136,21 @@ class ToolResult:
     # built directly in a test).
     capability: Cap | None = field(default=None)
 
+    # Whether the producer actually inspected files. None preserves the unknown
+    # state for legacy plugins; neither output text nor success proves inspection.
+    # False with no_files=True means empty discovery; False without it means a
+    # decline (for example missing configuration), skip, or timeout.
+    inspected_files: bool | None = field(default=None)
+
     def __post_init__(self) -> None:
         """Validate that the issue counts and skip state are consistent.
 
         Raises:
             ValueError: If issue counts are inconsistent or skip state is invalid.
         """
+        if self.no_files or self.skipped or self.timed_out:
+            self.inspected_files = False
+
         # Skipped tools are not failures — they just didn't run
         if self.skipped:
             self.success = True

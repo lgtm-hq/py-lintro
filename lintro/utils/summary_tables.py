@@ -36,60 +36,12 @@ UNKNOWN_RESIDUAL_ROW: str = "Residual Unknown (tools)"
 # run and a genuinely clean run are both ``PASS 0``; without this note they are
 # indistinguishable, which is how a fully excluded scan reads as green (#1678).
 NO_FILES_NOTE: str = "no files matched"
-# Fragments (any terminal period stripped before matching) that a framework
-# "nothing to do" message ends with. Covers every discovery outcome —
-# ``No <ext> found to check``, ``No files to format``, ``No .py/.pyi files
-# found`` — across check and fix. Deliberately excludes ``No issues found``
-# and ``No configuration found``, which mean the tool *did* run.
-_NO_FILES_SUFFIXES: tuple[str, ...] = (
-    " found to check",
-    " found to fix",
-    " files to check",
-    " files to fix",
-    " files to format",
-    " files found",
-)
-
 # ANSI color codes — only emit when stdout is a terminal
 _USE_COLOR = sys.stdout.isatty()
 _GREEN = "\033[92m" if _USE_COLOR else ""
 _RED = "\033[91m" if _USE_COLOR else ""
 _YELLOW = "\033[93m" if _USE_COLOR else ""
 _RESET = "\033[0m" if _USE_COLOR else ""
-
-
-def _extract_skip_reason(output: str) -> str:
-    """Extract abbreviated skip reason from tool output.
-
-    Skip messages have format: "Skipping {tool}: {error}. Minimum required: ..."
-
-    Args:
-        output: The tool output containing the skip message.
-
-    Returns:
-        Abbreviated reason string for display in the summary table.
-    """
-    if ":" in output and ". Minimum" in output:
-        colon_idx = output.index(":")
-        minimum_idx = output.index(". Minimum")
-        # Ensure colon comes before ". Minimum" to get a valid slice
-        if colon_idx >= minimum_idx:
-            return "SKIPPED"
-        start = colon_idx + 1
-        end = minimum_idx
-        reason = output[start:end].strip()
-        # Abbreviate common error messages
-        if "Command failed" in reason:
-            return "Cmd failed"
-        if "Could not parse version" in reason:
-            return "No version"
-        if "below minimum" in reason:
-            return "Outdated"
-        if "Failed to run" in reason:
-            return "Not found"
-        # Truncate if too long
-        return reason[:20] if len(reason) > 20 else reason
-    return "SKIPPED"
 
 
 def _safe_cast(
@@ -143,34 +95,23 @@ def _get_ai_unverified_count(result: object) -> int:
 
 
 def _is_no_files_result(output: object, result: object = None) -> bool:
-    """Report whether a tool result means "no files were inspected".
-
-    The structured ``no_files`` flag on ``ToolResult`` is the authority: it is
-    stamped by every producer of a "nothing to check" result. The prose match
-    stays as a fallback for legacy result shapes (plain objects and dicts built
-    in tests or by out-of-tree consumers) that carry only the message.
+    """Read empty discovery separately from other no-inspection outcomes.
 
     Args:
-        output: The tool result ``output`` value.
-        result: The tool result itself, when available.
+        output: Legacy argument, retained for callers; never interpreted.
+        result: The structured result, when available.
 
     Returns:
-        True when the result is flagged as a no-files result, or its output is
-        one of the framework's no-files messages.
+        True only for an explicit empty file set. A decline or an unknown
+        legacy result must not render as "no files matched".
     """
-    if result is not None and getattr(result, "no_files", False):
-        return True
-    if not isinstance(output, str):
-        return False
-    text = output.strip().rstrip(".")
-    return text.startswith("No ") and text.endswith(_NO_FILES_SUFFIXES)
+    return getattr(result, "inspected_files", None) is False and bool(
+        getattr(result, "no_files", False),
+    )
 
 
 def _is_result_skipped(result: object) -> tuple[bool, str]:
-    """Check if a tool result represents a skipped tool.
-
-    Uses the first-class ``skipped`` field if available, falling back to
-    legacy output string matching for backward compatibility.
+    """Read structured skip tracking without interpreting output text.
 
     Args:
         result: Tool result object.
@@ -178,22 +119,8 @@ def _is_result_skipped(result: object) -> tuple[bool, str]:
     Returns:
         Tuple of (is_skipped, skip_reason).
     """
-    # First-class field (preferred)
-    skipped = getattr(result, "skipped", False)
-    if skipped:
-        skip_reason = getattr(result, "skip_reason", None) or ""
-        return True, skip_reason
-
-    # Legacy fallback: match "Skipping {tool}: ..." pattern in output
-    tool_name = getattr(result, "name", "unknown")
-    result_output = getattr(result, "output", "") or ""
-    if (
-        result_output
-        and isinstance(result_output, str)
-        and result_output.lower().startswith(f"skipping {tool_name.lower()}:")
-    ):
-        return True, _extract_skip_reason(result_output)
-
+    if getattr(result, "skipped", False):
+        return True, getattr(result, "skip_reason", None) or ""
     return False, ""
 
 
@@ -282,7 +209,7 @@ def print_summary_table(
             display_name: str = _format_tool_display_name(tool_name)
             tool_display: str = f"{emoji} {display_name}"
 
-            # Check skip status (first-class field or legacy fallback)
+            # Read the producer's structured skip status
             is_skipped, skip_reason = _is_result_skipped(result)
 
             # Special handling for pytest/test action
