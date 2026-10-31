@@ -53,6 +53,35 @@ SEMGREP_OUTPUT_FORMAT: str = "json"
 SEMGREP_DEFAULT_CONFIG: str = "auto"
 
 
+def _has_unclosed_array(prefix: str) -> bool:
+    """Check for an array still open before the report's first brace.
+
+    Args:
+        prefix: Text preceding the report object.
+
+    Returns:
+        Whether an opening bracket remains outside quoted array strings.
+    """
+    depth = 0
+    in_string = False
+    escaped = False
+    for char in prefix:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"' and depth:
+            in_string = True
+        elif char == "[":
+            depth += 1
+        elif char == "]" and depth:
+            depth -= 1
+    return depth > 0
+
+
 def _extract_semgrep_json(raw_text: str) -> dict[str, Any]:
     """Extract Semgrep's JSON object from mixed stdout/stderr text.
 
@@ -85,18 +114,10 @@ def _extract_semgrep_json(raw_text: str) -> dict[str, Any]:
     if start == -1 or end == -1 or end < start:
         raise ValueError("Could not locate JSON object in Semgrep output")
 
-    # Reject enclosing arrays without mistaking bracketed status lines for JSON.
-    decoder = json.JSONDecoder()
-    array_start = text.find("[")
-    while 0 <= array_start < start:
-        try:
-            _, array_end = decoder.raw_decode(text, array_start)
-        except json.JSONDecodeError:
-            pass
-        else:
-            if array_end > end:
-                raise ValueError("Semgrep output must be a JSON object, got an array")
-        array_start = text.find("[", array_start + 1)
+    # Balanced status prefixes are allowed; complete or truncated array wrappers
+    # leave an opening bracket before the object and must not be sliced away.
+    if _has_unclosed_array(text[:start]):
+        raise ValueError("Semgrep output must be a JSON object, got an array")
 
     json_str: str = text[start : end + 1]
     parsed: dict[str, Any] = json.loads(json_str)

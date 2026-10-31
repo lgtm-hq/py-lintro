@@ -14,6 +14,7 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.semgrep.semgrep_parser import parse_semgrep_output
 from lintro.plugins import ToolRegistry
 from lintro.tools.core.version_parsing import get_minimum_versions
+from lintro.tools.semgrep.definition import _extract_semgrep_json
 
 
 def _semgrep_version_stdout() -> str:
@@ -106,6 +107,22 @@ def test_parse_semgrep_empty_results() -> None:
     """Ensure an empty results list returns no issues."""
     issues = parse_semgrep_output(output=json.dumps({"results": [], "errors": []}))
     assert_that(issues).is_equal_to([])
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    ["[", "[[", "[[], ", '["]", ', "Running semgrep...\n["],
+    ids=["array", "nested", "empty-item", "quoted-bracket", "prose"],
+)
+def test_extract_semgrep_json_rejects_truncated_arrays(prefix: str) -> None:
+    """Extraction must not discard an incomplete array around a valid object.
+
+    Args:
+        prefix: Incomplete array wrapper preceding a report object.
+    """
+    output = prefix + '{"results": [], "errors": []}'
+    with pytest.raises(ValueError, match="Semgrep output must be a JSON object"):
+        _extract_semgrep_json(output)
 
 
 def test_parse_semgrep_none_output() -> None:

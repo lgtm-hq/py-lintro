@@ -41,8 +41,10 @@ _VALID_FINDING = {
         ("Running semgrep...\n", "\n[main] INFO done"),
         ("[main] INFO start\n", "\n[main] INFO done"),
         ("[1, 2] status\n", "\n[done] done"),
+        ("[[main] INFO] start\n", "\n[done] done"),
+        ('["[", "\\""] status\n', "\n[done] done"),
     ],
-    ids=["bare", "prose", "log-tags", "array-in-prose"],
+    ids=["bare", "prose", "log-tags", "array-in-prose", "nested-tags", "quoted-tags"],
 )
 def test_check_with_mocked_subprocess_success(
     semgrep_plugin: SemgrepPlugin,
@@ -431,16 +433,30 @@ def test_check_counts_malformed_errors(
 @pytest.mark.parametrize("returncode", [0, 1, 2])
 @pytest.mark.parametrize(
     "entries",
-    [[{"results": [], "errors": []}], [None, {"results": [], "errors": []}, 42]],
-    ids=["single-object", "mixed-array"],
+    [
+        [{"results": [], "errors": []}],
+        [None, {"results": [], "errors": []}, 42],
+        [[{"results": [], "errors": []}]],
+        [[], {"results": [], "errors": []}],
+        ["]", {"results": [], "errors": []}],
+    ],
+    ids=[
+        "single-object",
+        "mixed-array",
+        "nested-array",
+        "empty-array",
+        "quoted-bracket",
+    ],
 )
 @pytest.mark.parametrize("prefix", ["", "Running semgrep...\n", "[main] INFO start\n"])
+@pytest.mark.parametrize("truncated", [False, True], ids=["complete", "truncated"])
 def test_check_rejects_wrapped_json_arrays(
     semgrep_plugin: SemgrepPlugin,
     tmp_path: Path,
     returncode: int,
     entries: list[object],
     prefix: str,
+    truncated: bool,
 ) -> None:
     """A report object inside an array must not be extracted as a clean scan.
 
@@ -450,10 +466,14 @@ def test_check_rejects_wrapped_json_arrays(
         returncode: Successful, findings, or execution error exit status.
         entries: An array containing a report-shaped object.
         prefix: Optional prose or bracketed logging before the array.
+        truncated: Whether the array's closing brackets are missing.
     """
     source = tmp_path / "scan.py"
     source.write_text("pass\n", encoding="utf-8")
-    report = prefix + json.dumps(entries) + "\n[main] INFO done"
+    array = json.dumps(entries)
+    if truncated:
+        array = array.rstrip("]")
+    report = prefix + array + ("\n[main] INFO done" if prefix else "")
     with patch.object(
         semgrep_plugin,
         "_run_subprocess_result",
