@@ -43,7 +43,8 @@ def run_fix_with_retry(
 
     result = tool.fix(paths, options)
 
-    if max_retries <= 1:
+    # An incomplete first pass has no complete baseline to merge or retry.
+    if max_retries <= 1 or result.residual_unknown or result.parse_failures_count:
         return result
 
     initial_issues_count = getattr(result, "initial_issues_count", None)
@@ -54,7 +55,7 @@ def run_fix_with_retry(
         # An incomplete report is not a convergence measurement. Retrying
         # must not replace its failure evidence with a later clean result.
         if result.residual_unknown or result.parse_failures_count:
-            return result
+            break
         if remaining == 0:
             break
 
@@ -66,13 +67,18 @@ def run_fix_with_retry(
         result = tool.fix(paths, options)
         remaining = get_remaining_count(result)
 
-    if result.residual_unknown or result.parse_failures_count:
-        return result
-
     # Merge: keep initial_issues_count and initial_issues from first pass,
     # rest from last pass, including failure accounting and execution metadata.
     if initial_issues_count is None and first_pass_initial_issues is not None:
         initial_issues_count = len(first_pass_initial_issues)
+    if result.residual_unknown or result.parse_failures_count:
+        return replace(
+            result,
+            initial_issues_count=initial_issues_count,
+            initial_issues=first_pass_initial_issues,
+            fixed_issues_count=None,
+            remaining_issues_count=None,
+        )
     if initial_issues_count is not None:
         result = replace(
             result,

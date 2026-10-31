@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -183,36 +183,46 @@ def test_fix_retry_merges_results_correctly() -> None:
 
 
 @pytest.mark.parametrize("failure_pass", [1, 2, 3])
-@pytest.mark.parametrize("initial_count", [None, 2])
+@pytest.mark.parametrize("initial_count", [None, 1])
 @pytest.mark.parametrize("failure_kind", ["parse", "unknown"])
 def test_incomplete_fix_pass_is_preserved_without_more_retries(
     failure_pass: int,
     initial_count: int | None,
     failure_kind: str,
 ) -> None:
-    """Neither first nor later failures may be rebuilt into measured results."""
-    detected = [BaseIssue(file="a.txt", message="format"), BaseIssue(file="b.txt")]
+    """Keep the first complete baseline and the latest incomplete evidence."""
+    detected = [
+        BaseIssue(file="a.txt", message="format a"),
+        BaseIssue(file="b.txt", message="format b"),
+        BaseIssue(file="c.txt", message="format c"),
+    ]
+    partial_findings = [BaseIssue(file="d.txt", message="partial verification")]
     incomplete = ToolResult(
         name="formatter",
         success=False,
         output="incomplete report",
-        issues_count=2,
-        issues=detected,
-        initial_issues=detected,
+        issues_count=1,
+        issues=partial_findings,
+        initial_issues=detected[-1:],
         initial_issues_count=initial_count,
         parse_failures_count=1 if failure_kind == "parse" else None,
         residual_unknown=failure_kind == "unknown",
         residual_unknown_reason=(
             "verification unavailable" if failure_kind == "unknown" else None
         ),
+        timed_out=True,
+        cwd="/repo",
+        duration_seconds=1.5,
+        metadata={"stage": "incomplete"},
     )
     measured = ToolResult(
         name="formatter",
         success=False,
-        issues_count=2,
-        initial_issues_count=2,
-        fixed_issues_count=0,
-        remaining_issues_count=2,
+        issues_count=1,
+        issues=detected[-1:],
+        initial_issues_count=3,
+        fixed_issues_count=2,
+        remaining_issues_count=1,
         initial_issues=detected,
     )
     tool = MagicMock()
@@ -220,14 +230,28 @@ def test_incomplete_fix_pass_is_preserved_without_more_retries(
 
     result = run_fix_with_retry(tool, ["."], {}, max_retries=3)
 
-    assert_that(result).is_same_as(incomplete)
-    assert_that(result.initial_issues_count).is_equal_to(initial_count)
-    assert_that(result.issues_count).is_equal_to(2)
+    if failure_pass == 1:
+        assert_that(result).is_same_as(incomplete)
+        assert_that(result.initial_issues_count).is_equal_to(initial_count)
+        assert_that(result.initial_issues).is_equal_to(detected[-1:])
+    else:
+        assert_that(result.initial_issues_count).is_equal_to(3)
+        assert_that(result.initial_issues).is_equal_to(detected)
+    assert_that(result.success).is_false()
+    assert_that(result.output).is_equal_to("incomplete report")
+    assert_that(result.issues).is_equal_to(partial_findings)
+    assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.fixed_issues_count).is_none()
     assert_that(result.remaining_issues_count).is_none()
     assert_that(result.parse_failures_count).is_equal_to(
         1 if failure_kind == "parse" else None,
     )
+    assert_that(result.residual_unknown).is_equal_to(failure_kind == "unknown")
     assert_that(result.residual_unknown_reason).is_equal_to(
         "verification unavailable" if failure_kind == "unknown" else None,
     )
+    assert_that(result.timed_out).is_true()
+    assert_that(result.cwd).is_equal_to("/repo")
+    assert_that(result.duration_seconds).is_equal_to(1.5)
+    assert_that(result.metadata).is_equal_to({"stage": "incomplete"})
+    assert_that(replace(result)).is_equal_to(result)
