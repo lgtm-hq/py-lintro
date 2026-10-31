@@ -11,12 +11,47 @@ from lintro.parsers.base_parser import validate_str_field
 from lintro.parsers.cargo_audit.cargo_audit_issue import CargoAuditIssue
 
 
+def _find_report_start(text: str) -> int:
+    """Locate an object without losing an enclosing array.
+
+    Balanced brackets before the object can be warning prose, such as ``[WARN]``
+    or ``note [1]``. Any array still open at the object belongs to its envelope.
+    Quoted brackets inside an array must not change that nesting.
+
+    Args:
+        text: Output text that may contain a JSON report.
+
+    Returns:
+        The object or enclosing array's index, or -1 when neither is found.
+    """
+    array_starts: list[int] = []
+    in_string = False
+    escaped = False
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"' and array_starts:
+            in_string = True
+        elif char == "[":
+            array_starts.append(index)
+        elif char == "]" and array_starts:
+            array_starts.pop()
+        elif char == "{":
+            return array_starts[0] if array_starts else index
+    return array_starts[0] if array_starts else -1
+
+
 def _extract_cargo_audit_json(raw_text: str) -> object:
     """Extract cargo-audit's JSON object from output text.
 
     Parse the whole text first so a valid JSON value retains its top-level type.
-    For output with surrounding text, keep the first object or array opener
-    and its final matching closer so an array cannot become its inner object.
+    For output with surrounding text, skip balanced bracketed prose but keep
+    any enclosing array so an array cannot become its inner object.
 
     Args:
         raw_text: Raw stdout/stderr text from cargo-audit.
@@ -39,7 +74,7 @@ def _extract_cargo_audit_json(raw_text: str) -> object:
         pass
 
     # Keep the outer container intact for top-level type validation.
-    start = next((i for i, char in enumerate(text) if char in "{["), -1)
+    start = _find_report_start(text)
     if start == -1:
         raise ValueError("Could not locate JSON container in cargo-audit output")
 

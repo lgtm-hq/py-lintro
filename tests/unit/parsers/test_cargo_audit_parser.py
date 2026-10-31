@@ -64,6 +64,38 @@ def test_parse_cargo_audit_output_empty_cases(
             id="warning-wrapped-unclosed-array",
         ),
         pytest.param(
+            '[{"vulnerabilities": {"list": []}}',
+            id="bare-unclosed-array",
+        ),
+        pytest.param(
+            '[WARN]\n[{"vulnerabilities": {"list": []}}]',
+            id="bracketed-warning-array",
+        ),
+        pytest.param(
+            '[INFO] fetching\n[[{"vulnerabilities": {"list": []}}]]\nDone.',
+            id="bracketed-info-nested-array",
+        ),
+        pytest.param(
+            'note [1]\n[{"vulnerabilities": {"list": []}}\nDone.',
+            id="bracketed-note-unclosed-array",
+        ),
+        pytest.param(
+            '[WARN]\n[[{"vulnerabilities": {"list": []}}]\nDone.',
+            id="bracketed-warning-unclosed-outer-array",
+        ),
+        pytest.param(
+            'warning\n["]", {"vulnerabilities": {"list": []}}]\nDone.',
+            id="array-with-quoted-closer",
+        ),
+        pytest.param(
+            'warning\n["[", {"vulnerabilities": {"list": []}}]\nDone.',
+            id="array-with-quoted-opener",
+        ),
+        pytest.param(
+            'warning\n["\\" ]", {"vulnerabilities": {"list": []}}\nDone.',
+            id="unclosed-array-with-escaped-quote",
+        ),
+        pytest.param(
             'warning\n{"vulnerabilities": {"list": null}}\nDone.',
             id="warning-wrapped-null-list",
         ),
@@ -89,8 +121,19 @@ def test_extract_cargo_audit_payload_rejects_invalid_schema(output: str | None) 
 
 @pytest.mark.parametrize(
     "report_wrapper",
-    ["{}", "warning\n{}", "{}\nwarning", "warning\n{}\nDone."],
-    ids=["plain", "warning-prefix", "warning-suffix", "warning-wrapped"],
+    [
+        pytest.param("{}", id="plain"),
+        pytest.param("warning\n{}", id="warning-prefix"),
+        pytest.param("{}\nwarning", id="warning-suffix"),
+        pytest.param("warning\n{}\nDone.", id="warning-wrapped"),
+        pytest.param("[WARN]\n{}", id="bracketed-warning-prefix"),
+        pytest.param("[INFO] fetching\n{}", id="bracketed-info-prefix"),
+        pytest.param("note [1]\n{}", id="bracketed-note-prefix"),
+        pytest.param(
+            "[WARN]\n[INFO] fetching\nnote [1]\n{}\nDone.",
+            id="multiple-bracketed-prefixes",
+        ),
+    ],
 )
 def test_parse_cargo_audit_output_no_vulnerabilities(report_wrapper: str) -> None:
     """Parser accepts empty reports with surrounding prose.
