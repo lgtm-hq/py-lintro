@@ -69,7 +69,13 @@ def test_ruff_json_lines_counts_decode_and_field_failures(malformed_line: str) -
         ('{"filename":', 1),
         ('{"filename":\n{"message":', 2),
         (' \n  {"filename":\n\n', 1),
+        ("[", 1),
+        ("[null,", 1),
+        (" \n[null,\n", 1),
+        ('[{"filename": "a.py", "message": "broken"}', 1),
+        ('[\n{"filename":', 1),
         ("", 0),
+        (" \n\t", 0),
         ("[]", 0),
         (" \n[]\n", 0),
         ("[\n]", 0),
@@ -84,6 +90,22 @@ def test_ruff_rejected_only_and_empty_reports(
         ([], expected_failures),
     )
     assert_that(parse_ruff_output(output)).is_empty()
+
+
+@pytest.mark.parametrize("prefix", ["", "Ruff progress...\n"])
+def test_ruff_valid_json_lines_do_not_count_array_decode_failure(prefix: str) -> None:
+    """Successful JSON Lines fallback does not inherit the array decoder failure."""
+    output = (
+        prefix + '{"filename": "a.py", "message": "unused import", "code": "F401"}\n'
+        '{"file": "b.py", "message": "Expected expression", "code": null}\n'
+    )
+
+    issues, failures = parse_ruff_output_with_stats(output)
+
+    assert_that(failures).is_zero()
+    assert_that(issues).extracting("file", "message", "code").is_equal_to(
+        [("a.py", "unused import", "F401"), ("b.py", "Expected expression", "")],
+    )
 
 
 def test_ruff_null_code_keeps_syntax_error_and_file_alias() -> None:

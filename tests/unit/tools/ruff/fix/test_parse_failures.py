@@ -25,6 +25,7 @@ _MIXED_REPORT = f"[{{}}, {_SYNTAX_ERROR}]"
         ("[{}]", 1),
         ('[{"filename": "a.py"}]', 1),
         ("[null, 42]", 2),
+        ("[null,", 1),
         ("{}", 1),
         ('{"filename":', 1),
     ],

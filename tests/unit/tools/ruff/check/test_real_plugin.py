@@ -46,6 +46,7 @@ def test_ruff_parse_warning_names_rejected_records(
     ("output", "expected_issues"),
     [
         ("[{}]", 0),
+        ("[null,", 0),
         ('[{"filename": "a.py"}]', 0),
         ('{}\n{"filename": "a.py", "message": "bad syntax", "code": null}', 1),
         ('{"filename":', 0),
