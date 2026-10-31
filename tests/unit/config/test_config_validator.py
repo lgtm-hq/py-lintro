@@ -610,14 +610,15 @@ def test_documented_sections_do_not_warn(
 ) -> None:
     """Every known top-level section must validate without UNKNOWN_OPTION.
 
-    Uses an empty mapping so the case does not depend on section-specific
-    nested fields.
+    Uses an empty mapping for sections and a path string for the scalar baseline
+    option so the case does not depend on section-specific nested fields.
 
     Args:
         write_config: Fixture writing config content to a temp file.
         section: Top-level section name to place in the config.
     """
-    path = write_config(f"{section}: {{}}\n")
+    content = "baseline: debt.json\n" if section == "baseline" else f"{section}: {{}}\n"
+    path = write_config(content)
 
     result = validate_config_file(path)
 

@@ -1037,6 +1037,7 @@ def _pyproject_lintro_catalog() -> _PyprojectLintroCatalog:
         | externally_handled_sections
         | {
             "ai",
+            "baseline",
             "defaults",
             "deps",
             "output",
@@ -1194,6 +1195,8 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             result["output"] = value
         elif key_lower == "watch":
             result["watch"] = value
+        elif key_lower == "baseline":
+            result["baseline"] = value
         elif key_lower == "deps":
             # Pass through non-mappings so ``_parse_deps_config`` fail-closes
             # instead of treating ``deps = true`` as an unrecognized key.
@@ -1437,6 +1440,7 @@ def build_config_from_dict(
         output=output_config,
         watch=watch_config,
         deps=deps_config,
+        baseline=data.get("baseline"),
         config_path=resolved_path,
     )
 

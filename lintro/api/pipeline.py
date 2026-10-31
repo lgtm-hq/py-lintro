@@ -23,11 +23,13 @@ from typing import TYPE_CHECKING
 
 import click
 
+from lintro.utils.execution.baseline_filter import apply_baseline
 from lintro.utils.execution.run_renderer import (
     make_result_display,
     render_needs_ai_enrichment,
     render_run,
 )
+from lintro.utils.fingerprint_baseline_file import load_run_baseline
 from lintro.utils.tool_executor import build_run_context, execute_run
 
 if TYPE_CHECKING:
@@ -184,6 +186,7 @@ def run_lint_artifact(
     no_art: bool = False,
     profile: bool = False,
     ai_enabled: bool = True,
+    baseline: str | None = None,
 ) -> RunArtifact:
     """Execute a run, apply AI enhancement, render it, and return the artifact.
 
@@ -222,6 +225,7 @@ def run_lint_artifact(
             only; the AI status rows of the configuration summary and any SARIF
             enrichment are still produced, exactly as they were before the
             executor's AI seams were removed.
+        baseline: Optional fingerprint baseline path overriding project config.
 
     Returns:
         RunArtifact: The rendered run's results, totals, severity tallies, and
@@ -241,6 +245,11 @@ def run_lint_artifact(
         group_by=group_by,
         profile=profile,
     )
+    acknowledgements = (
+        load_run_baseline(baseline, ctx.lintro_config)
+        if str(ctx.action) != "test"
+        else None
+    )
     _capture_fmt_checkpoint(ctx=ctx, paths=paths)
     artifact = execute_run(
         ctx=ctx,
@@ -259,12 +268,16 @@ def run_lint_artifact(
         ignore_conflicts=ignore_conflicts,
         diff_base=diff_base,
         ai_status_lines=_ai_status_lines(ctx),
-        on_tool_result=make_result_display(
-            logger=ctx.logger,
-            output_format=output_format,
-            raw_output=raw_output,
-            action=ctx.action,
-            group_by=group_by,
+        on_tool_result=(
+            None
+            if acknowledgements is not None
+            else make_result_display(
+                logger=ctx.logger,
+                output_format=output_format,
+                raw_output=raw_output,
+                action=ctx.action,
+                group_by=group_by,
+            )
         ),
     )
 
@@ -282,6 +295,19 @@ def run_lint_artifact(
             )
         except AIConfigOverrideError as exc:
             raise click.UsageError(str(exc)) from exc
+
+    if acknowledgements is not None:
+        apply_baseline(artifact, acknowledgements)
+        if not ctx.clean_stdout_output:
+            display = make_result_display(
+                logger=ctx.logger,
+                output_format=output_format,
+                raw_output=raw_output,
+                action=ctx.action,
+                group_by=group_by,
+            )
+            for result in artifact.tool_results:
+                display(result)
 
     render_run(
         artifact,
@@ -328,6 +354,7 @@ def run_lint_with_ai(
     no_art: bool = False,
     profile: bool = False,
     ai_enabled: bool = True,
+    baseline: str | None = None,
 ) -> int:
     """Run the full AI-aware pipeline and return only the process exit code.
 
@@ -364,6 +391,7 @@ def run_lint_with_ai(
             timings; post-checks are omitted. csv/sarif/markdown stdout stay
             unchanged.
         ai_enabled: Whether the post-execution AI enhancement may run.
+        baseline: Optional fingerprint baseline path overriding project config.
 
     Returns:
         int: Exit code (0 for success, 1 for failures).
@@ -394,4 +422,5 @@ def run_lint_with_ai(
         no_art=no_art,
         profile=profile,
         ai_enabled=ai_enabled,
+        baseline=baseline,
     ).exit_code

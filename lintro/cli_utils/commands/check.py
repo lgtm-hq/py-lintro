@@ -27,6 +27,11 @@ DEFAULT_ACTION: str = "check"
 @click.command("check")
 @click.argument("paths", nargs=-1, type=click.Path(exists=True))
 @click.option(
+    "--baseline",
+    type=click.Path(dir_okay=False),
+    help="Only report findings not acknowledged in this fingerprint baseline.",
+)
+@click.option(
     "--tools",
     type=str,
     help=(
@@ -193,6 +198,7 @@ def check_command(
     no_art: bool,
     profile: bool,
     explain_order: bool,
+    baseline: str | None,
 ) -> None:
     """Check files for issues using the specified tools.
 
@@ -226,6 +232,7 @@ def check_command(
         profile: bool: Whether to emit a per-tool performance profile.
         explain_order: bool: Print the derived execution order
             and exit without running tools.
+        baseline: str | None: Override the configured fingerprint baseline.
 
     Raises:
         SystemExit: Process exit with the aggregated exit code from tools,
@@ -289,6 +296,7 @@ def check_command(
             transport=transport,
             no_art=no_art,
             profile=profile,
+            baseline=baseline,
         )
     except ConfigurationError as exc:
         click.echo(str(exc), err=True)

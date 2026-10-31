@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import subprocess  # nosec B404 - commands are built by callers, shell disabled
 from collections.abc import Callable, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lintro.models.core.tool_result import ToolResult
@@ -154,6 +156,7 @@ def run_per_file_check(
     Returns:
         ToolResult carrying every issue found across the prepared files.
     """
+    inspected_paths: set[str] = set()
 
     def process(file_path: str) -> FileProcessingResult:
         """Check one file.
@@ -164,7 +167,7 @@ def run_per_file_check(
         Returns:
             FileProcessingResult for the aggregator.
         """
-        return check_one_file(
+        checked = check_one_file(
             plugin=plugin,
             cmd=command(file_path),
             parse=parse,
@@ -172,6 +175,16 @@ def run_per_file_check(
             failure_message=policy.failure_message,
             issues_imply_failure=policy.issues_imply_failure,
         )
+        if (
+            checked.inspected_files is True
+            and not checked.error
+            and not checked.skipped
+            and not checked.timed_out
+        ):
+            # Unknown canonical coverage cannot authorize pruning.
+            with suppress(OSError, RuntimeError):
+                inspected_paths.add(str(Path(file_path).resolve()))
+        return checked
 
     result = plugin._process_files_with_progress(
         files=ctx.files,
@@ -183,6 +196,8 @@ def run_per_file_check(
     return ToolResult(
         name=plugin.definition.name,
         inspected_files=result.inspected_files,
+        inspected_paths=frozenset(inspected_paths),
+        execution_failed=bool(result.execution_failures),
         success=result.all_success and result.total_issues == 0,
         output=result.build_output(timeout=ctx.timeout),
         issues_count=result.total_issues,
