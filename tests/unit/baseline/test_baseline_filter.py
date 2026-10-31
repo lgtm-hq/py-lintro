@@ -15,6 +15,7 @@ from lintro.utils.execution.baseline_filter import apply_baseline
 from lintro.utils.fingerprint_baseline import snapshot
 from lintro.utils.json_output import create_json_output
 from lintro.utils.meaningful_run import baseline_is_eligible
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 
 def test_check_filters_findings_exit_and_serialized_counts_together(
@@ -53,7 +54,7 @@ def test_check_filters_findings_exit_and_serialized_counts_together(
     assert_that(payload["summary"]["total_remaining"]).is_equal_to(1)
     assert_that(payload["summary"]["total_baselined"]).is_equal_to(1)
     assert_that(result.formatted_output).is_none()
-    assert_that(result.output).is_none()
+    assert_that(result.output).is_equal_to("native raw text with acknowledged issues")
     assert_that(
         baseline_is_eligible(
             action=Action.CHECK,
@@ -297,8 +298,8 @@ def test_failed_file_cannot_be_hidden_by_peer_findings_in_the_same_tool(
         ),
         patch.object(
             plugin,
-            "_run_subprocess",
-            side_effect=[OSError("unreadable"), (False, output)],
+            "_run_subprocess_result",
+            side_effect=[OSError("unreadable"), subprocess_result(False, output)],
         ),
     ):
         result = plugin.check([str(first), str(second)], {})

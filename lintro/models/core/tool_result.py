@@ -108,6 +108,12 @@ class ToolResult:
     # failure on another file. Acknowledging the findings cannot hide that error.
     execution_failed: bool = field(default=False)
 
+    # Producer-owned proof that every invocation completed with a recognized
+    # lint verdict and its report was fully parsed. Only then can findings
+    # explain success=False. Legacy producers default to unknown, so parsed
+    # findings alone cannot authorize acknowledgements or baseline pruning.
+    findings_complete: bool = field(default=False)
+
     # Parser failures (items that could not be parsed from tool output).
     # Omitted from JSON output unless the tool sets this explicitly.
     parse_failures_count: int | None = field(default=None)

@@ -8,6 +8,7 @@ from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools.ruff.check import execute_ruff_check
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 
 def test_execute_ruff_check_no_issues_returns_success(
@@ -20,8 +21,8 @@ def test_execute_ruff_check_no_issues_returns_success(
     """
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
-            return_value=(True, "[]"),
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+            return_value=subprocess_result(True, "[]"),
         ),
         patch(
             "lintro.tools.ruff.check.parse_ruff_output",
@@ -47,8 +48,8 @@ def test_execute_ruff_check_no_issues_with_format_check(
 
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
-            return_value=(True, ""),
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+            return_value=subprocess_result(True, "[]"),
         ),
         patch(
             "lintro.tools.ruff.check.parse_ruff_output",

@@ -29,6 +29,8 @@ from typing import Any
 
 from loguru import logger
 
+from lintro.models.core.subprocess_result import SubprocessResult, SubprocessRunner
+
 
 @dataclass
 class TimeoutResult:
@@ -128,6 +130,27 @@ def run_subprocess_with_timeout(
     with subprocess_timeout_context(tool, cmd, timeout, tool_name):
         success, output = tool._run_subprocess(cmd=cmd, timeout=timeout, cwd=cwd)
         return bool(success), str(output)
+
+
+def run_subprocess_result_with_timeout(
+    tool: SubprocessRunner,
+    cmd: list[str],
+    timeout: int | None = None,
+    cwd: str | None = None,
+) -> SubprocessResult:
+    """Run the native result API with shared timeout diagnostics.
+
+    Args:
+        tool: Tool instance supplying native subprocess execution.
+        cmd: Command to run.
+        timeout: Explicit deadline or the tool default.
+        cwd: Working directory for execution.
+
+    Returns:
+        Native exit status and separated output streams.
+    """
+    with subprocess_timeout_context(tool, cmd, timeout):
+        return tool._run_subprocess_result(cmd=cmd, timeout=timeout, cwd=cwd)
 
 
 def get_timeout_value(tool: Any, default_timeout: int | None = None) -> int:

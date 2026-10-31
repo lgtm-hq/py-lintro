@@ -903,6 +903,24 @@ def check_answered(result: ToolResult | None) -> bool:
     )
 
 
+def _fold_check_verdict(mutation: ToolResult, verify: ToolResult | None) -> None:
+    """Retain producer completeness and native errors across verification.
+
+    Args:
+        mutation: Mutation result that will carry the final residual.
+        verify: Final check result, or None for an unchanged scope.
+    """
+    mutation.findings_complete = mutation.success or mutation.findings_complete
+    if verify is None:
+        return
+    mutation.findings_complete = mutation.findings_complete and (
+        verify.success or verify.findings_complete
+    )
+    mutation.execution_failed = mutation.execution_failed or verify.execution_failed
+    if not verify.success and not verify.findings_complete and verify.output:
+        mutation.output = "\n".join(filter(None, (mutation.output, verify.output)))
+
+
 def _fold_one(
     *,
     mutation: ToolResult,
@@ -930,6 +948,7 @@ def _fold_one(
     # Execution failures can still gain a measured residual from an answered
     # check below.
     verify = outcome.result
+    _fold_check_verdict(mutation, verify)
     if verify and verify.parse_failures_count:
         mutation.parse_failures_count = (mutation.parse_failures_count or 0) + (
             verify.parse_failures_count

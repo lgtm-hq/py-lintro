@@ -12,6 +12,7 @@ from lintro.enums.tool_name import ToolName
 from lintro.parsers.hadolint.hadolint_issue import HadolintIssue
 from lintro.tools.hadolint.definition import HadolintPlugin
 from tests.test_samples_helpers import copy_sample
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 # =============================================================================
 # Tests for HadolintPlugin.check method with mocked subprocess
@@ -38,11 +39,15 @@ def test_check_with_issues(hadolint_plugin: HadolintPlugin, tmp_path: Path) -> N
     )
 
     mock_output = "Dockerfile:1 DL3006 warning: Always tag the version of an image"
-    mock_result = (False, mock_output)
+    mock_result = subprocess_result(False, mock_output)
 
     with (
         patch.object(hadolint_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(hadolint_plugin, "_run_subprocess", return_value=mock_result),
+        patch.object(
+            hadolint_plugin,
+            "_run_subprocess_result",
+            return_value=mock_result,
+        ),
     ):
         mock_ctx = MagicMock()
         mock_ctx.should_skip = False
@@ -76,11 +81,15 @@ def test_check_multiple_files(hadolint_plugin: HadolintPlugin, tmp_path: Path) -
     dockerfile2 = pathlib.Path(tmp_path) / "Dockerfile.dev"
     dockerfile2.write_text("FROM python:3.11-slim\n")
 
-    mock_result = (True, "")
+    mock_result = subprocess_result(True, "")
 
     with (
         patch.object(hadolint_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(hadolint_plugin, "_run_subprocess", return_value=mock_result),
+        patch.object(
+            hadolint_plugin,
+            "_run_subprocess_result",
+            return_value=mock_result,
+        ),
     ):
         mock_ctx = MagicMock()
         mock_ctx.should_skip = False
@@ -122,11 +131,15 @@ def test_parse_single_issue(hadolint_plugin: HadolintPlugin, tmp_path: Path) -> 
     mock_output = (
         "Dockerfile:1 DL3006 error: Always tag the version of an image explicitly"
     )
-    mock_result = (False, mock_output)
+    mock_result = subprocess_result(False, mock_output)
 
     with (
         patch.object(hadolint_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(hadolint_plugin, "_run_subprocess", return_value=mock_result),
+        patch.object(
+            hadolint_plugin,
+            "_run_subprocess_result",
+            return_value=mock_result,
+        ),
     ):
         mock_ctx = MagicMock()
         mock_ctx.should_skip = False
@@ -171,11 +184,15 @@ def test_parse_multiple_issues(hadolint_plugin: HadolintPlugin, tmp_path: Path) 
         "Dockerfile:1 DL3006 error: Always tag the version of an image explicitly\n"
         "Dockerfile:2 DL3009 info: Delete the apt-get lists after installing something"
     )
-    mock_result = (False, mock_output)
+    mock_result = subprocess_result(False, mock_output)
 
     with (
         patch.object(hadolint_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(hadolint_plugin, "_run_subprocess", return_value=mock_result),
+        patch.object(
+            hadolint_plugin,
+            "_run_subprocess_result",
+            return_value=mock_result,
+        ),
     ):
         mock_ctx = MagicMock()
         mock_ctx.should_skip = False

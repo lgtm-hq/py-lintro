@@ -34,6 +34,23 @@ _SUMMARY_REFORMATTED = re.compile(
 )
 
 
+def black_report_parse_failures(output: str, issues: list[BlackIssue]) -> int:
+    """Count unaccounted formatting entries in Black's native summary.
+
+    Args:
+        output: Native Black output.
+        issues: Parsed per-file formatting findings.
+
+    Returns:
+        Missing entries, including summary-only findings without file identities.
+    """
+    output = strip_ansi_codes(output)
+    summary = _SUMMARY_WOULD.search(output) or _SUMMARY_REFORMATTED.search(output)
+    expected = int(summary.group("count")) if summary else len(issues)
+    identified = sum(issue.file != "<unknown>" for issue in issues)
+    return abs(expected - identified)
+
+
 def _iter_issue_lines(lines: Iterable[str]) -> Iterable[str]:
     for line in lines:
         s = line.strip()

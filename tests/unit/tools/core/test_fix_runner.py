@@ -27,6 +27,7 @@ from lintro.tools.core.fix_runner import (
 from lintro.tools.dotenv_linter.definition import DotenvLinterPlugin
 from lintro.tools.shfmt.definition import ShfmtPlugin
 from lintro.tools.sqlfluff.definition import SqlfluffPlugin
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 #: A minimal shfmt diff, enough for the parser to report one issue.
 SHFMT_DIFF: str = """--- script.sh.orig
@@ -140,7 +141,11 @@ def test_check_step_execution_error_is_reported_as_a_failure(
         shell_script: Shell script the runner is pointed at.
     """
     plugin = ShfmtPlugin()
-    with patch.object(plugin, "_run_subprocess", side_effect=OSError("no shfmt")):
+    with patch.object(
+        plugin,
+        "_run_subprocess_result",
+        side_effect=OSError("no shfmt"),
+    ):
         result = plugin.fix([str(shell_script)], {})
 
     assert_that(result.success).is_false()
@@ -160,9 +165,9 @@ def test_fix_command_timeout_reports_every_issue_as_remaining(
     plugin = ShfmtPlugin()
     with patch.object(
         plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=[
-            (False, SHFMT_DIFF),
+            subprocess_result(False, SHFMT_DIFF),
             subprocess.TimeoutExpired(cmd=["shfmt"], timeout=1),
         ],
     ):
@@ -187,8 +192,8 @@ def test_fix_command_execution_error_reports_every_issue_as_remaining(
     plugin = ShfmtPlugin()
     with patch.object(
         plugin,
-        "_run_subprocess",
-        side_effect=[(False, SHFMT_DIFF), OSError("write failed")],
+        "_run_subprocess_result",
+        side_effect=[subprocess_result(False, SHFMT_DIFF), OSError("write failed")],
     ):
         result = plugin.fix([str(shell_script)], {})
 
@@ -209,8 +214,11 @@ def test_failed_fix_without_verification_keeps_the_initial_issues(
     plugin = ShfmtPlugin()
     with patch.object(
         plugin,
-        "_run_subprocess",
-        side_effect=[(False, SHFMT_DIFF), (False, "shfmt: cannot write")],
+        "_run_subprocess_result",
+        side_effect=[
+            subprocess_result(False, SHFMT_DIFF),
+            subprocess_result(False, "shfmt: cannot write"),
+        ],
     ):
         result = plugin.fix([str(shell_script)], {})
 
@@ -233,11 +241,11 @@ def test_verification_failure_conservatively_keeps_the_initial_issues(
     plugin = DotenvLinterPlugin()
     with patch.object(
         plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=[
-            (False, DOTENV_FINDING),
-            (True, ""),
-            (False, "dotenv-linter: cannot read"),
+            subprocess_result(False, DOTENV_FINDING),
+            subprocess_result(True, ""),
+            subprocess_result(False, "dotenv-linter: cannot read"),
         ],
     ):
         result = _fix_with_verification(plugin, env_file)
@@ -267,11 +275,11 @@ def test_verification_after_a_successful_fix_scores_the_survivors(
     plugin = DotenvLinterPlugin()
     with patch.object(
         plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=[
-            (False, DOTENV_FINDING),
-            (True, ""),
-            (True, ""),
+            subprocess_result(False, DOTENV_FINDING),
+            subprocess_result(True, ""),
+            subprocess_result(True, ""),
         ],
     ):
         result = _fix_with_verification(plugin, env_file)
@@ -304,10 +312,10 @@ def test_a_failed_fix_command_reports_every_initial_issue_as_remaining(
     plugin = SqlfluffPlugin()
     with patch.object(
         plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=[
-            (False, _sqlfluff_violations(3)),
-            (False, "1 unfixable violation"),
+            subprocess_result(False, _sqlfluff_violations(3)),
+            subprocess_result(False, "1 unfixable violation"),
         ],
     ):
         result = plugin.fix([str(query)], {})

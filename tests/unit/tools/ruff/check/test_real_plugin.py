@@ -9,6 +9,7 @@ from assertpy import assert_that
 
 from lintro.enums.tool_name import ToolName
 from lintro.tools.ruff.check import execute_ruff_check
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 if TYPE_CHECKING:
     from lintro.tools.ruff.definition import RuffPlugin
@@ -42,8 +43,8 @@ def test_execute_ruff_check_with_real_plugin(
     with (
         patch.object(ruff_plugin, "_verify_tool_version", return_value=None),
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
-            return_value=(True, "[]"),
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+            return_value=subprocess_result(True, "[]"),
         ),
     ):
         result = execute_ruff_check(ruff_plugin, [temp_python_file])

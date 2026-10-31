@@ -18,7 +18,10 @@ from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.black.black_issue import BlackIssue
-from lintro.parsers.black.black_parser import parse_black_output
+from lintro.parsers.black.black_parser import (
+    black_report_parse_failures,
+    parse_black_output,
+)
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
@@ -308,7 +311,7 @@ class BlackPlugin(BaseToolPlugin):
 
         logger.debug(f"[BlackPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
         try:
-            success, output = self._run_subprocess(
+            process = self._run_subprocess_result(
                 cmd=cmd,
                 timeout=ctx.timeout,
                 cwd=ctx.cwd,
@@ -316,7 +319,12 @@ class BlackPlugin(BaseToolPlugin):
         except subprocess.TimeoutExpired:
             return self._handle_timeout_error(ctx.timeout, cwd=ctx.cwd)
 
+        output = process.output
         black_issues = parse_black_output(output=output)
+        parse_failures = black_report_parse_failures(output, black_issues)
+        execution_failed = process.returncode not in (0, 1) or (
+            process.returncode == 1 and not black_issues
+        )
 
         # Check for line length violations that Black cannot wrap
         supplement = self._line_length_result(
@@ -326,14 +334,19 @@ class BlackPlugin(BaseToolPlugin):
 
         all_issues = black_issues + supplement.issues
         count = len(all_issues)
-        result_output = None if count == 0 else output
+        result_output = output if count or execution_failed or parse_failures else None
         if supplement.note:
             result_output = "\n".join(filter(None, (output.rstrip(), supplement.note)))
 
         return ToolResult(
             name=self.definition.name,
             inspected_files=True,
-            success=(success and count == 0 and not supplement.failed),
+            findings_complete=not (
+                execution_failed or parse_failures or supplement.failed
+            ),
+            execution_failed=execution_failed or supplement.failed,
+            parse_failures_count=parse_failures,
+            success=(process.success and count == 0 and not supplement.failed),
             output=result_output,
             issues_count=count,
             issues=all_issues,

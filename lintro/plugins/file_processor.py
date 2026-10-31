@@ -47,6 +47,7 @@ class FileProcessingResult:
             genuine finding in the JSON report.
         inspected_files: True for proven inspection, False for no work, or
             None when the invocation did not establish coverage.
+        findings_complete: Whether the producer certified a complete lint verdict.
     """
 
     success: bool
@@ -56,6 +57,7 @@ class FileProcessingResult:
     error: str | None = None
     timed_out: bool = False
     inspected_files: bool | None = None
+    findings_complete: bool = False
 
 
 @dataclass
@@ -124,6 +126,7 @@ class AggregatedResult:
         timed_out: Whether at least one file was abandoned due to a
             subprocess timeout.
         inspected_files: Three-state union of per-file inspection evidence.
+        findings_complete: Whether every file supplied a complete lint verdict.
     """
 
     all_success: bool = True
@@ -134,6 +137,7 @@ class AggregatedResult:
     total_issues: int = 0
     timed_out: bool = False
     inspected_files: bool | None = False
+    findings_complete: bool = True
 
     def add_file_result(self, file_path: str, result: FileProcessingResult) -> None:
         """Add a single file's result to the aggregate.
@@ -142,6 +146,7 @@ class AggregatedResult:
             file_path: Path to the file that was processed.
             result: The processing result for this file.
         """
+        self.findings_complete = self.findings_complete and result.findings_complete
         if result.inspected_files is True:
             self.inspected_files = True
         elif result.inspected_files is None and self.inspected_files is False:
@@ -158,9 +163,10 @@ class AggregatedResult:
 
         if result.error:
             self.all_outputs.append(f"Error processing {file_path}: {result.error}")
+            if result.output:
+                self.all_outputs.append(result.output)
             self.all_success = False
             self.execution_failures += 1
-            return
 
         issues_count = len(result.issues)
         self.total_issues += issues_count
@@ -168,7 +174,7 @@ class AggregatedResult:
         if not result.success:
             self.all_success = False
 
-        if (not result.success or result.issues) and result.output:
+        if not result.error and (not result.success or result.issues) and result.output:
             self.all_outputs.append(result.output)
 
         if result.issues:

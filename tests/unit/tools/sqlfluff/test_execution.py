@@ -9,6 +9,7 @@ from assertpy import assert_that
 
 from lintro.tools.sqlfluff.definition import SqlfluffPlugin
 from tests.test_samples_helpers import copy_sample
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 # Tests for SqlfluffPlugin.check method
 
@@ -36,8 +37,8 @@ def test_check_with_mocked_subprocess_success(
     # Note: verify_tool_version is already patched by the sqlfluff_plugin fixture
     with patch.object(
         sqlfluff_plugin,
-        "_run_subprocess",
-        return_value=(True, "[]"),
+        "_run_subprocess_result",
+        return_value=subprocess_result(True, "[]"),
     ):
         result = sqlfluff_plugin.check([str(test_file)], {})
 
@@ -85,8 +86,8 @@ def test_check_with_mocked_subprocess_issues(
     # Note: verify_tool_version is already patched by the sqlfluff_plugin fixture
     with patch.object(
         sqlfluff_plugin,
-        "_run_subprocess",
-        return_value=(False, sqlfluff_output),
+        "_run_subprocess_result",
+        return_value=subprocess_result(False, sqlfluff_output),
     ):
         result = sqlfluff_plugin.check([str(test_file)], {})
 
@@ -157,11 +158,14 @@ def test_fix_with_mocked_subprocess_success(
     # Note: verify_tool_version is already patched by the sqlfluff_plugin fixture
     with patch.object(
         sqlfluff_plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=[
-            (False, sqlfluff_lint_output),  # Initial lint check - issues found
-            (True, "Fixed 1 file(s)"),  # Fix command
-            (True, "[]"),  # Verification lint - no issues
+            subprocess_result(
+                False,
+                sqlfluff_lint_output,
+            ),  # Initial lint check - issues found
+            subprocess_result(True, "Fixed 1 file(s)"),  # Fix command
+            subprocess_result(True, "[]"),  # Verification lint - no issues
         ],
     ):
         result = sqlfluff_plugin.fix([str(test_file)], {})
@@ -198,8 +202,8 @@ def test_fix_with_mocked_subprocess_no_changes(
     # Initial lint check finds no issues, so fix and verify are skipped
     with patch.object(
         sqlfluff_plugin,
-        "_run_subprocess",
-        return_value=(True, "[]"),
+        "_run_subprocess_result",
+        return_value=subprocess_result(True, "[]"),
     ):
         result = sqlfluff_plugin.fix([str(test_file)], {})
 

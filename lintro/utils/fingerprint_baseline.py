@@ -98,7 +98,7 @@ def result_is_complete(result: ToolResult) -> bool:
         and not result.residual_unknown
         and not result.parse_failures_count
         and result.issues_count == len(result.issues or [])
-        and (result.success or bool(result.issues))
+        and (result.success or (result.findings_complete and result.issues_count > 0))
     )
 
 

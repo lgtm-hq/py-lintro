@@ -10,7 +10,9 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.tools.black.definition import BlackPlugin
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 # Tests for BlackPlugin.check method
 
@@ -26,7 +28,11 @@ def test_check_clean_file(black_plugin: BlackPlugin, tmp_path: Path) -> None:
     py_file.write_text('"""Module."""\n')
 
     with (
-        patch.object(black_plugin, "_run_subprocess", return_value=(True, "")),
+        patch.object(
+            black_plugin,
+            "_run_subprocess_result",
+            return_value=subprocess_result(True, ""),
+        ),
         patch.object(black_plugin, "_check_line_length_violations", return_value=[]),
     ):
         result = black_plugin.check([str(py_file)], {})
@@ -50,8 +56,8 @@ def test_check_needs_reformat(black_plugin: BlackPlugin, tmp_path: Path) -> None
     with (
         patch.object(
             black_plugin,
-            "_run_subprocess",
-            return_value=(False, output),
+            "_run_subprocess_result",
+            return_value=subprocess_result(False, output),
         ),
         patch.object(black_plugin, "_check_line_length_violations", return_value=[]),
     ):
@@ -83,11 +89,11 @@ def test_fix_reformats_and_rechecks(
     with (
         patch.object(
             black_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=[
-                (False, check_output),
-                (True, f"reformatted {py_file}\n"),
-                (True, ""),
+                subprocess_result(False, check_output),
+                subprocess_result(True, f"reformatted {py_file}\n"),
+                subprocess_result(True, ""),
             ],
         ),
         patch.object(
@@ -152,11 +158,12 @@ def test_fix_formats_files_despite_ruff_invalid_syntax(
         )
     report = subprocess.CompletedProcess(["ruff"], 1, json.dumps(diagnostics), "")
 
-    def run_black(cmd: list[str], **kwargs: object) -> tuple[bool, str]:
+    def run_black(cmd: list[str], *args: object, **kwargs: object) -> SubprocessResult:
         """Emulate Black checks and write formatting only on the fix invocation.
 
         Args:
             cmd: Black command assembled by the plugin.
+            *args: Positional subprocess settings supplied by the legacy wrapper.
             **kwargs: Subprocess settings supplied by the plugin.
 
         Returns:
@@ -164,15 +171,15 @@ def test_fix_formats_files_despite_ruff_invalid_syntax(
         """
         if "--check" in cmd:
             needs_format = py_file.read_text() == "x=1\n"
-            return (
+            return subprocess_result(
                 not needs_format,
                 f"would reformat {py_file}\n" if needs_format else "",
             )
         py_file.write_text("x = 1\n")
-        return True, f"reformatted {py_file}\n"
+        return subprocess_result(True, f"reformatted {py_file}\n")
 
     with (
-        patch.object(black_plugin, "_run_subprocess", side_effect=run_black),
+        patch.object(black_plugin, "_run_subprocess_result", side_effect=run_black),
         patch("shutil.which", return_value="/mock/ruff"),
         patch("subprocess.run", return_value=report),
     ):
@@ -235,8 +242,8 @@ def test_check_surfaces_unmeasured_supplement(
     with (
         patch.object(
             black_plugin,
-            "_run_subprocess",
-            return_value=(black_clean, black_output),
+            "_run_subprocess_result",
+            return_value=subprocess_result(black_clean, black_output),
         ),
         patch("shutil.which", return_value="/mock/ruff"),
         patch("subprocess.run", side_effect=[process]),
@@ -286,8 +293,8 @@ def test_check_missing_ruff_preserves_black_verdict(
     with (
         patch.object(
             black_plugin,
-            "_run_subprocess",
-            return_value=(black_success, output),
+            "_run_subprocess_result",
+            return_value=subprocess_result(black_success, output),
         ),
         patch("shutil.which", return_value=None),
     ):
@@ -317,7 +324,11 @@ def test_check_valid_empty_supplement_is_clean(
     py_file = tmp_path / "clean.py"
     py_file.write_text("x = 1\n")
     with (
-        patch.object(black_plugin, "_run_subprocess", return_value=(True, "")),
+        patch.object(
+            black_plugin,
+            "_run_subprocess_result",
+            return_value=subprocess_result(True, ""),
+        ),
         patch("shutil.which", return_value="/mock/ruff"),
         patch(
             "subprocess.run",
@@ -356,7 +367,11 @@ def test_fix_retains_supplement_timeout(
     }
     black_plugin.set_options(diff=stage == "diff")
     with (
-        patch.object(black_plugin, "_run_subprocess", return_value=(True, "")),
+        patch.object(
+            black_plugin,
+            "_run_subprocess_result",
+            return_value=subprocess_result(True, ""),
+        ),
         patch("shutil.which", return_value="/mock/ruff"),
         patch("subprocess.run", side_effect=reports[stage]),
     ):
@@ -448,11 +463,17 @@ def test_fix_retains_e501_when_final_supplement_fails(
     with (
         patch.object(
             black_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=[
-                (not black_fixed, f"would reformat {py_file}\n" if black_fixed else ""),
-                (True, f"reformatted {py_file}\n" if black_fixed else ""),
-                (True, ""),
+                subprocess_result(
+                    not black_fixed,
+                    f"would reformat {py_file}\n" if black_fixed else "",
+                ),
+                subprocess_result(
+                    True,
+                    f"reformatted {py_file}\n" if black_fixed else "",
+                ),
+                subprocess_result(True, ""),
             ],
         ),
         patch("shutil.which", return_value="/mock/ruff"),
@@ -514,8 +535,8 @@ def test_fix_initial_supplement_failure_reports_unapplied_changes(
     with (
         patch.object(
             black_plugin,
-            "_run_subprocess",
-            return_value=(False, f"would reformat {py_file}\n"),
+            "_run_subprocess_result",
+            return_value=subprocess_result(False, f"would reformat {py_file}\n"),
         ),
         patch("shutil.which", return_value="/mock/ruff"),
         patch("subprocess.run", side_effect=[process]),
@@ -553,11 +574,11 @@ def test_fix_missing_ruff_keeps_formatting_result(
     with (
         patch.object(
             black_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=[
-                (False, output),
-                (True, ""),
-                (not remaining, output if remaining else ""),
+                subprocess_result(False, output),
+                subprocess_result(True, ""),
+                subprocess_result(not remaining, output if remaining else ""),
             ],
         ),
         patch("shutil.which", return_value=None),

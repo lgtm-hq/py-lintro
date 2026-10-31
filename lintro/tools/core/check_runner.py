@@ -51,18 +51,18 @@ class PerFileCheckPolicy:
         failure_message: Error recorded when the command exits non-zero
             without producing any parseable issue, which means the invocation
             itself failed rather than the file being dirty. ``None`` (the
-            default) leaves such a run reported as an unsuccessful file with
-            its raw output, which is what most wrapped tools want: their exit
-            status alone is a reliable verdict.
+            default) uses a standard execution error and preserves raw output.
         issues_imply_failure: Mark a file unsuccessful whenever the parser
             found issues, even if the command exited zero. Needed by tools
             that report findings on a clean exit status.
         label: Progress bar label for the check pass.
+        findings_exit_codes: Native exit statuses that mean lint findings.
     """
 
     failure_message: str | None = None
     issues_imply_failure: bool = False
     label: str = "Processing files"
+    findings_exit_codes: frozenset[int] = frozenset({1})
 
 
 #: Policy for a tool whose exit status is the whole verdict.
@@ -77,6 +77,7 @@ def check_one_file(
     timeout: int,
     failure_message: str | None = None,
     issues_imply_failure: bool = False,
+    findings_exit_codes: frozenset[int] = frozenset({1}),
 ) -> FileProcessingResult:
     """Run one check-style invocation and classify its outcome.
 
@@ -86,16 +87,18 @@ def check_one_file(
         parse: Parser turning the command's output into issues.
         timeout: Per-command timeout in seconds.
         failure_message: Error to record when the command exits non-zero
-            without producing any parseable issue. ``None`` reports the run as
-            an unsuccessful file rather than an execution failure.
+            without producing any parseable issue. ``None`` uses a standard error.
         issues_imply_failure: Mark the file unsuccessful whenever issues were
             parsed, even on a zero exit status.
+        findings_exit_codes: Native statuses reserved for lint findings.
 
     Returns:
         FileProcessingResult describing the check outcome.
     """
+    output = ""
     try:
-        success, output = plugin._run_subprocess(cmd=cmd, timeout=timeout)
+        process = plugin._run_subprocess_result(cmd=cmd, timeout=timeout)
+        success, output = process.success, process.output
         # Parsing stays inside the handler: a malformed report must fail this
         # one file, not abort the whole run. ``_process_files_with_progress``
         # does not catch anything its processor raises.
@@ -103,7 +106,7 @@ def check_one_file(
     except subprocess.TimeoutExpired:
         return FileProcessingResult(
             success=False,
-            output="",
+            output=output,
             issues=[],
             skipped=True,
             timed_out=True,
@@ -112,18 +115,19 @@ def check_one_file(
     except (OSError, ValueError, RuntimeError) as exc:
         return FileProcessingResult(
             success=False,
-            output="",
+            output=output,
             issues=[],
             error=str(exc),
             inspected_files=False if isinstance(exc, OSError) else None,
         )
 
-    if not success and not issues and failure_message is not None:
+    complete = success or (process.returncode in findings_exit_codes and bool(issues))
+    if not complete:
         return FileProcessingResult(
             success=False,
             output=output,
-            issues=[],
-            error=failure_message,
+            issues=issues,
+            error=failure_message or f"Check failed (exit code {process.returncode})",
         )
     return FileProcessingResult(
         success=success and not (issues_imply_failure and issues),
@@ -131,7 +135,8 @@ def check_one_file(
         issues=issues,
         # Successful execution over the selected file also proves a clean
         # inspection. Failed invocations without findings remain unknown.
-        inspected_files=True if success or issues else None,
+        inspected_files=True,
+        findings_complete=True,
     )
 
 
@@ -174,6 +179,7 @@ def run_per_file_check(
             timeout=ctx.timeout,
             failure_message=policy.failure_message,
             issues_imply_failure=policy.issues_imply_failure,
+            findings_exit_codes=policy.findings_exit_codes,
         )
         if (
             checked.inspected_files is True
@@ -198,6 +204,7 @@ def run_per_file_check(
         inspected_files=result.inspected_files,
         inspected_paths=frozenset(inspected_paths),
         execution_failed=bool(result.execution_failures),
+        findings_complete=result.findings_complete and not result.execution_failures,
         success=result.all_success and result.total_issues == 0,
         output=result.build_output(timeout=ctx.timeout),
         issues_count=result.total_issues,

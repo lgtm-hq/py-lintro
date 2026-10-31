@@ -3,6 +3,7 @@
 Functions for running ruff check commands and processing results.
 """
 
+import json
 import subprocess  # nosec B404 - subprocess used safely to execute ruff commands with controlled input
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -10,13 +11,14 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from lintro.parsers.ruff.ruff_format_issue import RuffFormatIssue
+from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.parsers.ruff.ruff_parser import (
     parse_ruff_format_check_output,
     parse_ruff_output,
 )
 from lintro.tools.core.timeout_utils import (
     create_timeout_result,
-    run_subprocess_with_timeout,
+    run_subprocess_result_with_timeout,
 )
 
 # Re-exported so callers keep a single source of truth for the default Ruff
@@ -30,6 +32,29 @@ if TYPE_CHECKING:
     from lintro.tools.ruff.definition import RuffPlugin
 
 __all__ = ["RUFF_DEFAULT_TIMEOUT", "execute_ruff_check"]
+
+
+def _lint_parse_failures(output: str, issues: list[RuffIssue]) -> int:
+    """Account for the entire native JSON array before certifying coverage.
+
+    Args:
+        output: Ruff's stdout, excluding stderr diagnostics.
+        issues: Findings recovered by the tolerant display parser.
+
+    Returns:
+        Number of missing or malformed diagnostic records.
+    """
+    try:
+        records = json.loads(output)
+    except (ValueError, TypeError):
+        return 1
+    if not isinstance(records, list):
+        return 1
+    invalid = sum(
+        not issue.file or not issue.message or issue.line <= 0 or issue.column <= 0
+        for issue in issues
+    )
+    return abs(len(records) - len(issues)) + invalid
 
 
 def _baseline_coverage(
@@ -53,7 +78,7 @@ def _baseline_coverage(
     if not tool.options.get("_baseline_coverage", False):
         return None
     try:
-        success, output = run_subprocess_with_timeout(
+        process = run_subprocess_result_with_timeout(
             tool=tool,
             cmd=[*cmd, "--show-files"],
             timeout=timeout,
@@ -61,9 +86,10 @@ def _baseline_coverage(
         )
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
         return None
-    if not success:
+    if not process.success:
         return None
     try:
+        output = process.stdout
         paths = [Path(line) for line in output.splitlines() if line.strip()]
         if any(not path.is_absolute() or not path.is_file() for path in paths):
             return None
@@ -113,7 +139,7 @@ def execute_ruff_check(
     success_lint: bool
     output_lint: str
     try:
-        success_lint, output_lint = run_subprocess_with_timeout(
+        lint_process = run_subprocess_result_with_timeout(
             tool=tool,
             cmd=cmd,
             timeout=timeout,
@@ -134,6 +160,7 @@ def execute_ruff_check(
             issues=timeout_result.issues,
         )
 
+    success_lint, output_lint = lint_process.success, lint_process.output
     # Debug logging for CI diagnostics
     logger.debug(f"[ruff] check command: {' '.join(cmd)}")
     logger.debug(f"[ruff] check success: {success_lint}")
@@ -142,23 +169,28 @@ def execute_ruff_check(
         # formatted into tables, so no need to show it in console warnings
         logger.debug(f"[ruff] check full output:\n{output_lint}")
 
-    lint_issues = parse_ruff_output(output=output_lint)
+    lint_issues = parse_ruff_output(output=lint_process.stdout)
     lint_issues_count: int = len(lint_issues)
+    parse_failures = _lint_parse_failures(lint_process.stdout, lint_issues)
+    lint_complete = not parse_failures and (
+        success_lint or (lint_process.returncode == 1 and bool(lint_issues))
+    )
 
     # Optional format check via `format_check` flag
     format_issues_count: int = 0
     format_files: list[str] = []
     format_issues: list[RuffFormatIssue] = []
     success_format: bool = True  # Default to True when format check is skipped
+    format_complete = True
+    output_format = ""
     if tool.options.get("format_check", False):
         format_cmd: list[str] = build_ruff_format_command(
             tool=tool,
             files=rel_files,
             check_only=True,
         )
-        output_format: str
         try:
-            success_format, output_format = run_subprocess_with_timeout(
+            format_process = run_subprocess_result_with_timeout(
                 tool=tool,
                 cmd=format_cmd,
                 timeout=timeout,
@@ -179,6 +211,7 @@ def execute_ruff_check(
                 issues=lint_issues + timeout_result.issues,
             )
 
+        success_format, output_format = format_process.success, format_process.output
         # Debug logging for CI diagnostics
         logger.debug(f"[ruff] format --check command: {' '.join(format_cmd)}")
         logger.debug(f"[ruff] format --check success: {success_format}")
@@ -188,6 +221,9 @@ def execute_ruff_check(
             logger.debug(f"[ruff] format check full output:\n{output_format}")
 
         format_files = parse_ruff_format_check_output(output=output_format)
+        format_complete = success_format or (
+            format_process.returncode == 1 and bool(format_files)
+        )
         # Normalize files to absolute paths to keep behavior consistent with
         # direct CLI calls and stabilize tests that compare exact paths. The
         # fix flow canonicalises the same way through the same helper, so a
@@ -198,7 +234,8 @@ def execute_ruff_check(
 
     # Combine results - respect subprocess exit codes and issue counts
     issues_count: int = lint_issues_count + format_issues_count
-    success: bool = success_lint and success_format and (issues_count == 0)
+    complete = lint_complete and format_complete
+    success: bool = success_lint and success_format and issues_count == 0 and complete
 
     # Diagnostic logging for the "ERROR" case (subprocess failed but no issues parsed)
     if not success and issues_count == 0:
@@ -208,17 +245,19 @@ def execute_ruff_check(
         )
 
     # Suppress narrative blocks; rely on standardized tables and summary lines
-    output_summary: str | None = None
+    output_summary = (
+        "\n".join(filter(None, (output_lint, output_format))) if not complete else None
+    )
 
     # Combine linting and formatting issues for the formatters
     all_issues = lint_issues + format_issues
-    complete = bool(
-        (success_lint or lint_issues) and (success_format or format_issues),
-    )
 
     return ToolResult(
         name=tool.definition.name,
         inspected_files=True if complete else None,
+        findings_complete=complete,
+        execution_failed=not complete,
+        parse_failures_count=parse_failures,
         inspected_paths=(
             _baseline_coverage(tool, cmd=cmd, cwd=cwd, timeout=timeout)
             if complete
@@ -229,4 +268,5 @@ def execute_ruff_check(
         output=output_summary,
         issues_count=issues_count,
         issues=all_issues,
+        cwd=cwd,
     )

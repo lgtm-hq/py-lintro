@@ -23,6 +23,7 @@ def dirty_result(finding: RuffIssue) -> ToolResult:
         issues=[finding],
         issues_count=1,
         inspected_files=True,
+        findings_complete=True,
     )
 
 

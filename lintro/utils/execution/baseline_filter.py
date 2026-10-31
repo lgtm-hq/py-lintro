@@ -15,7 +15,6 @@ from lintro.utils.severity_counts import count_severities
 if TYPE_CHECKING:
     from lintro.models.core.fingerprint_baseline import FingerprintBaseline
     from lintro.models.core.run_artifact import RunArtifact
-    from lintro.parsers.base_issue import BaseIssue
 
 
 def apply_baseline(artifact: RunArtifact, baseline: FingerprintBaseline) -> None:
@@ -53,15 +52,12 @@ def apply_baseline(artifact: RunArtifact, baseline: FingerprintBaseline) -> None
             baseline=baseline,
             root=artifact.workspace_root,
         )
-        detected: list[BaseIssue] = []
-        detected_suppressed = 0
-        if artifact.action == Action.FIX:
-            detected, detected_suppressed = filter_issues(
-                result.initial_issues or [],
-                result=result,
-                baseline=baseline,
-                root=artifact.workspace_root,
-            )
+        detected, detected_suppressed = filter_issues(
+            result.initial_issues or [] if artifact.action == Action.FIX else [],
+            result=result,
+            baseline=baseline,
+            root=artifact.workspace_root,
+        )
         if not suppressed and not detected_suppressed:
             continue
         result.issues = retained
@@ -70,7 +66,6 @@ def apply_baseline(artifact: RunArtifact, baseline: FingerprintBaseline) -> None
         # Cached text and native raw output still contain acknowledged findings.
         # Execution-error output is kept by the completeness guard above.
         result.formatted_output = None
-        result.output = None
         if artifact.action == Action.FIX:
             result.initial_issues = detected
             before = len(detected)
@@ -79,9 +74,10 @@ def apply_baseline(artifact: RunArtifact, baseline: FingerprintBaseline) -> None
             result.initial_issues_count = fixed + remaining
             result.fixed_issues_count = fixed
             result.remaining_issues_count = remaining
-        # A complete failure with parsed findings is a lint verdict. Failures
-        # without findings never pass result_is_complete and remain failures.
+        # Only the producer's completeness proof can explain a failed verdict.
         result.success = result.success or not retained
+        if result.success:
+            result.output = None
     totals = aggregate_tool_results(artifact.tool_results, artifact.action)
     artifact.total_issues, artifact.total_fixed, artifact.total_remaining = totals
     artifact.exit_code = determine_exit_code(

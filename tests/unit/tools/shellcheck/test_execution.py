@@ -11,6 +11,7 @@ from assertpy import assert_that
 from lintro.parsers.shellcheck.shellcheck_parser import parse_shellcheck_output
 from lintro.tools.shellcheck.definition import ShellcheckPlugin
 from tests.test_samples_helpers import copy_sample
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 # Tests for ShellcheckPlugin.check method
 
@@ -37,8 +38,8 @@ def test_check_with_mocked_subprocess_success(
 
     with patch.object(
         shellcheck_plugin,
-        "_run_subprocess",
-        return_value=(True, "[]"),
+        "_run_subprocess_result",
+        return_value=subprocess_result(True, "[]"),
     ):
         result = shellcheck_plugin.check([str(test_file)], {})
 
@@ -80,8 +81,8 @@ def test_check_with_mocked_subprocess_issues(
 
     with patch.object(
         shellcheck_plugin,
-        "_run_subprocess",
-        return_value=(False, shellcheck_output),
+        "_run_subprocess_result",
+        return_value=subprocess_result(False, shellcheck_output),
     ):
         result = shellcheck_plugin.check([str(test_file)], {})
 

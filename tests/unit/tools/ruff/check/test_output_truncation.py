@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 from assertpy import assert_that
 
 from lintro.tools.ruff.check import execute_ruff_check
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 
 def _messages_at(records: list[tuple[str, str]], level: str) -> list[str]:
@@ -39,8 +40,8 @@ def test_check_failure_logs_output_to_debug_only(
 
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
-            return_value=(False, long_output),
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+            return_value=subprocess_result(False, long_output),
         ),
         patch(
             "lintro.tools.ruff.check.parse_ruff_output",
@@ -78,8 +79,11 @@ def test_format_check_failure_logs_output_to_debug_only(
 
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
-            side_effect=[(True, "[]"), (False, long_format_output)],
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+            side_effect=[
+                subprocess_result(True, "[]"),
+                subprocess_result(False, long_format_output),
+            ],
         ),
         patch(
             "lintro.tools.ruff.check.parse_ruff_output",
@@ -118,8 +122,8 @@ def test_check_success_does_not_log_output(
     """
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
-            return_value=(True, "[]"),
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+            return_value=subprocess_result(True, "[]"),
         ),
         patch(
             "lintro.tools.ruff.check.parse_ruff_output",

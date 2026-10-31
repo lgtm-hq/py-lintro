@@ -9,6 +9,7 @@ from assertpy import assert_that
 
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.tools.ruff.check import execute_ruff_check
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 
 def test_execute_ruff_check_parses_json_output_correctly(
@@ -25,8 +26,8 @@ def test_execute_ruff_check_parses_json_output_correctly(
 
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
-            return_value=(False, sample_ruff_json_output),
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+            return_value=subprocess_result(False, sample_ruff_json_output),
         ),
         patch(
             "lintro.tools.ruff.check.parse_ruff_output",
@@ -65,8 +66,8 @@ def test_execute_ruff_check_empty_json_output(
     """
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
-            return_value=(True, sample_ruff_json_empty_output),
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+            return_value=subprocess_result(True, sample_ruff_json_empty_output),
         ),
         patch(
             "lintro.tools.ruff.check.parse_ruff_output",
@@ -103,13 +104,13 @@ def test_execute_ruff_check_parses_format_check_output(
             side_effect=parse_ruff_format_check_output,
         ),
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
         ) as mock_subprocess,
     ):
         # First call: lint check, Second call: format check
         mock_subprocess.side_effect = [
-            (True, "[]"),
-            (False, sample_ruff_format_check_output),
+            subprocess_result(True, "[]"),
+            subprocess_result(False, sample_ruff_format_check_output),
         ]
 
         result = execute_ruff_check(mock_ruff_tool, ["/test/project"])
