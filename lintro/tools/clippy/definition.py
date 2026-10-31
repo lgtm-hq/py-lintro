@@ -145,6 +145,8 @@ class ClippyPlugin(BaseToolPlugin):
             success=True,  # Not an error, just skipping
             output=skip_message,
             issues_count=0,
+            skipped=True,
+            skip_reason=version_info.error_message or "Clippy version check failed",
         )
 
     def set_options(
@@ -334,6 +336,11 @@ class ClippyPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=(
+                True
+                if success_check or success_after or initial_issues or remaining_issues
+                else None
+            ),
             success=remaining_count == 0,
             output=output_after if should_show_output else None,
             issues_count=remaining_count,

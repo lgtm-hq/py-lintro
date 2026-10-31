@@ -385,6 +385,7 @@ class AstroCheckPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=issues_count == 0,
             output=None,
             issues_count=issues_count,

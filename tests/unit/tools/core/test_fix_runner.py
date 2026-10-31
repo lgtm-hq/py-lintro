@@ -146,6 +146,7 @@ def test_check_step_execution_error_is_reported_as_a_failure(
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.output).contains("no shfmt")
+    assert_that(result.inspected_files).is_false()
 
 
 def test_fix_command_timeout_reports_every_issue_as_remaining(
@@ -169,6 +170,7 @@ def test_fix_command_timeout_reports_every_issue_as_remaining(
 
     assert_that(result.success).is_false()
     assert_that(result.timed_out).is_true()
+    assert_that(result.inspected_files).is_false()
     assert_that(result.initial_issues_count).is_equal_to(1)
     assert_that(result.fixed_issues_count).is_equal_to(0)
     assert_that(result.remaining_issues_count).is_equal_to(1)
@@ -193,6 +195,7 @@ def test_fix_command_execution_error_reports_every_issue_as_remaining(
     assert_that(result.success).is_false()
     assert_that(result.remaining_issues_count).is_equal_to(1)
     assert_that(result.output).contains("write failed")
+    assert_that(result.inspected_files).is_true()
 
 
 def test_failed_fix_without_verification_keeps_the_initial_issues(

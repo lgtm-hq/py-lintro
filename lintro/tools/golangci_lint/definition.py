@@ -189,8 +189,12 @@ def _merge_fix_results(*, name: str, results: list[ToolResult]) -> ToolResult:
         if result.output:
             outputs.append(result.output)
     any_timed_out = any(r.timed_out for r in results)
+    coverage = [r.inspected_files for r in results]
     return ToolResult(
         name=name,
+        inspected_files=(
+            True if True in coverage else None if None in coverage else False
+        ),
         success=all(r.success for r in results) and not any_timed_out,
         timed_out=any_timed_out,
         output="\n".join(outputs) if outputs else None,
@@ -350,6 +354,7 @@ class GolangciLintPlugin(BaseToolPlugin):
         all_issues: list[GolangciLintIssue] = []
         failure_outputs: list[str] = []
         any_timed_out = False
+        any_inspected = False
         overall_success = True
         for module_root in module_roots:
             try:
@@ -381,6 +386,11 @@ class GolangciLintPlugin(BaseToolPlugin):
                 continue
 
             issues = parse_golangci_lint_output(output=output)
+            any_inspected = (
+                any_inspected
+                or success_cmd
+                or any(i.file != "(module)" for i in issues)
+            )
             _rebase_issue_paths(issues=issues, module_root=module_root)
             all_issues.extend(issues)
             overall_success = overall_success and bool(success_cmd)
@@ -392,6 +402,7 @@ class GolangciLintPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True if any_inspected else None,
             success=overall_success,
             output="\n".join(failure_outputs) if failure_outputs else None,
             issues_count=len(all_issues),
@@ -549,6 +560,15 @@ class GolangciLintPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=(
+                True
+                if success_check
+                or success_after
+                or any(
+                    i.file != "(module)" for i in [*initial_issues, *remaining_issues]
+                )
+                else None
+            ),
             success=success,
             output=output,
             issues_count=remaining_count,

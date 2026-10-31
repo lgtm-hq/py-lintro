@@ -136,6 +136,12 @@ class ToolResult:
     # built directly in a test).
     capability: Cap | None = field(default=None)
 
+    # Whether the producer actually inspected files. None preserves the unknown
+    # state for legacy plugins; neither output text nor success proves inspection.
+    # False with no_files=True means empty discovery; False without it means a
+    # decline (for example missing configuration), skip, or timeout.
+    inspected_files: bool | None = field(default=None)
+
     def __post_init__(self) -> None:
         """Validate collections, issue counts and execution state.
 
@@ -143,13 +149,18 @@ class ToolResult:
             TypeError: If a collection field is None.
             ValueError: If issue counts are inconsistent or skip state is invalid.
         """
-        for field_name, value in (
+        # Untyped plugins can violate the annotations at the construction boundary.
+        collection_fields: tuple[tuple[str, object], ...] = (
             ("issues", self.issues),
             ("initial_issues", self.initial_issues),
             ("metadata", self.metadata),
-        ):
+        )
+        for field_name, value in collection_fields:
             if value is None:
                 raise TypeError(f"ToolResult.{field_name} must not be None")
+
+        if self.no_files or self.skipped or self.timed_out:
+            self.inspected_files = False
 
         # Skipped tools are not failures — they just didn't run
         if self.skipped:

@@ -340,6 +340,7 @@ class BufPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=(count == 0),
             output=output if count > 0 else None,
             issues_count=count,
@@ -552,6 +553,7 @@ class BufPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=(remaining_count == 0),
             output=final_summary,
             issues_count=remaining_count,

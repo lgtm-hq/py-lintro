@@ -45,6 +45,8 @@ class FileProcessingResult:
             subprocess exceeded its deadline. Propagated to the tool-level
             ``ToolResult.timed_out`` so a timeout stays distinguishable from a
             genuine finding in the JSON report.
+        inspected_files: True for proven inspection, False for no work, or
+            None when the invocation did not establish coverage.
     """
 
     success: bool
@@ -53,6 +55,7 @@ class FileProcessingResult:
     skipped: bool = False
     error: str | None = None
     timed_out: bool = False
+    inspected_files: bool | None = None
 
 
 @dataclass
@@ -120,6 +123,7 @@ class AggregatedResult:
         total_issues: Total count of issues across all files.
         timed_out: Whether at least one file was abandoned due to a
             subprocess timeout.
+        inspected_files: Three-state union of per-file inspection evidence.
     """
 
     all_success: bool = True
@@ -129,6 +133,7 @@ class AggregatedResult:
     execution_failures: int = 0
     total_issues: int = 0
     timed_out: bool = False
+    inspected_files: bool | None = False
 
     def add_file_result(self, file_path: str, result: FileProcessingResult) -> None:
         """Add a single file's result to the aggregate.
@@ -137,6 +142,11 @@ class AggregatedResult:
             file_path: Path to the file that was processed.
             result: The processing result for this file.
         """
+        if result.inspected_files is True:
+            self.inspected_files = True
+        elif result.inspected_files is None and self.inspected_files is False:
+            self.inspected_files = None
+
         if result.timed_out:
             self.timed_out = True
 

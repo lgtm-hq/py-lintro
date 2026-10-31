@@ -113,12 +113,14 @@ def test_check_skipped_tool(
         success=False,
         issues_count=0,
         output="Skipping ruff: version check failed",
+        skipped=True,
+        skip_reason="version check failed",
     )
 
     print_summary_table(capture, Action.CHECK, [result])
 
     combined = "".join(output)
-    assert_that(combined).contains("SKIPPED")
+    assert_that(combined).contains("SKIP")
 
 
 # =============================================================================
@@ -200,6 +202,7 @@ def test_fix_no_files_shows_zero(
         success=True,
         issues_count=0,
         output="No files to format",
+        no_files=True,
     )
 
     print_summary_table(capture, Action.FIX, [result])
@@ -524,6 +527,7 @@ def test_check_pass_with_no_files_is_annotated(
         success=True,
         issues_count=0,
         output="No .md files found to check.",
+        no_files=True,
     )
 
     print_summary_table(capture, Action.CHECK, [result])
@@ -585,13 +589,14 @@ def test_check_pass_over_real_files_has_no_note(
         "templated",
     ],
 )
-def test_is_no_files_result_recognizes_discovery_messages(message: str) -> None:
-    """Every framework no-files message is recognized, with or without a period.
+def test_is_no_files_result_does_not_infer_discovery_from_text(message: str) -> None:
+    """A legacy message alone is not evidence of empty discovery.
 
     Args:
         message: A framework "nothing to do" message.
     """
-    assert_that(_is_no_files_result(message)).is_true()
+    result = ToolResult(output=message)
+    assert_that(_is_no_files_result(result)).is_false()
 
 
 @pytest.mark.parametrize(
@@ -615,23 +620,22 @@ def test_is_no_files_result_recognizes_discovery_messages(message: str) -> None:
         "none",
     ],
 )
-def test_is_no_files_result_ignores_ran_messages(message: object) -> None:
+def test_is_no_files_result_ignores_ran_messages(message: str | None) -> None:
     """A tool that actually ran is never mistaken for a zero-file run.
 
     Args:
         message: A message that must not be treated as a no-files result.
     """
-    assert_that(_is_no_files_result(message)).is_false()
+    result = ToolResult(output=message, inspected_files=True)
+    assert_that(_is_no_files_result(result)).is_false()
 
 
 def test_is_no_files_result_prefers_the_structured_flag() -> None:
-    """``no_files`` is the authority; the prose match is only a fallback.
+    """Only structured inspection and discovery flags establish empty discovery.
 
     ``prepare_execution`` and the tool definitions that build their own
-    "nothing was examined" result stamp ``no_files=True`` (#1743). A message
-    that the suffix list does not recognise — "No Cargo.toml found; skipping
-    clippy." — must still render the note, and a flagged result with no
-    message at all must too.
+    "nothing was examined" result stamp ``no_files=True`` (#1743). Both a
+    flagged result with a message and one without any message render the note.
     """
     flagged = ToolResult(
         name="clippy",
@@ -640,8 +644,8 @@ def test_is_no_files_result_prefers_the_structured_flag() -> None:
         issues_count=0,
         no_files=True,
     )
-    assert_that(_is_no_files_result(flagged.output)).is_false()
-    assert_that(_is_no_files_result(flagged.output, flagged)).is_true()
+    assert_that(_is_no_files_result(ToolResult(output=flagged.output))).is_false()
+    assert_that(_is_no_files_result(flagged)).is_true()
 
     silent = ToolResult(
         name="typos",
@@ -649,7 +653,7 @@ def test_is_no_files_result_prefers_the_structured_flag() -> None:
         issues_count=0,
         no_files=True,
     )
-    assert_that(_is_no_files_result(silent.output, silent)).is_true()
+    assert_that(_is_no_files_result(silent)).is_true()
 
     ran = ToolResult(
         name="ruff",
@@ -657,7 +661,7 @@ def test_is_no_files_result_prefers_the_structured_flag() -> None:
         output="No issues found",
         issues_count=0,
     )
-    assert_that(_is_no_files_result(ran.output, ran)).is_false()
+    assert_that(_is_no_files_result(ran)).is_false()
 
 
 def test_no_files_note_renders_from_the_flag_alone(

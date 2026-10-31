@@ -55,7 +55,6 @@ def test_check_extracts_known_checks(
     result = plugin.check([dotenv_violation_file], {})
 
     assert_that(result.issues).is_not_none()
-    assert result.issues is not None  # narrow type for mypy
     codes = {
         issue.code for issue in result.issues if isinstance(issue, DotenvLinterIssue)
     }
@@ -93,7 +92,6 @@ def test_check_issue_carries_doc_url(
     result = plugin.check([dotenv_violation_file], {})
 
     assert_that(result.issues).is_not_none()
-    assert result.issues is not None  # narrow type for mypy
     lowercase = next(
         i
         for i in result.issues

@@ -410,7 +410,6 @@ def test_check_with_vulnerabilities(
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.issues).is_not_none()
-    assert result.issues is not None
     first = result.issues[0]
     assert isinstance(first, PipAuditIssue)
     assert_that(first.vuln_id).is_equal_to("PYSEC-2019-217")

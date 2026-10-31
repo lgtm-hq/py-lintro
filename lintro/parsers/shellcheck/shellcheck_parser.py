@@ -87,7 +87,7 @@ def parse_shellcheck_output(output: str | None) -> list[ShellcheckIssue]:
         end_line: int = _safe_int(item.get("endLine", 0))
         end_column: int = _safe_int(item.get("endColumn", 0))
         level: str = str(item.get("level", "error"))
-        code: int | str = item.get("code", 0)
+        code: object = item.get("code", 0)
         message: str = str(item.get("message", ""))
 
         # Format code as SC#### string (handle both int and numeric string codes)

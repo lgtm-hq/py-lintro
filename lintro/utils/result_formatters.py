@@ -7,11 +7,15 @@ status messages.
 import json
 import re
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from lintro.enums.action import Action, normalize_action
 from lintro.enums.tool_name import ToolName
+
+if TYPE_CHECKING:
+    from lintro.models.core.tool_result import ToolResult
 
 # ANSI color codes for suppression table
 _YELLOW = "\033[33m"
@@ -98,6 +102,7 @@ def print_tool_result(
     success: bool | None = None,
     metadata: dict[str, object] | None = None,
     parse_failures_count: int = 0,
+    result: "ToolResult | None" = None,
 ) -> None:
     """Print the result for a tool.
 
@@ -116,6 +121,7 @@ def print_tool_result(
         metadata: dict[str, object] | None: Tool-specific metadata
             (e.g. suppression classifications for osv-scanner).
         parse_failures_count: Number of tool-output items that could not be parsed.
+        result: Structured tool result supplying empty-discovery metadata.
     """
     # Normalize action to enum
     action = normalize_action(action)
@@ -327,10 +333,7 @@ def print_tool_result(
         # If the tool reported a failure (e.g., parse error), do not claim pass
         if success is False:
             console_output_func(text="✗ Tool execution failed", color="red")
-        # Check if the output indicates no files were processed
-        elif output and any(
-            (msg in output for msg in ["No files to", "No Python files found to"]),
-        ):
+        elif result is not None and result.no_files and result.inspected_files is False:
             console_output_func(
                 text=("⚠️  No files processed (excluded by patterns)"),
             )

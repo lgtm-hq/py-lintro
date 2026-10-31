@@ -10,10 +10,11 @@ from __future__ import annotations
 import csv
 import io
 import json
+import subprocess  # nosec B404 - mocked tool process results only
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Never
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -24,6 +25,7 @@ from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.severity_counts import SeverityCounts
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
+from lintro.plugins.registry import ToolRegistry
 from lintro.tools import tool_manager
 from lintro.utils.execution.run_aggregation import finalize_artifact
 from lintro.utils.execution.run_context import RunContext
@@ -80,6 +82,7 @@ class _FakeTool:
         ]
         return ToolResult(
             name=self._name,
+            inspected_files=True,
             success=self._issues_count == 0,
             issues_count=self._issues_count,
             issues=issues,
@@ -703,6 +706,68 @@ def test_render_run_records_the_baseline_for_the_next_run(
     )
 
 
+@pytest.mark.parametrize("no_sources", [True, False])
+@pytest.mark.parametrize("tool_name", ["osv_scanner", "shellcheck", "pydoclint"])
+def test_plugin_coverage_controls_baseline_comparison_and_storage(
+    tmp_path: Path,
+    fake_logger: Any,
+    no_sources: bool,
+    tool_name: str,
+) -> None:
+    """Clean inspections compare and store baselines; no-source runs do neither.
+
+    Args:
+        tmp_path: Target and baseline storage directory.
+        fake_logger: Console logger double.
+        no_sources: Recognized empty discovery or a completed clean scan.
+        tool_name: Native scanner or per-file check plugin under test.
+    """
+    source_name, source_text, clean_output = {
+        "osv_scanner": ("requirements.txt", "requests==2.32.0\n", '{"results": []}'),
+        "shellcheck": ("safe.sh", "#!/bin/sh\necho ok\n", "[]"),
+        "pydoclint": ("safe.py", '"""Clean source."""\n', ""),
+    }[tool_name]
+    if not no_sources:
+        (tmp_path / source_name).write_text(source_text)
+    completed = subprocess.CompletedProcess(
+        [tool_name],
+        128 if no_sources else 0,
+        "" if no_sources else clean_output,
+        "No package sources found" if no_sources else "",
+    )
+    with (
+        patch(
+            "lintro.tools.osv_scanner.definition.verify_tool_version",
+            return_value=None,
+        ),
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch("subprocess.run", return_value=completed),
+    ):
+        measured = type(ToolRegistry.get(tool_name))().check([str(tmp_path)], {})
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger)
+    paths = [str(tmp_path)]
+    scope = severity_baseline_scope(paths=paths, tool_results=[measured])
+    previous = SeverityCounts(errors=9)
+    write_severity_baseline(ctx.output_manager.base_dir, previous, scope)
+    artifact = finalize_artifact(
+        ctx=ctx,
+        all_results=[measured],
+        total_issues=0,
+        total_fixed=0,
+        total_remaining=0,
+        paths=paths,
+    )
+    assert_that(artifact.previous_severity_counts).is_equal_to(
+        None if no_sources else previous,
+    )
+    render_run(artifact, ctx=ctx, output_format="grid")
+    stored = read_severity_baseline(ctx.output_manager.base_dir, scope)
+    assert_that(stored).is_equal_to(previous if no_sources else SeverityCounts())
+
+
 @pytest.mark.parametrize(
     ("scoped_paths", "scoped_tools"),
     [(["a.py"], None), (["."], "ruff")],
@@ -971,6 +1036,7 @@ def _unmeasured_artifacts() -> list[tuple[str, RunArtifact]]:
                 success=True,
                 skipped=False,
                 output="No .py/.pyi files found to check.",
+                no_files=True,
             ),
         ],
     )
@@ -992,9 +1058,36 @@ def _unmeasured_artifacts() -> list[tuple[str, RunArtifact]]:
             ),
         ],
     )
-    real = [ToolResult(name="ruff", success=True, output="All checks passed")]
+    real = [ToolResult(name="ruff", success=True, inspected_files=True)]
     return [
         ("empty", RunArtifact(action=Action.CHECK)),
+        (
+            "legacy-unknown",
+            RunArtifact(
+                action=Action.CHECK,
+                tool_results=[ToolResult(name="legacy", success=True)],
+            ),
+        ),
+        (
+            "mixed-inspected-and-unknown",
+            RunArtifact(
+                action=Action.CHECK,
+                tool_results=[*real, ToolResult(name="legacy", success=True)],
+            ),
+        ),
+        (
+            "declined",
+            RunArtifact(
+                action=Action.CHECK,
+                tool_results=[
+                    ToolResult(
+                        name="import-linter",
+                        success=True,
+                        inspected_files=False,
+                    ),
+                ],
+            ),
+        ),
         ("all-skipped", skipped_only),
         ("no-files-matched", no_files),
         ("all-timed-out", timed_out),
@@ -1028,8 +1121,7 @@ def _unmeasured_artifacts() -> list[tuple[str, RunArtifact]]:
 
 @pytest.mark.parametrize(
     "artifact",
-    [pair[1] for pair in _unmeasured_artifacts()],
-    ids=[pair[0] for pair in _unmeasured_artifacts()],
+    [pytest.param(artifact, id=label) for label, artifact in _unmeasured_artifacts()],
 )
 def test_render_run_does_not_record_a_baseline_for_an_unmeasured_run(
     tmp_path: Path,
@@ -1060,6 +1152,15 @@ def test_render_run_does_not_record_a_baseline_for_an_unmeasured_run(
     )
 
     ctx = replace(ctx, action=artifact.action, dry_run_preview=artifact.dry_run_preview)
+    finalized = finalize_artifact(
+        ctx=ctx,
+        all_results=artifact.tool_results,
+        total_issues=0,
+        total_fixed=0,
+        total_remaining=0,
+        paths=list(artifact.paths),
+    )
+    assert_that(finalized.previous_severity_counts).is_none()
     refreshed = te.refresh_artifact(artifact, ctx=ctx)
     assert_that(refreshed.previous_severity_counts).is_none()
     render_run(artifact, ctx=ctx, output_format="grid")

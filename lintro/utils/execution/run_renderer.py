@@ -127,6 +127,7 @@ def _display_fix_result(
             success=result.success,
             metadata=result.metadata,
             parse_failures_count=result.parse_failures_count or 0,
+            result=result,
         )
         return
 
@@ -159,6 +160,7 @@ def _display_fix_result(
             success=result.success,
             metadata=result.metadata,
             parse_failures_count=result.parse_failures_count or 0,
+            result=result,
         )
     elif (
         result.issues_count == 0
@@ -175,6 +177,7 @@ def _display_fix_result(
             success=result.success,
             metadata=result.metadata,
             parse_failures_count=result.parse_failures_count or 0,
+            result=result,
         )
 
 

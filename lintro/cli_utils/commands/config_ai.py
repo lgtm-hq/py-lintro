@@ -194,7 +194,7 @@ def displayable_base_url(url: str | None) -> str | None:
         parts = urlsplit(url)
         scheme, hostname, port = parts.scheme, parts.hostname, parts.port
     except ValueError:
-        scheme, hostname, port = "", None, None
+        return "<unparsable url>"
     if not scheme or not hostname:
         # Unparsable, or missing a scheme or host: no part of the value can
         # be trusted to be free of a credential, so the raw value is never

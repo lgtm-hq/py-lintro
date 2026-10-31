@@ -364,6 +364,10 @@ def _execute_tools_sequential(
                     success=False,
                     output=f"Failed to initialize tool: {e}",
                     issues_count=0,
+                    residual_unknown=ctx.action == Action.FIX,
+                    residual_unknown_reason=(
+                        "tool crashed" if ctx.action == Action.FIX else None
+                    ),
                     duration_seconds=time.monotonic() - attempt_started,
                 ),
             )

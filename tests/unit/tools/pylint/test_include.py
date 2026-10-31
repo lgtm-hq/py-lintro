@@ -111,6 +111,7 @@ def test_include_matching_nothing_is_a_clean_pass(
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.output).is_equal_to(PYLINT_NO_INCLUDED_FILES)
+    assert_that(result.no_files).is_true()
     assert_that(run.called).is_false()
     # No marker: the duplicate-code gate must not read this as "no clones".
     assert_that(result.metadata or {}).does_not_contain_key(

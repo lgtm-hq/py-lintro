@@ -169,6 +169,9 @@ class MyToolPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            # Parsed file findings prove inspection. For clean runs, use the
+            # tool's structured coverage report; an exit code is not proof.
+            inspected_files=True if issues else None,
             # success=True means the check passed (tool ran AND no issues found)
             # If you want success to only reflect tool execution, use just `success`
             success=success and len(issues) == 0,

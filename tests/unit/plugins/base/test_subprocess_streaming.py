@@ -174,8 +174,7 @@ def test_streaming_wait_receives_remaining_timeout_budget() -> None:
             str: Nothing; the generator exists only to consume wall time.
         """
         time.sleep(read_delay)
-        return
-        yield  # pragma: no cover - makes this a generator
+        yield from ()
 
     process = _RecordingProcess(stdout_iter=slow_stdout())
 

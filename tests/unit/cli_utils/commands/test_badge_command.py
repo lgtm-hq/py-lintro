@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from subprocess import CompletedProcess  # nosec B404 - mocked process result only
 from unittest.mock import patch
 
 import click
@@ -15,10 +17,14 @@ from lintro.cli_utils.commands.badge import (
     badge_command,
     resolve_severity_counts,
 )
+from lintro.enums.action import Action
 from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.severity_counts import SeverityCounts
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
+from lintro.tools.bandit.definition import BanditPlugin
+from lintro.tools.osv_scanner.definition import OsvScannerPlugin
+from lintro.utils.meaningful_run import baseline_is_eligible
 from lintro.utils.severity_counts import count_severities
 
 
@@ -131,7 +137,7 @@ def _counted_artifact(*, errors: int = 0, warnings: int = 0) -> RunArtifact:
     return RunArtifact(
         severity_counts=SeverityCounts(errors=errors, warnings=warnings),
         tool_results=[
-            ToolResult(name="ruff", success=True, skipped=False),
+            ToolResult(name="ruff", success=True, inspected_files=True),
         ],
     )
 
@@ -224,7 +230,7 @@ def test_badge_refuses_a_tool_failure_without_findings(
         ),
     ]
     if with_clean_tool:
-        results.append(ToolResult(name="ruff", success=True))
+        results.append(ToolResult(name="ruff", success=True, inspected_files=True))
     artifact = RunArtifact(
         tool_results=results,
         severity_counts=count_severities(results),
@@ -250,7 +256,7 @@ def test_badge_publishes_a_clean_live_run(with_skipped_tool: bool) -> None:
     Args:
         with_skipped_tool: Whether an optional tool could not run.
     """
-    results = [ToolResult(name="ruff", success=True, issues=[])]
+    results = [ToolResult(name="ruff", success=True, issues=[], inspected_files=True)]
     if with_skipped_tool:
         results.append(
             ToolResult(name="pylint", skipped=True, skip_reason="not installed"),
@@ -276,6 +282,7 @@ def test_badge_publishes_findings_from_a_failed_tool() -> None:
         success=False,
         issues_count=1,
         issues=[RuffIssue(file="a.py", line=1, code="F401", message="unused")],
+        inspected_files=True,
     )
     artifact = RunArtifact(
         tool_results=[tool_result],
@@ -342,18 +349,21 @@ def test_resolve_severity_counts_rejects_no_files_found_run() -> None:
             success=True,
             skipped=False,
             output="No .py/.pyi files found to check.",
+            no_files=True,
         ),
         ToolResult(
             name="cargo_audit",
             success=True,
             skipped=False,
             output="No files found to check.",
+            no_files=True,
         ),
         ToolResult(
             name="astro-check",
             success=True,
             skipped=False,
             output="No Astro files to check.",
+            no_files=True,
         ),
     ]
 
@@ -375,6 +385,7 @@ def test_badge_live_no_files_found_prints_no_badge() -> None:
             success=True,
             skipped=False,
             output="No .py/.pyi files found to check.\nNo issues found.",
+            no_files=True,
         ),
     ]
 
@@ -557,3 +568,88 @@ def test_badge_live_partial_timeout_prints_no_badge() -> None:
 
     assert_that(result.exit_code).is_not_equal_to(0)
     assert_that(result.output).does_not_contain("img.shields.io")
+
+
+@pytest.mark.parametrize("scenario", ["empty-discovery", "ignored-by-bandit", "clean"])
+def test_badge_uses_bandit_inspection_signal(tmp_path: Path, scenario: str) -> None:
+    """Only a completed Bandit inspection can publish a clean live badge.
+
+    Args:
+        tmp_path: Isolated scan directory.
+        scenario: Empty discovery, native no-files response, or clean inspection.
+    """
+    if scenario != "empty-discovery":
+        (tmp_path / "safe.py").write_text("value = 1\n")
+    completed = CompletedProcess(
+        args=["bandit"],
+        returncode=0,
+        stdout="",
+        stderr=(
+            "No .py/.pyi files found to check."
+            if scenario == "ignored-by-bandit"
+            else ""
+        ),
+    )
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch("lintro.tools.bandit.definition.subprocess.run", return_value=completed),
+    ):
+        measured = BanditPlugin().check([str(tmp_path)], {})
+    artifact = RunArtifact(tool_results=[measured], severity_counts=SeverityCounts())
+    with patch("lintro.cli_utils.commands.badge.api.check_run", return_value=artifact):
+        result = CliRunner().invoke(badge_command, ["--url"])
+
+    if scenario == "clean":
+        assert_that(result.exit_code).is_zero()
+        assert_that(result.output).contains("img.shields.io")
+    else:
+        assert_that(result.exit_code).is_equal_to(1)
+        assert_that(result.output).does_not_contain("img.shields.io")
+
+
+@pytest.mark.parametrize("no_sources", [True, False])
+def test_osv_no_sources_cannot_publish_or_qualify_a_baseline(
+    tmp_path: Path,
+    no_sources: bool,
+) -> None:
+    """The actual OSV plugin distinguishes a recognized no-op from a scan.
+
+    Args:
+        tmp_path: OSV scan root with or without a supported package source.
+        no_sources: Whether OSV reports that there was nothing to scan.
+    """
+    if not no_sources:
+        (tmp_path / "requirements.txt").write_text("requests==2.32.0\n")
+    report = json.dumps({"results": []})
+    completed = CompletedProcess(
+        ["osv-scanner"],
+        128 if no_sources else 0,
+        "" if no_sources else report,
+        "No package sources found" if no_sources else "",
+    )
+    with (
+        patch(
+            "lintro.tools.osv_scanner.definition.verify_tool_version",
+            return_value=None,
+        ),
+        patch("subprocess.run", return_value=completed),
+    ):
+        measured = OsvScannerPlugin().check([str(tmp_path)], {})
+    assert_that(measured.success).is_true()
+    assert_that(measured.output).is_none()
+    assert_that(measured.inspected_files).is_equal_to(not no_sources)
+    assert_that(
+        baseline_is_eligible(
+            action=Action.CHECK,
+            dry_run_preview=False,
+            tool_results=[measured],
+        ),
+    ).is_equal_to(not no_sources)
+    artifact = RunArtifact(tool_results=[measured], severity_counts=SeverityCounts())
+    with patch("lintro.cli_utils.commands.badge.api.check_run", return_value=artifact):
+        result = CliRunner().invoke(badge_command, ["--url"])
+    assert_that(result.exit_code).is_equal_to(1 if no_sources else 0)
+    assert_that("img.shields.io" in result.output).is_equal_to(not no_sources)

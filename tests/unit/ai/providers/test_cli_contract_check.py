@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import stat
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
@@ -22,6 +23,7 @@ from assertpy import assert_that
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers.cli_contract_check import (
     CliSurfaceReport,
+    VersionFloorResult,
     _probe,
     declared_cli_providers,
     probe_cli_surface,
@@ -31,6 +33,8 @@ from lintro.ai.providers.cli_contracts import (
     cli_contract_for,
     unadvertised_flags,
 )
+from tests.contract import test_cli_flag_surface
+from tests.contract.gating import REQUIRE_BINARIES_ENV
 
 _CONTRACT = CliContract(
     binary="fake-agent",
@@ -101,6 +105,59 @@ def test_unknown_version_is_not_a_violation() -> None:
     assert_that(list(report.violations)).is_empty()
 
 
+def test_unknown_version_does_not_claim_contract_satisfaction() -> None:
+    """An unreadable version leaves a declared floor unmeasured."""
+    report = _report(contract=replace(_CONTRACT, version_floor=(9, 0)), version=None)
+
+    assert_that(report.describe()).does_not_contain("satisfied")
+    assert_that(report.describe()).contains("unknown", "version unreadable")
+    assert_that(report.version_floor_result).is_equal_to("unknown")
+    assert_that(report.meets_version_floor).is_true()
+    assert_that(report.violations).is_empty()
+
+
+@pytest.mark.parametrize(
+    ("floor", "version", "expected"),
+    [
+        ((9, 0), (8, 9), "incompatible"),
+        ((9, 0), (9, 0), "compatible"),
+        ((9, 0), (9, 1), "compatible"),
+        ((9, 0), (0, 0), "incompatible"),
+        ((0, 0), (0, 0), "compatible"),
+        ((0, 0), None, "unknown"),
+        (None, (0, 0), "compatible"),
+        (None, None, "compatible"),
+    ],
+)
+def test_version_floor_result_distinguishes_evidence(
+    floor: tuple[int, ...] | None,
+    version: tuple[int, ...] | None,
+    expected: str,
+) -> None:
+    """Zero is a measured version, and an absent floor imposes no constraint.
+
+    Args:
+        floor: Declared minimum version, if any.
+        version: Version evidence from the installed CLI.
+        expected: The resulting compatibility state.
+    """
+    report = _report(contract=replace(_CONTRACT, version_floor=floor), version=version)
+
+    assert_that(report.version_floor_result).is_instance_of(VersionFloorResult)
+    assert_that(report.version_floor_result).is_equal_to(expected)
+    assert_that(report.meets_version_floor).is_equal_to(expected != "incompatible")
+    assert_that(bool(report.violations)).is_equal_to(expected == "incompatible")
+
+
+def test_unknown_version_preserves_required_flag_violations() -> None:
+    """An unmeasured floor must not hide independently observed drift."""
+    report = _report(version=None, missing_required_flags=("--always",))
+
+    assert_that(report.version_floor_result).is_equal_to("unknown")
+    assert_that(report.violations).is_length(1)
+    assert_that(report.describe()).contains("--always").does_not_contain("satisfied")
+
+
 def test_missing_required_flag_is_a_violation() -> None:
     """Required flags are never gated at runtime, so their absence is fatal."""
     report = _report(missing_required_flags=("--always",))
@@ -152,6 +209,70 @@ def _install_fake_binary(
         encoding="utf-8",
     )
     script.chmod(script.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+
+@pytest.mark.parametrize("require_binaries", ["0", "1"])
+@pytest.mark.parametrize(
+    "check_name",
+    [
+        "test_installed_cli_meets_declared_version_floor",
+        "test_installed_cli_has_no_contract_violations",
+    ],
+)
+def test_contract_gate_skips_an_unreadable_version(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    require_binaries: str,
+    check_name: str,
+) -> None:
+    """Working help cannot certify a CLI whose version is unmeasured.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Directory holding the stub binary.
+        require_binaries: Whether the gate requires binaries to be installed.
+        check_name: Contract assertion that must refuse an unmeasured version.
+    """
+    contract = cli_contract_for(AIProvider.ANTHROPIC)
+    _install_fake_binary(
+        directory=tmp_path,
+        name=contract.binary,
+        version_output="mystery build",
+        help_output=" ".join(contract.required_flags),
+    )
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setenv(REQUIRE_BINARIES_ENV, require_binaries)
+
+    check = getattr(test_cli_flag_surface, check_name)
+    with pytest.raises(pytest.skip.Exception, match="version unreadable"):
+        check(AIProvider.ANTHROPIC)
+
+
+def test_contract_gate_still_checks_flags_without_a_version(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Unknown version evidence does not erase measurable required-flag drift.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Directory holding the stub binary.
+    """
+    contract = cli_contract_for(AIProvider.ANTHROPIC)
+    _install_fake_binary(
+        directory=tmp_path,
+        name=contract.binary,
+        version_output="mystery build",
+        help_output=" ".join(contract.required_flags[1:]),
+    )
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    with pytest.raises((AssertionError, pytest.skip.Exception)) as failure:
+        test_cli_flag_surface.test_installed_cli_advertises_every_required_flag(
+            AIProvider.ANTHROPIC,
+        )
+    assert_that(failure.type).is_equal_to(AssertionError)
+    assert_that(str(failure.value)).contains("dropped required flag")
 
 
 async def test_probe_reports_absent_binary_without_raising(

@@ -242,6 +242,7 @@ class ImportLinterPlugin(BaseToolPlugin):
                 success=True,
                 output="No import-linter configuration found; skipping.",
                 issues_count=0,
+                inspected_files=False,
             )
 
         cmd = self._build_command(config_path=config_path)
@@ -263,6 +264,7 @@ class ImportLinterPlugin(BaseToolPlugin):
         issues = parse_import_linter_output(output=output)
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=success and not issues,
             output=output,
             issues_count=len(issues),

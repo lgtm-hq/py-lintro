@@ -189,6 +189,7 @@ class CargoDenyPlugin(BaseToolPlugin):
         # Any parsed finding still fails the check, including warnings on exit 0.
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=process_success and issues_count == 0 and parse_failures_count == 0,
             output=output if preserve_output else None,
             issues_count=issues_count,

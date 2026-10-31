@@ -385,6 +385,7 @@ class BanditPlugin(BaseToolPlugin):
         output: str
         stderr_output: str = ""
         execution_failure: bool = False
+        returncode: int | None = None
         try:
             # Run subprocess directly to capture stdout and stderr separately.
             # Bandit outputs JSON to stdout, but stderr may contain info/warning
@@ -398,6 +399,7 @@ class BanditPlugin(BaseToolPlugin):
                 # running from inside Python package directories
             )
             # Use only stdout for JSON parsing
+            returncode = result.returncode
             output = (result.stdout or "").strip()
             stderr_output = (result.stderr or "").strip()
             # Log stderr for debugging if present
@@ -452,7 +454,7 @@ class BanditPlugin(BaseToolPlugin):
             # Handle empty output (no JSON content to parse)
             if not output:
                 # If Bandit exited non-zero with no output, treat as failure
-                if result.returncode != 0:
+                if returncode != 0:
                     return ToolResult(
                         name=self.definition.name,
                         success=False,
@@ -465,6 +467,7 @@ class BanditPlugin(BaseToolPlugin):
                 logger.debug("[bandit] Empty output received; treating as clean pass")
                 return ToolResult(
                     name=self.definition.name,
+                    inspected_files=True,
                     success=True,
                     output=None,
                     issues_count=0,
@@ -480,6 +483,7 @@ class BanditPlugin(BaseToolPlugin):
 
             return ToolResult(
                 name=self.definition.name,
+                inspected_files=True,
                 success=execution_success,
                 output=output if execution_failure else None,
                 issues_count=issues_count,

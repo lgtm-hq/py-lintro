@@ -157,7 +157,6 @@ def test_non_duplicate_findings_are_left_alone() -> None:
     assert_that(verdict.count).is_equal_to(1)
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.success).is_false()
-    assert result.issues is not None  # narrow type for mypy
     assert_that(result.issues[0].get_code()).is_equal_to("C0116")
 
 

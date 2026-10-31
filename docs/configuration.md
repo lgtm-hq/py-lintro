@@ -342,7 +342,10 @@ A live badge **refuses to publish** rather than assert a quality claim the run d
 support. It exits non-zero, printing no snippet, when the check exited early, when any
 tool timed out, and when nothing actually inspected a file — which covers an empty
 directory, an all-skipped toolset, and a toolset that declined to run for want of
-configuration.
+configuration. Coverage comes from the producer's `ToolResult.inspected_files` signal,
+never its message text. Results that leave this signal as `None` have unknown coverage
+and cannot alone qualify a badge. A severity baseline also rejects mixed runs containing
+both inspected and unknown results, for comparison and storage.
 
 #### JSON output
 
@@ -371,7 +374,8 @@ comparable baseline exists; on a first run the key is absent rather than zero. T
 
 `--output` files and configured JSON artifacts carry the same two severity keys, but the
 rest of their `summary` object differs from the stdout document by design — it adds
-`timestamp` and `tools_run`, and omits `total_remaining`:
+`tools_run` and omits `total_remaining`. `timestamp` and `action` are at the document
+root:
 
 ```json
 {

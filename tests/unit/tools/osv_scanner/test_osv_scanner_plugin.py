@@ -624,7 +624,6 @@ def test_check_with_suppressions_detects_stale(
 
     assert_that(result.success).is_true()
     assert_that(result.metadata).is_not_none()
-    assert result.metadata is not None  # narrow type for mypy
     suppressions = result.metadata["suppressions"]
     assert_that(suppressions).is_length(1)
     assert_that(suppressions[0]["id"]).is_equal_to("GHSA-stale-1234")
@@ -853,7 +852,6 @@ def test_suppressions_classified_when_probe_findings_are_all_excluded(
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
     assert_that(result.metadata).is_not_none()
-    assert result.metadata is not None  # narrow type for mypy
     suppressions = result.metadata["suppressions"]
     assert_that(suppressions).is_length(1)
     # The excluded finding must not count as evidence the suppression is live.

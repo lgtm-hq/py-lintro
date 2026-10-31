@@ -26,6 +26,7 @@ import asyncio
 import contextlib
 import shutil
 from dataclasses import dataclass
+from enum import StrEnum, auto
 
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers.cli_capabilities import PROBE_TIMEOUT
@@ -40,10 +41,19 @@ from lintro.ai.providers.cli_transport import CliTransport
 
 __all__ = [
     "CliSurfaceReport",
+    "VersionFloorResult",
     "declared_cli_providers",
     "probe_cli_surface",
     "probe_cli_surface_sync",
 ]
+
+
+class VersionFloorResult(StrEnum):
+    """Version evidence relative to a declared CLI floor."""
+
+    COMPATIBLE = auto()
+    INCOMPATIBLE = auto()
+    UNKNOWN = auto()
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,20 +93,36 @@ class CliSurfaceReport:
         return self.binary_path is not None
 
     @property
-    def meets_version_floor(self) -> bool:
-        """Return whether the installed version satisfies the declared floor.
+    def version_floor_result(self) -> VersionFloorResult:
+        """Compare version evidence to the declared floor.
 
-        An unreadable version is not a failure, matching the guard's runtime
-        behaviour: probing can fail for reasons unrelated to compatibility.
+        Returns:
+            Compatible when no floor is declared or the version meets it,
+            incompatible when the version is below it, and unknown when a
+            declared floor cannot be checked because the version is unreadable.
+        """
+        floor = self.contract.version_floor
+        if floor is None:
+            return VersionFloorResult.COMPATIBLE
+        if self.version is None:
+            return VersionFloorResult.UNKNOWN
+        if self.version >= floor:
+            return VersionFloorResult.COMPATIBLE
+        return VersionFloorResult.INCOMPATIBLE
+
+    @property
+    def meets_version_floor(self) -> bool:
+        """Apply the runtime-permissive policy to the version floor result.
+
+        An unreadable version is allowed at runtime because probing can fail
+        for reasons unrelated to compatibility. Contract measurement must use
+        :attr:`version_floor_result` to distinguish that from compatibility.
 
         Returns:
             True when no floor is declared, the version is unknown, or the
             version is at or above the floor.
         """
-        floor = self.contract.version_floor
-        if floor is None or self.version is None:
-            return True
-        return self.version >= floor
+        return self.version_floor_result is not VersionFloorResult.INCOMPATIBLE
 
     @property
     def violations(self) -> tuple[str, ...]:
@@ -116,7 +142,7 @@ class CliSurfaceReport:
                 f"({self.contract.upgrade_hint})",
             )
             return tuple(problems)
-        if not self.meets_version_floor:
+        if self.version_floor_result is VersionFloorResult.INCOMPATIBLE:
             problems.append(
                 f"{self.contract.binary} {format_version(self.version)} is below "
                 f"the declared floor {format_version(self.contract.version_floor)}",
@@ -136,7 +162,12 @@ class CliSurfaceReport:
         """
         if not self.binary_present:
             return f"{self.contract.binary}: not installed"
-        state = "; ".join(self.violations) if self.violations else "contract satisfied"
+        if self.violations:
+            state = "; ".join(self.violations)
+        elif self.version is None:
+            state = "contract unknown (version unreadable)"
+        else:
+            state = "contract satisfied"
         help_note = "" if self.help_readable else " (help unreadable)"
         return (
             f"{self.contract.binary} {format_version(self.version)}{help_note}: {state}"

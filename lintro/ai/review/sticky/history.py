@@ -338,7 +338,7 @@ def _round_expander(
     outcome = run.outcome
     short = _short_sha(sha=identity.sha)
     sha_bit = f" · <code>{short}</code>" if short else ""
-    fixed = 0 if outcome.resolved is None else outcome.resolved
+    fixed = "—" if outcome.resolved is None else str(outcome.resolved)
     prefix = "~" if usage.estimated else ""
     # A capped round stays marked in history (#2003) so a later reader can
     # tell a genuinely clean round from one that reported fewer findings.

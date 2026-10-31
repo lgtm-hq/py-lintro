@@ -176,6 +176,7 @@ def test_no_files_defaults_to_false_and_is_settable() -> None:
     """
     real = ToolResult(name="ruff", success=True, issues_count=0)
     assert_that(real.no_files).is_false()
+    assert_that(real.inspected_files).is_none()
 
     nothing_examined = ToolResult(
         name="ruff",
@@ -185,9 +186,24 @@ def test_no_files_defaults_to_false_and_is_settable() -> None:
         no_files=True,
     )
     assert_that(nothing_examined.no_files).is_true()
+    assert_that(nothing_examined.inspected_files).is_false()
     # It is a successful non-event, not a skip: the tool stays in reporting.
     assert_that(nothing_examined.success).is_true()
     assert_that(nothing_examined.skipped).is_false()
+
+
+@pytest.mark.parametrize("inspected", [None, False, True])
+def test_inspection_signal_survives_result_copy(inspected: bool | None) -> None:
+    """Legacy unknown, decline and completed inspection remain distinct.
+
+    Args:
+        inspected: Producer's inspection signal.
+    """
+    result = ToolResult(name="plugin", success=True, inspected_files=inspected)
+    copied = dataclasses.replace(result, output="Changed display text")
+
+    assert_that(copied.inspected_files).is_equal_to(inspected)
+    assert_that(copied.no_files).is_false()
 
 
 def test_capability_survives_the_verify_fold() -> None:

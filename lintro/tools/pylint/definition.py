@@ -422,6 +422,7 @@ class PylintPlugin(BaseToolPlugin):
                 success=True,
                 output=PYLINT_NO_INCLUDED_FILES,
                 issues_count=0,
+                no_files=True,
             )
 
         config_path = find_pylint_config(paths)
@@ -466,6 +467,7 @@ class PylintPlugin(BaseToolPlugin):
                 logger.debug("[pylint] Nothing left to lint; treating as a clean pass")
                 return ToolResult(
                     name=self.definition.name,
+                    no_files=True,
                     success=True,
                     output=None,
                     issues_count=0,
@@ -480,6 +482,7 @@ class PylintPlugin(BaseToolPlugin):
             logger.debug(f"[pylint] Non-report output treated as clean: {stdout!r}")
             return ToolResult(
                 name=self.definition.name,
+                inspected_files=True,
                 success=True,
                 output=None,
                 issues_count=0,
@@ -514,6 +517,7 @@ class PylintPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=result.returncode == 0 and not issues,
             output=output,
             issues_count=len(issues),

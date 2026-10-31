@@ -149,6 +149,9 @@ def test_issues_only_requires_a_clean_exit_without_findings(
     assert_that(result.name).is_equal_to(plugin.definition.name)
     assert_that(result.success).is_equal_to(expected_success)
     assert_that(result.issues_count).is_equal_to(expected_count)
+    assert_that(result.inspected_files).is_equal_to(
+        True if returncode == 0 or expected_count else None,
+    )
     assert_that(len(result.issues or [])).is_equal_to(expected_count)
     assert_that(result.output).is_equal_to(None if expected_success else output)
     assert_that(result.cwd).is_equal_to(str(ts_file.parent))
@@ -463,7 +466,6 @@ def test_prettier_keeps_mixed_warnings_and_errors(ts_file: Path) -> None:
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
-    assert result.issues is not None
     assert_that(result.issues[0].file).is_equal_to("app.css")
     assert_that(result.output).is_equal_to(output)
 

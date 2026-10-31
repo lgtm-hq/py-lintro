@@ -196,8 +196,8 @@ class SemgrepPlugin(BaseToolPlugin):
         exclude: list[str] | None = None,
         include: list[str] | None = None,
         severity: str | SemgrepSeverity | None = None,
-        timeout_threshold: int | None = None,
-        jobs: int | None = None,
+        timeout_threshold: object = None,
+        jobs: object = None,
         verbose: bool | None = None,
         quiet: bool | None = None,
         **kwargs: Any,
@@ -431,9 +431,23 @@ class SemgrepPlugin(BaseToolPlugin):
             execution_success = not (
                 fatal_errors or execution_failure or parse_failures_count
             )
+            reported_paths = semgrep_data.get("paths")
+            scanned = (
+                reported_paths.get("scanned")
+                if isinstance(reported_paths, dict)
+                else None
+            )
+            # Parsed findings prove inspection even when reported paths are empty.
+            inspected_files = (
+                bool(issues or scanned)
+                if isinstance(scanned, list)
+                and all(isinstance(p, str) and p for p in scanned)
+                else True if issues else None
+            )
 
             return ToolResult(
                 name=self.definition.name,
+                inspected_files=inspected_files,
                 success=execution_success,
                 output=output if not execution_success else None,
                 issues_count=issues_count,

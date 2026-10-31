@@ -273,7 +273,7 @@ def _unpack_containers(*, value: ast.expr) -> list[ast.expr]:
     """
     found = [value]
     if isinstance(value, ast.Dict):
-        members: list[ast.expr] = [item for item in value.values if item is not None]
+        members = value.values
     elif isinstance(value, ast.Tuple | ast.List | ast.Set):
         members = list(value.elts)
     else:
