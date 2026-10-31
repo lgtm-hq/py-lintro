@@ -16,17 +16,22 @@ from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.parsers.clippy.clippy_issue import ClippyIssue
-from lintro.plugins.base import BaseToolPlugin
+from lintro.plugins.base import BaseToolPlugin, ExecutionContext
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.clippy.definition import ClippyPlugin
 from lintro.tools.core.batch_runner import (
     DEFAULT_BATCH_CHECK_POLICY,
     BatchCheckPolicy,
+    BatchCommands,
+    BatchFixPolicy,
     BatchOutput,
     BatchSuccess,
     batch_check_result,
+    run_batch_check,
+    run_batch_fix,
 )
 from lintro.tools.oxfmt.definition import OxfmtPlugin
 from lintro.tools.oxlint.definition import OxlintPlugin
@@ -179,11 +184,11 @@ def test_batch_fix_scores_the_difference_between_the_two_checks(
     plugin = OxlintPlugin()
     with patch.object(
         plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=[
-            (False, OXLINT_FINDING),
-            (True, ""),
-            (True, '{"diagnostics": []}'),
+            SubprocessResult(1, OXLINT_FINDING, "", OXLINT_FINDING),
+            SubprocessResult(0, "", "", ""),
+            SubprocessResult(0, '{"diagnostics": []}', "", '{"diagnostics": []}'),
         ],
     ):
         result = plugin.fix([str(ts_file)], {})
@@ -204,9 +209,9 @@ def test_a_fix_timeout_keeps_the_pre_fix_issues(ts_file: Path) -> None:
     plugin = OxlintPlugin()
     with patch.object(
         plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=[
-            (False, OXLINT_FINDING),
+            SubprocessResult(1, OXLINT_FINDING, "", OXLINT_FINDING),
             subprocess.TimeoutExpired(cmd=["oxlint"], timeout=30),
         ],
     ):
@@ -233,11 +238,11 @@ def test_a_recheck_finding_more_than_the_first_pass_stays_consistent(
     plugin = OxfmtPlugin()
     with patch.object(
         plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=[
-            (False, "app.ts\n"),
-            (True, ""),
-            (False, "app.ts\nother.ts\n"),
+            SubprocessResult(1, "app.ts\n", "", "app.ts\n"),
+            SubprocessResult(0, "", "", ""),
+            SubprocessResult(1, "app.ts\nother.ts\n", "", "app.ts\nother.ts\n"),
         ],
     ):
         result = plugin.fix([str(ts_file)], {})
@@ -246,6 +251,193 @@ def test_a_recheck_finding_more_than_the_first_pass_stays_consistent(
     assert_that(result.remaining_issues_count).is_equal_to(2)
     assert_that(result.fixed_issues_count).is_equal_to(0)
     assert_that(result.initial_issues_count).is_equal_to(2)
+
+
+@pytest.mark.parametrize(
+    ("plugin_cls", "finding_output"),
+    [
+        (OxfmtPlugin, OXFMT_DIFFERENT),
+        (OxlintPlugin, OXLINT_FINDING),
+        (PrettierPlugin, "[warn] app.css\n"),
+    ],
+    ids=["oxfmt", "oxlint", "prettier"],
+)
+@pytest.mark.parametrize("failed_stage", [0, 1, 2], ids=["precheck", "fix", "verify"])
+@pytest.mark.parametrize(
+    ("returncode", "failure_output"),
+    [
+        (1, ""),
+        (2, ""),
+        (2, "error: invalid configuration\n"),
+        (137, ""),
+        (-11, "error: process crashed\n"),
+    ],
+)
+def test_batch_fix_stops_on_any_failed_stage_without_parsed_issues(
+    plugin_cls: type[BaseToolPlugin],
+    finding_output: str,
+    failed_stage: int,
+    returncode: int,
+    failure_output: str,
+    ts_file: Path,
+) -> None:
+    """A later clean report cannot erase an earlier execution failure.
+
+    Args:
+        plugin_cls: Tool whose real discovery and parser run.
+        finding_output: A pre-fix finding in the tool's output format.
+        failed_stage: Index of the pre-check, fix or verification stage.
+        returncode: Execution failure status to preserve.
+        failure_output: Unparseable or empty error report.
+        ts_file: File the plugin discovers.
+    """
+    ts_file.with_suffix(".css").write_text("a { color: red; }\n")
+    plugin = plugin_cls()
+    processes = [
+        SubprocessResult(1, finding_output, "", finding_output),
+        SubprocessResult(0, "", "", ""),
+        SubprocessResult(0, "", "", ""),
+    ]
+    processes[failed_stage] = SubprocessResult(
+        returncode,
+        "",
+        failure_output,
+        failure_output,
+    )
+    with patch.object(plugin, "_run_subprocess_result", side_effect=processes):
+        result = plugin.fix([str(ts_file.parent)], {})
+
+    expected_remaining = int(failed_stage > 0)
+    assert_that(result.success).is_false()
+    assert_that(result.output).is_equal_to(failure_output)
+    assert_that(result.issues_count).is_equal_to(expected_remaining)
+    assert_that(len(result.issues or [])).is_equal_to(expected_remaining)
+    assert_that(result.initial_issues_count).is_equal_to(expected_remaining)
+    assert_that(result.remaining_issues_count).is_equal_to(expected_remaining)
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.cwd).is_equal_to(str(ts_file.parent))
+    assert_that(result.timed_out).is_false()
+
+
+@pytest.mark.parametrize("failed_stage", [0, 1, 2])
+def test_an_unexpected_fix_stage_exit_keeps_parsed_findings(
+    failed_stage: int,
+    ts_file: Path,
+) -> None:
+    """Exit 2 is an execution error even if its payload includes a finding.
+
+    Args:
+        failed_stage: Pipeline stage returning the unexpected status.
+        ts_file: File the plugin discovers.
+    """
+    plugin = OxfmtPlugin()
+    processes = [SubprocessResult(0, "", "", "")] * 3
+    processes[failed_stage] = SubprocessResult(2, OXFMT_DIFFERENT, "", OXFMT_DIFFERENT)
+    with patch.object(plugin, "_run_subprocess_result", side_effect=processes):
+        result = plugin.fix([str(ts_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).is_equal_to(OXFMT_DIFFERENT)
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+
+
+def test_prettier_keeps_mixed_warnings_and_errors(ts_file: Path) -> None:
+    """A Prettier error retains its raw report alongside real style findings.
+
+    Args:
+        ts_file: File used to locate the CSS fixture.
+    """
+    css_file = ts_file.with_suffix(".css")
+    css_file.write_text("a {color:red}")
+    output = (
+        "[warn] app.css\n"
+        "[error] Invalid configuration for file app.css:\n"
+        "[error] Unexpected token in .prettierrc.json\n"
+    )
+    plugin = PrettierPlugin()
+    with patch.object(
+        plugin,
+        "_run_subprocess_result",
+        return_value=SubprocessResult(2, "", output, output),
+    ):
+        result = plugin.check([str(css_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert result.issues is not None
+    assert_that(result.issues[0].file).is_equal_to("app.css")
+    assert_that(result.output).is_equal_to(output)
+
+
+def test_oxfmt_multiline_configuration_error_is_not_a_file(ts_file: Path) -> None:
+    """A diagnostic containing a source path must not count as formatting work.
+
+    Args:
+        ts_file: File the plugin discovers.
+    """
+    output = (
+        "Failed to load configuration file.\n"
+        "  × Failed to parse config file: .oxfmtrc.json\n"
+        "  ╰─▶ JSON parse error: trailing comma at line 3 column 1\n"
+        "error: Failed to format app.ts\n"
+    )
+    plugin = OxfmtPlugin()
+    with patch.object(
+        plugin,
+        "_run_subprocess_result",
+        return_value=SubprocessResult(1, "", output, output),
+    ):
+        result = plugin.check([str(ts_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.issues).is_empty()
+    assert_that(result.output).is_equal_to(output)
+
+
+@pytest.mark.parametrize("success_policy", list(BatchSuccess))
+def test_batch_check_keeps_timeout_warning_and_tool_name(
+    success_policy: BatchSuccess,
+) -> None:
+    """Both execution APIs retain the same enhanced timeout diagnostics.
+
+    Args:
+        success_policy: Check policy selecting the subprocess API.
+    """
+    plugin = OxfmtPlugin()
+    ctx = ExecutionContext(
+        files=["app.ts"],
+        rel_files=["app.ts"],
+        cwd="/tmp",
+        timeout=0,
+    )
+    messages: list[str] = []
+    sink = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        with patch.object(
+            plugin,
+            "_run_subprocess_result",
+            side_effect=subprocess.TimeoutExpired(cmd=["oxfmt"], timeout=0),
+        ):
+            result = run_batch_check(
+                ctx,
+                plugin=plugin,
+                cmd=["oxfmt", "app.ts"],
+                parse=lambda output: [],
+                policy=BatchCheckPolicy(
+                    success=success_policy,
+                    tool_name="Formatter override",
+                ),
+            )
+    finally:
+        logger.remove(sink)
+
+    assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.output).contains("Formatter override execution timed out (0s")
+    assert_that("".join(messages)).contains(result.output)
 
 
 #: One parsed finding, enough to exercise every "issues present" branch of the
@@ -307,11 +499,7 @@ def test_the_success_policy_decides_the_verdict(
 @pytest.mark.parametrize(
     ("returncode", "issues", "expected_output"),
     [
-        (0, (), None),
-        (1, (), "raw"),
         (1, _ONE_ISSUE, None),
-        (2, (), "raw"),
-        (2, _ONE_ISSUE, "raw"),
         (-11, _ONE_ISSUE, "raw"),
         (None, (), "raw"),
     ],
@@ -345,6 +533,69 @@ def test_issues_only_always_preserves_execution_failure_output(
     assert_that(result.output).is_equal_to(expected_output)
     assert_that(result.issues_count).is_equal_to(len(issues))
     assert_that(result.issues).is_equal_to(list(issues))
+
+
+def test_issues_only_default_rejects_undeclared_findings_exit() -> None:
+    """The empty findings-exit default cannot hide failed output."""
+    result = batch_check_result(
+        plugin=ClippyPlugin(),
+        exit_success=False,
+        returncode=1,
+        output="undeclared findings exit",
+        issues=_ONE_ISSUE,
+        policy=BatchCheckPolicy(
+            success=BatchSuccess.ISSUES_ONLY,
+            output=BatchOutput.NEVER,
+        ),
+    )
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).is_equal_to("undeclared findings exit")
+    assert_that(result.issues).is_equal_to(list(_ONE_ISSUE))
+
+
+def test_batch_fix_default_does_not_accept_findings_status(ts_file: Path) -> None:
+    """A new batch fixer must declare findings exits before proceeding to writes.
+
+    Args:
+        ts_file: File named by the simulated pre-check finding.
+    """
+    plugin = OxfmtPlugin()
+    with patch.object(
+        plugin,
+        "_run_subprocess_result",
+        return_value=SubprocessResult(1, OXFMT_DIFFERENT, "", OXFMT_DIFFERENT),
+    ):
+        result = run_batch_fix(
+            ExecutionContext(files=[str(ts_file)], rel_files=["app.ts"]),
+            plugin=plugin,
+            commands=BatchCommands(check=["oxfmt", "--list-different"], fix=["oxfmt"]),
+            parse=lambda output: list(_ONE_ISSUE),
+            policy=BatchFixPolicy(),
+        )
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).is_equal_to(OXFMT_DIFFERENT)
+    assert_that(result.issues).is_equal_to(list(_ONE_ISSUE))
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+
+
+@pytest.mark.parametrize("returncode", [0, 2])
+def test_numeric_status_overrides_a_conflicting_success_flag(returncode: int) -> None:
+    """A provided numeric status is authoritative for all check policies.
+
+    Args:
+        returncode: Exit status intentionally inconsistent with the legacy flag.
+    """
+    result = batch_check_result(
+        plugin=ClippyPlugin(),
+        exit_success=returncode != 0,
+        returncode=returncode,
+        output="status is authoritative",
+        issues=(),
+    )
+
+    assert_that(result.success).is_equal_to(returncode == 0)
 
 
 @pytest.mark.parametrize(

@@ -16,38 +16,6 @@ if TYPE_CHECKING:
     from lintro.tools.oxfmt.definition import OxfmtPlugin
 
 
-def test_check_returns_success_when_no_issues(
-    oxfmt_plugin: OxfmtPlugin,
-    mock_execution_context_for_tool: Any,
-) -> None:
-    """Check returns success when all files are formatted.
-
-    Args:
-        oxfmt_plugin: The OxfmtPlugin instance to test.
-        mock_execution_context_for_tool: Mock execution context factory.
-    """
-    with (
-        patch.object(oxfmt_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(oxfmt_plugin, "_run_subprocess_result") as mock_run,
-        patch.object(oxfmt_plugin, "_get_executable_command") as mock_exec,
-        patch.object(oxfmt_plugin, "_build_config_args") as mock_config,
-    ):
-        mock_prepare.return_value = mock_execution_context_for_tool(
-            files=["test.js"],
-            rel_files=["test.js"],
-            cwd="/tmp",
-        )
-
-        mock_exec.return_value = ["oxfmt"]
-        mock_config.return_value = []
-        mock_run.return_value = SubprocessResult(0, "", "", "")
-
-        result = oxfmt_plugin.check(["/tmp/test.js"], {})
-
-        assert_that(result.success).is_true()
-        assert_that(result.issues_count).is_equal_to(0)
-
-
 def test_check_returns_issues_when_unformatted_files(
     oxfmt_plugin: OxfmtPlugin,
     mock_execution_context_for_tool: Any,

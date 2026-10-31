@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 from assertpy import assert_that
 
 from lintro.parsers.oxlint.oxlint_issue import OxlintIssue
+from lintro.plugins.subprocess_executor import SubprocessResult
 
 if TYPE_CHECKING:
     from lintro.tools.oxlint.definition import OxlintPlugin
@@ -45,17 +46,17 @@ def test_fix_success_all_fixed(oxlint_plugin: OxlintPlugin, tmp_path: Path) -> N
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            return (False, initial_output)
+            return SubprocessResult(1, initial_output, "", initial_output)
         elif call_count == 2:
-            return (True, "")
+            return SubprocessResult(0, "", "", "")
         else:
-            return (True, final_output)
+            return SubprocessResult(0, final_output, "", final_output)
 
     with (
         patch.object(oxlint_plugin, "_prepare_execution") as mock_prepare,
         patch.object(
             oxlint_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=mock_run_subprocess,
         ),
         patch.object(oxlint_plugin, "_get_executable_command", return_value=["oxlint"]),
@@ -125,17 +126,17 @@ def test_fix_partial_fix(oxlint_plugin: OxlintPlugin, tmp_path: Path) -> None:
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            return (False, initial_output)
+            return SubprocessResult(1, initial_output, "", initial_output)
         elif call_count == 2:
-            return (True, "")
+            return SubprocessResult(0, "", "", "")
         else:
-            return (False, final_output)
+            return SubprocessResult(1, final_output, "", final_output)
 
     with (
         patch.object(oxlint_plugin, "_prepare_execution") as mock_prepare,
         patch.object(
             oxlint_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=mock_run_subprocess,
         ),
         patch.object(oxlint_plugin, "_get_executable_command", return_value=["oxlint"]),
@@ -175,7 +176,7 @@ def test_fix_timeout_on_initial_check(
         patch.object(oxlint_plugin, "_prepare_execution") as mock_prepare,
         patch.object(
             oxlint_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=subprocess.TimeoutExpired(cmd=["oxlint"], timeout=30),
         ),
         patch.object(oxlint_plugin, "_get_executable_command", return_value=["oxlint"]),
@@ -250,7 +251,7 @@ def test_fix_timeout_on_fix_command(
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            return (False, initial_output)
+            return SubprocessResult(1, initial_output, "", initial_output)
         else:
             raise subprocess.TimeoutExpired(cmd=["oxlint"], timeout=30)
 
@@ -258,7 +259,7 @@ def test_fix_timeout_on_fix_command(
         patch.object(oxlint_plugin, "_prepare_execution") as mock_prepare,
         patch.object(
             oxlint_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=mock_run_subprocess,
         ),
         patch.object(oxlint_plugin, "_get_executable_command", return_value=["oxlint"]),
@@ -338,9 +339,9 @@ def test_fix_timeout_on_final_check(
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            return (False, initial_output)
+            return SubprocessResult(1, initial_output, "", initial_output)
         elif call_count == 2:
-            return (True, "")
+            return SubprocessResult(0, "", "", "")
         else:
             raise subprocess.TimeoutExpired(cmd=["oxlint"], timeout=30)
 
@@ -348,7 +349,7 @@ def test_fix_timeout_on_final_check(
         patch.object(oxlint_plugin, "_prepare_execution") as mock_prepare,
         patch.object(
             oxlint_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=mock_run_subprocess,
         ),
         patch.object(oxlint_plugin, "_get_executable_command", return_value=["oxlint"]),
@@ -427,17 +428,17 @@ def test_fix_unfixable_issues(oxlint_plugin: OxlintPlugin, tmp_path: Path) -> No
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            return (False, initial_output)
+            return SubprocessResult(1, initial_output, "", initial_output)
         elif call_count == 2:
-            return (True, "")
+            return SubprocessResult(0, "", "", "")
         else:
-            return (False, final_output)
+            return SubprocessResult(1, final_output, "", final_output)
 
     with (
         patch.object(oxlint_plugin, "_prepare_execution") as mock_prepare,
         patch.object(
             oxlint_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=mock_run_subprocess,
         ),
         patch.object(oxlint_plugin, "_get_executable_command", return_value=["oxlint"]),
@@ -478,13 +479,13 @@ def test_fix_no_issues(oxlint_plugin: OxlintPlugin, tmp_path: Path) -> None:
     def mock_run_subprocess(*args, **kwargs):
         nonlocal call_count
         call_count += 1
-        return (True, mock_output)
+        return SubprocessResult(0, mock_output, "", mock_output)
 
     with (
         patch.object(oxlint_plugin, "_prepare_execution") as mock_prepare,
         patch.object(
             oxlint_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=mock_run_subprocess,
         ),
         patch.object(oxlint_plugin, "_get_executable_command", return_value=["oxlint"]),

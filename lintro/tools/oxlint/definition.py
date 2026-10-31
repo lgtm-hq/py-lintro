@@ -24,10 +24,9 @@ from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.batch_runner import (
-    BatchCheckPolicy,
+    ISSUES_ONLY_BATCH_CHECK_POLICY,
     BatchCommands,
     BatchFixPolicy,
-    BatchSuccess,
     run_batch_check,
     run_batch_fix,
 )
@@ -338,11 +337,7 @@ class OxlintPlugin(BaseToolPlugin):
             plugin=self,
             cmd=cmd,
             parse=lambda output: parse_oxlint_output(output=output),
-            policy=BatchCheckPolicy(
-                success=BatchSuccess.ISSUES_ONLY,
-                findings_exit_codes=(1,),
-                report_cwd=True,
-            ),
+            policy=ISSUES_ONLY_BATCH_CHECK_POLICY,
             cwd=ctx.cwd,
             on_timeout=lambda: self._create_timeout_result(
                 timeout_val=ctx.timeout,
@@ -421,6 +416,7 @@ class OxlintPlugin(BaseToolPlugin):
             commands=BatchCommands(check=check_cmd, fix=fix_cmd),
             parse=lambda output: parse_oxlint_output(output=output),
             policy=BatchFixPolicy(
+                findings_exit_codes=(1,),
                 verbose=bool(merged_options.get("verbose_fix_output", False)),
                 always_report_initial_issues=True,
                 report_cwd=True,
