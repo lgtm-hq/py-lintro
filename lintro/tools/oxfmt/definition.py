@@ -267,9 +267,9 @@ class OxfmtPlugin(BaseToolPlugin):
         cmd.extend(ctx.rel_files)
         logger.debug(f"[OxfmtPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
 
-        # Standardize: suppress oxfmt's informational output when no issues.
-        # oxfmt exits non-zero purely to signal "some file differs", so the
-        # parsed list — not the exit status — is the verdict.
+        # oxfmt returns 1 for formatting mismatches (also invalid config),
+        # and 2 for fatal errors. A failed check must have parsed findings.
+        # https://github.com/oxc-project/oxc/blob/main/apps/oxfmt/src/cli/result.rs
         return run_batch_check(
             ctx,
             plugin=self,
@@ -277,6 +277,7 @@ class OxfmtPlugin(BaseToolPlugin):
             parse=lambda output: parse_oxfmt_output(output=output),
             policy=BatchCheckPolicy(
                 success=BatchSuccess.ISSUES_ONLY,
+                findings_exit_codes=(1,),
                 report_cwd=True,
             ),
             cwd=ctx.cwd,

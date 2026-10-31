@@ -67,9 +67,9 @@ class BatchSuccess(StrEnum):
     """What makes a batch check run count as a pass.
 
     Attributes:
-        ISSUES_ONLY: The parsed issue list is the whole verdict; the exit
-            status is ignored because the tool exits non-zero purely to report
-            findings.
+        ISSUES_ONLY: Findings fail the run even on exit zero. A declared
+            findings exit code is expected only when issues were parsed;
+            every other non-zero exit is an execution failure.
         EXIT_STATUS: The exit status is the whole verdict; findings are
             reported but do not by themselves fail the run.
         EXIT_AND_ISSUES: Both must be clean.
@@ -111,12 +111,16 @@ class BatchCheckPolicy:
         report_cwd: Record the working directory on the ``ToolResult``. Tools
             that emit issue paths relative to it need this so the AI layer can
             resolve them; tools that emit absolute paths do not.
+        findings_exit_codes: Non-zero statuses used to report findings under
+            ``ISSUES_ONLY``. Unexpected statuses and failed runs without parsed
+            issues always preserve raw output, regardless of ``output``.
     """
 
     success: BatchSuccess = BatchSuccess.EXIT_AND_ISSUES
     output: BatchOutput = BatchOutput.ON_FAILURE
     tool_name: str | None = None
     report_cwd: bool = False
+    findings_exit_codes: tuple[int, ...] = ()
 
 
 #: Policy for a tool whose exit status and findings must both be clean.
@@ -268,6 +272,7 @@ def batch_check_result(
     issues: Sequence[IssueT],
     policy: BatchCheckPolicy = DEFAULT_BATCH_CHECK_POLICY,
     cwd: str | None = None,
+    returncode: int | None = None,
 ) -> ToolResult:
     """Turn one batch invocation's outcome into a ``ToolResult``.
 
@@ -278,6 +283,8 @@ def batch_check_result(
         issues: Issues the parser extracted from ``output``.
         policy: How to derive the verdict and when to surface ``output``.
         cwd: Working directory to record on the result.
+        returncode: Numeric exit status, required to recognize a declared
+            findings exit code under ``ISSUES_ONLY``.
 
     Returns:
         ToolResult for the run.
@@ -287,9 +294,14 @@ def batch_check_result(
             member this function does not handle.
     """
     issues_count = len(issues)
+    execution_failed = False
     match policy.success:
         case BatchSuccess.ISSUES_ONLY:
-            success = issues_count == 0
+            findings_exit = (
+                returncode in policy.findings_exit_codes and issues_count > 0
+            )
+            execution_failed = not exit_success and not findings_exit
+            success = not execution_failed and issues_count == 0
         case BatchSuccess.EXIT_STATUS:
             success = exit_success
         case BatchSuccess.EXIT_AND_ISSUES:
@@ -314,7 +326,7 @@ def batch_check_result(
     return ToolResult(
         name=plugin.definition.name,
         success=success,
-        output=output if show_output else None,
+        output=output if show_output or execution_failed else None,
         issues_count=issues_count,
         issues=list(issues),
         cwd=cwd,
@@ -360,14 +372,24 @@ def run_batch_check(
             handler was supplied.
     """
     result_cwd = cwd if policy.report_cwd else None
+    returncode = None
     try:
-        exit_success, output = run_subprocess_with_timeout(
-            tool=plugin,
-            cmd=cmd,
-            timeout=ctx.timeout,
-            cwd=cwd,
-            tool_name=policy.tool_name,
-        )
+        if policy.success == BatchSuccess.ISSUES_ONLY:
+            process = plugin._run_subprocess_result(
+                cmd=cmd,
+                timeout=ctx.timeout,
+                cwd=cwd,
+            )
+            exit_success, output = process.success, process.output
+            returncode = process.returncode
+        else:
+            exit_success, output = run_subprocess_with_timeout(
+                tool=plugin,
+                cmd=cmd,
+                timeout=ctx.timeout,
+                cwd=cwd,
+                tool_name=policy.tool_name,
+            )
     except subprocess.TimeoutExpired:
         if on_timeout is not None:
             return on_timeout()
@@ -390,6 +412,7 @@ def run_batch_check(
         issues=parse(output),
         policy=policy,
         cwd=result_cwd,
+        returncode=returncode,
     )
 
 

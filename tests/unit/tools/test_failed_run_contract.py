@@ -153,15 +153,6 @@ KNOWN_FAIL_OPEN: dict[tuple[str, str], KnownFailOpen] = {
     ("cargo_deny", "case1"): KnownFailOpen(
         "#2999 cargo-deny discards the failed exit status",
     ),
-    ("oxfmt", "case1"): KnownFailOpen(
-        "#3000 batch success ignores the failed exit status",
-    ),
-    ("oxlint", "case1"): KnownFailOpen(
-        "#3000 batch success ignores the failed exit status",
-    ),
-    ("prettier", "case1"): KnownFailOpen(
-        "#3000 batch success ignores the failed exit status",
-    ),
     ("bandit", "case2-rc0"): KnownFailOpen("#3024 null results read as clean"),
     ("bandit", "case2-rc1"): KnownFailOpen("#3024 null results read as clean"),
     ("cargo_audit", "case2-rc0"): KnownFailOpen(

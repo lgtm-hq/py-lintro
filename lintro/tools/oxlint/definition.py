@@ -330,9 +330,9 @@ class OxlintPlugin(BaseToolPlugin):
         cmd.extend(ctx.rel_files)
         logger.debug(f"[OxlintPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
 
-        # Standardize: suppress Oxlint's informational output when no issues.
-        # Oxlint exits non-zero purely to report findings, so the parsed list —
-        # not the exit status — is the verdict.
+        # Oxlint returns 1 for diagnostics and configuration errors alike;
+        # the findings exit code is expected only with parsed diagnostics.
+        # https://github.com/oxc-project/oxc/blob/main/apps/oxlint/src/result.rs
         return run_batch_check(
             ctx,
             plugin=self,
@@ -340,6 +340,7 @@ class OxlintPlugin(BaseToolPlugin):
             parse=lambda output: parse_oxlint_output(output=output),
             policy=BatchCheckPolicy(
                 success=BatchSuccess.ISSUES_ONLY,
+                findings_exit_codes=(1,),
                 report_cwd=True,
             ),
             cwd=ctx.cwd,
