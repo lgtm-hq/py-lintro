@@ -18,6 +18,7 @@ import pytest
 from assertpy import assert_that
 from loguru import logger
 
+from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.clippy.clippy_issue import ClippyIssue
 from lintro.parsers.oxfmt.oxfmt_parser import parse_oxfmt_output
 from lintro.plugins.base import BaseToolPlugin, ExecutionContext
@@ -229,8 +230,10 @@ def test_deprecated_initial_issues_policy_keyword_is_a_noop(
             SubprocessResult(0, "", "", ""),
         ],
     ):
+        ctx = plugin.prepare([str(ts_file)], {})
+        assert not isinstance(ctx, ToolResult)
         result = run_batch_fix(
-            ExecutionContext(files=[str(ts_file)], rel_files=["app.ts"]),
+            ctx,
             plugin=plugin,
             commands=BatchCommands(check=["oxfmt", "--check"], fix=["oxfmt"]),
             parse=lambda output: parse_oxfmt_output(output=output),
