@@ -42,7 +42,7 @@ def run_fix_with_retry(
 
     result = tool.fix(paths, options)
 
-    if max_retries <= 1:
+    if max_retries <= 1 or result.residual_unknown:
         return result
 
     initial_issues_count = getattr(result, "initial_issues_count", None)
@@ -59,6 +59,15 @@ def run_fix_with_retry(
             f"({remaining} remaining issues)",
         )
         result = tool.fix(paths, options)
+        if result.residual_unknown:
+            # Execution failures cannot converge through blind write retries.
+            # Keep the first pass's before-state and the failure's unknown counts.
+            result.initial_issues_count = initial_issues_count
+            result.initial_issues = first_pass_initial_issues
+            if first_pass_initial_issues is not None:
+                result.issues = list(first_pass_initial_issues)
+                result.issues_count = len(first_pass_initial_issues)
+            return result
         remaining = get_remaining_count(result)
 
     # Merge: keep initial_issues_count and initial_issues from first pass,
