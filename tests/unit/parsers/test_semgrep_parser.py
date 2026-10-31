@@ -104,7 +104,7 @@ def test_parse_semgrep_multiple_issues() -> None:
 
 def test_parse_semgrep_empty_results() -> None:
     """Ensure an empty results list returns no issues."""
-    issues = parse_semgrep_output(output=json.dumps({"results": []}))
+    issues = parse_semgrep_output(output=json.dumps({"results": [], "errors": []}))
     assert_that(issues).is_equal_to([])
 
 
@@ -136,18 +136,22 @@ def test_parse_semgrep_rejects_invalid_results(payload: dict[str, object]) -> No
     assert_that(str(exc.value)).contains("Semgrep results must be a list")
 
 
-def test_parse_semgrep_handles_malformed_issue_gracefully() -> None:
-    """Malformed issue entries should be skipped gracefully.
+@pytest.mark.parametrize(
+    "results",
+    [[None], [42], [{"check_id": "test", "path": "x.py", "start": {"line": "NaN"}}]],
+    ids=["null", "number", "invalid-line"],
+)
+def test_parse_semgrep_handles_malformed_issue_gracefully(
+    results: list[object],
+) -> None:
+    """Malformed result entries produce no parsed findings.
 
-    Note: Warnings are logged via loguru (visible in test output when run with
-    -s flag) but not asserted here due to loguru's capture complexity.
+    Args:
+        results: Entries that cannot be converted to Semgrep issues.
     """
     malformed = {
-        "results": [
-            None,
-            42,
-            {"check_id": "test", "path": "x.py", "start": {"line": "NaN"}},
-        ],
+        "results": results,
+        "errors": [],
     }
     issues = parse_semgrep_output(output=json.dumps(malformed))
     assert_that(issues).is_equal_to([])

@@ -112,6 +112,7 @@ def test_check_with_mocked_subprocess_findings(
     else:
         assert_that(result.output).contains(semgrep_output, "semgrep diagnostic")
     assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.parse_failures_count or 0).is_zero()
     assert_that(result.issues).is_not_none()
     issues = cast(list[SemgrepIssue], result.issues)
     assert_that(issues).is_length(1)
@@ -223,28 +224,38 @@ def test_check_rejects_invalid_results(
     assert_that(result.output).is_equal_to(report)
 
 
-@pytest.mark.parametrize("returncode", [2, 3, 7, -15])
-def test_check_failed_process_with_empty_results(
+@pytest.mark.parametrize("returncode", [1, 2, 3, 7, -15])
+@pytest.mark.parametrize(
+    "results",
+    [
+        [],
+        [None, 42, {"check_id": "test", "path": "scan.py", "start": {"line": "NaN"}}],
+    ],
+    ids=["empty", "unparseable"],
+)
+def test_check_failed_process_without_parsed_findings(
     semgrep_plugin: SemgrepPlugin,
     tmp_path: Path,
     returncode: int,
+    results: list[object],
 ) -> None:
-    """A valid empty array cannot hide a failed Semgrep process.
+    """A nonzero exit without parsed findings must preserve diagnostics and fail.
 
     Args:
         semgrep_plugin: Plugin with the version check bypassed.
         tmp_path: Temporary directory for scan input.
-        returncode: Error or signal exit status outside the findings codes.
+        returncode: Findings, error, or signal exit status.
+        results: Empty results or entries the parser cannot turn into findings.
     """
     source = tmp_path / "empty_scan.py"
     source.write_text("pass\n", encoding="utf-8")
-    report = json.dumps({"results": [], "errors": []})
+    report = json.dumps({"results": results, "errors": []})
     with patch(
         "subprocess.run",
         return_value=subprocess.CompletedProcess(
             ["semgrep"],
             returncode,
-            report,
+            report + "\n",
             "scan failed",
         ),
     ):
@@ -254,7 +265,7 @@ def test_check_failed_process_with_empty_results(
     assert_that(result.issues).is_empty()
     assert_that(result.issues_count).is_zero()
     assert_that(result.parse_failures_count or 0).is_zero()
-    assert_that(result.output).contains(report, "scan failed")
+    assert_that(result.output).is_equal_to(f"{report}\nscan failed")
 
 
 # =============================================================================

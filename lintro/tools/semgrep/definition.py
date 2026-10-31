@@ -294,6 +294,7 @@ class SemgrepPlugin(BaseToolPlugin):
         logger.debug(f"[semgrep] Running: {' '.join(cmd[:10])}... (cwd={ctx.cwd})")
 
         output: str
+        returncode: int | None = None
         execution_failure: bool = False
         try:
             proc = self._run_subprocess_result(
@@ -301,8 +302,9 @@ class SemgrepPlugin(BaseToolPlugin):
                 timeout=ctx.timeout,
                 cwd=ctx.cwd,
             )
-            # Exit 1 reports findings with --error; other nonzero codes fail.
-            execution_failure = proc.returncode not in (0, 1)
+            # Findings normally exit 0; tolerate --error's exit 1 only with findings.
+            returncode = proc.returncode
+            execution_failure = returncode not in (0, 1)
             output = proc.output.strip()
         except subprocess.TimeoutExpired:
             timeout_msg = (
@@ -337,6 +339,9 @@ class SemgrepPlugin(BaseToolPlugin):
             json_output = json.dumps(semgrep_data)
             issues = parse_semgrep_output(output=json_output)
             issues_count = len(issues)
+            execution_failure = execution_failure or (
+                returncode == 1 and issues_count == 0
+            )
 
             # Check for errors in the response
             # Partial parsing errors (e.g., TypeScript 4.9+ 'satisfies' keyword)
