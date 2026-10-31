@@ -1,0 +1,7 @@
+#!/bin/sh
+bunx oxfmt generated.mjs # nosemgrep: lintro.scripts.no-direct-formatter.native-command
+# nosemgrep: lintro.scripts.no-direct-formatter.native-command
+black generated.py
+# A different rule's suppression must not hide this invocation.
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+rustfmt generated.rs # nosemgrep: unrelated.rule

@@ -32,6 +32,16 @@ about empty versus unknown values. It does not prove a bug. It includes fixtures
 eight rule families and for both sides of each suppression. No pack is enabled in
 Lintro's own default configuration. No candidate-count baseline or ratchet is added.
 
+`scripts/no-direct-formatter` applies the same opt-in mechanism to literal native
+formatter invocations in script paths. It uses Semgrep's generic regex engine, not AST
+or data-flow analysis. The formatter examples are guarded against builtin `FORMAT`
+capability declarations and executed by real matcher tests, so adding a formatter
+requires updating pack coverage. Script paths, invocation forms, suppression syntax, and
+known matcher limitations are documented in the
+[configuration guide](../configuration.md#direct-formatter-invocations-in-scripts).
+`uv run lintro fmt` is an allowed delegation. No builtin tool or default pack selection
+is added for this rule.
+
 Choose a future **built-in deterministic AST tool** for logic-shaped checks that need
 Python ASTs or cross-file state. It will own the test-hygiene scanners; #1246's external
 plugin support can consume the same tool protocol. Migration waits for that tool's

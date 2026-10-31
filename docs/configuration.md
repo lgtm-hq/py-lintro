@@ -4031,6 +4031,79 @@ issues #438 and #3018 must land before precise-rule gating. See
 [ADR-0012](adr/0012-packaged-semgrep-rules.md) for boundaries and the future native
 deterministic AST tool decision.
 
+### Direct formatter invocations in scripts
+
+Enable `scripts/no-direct-formatter` to review scripts that bypass Lintro's formatting
+configuration ([#1610](https://github.com/lgtm-hq/py-lintro/issues/1610)):
+
+```yaml
+tools:
+  semgrep:
+    rule_packs: [scripts/no-direct-formatter]
+```
+
+Or use `rule_packs = ["scripts/no-direct-formatter"]` in `[tool.lintro.semgrep]`. Run
+`lintro chk . --tools semgrep`. This pack is **off by default**, including in Lintro's
+own configuration. Findings have WARNING severity and use Semgrep's existing check exit
+behavior; there is no automatic fix.
+
+The pack targets `**/scripts/**`, `**/*.mjs`, and `**/Makefile`, at the project root or
+in nested packages. It covers extensionless files inside `scripts` too. A file such as
+`src/ordinary.js`, `docs/formatters.md`, `descripts/generate.sh`, or a root `format.sh`
+is outside that scope. Selecting this pack expands Lintro's candidate discovery so
+Semgrep can apply these path filters. Use narrower CLI paths or Semgrep's existing
+`include`/`exclude` options to restrict the scan further, for example:
+
+```bash
+lintro chk scripts --tools semgrep --tool-options 'semgrep:include=scripts/**'
+```
+
+These filters narrow the shipped scope; they cannot widen it. For a different scope, use
+`lintro/rules/scripts/no-direct-formatter.yaml` as a starting point for a native Semgrep
+configuration and run it with `semgrep scan --config your-rules.yaml`.
+
+The literal command matcher recognizes:
+
+- `black`, `oxfmt`, `rustfmt`, and `shfmt` invocations;
+- `prettier` with `--write` or `-w`;
+- `ruff format`, `buf format`, `cargo fmt`, `taplo fmt`/`format`, and
+  `sqlfluff format`/`fix`;
+- bare shell commands, Make recipes, simple `&&`/`||`/`;` command chains, and literal
+  command strings passed to `exec`, `execSync`, `execFile`, `execFileSync`, `spawn`, or
+  `spawnSync` (including member calls);
+- command prefixes `bunx`, `npx` (with optional `--yes`), `uv run`, and `python -m`
+  (also `python3` and versioned Python 3 executables).
+
+`uv run lintro fmt`, `lintro fmt`, and `uv run lintro format` delegate to Lintro and are
+allowed. `prettier --check`, `ruff check`, `buf lint`, `taplo check`, and
+`sqlfluff lint` are outside the matched formatting forms. The pure formatter binaries
+are matched regardless of their arguments. Eligible tools follow builtin `FORMAT`
+capability declarations: a test requires the pack's formatter examples to equal those
+declarations, and real matcher tests execute every example. Biome has no builtin
+`FORMAT` declaration in this release and is therefore outside this pack.
+
+Suppress a deliberate exception with Semgrep's rule-specific comment on the invocation
+or the preceding line:
+
+```sh
+bunx oxfmt generated.mjs # nosemgrep: lintro.scripts.no-direct-formatter.native-command
+```
+
+```javascript
+execSync('bunx oxfmt generated.mjs'); // nosemgrep: lintro.scripts.no-direct-formatter.native-command
+```
+
+This is a generic, line-oriented regex heuristic, not a shell or JavaScript parser.
+Fixtures exercise the forms above, clean scripts, comments, suppressions, and excluded
+paths against real Semgrep. It does not resolve aliases, variables, computed commands,
+absolute executable paths, arbitrary runner flags, multiline commands, or subcommands
+split across argument arrays (for example `spawnSync('ruff', ['format', file])`). Bare
+`spawnSync('black', [file])` is covered. Chains with quoted text before the separator
+can be missed. Command-like text in strings, block comments or heredocs can still
+produce false positives; review the reported line before changing a script. This pack
+reports at most one finding per matching line, including when a line contains multiple
+invocations. It does not prove that every native formatter shell-out has been removed.
+
 ## Troubleshooting Configuration
 
 ### Common Issues

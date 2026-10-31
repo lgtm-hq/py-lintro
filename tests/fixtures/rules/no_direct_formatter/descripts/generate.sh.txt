@@ -1,0 +1,1 @@
+black generated.py

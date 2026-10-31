@@ -223,6 +223,13 @@ class SemgrepPlugin(BaseToolPlugin):
         Returns:
             ToolDefinition containing tool metadata.
         """
+        # Generic script rules include Makefiles and extensionless scripts.
+        # Discovery matches basenames only; let the pack's paths.include apply
+        # its precise directory globs after opt-in instead of losing those files.
+        packs = validate_rule_packs(self.options.get("rule_packs", []))
+        file_patterns = (
+            ["*"] if "scripts/no-direct-formatter" in packs else SEMGREP_FILE_PATTERNS
+        )
         return ToolDefinition(
             name="semgrep",
             description=(
@@ -231,10 +238,10 @@ class SemgrepPlugin(BaseToolPlugin):
             ),
             can_fix=False,
             tool_type=ToolType.LINTER | ToolType.SECURITY,
-            file_patterns=SEMGREP_FILE_PATTERNS,
+            file_patterns=file_patterns,
             claims=[
                 Claim(
-                    patterns=SEMGREP_FILE_PATTERNS,
+                    patterns=file_patterns,
                     capabilities={Cap.CHECK},
                 ),
             ],

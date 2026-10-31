@@ -1,0 +1,50 @@
+# Literal command heuristics, not shell or JavaScript data-flow analysis.
+# Keep formatter coverage aligned with builtin FORMAT claims (guarded by tests).
+---
+rules:
+  - id: lintro.scripts.no-direct-formatter.native-command
+    languages: [generic]
+    severity: WARNING
+    message: >-
+      Delegate formatting to lintro fmt (or uv run lintro fmt) so Lintro owns
+      formatter selection and configuration instead of invoking a native formatter.
+    metadata:
+      lintro_rule_pack: scripts/no-direct-formatter
+      # Executable matcher examples; keys must equal builtin FORMAT claimants.
+      lintro_formatters:
+        black: black generated.py
+        buf: buf format --write generated.proto
+        oxfmt: bunx oxfmt generated.mjs
+        prettier: prettier --write generated.css
+        ruff: ruff format generated.py
+        rustfmt: rustfmt generated.rs
+        shfmt: shfmt -w generated.sh
+        sqlfluff: sqlfluff format generated.sql
+        taplo: taplo fmt Cargo.toml
+    paths:
+      include:
+        - '**/scripts/**'
+        - '**/*.mjs'
+        - '**/Makefile'
+    pattern-regex: |-
+      (?mx)
+      ^(?![\t ]*(?:\#|//))[\t ]*
+      (?:
+        [@+-]?
+        | [^\r\n\#"'`]*?(?:&&|\|\||;)[\t ]*
+        | [^\r\n]*?\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync)
+          [\t ]*\([\t ]*["'`]
+      )
+      (?:
+        (?:bunx|npx)(?:[\t ]+--yes)?[\t ]+
+        | uv[\t ]+run[\t ]+
+        | python(?:3(?:\.[0-9]+)?)?[\t ]+-m[\t ]+
+      )?
+      (?:
+        (?:black|oxfmt|rustfmt|shfmt)(?=[\t "'`),;]|$)
+        | prettier(?=[\t "'`),;]|$)
+          (?=[^\r\n\#;]*?(?<![\w-])(?:--write|-w)(?=[\t "'`,\]]|$))
+        | (?:ruff[\t ]+format|buf[\t ]+format|cargo[\t ]+fmt
+            | taplo[\t ]+(?:fmt|format)|sqlfluff[\t ]+(?:format|fix))
+          (?=[\t "'`),;]|$)
+      )

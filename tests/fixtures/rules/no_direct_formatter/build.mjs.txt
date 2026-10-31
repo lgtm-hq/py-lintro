@@ -1,0 +1,2 @@
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+execSync('bunx oxfmt generated.mjs');
