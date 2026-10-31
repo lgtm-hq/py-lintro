@@ -5,6 +5,15 @@
 # necessary. Each entry is time-boxed via ignoreUntil so it cannot silently
 # outlive its rationale.
 
+# --- minimatch (npm, transitive via @stoplight/spectral-cli) ---
+# GHSA-g3hv-75wg-m249 (published 2026-10-30) covers the minimatch 9+ preprocessing
+# rewrite; OSV's range starts at 0. 3.1.5 is the latest 3.x and lacks that code.
+# Track: https://github.com/lgtm-hq/py-lintro/issues/3031
+[[IgnoredVulns]]
+id = "GHSA-g3hv-75wg-m249"
+ignoreUntil = 2026-11-30
+reason = "Verified 2026-10-31: minimatch@3.1.5 in the root bun.lock (via @stoplight/spectral-core 1.23.1 ^3.1.4 and glob 7.2.3 ^3.1.1 under pinned @stoplight/spectral-cli 6.17.0). The advisory is globParts amplification in firstPhasePreProcess()/secondPhasePreProcess() at optimizationLevel >= 2; those functions and that option exist only in the minimatch 9+ rewrite and are absent from the published 3.1.5 minimatch.js. OSV lists introduced=0, broader than the affected code. 3.1.5 is the latest 3.x, so no in-range upgrade exists. Exposure would in any case be the one-shot spectral lint process on repository files (DoS of that job only). Applicability exception, not a patched-module claim. Remove when spectral leaves minimatch 3 or OSV narrows the range. Track: https://github.com/lgtm-hq/py-lintro/issues/3031"
+
 # --- markdown-it (npm, transitive via markdownlint-cli2) ---
 # GHSA-r7fv-28h4-cvq7, GHSA-vfgh-jcmw-g37q and GHSA-gfr2-rv44-r23c (all
 # published 2026-10-20) are fixed in markdown-it 15.0.2 / 15.0.3, but
