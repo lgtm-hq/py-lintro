@@ -33,6 +33,7 @@ from lintro.ai.fix_context import (
 )
 from lintro.ai.fix_params import FixGenParams
 from lintro.ai.fix_parsing import (
+    AIFixParseError,
     parse_batch_response,
     parse_fix_response,
 )
@@ -176,6 +177,11 @@ async def _call_and_cache_fix(
 
     except (KeyboardInterrupt, SystemExit):
         raise
+    except AIFixParseError as exc:
+        logger.debug(
+            f"AI fix generation failed for {issue.file}:{issue.line}: "
+            f"malformed response ({exc})",
+        )
     except Exception as exc:
         logger.debug(
             f"AI fix generation failed for {issue.file}:{issue.line} "
@@ -386,10 +392,9 @@ async def _generate_batch_fixes(
         suggestions = parse_batch_response(response.content, file_path)
         if not suggestions:
             logger.debug(
-                f"Batch response parse returned no suggestions for {file_path}, "
-                f"falling back to single-issue mode",
+                f"Batch response contains no suggestions for {file_path}",
             )
-            return None
+            return []
 
         if len(suggestions) != len(file_issues):
             logger.debug(
@@ -417,6 +422,12 @@ async def _generate_batch_fixes(
 
     except (KeyboardInterrupt, SystemExit):
         raise
+    except AIFixParseError as exc:
+        logger.debug(
+            f"Batch AI fix generation failed for {file_path}: "
+            f"malformed response ({exc}), falling back to single-issue mode",
+        )
+        return None
     except Exception as exc:
         logger.debug(
             f"Batch AI fix generation failed for {file_path} "
