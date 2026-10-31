@@ -131,9 +131,8 @@ def test_parse_semgrep_rejects_invalid_results(payload: dict[str, object]) -> No
     Args:
         payload: JSON object without a usable results array.
     """
-    with pytest.raises(ValueError, match="Semgrep results must be a list") as exc:
+    with pytest.raises(ValueError, match="Semgrep results must be a list"):
         parse_semgrep_output(output=json.dumps(payload))
-    assert_that(str(exc.value)).contains("Semgrep results must be a list")
 
 
 @pytest.mark.parametrize(

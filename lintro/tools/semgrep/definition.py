@@ -68,7 +68,7 @@ def _extract_semgrep_json(raw_text: str) -> dict[str, Any]:
 
     Raises:
         json.JSONDecodeError: If JSON cannot be parsed.
-        ValueError: If no JSON object boundaries are found.
+        ValueError: If no JSON object boundaries are found or an array wraps it.
     """
     if not raw_text or not raw_text.strip():
         raise json.JSONDecodeError("Empty output", raw_text or "", 0)
@@ -85,9 +85,38 @@ def _extract_semgrep_json(raw_text: str) -> dict[str, Any]:
     if start == -1 or end == -1 or end < start:
         raise ValueError("Could not locate JSON object in Semgrep output")
 
+    # Reject enclosing arrays without mistaking bracketed status lines for JSON.
+    decoder = json.JSONDecoder()
+    array_start = text.find("[")
+    while 0 <= array_start < start:
+        try:
+            _, array_end = decoder.raw_decode(text, array_start)
+        except json.JSONDecodeError:
+            pass
+        else:
+            if array_end > end:
+                raise ValueError("Semgrep output must be a JSON object, got an array")
+        array_start = text.find("[", array_start + 1)
+
     json_str: str = text[start : end + 1]
     parsed: dict[str, Any] = json.loads(json_str)
     return parsed
+
+
+def _extract_semgrep_errors(data: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
+    """Extract error objects and count malformed containers or entries.
+
+    Args:
+        data: Parsed Semgrep report.
+
+    Returns:
+        Valid error objects and the number of error parse failures.
+    """
+    raw_errors = data.get("errors", [])
+    if not isinstance(raw_errors, list):
+        return [], 1
+    errors = [error for error in raw_errors if isinstance(error, dict)]
+    return errors, len(raw_errors) - len(errors)
 
 
 @register_tool
@@ -302,7 +331,7 @@ class SemgrepPlugin(BaseToolPlugin):
                 timeout=ctx.timeout,
                 cwd=ctx.cwd,
             )
-            # Findings normally exit 0; tolerate --error's exit 1 only with findings.
+            # Findings normally exit 0; accept exit 1 with findings for compatibility.
             returncode = proc.returncode
             execution_failure = returncode not in (0, 1)
             output = proc.output.strip()
@@ -339,6 +368,11 @@ class SemgrepPlugin(BaseToolPlugin):
             json_output = json.dumps(semgrep_data)
             issues = parse_semgrep_output(output=json_output)
             issues_count = len(issues)
+            errors, error_parse_failures = _extract_semgrep_errors(semgrep_data)
+            # The parser emits one issue per usable result; account for every drop.
+            parse_failures_count = (
+                len(semgrep_data["results"]) - issues_count + error_parse_failures
+            )
             execution_failure = execution_failure or (
                 returncode == 1 and issues_count == 0
             )
@@ -346,7 +380,6 @@ class SemgrepPlugin(BaseToolPlugin):
             # Check for errors in the response
             # Partial parsing errors (e.g., TypeScript 4.9+ 'satisfies' keyword)
             # are warnings, not fatal errors. Only fail on actual errors.
-            errors = semgrep_data.get("errors", [])
             fatal_errors = [e for e in errors if e.get("level", "error") == "error"]
 
             def _is_partial_parsing(err: dict[str, Any]) -> bool:
@@ -374,15 +407,17 @@ class SemgrepPlugin(BaseToolPlugin):
                     len(parsing_warnings),
                 )
 
-            execution_success = len(fatal_errors) == 0 and not execution_failure
-            has_fatal_errors = execution_failure or len(fatal_errors) > 0
+            execution_success = not (
+                fatal_errors or execution_failure or parse_failures_count
+            )
 
             return ToolResult(
                 name=self.definition.name,
                 success=execution_success,
-                output=output if has_fatal_errors else None,
+                output=output if not execution_success else None,
                 issues_count=issues_count,
                 issues=issues,
+                parse_failures_count=parse_failures_count or None,
             )
 
         except (json.JSONDecodeError, ValueError) as e:
