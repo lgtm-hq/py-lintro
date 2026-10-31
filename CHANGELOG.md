@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.173.3] - 2026-10-31
+
+### Changed
+
+- **tools**: add registry-wide failed-run contract (#2997) (#3027) (469606c)
+
+### Fixed
+
+- **security**: time-box GHSA-g3hv-75wg-m249 for minimatch 3.1.5 (#3031) (#3032)
+  (3d73323)
+
 ## [0.173.2] - 2026-10-30
 
 ### Changed
