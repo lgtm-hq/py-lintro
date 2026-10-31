@@ -36,6 +36,9 @@ def _extract_crate_info(labels: list[dict[str, Any]]) -> tuple[str | None, str |
 def _parse_diagnostic(item: dict[str, Any]) -> CargoDenyIssue | None:
     """Parse a diagnostic message from cargo-deny output.
 
+    All non-empty string severities, including note/help, are retained.
+    A missing code is valid; None always indicates a malformed record.
+
     Args:
         item: A diagnostic JSON object.
 
@@ -54,14 +57,16 @@ def _parse_diagnostic(item: dict[str, Any]) -> CargoDenyIssue | None:
 
         if not isinstance(severity, str) or not severity:
             return None
+        if not isinstance(labels, list) or any(
+            not isinstance(label, dict) for label in labels
+        ):
+            return None
 
         # Normalize severity to lowercase
         severity = severity.lower()
 
         # Extract crate info from labels
-        crate_name, crate_version = None, None
-        if isinstance(labels, list):
-            crate_name, crate_version = _extract_crate_info(labels)
+        crate_name, crate_version = _extract_crate_info(labels)
 
         return CargoDenyIssue(
             file="Cargo.toml",  # cargo-deny operates at project level
@@ -132,14 +137,14 @@ def _parse_advisory(item: dict[str, Any]) -> CargoDenyIssue | None:
         return None
 
 
-def _parse_record(item: dict[str, Any]) -> tuple[CargoDenyIssue | None, int]:
+def _parse_record(item: dict[str, Any]) -> tuple[CargoDenyIssue | None, bool]:
     """Parse a finding or distinguish an ignored record from a failure.
 
     Args:
         item: One decoded cargo-deny JSON record.
 
     Returns:
-        The parsed issue and the number of malformed finding records (0 or 1).
+        The parsed issue and whether the finding record is malformed.
     """
     item_type = item.get("type")
     if item_type == "diagnostic":
@@ -147,7 +152,7 @@ def _parse_record(item: dict[str, Any]) -> tuple[CargoDenyIssue | None, int]:
     elif item_type == "advisory":
         parsed = _parse_advisory(item)
     elif item_type in ("summary", "log", "build"):
-        return None, 0
+        return None, False
     else:
         # Future informational record types may be ignored, but a missing or
         # invalid type, or finding fields under an unknown type, loses a finding.
@@ -156,9 +161,9 @@ def _parse_record(item: dict[str, Any]) -> tuple[CargoDenyIssue | None, int]:
             "severity" in fields or "advisory" in fields
         )
         invalid_type = not isinstance(item_type, str) or not item_type
-        return None, int(invalid_type or finding_fields)
+        return None, invalid_type or finding_fields
 
-    return parsed, int(parsed is None)
+    return parsed, parsed is None
 
 
 def parse_cargo_deny_output_with_stats(output: str) -> tuple[list[CargoDenyIssue], int]:
@@ -167,11 +172,11 @@ def parse_cargo_deny_output_with_stats(output: str) -> tuple[list[CargoDenyIssue
     cargo-deny outputs JSON Lines format (one JSON object per line) when
     using --format json. Each line can be:
     - A diagnostic message with type "diagnostic"
-    - An advisory message with type "advisory"
+    - An advisory message with type "advisory" (compatibility support)
     - An informational record such as "log" or "summary", which is ignored
 
     Args:
-        output: Raw stdout emitted by cargo deny check --format json.
+        output: Raw output (stdout/stderr) emitted by cargo deny check --format json.
 
     Returns:
         Parsed issues and a count of malformed JSON or finding records.
@@ -185,6 +190,7 @@ def parse_cargo_deny_output_with_stats(output: str) -> tuple[list[CargoDenyIssue
 
     for line in output.splitlines():
         line = line.strip()
+        # Ignore ordinary progress text; malformed object lines still count below.
         if not line or not line.startswith("{"):
             continue
 
@@ -193,8 +199,8 @@ def parse_cargo_deny_output_with_stats(output: str) -> tuple[list[CargoDenyIssue
             if not isinstance(data, dict):
                 continue
 
-            parsed, failures = _parse_record(data)
-            parse_failures_count += failures
+            parsed, malformed = _parse_record(data)
+            parse_failures_count += malformed
             if parsed is not None:
                 issues.append(parsed)
 
@@ -206,7 +212,7 @@ def parse_cargo_deny_output_with_stats(output: str) -> tuple[list[CargoDenyIssue
 
 
 def parse_cargo_deny_output(output: str) -> list[CargoDenyIssue]:
-    """Parse cargo-deny JSON Lines output into CargoDenyIssue objects.
+    """Compatibility wrapper returning cargo-deny issues without parse statistics.
 
     Args:
         output: Raw output emitted by cargo deny check --format json.

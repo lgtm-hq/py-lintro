@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from assertpy import assert_that
 
@@ -31,6 +33,59 @@ def test_parse_cargo_deny_output_counts_only_malformed_records() -> None:
     assert_that(issues).extracting("code").is_equal_to(["L001"])
     assert_that(issues[0].message).is_equal_to("license violation")
     assert_that(failures).is_equal_to(3)
+
+
+@pytest.mark.parametrize("severity", ["note", "help"])
+@pytest.mark.parametrize(
+    ("malformed_record", "expected_failures"),
+    [
+        pytest.param("", 0, id="valid-only"),
+        pytest.param(
+            '{"type":"diagnostic","fields":{"severity":null}}',
+            1,
+            id="with-malformed-record",
+        ),
+    ],
+)
+def test_parse_cargo_deny_output_note_and_help(
+    severity: str,
+    malformed_record: str,
+    expected_failures: int,
+) -> None:
+    """Retain note/help diagnostics without codes and count malformed siblings.
+
+    Args:
+        severity: Valid informational diagnostic severity.
+        malformed_record: Optional malformed diagnostic alongside the valid one.
+        expected_failures: Number of malformed records in the output.
+    """
+    diagnostic = json.dumps(
+        {"type": "diagnostic", "fields": {"severity": severity, "message": "details"}},
+    )
+
+    issues, failures = parse_cargo_deny_output_with_stats(
+        f"{diagnostic}\n{malformed_record}",
+    )
+
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].severity).is_equal_to(severity)
+    assert_that(issues[0].code).is_empty()
+    assert_that(issues[0].message).is_equal_to("details")
+    assert_that(failures).is_equal_to(expected_failures)
+
+
+def test_parse_cargo_deny_output_ignores_non_json_progress() -> None:
+    """Ordinary cargo progress lines are not malformed JSON findings."""
+    output = (
+        "    Updating crates.io index\n\n"
+        '{"type":"summary","fields":{"errors":0,"warnings":0}}\n'
+        "    Fetching advisory database\n"
+    )
+
+    issues, failures = parse_cargo_deny_output_with_stats(output)
+
+    assert_that(issues).is_empty()
+    assert_that(failures).is_zero()
 
 
 def test_parse_cargo_deny_output_single_diagnostic() -> None:

@@ -181,13 +181,19 @@ class CargoDenyPlugin(BaseToolPlugin):
 
         issues, parse_failures_count = parse_cargo_deny_output_with_stats(output=output)
         issues_count = len(issues)
+        # Parsed errors explain a failed exit; otherwise retain the raw error text.
+        has_error = any(issue.severity == "error" for issue in issues)
+        preserve_output = parse_failures_count > 0 or (
+            not process_success and not has_error
+        )
 
         # A non-zero exit can mean findings or an execution error. Zero parsed
         # findings must never turn a failed invocation into a clean check.
+        # Any parsed finding still fails the check, including warnings on exit 0.
         return ToolResult(
             name=self.definition.name,
             success=process_success and issues_count == 0 and parse_failures_count == 0,
-            output=output if not process_success or parse_failures_count else None,
+            output=output if preserve_output else None,
             issues_count=issues_count,
             issues=issues,
             parse_failures_count=parse_failures_count,

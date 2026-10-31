@@ -82,15 +82,29 @@ def cargo_deny_check(
 
 
 @pytest.mark.parametrize(
-    ("process_success", "output", "expected_success", "expected_messages"),
+    (
+        "process_success",
+        "output",
+        "expected_success",
+        "expected_messages",
+        "expected_output",
+    ),
     [
-        pytest.param(False, "error: invalid configuration\n", False, [], id="garbage"),
-        pytest.param(False, "", False, [], id="failed-empty"),
+        pytest.param(
+            False,
+            "error: invalid configuration\n",
+            False,
+            [],
+            "error: invalid configuration\n",
+            id="garbage",
+        ),
+        pytest.param(False, "", False, [], "", id="failed-empty"),
         pytest.param(
             False,
             _ERROR_DIAGNOSTIC,
             False,
             ["license is not allowed"],
+            None,
             id="error",
         ),
         pytest.param(
@@ -98,17 +112,50 @@ def cargo_deny_check(
             _WARNING_DIAGNOSTIC,
             False,
             ["duplicate dependency"],
+            _WARNING_DIAGNOSTIC,
             id="failed-warning-only",
         ),
-        pytest.param(False, _INFORMATIONAL_OUTPUT, False, [], id="failed-summary"),
-        pytest.param(True, "", True, [], id="clean-empty"),
-        pytest.param(True, _INFORMATIONAL_OUTPUT, True, [], id="clean-summary"),
+        pytest.param(
+            False,
+            _ERROR_DIAGNOSTIC + "\n" + _WARNING_DIAGNOSTIC,
+            False,
+            ["license is not allowed", "duplicate dependency"],
+            None,
+            id="error-and-warning",
+        ),
+        pytest.param(
+            False,
+            _INFORMATIONAL_OUTPUT,
+            False,
+            [],
+            _INFORMATIONAL_OUTPUT,
+            id="failed-summary",
+        ),
+        pytest.param(True, "", True, [], None, id="clean-empty"),
+        pytest.param(True, _INFORMATIONAL_OUTPUT, True, [], None, id="clean-summary"),
+        pytest.param(
+            True,
+            "    Updating crates.io index\n",
+            True,
+            [],
+            None,
+            id="clean-progress",
+        ),
+        pytest.param(
+            True,
+            _WARNING_DIAGNOSTIC,
+            False,
+            ["duplicate dependency"],
+            None,
+            id="warning-only-zero-exit-is-failure",
+        ),
         pytest.param(
             True,
             _ERROR_DIAGNOSTIC,
             False,
             ["license is not allowed"],
-            id="error-despite-zero-exit",
+            None,
+            id="error-zero-exit-is-failure",
         ),
     ],
 )
@@ -118,6 +165,7 @@ def test_check_exit_status(
     output: str,
     expected_success: bool,
     expected_messages: list[str],
+    expected_output: str | None,
 ) -> None:
     """Preserve failed invocations and report parsed findings.
 
@@ -127,6 +175,7 @@ def test_check_exit_status(
         output: Captured tool output.
         expected_success: Expected overall check verdict.
         expected_messages: Expected parsed finding messages.
+        expected_output: Raw output retained for unexplained execution failures.
     """
     result = cargo_deny_check(process_success, output)
 
@@ -138,7 +187,7 @@ def test_check_exit_status(
         expected_messages,
     )
     assert_that(result.parse_failures_count).is_zero()
-    assert_that(result.output).is_equal_to(None if process_success else output)
+    assert_that(result.output).is_equal_to(expected_output)
 
 
 @pytest.mark.parametrize("process_success", [True, False], ids=["exit-0", "exit-1"])
@@ -146,9 +195,19 @@ def test_check_exit_status(
     "output",
     [
         pytest.param('{"type":"diagnostic","fields":null}', id="null-fields"),
+        pytest.param('{"type":"diagnostic"}', id="missing-fields"),
+        pytest.param('{"type":"diagnostic","fields":{}}', id="missing-severity"),
         pytest.param(
             '{"type":"diagnostic","fields":{"severity":null}}',
             id="null-severity",
+        ),
+        pytest.param(
+            '{"type":"diagnostic","fields":{"severity":"error","labels":[null]}}',
+            id="non-object-label",
+        ),
+        pytest.param(
+            '{"type":"diagnostic","fields":{"severity":"error","labels":null}}',
+            id="null-labels",
         ),
         pytest.param('{"type":"advisory","fields":null}', id="null-advisory-fields"),
         pytest.param(
@@ -188,6 +247,33 @@ def test_check_malformed_records_fail_closed(
     assert_that(result.issues).is_empty()
     assert_that(result.parse_failures_count).is_equal_to(1)
     assert_that(result.output).is_equal_to(combined)
+
+
+@pytest.mark.parametrize("process_success", [True, False], ids=["exit-0", "exit-1"])
+def test_check_keeps_error_and_raw_output_on_parse_failure(
+    cargo_deny_check: Callable[[bool, str], ToolResult],
+    process_success: bool,
+) -> None:
+    """A parsed error must not suppress raw output for a malformed sibling.
+
+    Args:
+        cargo_deny_check: Callable running the plugin with controlled output.
+        process_success: Whether the tool exited zero.
+    """
+    output = (
+        f"{_ERROR_DIAGNOSTIC}\n{_INFORMATIONAL_OUTPUT}\n"
+        '{"type":"diagnostic","fields":{"severity":null}}'
+    )
+
+    result = cargo_deny_check(process_success, output)
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.issues).extracting("message").is_equal_to(
+        ["license is not allowed"],
+    )
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.output).is_equal_to(output)
 
 
 def test_definition_name(cargo_deny_plugin: CargoDenyPlugin) -> None:
