@@ -282,6 +282,20 @@ The comparison baseline is stored as `severity-baseline.json` at the root of the
 directory — `LINTRO_LOG_DIR`, default `.lintro` — rather than inside a `run-*`
 directory, so run pruning never removes it.
 
+Counts are compared only when the normalized path arguments and executed tool set match.
+The file retains at most 32 scopes in last-write order; updating a scope makes it
+newest, while reading it does not. The latest run whose paths resolve to the full
+working directory is protected from eviction, even across many staged-file checks. Older
+scopes are discarded first, and invalid entries are removed on the next write. Older
+files without retention metadata remain readable; a new full-path check establishes the
+protected scope. `--diff` and `--incremental` checks neither compare against nor update
+this file.
+
+Writers use `severity-baseline.json.lock` beside the baseline and wait up to one second
+for contention before skipping the optional update. The lock file remains after the run
+so concurrent writers always coordinate on the same file; include it with the rest of
+`.lintro/` in your ignore rules.
+
 Only a run that actually measured the project reads or writes it, and the same rule
 governs both sides. A run qualifies when it is a `check` (not `format` or `test`, which
 measure something else), is not a `fmt --dry-run` preview (those report as checks but

@@ -46,6 +46,11 @@ class RunArtifact:
             tool selection, unresolvable ``--diff`` base, or a declined
             confirmation prompt). Renderers must emit nothing for such a run;
             the diagnostic has already been printed by the execute phase.
+        paths: Path arguments measured by the run, retained so aggregation
+            and rendering use the same severity-baseline scope.
+        partial_scan: Whether ``--diff`` or ``--incremental`` was requested.
+            These runs cannot read or write severity baselines because their
+            measured file set can change between invocations.
     """
 
     tool_results: list[ToolResult] = field(default_factory=list)
@@ -59,6 +64,8 @@ class RunArtifact:
     exit_code: int = 0
     dry_run_preview: bool = False
     early_exit: bool = False
+    paths: tuple[str, ...] = (".",)
+    partial_scan: bool = False
 
     @property
     def success(self) -> bool:

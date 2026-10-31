@@ -592,6 +592,8 @@ def execute_run(
             total_issues=0,
             total_fixed=0,
             total_remaining=0,
+            paths=paths,
+            partial_scan=incremental or diff_base is not None,
         )
 
     if not tools_to_run and skipped_tools:
@@ -783,6 +785,8 @@ def execute_run(
         total_issues=total_issues,
         total_fixed=total_fixed,
         total_remaining=total_remaining,
+        paths=paths,
+        partial_scan=incremental or diff_base is not None,
     )
 
 
