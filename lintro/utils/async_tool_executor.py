@@ -162,6 +162,7 @@ class AsyncToolExecutor:
         """
         options = options_per_tool or {}
 
+        from lintro.enums.action import Action
         from lintro.models.core.tool_result import ToolResult
 
         def _make_failed_result(
@@ -188,6 +189,10 @@ class AsyncToolExecutor:
                     success=False,
                     output=message,
                     issues_count=0,
+                    residual_unknown=action == Action.FIX,
+                    residual_unknown_reason=(
+                        "tool crashed" if action == Action.FIX else None
+                    ),
                     duration_seconds=duration_seconds,
                 ),
             )
