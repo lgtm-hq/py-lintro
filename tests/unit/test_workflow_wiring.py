@@ -298,6 +298,20 @@ def test_version_pr_is_gated_on_a_green_tag_publish() -> None:
     )
 
 
+def test_version_pr_skips_an_unfinished_publish() -> None:
+    """The gate's active-publish verdict prevents calling the PR generator."""
+    workflow = _load_workflow(name="release-version-pr.yml")
+    condition = str(workflow["jobs"]["version-pr"]["if"])
+    assert_that(
+        _evaluate_github_if(
+            condition,
+            cancelled=False,
+            results={"publish-gate": "success"},
+            outputs={"publish-gate": {"publish_green": "false"}},
+        ),
+    ).is_false()
+
+
 def _module_constant(*, script: Path, name: str) -> str:
     """Return a module-level string constant from a standalone CI script.
 

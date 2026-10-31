@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # For license details, see the repository root LICENSE file.
-"""Report whether the last tag publish failed at startup (#2516, #2550).
+"""Gate version PRs during publication or after startup failure (#3054).
 
 ``release-version-pr.yml`` opens a version PR on every push to ``main`` with
-``auto-merge: true``, and ``release-auto-tag.yml`` tags the merge. When the tag
+manual review, and ``release-auto-tag.yml`` tags the merge. When the tag
 publish pipeline is broken, every unrelated merge to ``main`` mints another
 version that never ships: eleven versions, ``v0.151.2`` through ``v0.152.6``,
 were burned that way between 2026-09-07 and 2026-09-09 while PyPI stayed on
@@ -13,10 +13,10 @@ were burned that way between 2026-09-07 and 2026-09-09 while PyPI stayed on
 This script is the gate in front of that loop. It lists ``push`` runs of the
 tag publish workflow, keeps the ones whose ``head_branch`` looks like a version
 tag (``v`` followed by digits, e.g. ``v0.152.7``), takes the most recent one by
-``created_at``, and reports ``publish_green=false`` only when that run
-concluded ``startup_failure`` (#2550).
+``created_at``, and reports ``publish_green=false`` while that run is not
+completed or concluded ``startup_failure`` (#2550, #3054).
 
-**Only a startup failure gates.** ``startup_failure`` is GitHub's verdict for a
+**Completed runs gate only on startup failure.** GitHub uses that verdict for a
 run that never started — unparsable YAML, a missing reusable workflow, a
 permissions block the runner rejects. That is the publish pipeline being
 broken, and every further tag would hit the same wall. Every other conclusion
@@ -33,9 +33,10 @@ are therefore treated like an API error: still green, but with a
 
 **The newest run wins, in flight or not.** The gate reads the newest tag run by
 ``created_at`` regardless of status, not the newest *completed* one. A queued,
-waiting or in-progress run has no startup failure to show, so it is green — and
-picking it deliberately means an in-flight publish neither resurrects an older
-verdict nor blocks the version PR behind it.
+waiting or in-progress run blocks generation until publication finishes.
+The release PR can already have merged while the GitHub Release is still
+absent, so allowing generation during that window can recreate its version.
+``--force`` overrides a completed startup failure, never active publication.
 
 **The gate is a skip, not an error.** It never fails the job: every path exits
 0 and the verdict travels in the ``publish_green`` output, which the workflow
@@ -51,9 +52,12 @@ wrong red is a stalled release train nobody is watching.
 Other benign-by-design cases, all reported green:
 
     - No tag runs at all (a fresh repository, or a renamed workflow).
-    - The newest tag run is queued, waiting or in progress: it has not failed
-      at startup, so there is nothing to gate on.
-    - ``--force``: the manual override for the first release after a fix.
+    - ``--force``: the manual override after a completed publish failure.
+
+This early gate is not an atomic generation lock. A run admitted before the
+release merges can outlive it; ``finalize-version-pr.py`` also checks live main
+and the candidate tag. The remaining write-time race belongs to lgtm-ci (see
+``docs/release-race-recovery.md``).
 
 Usage:
     python3 scripts/ci/check-last-publish-green.py [--force]
@@ -267,8 +271,7 @@ def evaluate(
 ) -> GateVerdict:
     """Decide whether the version PR may proceed.
 
-    Not green only when the newest version-tag run — by ``created_at``,
-    whatever its status — concluded ``startup_failure``.
+    Block the newest version-tag run while active, or after startup failure.
 
     Never raises: every failure below the gate — an unreachable API, a
     malformed payload, an exception type nobody anticipated — becomes a green
@@ -279,20 +282,11 @@ def evaluate(
         repo: Repository in ``owner/name`` form.
         workflow: Publish workflow file name.
         fetch: Text fetcher used for the GitHub API request.
-        force: Bypass the gate and report green.
+        force: Override a completed startup failure, never an active publish.
 
     Returns:
         The gate verdict and the summary line describing it.
     """
-    if force:
-        return GateVerdict(
-            green=True,
-            summary=(
-                "## Publish gate: forced\n\n"
-                "`--force` was requested, so the last tag publish was not "
-                "consulted and the version PR proceeds."
-            ),
-        )
     try:
         runs = list_tag_runs(repo=repo, workflow=workflow, fetch=fetch)
     except Exception as exc:
@@ -332,6 +326,26 @@ def evaluate(
     conclusion = str(latest.get("conclusion") or _NO_CONCLUSION).strip()
     tag = str(latest.get("head_branch", "")).strip() or "unknown tag"
     run_url = str(latest.get("html_url", "")).strip() or "unknown run"
+    if status != "completed":
+        return GateVerdict(
+            green=False,
+            summary=(
+                "## Publish gate: version PR skipped\n\n"
+                f"The last tag publish (`{tag}`) is `{status}` with conclusion "
+                f"`{conclusion}`. Wait for publication to complete before "
+                f"generating another version PR: {run_url}\n\n"
+                "`--force` does not bypass an unfinished publish (#3054)."
+            ),
+        )
+    if force:
+        return GateVerdict(
+            green=True,
+            summary=(
+                "## Publish gate: forced\n\n"
+                "`--force` was requested after the last tag publish completed, "
+                "so the version PR proceeds."
+            ),
+        )
     if conclusion not in _KNOWN_CONCLUSIONS:
         return GateVerdict(
             green=True,
@@ -411,13 +425,13 @@ def build_parser() -> argparse.ArgumentParser:
         The configured parser.
     """
     parser = argparse.ArgumentParser(
-        description="Report whether the last tag publish failed at startup.",
+        description="Wait for tag publication and gate completed startup failures.",
         epilog="Always exits 0; the verdict is the publish_green output.",
     )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Bypass the gate and report green (first release after a fix).",
+        help="Override a completed startup failure (never an unfinished publish).",
     )
     parser.add_argument(
         "--repo",
