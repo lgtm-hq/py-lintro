@@ -493,7 +493,7 @@ def run_per_file_fix(
         initial_issues_count=initial_total,
         fixed_issues_count=tally.fixed_total,
         remaining_issues_count=remaining_count,
-        initial_issues=tally.initial_issues or None,
+        initial_issues=tally.initial_issues,
         timed_out=result.timed_out,
         # The project root the per-file paths were resolved from — not the
         # subprocess working directory, which this runner never sets. The

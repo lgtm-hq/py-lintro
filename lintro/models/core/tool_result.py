@@ -54,7 +54,7 @@ class ToolResult:
     output: str | None = field(default=None)
     issues_count: int = field(default=0)
     formatted_output: str | None = field(default=None)
-    issues: Sequence[BaseIssue] | None = field(default=None)
+    issues: Sequence[BaseIssue] = field(default_factory=tuple)
 
     # Optional standardized counts for fix-capable tools
     initial_issues_count: int | None = field(default=None)
@@ -62,12 +62,12 @@ class ToolResult:
     remaining_issues_count: int | None = field(default=None)
 
     # Pre-fix issues detected before applying fixes (for displaying what was fixed)
-    initial_issues: Sequence[BaseIssue] | None = field(default=None)
+    initial_issues: Sequence[BaseIssue] = field(default_factory=tuple)
 
     # Optional pytest-specific summary data for display
     pytest_summary: dict[str, Any] | None = field(default=None)
 
-    # Optional tool metadata. Most keys are AI-generated (explanations, fix
+    # Tool metadata. Most keys are AI-generated (explanations, fix
     # suggestions), but the field is not AI-specific: osv-scanner stores its
     # suppression classifications here with the AI layer fully disabled.
     # Expected keys (all optional):
@@ -78,7 +78,7 @@ class ToolResult:
     #   "telemetry": dict with api_calls, tokens, cost, latency
     #   "suppressions": list[dict]  (osv-scanner, non-AI)
     # AI keys are built incrementally via helpers in lintro.ai.metadata.
-    metadata: dict[str, Any] | None = field(default=None)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     # Working directory used during tool execution (for resolving relative
     # issue file paths in AI fix generation)

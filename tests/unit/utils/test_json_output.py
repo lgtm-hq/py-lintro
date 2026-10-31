@@ -18,6 +18,24 @@ from lintro.utils.json_output import create_json_output, serialize_tool_result
 from lintro.utils.output.file_writer import write_output_file
 
 
+@pytest.mark.parametrize("action", [Action.CHECK, Action.FIX])
+def test_default_collections_preserve_empty_result_json(action: Action) -> None:
+    """Empty collections stay omitted and existing JSON key order is stable.
+
+    Args:
+        action: Serialization mode whose empty wire shape is pinned.
+    """
+    expected = (
+        '{"tool": "", "success": false, "issues_count": 0, '
+        '"skipped": false, "skip_reason": null, "timed_out": false, "output": null'
+    )
+    if action == Action.FIX:
+        expected += ', "net_resolved": 0, "fixed": 0, "remaining": 0'
+
+    serialized = json.dumps(serialize_tool_result(ToolResult(), action=action))
+    assert_that(serialized).is_equal_to(expected + "}")
+
+
 @dataclass
 class _StubIssue(BaseIssue):
     """Minimal issue used to exercise JSON serialization."""

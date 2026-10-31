@@ -9,38 +9,26 @@ Tests in this directory focus on utility functions including:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
+
+from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 
 @dataclass
-class FakeToolResult:
-    """Fake ToolResult for testing console/logger and summary output."""
-
-    name: str = "test-tool"
-    success: bool = True
-    issues_count: int = 0
-    output: str = ""
-    issues: list[Any] = field(default_factory=list)
-    initial_issues: list[Any] | None = None
-    fixed_issues_count: int | None = None
-    remaining_issues_count: int | None = None
-    pytest_summary: dict[str, Any] | None = None
-    metadata: dict[str, Any] | None = None
-    # The verify pass's third state (#1743): the residual was never measured,
-    # so both counts above are None and consumers must render "unknown".
-    residual_unknown: bool = False
-    residual_unknown_reason: str | None = None
-
-
-@dataclass
-class FakeIssue:
+class FakeIssue(BaseIssue):
     """Fake Issue for testing output formatters."""
+
+    DISPLAY_FIELD_MAP: ClassVar[dict[str, str]] = {
+        **BaseIssue.DISPLAY_FIELD_MAP,
+        "severity": "level",
+    }
 
     file: str = "test.py"
     line: int = 1
@@ -52,25 +40,26 @@ class FakeIssue:
 
 
 @pytest.fixture
-def fake_tool_result() -> FakeToolResult:
-    """Provide a FakeToolResult instance for testing.
+def tool_result() -> ToolResult:
+    """Provide a ToolResult instance for testing.
 
     Returns:
-        FakeToolResult: Description of returned FakeToolResult.
+        ToolResult: Description of returned ToolResult.
     """
-    return FakeToolResult()
+    return ToolResult(name="test-tool", success=True, output="")
 
 
 @pytest.fixture
-def fake_tool_result_factory() -> Callable[..., FakeToolResult]:
-    """Factory fixture to create FakeToolResult with custom attributes.
+def tool_result_factory() -> Callable[..., ToolResult]:
+    """Factory fixture to create ToolResult with custom attributes.
 
     Returns:
-        Callable[..., FakeToolResult]: Description of returned Callable[..., FakeToolResult].
+        Callable[..., ToolResult]: Description of returned Callable[..., ToolResult].
     """
 
-    def _create(**kwargs: Any) -> FakeToolResult:
-        return FakeToolResult(**kwargs)
+    def _create(**kwargs: Any) -> ToolResult:
+        defaults = {"name": "test-tool", "success": True, "output": "", **kwargs}
+        return ToolResult(**defaults)
 
     return _create
 

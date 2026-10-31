@@ -63,8 +63,6 @@ def ensure_ai_metadata(result: ToolResult) -> dict[str, Any]:
     Returns:
         The result's mutable ``metadata`` dict.
     """
-    if result.metadata is None:
-        result.metadata = {}
     return result.metadata
 
 

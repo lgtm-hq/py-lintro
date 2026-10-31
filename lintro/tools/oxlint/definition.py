@@ -239,7 +239,7 @@ class OxlintPlugin(BaseToolPlugin):
             issues_count=pre_fix_count,
             issues=list(initial_issues or []),
             initial_issues_count=pre_fix_count,
-            initial_issues=initial_issues if initial_issues is not None else None,
+            initial_issues=initial_issues if initial_issues is not None else (),
             cwd=cwd,
             timed_out=True,
         )
@@ -466,13 +466,12 @@ class OxlintPlugin(BaseToolPlugin):
                 no_files=_is_no_files_result,
                 verbose=bool(merged_options.get("verbose_fix_output", False)),
                 verbose_output_label="Fix output (oxlint JSON)",
-                always_report_initial_issues=True,
                 report_cwd=True,
             ),
             cwd=ctx.cwd,
             on_timeout=lambda detected: self._create_timeout_result(
                 timeout_val=ctx.timeout,
-                initial_issues=list(detected) or None,
+                initial_issues=list(detected),
                 initial_count=len(detected),
                 cwd=ctx.cwd,
             ),

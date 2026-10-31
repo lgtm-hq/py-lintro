@@ -48,7 +48,7 @@ def _ruff_is_fixable(issue: object) -> bool:
         True if the issue is fixable (format issue or has fixable attribute).
     """
     return isinstance(issue, RuffFormatIssue) or (
-        isinstance(issue, RuffIssue) and getattr(issue, "fixable", False)
+        isinstance(issue, RuffIssue) and issue.fixable
     )
 
 
@@ -61,7 +61,7 @@ def _black_is_fixable(issue: object) -> bool:
     Returns:
         True if the issue is a BlackIssue (all Black issues are fixable).
     """
-    return isinstance(issue, BlackIssue) and getattr(issue, "fixable", True)
+    return isinstance(issue, BlackIssue) and issue.fixable
 
 
 # -----------------------------------------------------------------------------

@@ -517,7 +517,7 @@ class PylintPlugin(BaseToolPlugin):
             success=result.returncode == 0 and not issues,
             output=output,
             issues_count=len(issues),
-            issues=issues if issues else None,
+            issues=issues,
             metadata={PYLINT_ANALYSED_METADATA_KEY: True},
         )
 

@@ -73,7 +73,7 @@ def test_check_clean_project_succeeds(
     assert_that(run.called).is_true()
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
-    assert_that(result.issues).is_none()
+    assert_that(result.issues).is_empty()
 
 
 def test_check_runs_once_regardless_of_file_count(

@@ -31,8 +31,8 @@ def _merged_issues(result: ToolResult) -> list[BaseIssue]:
         Deduplicated detected-plus-remaining issues.
     """
     return merge_detected_and_remaining(
-        getattr(result, "initial_issues", None),
-        getattr(result, "issues", None),
+        result.initial_issues,
+        result.issues,
     )
 
 
@@ -47,7 +47,7 @@ def _distinct_issue_files(issues: list[BaseIssue]) -> int:
     """
     files: set[str] = set()
     for issue in issues:
-        file_path = getattr(issue, "file", "")
+        file_path = issue.file
         if file_path:
             files.add(str(file_path))
     return len(files)
@@ -70,9 +70,9 @@ def build_timings(results: list[ToolResult]) -> list[ToolTiming]:
     """
     timings: list[ToolTiming] = []
     for result in results:
-        if getattr(result, "skipped", False):
+        if result.skipped:
             continue
-        duration = getattr(result, "duration_seconds", None)
+        duration = result.duration_seconds
         if duration is None:
             continue
         merged = _merged_issues(result)

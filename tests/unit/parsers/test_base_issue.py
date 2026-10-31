@@ -19,6 +19,7 @@ def test_base_issue_default_values() -> None:
     assert_that(issue.line).is_equal_to(0)
     assert_that(issue.column).is_equal_to(0)
     assert_that(issue.message).is_equal_to("")
+    assert_that(issue.fixable).is_false()
 
 
 def test_base_issue_accepts_values() -> None:
@@ -115,12 +116,7 @@ def test_subclass_with_custom_field_map() -> None:
 
 def test_to_display_row_fixable_true() -> None:
     """to_display_row shows Yes for fixable=True."""
-
-    @dataclass
-    class FixableIssue(BaseIssue):
-        fixable: bool = False
-
-    issue = FixableIssue(file="test.py", line=1, column=1, fixable=True)
+    issue = BaseIssue(file="test.py", line=1, column=1, fixable=True)
     result = issue.to_display_row()
     assert_that(result["fixable"]).is_equal_to("Yes")
 

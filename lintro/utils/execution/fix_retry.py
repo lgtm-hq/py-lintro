@@ -64,8 +64,8 @@ def run_fix_with_retry(
     if max_retries <= 1 or result.residual_unknown or result.parse_failures_count:
         return result
 
-    initial_issues_count = getattr(result, "initial_issues_count", None)
-    first_pass_initial_issues = getattr(result, "initial_issues", None)
+    initial_issues_count = result.initial_issues_count
+    first_pass_initial_issues = result.initial_issues
     remaining = get_remaining_count(result)
 
     for attempt in range(2, max_retries + 1):
@@ -87,20 +87,20 @@ def run_fix_with_retry(
 
     # Merge: keep initial_issues_count and initial_issues from first pass,
     # rest from last pass, including failure accounting and execution metadata.
-    if initial_issues_count is None and first_pass_initial_issues is not None:
+    if initial_issues_count is None and first_pass_initial_issues:
         initial_issues_count = len(first_pass_initial_issues)
     if result.residual_unknown or result.parse_failures_count:
         # Execution failures carry the original detected findings. Parse
         # failures also retain the latest report's usable partial findings.
         issues = (
             first_pass_initial_issues
-            if not result.parse_failures_count and first_pass_initial_issues is not None
+            if not result.parse_failures_count and first_pass_initial_issues
             else result.issues
         )
         return replace(
             result,
             issues=issues,
-            issues_count=len(issues) if issues is not None else result.issues_count,
+            issues_count=len(issues),
             initial_issues_count=initial_issues_count,
             initial_issues=first_pass_initial_issues,
             fixed_issues_count=None,

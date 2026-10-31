@@ -398,7 +398,7 @@ def restrict_lint_results_to_files(
     outside_root = 0
     for result in results:
         kept = []
-        for issue in result.issues or ():
+        for issue in result.issues:
             relative = _relative_report_path(
                 _normalize_report_path(getattr(issue, "file", "") or ""),
                 report_root=report_root,

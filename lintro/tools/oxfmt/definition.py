@@ -390,7 +390,7 @@ class OxfmtPlugin(BaseToolPlugin):
             cwd=ctx.cwd,
             on_timeout=lambda detected: self._create_timeout_result(
                 timeout_val=ctx.timeout,
-                initial_issues=list(detected) or None,
+                initial_issues=list(detected),
                 initial_count=len(detected),
                 cwd=ctx.cwd,
             ),

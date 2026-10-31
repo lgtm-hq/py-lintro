@@ -348,12 +348,10 @@ def test_an_unexpected_fix_stage_exit_preserves_the_report_as_unknown(
 @pytest.mark.parametrize("failed_stage", [0, 1, 2], ids=["precheck", "fix", "verify"])
 @pytest.mark.parametrize("initial_count", [0, 3])
 @pytest.mark.parametrize("report_initial", [False, True])
-@pytest.mark.parametrize("always_report_initial", [False, True])
 def test_failed_fix_preserves_initial_accounting_and_reporting(
     failed_stage: int,
     initial_count: int,
     report_initial: bool,
-    always_report_initial: bool,
     ts_file: Path,
 ) -> None:
     """A failed stage's findings cannot replace the pre-fix count or list policy.
@@ -362,7 +360,6 @@ def test_failed_fix_preserves_initial_accounting_and_reporting(
         failed_stage: Stage returning one finding and an execution error.
         initial_count: Number of findings from a successful pre-check.
         report_initial: Whether to include initial findings in the issue list.
-        always_report_initial: Whether to retain an empty initial list.
         ts_file: File identifying the execution directory.
     """
     initial_output = "app.ts\nsecond.ts\nthird.ts\n" if initial_count else ""
@@ -384,7 +381,6 @@ def test_failed_fix_preserves_initial_accounting_and_reporting(
             policy=BatchFixPolicy(
                 findings_exit_codes=(1,),
                 report_initial_issues=report_initial,
-                always_report_initial_issues=always_report_initial,
             ),
         )
 
@@ -393,7 +389,7 @@ def test_failed_fix_preserves_initial_accounting_and_reporting(
     assert_that(result.output).is_equal_to(OXFMT_DIFFERENT)
     assert_that(result.initial_issues_count).is_equal_to(len(expected_initial))
     assert_that(result.initial_issues).is_equal_to(
-        expected_initial if expected_initial or always_report_initial else None,
+        expected_initial,
     )
     assert_that(result.remaining_issues_count).is_none()
     assert_that(result.issues_count).is_equal_to(len(expected_initial))

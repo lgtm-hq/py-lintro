@@ -337,7 +337,7 @@ def advisory_results_to_payload(results: list[ToolResult]) -> list[dict[str, obj
                 "skipped": bool(getattr(result, "skipped", False)),
                 "skip_reason": result.skip_reason,
                 "issues_count": result.issues_count or 0,
-                "issues": [issue.to_display_row() for issue in (result.issues or [])],
+                "issues": [issue.to_display_row() for issue in (result.issues)],
             },
         )
     return payload

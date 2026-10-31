@@ -26,6 +26,30 @@ from lintro.tools.core.verify_pass import (
 )
 
 
+@pytest.mark.parametrize("field_name", ["issues", "initial_issues", "metadata"])
+def test_collection_defaults_are_empty_containers(field_name: str) -> None:
+    """Default results expose usable collections without normalization.
+
+    Args:
+        field_name: Collection whose default is part of the result contract.
+    """
+    result = ToolResult()
+    expected: object = {} if field_name == "metadata" else ()
+
+    assert_that(getattr(result, field_name)).is_equal_to(expected)
+
+
+def test_default_metadata_is_owned_by_each_result() -> None:
+    """Attaching metadata to one default result cannot mutate another."""
+    first = ToolResult()
+    second = ToolResult()
+
+    first.metadata["fixed_count"] = 2
+
+    assert_that(first.metadata).is_equal_to({"fixed_count": 2})
+    assert_that(second.metadata).is_empty()
+
+
 def test_metadata_field_is_the_only_metadata_dataclass_field() -> None:
     """``metadata`` is the sole metadata field on the dataclass."""
     field_names = [f.name for f in dataclasses.fields(ToolResult)]

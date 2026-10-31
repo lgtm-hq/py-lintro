@@ -42,6 +42,7 @@ class BaseIssue:
         doc_url: URL to the rule's documentation page (empty when unavailable).
         category: Optional concern category (Security, Style, …) used by
             ``--group-by category``; empty until taxonomy enrichment.
+        fixable: Whether the tool can automatically fix the issue.
     """
 
     # Default field mapping - subclasses can override specific keys
@@ -61,6 +62,7 @@ class BaseIssue:
     message: str = field(default="")
     doc_url: str = field(default="", repr=False)
     category: str = field(default="")
+    fixable: bool = field(default=False)
 
     def get_severity(self) -> SeverityLevel:
         """Return the normalized severity for this issue.

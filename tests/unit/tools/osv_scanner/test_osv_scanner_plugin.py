@@ -654,7 +654,7 @@ def test_check_without_config_no_metadata(
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
     assert_that(result.success).is_true()
-    assert_that(result.metadata).is_none()
+    assert_that(result.metadata).is_empty()
 
 
 def test_check_suppressions_disabled(
@@ -692,7 +692,7 @@ def test_check_suppressions_disabled(
 
     # Only one subprocess call (gating scan, no probe)
     assert_that(mock_run.call_count).is_equal_to(1)
-    assert_that(result.metadata).is_none()
+    assert_that(result.metadata).is_empty()
 
 
 def test_check_suppressions_probe_timeout(
@@ -729,7 +729,7 @@ def test_check_suppressions_probe_timeout(
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
     assert_that(result.success).is_true()
-    assert_that(result.metadata).is_none()
+    assert_that(result.metadata).is_empty()
 
 
 def test_build_probe_command_internal(

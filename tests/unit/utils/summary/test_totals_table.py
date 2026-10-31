@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 from assertpy import assert_that
 
 from lintro.enums.action import Action
+from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.summary_tables import (
     count_affected_files,
     count_fixable_issues,
@@ -20,7 +22,7 @@ from lintro.utils.summary_tables import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.unit.utils.conftest import FakeIssue, FakeToolResult
+    from tests.unit.utils.conftest import FakeIssue
 
 
 # =============================================================================
@@ -34,29 +36,29 @@ def test_count_affected_files_empty_results() -> None:
 
 
 def test_count_affected_files_no_issues(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Verify count_affected_files returns 0 when results have no issues.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
-    results = [fake_tool_result_factory(issues=[])]
+    results = [tool_result_factory(issues=[])]
     assert_that(count_affected_files(results)).is_equal_to(0)
 
 
 def test_count_affected_files_single_file(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     fake_issue_factory: Callable[..., FakeIssue],
 ) -> None:
     """Verify count_affected_files counts a single affected file.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         fake_issue_factory: Factory for creating FakeIssue instances.
     """
     results = [
-        fake_tool_result_factory(
+        tool_result_factory(
             issues=[fake_issue_factory(file="src/main.py")],
         ),
     ]
@@ -64,17 +66,17 @@ def test_count_affected_files_single_file(
 
 
 def test_count_affected_files_deduplication_within_tool(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     fake_issue_factory: Callable[..., FakeIssue],
 ) -> None:
     """Verify count_affected_files deduplicates files within a single tool.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         fake_issue_factory: Factory for creating FakeIssue instances.
     """
     results = [
-        fake_tool_result_factory(
+        tool_result_factory(
             issues=[
                 fake_issue_factory(file="src/main.py"),
                 fake_issue_factory(file="src/main.py"),
@@ -86,20 +88,20 @@ def test_count_affected_files_deduplication_within_tool(
 
 
 def test_count_affected_files_deduplication_across_tools(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     fake_issue_factory: Callable[..., FakeIssue],
 ) -> None:
     """Verify count_affected_files deduplicates files across multiple tools.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         fake_issue_factory: Factory for creating FakeIssue instances.
     """
     results = [
-        fake_tool_result_factory(
+        tool_result_factory(
             issues=[fake_issue_factory(file="src/main.py")],
         ),
-        fake_tool_result_factory(
+        tool_result_factory(
             issues=[
                 fake_issue_factory(file="src/main.py"),
                 fake_issue_factory(file="src/other.py"),
@@ -110,17 +112,17 @@ def test_count_affected_files_deduplication_across_tools(
 
 
 def test_count_affected_files_empty_file_paths_excluded(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     fake_issue_factory: Callable[..., FakeIssue],
 ) -> None:
     """Verify count_affected_files excludes issues with empty file paths.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         fake_issue_factory: Factory for creating FakeIssue instances.
     """
     results = [
-        fake_tool_result_factory(
+        tool_result_factory(
             issues=[
                 fake_issue_factory(file=""),
                 fake_issue_factory(file="src/valid.py"),
@@ -131,7 +133,7 @@ def test_count_affected_files_empty_file_paths_excluded(
 
 
 def test_count_affected_files_counts_fixed_files_from_initial_issues(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     fake_issue_factory: Callable[..., FakeIssue],
 ) -> None:
     """Files fixed clean (no remaining issues) are still counted as affected.
@@ -142,11 +144,11 @@ def test_count_affected_files_counts_fixed_files_from_initial_issues(
     0.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         fake_issue_factory: Factory for creating FakeIssue instances.
     """
     results = [
-        fake_tool_result_factory(
+        tool_result_factory(
             issues=[],
             initial_issues=[fake_issue_factory(file="src/reformatted.py")],
         ),
@@ -155,17 +157,17 @@ def test_count_affected_files_counts_fixed_files_from_initial_issues(
 
 
 def test_count_affected_files_unions_initial_and_remaining(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     fake_issue_factory: Callable[..., FakeIssue],
 ) -> None:
     """Affected files union pre-fix detected and post-fix remaining files.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         fake_issue_factory: Factory for creating FakeIssue instances.
     """
     results = [
-        fake_tool_result_factory(
+        tool_result_factory(
             issues=[fake_issue_factory(file="src/remaining.py")],
             initial_issues=[fake_issue_factory(file="src/fixed.py")],
         ),
@@ -174,19 +176,19 @@ def test_count_affected_files_unions_initial_and_remaining(
 
 
 def test_count_affected_files_path_objects_deduplicated(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     fake_issue_factory: Callable[..., FakeIssue],
 ) -> None:
     """Verify count_affected_files deduplicates Path objects and strings.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         fake_issue_factory: Factory for creating FakeIssue instances.
     """
     from pathlib import Path
 
     results = [
-        fake_tool_result_factory(
+        tool_result_factory(
             issues=[
                 fake_issue_factory(file=Path("src/main.py")),
                 fake_issue_factory(file="src/main.py"),
@@ -196,13 +198,11 @@ def test_count_affected_files_path_objects_deduplicated(
     assert_that(count_affected_files(results)).is_equal_to(1)
 
 
-def test_count_affected_files_no_issues_attribute() -> None:
-    """Verify count_affected_files handles objects without issues attribute."""
+def test_count_affected_files_default_collections() -> None:
+    """A count-only result has no affected file paths to report."""
+    result = ToolResult(name="tool", success=False, issues_count=2)
 
-    class NoIssuesResult:
-        name: str = "tool"
-
-    assert_that(count_affected_files([NoIssuesResult()])).is_equal_to(0)
+    assert_that(count_affected_files([result])).is_zero()
 
 
 # =============================================================================
@@ -216,17 +216,17 @@ def test_count_fixable_issues_empty_results() -> None:
 
 
 def test_count_fixable_issues_counts_only_fixable(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     fake_issue_factory: Callable[..., FakeIssue],
 ) -> None:
     """Verify count_fixable_issues counts only issues flagged fixable.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         fake_issue_factory: Factory for creating FakeIssue instances.
     """
     results = [
-        fake_tool_result_factory(
+        tool_result_factory(
             issues=[
                 fake_issue_factory(fixable=True),
                 fake_issue_factory(fixable=True),
@@ -237,20 +237,11 @@ def test_count_fixable_issues_counts_only_fixable(
     assert_that(count_fixable_issues(results)).is_equal_to(2)
 
 
-def test_count_fixable_issues_no_fixable_attribute() -> None:
-    """Verify count_fixable_issues does not fabricate fixability.
+def test_count_fixable_issues_defaults_to_unfixable() -> None:
+    """The base issue contract does not fabricate fixability."""
+    result = ToolResult(issues=[BaseIssue(file="a.py")])
 
-    Issues without a truthy ``fixable`` attribute are never counted, so
-    tools that do not report fixability contribute zero.
-    """
-
-    class BareIssue:
-        file: str = "a.py"
-
-    class Result:
-        issues = [BareIssue()]
-
-    assert_that(count_fixable_issues([Result()])).is_equal_to(0)
+    assert_that(count_fixable_issues([result])).is_zero()
 
 
 # =============================================================================
