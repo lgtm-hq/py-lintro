@@ -125,85 +125,95 @@ def test_ignored_targets_are_explicit_no_files(
 
 @pytest.mark.parametrize("action", ["check", "fix"])
 @pytest.mark.parametrize(
-    ("plugin_cls", "returncode", "stdout", "stderr"),
+    ("plugin_cls", "returncode", "stdout", "stderr", "parse_failures"),
     [
-        (OxlintPlugin, 2, OXLINT_NO_FILES, ""),
-        (OxlintPlugin, -11, OXLINT_NO_FILES, ""),
-        (OxlintPlugin, 1, OXLINT_NO_FILES, "error: invalid configuration\n"),
-        (OxlintPlugin, 1, "", OXLINT_NO_FILES),
-        (OxlintPlugin, 1, OXLINT_NO_FILES + "error: invalid configuration\n", ""),
-        (OxlintPlugin, 1, OXLINT_NO_FILES + "{}", ""),
+        (OxlintPlugin, 2, OXLINT_NO_FILES, "", 0),
+        (OxlintPlugin, -11, OXLINT_NO_FILES, "", 0),
+        (OxlintPlugin, 1, OXLINT_NO_FILES, "error: invalid configuration\n", 0),
+        (OxlintPlugin, 1, "", OXLINT_NO_FILES, 0),
+        (OxlintPlugin, 1, OXLINT_NO_FILES + "error: invalid configuration\n", "", 0),
+        (OxlintPlugin, 1, OXLINT_NO_FILES + "{}", "", 1),
         (
             OxlintPlugin,
             1,
             OXLINT_NO_FILES.replace('"number_of_files": 0', '"number_of_files": 1'),
             "",
+            0,
         ),
         (
             OxlintPlugin,
             1,
             OXLINT_NO_FILES.replace('"number_of_files": 0', '"number_of_files": false'),
             "",
+            0,
         ),
         (
             OxlintPlugin,
             1,
             OXLINT_NO_FILES.replace('"number_of_files": 0', '"number_of_files": "0"'),
             "",
+            0,
         ),
         (
             OxlintPlugin,
             1,
             OXLINT_NO_FILES.replace('"number_of_files": 0', '"other": 0'),
             "",
+            0,
         ),
         (
             OxlintPlugin,
             1,
             OXLINT_NO_FILES.replace('"diagnostics": []', '"diagnostics": null'),
             "",
+            1,
         ),
         (
             OxlintPlugin,
             1,
             OXLINT_NO_FILES.replace('"diagnostics": []', '"diagnostics": [null]'),
             "",
+            1,
         ),
         (
             OxlintPlugin,
             1,
             OXLINT_NO_FILES.replace('"diagnostics": []', '"other": []'),
             "",
+            1,
         ),
         (
             OxlintPlugin,
             1,
             OXLINT_NO_FILES.replace('"diagnostics": []', '"diagnostics": ['),
             "",
+            1,
         ),
         (
             OxlintPlugin,
             1,
             OXLINT_NO_FILES.replace("No files found", "No files were found"),
             "",
+            0,
         ),
-        (OxlintPlugin, 1, OXLINT_NO_FILES.split("\n", 1)[1], ""),
-        (OxlintPlugin, 1, OXLINT_NO_FILES.split("\n", 1)[0], ""),
-        (OxlintPlugin, 1, OXLINT_NO_FILES.split("\n", 1)[0] + "\n[]", ""),
+        (OxlintPlugin, 1, OXLINT_NO_FILES.split("\n", 1)[1], "", 0),
+        (OxlintPlugin, 1, OXLINT_NO_FILES.split("\n", 1)[0], "", 0),
+        (OxlintPlugin, 1, OXLINT_NO_FILES.split("\n", 1)[0] + "\n[]", "", 1),
         (
             OxlintPlugin,
             1,
             OXLINT_NO_FILES.replace('"number_of_files": 0', '"number_of_files": 0.0'),
             "",
+            0,
         ),
-        (OxfmtPlugin, 1, "", OXFMT_NO_FILES),
-        (OxfmtPlugin, 137, "", OXFMT_NO_FILES),
-        (OxfmtPlugin, 2, "error: config.js\n", OXFMT_NO_FILES),
-        (OxfmtPlugin, 2, "", "error: " + OXFMT_NO_FILES),
-        (OxfmtPlugin, 2, "", OXFMT_NO_FILES + "error: config.js\n"),
-        (OxfmtPlugin, 2, "", "Expected at least one target file\n"),
-        (OxfmtPlugin, 2, "", OXFMT_NO_FILES.replace("rules.", "rules!")),
-        (OxfmtPlugin, 2, OXFMT_NO_FILES, OXFMT_NO_FILES),
+        (OxfmtPlugin, 1, "", OXFMT_NO_FILES, None),
+        (OxfmtPlugin, 137, "", OXFMT_NO_FILES, None),
+        (OxfmtPlugin, 2, "error: config.js\n", OXFMT_NO_FILES, None),
+        (OxfmtPlugin, 2, "", "error: " + OXFMT_NO_FILES, None),
+        (OxfmtPlugin, 2, "", OXFMT_NO_FILES + "error: config.js\n", None),
+        (OxfmtPlugin, 2, "", "Expected at least one target file\n", None),
+        (OxfmtPlugin, 2, "", OXFMT_NO_FILES.replace("rules.", "rules!"), None),
+        (OxfmtPlugin, 2, OXFMT_NO_FILES, OXFMT_NO_FILES, None),
     ],
 )
 def test_no_target_lookalikes_still_fail_closed(
@@ -212,6 +222,7 @@ def test_no_target_lookalikes_still_fail_closed(
     returncode: int,
     stdout: str,
     stderr: str,
+    parse_failures: int | None,
     batch_project: Path,
 ) -> None:
     """Near matches, wrong statuses and extra failures cannot become skips.
@@ -222,6 +233,7 @@ def test_no_target_lookalikes_still_fail_closed(
         returncode: Failed process status.
         stdout: Malformed or lookalike stdout.
         stderr: Malformed or lookalike stderr.
+        parse_failures: Expected number of rejected Oxlint reports or records.
         batch_project: Discovered target directory.
     """
     plugin = plugin_cls()
@@ -236,6 +248,17 @@ def test_no_target_lookalikes_still_fail_closed(
     assert_that(result.success).is_false()
     assert_that(result.no_files).is_false()
     assert_that(result.skipped).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(parse_failures)
+    if parse_failures:
+        if action == "fix":
+            assert_that(result.residual_unknown).is_true()
+            assert_that(result.fixed_issues_count).is_none()
+            assert_that(result.remaining_issues_count).is_none()
+            output = output.rstrip()
+        output = (
+            f"Failed to parse {parse_failures} Oxlint report(s) or diagnostic(s).\n"
+            f"{output}"
+        )
     assert_that(result.output).is_equal_to(output)
 
 

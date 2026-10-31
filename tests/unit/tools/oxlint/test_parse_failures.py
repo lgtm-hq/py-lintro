@@ -118,6 +118,41 @@ def test_check_invalid_report_is_counted_and_fails(
     assert_that(serialized["success"]).is_false()
 
 
+def test_parse_failure_preserves_the_execution_failure_reason(
+    prepared_oxlint: OxlintPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Partial initial output and a failed write retain both failure causes."""
+    partial = json.dumps(
+        {"diagnostics": [{"filename": "test.js", "message": "Use const"}, None]},
+    )
+    monkeypatch.setattr(
+        prepared_oxlint,
+        "_run_subprocess_result",
+        MagicMock(
+            side_effect=[
+                _subprocess_result(True, partial),
+                SubprocessResult(2, "", "write crashed\n", "write crashed\n"),
+            ],
+        ),
+    )
+
+    result = replace(prepared_oxlint.fix(["test.js"], {}))
+
+    assert_that(result.residual_unknown_reason).contains(
+        "Batch execution failed after writes may have begun",
+        "Failed to parse 1 Oxlint report(s) or diagnostic(s).",
+    )
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.success).is_false()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.output).contains("Failed to parse 1", "write crashed")
+    assert_that([issue.message for issue in result.issues or []]).is_equal_to(
+        ["Use const"],
+    )
+
+
 def test_check_mixed_report_keeps_findings_and_counts_each_failure(
     prepared_oxlint: OxlintPlugin,
     monkeypatch: pytest.MonkeyPatch,

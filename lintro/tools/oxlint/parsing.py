@@ -88,7 +88,13 @@ class OxlintOutputParser:
             result.fixed_issues_count = None
             result.remaining_issues_count = None
             result.residual_unknown = True
-            result.residual_unknown_reason = message
+            result.residual_unknown_reason = "; ".join(
+                dict.fromkeys(
+                    reason
+                    for reason in (result.residual_unknown_reason, message)
+                    if reason
+                ),
+            )
             if self.failure_counts[0]:
                 result.initial_issues_count = None
             else:

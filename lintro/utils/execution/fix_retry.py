@@ -19,6 +19,22 @@ if TYPE_CHECKING:
 __all__ = ["run_fix_with_retry"]
 
 
+def _mark_parse_failure_unknown(result: ToolResult) -> None:
+    """Ensure an incomplete report carries explicit unknown fix accounting.
+
+    Args:
+        result: Fix result to normalize before returning or merging it.
+    """
+    if result.parse_failures_count:
+        result.success = False
+        result.fixed_issues_count = None
+        result.remaining_issues_count = None
+        result.residual_unknown = True
+        result.residual_unknown_reason = (
+            result.residual_unknown_reason or "tool output could not be fully parsed"
+        )
+
+
 def run_fix_with_retry(
     tool: BaseToolPlugin,
     paths: list[str],
@@ -42,6 +58,7 @@ def run_fix_with_retry(
     from loguru import logger
 
     result = tool.fix(paths, options)
+    _mark_parse_failure_unknown(result)
 
     # An incomplete first pass has no complete baseline to merge or retry.
     if max_retries <= 1 or result.residual_unknown or result.parse_failures_count:
@@ -65,6 +82,7 @@ def run_fix_with_retry(
             f"({remaining} remaining issues)",
         )
         result = tool.fix(paths, options)
+        _mark_parse_failure_unknown(result)
         remaining = get_remaining_count(result)
 
     # Merge: keep initial_issues_count and initial_issues from first pass,
@@ -72,8 +90,17 @@ def run_fix_with_retry(
     if initial_issues_count is None and first_pass_initial_issues is not None:
         initial_issues_count = len(first_pass_initial_issues)
     if result.residual_unknown or result.parse_failures_count:
+        # Execution failures carry the original detected findings. Parse
+        # failures also retain the latest report's usable partial findings.
+        issues = (
+            first_pass_initial_issues
+            if not result.parse_failures_count and first_pass_initial_issues is not None
+            else result.issues
+        )
         return replace(
             result,
+            issues=issues,
+            issues_count=len(issues) if issues is not None else result.issues_count,
             initial_issues_count=initial_issues_count,
             initial_issues=first_pass_initial_issues,
             fixed_issues_count=None,

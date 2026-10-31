@@ -926,9 +926,9 @@ def _fold_one(
         fixed count, and a note when the two disagreed. The pre-fix issue list
         is preserved so the "detected / remaining" view still renders.
     """
-    # A later check cannot reconstruct a missing baseline or repair an earlier
-    # incomplete report. In particular, never put numeric counts alongside an
-    # existing residual_unknown flag.
+    # A later check cannot reconstruct a report that could not be fully parsed.
+    # Execution failures can still gain a measured residual from an answered
+    # check below.
     verify = outcome.result
     if verify and verify.parse_failures_count:
         mutation.parse_failures_count = (mutation.parse_failures_count or 0) + (
@@ -953,8 +953,6 @@ def _fold_one(
                 ),
             ),
         )
-    if mutation.residual_unknown:
-        return mutation
     if outcome.status is VerifyStatus.UNKNOWN:
         return _fold_unknown(mutation=mutation, outcome=outcome)
     # An ``UNCHANGED`` outcome carries no result: nothing was rewritten, or

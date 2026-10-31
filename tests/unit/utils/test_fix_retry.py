@@ -239,16 +239,23 @@ def test_incomplete_fix_pass_is_preserved_without_more_retries(
         assert_that(result.initial_issues).is_equal_to(detected)
     assert_that(result.success).is_false()
     assert_that(result.output).is_equal_to("incomplete report")
-    assert_that(result.issues).is_equal_to(partial_findings)
-    assert_that(result.issues_count).is_equal_to(1)
+    expected_findings = (
+        detected if failure_pass > 1 and failure_kind == "unknown" else partial_findings
+    )
+    assert_that(result.issues).is_equal_to(expected_findings)
+    assert_that(result.issues_count).is_equal_to(len(expected_findings))
     assert_that(result.fixed_issues_count).is_none()
     assert_that(result.remaining_issues_count).is_none()
     assert_that(result.parse_failures_count).is_equal_to(
         1 if failure_kind == "parse" else None,
     )
-    assert_that(result.residual_unknown).is_equal_to(failure_kind == "unknown")
+    assert_that(result.residual_unknown).is_true()
     assert_that(result.residual_unknown_reason).is_equal_to(
-        "verification unavailable" if failure_kind == "unknown" else None,
+        (
+            "verification unavailable"
+            if failure_kind == "unknown"
+            else "tool output could not be fully parsed"
+        ),
     )
     assert_that(result.timed_out).is_true()
     assert_that(result.cwd).is_equal_to("/repo")
