@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.ai.budget import CostBudget
 from lintro.ai.cli_schemas import cli_schema_for_summary
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
@@ -269,7 +270,7 @@ async def _call_summary_provider(
             ai_config=ai_config,
             user_prompt=prompt,
             system_prompt=SUMMARY_SYSTEM,
-            budget=None,
+            budget=CostBudget(),
             max_tokens=max_tokens,
             repo_root=str(workspace_root) if workspace_root is not None else None,
             cli_schema=cli_schema_for_summary(transport=ai_config.transport),

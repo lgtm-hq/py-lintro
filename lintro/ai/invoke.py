@@ -56,7 +56,8 @@ async def call_ai(
         ai_config: AI configuration (retry, timeout, fallback models).
         user_prompt: User-facing prompt text.
         system_prompt: Optional system prompt.
-        budget: Optional session cost budget to record against.
+        budget: Session cost budget to record against. Legacy external
+            callers may pass None to create a fresh unlimited tracker.
         max_tokens: Per-call token cap; defaults to ``ai_config.max_tokens``.
         repo_root: Optional repository root for CLI providers.
         use_one_shot: When True, avoid durable CLI sessions.
@@ -69,6 +70,56 @@ async def call_ai(
             ``ai.transports.cli.max_turns`` overrides it (#2685).
         no_tools: When True the CLI agent gets no tools and answers from the
             prompt alone (#2731). No effect on the API transport.
+
+    Returns:
+        The provider response with usage metadata.
+    """
+    return await _call_ai(
+        provider=provider,
+        ai_config=ai_config,
+        user_prompt=user_prompt,
+        system_prompt=system_prompt,
+        budget=budget if budget is not None else CostBudget(),
+        max_tokens=max_tokens,
+        repo_root=repo_root,
+        use_one_shot=use_one_shot,
+        cli_schema=cli_schema,
+        timeout=timeout,
+        call_kind=call_kind,
+        no_tools=no_tools,
+    )
+
+
+async def _call_ai(
+    *,
+    provider: BaseAIProvider,
+    ai_config: AIConfig,
+    user_prompt: str,
+    system_prompt: str | None,
+    budget: CostBudget,
+    max_tokens: int | None,
+    repo_root: str | None,
+    use_one_shot: bool,
+    cli_schema: CliSchemaRequest | None,
+    timeout: float | None,
+    call_kind: AICallKind,
+    no_tools: bool,
+) -> AIResponse:
+    """Invoke AI with a concrete session budget, including unlimited sessions.
+
+    Args:
+        provider: Configured AI provider instance.
+        ai_config: AI configuration for retry, timeout, and fallback.
+        user_prompt: User-facing prompt text.
+        system_prompt: Optional system prompt.
+        budget: Normalized session cost budget.
+        max_tokens: Optional per-call token cap.
+        repo_root: Optional repository root for CLI providers.
+        use_one_shot: Whether to avoid durable CLI sessions.
+        cli_schema: Optional native CLI JSON schema request.
+        timeout: Optional per-call timeout override in seconds.
+        call_kind: Purpose of the call, determining its CLI turn limit.
+        no_tools: Whether CLI tools are disabled for this call.
 
     Returns:
         The provider response with usage metadata.
@@ -122,7 +173,7 @@ async def call_ai(
                 cost is charged to the budget first (#2685).
         """
         try:
-            if budget is not None and budget.max_cost_usd is not None:
+            if budget.max_cost_usd is not None:
                 input_chars = len(user_prompt) + len(system_prompt or "")
                 estimate = estimate_cost_with_floor(
                     provider.model_name,
@@ -148,11 +199,10 @@ async def call_ai(
                 output_tokens=exc.output_tokens,
                 reported=exc.cost_estimate,
             )
-            if budget is not None and exc.cost_estimate:
+            if exc.cost_estimate:
                 budget.record(exc.cost_estimate)
             raise
-        if budget is not None:
-            budget.record(response.cost_estimate)
+        budget.record(response.cost_estimate)
         # The one seam every provider call crosses (ADR-0008, invariant 2),
         # so the run's model ledger sees each completed call once (#2867).
         record_response(response)
