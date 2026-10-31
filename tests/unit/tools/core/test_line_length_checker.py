@@ -13,7 +13,9 @@ import pytest
 from assertpy import assert_that
 
 from lintro.tools.core.line_length_checker import (
+    LineLengthCheckUnavailableError,
     LineLengthViolation,
+    RuffNotFoundError,
     check_line_length_violations,
 )
 
@@ -117,12 +119,15 @@ def test_check_line_length_empty_files_returns_empty_list() -> None:
     assert_that(result).is_empty()
 
 
-def test_check_line_length_ruff_not_available_returns_empty() -> None:
-    """Test that missing ruff returns empty violations without error."""
-    with patch("shutil.which", return_value=None) as mock_which:
-        result = check_line_length_violations(files=["test.py"])
-        assert_that(result).is_empty()
-        mock_which.assert_called_once_with("ruff")
+def test_check_line_length_ruff_not_available_is_explicit() -> None:
+    """Distinguish an absent optional Ruff from a measured empty report."""
+    with (
+        patch("shutil.which", return_value=None),
+        pytest.raises(RuffNotFoundError) as exc_info,
+    ):
+        check_line_length_violations(files=["test.py"])
+    assert_that(str(exc_info.value)).contains("Ruff not found in PATH")
+    assert_that(exc_info.value.timed_out).is_false()
 
 
 def test_check_line_length_successful_detection(
@@ -175,55 +180,89 @@ def test_check_line_length_custom_line_length(
 
 
 @pytest.mark.parametrize(
-    "exception,description",
+    "exception,reason,timed_out",
     [
-        (subprocess.TimeoutExpired(cmd=["ruff"], timeout=30), "timeout"),
-        (FileNotFoundError("ruff not found"), "file_not_found"),
-        (RuntimeError("Unexpected error"), "generic_error"),
+        (
+            subprocess.TimeoutExpired(cmd=["ruff"], timeout=30),
+            "timed out after 30s",
+            True,
+        ),
+        (FileNotFoundError("ruff disappeared"), "ruff disappeared", False),
+        (OSError("Permission denied"), "Permission denied", False),
+        (RuntimeError("Unexpected error"), "Unexpected error", False),
     ],
-    ids=["timeout", "file_not_found", "generic_error"],
+    ids=["timeout", "file_not_found", "os_error", "generic_error"],
 )
-def test_check_line_length_exception_returns_empty(
+def test_check_line_length_execution_failure_is_unavailable(
     mock_ruff_available: MagicMock,
     exception: Exception,
-    description: str,
+    reason: str,
+    timed_out: bool,
 ) -> None:
-    """Test that various exceptions return empty list gracefully.
+    """Execution errors cannot masquerade as zero E501 findings.
 
     Args:
         mock_ruff_available: Mock fixture ensuring ruff is available.
         exception: The exception to be raised by subprocess.run.
-        description: Description of the test case.
+        reason: Visible explanation of the failure.
+        timed_out: Expected timeout status.
     """
-    with patch("subprocess.run", side_effect=exception):
-        result = check_line_length_violations(files=["test.py"], timeout=30)
-        assert_that(result).is_empty()
+    with (
+        patch("subprocess.run", side_effect=exception),
+        pytest.raises(LineLengthCheckUnavailableError) as exc_info,
+    ):
+        check_line_length_violations(files=["test.py"], timeout=30)
+    assert_that(str(exc_info.value)).contains(reason)
+    assert_that(exc_info.value.timed_out).is_equal_to(timed_out)
+    assert_that(isinstance(exc_info.value, RuffNotFoundError)).is_false()
 
 
 @pytest.mark.parametrize(
-    "stdout,description",
+    "stdout",
     [
-        ("not valid json", "invalid_json"),
-        ("", "empty_stdout"),
+        "not valid json",
+        "",
+        "null",
+        "{}",
+        '["invalid diagnostic"]',
+        '[{"location": null}]',
     ],
-    ids=["invalid_json", "empty_stdout"],
+    ids=["invalid_json", "empty_stdout", "null", "object", "item", "location"],
 )
-def test_check_line_length_invalid_output_returns_empty(
+def test_check_line_length_invalid_output_is_not_a_measurement(
     mock_ruff_available: MagicMock,
     stdout: str,
-    description: str,
 ) -> None:
-    """Test that invalid/empty stdout returns empty list gracefully.
+    """Only a valid diagnostic array can report zero findings.
 
     Args:
         mock_ruff_available: Mock fixture ensuring ruff is available.
         stdout: The stdout output from subprocess.run.
-        description: Description of the test case.
     """
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(stdout=stdout, returncode=1)
-        result = check_line_length_violations(files=["test.py"])
-        assert_that(result).is_empty()
+    with (
+        patch("subprocess.run", return_value=MagicMock(stdout=stdout, returncode=1)),
+        pytest.raises(LineLengthCheckUnavailableError) as exc_info,
+    ):
+        check_line_length_violations(files=["test.py"])
+    assert_that(str(exc_info.value)).contains("Invalid Ruff JSON report")
+    assert_that(exc_info.value.timed_out).is_false()
+
+
+def test_check_line_length_failed_exit_rejects_even_empty_json(
+    mock_ruff_available: MagicMock,
+) -> None:
+    """A Ruff execution error takes precedence over an empty report.
+
+    Args:
+        mock_ruff_available: Mock fixture ensuring ruff is available.
+    """
+    process = subprocess.CompletedProcess(["ruff"], 2, "[]", "invalid configuration")
+    with (
+        patch("subprocess.run", return_value=process),
+        pytest.raises(LineLengthCheckUnavailableError) as exc_info,
+    ):
+        check_line_length_violations(files=["test.py"])
+    assert_that(str(exc_info.value)).contains("code 2", "invalid configuration")
 
 
 def test_check_line_length_relative_paths_converted_to_absolute(
