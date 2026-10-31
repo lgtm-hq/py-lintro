@@ -21,6 +21,7 @@ from typing import Any
 
 from lintro.config.config_loader import (
     EXTERNALLY_HANDLED_SECTIONS,
+    MAPPING_SECTIONS,
     _convert_pyproject_to_config,
     _find_config_file,
     _pyproject_lintro_catalog,
@@ -68,20 +69,6 @@ KNOWN_TOOL_KEYS: frozenset[str] = frozenset(LintroToolConfig.model_fields)
 KNOWN_REVIEW_KEYS: frozenset[str] = frozenset(ReviewConfig.model_fields)
 KNOWN_OUTPUT_KEYS: frozenset[str] = frozenset(OutputConfig.model_fields)
 KNOWN_WATCH_KEYS: frozenset[str] = frozenset(WatchConfig.model_fields)
-
-# Sections the loader requires to be mappings when explicitly provided.
-# Check them before typed parsing so invalid values have a section location.
-MAPPING_SECTIONS: tuple[str, ...] = (
-    "enforce",
-    "execution",
-    "defaults",
-    "tools",
-    "ai",
-    "review",
-    "output",
-    "watch",
-    "deps",
-)
 
 # Deprecated option names mapped to their modern replacement.
 DEPRECATED_KEYS: dict[str, str] = {
@@ -386,8 +373,8 @@ def _not_found_result(
     )
 
 
-def _is_loader_ignored_yaml(parsed: Any) -> bool:
-    """Return whether ``load_config`` treats this YAML document as not found.
+def _is_empty_mapping(parsed: Any) -> bool:
+    """Return whether the parsed YAML document is an empty mapping.
 
     Only an empty mapping falls through to ``[tool.lintro]``. Non-mapping
     documents, including null, are errors in both validation and loading.
@@ -401,7 +388,7 @@ def _is_loader_ignored_yaml(parsed: Any) -> bool:
     return isinstance(parsed, dict) and not parsed
 
 
-def _empty_yaml_error(config_path: Path) -> ValidationMessage:
+def _empty_mapping_error(config_path: Path) -> ValidationMessage:
     """Build the error for an empty YAML mapping given as an explicit path.
 
     Args:
@@ -736,9 +723,9 @@ def validate_config_file(path: Path | str | None = None) -> ValidationResult:
         return result
     parsed, is_pyproject = parsed_pair
 
-    if not is_pyproject and _is_loader_ignored_yaml(parsed):
+    if not is_pyproject and _is_empty_mapping(parsed):
         if explicit:
-            result.errors.append(_empty_yaml_error(config_path))
+            result.errors.append(_empty_mapping_error(config_path))
             return result
         # Auto-detect follows the runtime fallback for an empty mapping.
         result.warnings.append(

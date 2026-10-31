@@ -53,6 +53,19 @@ LINTRO_CONFIG_FILENAMES = [
     "lintro-config.yml",
 ]
 
+# Sections that must be mappings in each source, before any tier is merged.
+MAPPING_SECTIONS: tuple[str, ...] = (
+    "enforce",
+    "execution",
+    "defaults",
+    "tools",
+    "ai",
+    "review",
+    "output",
+    "watch",
+    "deps",
+)
+
 # Config sections that are valid in both ``.lintro-config.yaml`` and
 # ``[tool.lintro]`` but are parsed by other loaders: ``module_size`` by
 # ``lintro.utils.config``, ``licenses`` by ``lintro.config.licenses_config``,
@@ -1314,6 +1327,12 @@ def load_config(
                     "Consider migrating to .lintro-config.yaml",
                 )
 
+        # Validate each source before merging: a project mapping must not hide
+        # an invalid global section by replacing it.
+        for source_data in (global_data, project_data):
+            for section in MAPPING_SECTIONS:
+                _require_mapping_section(data=source_data, section=section)
+
         # Tool names are case-insensitive, so both tiers must agree on one key per
         # tool before merging or tracking contributions.
         global_data = _with_normalized_tool_keys(global_data)
@@ -1321,8 +1340,8 @@ def load_config(
 
         # Deep-merge: global config is the base, project config overrides per key.
         data = _deep_merge(base=global_data, override=project_data)
-        # Do not coerce missing/null ``tools`` to ``{}`` — a YAML-null
-        # ``tools:`` must still fail closed in ``build_config_from_dict``.
+        # Keep omitted ``tools`` distinct from an explicitly empty mapping for
+        # tool enablement and contribution tracking.
         global_tools = global_data.get("tools")
         project_tools = project_data.get("tools")
         if isinstance(global_tools, dict) and isinstance(project_tools, dict):

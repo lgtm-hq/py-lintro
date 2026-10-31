@@ -320,7 +320,14 @@ def test_pyproject_rejects_non_mapping_sections(
     section: str,
     raw_value: str,
 ) -> None:
-    """Pyproject conversion must preserve invalid sections for validation."""
+    """Pyproject conversion must preserve invalid sections for validation.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+        monkeypatch: Pytest monkeypatch fixture.
+        section: Top-level section that must be a mapping.
+        raw_value: TOML spelling of an invalid section value.
+    """
     (tmp_path / "pyproject.toml").write_text(
         f"[tool.lintro]\n{section} = {raw_value}\n",
         encoding="utf-8",
@@ -378,6 +385,35 @@ def test_non_mapping_document_does_not_fall_back_to_pyproject(
     assert_that(load_config).raises(ConfigurationError).when_called_with(
         config_path=config_file if explicit_path else None,
     ).contains("must be a mapping").contains(str(config_file))
+
+
+@pytest.mark.parametrize("fallback_source", ["search", "pyproject"])
+def test_empty_mapping_document_preserves_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fallback_source: str,
+) -> None:
+    """An explicit empty mapping still searches YAML before pyproject fallback.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+        monkeypatch: Pytest monkeypatch fixture.
+        fallback_source: Source that supplies the effective configuration.
+    """
+    empty_file = tmp_path / "empty.yaml"
+    empty_file.write_text("{}\n", encoding="utf-8")
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("[tool.lintro]\nfail_fast = true\n", encoding="utf-8")
+    expected_path = pyproject
+    if fallback_source == "search":
+        expected_path = tmp_path / ".lintro-config.yaml"
+        expected_path.write_text("execution: {fail_fast: false}\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    config = load_config(config_path=empty_file)
+
+    assert_that(config.execution.fail_fast).is_equal_to(fallback_source == "pyproject")
+    assert_that(config.config_path).is_equal_to(str(expected_path.resolve()))
 
 
 def test_load_config_null_tool_raises_configuration_error(tmp_path: Path) -> None:

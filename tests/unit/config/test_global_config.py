@@ -27,7 +27,20 @@ from click.testing import CliRunner
 
 from lintro.cli import cli
 from lintro.config.config_loader import clear_config_cache, load_config
+from lintro.config.lintro_config import LintroConfig
 from lintro.exceptions.errors import ConfigurationError
+
+MAPPING_SECTIONS = (
+    "enforce",
+    "execution",
+    "defaults",
+    "tools",
+    "ai",
+    "review",
+    "output",
+    "watch",
+    "deps",
+)
 
 
 @pytest.fixture
@@ -797,14 +810,21 @@ def test_load_config_rejects_non_mapping_global_document(
     ).contains("must be a mapping").contains(str(global_file))
 
 
-@pytest.mark.parametrize("section", ["ai", "review", "output", "watch", "deps"])
+@pytest.mark.parametrize("section", MAPPING_SECTIONS)
 def test_project_null_section_does_not_restore_global_defaults(
     isolated_home: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     section: str,
 ) -> None:
-    """A project null must fail even when its global section is a mapping."""
+    """A project null must fail even when its global section is a mapping.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+        section: Section that must remain a mapping in each source.
+    """
     (isolated_home / ".lintro-config.yaml").write_text(
         f"{section}: {{}}\n",
         encoding="utf-8",
@@ -818,6 +838,108 @@ def test_project_null_section_does_not_restore_global_defaults(
     assert_that(load_config).raises(ConfigurationError).when_called_with(
         allow_pyproject_fallback=False,
     ).contains(f"{section} must be a mapping, got null")
+
+
+@pytest.mark.parametrize("section", MAPPING_SECTIONS)
+@pytest.mark.parametrize("project_source", ["discovered", "explicit", "pyproject"])
+@pytest.mark.parametrize(
+    ("raw_value", "actual"),
+    [
+        ("", "null"),
+        ("null", "null"),
+        ("~", "null"),
+        ("false", "bool"),
+        ("[]", "list"),
+        ('""', "str"),
+        ("0", "int"),
+        ("invalid", "str"),
+    ],
+)
+def test_project_mapping_cannot_hide_invalid_global_section(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    section: str,
+    project_source: str,
+    raw_value: str,
+    actual: str,
+) -> None:
+    """Validate global section types before any project mapping replaces them.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+        section: Section that must remain a mapping in each source.
+        project_source: How the project overlay is selected.
+        raw_value: YAML spelling of the invalid global section.
+        actual: Type named in the error.
+    """
+    (isolated_home / ".lintro-config.yaml").write_text(
+        f"{section}: {raw_value}\n",
+        encoding="utf-8",
+    )
+    project = _make_project(tmp_path, monkeypatch)
+    config_path = None
+    if project_source == "pyproject":
+        (project / "pyproject.toml").write_text(
+            f"[tool.lintro.{section}]\n",
+            encoding="utf-8",
+        )
+    else:
+        project_file = project / (
+            "explicit.yaml" if project_source == "explicit" else ".lintro-config.yaml"
+        )
+        project_file.write_text(f"{section}: {{}}\n", encoding="utf-8")
+        if project_source == "explicit":
+            config_path = project_file
+
+    with pytest.raises(
+        ConfigurationError,
+        match=f"{section} must be a mapping, got {actual}",
+    ):
+        load_config(config_path=config_path)
+
+
+@pytest.mark.parametrize("global_shape", ["absent", "omitted", "empty_sections"])
+@pytest.mark.parametrize("project_shape", ["absent", "omitted", "empty_sections"])
+def test_valid_empty_sources_keep_defaults(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    global_shape: str,
+    project_shape: str,
+) -> None:
+    """Missing files, omitted sections and empty section mappings stay valid.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+        global_shape: Valid shape of the global source.
+        project_shape: Valid shape of the project source.
+    """
+    project = _make_project(tmp_path, monkeypatch)
+    for directory, shape in (
+        (isolated_home, global_shape),
+        (project, project_shape),
+    ):
+        if shape != "absent":
+            content = (
+                "\n".join(f"{section}: {{}}" for section in MAPPING_SECTIONS)
+                if shape == "empty_sections"
+                else "{}\n"
+            )
+            (directory / ".lintro-config.yaml").write_text(content, encoding="utf-8")
+
+    config = load_config(allow_pyproject_fallback=False)
+
+    metadata = {"config_path", "global_config_path", "global_contributed_keys"}
+    assert_that(config.model_dump(exclude=metadata)).is_equal_to(
+        LintroConfig().model_dump(exclude=metadata),
+    )
+    assert_that(config.global_contributed_keys).is_empty()
+    assert_that(config.global_config_path is None).is_equal_to(global_shape == "absent")
 
 
 # =============================================================================

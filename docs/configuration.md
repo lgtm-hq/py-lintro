@@ -42,12 +42,18 @@ Omitting a section uses its defaults. When present, each of `enforce`, `executio
 Use an empty mapping such as `ai: {}` for default settings. Explicit nulls (`ai: null`,
 `ai: ~`, or a bare `ai:`), lists, and scalar section values raise `ConfigurationError`.
 This applies to both project and global config, and to `[tool.lintro]` sections in
-`pyproject.toml` (TOML has no null value).
+`pyproject.toml` (TOML has no null value). Each source is checked before merging, so
+a project mapping cannot hide an invalid global section.
 
 A YAML config document must also be a mapping. A top-level list, scalar, null, or an
 empty or comment-only file raises `ConfigurationError` instead of silently loading
 defaults or falling back to `pyproject.toml`. An empty mapping document (`{}`) retains
 the existing fallback behavior.
+
+**Migration:** Empty and comment-only YAML files that previously loaded defaults now
+raise an error. Remove an unused config file or replace its contents with `{}` to
+keep the fallback behavior. Replace bare section keys such as `ai:` with `ai: {}`
+when default section settings are intended.
 
 ### Tiered Configuration Flow
 
@@ -715,6 +721,10 @@ Resolution rules:
   of how loading was enabled.
 - With no allowlist configured, enabling loads all discovered `lintro.plugins` entry
   points — use this only in fully trusted environments.
+- A global or project YAML file that cannot be read or parsed, or whose root is not a
+  mapping, disables external plugin loading, even with
+  `LINTRO_ENABLE_EXTERNAL_PLUGINS=1`. This includes empty and comment-only files. An
+  empty mapping (`{}`) is valid.
 
 ### Pre-Execution Summary
 
