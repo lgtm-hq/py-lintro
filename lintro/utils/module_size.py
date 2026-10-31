@@ -10,8 +10,10 @@ Behaviour:
     * Counts physical lines per Python module under the scanned paths.
     * Emits a warning for any module whose line count exceeds the configured
       threshold and is not present in the baseline allowlist.
-    * Never fails the build. The gate is warn-level only so it can land green
-      while the historical violators are burned down.
+    * Size violations never fail the build. The gate is warn-level only so it
+      can land green while the historical violators are burned down.
+    * Fails with the file path and reason when a module cannot be read or
+      decoded, because its size could not be measured.
 
 Ratchet-down plan:
     The threshold starts at ``DEFAULT_MODULE_SIZE_THRESHOLD`` (800 lines) with
@@ -158,14 +160,18 @@ def count_module_lines(
         file_path: Path to the file to measure.
 
     Returns:
-        int: Number of physical lines in the file. Returns 0 when the file
-        cannot be read.
+        int: Number of physical lines in the file.
+
+    Raises:
+        OSError: If the file cannot be read or decoded as UTF-8. The message
+            includes the file path and the underlying reason.
     """
     try:
-        with open(file_path, encoding="utf-8", errors="replace") as handle:
+        with open(file_path, encoding="utf-8") as handle:
             return sum(1 for _ in handle)
-    except OSError:
-        return 0
+    except (OSError, UnicodeDecodeError) as exc:
+        msg = f"Cannot measure module size for {file_path}: {exc}"
+        raise OSError(msg) from exc
 
 
 def _normalize(path: str) -> str:
@@ -216,7 +222,8 @@ def find_oversized_modules(
     """Find Python modules that exceed the module-size threshold.
 
     Baselined modules are skipped even when they exceed the threshold, so the
-    gate can land green while historical violators are burned down.
+    gate can land green while historical violators are burned down. Read or
+    decoding failures propagate with the file path and underlying reason.
 
     Args:
         paths: Files or directories to scan for Python modules.
@@ -229,6 +236,7 @@ def find_oversized_modules(
     Returns:
         list[OversizedModule]: Offending modules sorted by descending line
         count, then path. Empty when nothing exceeds the threshold.
+
     """
     baseline_set = frozenset(_normalize(entry) for entry in baseline)
 

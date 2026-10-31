@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from unittest.mock import patch
 
+import pytest
 from assertpy import assert_that
 
+from lintro.enums.action import Action
+from lintro.utils import gates
+from lintro.utils.console import ThreadSafeConsoleLogger
 from lintro.utils.module_size import (
     DEFAULT_MODULE_SIZE_BASELINE,
     DEFAULT_MODULE_SIZE_EXCLUDES,
@@ -54,6 +59,98 @@ def test_count_module_lines_counts_physical_lines(
     module = _write_module(directory=tmp_path, name="counted.py", line_count=42)
 
     assert_that(count_module_lines(file_path=str(module))).is_equal_to(42)
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [("", 0), ("x = 1", 1), ("# café\nx = 1\n", 2)],
+)
+def test_count_module_lines_handles_valid_text(
+    tmp_path: Path,
+    content: str,
+    expected: int,
+) -> None:
+    """Empty files, unterminated lines and valid UTF-8 are measured.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        content: Module contents to measure.
+        expected: Expected physical line count.
+    """
+    module = tmp_path / "valid.py"
+    module.write_text(content, encoding="utf-8")
+
+    assert_that(count_module_lines(file_path=str(module))).is_equal_to(expected)
+
+
+@pytest.mark.parametrize(
+    "read_error",
+    [PermissionError("permission denied"), OSError("disk read failed")],
+    ids=["permission", "io"],
+)
+@pytest.mark.parametrize("output_format", ["plain", "json"])
+def test_unreadable_module_fails_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    read_error: OSError,
+    output_format: str,
+) -> None:
+    """Read failures abort the gate with the file and reason in all modes.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+        read_error: Filesystem failure raised while reading a discovered module.
+        output_format: Console or machine-readable output mode.
+    """
+    module = _write_module(directory=tmp_path, name="unreadable.py", line_count=2)
+    monkeypatch.setattr(gates, "load_module_size_config", lambda: {})
+
+    with (
+        patch("lintro.utils.module_size.open", side_effect=read_error),
+        pytest.raises(OSError) as raised,
+    ):
+        gates.execute_gates(
+            action=Action.CHECK,
+            paths=[str(tmp_path)],
+            exclude=None,
+            include_venv=False,
+            output_format=output_format,
+            logger=ThreadSafeConsoleLogger(),
+            all_results=[],
+            total_issues=0,
+        )
+
+    assert_that(str(raised.value)).contains(str(module), str(read_error))
+
+
+def test_invalid_utf8_module_reports_decoding_failure(tmp_path: Path) -> None:
+    """Invalid UTF-8 cannot be counted as a small, readable module.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    module = tmp_path / "invalid.py"
+    module.write_bytes(b"# valid first line\n\xff\n")
+
+    with pytest.raises(OSError) as raised:
+        find_oversized_modules(paths=[str(tmp_path)], baseline=())
+
+    assert_that(str(raised.value)).contains(str(module), "utf-8", "invalid start byte")
+
+
+def test_count_module_lines_reports_missing_file(tmp_path: Path) -> None:
+    """Direct callers receive an error when a module disappears.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    missing = tmp_path / "missing.py"
+
+    with pytest.raises(OSError) as raised:
+        count_module_lines(file_path=str(missing))
+
+    assert_that(str(raised.value)).contains(str(missing), "No such file")
 
 
 def test_small_module_produces_no_warning(
