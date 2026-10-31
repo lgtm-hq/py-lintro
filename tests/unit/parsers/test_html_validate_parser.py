@@ -5,6 +5,9 @@ and that it extracts rule id, severity, location, selector, and documentation
 URL from real html-validate ``--formatter json`` output.
 """
 
+import json
+
+import pytest
 from assertpy import assert_that
 
 from lintro.enums.severity_level import SeverityLevel
@@ -131,3 +134,30 @@ def test_parse_missing_optional_fields() -> None:
     assert_that(issues[0].column).is_equal_to(0)
     assert_that(issues[0].selector).is_equal_to("")
     assert_that(issues[0].doc_url).is_equal_to("")
+
+
+@pytest.mark.parametrize("value", [None, 42, False, [], {}])
+def test_html_validate_non_string_text_uses_defaults(value: object) -> None:
+    """Invalid JSON text fields never become displayable Python strings."""
+    output = json.dumps(
+        [
+            {
+                "filePath": value,
+                "messages": [
+                    dict.fromkeys(
+                        ["message", "ruleId", "ruleUrl", "selector"],
+                        value,
+                    ),
+                ],
+            },
+        ],
+    )
+    issues = parse_html_validate_output(output)
+
+    assert_that(issues).is_length(1)
+    issue = issues[0]
+    assert_that(
+        (issue.file, issue.message, issue.code, issue.doc_url, issue.selector),
+    ).is_equal_to(
+        ("", "", "", "", ""),
+    )

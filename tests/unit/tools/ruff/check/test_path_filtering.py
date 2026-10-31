@@ -92,8 +92,8 @@ def test_execute_ruff_check_delegates_discovery_to_prepare_execution(
             side_effect=_record_ruff_invocations(commands, working_dirs),
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=[],
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=([], 0),
         ),
     ):
         result = execute_ruff_check(mock_ruff_tool, ["/test/project"])
@@ -134,8 +134,8 @@ def test_execute_ruff_check_converts_paths_to_relative(
             side_effect=_record_ruff_invocations(commands, working_dirs),
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=[],
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=([], 0),
         ),
     ):
         result = execute_ruff_check(mock_ruff_tool, ["/test/project"])
@@ -169,8 +169,8 @@ def test_execute_ruff_check_handles_multiple_directories(
             return_value=subprocess_result(True, "[]"),
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=[],
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=([], 0),
         ),
     ):
         result = execute_ruff_check(mock_ruff_tool, ["/test"])
@@ -202,8 +202,8 @@ def test_execute_ruff_check_uses_absolute_paths_when_no_cwd(
             side_effect=_record_ruff_invocations(commands, working_dirs),
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=[],
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=([], 0),
         ),
     ):
         result = execute_ruff_check(mock_ruff_tool, ["/test/project"])

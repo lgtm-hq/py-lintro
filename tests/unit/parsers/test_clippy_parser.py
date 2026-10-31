@@ -2,9 +2,29 @@
 
 from __future__ import annotations
 
+import json
+
+import pytest
 from assertpy import assert_that
 
 from lintro.parsers.clippy.clippy_parser import parse_clippy_output
+
+
+@pytest.mark.parametrize("value", [None, 42, False, [], {}])
+def test_clippy_non_string_message_is_rejected(value: object) -> None:
+    """A null or malformed message cannot manufacture a Clippy finding."""
+    output = json.dumps(
+        {
+            "reason": "compiler-message",
+            "message": {
+                "code": {"code": "clippy::needless_return"},
+                "message": value,
+                "level": "warning",
+                "spans": [{"file_name": "src/lib.rs", "line_start": 1}],
+            },
+        },
+    )
+    assert_that(parse_clippy_output(output)).is_empty()
 
 
 def test_parse_clippy_output_single_issue() -> None:

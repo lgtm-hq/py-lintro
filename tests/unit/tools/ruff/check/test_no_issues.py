@@ -25,8 +25,8 @@ def test_execute_ruff_check_no_issues_returns_success(
             return_value=subprocess_result(True, "[]"),
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=[],
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=([], 0),
         ),
     ):
         result = execute_ruff_check(mock_ruff_tool, ["/test/project"])
@@ -52,8 +52,8 @@ def test_execute_ruff_check_no_issues_with_format_check(
             return_value=subprocess_result(True, "[]"),
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=[],
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=([], 0),
         ),
         patch(
             "lintro.tools.ruff.check.parse_ruff_format_check_output",

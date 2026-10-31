@@ -33,7 +33,7 @@ from lintro.plugins.file_processor import FileProcessingResult
 
 if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
-    from lintro.plugins.base import BaseToolPlugin, ExecutionContext
+    from lintro.plugins.base import BaseToolPlugin, PreparedExecution
 
 __all__ = [
     "DEFAULT_CHECK_POLICY",
@@ -74,7 +74,7 @@ def check_one_file(
     plugin: BaseToolPlugin,
     cmd: list[str],
     parse: Callable[[str], Sequence[BaseIssue]],
-    timeout: int,
+    timeout: float,
     failure_message: str | None = None,
     issues_imply_failure: bool = False,
     findings_exit_codes: frozenset[int] = frozenset({1}),
@@ -141,7 +141,7 @@ def check_one_file(
 
 
 def run_per_file_check(
-    ctx: ExecutionContext,
+    ctx: PreparedExecution,
     *,
     plugin: BaseToolPlugin,
     command: Callable[[str], list[str]],

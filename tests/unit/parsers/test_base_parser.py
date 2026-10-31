@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import pytest
 from assertpy import assert_that
 
+from lintro.parsers import base_parser
 from lintro.parsers.base_issue import BaseIssue
 from lintro.parsers.base_parser import (
     collect_continuation_lines,
@@ -18,6 +19,31 @@ from lintro.parsers.base_parser import (
     validate_int_field,
     validate_str_field,
 )
+
+
+@pytest.mark.parametrize(
+    ("item", "expected"),
+    [
+        ({}, "fallback"),
+        ({"text": None}, "fallback"),
+        ({"text": 42}, "fallback"),
+        ({"text": False}, "fallback"),
+        ({"text": []}, "fallback"),
+        ({"text": {}}, "fallback"),
+        ({"text": ""}, ""),
+        ({"text": "  café  "}, "  café  "),
+        ({"text": "None"}, "None"),
+    ],
+)
+def test_extract_optional_str_preserves_only_strings(
+    item: dict[str, object],
+    expected: str,
+) -> None:
+    """Optional text uses its default without converting arbitrary values."""
+    assert_that(
+        base_parser.extract_optional_str(item, "text", "fallback"),
+    ).is_equal_to(expected)
+    assert_that(base_parser.extract_optional_str(item, "absent")).is_empty()
 
 
 def test_extract_int_field_first_candidate() -> None:

@@ -22,7 +22,7 @@ from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.typos.typos_issue import TyposIssue
 from lintro.parsers.typos.typos_parser import parse_typos_report
-from lintro.plugins.base import BaseToolPlugin, ExecutionContext
+from lintro.plugins.base import BaseToolPlugin, PreparedExecution
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.argv_batching import argv_cost, chunk_paths
@@ -265,7 +265,7 @@ class TyposPlugin(BaseToolPlugin):
     def _run_batched(
         self,
         files: list[str],
-        ctx: ExecutionContext,
+        ctx: PreparedExecution,
         extra_args: list[str] | None = None,
         stop_on_failure: bool = False,
     ) -> _BatchOutcome:

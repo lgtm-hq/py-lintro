@@ -63,9 +63,9 @@ class PytestPlugin(BaseToolPlugin):
 
     # Pytest-specific components
     pytest_config: PytestConfiguration = field(default_factory=PytestConfiguration)
-    executor: PytestExecutor | None = field(default=None, init=False)
-    result_processor: PytestResultProcessor | None = field(default=None, init=False)
-    error_handler: PytestErrorHandler | None = field(default=None, init=False)
+    executor: PytestExecutor = field(init=False)
+    result_processor: PytestResultProcessor = field(init=False)
+    error_handler: PytestErrorHandler = field(init=False)
 
     # Internal storage for file patterns from config
     _file_patterns_from_config: list[str] = field(default_factory=list, init=False)
@@ -187,13 +187,11 @@ class PytestPlugin(BaseToolPlugin):
 
         self.pytest_config = copy.deepcopy(self.pytest_config)
 
-        if self.executor is not None:
-            self.executor = copy.copy(self.executor)
-            self.executor.config = self.pytest_config
-            self.executor.tool = self
-        if self.result_processor is not None:
-            self.result_processor = copy.copy(self.result_processor)
-            self.result_processor.config = self.pytest_config
+        self.executor = copy.copy(self.executor)
+        self.executor.config = self.pytest_config
+        self.executor.tool = self
+        self.result_processor = copy.copy(self.result_processor)
+        self.result_processor.config = self.pytest_config
         # error_handler holds only the immutable tool name; safe to share.
 
     def _reset_execution_state(self) -> None:
@@ -211,10 +209,8 @@ class PytestPlugin(BaseToolPlugin):
 
         self.pytest_config = PytestConfiguration()
 
-        if self.executor is not None:
-            self.executor.config = self.pytest_config
-        if self.result_processor is not None:
-            self.result_processor.config = self.pytest_config
+        self.executor.config = self.pytest_config
+        self.result_processor.config = self.pytest_config
         # error_handler holds only the immutable tool name; safe to share.
 
     def _resolve_timeout_seconds(self, options: dict[str, Any]) -> int | float:
@@ -355,14 +351,6 @@ class PytestPlugin(BaseToolPlugin):
         logger.debug(f"Target files: {target_files}")
 
         # Prepare test execution using executor
-        if self.executor is None:
-            return ToolResult(
-                name=self.definition.name,
-                success=False,
-                output="Pytest executor not initialized",
-                issues_count=0,
-            )
-
         try:
             # Collection runs inside the timeout handler: it is a pytest
             # subprocess held to the same deadline, so a collection that times
@@ -401,14 +389,6 @@ class PytestPlugin(BaseToolPlugin):
             )
 
             # Process results using result processor
-            if self.result_processor is None:
-                return ToolResult(
-                    name=self.definition.name,
-                    success=False,
-                    output="Pytest result processor not initialized",
-                    issues_count=0,
-                )
-
             summary_data, all_issues = self.result_processor.process_test_results(
                 output=output,
                 return_code=return_code,
@@ -425,28 +405,12 @@ class PytestPlugin(BaseToolPlugin):
             )
 
         except subprocess.TimeoutExpired:
-            if self.error_handler is None:
-                return ToolResult(
-                    name=self.definition.name,
-                    success=False,
-                    output=f"Pytest execution timed out ({timeout_val}s)",
-                    issues_count=0,
-                    timed_out=True,
-                )
-
             return self.error_handler.handle_timeout_error(
                 timeout_val,
                 cmd,
                 initial_count=0,
             )
         except (OSError, ValueError, RuntimeError) as e:
-            if self.error_handler is None:
-                return ToolResult(
-                    name=self.definition.name,
-                    success=False,
-                    output=f"Pytest execution failed: {e}",
-                    issues_count=0,
-                )
             return self.error_handler.handle_execution_error(e, cmd)
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

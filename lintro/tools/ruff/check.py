@@ -14,7 +14,7 @@ from lintro.parsers.ruff.ruff_format_issue import RuffFormatIssue
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.parsers.ruff.ruff_parser import (
     parse_ruff_format_check_output,
-    parse_ruff_output,
+    parse_ruff_output_with_stats,
 )
 from lintro.tools.core.timeout_utils import (
     create_timeout_result,
@@ -169,9 +169,14 @@ def execute_ruff_check(
         # formatted into tables, so no need to show it in console warnings
         logger.debug(f"[ruff] check full output:\n{output_lint}")
 
-    lint_issues = parse_ruff_output(output=lint_process.stdout)
+    lint_issues, parse_failures = parse_ruff_output_with_stats(
+        output=lint_process.stdout,
+    )
     lint_issues_count: int = len(lint_issues)
-    parse_failures = _lint_parse_failures(lint_process.stdout, lint_issues)
+    parse_failures = max(
+        parse_failures,
+        _lint_parse_failures(lint_process.stdout, lint_issues),
+    )
     lint_complete = not parse_failures and (
         success_lint or (lint_process.returncode == 1 and bool(lint_issues))
     )
@@ -209,6 +214,7 @@ def execute_ruff_check(
                 output=timeout_result.output,
                 issues_count=lint_issues_count + timeout_result.issues_count,
                 issues=lint_issues + timeout_result.issues,
+                parse_failures_count=parse_failures,
             )
 
         success_format, output_format = format_process.success, format_process.output
@@ -237,8 +243,12 @@ def execute_ruff_check(
     complete = lint_complete and format_complete
     success: bool = success_lint and success_format and issues_count == 0 and complete
 
-    # Diagnostic logging for the "ERROR" case (subprocess failed but no issues parsed)
-    if not success and issues_count == 0:
+    if parse_failures:
+        logger.warning(
+            f"ruff: {parse_failures} diagnostic record(s) could not be parsed",
+        )
+    # A failed process with no findings needs an execution-error diagnostic.
+    elif not success and issues_count == 0:
         logger.warning(
             f"ruff subprocess failed (lint={success_lint}, format={success_format}) "
             f"but no issues were parsed - this indicates a ruff execution error",

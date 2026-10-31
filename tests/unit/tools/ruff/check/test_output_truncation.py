@@ -44,8 +44,8 @@ def test_check_failure_logs_output_to_debug_only(
             return_value=subprocess_result(False, long_output),
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=[],
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=([], 0),
         ),
     ):
         execute_ruff_check(mock_ruff_tool, ["/test/project"])
@@ -86,8 +86,8 @@ def test_format_check_failure_logs_output_to_debug_only(
             ],
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=[],
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=([], 0),
         ),
         patch(
             "lintro.tools.ruff.check.parse_ruff_format_check_output",
@@ -126,8 +126,8 @@ def test_check_success_does_not_log_output(
             return_value=subprocess_result(True, "[]"),
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=[],
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=([], 0),
         ),
     ):
         result = execute_ruff_check(mock_ruff_tool, ["/test/project"])

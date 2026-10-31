@@ -36,7 +36,7 @@ from lintro.tools.core.check_runner import check_one_file
 
 if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
-    from lintro.plugins.base import BaseToolPlugin, ExecutionContext
+    from lintro.plugins.base import BaseToolPlugin, PreparedExecution
 
 __all__ = [
     "PerFileFixPolicy",
@@ -146,7 +146,7 @@ def _run_check_step(
     cmd: list[str],
     parse: Callable[[str], Sequence[BaseIssue]],
     failure_message: str,
-    timeout: int,
+    timeout: float,
 ) -> FileProcessingResult:
     """Run one check-style invocation and classify its outcome.
 
@@ -217,7 +217,7 @@ def _verify_and_score(
     check_cmd: list[str],
     parse: Callable[[str], Sequence[BaseIssue]],
     policy: PerFileFixPolicy,
-    timeout: int,
+    timeout: float,
     initial_issues: list[BaseIssue],
     fix_success: bool,
     fix_output: str,
@@ -292,7 +292,7 @@ def _fix_one_file(
     fix_command: Callable[[str], list[str]],
     parse: Callable[[str], Sequence[BaseIssue]],
     policy: PerFileFixPolicy,
-    timeout: int,
+    timeout: float,
 ) -> FileFixResult:
     """Check, fix and (optionally) verify a single file.
 
@@ -404,7 +404,7 @@ def _build_summary(
 
 
 def run_per_file_fix(
-    ctx: ExecutionContext,
+    ctx: PreparedExecution,
     *,
     plugin: BaseToolPlugin,
     check_command: Callable[[str], list[str]],

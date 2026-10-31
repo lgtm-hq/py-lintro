@@ -34,6 +34,7 @@ from lintro.ai.fix_context import (
 )
 from lintro.ai.fix_params import FixGenParams, _no_progress
 from lintro.ai.fix_parsing import (
+    AIFixParseError,
     parse_batch_response,
     parse_fix_response,
 )
@@ -177,6 +178,11 @@ async def _call_and_cache_fix(
 
     except (KeyboardInterrupt, SystemExit):
         raise
+    except AIFixParseError as exc:
+        logger.debug(
+            f"AI fix generation failed for {issue.file}:{issue.line}: "
+            f"malformed response ({exc})",
+        )
     except Exception as exc:
         logger.debug(
             f"AI fix generation failed for {issue.file}:{issue.line} "
@@ -306,8 +312,9 @@ async def _generate_batch_fixes(
     """Generate fixes for multiple issues in one file via a batch prompt.
 
     Returns a list of suggestions on success, or None if the batch prompt
-    does not fit within the token budget or the response cannot be parsed
-    (signalling the caller to fall back to single-issue mode).
+    does not fit within the token budget, the response cannot be parsed, or
+    the suggestion count differs from the issue count (signalling the caller
+    to fall back to single-issue mode).
 
     Args:
         file_path: Resolved absolute file path.
@@ -385,13 +392,6 @@ async def _generate_batch_fixes(
             batch=True,
         )
         suggestions = parse_batch_response(response.content, file_path)
-        if not suggestions:
-            logger.debug(
-                f"Batch response parse returned no suggestions for {file_path}, "
-                f"falling back to single-issue mode",
-            )
-            return None
-
         if len(suggestions) != len(file_issues):
             logger.debug(
                 f"Batch response count mismatch for {file_path}: "
@@ -418,6 +418,12 @@ async def _generate_batch_fixes(
 
     except (KeyboardInterrupt, SystemExit):
         raise
+    except AIFixParseError as exc:
+        logger.debug(
+            f"Batch AI fix generation failed for {file_path}: "
+            f"malformed response ({exc}), falling back to single-issue mode",
+        )
+        return None
     except Exception as exc:
         logger.debug(
             f"Batch AI fix generation failed for {file_path} "

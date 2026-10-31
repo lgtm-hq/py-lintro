@@ -22,7 +22,7 @@ def test_execute_ruff_check_parses_json_output_correctly(
         mock_ruff_tool: Mock RuffTool instance for testing.
         sample_ruff_json_output: Sample JSON output from ruff.
     """
-    from lintro.parsers.ruff.ruff_parser import parse_ruff_output
+    from lintro.parsers.ruff.ruff_parser import parse_ruff_output_with_stats
 
     with (
         patch(
@@ -30,8 +30,8 @@ def test_execute_ruff_check_parses_json_output_correctly(
             return_value=subprocess_result(False, sample_ruff_json_output),
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            side_effect=parse_ruff_output,
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            side_effect=parse_ruff_output_with_stats,
         ),
     ):
         result = execute_ruff_check(mock_ruff_tool, ["/test/project"])
@@ -70,8 +70,8 @@ def test_execute_ruff_check_empty_json_output(
             return_value=subprocess_result(True, sample_ruff_json_empty_output),
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=[],
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=([], 0),
         ),
     ):
         result = execute_ruff_check(mock_ruff_tool, ["/test/project"])
@@ -96,8 +96,8 @@ def test_execute_ruff_check_parses_format_check_output(
 
     with (
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=[],
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=([], 0),
         ),
         patch(
             "lintro.tools.ruff.check.parse_ruff_format_check_output",

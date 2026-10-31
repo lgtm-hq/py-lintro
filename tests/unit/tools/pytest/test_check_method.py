@@ -111,61 +111,6 @@ def test_check_failure_with_mocked_subprocess(
         assert_that(result.issues_count).is_greater_than(0)
 
 
-def test_check_handles_executor_not_initialized(
-    sample_pytest_plugin: PytestPlugin,
-) -> None:
-    """Check handles case when executor is None.
-
-    Args:
-        sample_pytest_plugin: The PytestPlugin instance to test.
-    """
-    sample_pytest_plugin.executor = None
-
-    with patch.object(
-        sample_pytest_plugin,
-        "_verify_tool_version",
-        return_value=None,
-    ):
-        result = sample_pytest_plugin.check(["tests"], {})
-
-        assert_that(result.success).is_false()
-        assert_that(result.output).contains("not initialized")
-
-
-def test_check_handles_result_processor_not_initialized(
-    sample_pytest_plugin: PytestPlugin,
-) -> None:
-    """Check handles case when result_processor is None.
-
-    Args:
-        sample_pytest_plugin: The PytestPlugin instance to test.
-    """
-    sample_pytest_plugin.result_processor = None
-
-    with (
-        patch.object(
-            sample_pytest_plugin,
-            "_verify_tool_version",
-            return_value=None,
-        ),
-        patch.object(
-            sample_pytest_plugin.executor,
-            "prepare_test_execution",
-            return_value=10,
-        ),
-        patch.object(
-            sample_pytest_plugin.executor,
-            "execute_tests",
-            return_value=(True, "10 passed", 0),
-        ),
-        patch.object(sample_pytest_plugin, "_parse_output", return_value=[]),
-    ):
-        result = sample_pytest_plugin.check(["tests"], {})
-
-        assert_that(result.success).is_false()
-        assert_that(result.output).contains("not initialized")
-
-
 # =============================================================================
 # Tests for pytest test collection mode
 # =============================================================================
