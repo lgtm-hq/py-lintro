@@ -11,19 +11,18 @@ from lintro.parsers.base_parser import validate_str_field
 from lintro.parsers.cargo_audit.cargo_audit_issue import CargoAuditIssue
 
 
-def _extract_cargo_audit_json(raw_text: str) -> dict[str, Any]:
+def _extract_cargo_audit_json(raw_text: str) -> object:
     """Extract cargo-audit's JSON object from output text.
 
-    This function finds JSON by locating the first '{' and last '}' in the output.
-    This approach works because cargo-audit outputs a single top-level JSON object.
-    It would not work for tools that output multiple JSON objects or have nested
-    structures where the last '}' doesn't correspond to the opening '{'.
+    Parse the whole text first so a valid JSON value retains its top-level type.
+    For output with surrounding text, locate the first '{' and last '}'. This
+    fallback relies on cargo-audit emitting a single JSON object.
 
     Args:
         raw_text: Raw stdout/stderr text from cargo-audit.
 
     Returns:
-        dict[str, Any]: Parsed JSON object.
+        Parsed JSON value, expected to be an object.
 
     Raises:
         json.JSONDecodeError: If JSON cannot be parsed.
@@ -34,10 +33,10 @@ def _extract_cargo_audit_json(raw_text: str) -> dict[str, Any]:
 
     text: str = raw_text.strip()
 
-    # Quick path: if the entire text is JSON
-    if text.startswith("{") and text.endswith("}"):
-        result: dict[str, Any] = json.loads(text)
-        return result
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
 
     # Fallback: find JSON boundaries. This works because cargo-audit outputs
     # a single JSON object, so the first '{' and last '}' delimit it correctly.
@@ -58,10 +57,10 @@ def extract_cargo_audit_payload(output: str | None) -> dict[str, Any] | None:
         output: Raw stdout from ``cargo audit --json``.
 
     Returns:
-        The parsed JSON object, or ``None`` when the output is empty or cannot
-        be parsed as a JSON object. A ``None`` result on non-empty output
-        indicates a parse failure that security callers must treat as a
-        non-clean scan (see #1044).
+        The parsed JSON object with a ``vulnerabilities.list`` list, or ``None``
+        when the output is empty, invalid JSON, or lacks that report schema.
+        A ``None`` result indicates a parse failure that security callers must
+        treat as a non-clean scan (see #1044 and #3003). An empty list is valid.
     """
     if not output or not output.strip():
         return None
@@ -74,6 +73,14 @@ def extract_cargo_audit_payload(output: str | None) -> dict[str, Any] | None:
 
     if not isinstance(data, dict):
         logger.warning("cargo-audit output is not a dictionary")
+        return None
+
+    vulnerabilities = data.get("vulnerabilities")
+    if not isinstance(vulnerabilities, dict) or not isinstance(
+        vulnerabilities.get("list"),
+        list,
+    ):
+        logger.warning("cargo-audit output missing a valid 'vulnerabilities.list' list")
         return None
 
     return data
