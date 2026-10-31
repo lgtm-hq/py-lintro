@@ -70,6 +70,7 @@ def apply_baseline(artifact: RunArtifact, baseline: FingerprintBaseline) -> None
         # Cached text and native raw output still contain acknowledged findings.
         # Execution-error output is kept by the completeness guard above.
         result.formatted_output = None
+        result.output = None
         if artifact.action == Action.FIX:
             result.initial_issues = detected
             before = len(detected)
@@ -80,8 +81,6 @@ def apply_baseline(artifact: RunArtifact, baseline: FingerprintBaseline) -> None
             result.remaining_issues_count = remaining
         # Only the producer's completeness proof can explain a failed verdict.
         result.success = result.success or not retained
-        if result.success:
-            result.output = None
     totals = aggregate_tool_results(artifact.tool_results, artifact.action)
     artifact.total_issues, artifact.total_fixed, artifact.total_remaining = totals
     artifact.exit_code = determine_exit_code(

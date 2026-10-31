@@ -74,9 +74,12 @@ unknown residual, unknown inspection, and unexplained failure states remain fail
 failed producer must explicitly certify that its findings fully explain the failure
 before they can be acknowledged. The supported check tools above supply this proof from
 their native exit statuses and reports. Other failed producers retain their findings
-until they supply that proof. Raw output is preserved while a result remains
-unsuccessful. Live diagnostic display is deferred when a baseline is active so final
-structured findings reflect filtering.
+until they supply that proof. Whenever findings are acknowledged, cached display text
+and native diagnostic output are cleared, including when retained findings keep the
+result failing. Final display and serialization use the retained structured findings.
+Incomplete results preserve their findings and execution-error output. Live diagnostic
+display is deferred when a baseline is active so final structured findings reflect
+filtering.
 
 `update` adds currently observed findings and removes fixed entries only where there is
 affirmative complete, exact file coverage. Unseen tools and files, unknown coverage,

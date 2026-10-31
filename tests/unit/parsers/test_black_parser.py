@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import pytest
 from assertpy import assert_that
 
-from lintro.parsers.black.black_parser import parse_black_output
+from lintro.parsers.black.black_parser import (
+    black_report_parse_failures,
+    parse_black_output,
+)
 
 
 def test_parse_black_output_would_reformat_single_file() -> None:
@@ -64,3 +68,62 @@ def test_parse_black_output_check_mode_keeps_preview_tense() -> None:
     output = "would reformat src/app.py\n1 file would be reformatted."
     issues = parse_black_output(output)
     assert_that(issues[0].message).is_equal_to("Would reformat file")
+
+
+@pytest.mark.parametrize("check", [True, False])
+@pytest.mark.parametrize("unchanged,failed", [(0, 0), (1, 0), (0, 1), (3, 4)])
+def test_native_summary_counts_include_trailing_clauses(
+    check: bool,
+    unchanged: int,
+    failed: int,
+) -> None:
+    """Whole native summaries supply counts even with unchanged or failed files."""
+    summary = "2 files " + ("would be reformatted" if check else "reformatted")
+    if unchanged:
+        tense = "would be left unchanged" if check else "left unchanged"
+        summary += f", {unchanged} file{'s' if unchanged > 1 else ''} {tense}"
+    if failed:
+        tense = "would fail to reformat" if check else "failed to reformat"
+        summary += f", {failed} file{'s' if failed > 1 else ''} {tense}"
+    output = f"All done!\n\x1b[1m{summary}.\x1b[0m\n"
+
+    issues = parse_black_output(output)
+
+    assert_that(issues).is_length(2)
+    assert_that([issue.file for issue in issues]).is_equal_to(["<unknown>"] * 2)
+    assert_that(black_report_parse_failures(output, issues)).is_equal_to(2)
+    per_file = ("would reformat" if check else "reformatted") + " a.py\n"
+    partial_output = per_file + output
+    assert_that(
+        black_report_parse_failures(partial_output, parse_black_output(partial_output)),
+    ).is_equal_to(1)
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "2 files would be reformatted.py",
+        "2 files reformatted.py",
+        "src/2 files would be reformatted.py",
+        "2 files would be reformatted, 1 file would be left unchanged.py",
+        "2 files reformatted, 1 file failed to reformat.py",
+    ],
+)
+@pytest.mark.parametrize("check", [True, False])
+def test_summary_like_filenames_do_not_override_native_count(
+    filename: str,
+    check: bool,
+) -> None:
+    """A filename's apparent count cannot invalidate a fully parsed report."""
+    diagnostic = "would reformat" if check else "reformatted"
+    summary = "would be reformatted" if check else "reformatted"
+    output = f"{diagnostic} {filename}\n1 file {summary}.\n"
+
+    issues = parse_black_output(output)
+
+    assert_that([issue.file for issue in issues]).is_equal_to([filename])
+    assert_that(black_report_parse_failures(output, issues)).is_zero()
+    assert_that(parse_black_output(filename)).is_empty()
+    assert_that(
+        parse_black_output(f"error: cannot format {filename}: invalid"),
+    ).is_empty()

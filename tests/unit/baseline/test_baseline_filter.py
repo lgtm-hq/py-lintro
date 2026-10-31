@@ -54,7 +54,8 @@ def test_check_filters_findings_exit_and_serialized_counts_together(
     assert_that(payload["summary"]["total_remaining"]).is_equal_to(1)
     assert_that(payload["summary"]["total_baselined"]).is_equal_to(1)
     assert_that(result.formatted_output).is_none()
-    assert_that(result.output).is_equal_to("native raw text with acknowledged issues")
+    assert_that(result.output).is_none()
+    assert_that(payload["results"][0]["output"]).is_none()
     assert_that(
         baseline_is_eligible(
             action=Action.CHECK,
@@ -92,6 +93,8 @@ def test_all_acknowledged_lint_findings_pass_without_appearing_fixed(
         {"parse_failures_count": 1},
         {"timed_out": True},
         {"residual_unknown": True, "residual_unknown_reason": "incomplete verify"},
+        {"execution_failed": True},
+        {"findings_complete": False},
     ],
 )
 def test_acknowledgements_cannot_hide_incomplete_inspection(
@@ -101,7 +104,12 @@ def test_acknowledgements_cannot_hide_incomplete_inspection(
 ) -> None:
     """Incomplete reports retain both their findings and failing exit status."""
     baseline = snapshot([dirty_result], root=tmp_path)
-    result = replace(dirty_result, **state)
+    result = replace(
+        dirty_result,
+        output="native execution error with findings",
+        formatted_output="cached execution error",
+        **state,
+    )
     artifact = RunArtifact(
         tool_results=[result],
         workspace_root=tmp_path,
@@ -112,6 +120,8 @@ def test_acknowledgements_cannot_hide_incomplete_inspection(
     assert_that(artifact.exit_code).is_equal_to(1)
     assert_that(result.issues).is_length(1)
     assert_that(result.baselined_count).is_zero()
+    assert_that(result.output).is_equal_to("native execution error with findings")
+    assert_that(result.formatted_output).is_equal_to("cached execution error")
 
 
 def test_tool_error_and_policy_failure_survive_acknowledged_peer(
@@ -151,6 +161,8 @@ def test_verified_residual_and_detected_findings_are_filtered_independently(
         remaining_issues_count=2,
         issues=[finding, new],
         issues_count=2,
+        output="native report containing acknowledged and new findings",
+        formatted_output="cached native report",
     )
     artifact = RunArtifact(
         action=Action.FIX,
@@ -170,6 +182,8 @@ def test_verified_residual_and_detected_findings_are_filtered_independently(
     assert_that(artifact.total_remaining).is_equal_to(1)
     assert_that(artifact.total_issues).is_equal_to(1)
     assert_that(artifact.exit_code).is_equal_to(1)
+    assert_that(result.output).is_none()
+    assert_that(result.formatted_output).is_none()
 
 
 def test_acknowledged_fixed_findings_are_not_reported_as_new_fixes(

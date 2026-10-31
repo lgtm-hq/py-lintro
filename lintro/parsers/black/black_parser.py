@@ -24,13 +24,18 @@ from lintro.parsers.black.black_issue import BlackIssue
 
 _WOULD_REFORMAT = re.compile(r"^would reformat\s+(?P<file>.+)$", re.IGNORECASE)
 _REFORMATTED = re.compile(r"^reformatted\s+(?P<file>.+)$", re.IGNORECASE)
+# Native summaries occupy a whole line; filenames can contain the same words.
 _SUMMARY_WOULD = re.compile(
-    r"(?P<count>\d+)\s+file(?:s)?\s+would\s+be\s+reformatted\.?",
-    re.IGNORECASE,
+    r"^[ \t]*(?P<count>\d+) files? would be reformatted"
+    r"(?:, \d+ files? would be left unchanged)?"
+    r"(?:, \d+ files? would fail to reformat)?\.?[ \t]*\r?$",
+    re.IGNORECASE | re.MULTILINE,
 )
 _SUMMARY_REFORMATTED = re.compile(
-    r"(?P<count>\d+)\s+file(?:s)?\s+reformatted\.?",
-    re.IGNORECASE,
+    r"^[ \t]*(?P<count>\d+) files? reformatted"
+    r"(?:, \d+ files? left unchanged)?"
+    r"(?:, \d+ files? failed to reformat)?\.?[ \t]*\r?$",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 
