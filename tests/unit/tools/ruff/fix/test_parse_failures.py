@@ -26,6 +26,7 @@ _MIXED_REPORT = f"[{{}}, {_SYNTAX_ERROR}]"
         ('[{"filename": "a.py"}]', 1),
         ("[null, 42]", 2),
         ("{}", 1),
+        ('{"filename":', 1),
     ],
 )
 def test_fix_rejects_incomplete_diagnostics(
@@ -111,9 +112,11 @@ def test_fix_retains_parse_failures_across_timeouts(
     assert_that(result.issues).extracting("code").is_equal_to([""])
 
 
+@pytest.mark.parametrize("report", [_MIXED_REPORT, f'{{"filename":\n{_SYNTAX_ERROR}'])
 def test_fix_accumulates_unsafe_probe_rejections(
     ruff_plugin: RuffPlugin,
     temp_python_file: str,
+    report: str,
 ) -> None:
     """An unusable unsafe report cannot erase the remaining syntax error."""
     with (
@@ -125,8 +128,8 @@ def test_fix_accumulates_unsafe_probe_rejections(
             ruff_plugin,
             "_run_subprocess",
             side_effect=[
-                (False, _MIXED_REPORT),
-                (False, _MIXED_REPORT),
+                (False, report),
+                (False, report),
                 (True, "[{}, null]"),
             ],
         ),

@@ -36,6 +36,56 @@ def test_ruff_rejects_unusable_required_fields(item: dict[str, object]) -> None:
         assert_that(list(stream_ruff_output(output))).is_empty()
 
 
+@pytest.mark.parametrize(
+    "malformed_line",
+    ['{"filename":', '{"filename": "broken.py", "message": }'],
+)
+def test_ruff_json_lines_counts_decode_and_field_failures(malformed_line: str) -> None:
+    """Keep valid findings while counting each decoding and required-field failure."""
+    output = "\n".join(
+        (
+            "Ruff progress...",
+            "",
+            malformed_line,
+            '{"filename": "a.py", "message": "unused import", "code": "F401"}',
+            "{}",
+            '{"file": "b.py", "message": "Expected expression", "code": null}',
+            f"  {malformed_line}",
+        ),
+    )
+
+    issues, failures = parse_ruff_output_with_stats(output)
+
+    assert_that(failures).is_equal_to(3)
+    assert_that(issues).extracting("file", "message", "code").is_equal_to(
+        [("a.py", "unused import", "F401"), ("b.py", "Expected expression", "")],
+    )
+    assert_that(parse_ruff_output(output)).is_equal_to(issues)
+
+
+@pytest.mark.parametrize(
+    ("output", "expected_failures"),
+    [
+        ('{"filename":', 1),
+        ('{"filename":\n{"message":', 2),
+        (' \n  {"filename":\n\n', 1),
+        ("", 0),
+        ("[]", 0),
+        (" \n[]\n", 0),
+        ("[\n]", 0),
+    ],
+)
+def test_ruff_rejected_only_and_empty_reports(
+    output: str,
+    expected_failures: int,
+) -> None:
+    """Distinguish rejected JSON records from valid empty reports."""
+    assert_that(parse_ruff_output_with_stats(output)).is_equal_to(
+        ([], expected_failures),
+    )
+    assert_that(parse_ruff_output(output)).is_empty()
+
+
 def test_ruff_null_code_keeps_syntax_error_and_file_alias() -> None:
     """Syntax errors remain findings when Ruff supplies no rule code."""
     output = '[{"file": "syntax.py", "message": "Expected expression", "code": null}]'
