@@ -44,7 +44,7 @@ def tool_result() -> ToolResult:
     """Provide a ToolResult instance for testing.
 
     Returns:
-        ToolResult: Description of returned ToolResult.
+        ToolResult: Successful result with the canonical field defaults.
     """
     return ToolResult(name="test-tool", success=True, output="")
 
@@ -54,7 +54,7 @@ def tool_result_factory() -> Callable[..., ToolResult]:
     """Factory fixture to create ToolResult with custom attributes.
 
     Returns:
-        Callable[..., ToolResult]: Description of returned Callable[..., ToolResult].
+        Callable[..., ToolResult]: Factory accepting ToolResult field overrides.
     """
 
     def _create(**kwargs: Any) -> ToolResult:
@@ -69,7 +69,7 @@ def fake_issue() -> FakeIssue:
     """Provide a FakeIssue instance for testing.
 
     Returns:
-        FakeIssue: Description of returned FakeIssue.
+        FakeIssue: Example lint finding with a file location and rule code.
     """
     return FakeIssue()
 
@@ -79,7 +79,7 @@ def fake_issue_factory() -> Callable[..., FakeIssue]:
     """Factory fixture to create FakeIssue with custom attributes.
 
     Returns:
-        Callable[..., FakeIssue]: Description of returned Callable[..., FakeIssue].
+        Callable[..., FakeIssue]: Factory accepting example issue field overrides.
     """
 
     def _create(**kwargs: Any) -> FakeIssue:

@@ -10,11 +10,20 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.action import Action
+from lintro.formatters.formatter import format_issues_with_sections
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
+from lintro.parsers.clippy.clippy_issue import ClippyIssue
+from lintro.parsers.oxfmt.oxfmt_issue import OxfmtIssue
+from lintro.parsers.prettier.prettier_issue import PrettierIssue
+from lintro.parsers.sqlfluff.sqlfluff_issue import SqlfluffIssue
+from lintro.parsers.taplo.taplo_parser import parse_taplo_output
 from lintro.utils.console.logger import ThreadSafeConsoleLogger
 from lintro.utils.execution.exit_codes import determine_exit_code
+from lintro.utils.execution.result_shaping import filter_result_to_fixable
+from lintro.utils.findings import findings_from_results
 from lintro.utils.json_output import serialize_tool_result
-from lintro.utils.summary_tables import print_summary_table
+from lintro.utils.summary_tables import count_fixable_issues, print_summary_table
 
 
 @pytest.mark.parametrize(
@@ -51,3 +60,62 @@ def test_missing_success_cannot_be_reported_as_a_pass(
     malformed = cast(ToolResult, SimpleNamespace(**fields))
 
     assert_that(consume).raises(AttributeError).when_called_with(malformed)
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "issue"),
+    [
+        (
+            "taplo",
+            parse_taplo_output(
+                "error[invalid_value]: invalid value\n  --> a.toml:1:1",
+            )[0],
+        ),
+        (
+            "taplo",
+            parse_taplo_output(
+                "error[expected_table_array]: expected array\n  --> a.toml:1:1",
+            )[0],
+        ),
+        (
+            "taplo",
+            parse_taplo_output(
+                'ERROR the file is not properly formatted path="a.toml"',
+            )[0],
+        ),
+        ("sqlfluff", SqlfluffIssue(file="a.sql", code="PRS", message="Parse error")),
+        ("sqlfluff", SqlfluffIssue(file="a.sql", code="LT01", message="Spacing")),
+        ("prettier", PrettierIssue(file="a.js", message="Would reformat")),
+        ("oxfmt", OxfmtIssue(file="a.js", message="Would reformat")),
+        ("clippy", ClippyIssue(file="a.rs", message="Lint diagnostic")),
+    ],
+)
+def test_preview_fallback_preserves_public_fixability(
+    tool_name: str,
+    issue: BaseIssue,
+) -> None:
+    """Preview estimates must not change console, JSON or MCP fixability.
+
+    Args:
+        tool_name: Tool whose check findings lack a native fix signal.
+        issue: Parsed syntax, schema, lint or formatting diagnostic.
+    """
+    result = ToolResult(name=tool_name, issues_count=1, issues=[issue])
+
+    assert_that(count_fixable_issues([result])).is_zero()
+    assert_that(issue.to_display_row()["fixable"]).is_empty()
+    sections = format_issues_with_sections([issue], output_format="plain")
+    assert_that(sections).contains("Not auto-fixable issues")
+    assert_that(sections).does_not_contain("Auto-fixable issues")
+    finding = findings_from_results(results=[result], action=Action.CHECK)[0]
+    assert_that(finding.to_dict()["fixable"]).is_false()
+    wire = serialize_tool_result(result, action=Action.CHECK)
+    assert_that(wire["issues_count"]).is_equal_to(1)
+    assert_that(wire["issues"][0]).does_not_contain_key("fixable")
+
+    preview = filter_result_to_fixable(result)
+    assert_that(preview.issues_count).is_equal_to(1)
+    assert_that(preview.issues).is_equal_to([issue])
+    assert_that(preview.success).is_true()
+    assert_that(result.success).is_false()
+    assert_that(issue.fixable).is_false()

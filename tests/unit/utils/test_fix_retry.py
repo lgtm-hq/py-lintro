@@ -14,6 +14,7 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.execution.exit_codes import aggregate_tool_results
 from lintro.utils.execution.fix_retry import run_fix_with_retry
+from lintro.utils.json_output import serialize_tool_result
 from lintro.utils.tool_executor import _run_fix_with_retry
 
 
@@ -270,13 +271,18 @@ def test_retry_distinguishes_measured_zero_from_unmeasured_initial_issues(
 
     assert_that(result.initial_issues_count).is_equal_to(initial_count)
     assert_that(result.initial_issues).is_empty()
-    expected = () if initial_count == 0 and failure_kind == "unknown" else latest
-    assert_that(result.issues).is_equal_to(expected)
+    assert_that(result.issues).is_equal_to(latest)
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.fixed_issues_count).is_none()
     assert_that(result.remaining_issues_count).is_none()
     assert_that(result.success).is_false()
     assert_that(result.residual_unknown).is_true()
+
+    payload = serialize_tool_result(result, action=Action.FIX)
+    assert_that(payload["issues_count"]).is_equal_to(result.issues_count)
+    assert_that(payload["issues"][0]["file"]).is_equal_to("new.txt")
+    assert_that(payload["fixed"]).is_none()
+    assert_that(payload["remaining"]).is_none()
 
 
 @pytest.mark.parametrize("failure_pass", [1, 2, 3])

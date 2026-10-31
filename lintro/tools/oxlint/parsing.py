@@ -104,7 +104,7 @@ class OxlintOutputParser:
             # Unknown results carry detected findings, not a measured residual.
             result.issues = merge_detected_and_remaining(
                 [],
-                [*(result.issues), *(result.initial_issues)],
+                [*result.issues, *result.initial_issues],
             )
             result.issues_count = len(result.issues)
         result.output = f"{message}\n{result.output}" if result.output else message

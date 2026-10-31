@@ -40,7 +40,7 @@ def test_check_success_no_issues(
 
     Args:
         console_capture: Mock console output capture.
-        tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
     result = tool_result_factory(name="ruff", success=True, issues_count=0)
@@ -60,7 +60,7 @@ def test_check_with_issues(
 
     Args:
         console_capture: Mock console output capture.
-        tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
     result = tool_result_factory(name="ruff", success=True, issues_count=5)
@@ -81,7 +81,7 @@ def test_check_execution_failure(
 
     Args:
         console_capture: Mock console output capture.
-        tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
     result = tool_result_factory(
@@ -105,7 +105,7 @@ def test_check_skipped_tool(
 
     Args:
         console_capture: Mock console output capture.
-        tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
     result = tool_result_factory(
@@ -134,7 +134,7 @@ def test_fix_with_fixed_count(
 
     Args:
         console_capture: Mock console output capture.
-        tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
     result = tool_result_factory(
@@ -164,7 +164,7 @@ def test_fix_with_remaining_issues(
 
     Args:
         console_capture: Mock console output capture.
-        tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
     result = tool_result_factory(
@@ -192,7 +192,7 @@ def test_fix_no_files_shows_zero(
 
     Args:
         console_capture: Mock console output capture.
-        tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
     result = tool_result_factory(
@@ -223,7 +223,7 @@ def test_fix_never_reads_a_remaining_count_off_prose_output(
 
     Args:
         console_capture: Mock console output capture.
-        tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
     succeeded = tool_result_factory(
@@ -257,7 +257,7 @@ def test_fix_shows_ai_fixed_count_from_metadata(
 
     Args:
         console_capture: Mock console output capture.
-        tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
     result = tool_result_factory(
@@ -295,7 +295,7 @@ def test_pytest_with_summary(
 
     Args:
         console_capture: Mock console output capture.
-        tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
     result = tool_result_factory(
@@ -331,7 +331,7 @@ def test_non_pytest_test_tool(
 
     Args:
         console_capture: Mock console output capture.
-        tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
     result = tool_result_factory(
@@ -364,7 +364,7 @@ def test_multiple_tools_displayed(
 
     Args:
         console_capture: Mock console output capture.
-        tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
     results = [
@@ -389,7 +389,7 @@ def test_tools_sorted_alphabetically(
 
     Args:
         console_capture: Mock console output capture.
-        tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
     # Input in non-alphabetical order: ruff, bandit, clippy
@@ -443,7 +443,7 @@ def test_unknown_tool_name(
 
     Args:
         console_capture: Mock console output capture.
-        tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
     result = tool_result_factory(
@@ -484,7 +484,7 @@ def test_default_remaining_count_used_in_fix_output(
 
     Args:
         console_capture: Mock console output capture.
-        tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
     result = tool_result_factory(
@@ -516,7 +516,7 @@ def test_check_pass_with_no_files_is_annotated(
 
     Args:
         console_capture: Mock console output capture.
-        tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
     result = tool_result_factory(
@@ -541,7 +541,7 @@ def test_check_pass_over_real_files_has_no_note(
 
     Args:
         console_capture: Mock console output capture.
-        tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
     result = tool_result_factory(

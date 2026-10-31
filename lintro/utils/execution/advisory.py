@@ -248,11 +248,7 @@ def advisory_findings_count(results: list[ToolResult]) -> int:
     Returns:
         Sum of the per-tool issue counts, ignoring skipped tools.
     """
-    return sum(
-        result.issues_count or 0
-        for result in results
-        if not getattr(result, "skipped", False)
-    )
+    return sum(result.issues_count for result in results if not result.skipped)
 
 
 def advisory_tools_errored(results: list[ToolResult]) -> bool:
@@ -272,7 +268,7 @@ def advisory_tools_errored(results: list[ToolResult]) -> bool:
     return any(
         tool_run_status(
             result=result,
-            issue_count=result.issues_count or 0,
+            issue_count=result.issues_count,
         )
         in {ToolRunStatus.ERRORED, ToolRunStatus.TIMED_OUT}
         for result in results
@@ -302,7 +298,7 @@ def render_advisory_results(
     blocks: list[str] = []
     for result in results:
         header = f"Advisory: {result.name}"
-        if getattr(result, "skipped", False):
+        if result.skipped:
             reason = result.skip_reason or "skipped"
             blocks.append(f"{header}\n  skipped — {reason}")
             continue
@@ -334,10 +330,10 @@ def advisory_results_to_payload(results: list[ToolResult]) -> list[dict[str, obj
                 "tool": result.name,
                 "success": bool(result.success),
                 "output": result.output,
-                "skipped": bool(getattr(result, "skipped", False)),
+                "skipped": result.skipped,
                 "skip_reason": result.skip_reason,
-                "issues_count": result.issues_count or 0,
-                "issues": [issue.to_display_row() for issue in (result.issues)],
+                "issues_count": result.issues_count,
+                "issues": [issue.to_display_row() for issue in result.issues],
             },
         )
     return payload

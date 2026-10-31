@@ -13,6 +13,7 @@ from assertpy import assert_that
 import lintro.utils.tool_executor as te
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
+from lintro.parsers.clippy.clippy_issue import ClippyIssue
 from lintro.parsers.oxfmt.oxfmt_issue import OxfmtIssue
 from lintro.parsers.prettier.prettier_issue import PrettierIssue
 from lintro.parsers.sqlfluff.sqlfluff_issue import SqlfluffIssue
@@ -1070,6 +1071,7 @@ def test_executor_dry_run_only_non_fixable_exits_zero(
         ("oxfmt", OxfmtIssue(file="a.js", message="Would reformat")),
         ("taplo", TaploIssue(file="a.toml", message="Would reformat")),
         ("sqlfluff", SqlfluffIssue(file="a.sql", message="Would reformat")),
+        ("clippy", ClippyIssue(file="a.rs", message="Lint diagnostic")),
     ],
 )
 def test_executor_dry_run_treats_formatter_issues_without_flag_as_fixable(

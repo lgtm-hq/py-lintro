@@ -771,8 +771,7 @@ def execute_run(
     # summary and exit code count only auto-fixable issues.
     if ctx.dry_run_preview:
         all_results[:] = [
-            r if getattr(r, "skipped", False) else _filter_result_to_fixable(r)
-            for r in all_results
+            r if r.skipped else _filter_result_to_fixable(r) for r in all_results
         ]
         total_issues, total_fixed, total_remaining = aggregate_tool_results(
             all_results,

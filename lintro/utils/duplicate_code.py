@@ -127,7 +127,7 @@ def _was_analysed(*, result: ToolResult) -> bool:
     Returns:
         bool: True when pylint actually analysed files and reported back.
     """
-    if getattr(result, "skipped", False):
+    if result.skipped:
         return False
     metadata = result.metadata
     return bool(metadata.get(PYLINT_ANALYSED_METADATA_KEY, False))

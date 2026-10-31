@@ -13,11 +13,11 @@ class OxfmtIssue(BaseIssue):
 
     Attributes:
         DEFAULT_SEVERITY: Defaults to INFO (pure formatter).
+        PREVIEW_FIXABLE: Include formatting findings in dry-run previews.
         code: Tool-specific code identifying the rule (default: FORMAT).
-        fixable: Formatting findings are auto-fixable by default.
     """
 
     DEFAULT_SEVERITY: ClassVar[SeverityLevel] = SeverityLevel.INFO
+    PREVIEW_FIXABLE: ClassVar[bool] = True
 
     code: str = field(default="FORMAT")
-    fixable: bool = field(default=True)

@@ -94,10 +94,11 @@ def run_fix_with_retry(
     if result.residual_unknown or result.parse_failures_count:
         # Execution failures carry the original detected findings. Parse
         # failures also retain the latest report's usable partial findings.
+        # An empty original list must not discard findings from a later pass,
+        # even when the first pass explicitly measured zero.
         issues = (
             first_pass_initial_issues
-            if not result.parse_failures_count
-            and (first_pass_initial_issues or initial_issues_count == 0)
+            if not result.parse_failures_count and first_pass_initial_issues
             else result.issues
         )
         return replace(

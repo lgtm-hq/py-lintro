@@ -35,6 +35,8 @@ class BaseIssue:
             Example: {"severity": "level"} to map self.level to severity output.
         DEFAULT_SEVERITY: Fallback severity when the issue has no native value.
             Override in subclasses (e.g. INFO for pure-formatting tools).
+        PREVIEW_FIXABLE: Include check findings in format previews when the tool
+            lacks a per-issue fix signal. Does not claim public fixability.
         file: File path where the issue was found.
         line: Line number where the issue was found (1-based, 0 means unknown).
         column: Column number where the issue was found (1-based, 0 means unknown).
@@ -55,6 +57,7 @@ class BaseIssue:
     }
 
     DEFAULT_SEVERITY: ClassVar[SeverityLevel] = SeverityLevel.WARNING
+    PREVIEW_FIXABLE: ClassVar[bool] = False
 
     file: str = field(default="")
     line: int = field(default=0)
