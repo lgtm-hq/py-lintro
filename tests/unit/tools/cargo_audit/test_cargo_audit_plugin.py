@@ -184,15 +184,22 @@ def test_check_no_cargo_lock(
     assert_that(result.issues_count).is_equal_to(0)
 
 
+@pytest.mark.parametrize(
+    "report_wrapper",
+    ["{}", "warning\n{}", "{}\nwarning", "warning\n{}\nDone."],
+    ids=["plain", "warning-prefix", "warning-suffix", "warning-wrapped"],
+)
 def test_check_no_vulnerabilities(
     cargo_audit_plugin: CargoAuditPlugin,
     tmp_path: Path,
+    report_wrapper: str,
 ) -> None:
     """Check returns success when no vulnerabilities found.
 
     Args:
         cargo_audit_plugin: The plugin instance.
         tmp_path: Temporary directory path.
+        report_wrapper: Template for permitted text around the JSON object.
     """
     cargo_lock = tmp_path / "Cargo.lock"
     cargo_lock.write_text('[[package]]\nname = "test"\nversion = "1.0.0"')
@@ -203,6 +210,7 @@ def test_check_no_vulnerabilities(
             "list": []
         }
     }"""
+    mock_output = report_wrapper.format(mock_output)
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
@@ -310,6 +318,31 @@ def test_check_timeout(
         pytest.param("null", id="null-report"),
         pytest.param("[]", id="array-report"),
         pytest.param('[{"vulnerabilities": {"list": []}}]', id="array-of-reports"),
+        pytest.param("warning\n[]", id="warning-prefixed-empty-array"),
+        pytest.param(
+            'warning\n[{"vulnerabilities": {"list": []}}]',
+            id="warning-prefixed-array",
+        ),
+        pytest.param(
+            '[{"vulnerabilities": {"list": []}}]\nwarning',
+            id="warning-suffixed-array",
+        ),
+        pytest.param(
+            'warning\n[{"vulnerabilities": {"list": []}}]\nDone.',
+            id="warning-wrapped-array",
+        ),
+        pytest.param(
+            'warning\n[[{"vulnerabilities": {"list": []}}]]\nDone.',
+            id="warning-wrapped-nested-array",
+        ),
+        pytest.param(
+            'warning\n[{"vulnerabilities": {"list": []}}\nDone.',
+            id="warning-wrapped-unclosed-array",
+        ),
+        pytest.param(
+            'warning\n{"vulnerabilities": {"list": null}}\nDone.',
+            id="warning-wrapped-null-list",
+        ),
         pytest.param("{}", id="missing-vulnerabilities"),
         pytest.param('{"vulnerabilities": null}', id="null-vulnerabilities"),
         pytest.param('{"vulnerabilities": []}', id="array-vulnerabilities"),

@@ -15,8 +15,8 @@ def _extract_cargo_audit_json(raw_text: str) -> object:
     """Extract cargo-audit's JSON object from output text.
 
     Parse the whole text first so a valid JSON value retains its top-level type.
-    For output with surrounding text, locate the first '{' and last '}'. This
-    fallback relies on cargo-audit emitting a single JSON object.
+    For output with surrounding text, keep the first object or array opener
+    and its final matching closer so an array cannot become its inner object.
 
     Args:
         raw_text: Raw stdout/stderr text from cargo-audit.
@@ -26,7 +26,7 @@ def _extract_cargo_audit_json(raw_text: str) -> object:
 
     Raises:
         json.JSONDecodeError: If JSON cannot be parsed.
-        ValueError: If no JSON object boundaries are found.
+        ValueError: If no JSON container boundaries are found.
     """
     if not raw_text or not raw_text.strip():
         raise json.JSONDecodeError("Empty output", raw_text or "", 0)
@@ -38,16 +38,17 @@ def _extract_cargo_audit_json(raw_text: str) -> object:
     except json.JSONDecodeError:
         pass
 
-    # Fallback: find JSON boundaries. This works because cargo-audit outputs
-    # a single JSON object, so the first '{' and last '}' delimit it correctly.
-    start: int = text.find("{")
-    end: int = text.rfind("}")
-    if start == -1 or end == -1 or end < start:
-        raise ValueError("Could not locate JSON object in cargo-audit output")
+    # Keep the outer container intact for top-level type validation.
+    start = next((i for i, char in enumerate(text) if char in "{["), -1)
+    if start == -1:
+        raise ValueError("Could not locate JSON container in cargo-audit output")
+
+    end = text.rfind("}" if text[start] == "{" else "]")
+    if end < start:
+        raise ValueError("Could not locate JSON container in cargo-audit output")
 
     json_str: str = text[start : end + 1]
-    parsed: dict[str, Any] = json.loads(json_str)
-    return parsed
+    return json.loads(json_str)
 
 
 def extract_cargo_audit_payload(output: str | None) -> dict[str, Any] | None:

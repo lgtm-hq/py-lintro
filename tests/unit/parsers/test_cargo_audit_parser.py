@@ -42,6 +42,31 @@ def test_parse_cargo_audit_output_empty_cases(
         pytest.param("null", id="null-report"),
         pytest.param("[]", id="array-report"),
         pytest.param('[{"vulnerabilities": {"list": []}}]', id="array-of-reports"),
+        pytest.param("warning\n[]", id="warning-prefixed-empty-array"),
+        pytest.param(
+            'warning\n[{"vulnerabilities": {"list": []}}]',
+            id="warning-prefixed-array",
+        ),
+        pytest.param(
+            '[{"vulnerabilities": {"list": []}}]\nwarning',
+            id="warning-suffixed-array",
+        ),
+        pytest.param(
+            'warning\n[{"vulnerabilities": {"list": []}}]\nDone.',
+            id="warning-wrapped-array",
+        ),
+        pytest.param(
+            'warning\n[[{"vulnerabilities": {"list": []}}]]\nDone.',
+            id="warning-wrapped-nested-array",
+        ),
+        pytest.param(
+            'warning\n[{"vulnerabilities": {"list": []}}\nDone.',
+            id="warning-wrapped-unclosed-array",
+        ),
+        pytest.param(
+            'warning\n{"vulnerabilities": {"list": null}}\nDone.',
+            id="warning-wrapped-null-list",
+        ),
         pytest.param("{}", id="missing-vulnerabilities"),
         pytest.param('{"vulnerabilities": null}', id="null-vulnerabilities"),
         pytest.param('{"vulnerabilities": []}', id="array-vulnerabilities"),
@@ -62,14 +87,24 @@ def test_extract_cargo_audit_payload_rejects_invalid_schema(output: str | None) 
     assert_that(parse_cargo_audit_output(output)).is_empty()
 
 
-def test_parse_cargo_audit_output_no_vulnerabilities() -> None:
-    """Parser returns empty list when no vulnerabilities found."""
+@pytest.mark.parametrize(
+    "report_wrapper",
+    ["{}", "warning\n{}", "{}\nwarning", "warning\n{}\nDone."],
+    ids=["plain", "warning-prefix", "warning-suffix", "warning-wrapped"],
+)
+def test_parse_cargo_audit_output_no_vulnerabilities(report_wrapper: str) -> None:
+    """Parser accepts empty reports with surrounding prose.
+
+    Args:
+        report_wrapper: Template for permitted text around the JSON object.
+    """
     output = """{
         "vulnerabilities": {
             "count": 0,
             "list": []
         }
     }"""
+    output = report_wrapper.format(output)
     result = parse_cargo_audit_output(output)
 
     assert_that(result).is_length(0)
