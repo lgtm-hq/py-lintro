@@ -12,6 +12,9 @@ Older single-scope files are migrated on write. Legacy baselines without
 scope and unreadable files are incomparable and replaced by the next eligible
 run, restoring deltas automatically on the following run.
 
+Writers hold a persistent sibling file lock across reading, merging and
+atomically replacing the baseline. Readers see either complete version.
+
 Every operation here is best-effort: a workspace with no baseline, an
 unreadable file, or a read-only directory must never fail a lint run. The
 delta simply is not reported.
@@ -21,6 +24,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
+import tempfile
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -29,7 +35,7 @@ from loguru import logger
 from lintro.models.core.severity_counts import SeverityCounts
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
     from lintro.models.core.tool_result import ToolResult
 
@@ -164,6 +170,63 @@ def read_severity_baseline(base_dir: Path | str, scope: str) -> SeverityCounts |
     return _parse_counts(scopes.get(scope))
 
 
+@contextmanager
+def _baseline_lock(path: Path) -> Iterator[None]:
+    """Lock a stable sibling file until the handle closes, including on error.
+
+    Keep the lock file in place: unlinking it would let waiters and new
+    writers lock different inodes after an atomic baseline replacement.
+
+    Args:
+        path: Baseline path whose parent already exists.
+
+    Yields:
+        None: The caller owns the exclusive writer lock.
+    """
+    with path.with_name(path.name + ".lock").open("a+", encoding="utf-8") as handle:
+        if sys.platform == "win32":
+            import msvcrt
+
+            handle.seek(0)
+            if handle.read(1) == "":
+                handle.write("0")
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+
+
+def _replace_baseline(path: Path, scopes: dict[str, Any]) -> None:
+    """Publish complete JSON, cleaning up the temporary file even on failure.
+
+    Args:
+        path: Baseline path whose parent already exists.
+        scopes: Merged scope entries to persist.
+    """
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            json.dump({"scopes": scopes}, handle, indent=2)
+            handle.write("\n")
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            with suppress(OSError):
+                temporary.unlink(missing_ok=True)
+
+
 def write_severity_baseline(
     base_dir: Path | str,
     counts: SeverityCounts,
@@ -180,13 +243,11 @@ def write_severity_baseline(
         scope: Fingerprint of the current run's paths and executed tools.
     """
     path = _baseline_path(base_dir)
-    scopes = _read_baseline(path) or {}
-    scopes[scope] = counts.to_dict()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps({"scopes": scopes}, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        with _baseline_lock(path):
+            scopes = _read_baseline(path) or {}
+            scopes[scope] = counts.to_dict()
+            _replace_baseline(path, scopes)
     except OSError as exc:
         logger.debug(f"Failed to write severity baseline {path}: {exc}")
