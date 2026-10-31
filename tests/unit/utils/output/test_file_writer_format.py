@@ -7,15 +7,59 @@ tool outputs into various display formats.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
 
+from lintro.enums.action import Action
+from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.ruff.ruff_parser import parse_ruff_output_with_stats
+from lintro.utils.execution.run_renderer import make_result_display
+from lintro.utils.json_output import serialize_tool_result
 from lintro.utils.output.file_writer import (
     TABULATE_AVAILABLE,
     format_tool_output,
 )
+
+
+@pytest.mark.parametrize("action", [Action.CHECK, Action.FIX])
+def test_ruff_registry_rendering_preserves_parse_failure(action: Action) -> None:
+    """The registry's display reparse cannot turn a failed Ruff result green."""
+    raw_output = "[{}]"
+    issues, failures = parse_ruff_output_with_stats(raw_output)
+    result = ToolResult(
+        name="ruff",
+        success=failures == 0,
+        issues=issues,
+        issues_count=len(issues),
+        output=raw_output,
+        parse_failures_count=failures,
+    )
+    before = serialize_tool_result(result, action=action)
+    messages: list[str] = []
+
+    def capture(text: str, **kwargs: object) -> None:
+        """Collect rendered console text without replacing the parser registry."""
+        messages.append(text)
+
+    display = make_result_display(
+        logger=SimpleNamespace(console_output=capture),
+        output_format="plain",
+        raw_output=False,
+        action=action,
+    )
+    display(result)
+
+    rendered = "\n".join(messages)
+    assert_that(rendered).contains(raw_output, "1 issue(s) could not be parsed")
+    assert_that(rendered).contains("Tool execution failed")
+    assert_that(rendered).does_not_contain("No issues found")
+    assert_that(serialize_tool_result(result, action=action)).is_equal_to(before)
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
 
 # =============================================================================
 # Tests for format_tool_output - Empty/whitespace handling

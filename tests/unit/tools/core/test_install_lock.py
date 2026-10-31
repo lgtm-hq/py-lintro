@@ -14,6 +14,17 @@ from lintro.tools.core.install_lock import (
 )
 
 
+@pytest.mark.parametrize("name", [None, 42, True, ["ruff"], {"tool": "ruff"}, ""])
+def test_install_lock_rejects_unusable_tool_names(name: object) -> None:
+    """A tool identity must be a nonempty string rather than coerced JSON."""
+    lock = InstallLock.from_dict(
+        {"tools": [{"name": name}, {"name": "ruff", "version": "0.14.0"}]},
+    )
+
+    assert_that([entry.name for entry in lock.tools]).is_equal_to(["ruff"])
+    assert_that(lock.tools[0].version).is_equal_to("0.14.0")
+
+
 @pytest.mark.parametrize("value", [None, 42, False, [], {}])
 def test_install_lock_non_string_text_uses_defaults(value: object) -> None:
     """Optional entry fields and timestamps use their documented defaults."""

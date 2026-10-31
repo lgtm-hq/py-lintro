@@ -7,7 +7,11 @@ import json
 import pytest
 from assertpy import assert_that
 
-from lintro.parsers.ruff.ruff_parser import parse_ruff_output, stream_ruff_output
+from lintro.parsers.ruff.ruff_parser import (
+    parse_ruff_output,
+    parse_ruff_output_with_stats,
+    stream_ruff_output,
+)
 
 
 @pytest.mark.parametrize(
@@ -28,6 +32,7 @@ def test_ruff_rejects_unusable_required_fields(item: dict[str, object]) -> None:
     """Batch, JSON Lines and streaming paths reject incomplete records."""
     for output in (json.dumps([item]), json.dumps(item) + "\n"):
         assert_that(parse_ruff_output(output)).is_empty()
+        assert_that(parse_ruff_output_with_stats(output)).is_equal_to(([], 1))
         assert_that(list(stream_ruff_output(output))).is_empty()
 
 

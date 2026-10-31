@@ -44,10 +44,13 @@ class InstallLock:
         tools: list[InstallLockEntry] = []
         if isinstance(raw_tools, list):
             for entry in raw_tools:
-                if isinstance(entry, dict) and entry.get("name"):
+                if not isinstance(entry, dict):
+                    continue
+                name = entry.get("name")
+                if isinstance(name, str) and name:
                     tools.append(
                         InstallLockEntry(
-                            name=str(entry["name"]),
+                            name=name,
                             version=extract_optional_str(entry, "version"),
                             install_hint=extract_optional_str(entry, "install_hint"),
                             status=extract_optional_str(entry, "status", "to_install"),

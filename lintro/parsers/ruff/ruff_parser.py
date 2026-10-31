@@ -112,7 +112,7 @@ def parse_ruff_output_with_stats(output: str) -> tuple[list[RuffIssue], int]:
     Returns:
         Parsed issues and the number of rejected diagnostic records.
     """
-    if not output or output.strip() in ("[]", "{}"):
+    if not output or output.strip() == "[]":
         return [], 0
 
     # First try JSON array (with possible trailing non-JSON data)
@@ -186,6 +186,9 @@ def stream_ruff_output(
     Supports both JSON array and JSON Lines formats. For large outputs,
     this is more memory-efficient than parse_ruff_output() as it yields
     issues incrementally rather than building a full list.
+
+    Rejected records are skipped without a failure count. Execution paths
+    that decide success must use parse_ruff_output_with_stats() instead.
 
     Args:
         output: Raw output from `ruff check --output-format json`, either

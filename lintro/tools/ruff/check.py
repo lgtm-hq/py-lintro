@@ -162,8 +162,12 @@ def execute_ruff_check(
         success_lint and success_format and issues_count == 0 and parse_failures == 0
     )
 
-    # Diagnostic logging for the "ERROR" case (subprocess failed but no issues parsed)
-    if not success and issues_count == 0:
+    if parse_failures:
+        logger.warning(
+            f"ruff: {parse_failures} diagnostic record(s) could not be parsed",
+        )
+    # A failed process with no findings needs an execution-error diagnostic.
+    elif not success and issues_count == 0:
         logger.warning(
             f"ruff subprocess failed (lint={success_lint}, format={success_format}) "
             f"but no issues were parsed - this indicates a ruff execution error",
