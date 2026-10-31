@@ -81,6 +81,7 @@ from loguru import logger
 from lintro.enums.action import Action
 from lintro.enums.capability import MUTATING_CAPABILITIES, Cap
 from lintro.enums.verify_status import VerifyStatus
+from lintro.formatters.formatter import merge_detected_and_remaining
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.file_cache import FingerprintSnapshot, snapshot_fingerprints
@@ -844,14 +845,26 @@ def _fold_unknown(
         outcome: The tool's ``UNKNOWN`` verify outcome.
 
     Returns:
-        ToolResult: ``mutation`` carrying its pre-fix findings, no fixed or
-        remaining count, and the reason the residual is unknown.
+        ToolResult: ``mutation`` carrying detected findings, no fixed or
+        remaining count, and the reason the residual is unknown. Incomplete
+        reports also retain usable post-fix findings without duplicates.
     """
     detected = _pre_fix_issues(mutation)
     note = RESIDUAL_UNKNOWN_TEMPLATE.format(
         reason=outcome.unknown_reason,
         detected=len(detected),
     )
+    if mutation.parse_failures_count:
+        verified = outcome.result.issues if outcome.result is not None else []
+        detected = merge_detected_and_remaining(
+            [],
+            [*(verified or []), *(mutation.issues or []), *detected],
+        )
+        note = (
+            f"Verify pass: residual unknown — {outcome.unknown_reason}. "
+            "Usable findings from the reports are retained; "
+            "complete fix accounting is unavailable."
+        )
     output = mutation.output or ""
     mutation.output = f"{output}\n{note}" if output.strip() else note
     mutation.issues = detected
@@ -900,18 +913,21 @@ def _fold_one(
         mutation.parse_failures_count = (mutation.parse_failures_count or 0) + (
             verify.parse_failures_count
         )
-    if mutation.residual_unknown:
-        return mutation
     if mutation.parse_failures_count:
         return _fold_unknown(
             mutation=mutation,
             outcome=VerifyOutcome(
                 tool=mutation.name,
-                result=None,
+                result=verify,
                 status=VerifyStatus.UNKNOWN,
-                unknown_reason="tool output could not be fully parsed",
+                unknown_reason=(
+                    mutation.residual_unknown_reason
+                    or "tool output could not be fully parsed"
+                ),
             ),
         )
+    if mutation.residual_unknown:
+        return mutation
     if outcome.status is VerifyStatus.UNKNOWN:
         return _fold_unknown(mutation=mutation, outcome=outcome)
     # An ``UNCHANGED`` outcome carries no result: nothing was rewritten, or

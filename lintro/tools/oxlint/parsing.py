@@ -1,7 +1,9 @@
 """Per-invocation parser accounting for Oxlint's batch runners."""
 
+import re
 from dataclasses import dataclass, field
 
+from lintro.formatters.formatter import merge_detected_and_remaining
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.oxlint.oxlint_issue import OxlintIssue
 from lintro.parsers.oxlint.oxlint_parser import parse_oxlint_output_with_stats
@@ -16,7 +18,11 @@ def _without_fix_claims(output: str | None) -> str:
     Returns:
         Summary without numerical fix claims, preserving raw output verbatim.
     """
-    summary, separator, raw_output = (output or "").partition("Fix output:\n")
+    output = output or ""
+    # #3000 labels the same raw section "Fix output (oxlint JSON)". Only
+    # filter the generated summary, never lines inside either raw section.
+    raw_heading = re.search(r"^Fix output(?: \(oxlint JSON\))?:\n", output, re.M)
+    summary = output[: raw_heading.start()] if raw_heading else output
     summary = "\n".join(
         line
         for line in summary.splitlines()
@@ -24,8 +30,8 @@ def _without_fix_claims(output: str | None) -> str:
         and line != "All issues were successfully auto-fixed"
     )
     summary = summary.strip()
-    if separator:
-        verbose = f"{separator}{raw_output}"
+    if raw_heading:
+        verbose = output[raw_heading.start() :]
         return f"{summary}\n{verbose}" if summary else verbose
     return summary
 
@@ -57,8 +63,9 @@ class OxlintOutputParser:
         """Surface rejected records and prevent incomplete reports implying success.
 
         Either incomplete fix report makes derived fix accounting unknown,
-        including on timeout. Bare non-JSON prose and whitespace still count
-        no failures and can pass clean under ISSUES_ONLY until #3000 lands.
+        including on timeout. Usable verification and initial findings remain
+        visible without duplicates. Bare non-JSON prose and whitespace still
+        count no failures and can pass clean under ISSUES_ONLY until #3000 lands.
 
         Args:
             result: Check, fix or timeout result from the shared runner.
@@ -84,8 +91,15 @@ class OxlintOutputParser:
             result.residual_unknown_reason = message
             if self.failure_counts[0]:
                 result.initial_issues_count = None
+            else:
+                # The shared runner can inflate its baseline when verification
+                # discovers more findings; retain the actual measured before-count.
+                result.initial_issues_count = len(result.initial_issues or [])
             # Unknown results carry detected findings, not a measured residual.
-            result.issues = list(result.initial_issues or [])
+            result.issues = merge_detected_and_remaining(
+                [],
+                [*(result.issues or []), *(result.initial_issues or [])],
+            )
             result.issues_count = len(result.issues)
         result.output = f"{message}\n{result.output}" if result.output else message
         return result

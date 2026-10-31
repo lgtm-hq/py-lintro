@@ -35,10 +35,11 @@ class ToolResult:
     When ``residual_unknown`` is set the tool or run-level verify pass (#1743)
     could not establish complete fix accounting, so there is no count to mirror:
     ``fixed_issues_count`` and ``remaining_issues_count`` are both ``None``
-    (enforced below) and ``issues_count`` is a **before**-count — the number of
-    pre-fix findings carried forward, which is what ``issues`` holds. It is not
-    a residual, and consumers must render "unknown" rather than presenting it
-    as one.
+    (enforced below) and ``issues_count`` counts the usable findings carried
+    forward in ``issues``. These include pre-fix findings and, for incomplete
+    reports, successfully parsed post-fix findings without duplicates. It is
+    not a measured residual, and consumers must render "unknown" rather than
+    presenting it as one.
 
     The ``issues`` field can contain parsed issue objects (tool-specific) to
     support unified table formatting.
@@ -161,7 +162,7 @@ class ToolResult:
 
         if self.residual_unknown_reason and not self.residual_unknown:
             raise ValueError(
-                "residual_unknown_reason can only be set when " "residual_unknown=True",
+                "residual_unknown_reason can only be set when residual_unknown=True",
             )
 
         if self.residual_unknown and self.success:

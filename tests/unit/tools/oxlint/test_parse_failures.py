@@ -5,16 +5,19 @@ from __future__ import annotations
 import json
 import subprocess  # nosec B404 - only constructs TimeoutExpired for runner tests
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from assertpy import assert_that
 
+import lintro.tools.oxlint.definition as oxlint_definition
 import lintro.utils.tool_executor as executor
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import ExecutionContext
+from lintro.tools.core.batch_runner import BatchFixPolicy
 from lintro.tools.core.verify_pass import VerifyBaseline
 from lintro.tools.oxlint.definition import OxlintPlugin
 from lintro.utils.json_output import serialize_tool_result
@@ -196,6 +199,52 @@ def test_fix_parse_failures_cannot_claim_a_clean_or_fixed_result(
         assert_that(result.initial_issues_count).is_none()
 
 
+@pytest.mark.parametrize(
+    "initial_messages",
+    [[], ["Use const"], ["Earlier finding", "Use const"]],
+)
+def test_partial_fix_verification_keeps_new_findings_without_duplicates(
+    prepared_oxlint: OxlintPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+    initial_messages: list[str],
+) -> None:
+    """A rejected record cannot hide usable findings from the after-state."""
+    initial = [
+        {"filename": "test.js", "message": message} for message in initial_messages
+    ]
+    verified = {"filename": "test.js", "message": "Use const", "severity": "error"}
+    monkeypatch.setattr(
+        prepared_oxlint,
+        "_run_subprocess",
+        MagicMock(
+            side_effect=[
+                (True, json.dumps({"diagnostics": initial})),
+                (True, ""),
+                (False, json.dumps({"diagnostics": [verified, None]})),
+            ],
+        ),
+    )
+
+    result = replace(prepared_oxlint.fix(["test.js"], {}))
+
+    expected = ["Use const"]
+    if "Earlier finding" in initial_messages:
+        expected.append("Earlier finding")
+    assert_that([issue.message for issue in result.issues or []]).is_equal_to(expected)
+    assert_that(list(result.issues or [])[0].to_display_row()["severity"]).is_equal_to(
+        "ERROR",
+    )
+    assert_that(result.issues_count).is_equal_to(len(expected))
+    assert_that(result.initial_issues_count).is_equal_to(len(initial_messages))
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.success).is_false()
+    assert_that(result.residual_unknown).is_true()
+    serialized = serialize_tool_result(result, action=Action.FIX)
+    assert_that(serialized["fixed"]).is_none()
+    assert_that(serialized["remaining"]).is_none()
+    assert_that(serialized["issues"]).is_length(len(expected))
+
+
 @pytest.mark.parametrize("method", ["check", "fix"])
 @pytest.mark.parametrize("exit_success", [True, False])
 @pytest.mark.parametrize("nonclean", [True, False])
@@ -273,13 +322,23 @@ def test_report_tolerates_log_prefixes_and_trailing_braces(
         assert_that(result.output).is_none()
 
 
+@pytest.mark.parametrize("verbose_label", ["Fix output", "Fix output (oxlint JSON)"])
 def test_incomplete_fix_preserves_findings_summary_and_verbose_output(
     prepared_oxlint: OxlintPlugin,
     monkeypatch: pytest.MonkeyPatch,
+    verbose_label: str,
 ) -> None:
     """Remove unverified fix claims while retaining useful diagnostic text."""
     diagnostic = {"filename": "test.js", "message": "Use const"}
-    raw_fix = "Fixed by oxlint {config}\nverbose details"
+    raw_fix = (
+        "Fixed by oxlint {config}\nAll issues were successfully auto-fixed\n"
+        "verbose details\n"
+    )
+    monkeypatch.setattr(
+        oxlint_definition,
+        "BatchFixPolicy",
+        partial(BatchFixPolicy, verbose_output_label=verbose_label),
+    )
     outputs = [
         (True, json.dumps({"diagnostics": [diagnostic, diagnostic, None]})),
         (True, raw_fix),
@@ -298,8 +357,17 @@ def test_incomplete_fix_preserves_findings_summary_and_verbose_output(
         "Failed to parse 1",
         "Found 1 issue(s) that cannot be auto-fixed",
         "test.js - Use const",
-        f"Fix output:\n{raw_fix}",
-    ).does_not_contain("Fixed 1 issue(s)", "All issues were successfully auto-fixed")
+        f"{verbose_label}:\n{raw_fix}",
+    )
+    summary, separator, raw_output = (result.output or "").partition(
+        f"{verbose_label}:\n",
+    )
+    assert_that(summary).does_not_contain(
+        "Fixed 1 issue(s)",
+        "All issues were successfully auto-fixed",
+    )
+    assert_that(separator).is_equal_to(f"{verbose_label}:\n")
+    assert_that(raw_output).is_equal_to(raw_fix)
 
 
 @pytest.mark.parametrize(
@@ -318,6 +386,15 @@ def test_executor_fold_preserves_unknown_fix_accounting(
     diagnostic = {"filename": "test.js", "message": "Use const"}
     valid = json.dumps({"diagnostics": [diagnostic]})
     partial = json.dumps({"diagnostics": [diagnostic, None]})
+    executor_partial = json.dumps(
+        {
+            "diagnostics": [
+                {**diagnostic, "severity": "error"},
+                {"filename": "test.js", "message": "Executor-only finding"},
+                None,
+            ],
+        },
+    )
     clean = '{"diagnostics": []}'
     timeout = subprocess.TimeoutExpired(cmd=["oxlint"], timeout=30)
     initial_failed = failed_stage in {
@@ -341,7 +418,7 @@ def test_executor_fold_preserves_unknown_fix_accounting(
         )
     # The executor case starts with complete fix reports; its last CHECK fails.
     if failed_stage == "executor" or executor_report == "partial":
-        outputs.append((False, partial))
+        outputs.append((False, executor_partial))
     elif executor_report == "timeout":
         outputs.append(timeout)
     else:
@@ -385,9 +462,14 @@ def test_executor_fold_preserves_unknown_fix_accounting(
     assert_that(result.success).is_false()
     assert_that(result.fixed_issues_count).is_none()
     assert_that(result.remaining_issues_count).is_none()
-    assert_that(result.issues_count).is_equal_to(1)
+    expected_messages = ["Use const"]
+    if not result.timed_out and (
+        failed_stage == "executor" or executor_report == "partial"
+    ):
+        expected_messages.append("Executor-only finding")
+    assert_that(result.issues_count).is_equal_to(len(expected_messages))
     assert_that([issue.message for issue in result.issues or []]).is_equal_to(
-        ["Use const"],
+        expected_messages,
     )
     assert_that(result.initial_issues_count).is_equal_to(None if initial_failed else 1)
     serialized = json.loads(
