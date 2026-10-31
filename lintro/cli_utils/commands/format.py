@@ -21,7 +21,12 @@ DEFAULT_ACTION: str = "fmt"
 @click.option(
     "--baseline",
     type=click.Path(dir_okay=False),
-    help="Apply a fingerprint baseline to final verified findings.",
+    help=(
+        "Apply a fingerprint baseline to certified complete, verified findings. "
+        "Unsupported or incomplete findings remain visible and failing. "
+        "See 'lintro baseline --help' for supported check tools; format runs "
+        "also require a certified mutation result."
+    ),
 )
 @click.option(
     "--tools",

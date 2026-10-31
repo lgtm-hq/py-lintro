@@ -29,7 +29,11 @@ DEFAULT_ACTION: str = "check"
 @click.option(
     "--baseline",
     type=click.Path(dir_okay=False),
-    help="Only report findings not acknowledged in this fingerprint baseline.",
+    help=(
+        "Apply a fingerprint baseline to certified complete findings. "
+        "Unsupported or incomplete findings remain visible and failing. "
+        "See 'lintro baseline --help' for supported tools."
+    ),
 )
 @click.option(
     "--tools",

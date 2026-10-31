@@ -78,6 +78,39 @@ def fingerprint(
     )
 
 
+def baseline_incomplete_reason(result: ToolResult) -> str | None:
+    """Explain why a producer cannot safely acknowledge its findings.
+
+    Args:
+        result: Producer's completed result.
+
+    Returns:
+        Incompleteness reason, or None for a complete verdict.
+    """
+    if result.skipped:
+        return "tool was skipped"
+    if result.no_files:
+        return "no files were inspected"
+    if result.timed_out:
+        return "execution timed out"
+    if result.execution_failed:
+        return "tool execution failed"
+    if result.residual_unknown:
+        return "residual findings are unknown"
+    if result.parse_failures_count:
+        return f"report has {result.parse_failures_count} parse failure(s)"
+    if result.inspected_files is not True:
+        return "file inspection was not confirmed"
+    if result.issues_count != len(result.issues or []):
+        return "finding count does not match the parsed report"
+    if not result.success:
+        if not result.findings_complete:
+            return "producer does not certify complete findings for baselining"
+        if result.issues_count <= 0:
+            return "failed verdict is not explained by findings"
+    return None
+
+
 def result_is_complete(result: ToolResult) -> bool:
     """Require affirmative inspection and coherent parsed findings.
 
@@ -87,19 +120,7 @@ def result_is_complete(result: ToolResult) -> bool:
     Returns:
         Whether findings can be acknowledged without hiding execution errors.
     """
-    return (
-        result.inspected_files is True
-        and not (
-            result.skipped
-            or result.no_files
-            or result.timed_out
-            or result.execution_failed
-        )
-        and not result.residual_unknown
-        and not result.parse_failures_count
-        and result.issues_count == len(result.issues or [])
-        and (result.success or (result.findings_complete and result.issues_count > 0))
-    )
+    return baseline_incomplete_reason(result) is None
 
 
 def snapshot(results: Sequence[ToolResult], *, root: Path) -> FingerprintBaseline:

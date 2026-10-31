@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from loguru import logger
+
 from lintro.enums.action import Action
 from lintro.utils.execution.exit_codes import (
     aggregate_tool_results,
     determine_exit_code,
 )
-from lintro.utils.fingerprint_baseline import filter_issues, result_is_complete
+from lintro.utils.fingerprint_baseline import baseline_incomplete_reason, filter_issues
 from lintro.utils.severity_counts import count_severities
 
 if TYPE_CHECKING:
@@ -40,7 +42,9 @@ def apply_baseline(artifact: RunArtifact, baseline: FingerprintBaseline) -> None
     )
     for result in artifact.tool_results:
         result.baselined_count = 0
-        if not result_is_complete(result):
+        if (reason := baseline_incomplete_reason(result)) is not None:
+            if not result.skipped and not result.no_files:
+                logger.warning(f"Baseline not applied to {result.name}: {reason}")
             continue
         if artifact.action == Action.FIX and result.initial_issues is None:
             # A residual alone cannot establish which acknowledged findings

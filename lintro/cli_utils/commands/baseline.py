@@ -10,8 +10,8 @@ import click
 from lintro.config.config_loader import get_config
 from lintro.exceptions.errors import ConfigurationError
 from lintro.utils.fingerprint_baseline import (
+    baseline_incomplete_reason,
     maintain_baseline,
-    result_is_complete,
     snapshot,
 )
 from lintro.utils.fingerprint_baseline_file import (
@@ -26,8 +26,19 @@ if TYPE_CHECKING:
     from lintro.models.core.fingerprint_baseline import FingerprintBaseline
     from lintro.models.core.run_artifact import RunArtifact
 
+BASELINE_SCAN_HELP = (
+    "Certified check findings: ruff, black, shellcheck, hadolint, shfmt, "
+    "dotenv-linter, pydoclint, sqlfluff. Use --tools to select supported tools. "
+    "Default or mixed selections abort if any active result is incomplete or "
+    "cannot certify its findings; no failing tool is silently omitted."
+)
 
-@click.group("baseline")
+
+@click.group(
+    "baseline",
+    help="Create, update, prune, or inspect a fingerprint baseline. "
+    + BASELINE_SCAN_HELP,
+)
 def baseline_command() -> None:
     """Create, update, prune, or inspect a fingerprint baseline."""
 
@@ -83,14 +94,20 @@ def _scan(
     finally:
         ctx.output_manager.mark_run_complete()
     active = [r for r in artifact.tool_results if not r.skipped and not r.no_files]
-    if (
-        artifact.early_exit
-        or not active
-        or any(not result_is_complete(result) for result in active)
-    ):
+    blockers = [
+        f"{result.name}: {reason}"
+        for result in active
+        if (reason := baseline_incomplete_reason(result)) is not None
+    ]
+    if artifact.early_exit:
+        blockers.append("scan ended before tool execution")
+    if not active:
+        blockers.append("no active tool confirmed file inspection")
+    if blockers:
         raise click.ClickException(
-            "Baseline unchanged: scan failed, was incomplete, "
-            "or had unknown inspection.",
+            "Baseline unchanged: "
+            + "; ".join(blockers)
+            + ". Use --tools to select supported tools; see 'lintro baseline --help'.",
         )
     # Exact file discovery does not prove that user overrides ran every rule.
     # Only original user options count; our internal Ruff discovery flag does not.
@@ -168,7 +185,7 @@ def _register_management(mode: str, help_text: str) -> None:
         help_text: CLI help for the operation.
     """
 
-    @baseline_command.command(mode, help=help_text)
+    @baseline_command.command(mode, help=help_text + " " + BASELINE_SCAN_HELP)
     @click.argument("paths", nargs=-1, type=click.Path(exists=True))
     @click.option("--baseline", type=click.Path(dir_okay=False), help="Baseline file.")
     @click.option("--tools", help="Comma-separated tools (or configured defaults).")

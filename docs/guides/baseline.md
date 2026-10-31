@@ -6,7 +6,7 @@ its existing behavior.
 
 ```bash
 lintro baseline create . --tools ruff,black
-lintro chk . --baseline .lintro-baseline.json
+lintro chk . --tools ruff,black --baseline .lintro-baseline.json
 lintro baseline update . --tools ruff
 lintro baseline prune . --tools ruff
 lintro baseline show
@@ -19,6 +19,35 @@ the invocation directory; configured paths are relative to the project config. R
 the project root: finding paths in the baseline are relative to that root. Commit the
 baseline alongside the code. Creation refuses to overwrite a file. `show` reads
 statistics without executing tools.
+
+## Supported tools and scope
+
+Certified **check** findings currently come from `ruff`, `black`, `shellcheck`,
+`hadolint`, `shfmt`, `dotenv-linter`, `pydoclint`, and `sqlfluff`. These producers
+certify native lint verdicts and complete reports. A supported tool can still fail
+inspection or parsing; those errors cannot be acknowledged.
+
+Other producers, including `mypy`, `pylint`, and `bandit`, do not yet certify failed
+findings for baselining. Their findings stay visible and failing under
+`check --baseline`, even if the baseline contains matching entries. A successful, fully
+inspected result with coherent findings can participate without explaining a failure,
+but a nonzero native exit alone never proves completeness.
+
+Without `--tools`, management commands use the normal configured/default selection. If
+**any active result** is incomplete or cannot certify its findings, `create`, `update`,
+and `prune` abort the entire transaction and name the blocking tools and reasons. No
+partial snapshot is written and no failing tool is silently dropped. For example,
+`lintro baseline create . --tools ruff,mypy` aborts when mypy reports a type error, even
+if Ruff's findings are complete. Use an explicit supported selection as above, and run
+the remaining checks separately; their existing findings still need attention. Skipped
+tools and tools with no matching files supply no coverage or acknowledgements; a scan
+with no active tools also aborts.
+
+This is a limited implementation of #438. A baseline across the full default tool set,
+including the issue's mypy example, remains unsupported until those producers certify
+their results. `fmt --baseline` additionally requires complete mutation and verification
+results; unfixable residual findings may stay failing even for the check tools listed
+above. The list is not a promise that every formatter can acknowledge residual findings.
 
 ## Design for #438
 
@@ -43,11 +72,11 @@ recomputes totals, severity counts, success, and measured fix accounting. Baseli
 findings are reported separately, never counted as fixes. Timeout, parse-failure,
 unknown residual, unknown inspection, and unexplained failure states remain failures. A
 failed producer must explicitly certify that its findings fully explain the failure
-before they can be acknowledged. Black, Ruff, and the shared per-file check runner
-supply this proof from their native exit statuses and reports. Other failed producers
-retain their findings until they supply that proof. Raw output is preserved while a
-result remains unsuccessful. Live diagnostic display is deferred when a baseline is
-active so final structured findings reflect filtering.
+before they can be acknowledged. The supported check tools above supply this proof from
+their native exit statuses and reports. Other failed producers retain their findings
+until they supply that proof. Raw output is preserved while a result remains
+unsuccessful. Live diagnostic display is deferred when a baseline is active so final
+structured findings reflect filtering.
 
 `update` adds currently observed findings and removes fixed entries only where there is
 affirmative complete, exact file coverage. Unseen tools and files, unknown coverage,
@@ -74,8 +103,9 @@ fixed entries within its exact coverage; an execution failure cannot. Occurrence
 shrink only over that same coverage. Deleted files are retained because their absence
 alone is not a successful inspection.
 
-Baseline JSON is untrusted input: unknown keys/versions, duplicate keys or entries,
-noncanonical/traversing/absolute paths, invalid hashes, invalid counts, and oversized
-files fail closed before tools run. Writes use an exclusive sibling lock and an atomic
-replacement; an error leaves the existing baseline intact. No rule packs (#3023),
-provenance, or broader ignore system (#1610) are introduced here.
+Baseline JSON is untrusted input. Unknown schema versions, unexpected or duplicate JSON
+members, repeated entries, non-canonical paths, parent traversal, absolute paths,
+invalid hashes or counts, and oversized files fail closed before tools run. Writes use
+an exclusive sibling lock and an atomic replacement; an error leaves the existing
+baseline intact. No rule packs (#3023), provenance, or broader ignore system (#1610) are
+introduced here.
