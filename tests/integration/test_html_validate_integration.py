@@ -66,7 +66,6 @@ def test_html_validate_detects_violations() -> None:
     assert_that(result.success).is_false()
     assert_that(result.issues).is_not_none()
     issues = result.issues
-    assert issues is not None
 
     issue = issues[0]
     if not isinstance(issue, HtmlValidateIssue):

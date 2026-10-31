@@ -710,7 +710,7 @@ def _parse_precedence(raw: Any) -> list[tuple[str, str]]:
 def _parse_tool_config(tool_name: str, data: dict[str, Any]) -> LintroToolConfig:
     """Parse a single tool configuration.
 
-    In the tiered model, tools only have enabled and optional config_source.
+    Tools control enablement, config sources and optional packaged rules.
 
     Args:
         tool_name: Name of the tool being parsed (used in error messages).
@@ -738,6 +738,7 @@ def _parse_tool_config(tool_name: str, data: dict[str, Any]) -> LintroToolConfig
         enabled=enabled,
         config_source=config_source,
         auto_install=auto_install,
+        rule_packs=data.get("rule_packs", []),
     )
 
 

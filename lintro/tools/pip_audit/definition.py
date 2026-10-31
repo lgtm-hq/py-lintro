@@ -437,7 +437,7 @@ class PipAuditPlugin(BaseToolPlugin):
             success=overall_success,
             output=combined_output if should_show_output else None,
             issues_count=len(issues),
-            issues=issues if issues else None,
+            issues=issues,
             parse_failures_count=parse_failures_count,
             timed_out=any_timed_out,
         )

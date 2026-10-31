@@ -150,8 +150,8 @@ class BatchFixPolicy:
         report_initial_issues: Include the pre-fix issues ahead of the
             surviving ones in ``ToolResult.issues``. Tools that render a
             two-table fix view need this; the rest report only what remains.
-        always_report_initial_issues: Pass an empty list rather than ``None``
-            to ``ToolResult.initial_issues`` when nothing was detected.
+        always_report_initial_issues: Deprecated no-op kept for plugin
+            compatibility. ``ToolResult.initial_issues`` is always a sequence.
         tool_name: Name used in timeout messages when it differs from the
             registered tool name.
         report_cwd: Record the working directory on the ``ToolResult``.
@@ -200,7 +200,7 @@ def batch_timeout_result(
     cmd: list[str] | None = None,
     tool_name: str | None = None,
     cwd: str | None = None,
-    issues: Sequence[IssueT] | None = None,
+    issues: Sequence[IssueT] = (),
 ) -> ToolResult:
     """Build the ``ToolResult`` for a batch invocation that timed out.
 
@@ -215,8 +215,7 @@ def batch_timeout_result(
         tool_name: Name used in the message when it differs from the
             registered tool name.
         cwd: Working directory to record on the result.
-        issues: Issues to report, for callers that distinguish an empty list
-            from an absent one.
+        issues: Findings parsed before the timeout, if any.
 
     Returns:
         ToolResult describing the timeout.
@@ -281,7 +280,7 @@ def batch_fix_timeout_result(
         initial_issues_count=initial_count,
         fixed_issues_count=0,
         remaining_issues_count=initial_count,
-        initial_issues=list(initial_issues) if initial_issues else None,
+        initial_issues=list(initial_issues),
         cwd=cwd,
     )
 
@@ -560,11 +559,7 @@ def _batch_fix_failure_result(
             if initial_check
             else "Batch execution failed after writes may have begun"
         ),
-        initial_issues=(
-            list(initial_issues)
-            if initial_issues or policy.always_report_initial_issues
-            else None
-        ),
+        initial_issues=list(initial_issues),
         cwd=cwd,
     )
 
@@ -723,10 +718,6 @@ def run_batch_fix(
         if policy.report_initial_issues
         else list(remaining_issues)
     )
-    if policy.always_report_initial_issues:
-        reported_initial: Sequence[IssueT] | None = initial_issues
-    else:
-        reported_initial = initial_issues or None
 
     logger.debug(
         f"[{type(plugin).__name__}] Batch fix complete: initial={initial_count}, "
@@ -750,6 +741,6 @@ def run_batch_fix(
         initial_issues_count=initial_count,
         fixed_issues_count=fixed_count,
         remaining_issues_count=remaining_count,
-        initial_issues=reported_initial,
+        initial_issues=initial_issues,
         cwd=result_cwd,
     )

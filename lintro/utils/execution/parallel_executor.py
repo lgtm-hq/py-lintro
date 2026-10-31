@@ -197,7 +197,13 @@ def run_tools_parallel(
                             auto_install=auto_install,
                             diff_base=diff_base,
                         )
-                    except (OSError, ValueError, RuntimeError) as exc:
+                    except (
+                        OSError,
+                        ValueError,
+                        RuntimeError,
+                        TypeError,
+                        AttributeError,
+                    ) as exc:
                         # Same telemetry the sequential path records: a
                         # console line so the failure is visible, and a
                         # duration so a crashed tool still appears in
@@ -214,7 +220,10 @@ def run_tools_parallel(
                             ToolResult(
                                 name=tool_name,
                                 success=False,
-                                output=f"Failed to initialize tool: {exc}",
+                                output=(
+                                    "Failed to initialize tool: "
+                                    f"{type(exc).__name__}: {exc}"
+                                ),
                                 issues_count=0,
                                 residual_unknown=action == Action.FIX,
                                 residual_unknown_reason=(

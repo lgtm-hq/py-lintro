@@ -1,0 +1,42 @@
+import json
+import os
+from json import loads
+
+
+def decode(raw):
+    decoded = json.loads(raw)
+    # ruleid: lintro.python.none-coercion.decoded-get-default
+    count = decoded.get("count", 0)
+    # ruleid: lintro.python.none-coercion.decoded-get-default
+    enabled = decoded.get("enabled", False)
+    # ok: lintro.python.none-coercion.decoded-get-default
+    optional = decoded.get("optional", None)
+    # ok: lintro.python.none-coercion.decoded-get-default
+    absent = decoded.get("optional")
+    # ok: lintro.python.none-coercion.decoded-get-default
+    environment = os.environ.get("COUNT", "0")
+    # ok: lintro.python.none-coercion.decoded-get-default
+    unrelated = other.get("count", 0)
+    return count
+
+
+def imported(raw):
+    parsed = loads(raw)
+    # ruleid: lintro.python.none-coercion.decoded-get-default
+    return parsed.get("key", [])
+
+
+def direct(raw):
+    # ruleid: lintro.python.none-coercion.decoded-get-default
+    return json.loads(raw).get("key", {})
+
+
+def constants(raw):
+    CONSTANT_TABLE = json.loads(raw)
+    # ok: lintro.python.none-coercion.decoded-get-default
+    return CONSTANT_TABLE.get("key", 0)
+
+
+def ordinary_mapping(data):
+    # ok: lintro.python.none-coercion.decoded-get-default
+    return data.get("key", 0)

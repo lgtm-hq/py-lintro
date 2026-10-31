@@ -39,18 +39,18 @@ def serialize_issue(issue: "BaseIssue") -> dict[str, Any]:
         ``path`` included when it is a non-empty string.
     """
     data: dict[str, Any] = {
-        "file": getattr(issue, "file", "") or "",
-        "line": getattr(issue, "line", None) or 0,
+        "file": issue.file or "",
+        "line": issue.line or 0,
         "code": issue.get_code(),
-        "message": getattr(issue, "message", "") or "",
+        "message": issue.message or "",
     }
-    doc_url = getattr(issue, "doc_url", "") or ""
+    doc_url = issue.doc_url or ""
     if doc_url:
         data["doc_url"] = doc_url
     raw_path = getattr(issue, "path", "")
     if isinstance(raw_path, str) and raw_path:
         data["path"] = raw_path
-    raw_category = getattr(issue, "category", None)
+    raw_category = issue.category
     if isinstance(raw_category, str) and raw_category:
         data["category"] = raw_category
     return data
@@ -72,7 +72,7 @@ def timed_out_tool_names(results: Sequence[ToolResult]) -> list[str]:
     """
     names: list[str] = []
     for result in results:
-        if not getattr(result, "timed_out", False):
+        if not result.timed_out:
             continue
         name = result.name
         if name not in names:
@@ -116,17 +116,17 @@ def serialize_tool_result(
         present, and ``issues`` when any exist.
     """
     merged_issues = merge_detected_and_remaining(
-        getattr(result, "initial_issues", None),
-        getattr(result, "issues", None),
+        result.initial_issues,
+        result.issues,
     )
     data: dict[str, Any] = {
         "tool": result.name,
-        "success": getattr(result, "success", True),
+        "success": result.success,
         "issues_count": len(merged_issues),
-        "skipped": getattr(result, "skipped", False),
-        "skip_reason": getattr(result, "skip_reason", None),
-        "timed_out": bool(getattr(result, "timed_out", False)),
-        "output": getattr(result, "output", ""),
+        "skipped": result.skipped,
+        "skip_reason": result.skip_reason,
+        "timed_out": bool(result.timed_out),
+        "output": result.output,
     }
     if result.parse_failures_count is not None:
         data["parse_failures_count"] = result.parse_failures_count
@@ -135,7 +135,7 @@ def serialize_tool_result(
     if result.execution_failed:
         data["execution_failed"] = True
     if action == Action.FIX:
-        if getattr(result, "residual_unknown", False):
+        if result.residual_unknown:
             # The verify pass could not measure the residual (#1743). Both
             # counts are null rather than zero: a consumer must be able to
             # tell "nothing left" from "nobody looked".
@@ -148,14 +148,14 @@ def serialize_tool_result(
             data["residual_unknown"] = True
             data["residual_unknown_reason"] = result.residual_unknown_reason
         else:
-            fixed = getattr(result, "fixed_issues_count", None)
-            remaining = getattr(result, "remaining_issues_count", None)
+            fixed = result.fixed_issues_count
+            remaining = result.remaining_issues_count
             data["net_resolved"] = fixed if fixed is not None else 0
             # Deprecated alias of ``net_resolved``; see above.
             data["fixed"] = data["net_resolved"]
             data["remaining"] = remaining if remaining is not None else 0
-    metadata = getattr(result, "metadata", None)
-    if isinstance(metadata, dict) and metadata:
+    metadata = result.metadata
+    if metadata:
         normalized_metadata = normalize_tool_metadata(metadata)
         if normalized_metadata:
             data["metadata"] = normalized_metadata

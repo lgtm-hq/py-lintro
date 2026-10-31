@@ -8,9 +8,11 @@ from discovery, so the committed sample cannot be linted in place.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 from assertpy import assert_that
 
+from lintro.parsers.buf.buf_issue import BufIssue
 from lintro.tools.buf.definition import BufPlugin
 from tests.integration._tools import require_tool
 
@@ -114,7 +116,7 @@ def test_check_detects_lint_violations(tmp_path: Path) -> None:
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_greater_than(0)
     assert_that(result.issues).is_not_none()
-    codes = {issue.code for issue in result.issues}  # type: ignore[union-attr]
+    codes = {cast(BufIssue, issue).code for issue in result.issues}
     assert_that(codes).contains("MESSAGE_PASCAL_CASE")
 
 
@@ -146,7 +148,7 @@ def test_check_detects_formatting(tmp_path: Path) -> None:
 
     assert_that(result.success).is_false()
     assert_that(result.issues).is_not_none()
-    codes = {issue.code for issue in result.issues}  # type: ignore[union-attr]
+    codes = {cast(BufIssue, issue).code for issue in result.issues}
     assert_that(codes).contains("FORMAT")
 
 

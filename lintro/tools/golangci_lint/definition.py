@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import subprocess  # nosec B404 - used safely with shell disabled
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
 from lintro.parsers.golangci_lint.golangci_lint_issue import GolangciLintIssue
 from lintro.parsers.golangci_lint.golangci_lint_parser import (
     parse_golangci_lint_output,
@@ -144,6 +146,23 @@ def _rebase_issue_paths(
             issue.file = str(module_root / file_path)
 
 
+def _sum_measured_counts(counts: Iterable[int | None]) -> int | None:
+    """Sum measured counts, preserving an unknown measurement.
+
+    Args:
+        counts: Per-module counts, with None denoting an unmeasured count.
+
+    Returns:
+        Total when every module was measured, otherwise None.
+    """
+    total = 0
+    for count in counts:
+        if count is None:
+            return None
+        total += count
+    return total
+
+
 def _merge_fix_results(*, name: str, results: list[ToolResult]) -> ToolResult:
     """Merge per-module fix results into a single aggregate result.
 
@@ -161,12 +180,12 @@ def _merge_fix_results(*, name: str, results: list[ToolResult]) -> ToolResult:
         Aggregate ToolResult (success only when every module succeeded and no
         module timed out).
     """
-    issues: list[Any] = []
-    initial_issues: list[Any] = []
+    issues: list[BaseIssue] = []
+    initial_issues: list[BaseIssue] = []
     outputs: list[str] = []
     for result in results:
-        issues.extend(result.issues or [])
-        initial_issues.extend(result.initial_issues or [])
+        issues.extend(result.issues)
+        initial_issues.extend(result.initial_issues)
         if result.output:
             outputs.append(result.output)
     any_timed_out = any(r.timed_out for r in results)
@@ -179,12 +198,16 @@ def _merge_fix_results(*, name: str, results: list[ToolResult]) -> ToolResult:
         success=all(r.success for r in results) and not any_timed_out,
         timed_out=any_timed_out,
         output="\n".join(outputs) if outputs else None,
-        issues_count=sum(r.issues_count or 0 for r in results),
+        issues_count=sum(r.issues_count for r in results),
         issues=issues,
-        initial_issues_count=sum(r.initial_issues_count or 0 for r in results),
-        fixed_issues_count=sum(r.fixed_issues_count or 0 for r in results),
-        remaining_issues_count=sum(r.remaining_issues_count or 0 for r in results),
-        initial_issues=initial_issues if initial_issues else None,
+        initial_issues_count=_sum_measured_counts(
+            r.initial_issues_count for r in results
+        ),
+        fixed_issues_count=_sum_measured_counts(r.fixed_issues_count for r in results),
+        remaining_issues_count=_sum_measured_counts(
+            r.remaining_issues_count for r in results
+        ),
+        initial_issues=initial_issues,
     )
 
 
@@ -357,7 +380,7 @@ class GolangciLintPlugin(BaseToolPlugin):
                 # never inflates issues_count. The tool-level ``timed_out``
                 # flag (plus success=False) is what surfaces it instead.
                 any_timed_out = True
-                all_issues.extend(timeout_result.issues or [])
+                all_issues.extend(timeout_result.issues)
                 if timeout_result.output:
                     failure_outputs.append(timeout_result.output)
                 continue
@@ -553,5 +576,5 @@ class GolangciLintPlugin(BaseToolPlugin):
             initial_issues_count=initial_count,
             fixed_issues_count=fixed_count,
             remaining_issues_count=remaining_count,
-            initial_issues=initial_issues if initial_issues else None,
+            initial_issues=initial_issues,
         )

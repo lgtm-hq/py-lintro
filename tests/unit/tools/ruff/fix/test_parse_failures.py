@@ -175,7 +175,6 @@ def test_fix_accepts_null_code_diagnostics(
     assert_that(result.parse_failures_count).is_zero()
     assert_that(result.success).is_equal_to(fixed)
     assert_that(result.initial_issues_count).is_equal_to(1)
-    assert result.initial_issues is not None
     assert_that(result.initial_issues[0].get_code()).is_empty()
     assert_that(result.remaining_issues_count).is_equal_to(int(not fixed))
     assert_that(result.fixed_issues_count).is_equal_to(int(fixed))

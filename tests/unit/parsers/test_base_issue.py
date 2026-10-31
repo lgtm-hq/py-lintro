@@ -19,6 +19,7 @@ def test_base_issue_default_values() -> None:
     assert_that(issue.line).is_equal_to(0)
     assert_that(issue.column).is_equal_to(0)
     assert_that(issue.message).is_equal_to("")
+    assert_that(issue.fixable).is_false()
 
 
 def test_base_issue_accepts_values() -> None:
@@ -28,6 +29,30 @@ def test_base_issue_accepts_values() -> None:
     assert_that(issue.line).is_equal_to(10)
     assert_that(issue.column).is_equal_to(5)
     assert_that(issue.message).is_equal_to("Error found")
+
+
+@pytest.mark.parametrize(("code", "fixable"), [("FORMAT", True), ("LINT", False)])
+def test_plugin_can_compute_inherited_fixable_field(code: str, fixable: bool) -> None:
+    """The v2 migration replaces a read-only property with a computed field.
+
+    Args:
+        code: Native plugin rule code.
+        fixable: Whether the plugin can fix this rule automatically.
+    """
+
+    @dataclass
+    class PluginIssue(BaseIssue):
+        code: str = ""
+
+        def __post_init__(self) -> None:
+            self.fixable = self.code == "FORMAT"
+
+    issue = PluginIssue(code=code)
+
+    assert_that(issue.fixable).is_equal_to(fixable)
+    assert_that(issue.to_display_row()["fixable"]).is_equal_to("Yes" if fixable else "")
+    issue.fixable = not fixable
+    assert_that(issue.fixable).is_equal_to(not fixable)
 
 
 def test_to_display_row_basic_fields() -> None:
@@ -115,12 +140,7 @@ def test_subclass_with_custom_field_map() -> None:
 
 def test_to_display_row_fixable_true() -> None:
     """to_display_row shows Yes for fixable=True."""
-
-    @dataclass
-    class FixableIssue(BaseIssue):
-        fixable: bool = False
-
-    issue = FixableIssue(file="test.py", line=1, column=1, fixable=True)
+    issue = BaseIssue(file="test.py", line=1, column=1, fixable=True)
     result = issue.to_display_row()
     assert_that(result["fixable"]).is_equal_to("Yes")
 

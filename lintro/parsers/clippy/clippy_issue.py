@@ -14,6 +14,7 @@ class ClippyIssue(BaseIssue):
 
     Attributes:
         DISPLAY_FIELD_MAP: Mapping of display field names to attribute names.
+        PREVIEW_FIXABLE: Preserve previews when no per-issue fix signal exists.
         code: Clippy lint code (e.g., clippy::needless_return).
         level: Severity level (e.g., warning, error).
         end_line: Optional end line number.
@@ -24,6 +25,7 @@ class ClippyIssue(BaseIssue):
         **BaseIssue.DISPLAY_FIELD_MAP,
         "severity": "level",
     }
+    PREVIEW_FIXABLE: ClassVar[bool] = True
 
     code: str = field(default="")
     level: str | None = field(default=None)

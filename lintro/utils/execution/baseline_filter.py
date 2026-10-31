@@ -46,9 +46,12 @@ def apply_baseline(artifact: RunArtifact, baseline: FingerprintBaseline) -> None
             if not result.skipped and not result.no_files:
                 logger.warning(f"Baseline not applied to {result.name}: {reason}")
             continue
-        if artifact.action == Action.FIX and result.initial_issues is None:
-            # A residual alone cannot establish which acknowledged findings
-            # were fixed. Keep that producer's accounting unchanged.
+        if artifact.action == Action.FIX and (
+            result.initial_issues_count is None
+            or result.initial_issues_count != len(result.initial_issues)
+        ):
+            # Empty collection defaults do not prove pre-fix measurement.
+            # Require the detected findings to match the producer's count.
             continue
         retained, suppressed = filter_issues(
             result.issues or [],

@@ -12,6 +12,12 @@ from assertpy import assert_that
 
 import lintro.utils.tool_executor as te
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
+from lintro.parsers.clippy.clippy_issue import ClippyIssue
+from lintro.parsers.oxfmt.oxfmt_issue import OxfmtIssue
+from lintro.parsers.prettier.prettier_issue import PrettierIssue
+from lintro.parsers.sqlfluff.sqlfluff_issue import SqlfluffIssue
+from lintro.parsers.taplo.taplo_issue import TaploIssue
 from lintro.tools import tool_manager
 from lintro.utils.execution.tool_configuration import ToolsToRunResult
 from lintro.utils.output import OutputManager
@@ -1058,36 +1064,43 @@ def test_executor_dry_run_only_non_fixable_exits_zero(
     assert_that(texts).does_not_contain("Would fix")
 
 
+@pytest.mark.parametrize(
+    ("tool_name", "issue"),
+    [
+        ("prettier", PrettierIssue(file="a.js", message="Would reformat")),
+        ("oxfmt", OxfmtIssue(file="a.js", message="Would reformat")),
+        ("taplo", TaploIssue(file="a.toml", message="Would reformat")),
+        ("sqlfluff", SqlfluffIssue(file="a.sql", message="Would reformat")),
+        ("clippy", ClippyIssue(file="a.rs", message="Lint diagnostic")),
+    ],
+)
 def test_executor_dry_run_treats_formatter_issues_without_flag_as_fixable(
     monkeypatch: pytest.MonkeyPatch,
     fake_logger: Any,
+    tool_name: str,
+    issue: BaseIssue,
 ) -> None:
-    """Formatter issues lacking a ``fixable`` attribute count as would-fix.
+    """Formatter issues without a native per-issue flag count as would-fix.
 
-    Pure-formatter parsers (e.g. prettier) do not define a ``fixable`` field.
-    Every diagnostic such a tool emits in check mode is a reformat that fmt
-    would apply, so it must be counted.
+    Declaring a conservative default on BaseIssue must not hide the changes
+    these formatters would apply.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
         fake_logger: FakeLogger fixture.
+        tool_name: Formatter being previewed.
+        issue: A formatting diagnostic using its model's default fixability.
     """
-    from lintro.parsers.prettier.prettier_issue import PrettierIssue
-
-    issue = PrettierIssue(file="a.js", line=1, column=1, message="Would reformat")
-    assert_that(hasattr(issue, "fixable")).is_false()
     _stub_logger(monkeypatch, fake_logger)
     result = ToolResult(
-        name="prettier",
+        name=tool_name,
         success=False,
         output="x",
         issues_count=1,
         issues=[issue],
     )
-    _setup_tool_manager(
-        monkeypatch,
-        {"prettier": CallTrackingTool("prettier", can_fix=True, result=result)},
-    )
+    tool = CallTrackingTool(tool_name, can_fix=True, result=result)
+    _setup_tool_manager(monkeypatch, {tool_name: tool})
 
     code = run_lint_tools_simple(
         action="fmt",
@@ -1104,8 +1117,11 @@ def test_executor_dry_run_treats_formatter_issues_without_flag_as_fixable(
     )
 
     assert_that(code).is_equal_to(1)
+    assert_that(tool.checked).is_true()
+    assert_that(tool.fixed).is_false()
     texts = _console_texts(fake_logger)
     assert_that(texts).contains("Would fix 1 issue in")
+    assert_that(texts).does_not_contain("Nothing to fix")
 
 
 def test_executor_diff_mixed_targets_warns_non_repo_full_scan(

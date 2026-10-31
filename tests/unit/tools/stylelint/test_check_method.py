@@ -62,7 +62,7 @@ def test_check_with_issues(
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.issues).is_not_none()
-    issue = cast(StylelintIssue, result.issues[0])  # type: ignore[index]
+    issue = cast(StylelintIssue, result.issues[0])
     assert_that(issue.code).is_equal_to("color-hex-length")
     assert_that(result.output).is_not_none()
 

@@ -11,25 +11,26 @@ whitelist normalizer live in core and never import :mod:`lintro.ai`
 from __future__ import annotations
 
 import copy
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from lintro.models.core.tool_result import ToolResult
 
 
-def get_ai_count(result: object, key: str) -> int:
+def get_ai_count(result: ToolResult, key: str) -> int:
     """Get an integer AI metadata count from a result object.
 
     Falls back from ``applied_count`` to ``fixed_count`` for
     backward compatibility with older metadata.
 
     Args:
-        result: Tool result with an optional ``metadata`` dict attribute.
+        result: Tool result carrying metadata.
         key: Metadata key to read (e.g. ``"applied_count"``).
 
     Returns:
         Non-negative integer count, or ``0`` when absent/invalid.
     """
-    metadata = getattr(result, "metadata", None)
-    if not isinstance(metadata, dict):
-        return 0
+    metadata = result.metadata
     value = metadata.get(key)
     if value is None and key == "applied_count":
         value = metadata.get("fixed_count", 0)

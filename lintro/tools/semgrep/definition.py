@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import json
 import subprocess  # nosec B404 - used safely with shell disabled
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote as url_quote
 
@@ -27,6 +28,7 @@ from lintro.parsers.semgrep.semgrep_parser import parse_semgrep_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.rules import resolve_rule_pack, validate_rule_packs
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_list,
@@ -51,6 +53,65 @@ SEMGREP_FILE_PATTERNS: list[str] = [
 ]
 SEMGREP_OUTPUT_FORMAT: str = "json"
 SEMGREP_DEFAULT_CONFIG: str = "auto"
+
+
+def _rule_configs(
+    options: dict[str, object],
+    cwd: str | None,
+    config_explicit: bool,
+) -> list[str]:
+    """Combine explicit or native Semgrep configuration with packaged rules.
+
+    Args:
+        options: Validated plugin options.
+        cwd: Scan project root, used to locate native configuration.
+        config_explicit: Whether the caller explicitly selected a configuration.
+
+    Returns:
+        Configuration arguments, preserving the default when no pack is enabled.
+    """
+    packs = validate_rule_packs(options.get("rule_packs", []))
+    config = options.get("config", SEMGREP_DEFAULT_CONFIG)
+    configs = [str(config)] if config is not None else []
+    if packs and config == SEMGREP_DEFAULT_CONFIG and not config_explicit:
+        # An opt-in pack replaces implicit registry access, retaining local rules.
+        root = Path(cwd) if cwd is not None else Path.cwd()
+        configs = [
+            str(root / native)
+            for native in (".semgrep.yaml", ".semgrep.yml", ".semgrep")
+            if (root / native).exists()
+        ]
+    configs.extend(str(resolve_rule_pack(name)) for name in packs)
+    return configs
+
+
+def _restore_pack_rule_ids(data: dict[str, Any], packs: list[str]) -> None:
+    """Remove installation-path prefixes only from marked packaged findings.
+
+    Args:
+        data: Semgrep report to normalize before parsing issue objects.
+        packs: Enabled packaged rules, whose metadata identifies their findings.
+    """
+    results = data.get("results")
+    if not isinstance(results, list):
+        return
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        extra = result.get("extra")
+        metadata = extra.get("metadata") if isinstance(extra, dict) else None
+        pack = metadata.get("lintro_rule_pack") if isinstance(metadata, dict) else None
+        check_id = result.get("check_id")
+        if (
+            not isinstance(pack, str)
+            or pack not in packs
+            or not isinstance(check_id, str)
+        ):
+            continue
+        namespace = "lintro." + pack.replace("/", ".") + "."
+        prefix, marker, suffix = check_id.rpartition(namespace)
+        if marker and (not prefix or prefix.endswith(".")):
+            result["check_id"] = marker + suffix
 
 
 def _has_unclosed_array(prefix: str) -> bool:
@@ -149,6 +210,12 @@ class SemgrepPlugin(BaseToolPlugin):
     vulnerabilities and enforcing code standards across multiple languages.
     """
 
+    _config_explicit: bool = field(default=False, init=False, repr=False)
+
+    def _reset_execution_state(self) -> None:
+        """Restore implicit configuration selection when options are reset."""
+        self._config_explicit = False
+
     @property
     def definition(self) -> ToolDefinition:
         """Return the tool definition.
@@ -179,6 +246,7 @@ class SemgrepPlugin(BaseToolPlugin):
             default_options={
                 "timeout": SEMGREP_DEFAULT_TIMEOUT,
                 "config": SEMGREP_DEFAULT_CONFIG,
+                "rule_packs": [],
                 "exclude": None,
                 "include": None,
                 "severity": None,
@@ -213,7 +281,8 @@ class SemgrepPlugin(BaseToolPlugin):
             jobs: Number of parallel jobs.
             verbose: Verbose output.
             quiet: Quiet mode.
-            **kwargs: Other tool options.
+            **kwargs: Other tool options, including ``rule_packs`` (a list of
+                packaged language/pack names, listed by ``list-tools --rules``).
 
         Raises:
             ValueError: If an option value is invalid.
@@ -221,6 +290,8 @@ class SemgrepPlugin(BaseToolPlugin):
         validate_str(config, "config")
         validate_list(exclude, "exclude")
         validate_list(include, "include")
+        if "rule_packs" in kwargs:
+            kwargs["rule_packs"] = validate_rule_packs(kwargs["rule_packs"])
 
         severity_str: str | None = None
         if severity is not None:
@@ -245,12 +316,19 @@ class SemgrepPlugin(BaseToolPlugin):
             quiet=quiet,
         )
         super().set_options(**options, **kwargs)
+        if config is not None:
+            self._config_explicit = True
 
-    def _build_check_command(self, files: list[str]) -> list[str]:
+    def _build_check_command(
+        self,
+        files: list[str],
+        cwd: str | None = None,
+    ) -> list[str]:
         """Build the semgrep check command.
 
         Args:
             files: List of files to check.
+            cwd: Scan project root for native configuration discovery.
 
         Returns:
             List of command arguments.
@@ -261,9 +339,8 @@ class SemgrepPlugin(BaseToolPlugin):
         cmd.extend([f"--{SEMGREP_OUTPUT_FORMAT}"])
 
         # Config option (required for semgrep to know what rules to use)
-        config_opt = self.options.get("config", SEMGREP_DEFAULT_CONFIG)
-        if config_opt is not None:
-            cmd.extend(["--config", str(config_opt)])
+        for config in _rule_configs(self.options, cwd, self._config_explicit):
+            cmd.extend(["--config", config])
 
         # Exclude patterns
         exclude_opt = self.options.get("exclude")
@@ -319,7 +396,7 @@ class SemgrepPlugin(BaseToolPlugin):
             URL to the Semgrep registry page, or None if the rule is
             empty or appears to be a local/custom rule.
         """
-        if not code:
+        if not code or code.startswith("lintro."):
             return None
         if "." in code and "/" not in code:
             return DocUrlTemplate.SEMGREP.format(code=url_quote(code, safe=""))
@@ -334,13 +411,17 @@ class SemgrepPlugin(BaseToolPlugin):
 
         Returns:
             ToolResult with check results.
+
         """
+        if options:
+            runtime_options: dict[str, Any] = dict(options)
+            self.set_options(**runtime_options)
         # Use shared preparation for version check, path validation, file discovery
         ctx = self.prepare(paths=paths, options=options)
         if isinstance(ctx, ToolResult):
             return ctx
 
-        cmd: list[str] = self._build_check_command(files=ctx.rel_files)
+        cmd: list[str] = self._build_check_command(files=ctx.rel_files, cwd=ctx.cwd)
         logger.debug(f"[semgrep] Running: {' '.join(cmd[:10])}... (cwd={ctx.cwd})")
 
         output: str
@@ -386,6 +467,10 @@ class SemgrepPlugin(BaseToolPlugin):
                 )
 
             semgrep_data = _extract_semgrep_json(raw_text=output)
+            _restore_pack_rule_ids(
+                semgrep_data,
+                validate_rule_packs(self.options.get("rule_packs", [])),
+            )
             json_output = json.dumps(semgrep_data)
             issues = parse_semgrep_output(output=json_output)
             issues_count = len(issues)

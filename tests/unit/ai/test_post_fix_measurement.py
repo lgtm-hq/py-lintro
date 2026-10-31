@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from copy import deepcopy
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -11,6 +13,7 @@ from assertpy import assert_that
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.validation import validate_applied_fixes, verify_fixes
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
 
 from .conftest import MockIssue
 
@@ -50,10 +53,11 @@ def unmeasured_rerun(request: pytest.FixtureRequest) -> ToolResult:
 def test_standalone_unmeasured_rerun_cannot_verify(
     suggestions: list[AIFixSuggestion],
     unmeasured_rerun: ToolResult,
-    empty_issues: list[MockIssue] | None,
+    empty_issues: Sequence[BaseIssue] | None,
 ) -> None:
     """Both None and an empty failed result leave every suggestion unverified."""
-    unmeasured_rerun.issues = empty_issues
+    # Deliberately inject invalid None to keep the fail-closed regression case.
+    unmeasured_rerun.issues = cast(Sequence[BaseIssue], empty_issues)
     tool = MagicMock()
     tool.check.return_value = unmeasured_rerun
     with patch("lintro.tools.tool_manager.get_tool", return_value=tool):
@@ -76,11 +80,12 @@ def test_unified_unmeasured_rerun_preserves_original_result(
     suggestions: list[AIFixSuggestion],
     sample_issues: list[MockIssue],
     unmeasured_rerun: ToolResult,
-    empty_issues: list[MockIssue] | None,
+    empty_issues: Sequence[BaseIssue] | None,
     original_flag: str | None,
 ) -> None:
     """Unanswered checks cannot rewrite counts, findings, output or failure flags."""
-    unmeasured_rerun.issues = empty_issues
+    # Deliberately inject invalid None to keep the fail-closed regression case.
+    unmeasured_rerun.issues = cast(Sequence[BaseIssue], empty_issues)
     original = ToolResult(
         name="ruff",
         success=False,

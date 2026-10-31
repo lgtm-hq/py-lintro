@@ -1,0 +1,197 @@
+# Advisory candidates, versioned with Lintro. These patterns cannot prove that
+# absence means unknown. See docs/adr/0012-packaged-semgrep-rules.md.
+---
+rules:
+  - id: lintro.python.none-coercion.getattr-default
+    languages: [python]
+    metadata:
+      lintro_rule_pack: python/none-coercion
+    severity: INFO
+    message: >-
+      Does a missing attribute mean empty or unknown? Prefer a declared field
+      and preserve unknown state instead of silently using getattr's default.
+    options:
+      constant_propagation: false
+    patterns:
+      - pattern: getattr($X, "...", $DEFAULT)
+      - metavariable-regex:
+          metavariable: $X
+          regex: '^(?![A-Z][A-Z0-9_]*$)'
+
+  - id: lintro.python.none-coercion.or-fallback
+    languages: [python]
+    metadata:
+      lintro_rule_pack: python/none-coercion
+    severity: INFO
+    message: >-
+      Does this falsey value mean empty or unknown? An or fallback also erases
+      None and other falsey values; preserve unknown measurements explicitly.
+    options:
+      constant_propagation: false
+    patterns:
+      - pattern-either:
+          - pattern: $X or []
+          - pattern: $X or 0
+          - pattern: $X or ""
+          - pattern: $X or False
+      # Do not silence arbitrary objects merely because they have a stdout field.
+      - pattern-not-inside: |
+          $PROC = subprocess.run(...)
+          ...
+          $PROC.stdout or ""
+      - pattern-not: subprocess.run(...).stdout or ""
+      - pattern-not: os.environ.get(...) or $DEFAULT
+      - metavariable-regex:
+          metavariable: $X
+          regex: '^(?![A-Z][A-Z0-9_]*(?:$|\[|\.get\())'
+
+  - id: lintro.python.none-coercion.except-return
+    languages: [python]
+    metadata:
+      lintro_rule_pack: python/none-coercion
+    severity: INFO
+    message: >-
+      Does failure mean empty or unknown? Returning a concrete value from an
+      exception handler can make an unmeasured result appear clean.
+    options:
+      constant_propagation: false
+    patterns:
+      # Search within the handler, excluding functions defined in that scope.
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  try:
+                    ...
+                  except ...:
+                    $HANDLER
+              - metavariable-pattern:
+                  metavariable: $HANDLER
+                  patterns:
+                    - pattern: return $DEFAULT
+                    - pattern-either:
+                        - pattern: return []
+                        - pattern: return 0
+                        - pattern: return True
+                        - pattern: return {}
+                    - pattern-not-inside: |
+                        def $NESTED(...):
+                          ...
+          - patterns:
+              - pattern: |
+                  try:
+                    ...
+                  except ...:
+                    $HANDLER
+              - pattern-inside: |
+                  def $FUNCTION(...):
+                    ...
+              - metavariable-regex:
+                  metavariable: $FUNCTION
+                  regex: '^(?!(?:is_|has_))'
+              - metavariable-pattern:
+                  metavariable: $HANDLER
+                  patterns:
+                    - pattern: return $DEFAULT
+                    - pattern: return False
+                    - pattern-not-inside: |
+                        def $NESTED(...):
+                          ...
+      - focus-metavariable: $DEFAULT
+
+  - id: lintro.python.none-coercion.none-guard-return
+    languages: [python]
+    metadata:
+      lintro_rule_pack: python/none-coercion
+    severity: INFO
+    message: >-
+      Does None mean no issues or an unknown result? Returning an empty list
+      after the None guard may erase an unavailable measurement.
+    options:
+      constant_propagation: false
+    patterns:
+      - pattern: |
+          if $X is not None:
+            return $VALUE
+          return []
+      - pattern-not: |
+          if $X is not None:
+            return True
+          return []
+
+  - id: lintro.python.none-coercion.stringified-get
+    languages: [python]
+    metadata:
+      lintro_rule_pack: python/none-coercion
+    severity: INFO
+    message: >-
+      Does a missing or null value mean empty or unknown? str(mapping.get(...))
+      turns explicit null into the text "None", even when get has a default.
+    options:
+      constant_propagation: false
+    patterns:
+      - pattern: str($DATA.get($KEY, ...))
+      - pattern-not: str(os.environ.get(...))
+      - metavariable-regex:
+          metavariable: $DATA
+          regex: '^(?![A-Z][A-Z0-9_]*$)'
+
+  - id: lintro.python.none-coercion.decoded-get-default
+    languages: [python]
+    metadata:
+      lintro_rule_pack: python/none-coercion
+    severity: INFO
+    message: >-
+      Does explicit JSON null mean empty or unknown? dict.get's default only
+      handles a missing key; json.loads can supply None and bypass that default.
+    options:
+      constant_propagation: false
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern-inside: |
+                  $DATA = json.loads(...)
+                  ...
+              - pattern: $DATA.get($KEY, $DEFAULT)
+              - metavariable-regex:
+                  metavariable: $DATA
+                  regex: '^(?![A-Z][A-Z0-9_]*$)'
+          - pattern: json.loads(...).get($KEY, $DEFAULT)
+      - metavariable-pattern:
+          metavariable: $DEFAULT
+          patterns:
+            - pattern: $VALUE
+            - pattern-not: None
+
+  - id: lintro.python.none-coercion.failed-tool-result
+    languages: [python]
+    metadata:
+      lintro_rule_pack: python/none-coercion
+    severity: INFO
+    message: >-
+      Does this failed run leave zero issues or an unknown residual? Review how
+      remaining issues are represented; failure alone does not prove clean.
+    options:
+      constant_propagation: false
+    patterns:
+      - pattern: ToolResult(..., success=False, ...)
+      - pattern-not: ToolResult(..., remaining_issues_count=$COUNT, ...)
+      - pattern-not: ToolResult(..., residual_unknown=$UNKNOWN, ...)
+      - pattern-not: ToolResult(..., **$KWARGS)
+
+  - id: lintro.python.none-coercion.capability-empty
+    languages: [python]
+    metadata:
+      lintro_rule_pack: python/none-coercion
+    severity: INFO
+    message: >-
+      Does an unavailable capability mean no issues or an unknown result?
+      Returning [] can hide that no inspection was possible.
+    options:
+      constant_propagation: false
+    patterns:
+      - pattern: |
+          if not $CAPABILITY:
+            return []
+      - metavariable-regex:
+          metavariable: $CAPABILITY
+          regex: '(?i).*(?:can_|has_|supports_|capabilit|available|enabled)'

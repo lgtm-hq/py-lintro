@@ -100,11 +100,11 @@ class OxlintOutputParser:
             else:
                 # The shared runner can inflate its baseline when verification
                 # discovers more findings; retain the actual measured before-count.
-                result.initial_issues_count = len(result.initial_issues or [])
+                result.initial_issues_count = len(result.initial_issues)
             # Unknown results carry detected findings, not a measured residual.
             result.issues = merge_detected_and_remaining(
                 [],
-                [*(result.issues or []), *(result.initial_issues or [])],
+                [*result.issues, *result.initial_issues],
             )
             result.issues_count = len(result.issues)
         result.output = f"{message}\n{result.output}" if result.output else message

@@ -216,6 +216,40 @@ def test_acknowledged_fixed_findings_are_not_reported_as_new_fixes(
     assert_that(artifact.success).is_true()
 
 
+@pytest.mark.parametrize("initial_count", [None, 1])
+def test_format_without_detected_findings_preserves_residual_accounting(
+    tmp_path: Path,
+    dirty_result: ToolResult,
+    initial_count: int | None,
+) -> None:
+    """An empty default collection cannot prove the pre-fix findings were measured."""
+    baseline = snapshot([dirty_result], root=tmp_path)
+    result = replace(
+        dirty_result,
+        initial_issues_count=initial_count,
+        fixed_issues_count=0,
+        remaining_issues_count=1,
+        output="native residual finding",
+        formatted_output="cached residual finding",
+    )
+    expected = replace(result, baselined_count=0)
+    artifact = RunArtifact(
+        action=Action.FIX,
+        tool_results=[result],
+        workspace_root=tmp_path,
+        total_issues=1,
+        total_remaining=1,
+        exit_code=1,
+    )
+
+    apply_baseline(artifact, baseline)
+
+    assert_that(result).is_equal_to(expected)
+    assert_that(artifact.total_issues).is_equal_to(1)
+    assert_that(artifact.total_remaining).is_equal_to(1)
+    assert_that(artifact.exit_code).is_equal_to(1)
+
+
 @pytest.mark.parametrize("remaining", [0, 1])
 def test_unmatched_format_result_preserves_output_and_accounting(
     tmp_path: Path,

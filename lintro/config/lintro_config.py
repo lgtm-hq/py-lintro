@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 
 from lintro.config.deps_config import DepsConfig
 from lintro.config.enforce_config import EnforceConfig
@@ -91,6 +91,30 @@ class LintroConfig(BaseModel):
     config_path: str | None = None
     global_config_path: str | None = None
     global_contributed_keys: list[str] = Field(default_factory=list)
+
+    @field_validator("tools")
+    @classmethod
+    def _validate_rule_pack_tools(
+        cls,
+        tools: dict[str, LintroToolConfig],
+    ) -> dict[str, LintroToolConfig]:
+        """Reject packs whose configured tool cannot execute them.
+
+        Args:
+            tools: Validated per-tool configurations, including model instances.
+
+        Returns:
+            Tool configurations with supported pack selections.
+
+        Raises:
+            ValueError: If a non-Semgrep tool enables a rule pack.
+        """
+        for name, tool in tools.items():
+            if tool.rule_packs and name.lower() != "semgrep":
+                raise ValueError(
+                    f"tools.{name}.rule_packs is only supported for Semgrep",
+                )
+        return tools
 
     def get_tool_config(self, tool_name: str) -> LintroToolConfig:
         """Get configuration for a specific tool.

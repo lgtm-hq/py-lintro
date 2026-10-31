@@ -821,7 +821,7 @@ def _verified_paths(
     if verify is None:
         return set()
     covered = set(scope.files)
-    for issue in verify.issues or ():
+    for issue in verify.issues:
         path = _issue_path(issue, cwd=verify.cwd or fallback_cwd)
         if path:
             covered.add(path)
@@ -859,7 +859,7 @@ def _fold_unknown(
         verified = outcome.result.issues if outcome.result is not None else []
         detected = merge_detected_and_remaining(
             [],
-            [*(verified or []), *(mutation.issues or []), *detected],
+            [*verified, *mutation.issues, *detected],
         )
         note = (
             f"Verify pass: residual unknown — {outcome.unknown_reason}. "

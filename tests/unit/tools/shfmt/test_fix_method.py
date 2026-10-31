@@ -81,11 +81,11 @@ def test_fix_populates_initial_issues(
     assert_that(result.remaining_issues_count).is_equal_to(0)
 
 
-def test_fix_initial_issues_none_when_no_issues(
+def test_fix_initial_issues_empty_when_no_issues(
     shfmt_plugin: ShfmtPlugin,
     tmp_path: Path,
 ) -> None:
-    """Fix sets initial_issues to None when no issues detected.
+    """Fix keeps initial_issues empty when no issues are detected.
 
     Args:
         shfmt_plugin: The ShfmtPlugin instance to test.
@@ -112,7 +112,7 @@ def test_fix_initial_issues_none_when_no_issues(
             result = shfmt_plugin.fix([str(test_file)], {})
 
     assert_that(result.success).is_true()
-    assert_that(result.initial_issues).is_none()
+    assert_that(result.initial_issues).is_empty()
 
 
 def test_fix_surfaces_check_subprocess_failure(

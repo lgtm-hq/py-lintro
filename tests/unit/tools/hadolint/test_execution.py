@@ -63,7 +63,7 @@ def test_check_with_issues(hadolint_plugin: HadolintPlugin, tmp_path: Path) -> N
         assert_that(result.success).is_false()
         assert_that(result.issues_count).is_equal_to(1)
         assert_that(result.issues).is_not_none()
-        issue = cast(HadolintIssue, result.issues[0])  # type: ignore[index]  # validated via is_not_none
+        issue = cast(HadolintIssue, result.issues[0])
         assert_that(issue.code).is_equal_to("DL3006")
 
 
@@ -153,7 +153,7 @@ def test_parse_single_issue(hadolint_plugin: HadolintPlugin, tmp_path: Path) -> 
 
         assert_that(result.issues_count).is_equal_to(1)
         assert_that(result.issues).is_not_none()
-        issue = cast(HadolintIssue, result.issues[0])  # type: ignore[index]  # validated via is_not_none
+        issue = cast(HadolintIssue, result.issues[0])
         assert_that(issue.file).is_equal_to("Dockerfile")
         assert_that(issue.line).is_equal_to(1)
         assert_that(issue.code).is_equal_to("DL3006")
@@ -206,7 +206,7 @@ def test_parse_multiple_issues(hadolint_plugin: HadolintPlugin, tmp_path: Path) 
 
         assert_that(result.issues_count).is_equal_to(2)
         assert_that(result.issues).is_not_none()
-        first_issue = cast(HadolintIssue, result.issues[0])  # type: ignore[index]  # validated via is_not_none
-        second_issue = cast(HadolintIssue, result.issues[1])  # type: ignore[index]  # validated via is_not_none
+        first_issue = cast(HadolintIssue, result.issues[0])
+        second_issue = cast(HadolintIssue, result.issues[1])
         assert_that(first_issue.code).is_equal_to("DL3006")
         assert_that(second_issue.code).is_equal_to("DL3009")
