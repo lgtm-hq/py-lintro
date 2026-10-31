@@ -23,7 +23,20 @@ from lintro.config.config_loader import (
 )
 from lintro.config.enforce_config import EnforceConfig
 from lintro.config.execution_config import ExecutionConfig
+from lintro.config.lintro_config import LintroConfig
 from lintro.exceptions.errors import ConfigurationError
+
+MAPPING_SECTIONS = (
+    "enforce",
+    "execution",
+    "defaults",
+    "tools",
+    "ai",
+    "review",
+    "output",
+    "watch",
+    "deps",
+)
 
 
 def test_empty_data() -> None:
@@ -245,7 +258,7 @@ def test_convert_scalar_enforce_raises() -> None:
 
 @pytest.mark.parametrize(
     "section",
-    ["enforce", "execution", "defaults", "tools"],
+    MAPPING_SECTIONS,
 )
 def test_build_config_from_dict_rejects_null_mapping_section(
     section: str,
@@ -261,23 +274,110 @@ def test_build_config_from_dict_rejects_null_mapping_section(
 
 @pytest.mark.parametrize(
     "section",
-    ["enforce", "execution", "defaults", "tools"],
+    MAPPING_SECTIONS,
 )
-def test_load_config_null_mapping_section_raises_configuration_error(
+@pytest.mark.parametrize(
+    ("raw_value", "actual"),
+    [
+        ("", "null"),
+        ("null", "null"),
+        ("~", "null"),
+        ("false", "bool"),
+        ("[]", "list"),
+        ('""', "str"),
+        ("0", "int"),
+        ("invalid", "str"),
+    ],
+)
+def test_load_config_rejects_non_mapping_sections(
     tmp_path: Path,
     section: str,
+    raw_value: str,
+    actual: str,
 ) -> None:
-    """A bare ``section:`` in YAML must raise ConfigurationError.
+    """Explicit null and non-mapping sections must raise ConfigurationError.
 
     Args:
         tmp_path: Temporary directory path for test files.
-        section: Top-level mapping section spelled as a YAML null.
+        section: Top-level section that must be a mapping.
+        raw_value: YAML spelling of an invalid section value.
+        actual: Type named in the error.
     """
     config_file = tmp_path / ".lintro-config.yaml"
-    config_file.write_text(f"{section}:\n", encoding="utf-8")
+    config_file.write_text(f"{section}: {raw_value}\n", encoding="utf-8")
 
-    with pytest.raises(ConfigurationError, match=f"{section} must be a mapping"):
-        load_config(config_path=str(config_file))
+    assert_that(load_config).raises(ConfigurationError).when_called_with(
+        config_path=config_file,
+        allow_pyproject_fallback=False,
+    ).contains(f"{section} must be a mapping, got {actual}")
+
+
+@pytest.mark.parametrize("section", MAPPING_SECTIONS)
+@pytest.mark.parametrize("raw_value", ["false", "[]", '""', "0"])
+def test_pyproject_rejects_non_mapping_sections(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    section: str,
+    raw_value: str,
+) -> None:
+    """Pyproject conversion must preserve invalid sections for validation."""
+    (tmp_path / "pyproject.toml").write_text(
+        f"[tool.lintro]\n{section} = {raw_value}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert_that(load_config).raises(ConfigurationError).when_called_with().contains(
+        f"{section} must be a mapping",
+    )
+
+
+@pytest.mark.parametrize("explicit_sections", [False, True])
+def test_omitted_and_empty_mapping_sections_use_defaults(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    explicit_sections: bool,
+) -> None:
+    """Omitted sections and explicit empty mappings keep all model defaults."""
+    config_file = tmp_path / ".lintro-config.yaml"
+    content = (
+        "\n".join(f"{section}: {{}}" for section in MAPPING_SECTIONS)
+        if explicit_sections
+        else "{}"
+    )
+    config_file.write_text(content, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    config = load_config(config_path=config_file, allow_pyproject_fallback=False)
+
+    assert_that(config.model_dump(exclude={"config_path"})).is_equal_to(
+        LintroConfig().model_dump(exclude={"config_path"}),
+    )
+
+
+@pytest.mark.parametrize("explicit_path", [False, True])
+@pytest.mark.parametrize(
+    "content",
+    ["[]\n", "- ruff\n", "invalid\n", "false\n", "0\n", "null\n", "", "# comment\n"],
+)
+def test_non_mapping_document_does_not_fall_back_to_pyproject(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    explicit_path: bool,
+    content: str,
+) -> None:
+    """Invalid YAML roots must fail even when a valid fallback config exists."""
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text(content, encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.lintro]\nfail_fast = true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert_that(load_config).raises(ConfigurationError).when_called_with(
+        config_path=config_file if explicit_path else None,
+    ).contains("must be a mapping").contains(str(config_file))
 
 
 def test_load_config_null_tool_raises_configuration_error(tmp_path: Path) -> None:

@@ -69,17 +69,18 @@ KNOWN_REVIEW_KEYS: frozenset[str] = frozenset(ReviewConfig.model_fields)
 KNOWN_OUTPUT_KEYS: frozenset[str] = frozenset(OutputConfig.model_fields)
 KNOWN_WATCH_KEYS: frozenset[str] = frozenset(WatchConfig.model_fields)
 
-# Sections whose typed parser calls ``.get``/``.items`` on its input without a
-# type guard. YAML spells an empty section as ``enforce:`` which deserializes
-# to ``None``, so these must be checked up front or the parser raises
-# ``AttributeError`` out of the validator instead of reporting the problem.
-# ``ai``/``review``/``output`` are excluded on purpose: their parsers
-# accept ``None`` as "absent" and raise a descriptive ``ValueError`` otherwise.
+# Sections the loader requires to be mappings when explicitly provided.
+# Check them before typed parsing so invalid values have a section location.
 MAPPING_SECTIONS: tuple[str, ...] = (
     "enforce",
     "execution",
     "defaults",
     "tools",
+    "ai",
+    "review",
+    "output",
+    "watch",
+    "deps",
 )
 
 # Deprecated option names mapped to their modern replacement.
@@ -385,40 +386,26 @@ def _not_found_result(
     )
 
 
-def _is_empty_document(parsed: Any) -> bool:
-    """Return whether a parsed YAML document is an empty mapping or null.
-
-    Args:
-        parsed: Value returned by ``yaml.safe_load``.
-
-    Returns:
-        bool: True when the document is ``None`` or ``{}``.
-    """
-    return parsed is None or parsed == {}
-
-
 def _is_loader_ignored_yaml(parsed: Any) -> bool:
     """Return whether ``load_config`` treats this YAML document as not found.
 
-    ``_load_yaml_file`` maps ``None`` and any non-dict to ``{}``, and
-    ``load_config`` then continues searching. Auto-detect validate must
-    follow that fallthrough instead of hard-failing ``INVALID_TYPE`` on a
-    scalar or list and skipping ``[tool.lintro]``.
+    Only an empty mapping falls through to ``[tool.lintro]``. Non-mapping
+    documents, including null, are errors in both validation and loading.
 
     Args:
         parsed: Value returned by ``yaml.safe_load``.
 
     Returns:
-        bool: True when the document is ``None``, a non-mapping, or ``{}``.
+        bool: True when the document is an empty mapping.
     """
-    return parsed is None or not isinstance(parsed, dict) or parsed == {}
+    return isinstance(parsed, dict) and not parsed
 
 
 def _empty_yaml_error(config_path: Path) -> ValidationMessage:
-    """Build the error for an empty YAML file given as an explicit path.
+    """Build the error for an empty YAML mapping given as an explicit path.
 
     Args:
-        config_path: The empty file the caller asked to validate.
+        config_path: The file containing the empty mapping.
 
     Returns:
         ValidationMessage: ``EMPTY_CONFIG`` error describing runtime fallback.
@@ -426,8 +413,8 @@ def _empty_yaml_error(config_path: Path) -> ValidationMessage:
     return ValidationMessage(
         code=ValidationCode.EMPTY_CONFIG,
         message=(
-            f"Config file {config_path} is empty and is not a successful "
-            "config. load_config ignores empty YAML and still searches "
+            f"Config file {config_path} is an empty mapping and is not a successful "
+            "config. load_config ignores empty mappings and still searches "
             "upward for another file or [tool.lintro]."
         ),
         location=str(config_path),
@@ -694,13 +681,10 @@ def validate_config_file(path: Path | str | None = None) -> ValidationResult:
     Loads the config (or locates one by searching upward), checks it against
     the known schema, and reports both hard errors and softer warnings.
 
-    Empty or non-mapping YAML (``None``, ``{}``, a list, or a scalar) is
-    not a successful config: ``load_config`` maps those documents to
-    ``{}`` and continues to ``[tool.lintro]``. Auto-detect therefore
-    falls through to pyproject the same way; an explicit empty path is
-    ``EMPTY_CONFIG`` and an explicit non-mapping root is
-    ``INVALID_TYPE``, so validate never exits 0 while runtime would load
-    a different file.
+    An empty YAML mapping (``{}``) is not a successful config: ``load_config``
+    continues to ``[tool.lintro]``. Auto-detect falls through to pyproject the
+    same way; an explicit empty mapping is ``EMPTY_CONFIG``. A non-mapping
+    document, including null or empty YAML, is always ``INVALID_TYPE``.
 
     Args:
         path: Explicit path to a config file. When None, the nearest
@@ -754,27 +738,14 @@ def validate_config_file(path: Path | str | None = None) -> ValidationResult:
 
     if not is_pyproject and _is_loader_ignored_yaml(parsed):
         if explicit:
-            if _is_empty_document(parsed):
-                result.errors.append(_empty_yaml_error(config_path))
-            else:
-                result.errors.append(
-                    ValidationMessage(
-                        code=ValidationCode.INVALID_TYPE,
-                        message=(
-                            "Config root must be a mapping, got "
-                            f"{type(parsed).__name__}."
-                        ),
-                    ),
-                )
+            result.errors.append(_empty_yaml_error(config_path))
             return result
-        # Auto-detect: treat loader-ignored YAML like empty — continue
-        # to pyproject rather than reporting INVALID_TYPE for a file
-        # runtime ignores.
+        # Auto-detect follows the runtime fallback for an empty mapping.
         result.warnings.append(
             ValidationMessage(
                 code=ValidationCode.EMPTY_CONFIG,
                 message=(
-                    f"{config_path} is empty or not a mapping and will be "
+                    f"{config_path} is an empty mapping and will be "
                     "ignored at runtime; continuing to [tool.lintro] in "
                     "pyproject.toml."
                 ),
@@ -795,12 +766,11 @@ def validate_config_file(path: Path | str | None = None) -> ValidationResult:
         parsed, is_pyproject = parsed_pair
 
     if not isinstance(parsed, dict):
+        actual = "null" if parsed is None else type(parsed).__name__
         result.errors.append(
             ValidationMessage(
                 code=ValidationCode.INVALID_TYPE,
-                message=(
-                    f"Config root must be a mapping, got {type(parsed).__name__}."
-                ),
+                message=f"Config root must be a mapping, got {actual}.",
             ),
         )
         return result

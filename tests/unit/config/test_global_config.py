@@ -27,6 +27,7 @@ from click.testing import CliRunner
 
 from lintro.cli import cli
 from lintro.config.config_loader import clear_config_cache, load_config
+from lintro.exceptions.errors import ConfigurationError
 
 
 @pytest.fixture
@@ -771,26 +772,52 @@ def test_load_config_malformed_global_raises(
     )
 
 
-def test_load_config_empty_global_is_not_an_error(
+@pytest.mark.parametrize("content", ["", "null\n", "[]\n", "false\n", "invalid\n"])
+def test_load_config_rejects_non_mapping_global_document(
     isolated_home: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    content: str,
 ) -> None:
-    """An empty global file is tolerated and contributes nothing.
+    """A non-mapping global file must fail before loading project config.
 
     Args:
         isolated_home: Isolated fake home directory.
         tmp_path: Pytest temporary directory.
         monkeypatch: Pytest monkeypatch fixture.
+        content: YAML document without a root mapping.
     """
-    (isolated_home / ".lintro-config.yaml").write_text("")
-    _make_project(tmp_path, monkeypatch)
+    global_file = isolated_home / ".lintro-config.yaml"
+    global_file.write_text(content, encoding="utf-8")
+    project = _make_project(tmp_path, monkeypatch)
+    (project / ".lintro-config.yaml").write_text("ai: {}\n", encoding="utf-8")
 
-    config = load_config(allow_pyproject_fallback=False)
+    assert_that(load_config).raises(ConfigurationError).when_called_with(
+        allow_pyproject_fallback=False,
+    ).contains("must be a mapping").contains(str(global_file))
 
-    assert_that(config.global_config_path).is_not_none()
-    assert_that(config.global_contributed_keys).is_equal_to([])
-    assert_that(config.enforce.line_length).is_none()
+
+@pytest.mark.parametrize("section", ["ai", "review", "output", "watch", "deps"])
+def test_project_null_section_does_not_restore_global_defaults(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    section: str,
+) -> None:
+    """A project null must fail even when its global section is a mapping."""
+    (isolated_home / ".lintro-config.yaml").write_text(
+        f"{section}: {{}}\n",
+        encoding="utf-8",
+    )
+    project = _make_project(tmp_path, monkeypatch)
+    (project / ".lintro-config.yaml").write_text(
+        f"{section}: null\n",
+        encoding="utf-8",
+    )
+
+    assert_that(load_config).raises(ConfigurationError).when_called_with(
+        allow_pyproject_fallback=False,
+    ).contains(f"{section} must be a mapping, got null")
 
 
 # =============================================================================
