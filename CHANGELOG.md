@@ -25,6 +25,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **tools**: a failed batch with no parsed issues is never clean (#3000) (#3034)
+  (aca3ec1)
 - **cargo-audit**: reject missing or invalid vulnerability reports (#3003) (#3036)
   (ab5e202)
 - **ai**: reject unusable custom-agent answers (#3002) (#3040) (b8600dc)
