@@ -35,6 +35,26 @@ configure specific commands rather than tool resolution.
 3. **`defaults` provide fallbacks** - Only used when a tool has no native config file
 4. **Simple and transparent** - Users know exactly which config is used
 
+### Section Types and Null Values
+
+Omitting a section uses its defaults. When present, each of `enforce`, `execution`,
+`defaults`, `tools`, `ai`, `review`, `output`, `watch`, and `deps` must be a mapping.
+Use an empty mapping such as `ai: {}` for default settings. Explicit nulls (`ai: null`,
+`ai: ~`, or a bare `ai:`), lists, and scalar section values raise `ConfigurationError`.
+This applies to both project and global config, and to `[tool.lintro]` sections in
+`pyproject.toml` (TOML has no null value). Each source is checked before merging, so a
+project mapping cannot hide an invalid global section.
+
+A YAML config document must also be a mapping. A top-level list, scalar, null, or an
+empty or comment-only file raises `ConfigurationError` instead of silently loading
+defaults or falling back to `pyproject.toml`. An empty mapping document (`{}`) retains
+the existing fallback behavior.
+
+**Migration:** Empty and comment-only YAML files that previously loaded defaults now
+raise an error. Remove an unused config file or replace its contents with `{}` to keep
+the fallback behavior. Replace bare section keys such as `ai:` with `ai: {}` when
+default section settings are intended.
+
 ### Tiered Configuration Flow
 
 The configuration system works in a specific order:
@@ -117,9 +137,10 @@ sections:
    or `[tool.lintro]` in `pyproject.toml`. Overrides the global config per key.
 
 A value set in the global config survives only where the project config does not
-override that exact key path. An auto-discovered global file that is absent or empty is
-never an error — only an explicit `LINTRO_GLOBAL_CONFIG` path that does not exist is
-(see [below](#user-level-global-config)).
+override that exact key path. An absent auto-discovered global file or one containing an
+empty mapping (`{}`) is never an error. A non-mapping document or an explicit
+`LINTRO_GLOBAL_CONFIG` path that does not exist raises an error (see
+[below](#user-level-global-config)).
 
 In the `tools:` section a scalar entry such as `ruff: false` is a complete statement
 about the tool, so a project scalar replaces the global mapping wholesale. A project
@@ -704,6 +725,10 @@ Resolution rules:
   of how loading was enabled.
 - With no allowlist configured, enabling loads all discovered `lintro.plugins` entry
   points — use this only in fully trusted environments.
+- A global or project YAML file that cannot be read or parsed, or whose root is not a
+  mapping, disables external plugin loading, even with
+  `LINTRO_ENABLE_EXTERNAL_PLUGINS=1`. This includes empty and comment-only files. An
+  empty mapping (`{}`) is valid.
 
 ### Pre-Execution Summary
 

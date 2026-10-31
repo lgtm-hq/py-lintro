@@ -147,7 +147,7 @@ def test_load_config_rejects_non_mapping_pyproject_watch(
     pyproject.write_text("[tool.lintro]\nwatch = 500\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    with pytest.raises(ValueError, match="watch config must be a mapping"):
+    with pytest.raises(ValueError, match="watch must be a mapping"):
         load_config()
 
 
@@ -156,5 +156,5 @@ def test_load_config_rejects_non_mapping_yaml_watch(tmp_path: Path) -> None:
     config_file = tmp_path / ".lintro-config.yaml"
     config_file.write_text("watch: 500\n", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="watch config must be a mapping"):
+    with pytest.raises(ValueError, match="watch must be a mapping"):
         load_config(config_path=config_file)
