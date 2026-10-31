@@ -139,8 +139,8 @@ def test_fix_formats_files_despite_ruff_invalid_syntax(
             "url": None,
         },
     ]
+    long_file = tmp_path / "long.py"
     if include_e501:
-        long_file = tmp_path / "long.py"
         long_file.write_text('value = "' + "x" * 100 + '"\n')
         diagnostics.append(
             {

@@ -150,14 +150,9 @@ def test_a_contradictory_pair_and_its_reverse_fail_planning() -> None:
     }
     precedence = [["one_fixer", "two_fixer"], ["two_fixer", "one_fixer"]]
 
-    assert_that(derive_order).raises(OrderPlanningError).when_called_with(
-        claims,
-        precedence=precedence,
-    )
-    try:
+    with pytest.raises(OrderPlanningError) as caught:
         derive_order(claims, precedence=precedence)
-    except OrderPlanningError as exc:
-        message = str(exc)
+    message = str(caught.value)
     assert_that(message).contains("one_fixer")
     assert_that(message).contains("two_fixer")
     assert_that(message).contains(PRECEDENCE_CONFIG_KEY)
@@ -367,14 +362,9 @@ def test_a_contradictory_override_fails_planning_with_an_actionable_message() ->
         ["three_fixer", "one_fixer"],
     ]
 
-    assert_that(derive_order).raises(OrderPlanningError).when_called_with(
-        claims,
-        precedence=precedence,
-    )
-    try:
+    with pytest.raises(OrderPlanningError) as caught:
         derive_order(claims, precedence=precedence)
-    except OrderPlanningError as exc:
-        message = str(exc)
+    message = str(caught.value)
     assert_that(message).contains("one_fixer")
     assert_that(message).contains("two_fixer")
     assert_that(message).contains(PRECEDENCE_CONFIG_KEY)
