@@ -21,6 +21,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.173.6] - 2026-10-31
+
+### Changed
+
+- **mypy**: enable None-related strictness checks (#3064) (63c7f49)
+- **core**: preserve fix-retry payload fields (#1868) (#3069) (8dbc764)
+
+### Fixed
+
+- **core**: record structured tool inspection coverage (#3067) (d2230c6)
+- **ai/review**: preserve unknown fix counts in history expanders (#3078) (b15e73e)
+- **ai**: report unreadable CLI contract versions as unknown (#3077) (2cc45b0)
+- **output**: preserve unknown counts when formatters crash (#3072) (514be2c)
+- **ai/review**: reject null verification when reusing stored rounds (#3063) (1ff0660)
+- **ai/review**: record malformed adversarial sweeps as degraded (#3061) (7be4d3c)
+
 ## [0.173.5] - 2026-10-31
 
 ### Changed
