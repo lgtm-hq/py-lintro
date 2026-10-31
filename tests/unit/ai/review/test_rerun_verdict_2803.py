@@ -23,7 +23,9 @@ from assertpy import assert_that
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIProviderError
+from lintro.ai.provenance import record_response
 from lintro.ai.providers.capabilities import ProviderCapabilities
+from lintro.ai.providers.reported_model import ReportedModel
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.coverage_degradation import (
     GENERATED_QUESTIONS_FAILED_NOTE,
@@ -195,6 +197,7 @@ def _response(content: str) -> AIResponse:
         output_tokens=5,
         cost_estimate=0.01,
         provider="fake",
+        reported_models=(ReportedModel(model="fake-model"),),
     )
 
 
@@ -242,6 +245,8 @@ def _run(
         response = _response(answer)
         if budget is not None:
             budget.record(response.cost_estimate)
+        # This seam replaces invoke.call_ai, including its ledger write.
+        record_response(response)
         return response
 
     with patch("lintro.ai.review.provider_call.call_ai", side_effect=_call_ai):
@@ -548,18 +553,30 @@ def test_a_push_that_leaves_the_file_unchanged_still_redoes_it_once(
     calls: list[str] = []
 
     result = _run(prior=prior, calls=calls, context=pushed)
+    resumed = _next_state(prior=prior, result=result, head="H2")
+    recorded = resumed.runs[-1]
     again_calls: list[str] = []
     again = _run(
-        prior=_next_state(prior=prior, result=result, head="H2"),
+        prior=resumed,
         calls=again_calls,
         context=pushed,
     )
 
+    assert_that(calls).is_length(1)
     assert_that(result.metadata.reviewed_paths).contains("a.py", "b.py")
     assert_that(result.metadata.coverage_degradations).is_empty()
     assert_that(_classify(classifier, result).exit_code).is_equal_to(0)
+    assert_that(recorded.identity.model_verification).is_equal_to("verified")
+    assert_that(recorded.identity.reported_models).is_equal_to(
+        (ReportedModel(model="fake-model"),),
+    )
+    assert_that(recorded.usage.total).is_equal_to(15)
+    assert_that(recorded.usage.cost).is_close_to(0.01, 1e-9)
     assert_that(again_calls).is_empty()
     assert_that(again.metadata.coverage_degradations).is_empty()
+    assert_that(again.metadata.token_usage["total"]).is_equal_to(0)
+    assert_that(again.metadata.cost_estimate_usd).is_equal_to(0.0)
+    assert_that(_classify(classifier, again).exit_code).is_equal_to(0)
 
 
 def test_a_push_that_changes_the_degraded_file_carries_nothing(
