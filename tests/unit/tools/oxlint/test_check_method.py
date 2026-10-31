@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 from assertpy import assert_that
 
 from lintro.parsers.oxlint.oxlint_issue import OxlintIssue
+from lintro.plugins.subprocess_executor import SubprocessResult
 
 if TYPE_CHECKING:
     from lintro.tools.oxlint.definition import OxlintPlugin
@@ -37,11 +38,11 @@ def test_check_with_issues(oxlint_plugin: OxlintPlugin, tmp_path: Path) -> None:
             }
         ]
     }"""
-    mock_result = (False, mock_output)
+    mock_result = SubprocessResult(1, mock_output, "", mock_output)
 
     with (
         patch.object(oxlint_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(oxlint_plugin, "_run_subprocess", return_value=mock_result),
+        patch.object(oxlint_plugin, "_run_subprocess_result", return_value=mock_result),
         patch.object(oxlint_plugin, "_get_executable_command", return_value=["oxlint"]),
         patch.object(oxlint_plugin, "_build_config_args", return_value=[]),
     ):
@@ -75,11 +76,11 @@ def test_check_without_issues(oxlint_plugin: OxlintPlugin, tmp_path: Path) -> No
     test_file.write_text("const x = 1;\nconsole.log(x);\n")
 
     mock_output = '{"diagnostics": []}'
-    mock_result = (True, mock_output)
+    mock_result = SubprocessResult(0, mock_output, "", mock_output)
 
     with (
         patch.object(oxlint_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(oxlint_plugin, "_run_subprocess", return_value=mock_result),
+        patch.object(oxlint_plugin, "_run_subprocess_result", return_value=mock_result),
         patch.object(oxlint_plugin, "_get_executable_command", return_value=["oxlint"]),
         patch.object(oxlint_plugin, "_build_config_args", return_value=[]),
     ):
@@ -114,7 +115,7 @@ def test_check_timeout_handling(oxlint_plugin: OxlintPlugin, tmp_path: Path) -> 
         patch.object(oxlint_plugin, "_prepare_execution") as mock_prepare,
         patch.object(
             oxlint_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=subprocess.TimeoutExpired(cmd=["oxlint"], timeout=30),
         ),
         patch.object(oxlint_plugin, "_get_executable_command", return_value=["oxlint"]),

@@ -2,11 +2,30 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from pathlib import Path
+from unittest.mock import MagicMock
+
 import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.tool_result import ToolResult
 from lintro.tools.cargo_deny.definition import CargoDenyPlugin
+
+_ERROR_DIAGNOSTIC = (
+    '{"type":"diagnostic","fields":{"severity":"error","code":"L001",'
+    '"message":"license is not allowed"}}'
+)
+_WARNING_DIAGNOSTIC = (
+    '{"type":"diagnostic","fields":{"severity":"warning","code":"B001",'
+    '"message":"duplicate dependency"}}'
+)
+_INFORMATIONAL_OUTPUT = (
+    '{"type":"log","fields":{"level":"INFO","message":"checking advisories"}}\n'
+    '{"type":"summary","fields":{"advisories":'
+    '{"errors":0,"warnings":0,"notes":0,"helps":0}}}'
+)
 
 
 @pytest.fixture
@@ -17,6 +36,268 @@ def cargo_deny_plugin() -> CargoDenyPlugin:
         A CargoDenyPlugin instance.
     """
     return CargoDenyPlugin()
+
+
+@pytest.fixture
+def cargo_deny_check(
+    cargo_deny_plugin: CargoDenyPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> Callable[[bool, str], ToolResult]:
+    """Run the plugin on a real manifest with a controlled process result.
+
+    Args:
+        cargo_deny_plugin: The plugin instance.
+        monkeypatch: Fixture restoring process and version-check patches.
+        tmp_path: Temporary Cargo project directory.
+
+    Returns:
+        A callable accepting the process success flag and captured output.
+    """
+    manifest = tmp_path / "Cargo.toml"
+    manifest.write_text('[package]\nname = "example"\nversion = "0.1.0"\n')
+    monkeypatch.setattr(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        MagicMock(return_value=None),
+    )
+
+    def check(process_success: bool, output: str) -> ToolResult:
+        """Check the manifest using the supplied subprocess result.
+
+        Args:
+            process_success: Whether the process exited zero.
+            output: Combined tool output.
+
+        Returns:
+            The plugin's observable result.
+        """
+        monkeypatch.setattr(
+            cargo_deny_plugin,
+            "_run_subprocess",
+            MagicMock(return_value=(process_success, output)),
+        )
+        return cargo_deny_plugin.check([str(manifest)], {})
+
+    return check
+
+
+@pytest.mark.parametrize(
+    (
+        "process_success",
+        "output",
+        "expected_success",
+        "expected_messages",
+        "expected_output",
+    ),
+    [
+        pytest.param(
+            False,
+            "error: invalid configuration\n",
+            False,
+            [],
+            "error: invalid configuration\n",
+            id="garbage",
+        ),
+        pytest.param(False, "", False, [], "", id="failed-empty"),
+        pytest.param(
+            False,
+            _ERROR_DIAGNOSTIC,
+            False,
+            ["license is not allowed"],
+            _ERROR_DIAGNOSTIC,
+            id="error",
+        ),
+        pytest.param(
+            False,
+            _WARNING_DIAGNOSTIC,
+            False,
+            ["duplicate dependency"],
+            _WARNING_DIAGNOSTIC,
+            id="failed-warning-only",
+        ),
+        pytest.param(
+            False,
+            _ERROR_DIAGNOSTIC + "\n" + _WARNING_DIAGNOSTIC,
+            False,
+            ["license is not allowed", "duplicate dependency"],
+            _ERROR_DIAGNOSTIC + "\n" + _WARNING_DIAGNOSTIC,
+            id="error-and-warning",
+        ),
+        pytest.param(
+            False,
+            _INFORMATIONAL_OUTPUT,
+            False,
+            [],
+            _INFORMATIONAL_OUTPUT,
+            id="failed-summary",
+        ),
+        pytest.param(True, "", True, [], None, id="clean-empty"),
+        pytest.param(True, _INFORMATIONAL_OUTPUT, True, [], None, id="clean-summary"),
+        pytest.param(
+            True,
+            "    Updating crates.io index\n",
+            True,
+            [],
+            None,
+            id="clean-progress",
+        ),
+        pytest.param(
+            True,
+            _WARNING_DIAGNOSTIC,
+            False,
+            ["duplicate dependency"],
+            None,
+            id="warning-only-zero-exit-is-failure",
+        ),
+        pytest.param(
+            True,
+            _ERROR_DIAGNOSTIC,
+            False,
+            ["license is not allowed"],
+            None,
+            id="error-zero-exit-is-failure",
+        ),
+    ],
+)
+def test_check_exit_status(
+    cargo_deny_check: Callable[[bool, str], ToolResult],
+    process_success: bool,
+    output: str,
+    expected_success: bool,
+    expected_messages: list[str],
+    expected_output: str | None,
+) -> None:
+    """Preserve failed invocations and report parsed findings.
+
+    Args:
+        cargo_deny_check: Callable running the plugin with controlled output.
+        process_success: Whether the tool exited zero.
+        output: Captured tool output.
+        expected_success: Expected overall check verdict.
+        expected_messages: Expected parsed finding messages.
+        expected_output: Raw output retained for failed invocations.
+    """
+    result = cargo_deny_check(process_success, output)
+
+    assert_that(result.no_files).is_false()
+    assert_that(result.skipped).is_false()
+    assert_that(result.success).is_equal_to(expected_success)
+    assert_that(result.issues_count).is_equal_to(len(expected_messages))
+    assert_that([issue.message for issue in result.issues or []]).is_equal_to(
+        expected_messages,
+    )
+    assert_that(result.parse_failures_count).is_zero()
+    assert_that(result.output).is_equal_to(expected_output)
+
+
+@pytest.mark.parametrize("process_success", [True, False], ids=["exit-0", "exit-1"])
+@pytest.mark.parametrize(
+    "output",
+    [
+        pytest.param('{"type":"diagnostic","fields":null}', id="null-fields"),
+        pytest.param('{"type":"diagnostic"}', id="missing-fields"),
+        pytest.param('{"type":"diagnostic","fields":{}}', id="missing-severity"),
+        pytest.param(
+            '{"type":"diagnostic","fields":{"severity":null}}',
+            id="null-severity",
+        ),
+        pytest.param(
+            '{"type":"diagnostic","fields":{"severity":"error","labels":[null]}}',
+            id="non-object-label",
+        ),
+        pytest.param(
+            '{"type":"diagnostic","fields":{"severity":"error","labels":null}}',
+            id="null-labels",
+        ),
+        pytest.param('{"type":"advisory","fields":null}', id="null-advisory-fields"),
+        pytest.param(
+            '{"type":"advisory","fields":{"advisory":null}}',
+            id="null-advisory",
+        ),
+        pytest.param(
+            '{"type":null,"fields":{"severity":"error","message":"lost"}}',
+            id="null-type",
+        ),
+        pytest.param('{"type":null,"fields":null}', id="null-type-and-fields"),
+        pytest.param('{"fields":{"severity":"error"}}', id="missing-type"),
+        pytest.param(
+            '{"type":"unexpected","fields":{"severity":"error"}}',
+            id="unknown-error-type",
+        ),
+        pytest.param('{"type":"diagnostic","fields":', id="truncated-json"),
+    ],
+)
+def test_check_malformed_records_fail_closed(
+    cargo_deny_check: Callable[[bool, str], ToolResult],
+    process_success: bool,
+    output: str,
+) -> None:
+    """Expose a malformed diagnostic alongside legitimate information records.
+
+    Args:
+        cargo_deny_check: Callable running the plugin with controlled output.
+        process_success: Whether the tool exited zero.
+        output: A malformed error-bearing JSON record.
+    """
+    combined = f"{_INFORMATIONAL_OUTPUT}\n{output}"
+    result = cargo_deny_check(process_success, combined)
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_zero()
+    assert_that(result.issues).is_empty()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.output).is_equal_to(combined)
+
+
+def test_check_keeps_plaintext_execution_error_alongside_parsed_finding(
+    cargo_deny_check: Callable[[bool, str], ToolResult],
+) -> None:
+    """Retain execution errors even when a valid diagnostic explains the exit.
+
+    Args:
+        cargo_deny_check: Callable running the plugin with controlled output.
+    """
+    output = (
+        f"{_ERROR_DIAGNOSTIC}\n"
+        "error: failed to fetch advisory database: connection refused\n"
+    )
+
+    result = cargo_deny_check(False, output)
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.issues).extracting("severity", "code", "message").is_equal_to(
+        [("error", "L001", "license is not allowed")],
+    )
+    assert_that(result.parse_failures_count).is_zero()
+    assert_that(result.output).is_equal_to(output)
+
+
+@pytest.mark.parametrize("process_success", [True, False], ids=["exit-0", "exit-1"])
+def test_check_keeps_error_and_raw_output_on_parse_failure(
+    cargo_deny_check: Callable[[bool, str], ToolResult],
+    process_success: bool,
+) -> None:
+    """A parsed error must not suppress raw output for a malformed sibling.
+
+    Args:
+        cargo_deny_check: Callable running the plugin with controlled output.
+        process_success: Whether the tool exited zero.
+    """
+    output = (
+        f"{_ERROR_DIAGNOSTIC}\n{_INFORMATIONAL_OUTPUT}\n"
+        '{"type":"diagnostic","fields":{"severity":null}}'
+    )
+
+    result = cargo_deny_check(process_success, output)
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.issues).extracting("message").is_equal_to(
+        ["license is not allowed"],
+    )
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.output).is_equal_to(output)
 
 
 def test_definition_name(cargo_deny_plugin: CargoDenyPlugin) -> None:

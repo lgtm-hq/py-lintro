@@ -182,10 +182,9 @@ class CargoAuditPlugin(BaseToolPlugin):
         payload = extract_cargo_audit_payload(proc.stdout)
         issues = parse_cargo_audit_output(proc.stdout, data=payload)
 
-        # Fail closed on unparseable output. cargo-audit is a security scanner,
-        # so a payload we cannot parse (yet non-empty stdout) must never be
-        # reported as a clean pass (see #1044).
-        parse_failure = payload is None and bool(proc.stdout.strip())
+        # A missing or schema-invalid report cannot establish a clean scan,
+        # even when the subprocess succeeds (see #1044 and #3003).
+        parse_failure = payload is None
         if parse_failure:
             success = False
         parse_failures_count = 1 if parse_failure else 0

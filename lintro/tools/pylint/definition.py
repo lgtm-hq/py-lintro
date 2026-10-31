@@ -498,10 +498,24 @@ class PylintPlugin(BaseToolPlugin):
                 parse_failures_count=1,
             )
 
+        # Honour pylint's native verdict, including fail-under. A failed score
+        # uses msg_status or 1 in current pylint, not a dedicated status bit;
+        # status 16 is also used for convention messages. Let pylint resolve
+        # its own gate/configuration rather than guessing the cause from bits.
+        output = None
+        if result.returncode != 0 and not issues:
+            output = (
+                f"pylint exited with status {result.returncode} without reporting "
+                "any issues. Check the native pylint configuration "
+                "(including fail-under)."
+            )
+            if stderr:
+                output += f"\n{stderr}"
+
         return ToolResult(
             name=self.definition.name,
-            success=not issues,
-            output=None,
+            success=result.returncode == 0 and not issues,
+            output=output,
             issues_count=len(issues),
             issues=issues if issues else None,
             metadata={PYLINT_ANALYSED_METADATA_KEY: True},

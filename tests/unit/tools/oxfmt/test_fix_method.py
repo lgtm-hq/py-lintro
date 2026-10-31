@@ -10,6 +10,7 @@ from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.oxfmt.oxfmt_issue import OxfmtIssue
+from lintro.plugins.subprocess_executor import SubprocessResult
 
 if TYPE_CHECKING:
     from lintro.tools.oxfmt.definition import OxfmtPlugin
@@ -27,7 +28,7 @@ def test_fix_success_no_issues(
     """
     with (
         patch.object(oxfmt_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(oxfmt_plugin, "_run_subprocess") as mock_run,
+        patch.object(oxfmt_plugin, "_run_subprocess_result") as mock_run,
         patch.object(oxfmt_plugin, "_get_executable_command") as mock_exec,
         patch.object(oxfmt_plugin, "_build_config_args") as mock_config,
     ):
@@ -41,9 +42,9 @@ def test_fix_success_no_issues(
         mock_config.return_value = []
         # Initial check - no issues, fix - success, final check - no issues
         mock_run.side_effect = [
-            (True, ""),
-            (True, ""),
-            (True, ""),
+            SubprocessResult(0, "", "", ""),
+            SubprocessResult(0, "", "", ""),
+            SubprocessResult(0, "", "", ""),
         ]
 
         result = oxfmt_plugin.fix(["/tmp/test.js"], {})
@@ -64,7 +65,7 @@ def test_fix_success_with_fixes_applied(
     """
     with (
         patch.object(oxfmt_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(oxfmt_plugin, "_run_subprocess") as mock_run,
+        patch.object(oxfmt_plugin, "_run_subprocess_result") as mock_run,
         patch.object(oxfmt_plugin, "_get_executable_command") as mock_exec,
         patch.object(oxfmt_plugin, "_build_config_args") as mock_config,
     ):
@@ -77,9 +78,10 @@ def test_fix_success_with_fixes_applied(
         mock_exec.return_value = ["oxfmt"]
         mock_config.return_value = []
         mock_run.side_effect = [
-            (False, "test.js"),  # Initial check - issue found
-            (True, ""),  # Fix command
-            (True, ""),  # Final check - no issues
+            # Initial check - issue found
+            SubprocessResult(1, "test.js", "", "test.js"),
+            SubprocessResult(0, "", "", ""),  # Fix command
+            SubprocessResult(0, "", "", ""),  # Final check - no issues
         ]
 
         result = oxfmt_plugin.fix(["/tmp/test.js"], {})
@@ -120,7 +122,7 @@ def test_fix_timeout_during_initial_check(
 
     with (
         patch.object(oxfmt_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(oxfmt_plugin, "_run_subprocess") as mock_run,
+        patch.object(oxfmt_plugin, "_run_subprocess_result") as mock_run,
         patch.object(oxfmt_plugin, "_get_executable_command") as mock_exec,
         patch.object(oxfmt_plugin, "_build_config_args") as mock_config,
         patch.object(
@@ -183,7 +185,7 @@ def test_fix_timeout_during_fix_command(
 
     with (
         patch.object(oxfmt_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(oxfmt_plugin, "_run_subprocess") as mock_run,
+        patch.object(oxfmt_plugin, "_run_subprocess_result") as mock_run,
         patch.object(oxfmt_plugin, "_get_executable_command") as mock_exec,
         patch.object(oxfmt_plugin, "_build_config_args") as mock_config,
         patch.object(
@@ -201,7 +203,8 @@ def test_fix_timeout_during_fix_command(
         mock_exec.return_value = ["oxfmt"]
         mock_config.return_value = []
         mock_run.side_effect = [
-            (False, "test.js"),  # Initial check - issue found
+            # Initial check - issue found
+            SubprocessResult(1, "test.js", "", "test.js"),
             subprocess.TimeoutExpired(cmd="oxfmt", timeout=30),  # Fix times out
         ]
 
@@ -246,7 +249,7 @@ def test_fix_multiple_files_with_issues(
     """
     with (
         patch.object(oxfmt_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(oxfmt_plugin, "_run_subprocess") as mock_run,
+        patch.object(oxfmt_plugin, "_run_subprocess_result") as mock_run,
         patch.object(oxfmt_plugin, "_get_executable_command") as mock_exec,
         patch.object(oxfmt_plugin, "_build_config_args") as mock_config,
     ):
@@ -259,9 +262,14 @@ def test_fix_multiple_files_with_issues(
         mock_exec.return_value = ["oxfmt"]
         mock_config.return_value = []
         mock_run.side_effect = [
-            (False, "test1.js\ntest2.ts\ntest3.tsx"),  # Initial check - 3 issues
-            (True, ""),  # Fix command
-            (True, ""),  # Final check - no issues
+            SubprocessResult(
+                1,
+                "test1.js\ntest2.ts\ntest3.tsx",
+                "",
+                "test1.js\ntest2.ts\ntest3.tsx",
+            ),  # Initial check - 3 issues
+            SubprocessResult(0, "", "", ""),  # Fix command
+            SubprocessResult(0, "", "", ""),  # Final check - no issues
         ]
 
         result = oxfmt_plugin.fix(["/tmp"], {})
@@ -284,7 +292,7 @@ def test_fix_output_includes_fix_count(
     """
     with (
         patch.object(oxfmt_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(oxfmt_plugin, "_run_subprocess") as mock_run,
+        patch.object(oxfmt_plugin, "_run_subprocess_result") as mock_run,
         patch.object(oxfmt_plugin, "_get_executable_command") as mock_exec,
         patch.object(oxfmt_plugin, "_build_config_args") as mock_config,
     ):
@@ -297,9 +305,10 @@ def test_fix_output_includes_fix_count(
         mock_exec.return_value = ["oxfmt"]
         mock_config.return_value = []
         mock_run.side_effect = [
-            (False, "test.js"),  # Initial check - issue found
-            (True, ""),  # Fix command
-            (True, ""),  # Final check - no issues
+            # Initial check - issue found
+            SubprocessResult(1, "test.js", "", "test.js"),
+            SubprocessResult(0, "", "", ""),  # Fix command
+            SubprocessResult(0, "", "", ""),  # Final check - no issues
         ]
 
         result = oxfmt_plugin.fix(["/tmp/test.js"], {})

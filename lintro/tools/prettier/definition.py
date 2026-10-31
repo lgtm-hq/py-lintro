@@ -43,6 +43,9 @@ from lintro.utils.path_utils import find_file_upward
 
 # Constants for Prettier configuration
 PRETTIER_DEFAULT_TIMEOUT: int = 120
+# --check returns 1 for unformatted files and 2 for errors.
+# https://prettier.io/docs/cli#exit-codes
+PRETTIER_FINDINGS_EXIT_CODES: tuple[int, ...] = (1,)
 # Note: JS/TS/Vue files are handled by oxfmt (faster).
 # Prettier handles file types that oxfmt doesn't support.
 PRETTIER_CONFIG_FILENAMES: tuple[str, ...] = (
@@ -406,9 +409,6 @@ class PrettierPlugin(BaseToolPlugin):
         cmd.extend(ctx.rel_files)
         logger.debug(f"[PrettierPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
 
-        # Standardize: suppress Prettier's informational output when no issues.
-        # Prettier exits non-zero purely to report unformatted files, so the
-        # parsed list — not the exit status — is the verdict.
         return run_batch_check(
             ctx,
             plugin=self,
@@ -416,6 +416,7 @@ class PrettierPlugin(BaseToolPlugin):
             parse=lambda output: parse_prettier_output(output=output),
             policy=BatchCheckPolicy(
                 success=BatchSuccess.ISSUES_ONLY,
+                findings_exit_codes=PRETTIER_FINDINGS_EXIT_CODES,
                 report_cwd=True,
             ),
             cwd=ctx.cwd,
@@ -516,6 +517,8 @@ class PrettierPlugin(BaseToolPlugin):
             commands=BatchCommands(check=check_cmd, fix=fix_cmd),
             parse=lambda output: parse_prettier_output(output=output),
             policy=BatchFixPolicy(
+                findings_exit_codes=PRETTIER_FINDINGS_EXIT_CODES,
+                parse_fix_output=False,
                 fixed_label="formatting issue",
                 all_fixed_message=(
                     "All formatting issues were successfully auto-fixed"
