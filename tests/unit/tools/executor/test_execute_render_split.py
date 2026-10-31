@@ -20,6 +20,7 @@ import pytest
 from assertpy import assert_that
 
 import lintro.utils.tool_executor as te
+from lintro.config.lintro_config import LintroConfig
 from lintro.enums.action import Action
 from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.severity_counts import SeverityCounts
@@ -1426,6 +1427,7 @@ def test_simple_runner_finalizes_output_after_execution_error(
         output_manager=_FailingOutputManager(),
         logger=fake_logger,
         action=Action.CHECK,
+        lintro_config=LintroConfig(),
     )
     monkeypatch.setattr(te, "build_run_context", lambda **_kwargs: ctx)
     monkeypatch.setattr(

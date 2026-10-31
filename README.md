@@ -56,7 +56,7 @@ lintro check --output-format grid  # Beautiful output
 <!-- TODO: Add screenshot of grid output -->
 
 Adopting Lintro in a legacy project? Run `lintro baseline create`, then
-`lintro chk --baseline .lintro-baseline.json` to report new findings while
+`lintro check --baseline .lintro-baseline.json` to report new findings while
 acknowledging existing ones. See the [baseline guide](docs/guides/baseline.md)
 for updates, conservative pruning, and configuration.
 
