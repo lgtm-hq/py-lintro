@@ -191,20 +191,24 @@ class ReviewState:
     def from_artifact_dict(cls, payload: dict[str, Any]) -> ReviewState:
         """Parse a schema-3 envelope; unknown coverage rows are dropped.
 
+        Missing or non-list required collections raise ``ValueError`` so
+        no coverage is trusted from an incomplete artifact.
+
         Args:
             payload: Decoded JSON mapping.
 
         Returns:
             Parsed state. Invalid coverage/flag rows are omitted.
         """
+        _validate_artifact_collections(payload)
         coverage: list[CoverageRecord] = []
-        for raw in payload.get("coverage") or []:
+        for raw in payload.get("coverage", []):
             if isinstance(raw, dict):
                 coverage_row = CoverageRecord.from_dict(raw)
                 if coverage_row is not None:
                     coverage.append(coverage_row)
         flagged: list[FlaggedFile] = []
-        for raw in payload.get("flagged_files") or []:
+        for raw in payload.get("flagged_files", []):
             if isinstance(raw, dict):
                 flag_row = FlaggedFile.from_dict(raw)
                 if flag_row is not None:
@@ -219,13 +223,13 @@ class ReviewState:
             version=STATE_VERSION,
             runs=tuple(
                 RunRecord.from_dict(item)
-                for item in payload.get("runs") or []
+                for item in payload.get("runs", [])
                 if isinstance(item, dict)
             ),
             findings=rebaseline_records(
                 records=[
                     record
-                    for item in payload.get("findings") or []
+                    for item in payload.get("findings", [])
                     if isinstance(item, dict)
                     for record in (FindingRecord.from_dict(item),)
                     if record is not None
@@ -249,6 +253,24 @@ class ReviewState:
             pr_spend_usd=spend_from_payload(payload),
             pr_shadow_usd=spend_from_payload(payload, key="pr_shadow_usd"),
         )
+
+
+def _validate_artifact_collections(payload: dict[str, Any]) -> None:
+    """Reject unknown collection shapes before trusting any artifact coverage."""
+    version = _payload_version(payload)
+    # v2 stored runs/findings; v3 introduced the artifact resume fields.
+    for name, required_since in (
+        ("runs", 2),
+        ("findings", 2),
+        ("coverage", 3),
+        ("flagged_files", 3),
+        ("pending_invalidations", 3),
+        ("consumed_flags", 3),
+    ):
+        if name not in payload and version < required_since:
+            continue
+        if not isinstance(payload.get(name), list):
+            raise ValueError(f"Review-state collection {name!r} must be a list")
 
 
 def spend_from_payload(payload: dict[str, Any], *, key: str = "pr_spend_usd") -> float:
@@ -276,10 +298,8 @@ def _pending_from_payload(
     payload: dict[str, Any],
 ) -> tuple[tuple[str, str], ...]:
     """Parse pending invalidation pairs from an artifact mapping."""
-    raw = payload.get("pending_invalidations") or []
+    raw = payload.get("pending_invalidations", [])
     parsed: list[tuple[str, str]] = []
-    if not isinstance(raw, list):
-        return ()
     allowed = {"group_invalidated", "import_invalidated"}
     for item in raw:
         if not isinstance(item, dict):
@@ -295,10 +315,8 @@ def _consumed_from_payload(
     payload: dict[str, Any],
 ) -> tuple[tuple[str, str], ...]:
     """Parse honored flag identities from an artifact mapping."""
-    raw = payload.get("consumed_flags") or []
+    raw = payload.get("consumed_flags", [])
     parsed: list[tuple[str, str]] = []
-    if not isinstance(raw, list):
-        return ()
     for item in raw:
         if not isinstance(item, dict):
             continue
