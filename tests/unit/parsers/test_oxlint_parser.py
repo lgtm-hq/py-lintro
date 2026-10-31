@@ -7,7 +7,10 @@ import json
 import pytest
 from assertpy import assert_that
 
-from lintro.parsers.oxlint.oxlint_parser import parse_oxlint_output
+from lintro.parsers.oxlint.oxlint_parser import (
+    parse_oxlint_output,
+    parse_oxlint_output_with_stats,
+)
 
 
 def test_parse_oxlint_output_empty() -> None:
@@ -277,14 +280,17 @@ def test_parse_oxlint_output_no_help_field() -> None:
 
 
 @pytest.mark.parametrize("field", ["filename", "message"])
-@pytest.mark.parametrize("value", [None, 42, False, [], {}])
+@pytest.mark.parametrize("value", [None, "", " \n", 42, False, [], {}])
 def test_required_fields_reject_unrenderable_values(field: str, value: object) -> None:
     """Invalid required fields never reach the issue model."""
     diagnostic = {"filename": "test.js", "message": "Unused variable", field: value}
 
-    assert_that(
-        parse_oxlint_output(json.dumps({"diagnostics": [diagnostic]})),
-    ).is_empty()
+    issues, failures = parse_oxlint_output_with_stats(
+        json.dumps({"diagnostics": [diagnostic]}),
+    )
+
+    assert_that(issues).is_empty()
+    assert_that(failures).is_equal_to(1)
 
 
 @pytest.mark.parametrize("field", ["filename", "message"])
@@ -293,9 +299,12 @@ def test_missing_required_field_is_not_a_diagnostic(field: str) -> None:
     diagnostic = {"filename": "test.js", "message": "Unused variable"}
     del diagnostic[field]
 
-    issues = parse_oxlint_output(json.dumps({"diagnostics": [diagnostic]}))
+    issues, failures = parse_oxlint_output_with_stats(
+        json.dumps({"diagnostics": [diagnostic]}),
+    )
 
     assert_that(issues).is_empty()
+    assert_that(failures).is_equal_to(1)
 
 
 def test_null_optional_fields_use_model_defaults() -> None:
@@ -349,3 +358,30 @@ def test_coordinates_default_independently(
     assert_that((issue.line, issue.column)).is_equal_to(
         (0 if line is None else line, 0 if column is None else column),
     )
+
+
+@pytest.mark.parametrize("field", ["line", "column"])
+@pytest.mark.parametrize("value", [-5, 1.5, "3", True, False, [], {}])
+def test_invalid_coordinate_is_unknown_without_dropping_the_finding(
+    field: str,
+    value: object,
+) -> None:
+    """Bad coordinates default independently and do not invalidate the record."""
+    span = {"line": 3, "column": 7, field: value}
+    diagnostic = {
+        "filename": "test.js",
+        "message": "Unused variable",
+        "labels": [{"span": span}],
+    }
+
+    issues, failures = parse_oxlint_output_with_stats(
+        json.dumps({"diagnostics": [diagnostic]}),
+    )
+
+    assert_that(failures).is_zero()
+    assert_that(issues).is_length(1)
+    issue = issues[0]
+    assert_that((issue.line, issue.column)).is_equal_to(
+        (0, 7) if field == "line" else (3, 0),
+    )
+    assert_that(issue.to_display_row()[field]).is_equal_to("-")

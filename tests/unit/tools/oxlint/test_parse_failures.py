@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import json
+import subprocess  # nosec B404 - only constructs TimeoutExpired for runner tests
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from assertpy import assert_that
 
+import lintro.utils.tool_executor as executor
 from lintro.enums.action import Action
+from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import ExecutionContext
+from lintro.tools.core.verify_pass import VerifyBaseline
 from lintro.tools.oxlint.definition import OxlintPlugin
 from lintro.utils.json_output import serialize_tool_result
 
@@ -64,6 +69,8 @@ def prepared_oxlint(
         {"diagnostics": [{"message": "Unused variable"}]},
         {"diagnostics": [{"filename": {"path": "test.js"}, "message": "Error"}]},
         {"diagnostics": [{"filename": "test.js", "message": None}]},
+        {"diagnostics": [{"filename": "test.js", "message": ""}]},
+        {"diagnostics": [{"filename": "test.js", "message": " \n"}]},
         {"diagnostics": [{"filename": "test.js"}]},
     ],
 )
@@ -177,15 +184,218 @@ def test_fix_parse_failures_cannot_claim_a_clean_or_fixed_result(
     assert_that(result.output).contains("parse").does_not_contain(
         "All issues were successfully auto-fixed",
     )
-    if failed_stage in {"verify", "both"}:
-        assert_that(result.residual_unknown).is_true()
-        assert_that(result.remaining_issues_count).is_none()
-        assert_that(result.issues_count).is_equal_to(
-            1 if failed_stage == "verify" else 0,
-        )
-        serialized = serialize_tool_result(result, action=Action.FIX)
-        assert_that(serialized["fixed"]).is_none()
-        assert_that(serialized["remaining"]).is_none()
-    else:
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.issues_count).is_equal_to(
+        1 if failed_stage == "verify" else 0,
+    )
+    serialized = serialize_tool_result(replace(result), action=Action.FIX)
+    assert_that(serialized["fixed"]).is_none()
+    assert_that(serialized["remaining"]).is_none()
+    if failed_stage in {"initial", "both"}:
         assert_that(result.initial_issues_count).is_none()
-        assert_that(result.remaining_issues_count).is_zero()
+
+
+@pytest.mark.parametrize("method", ["check", "fix"])
+@pytest.mark.parametrize("exit_success", [True, False])
+@pytest.mark.parametrize("nonclean", [True, False])
+@pytest.mark.parametrize("prefix", ["Found report:\n", "note ", "[WARN] note\n"])
+def test_prose_wrapped_array_never_becomes_an_object_report(
+    prepared_oxlint: OxlintPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    exit_success: bool,
+    nonclean: bool,
+    prefix: str,
+) -> None:
+    """Array envelopes fail for both exit codes and both clean and dirty inners."""
+    diagnostics = [{"filename": "test.js", "message": "Use const"}] if nonclean else []
+    output = f"{prefix}{json.dumps([{'diagnostics': diagnostics}])}\nDone"
+    monkeypatch.setattr(
+        prepared_oxlint,
+        "_run_subprocess",
+        MagicMock(return_value=(exit_success, output)),
+    )
+
+    result = getattr(prepared_oxlint, method)(["test.js"], {})
+    serialized = serialize_tool_result(
+        replace(result),
+        action=Action.FIX if method == "fix" else Action.CHECK,
+    )
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_zero()
+    assert_that(result.parse_failures_count).is_equal_to(2 if method == "fix" else 1)
+    assert_that(serialized["success"]).is_false()
+    assert_that(serialized["parse_failures_count"]).is_equal_to(
+        result.parse_failures_count,
+    )
+
+
+@pytest.mark.parametrize("method", ["check", "fix"])
+@pytest.mark.parametrize("nonclean", [True, False])
+@pytest.mark.parametrize(
+    "prefix,suffix",
+    [
+        ("Warning: using default configuration\n", "\nDone"),
+        ("[WARN] using default configuration\n", "\nFinished {threads: 4}"),
+        ("[INFO] start\n[WARNING] config\n", " trailing {oops}"),
+        ("", "\nFinished }"),
+    ],
+)
+def test_report_tolerates_log_prefixes_and_trailing_braces(
+    prepared_oxlint: OxlintPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    nonclean: bool,
+    prefix: str,
+    suffix: str,
+) -> None:
+    """Surrounding prose never invalidates a complete object report."""
+    diagnostics = [{"filename": "test.js", "message": "Use const"}] if nonclean else []
+    output = f"{prefix}{json.dumps({'diagnostics': diagnostics})}{suffix}"
+    monkeypatch.setattr(
+        prepared_oxlint,
+        "_run_subprocess",
+        MagicMock(return_value=(not nonclean, output)),
+    )
+
+    result = getattr(prepared_oxlint, method)(["test.js"], {})
+
+    assert_that(result.success).is_equal_to(not nonclean)
+    assert_that(result.parse_failures_count).is_zero()
+    assert_that(result.issues_count).is_equal_to(int(nonclean))
+    if nonclean:
+        assert_that([issue.message for issue in result.issues or []]).contains(
+            "Use const",
+        )
+    else:
+        assert_that(result.output).is_none()
+
+
+def test_incomplete_fix_preserves_findings_summary_and_verbose_output(
+    prepared_oxlint: OxlintPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Remove unverified fix claims while retaining useful diagnostic text."""
+    diagnostic = {"filename": "test.js", "message": "Use const"}
+    raw_fix = "Fixed by oxlint {config}\nverbose details"
+    outputs = [
+        (True, json.dumps({"diagnostics": [diagnostic, diagnostic, None]})),
+        (True, raw_fix),
+        (True, json.dumps({"diagnostics": [diagnostic]})),
+    ]
+    monkeypatch.setattr(
+        prepared_oxlint,
+        "_run_subprocess",
+        MagicMock(side_effect=outputs),
+    )
+
+    result = prepared_oxlint.fix(["test.js"], {"verbose_fix_output": True})
+
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.output).contains(
+        "Failed to parse 1",
+        "Found 1 issue(s) that cannot be auto-fixed",
+        "test.js - Use const",
+        f"Fix output:\n{raw_fix}",
+    ).does_not_contain("Fixed 1 issue(s)", "All issues were successfully auto-fixed")
+
+
+@pytest.mark.parametrize(
+    "failed_stage",
+    ["initial", "verify", "both", "fix-timeout", "verify-timeout", "executor"],
+)
+@pytest.mark.parametrize("executor_report", ["clean", "partial", "timeout"])
+def test_executor_fold_preserves_unknown_fix_accounting(
+    prepared_oxlint: OxlintPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    failed_stage: str,
+    executor_report: str,
+) -> None:
+    """Real check, fix and executor verify code must produce a valid unknown row."""
+    diagnostic = {"filename": "test.js", "message": "Use const"}
+    valid = json.dumps({"diagnostics": [diagnostic]})
+    partial = json.dumps({"diagnostics": [diagnostic, None]})
+    clean = '{"diagnostics": []}'
+    timeout = subprocess.TimeoutExpired(cmd=["oxlint"], timeout=30)
+    initial_failed = failed_stage in {
+        "initial",
+        "both",
+        "fix-timeout",
+        "verify-timeout",
+    }
+    final_failed = failed_stage in {"verify", "both"}
+    outputs: list[object] = [
+        (True, partial if initial_failed else valid),
+        timeout if failed_stage == "fix-timeout" else (True, ""),
+    ]
+    if failed_stage != "fix-timeout":
+        outputs.append(
+            (
+                timeout
+                if failed_stage == "verify-timeout"
+                else (True, partial if final_failed else clean)
+            ),
+        )
+    # The executor case starts with complete fix reports; its last CHECK fails.
+    if failed_stage == "executor" or executor_report == "partial":
+        outputs.append((False, partial))
+    elif executor_report == "timeout":
+        outputs.append(timeout)
+    else:
+        outputs.append((True, clean))
+    monkeypatch.setattr(
+        prepared_oxlint,
+        "_run_subprocess",
+        MagicMock(side_effect=outputs),
+    )
+    mutation = prepared_oxlint.fix(["test.js"], {})
+    results = [mutation]
+    monkeypatch.setattr(
+        executor,
+        "configure_tool_for_execution",
+        MagicMock(return_value=prepared_oxlint),
+    )
+    ctx = MagicMock(action=Action.FIX, dry_run_preview=False, clean_stdout_output=True)
+
+    executor._run_verify_phase(
+        ctx=ctx,
+        baseline=VerifyBaseline(candidates=(str(tmp_path / "test.js"),)),
+        tools_to_run=["oxlint"],
+        all_results=results,
+        config_manager=MagicMock(),
+        tool_option_dict={},
+        exclude=None,
+        include_venv=False,
+        effective_auto_install=False,
+        diff_base=None,
+    )
+
+    # replace reconstructs ToolResult and executes its invariant validation.
+    result: ToolResult = replace(results[0])
+    expected_failures = int(initial_failed) + int(final_failed)
+    if not result.timed_out and (
+        failed_stage == "executor" or executor_report == "partial"
+    ):
+        expected_failures += 1
+    assert_that(result.parse_failures_count).is_equal_to(expected_failures)
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.success).is_false()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that([issue.message for issue in result.issues or []]).is_equal_to(
+        ["Use const"],
+    )
+    assert_that(result.initial_issues_count).is_equal_to(None if initial_failed else 1)
+    serialized = json.loads(
+        json.dumps(serialize_tool_result(result, action=Action.FIX)),
+    )
+    assert_that(serialized["parse_failures_count"]).is_equal_to(expected_failures)
+    assert_that(serialized["fixed"]).is_none()
+    assert_that(serialized["net_resolved"]).is_none()
+    assert_that(serialized["remaining"]).is_none()
+    assert_that(serialized["residual_unknown"]).is_true()
+    assert_that(serialized["timed_out"]).is_equal_to("timeout" in failed_stage)

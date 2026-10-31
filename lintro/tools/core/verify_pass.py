@@ -856,7 +856,7 @@ def _fold_unknown(
     mutation.output = f"{output}\n{note}" if output.strip() else note
     mutation.issues = detected
     mutation.issues_count = len(detected)
-    if mutation.initial_issues_count is None:
+    if mutation.initial_issues_count is None and not mutation.parse_failures_count:
         mutation.initial_issues_count = len(detected)
     # No after-count exists, so none is reported. Consumers key off
     # ``residual_unknown`` and render "unknown" rather than filling the gap
@@ -892,9 +892,28 @@ def _fold_one(
         fixed count, and a note when the two disagreed. The pre-fix issue list
         is preserved so the "detected / remaining" view still renders.
     """
+    # A later check cannot reconstruct a missing baseline or repair an earlier
+    # incomplete report. In particular, never put numeric counts alongside an
+    # existing residual_unknown flag.
+    verify = outcome.result
+    if verify and verify.parse_failures_count:
+        mutation.parse_failures_count = (mutation.parse_failures_count or 0) + (
+            verify.parse_failures_count
+        )
+    if mutation.residual_unknown:
+        return mutation
+    if mutation.parse_failures_count:
+        return _fold_unknown(
+            mutation=mutation,
+            outcome=VerifyOutcome(
+                tool=mutation.name,
+                result=None,
+                status=VerifyStatus.UNKNOWN,
+                unknown_reason="tool output could not be fully parsed",
+            ),
+        )
     if outcome.status is VerifyStatus.UNKNOWN:
         return _fold_unknown(mutation=mutation, outcome=outcome)
-    verify = outcome.result
     # An ``UNCHANGED`` outcome carries no result: nothing was rewritten, or
     # the tool discovered none of the scope's files, so its pre-fix findings
     # stand as its post-fix findings. Everything that could not answer at all

@@ -7,6 +7,29 @@ from lintro.parsers.oxlint.oxlint_issue import OxlintIssue
 from lintro.parsers.oxlint.oxlint_parser import parse_oxlint_output_with_stats
 
 
+def _without_fix_claims(output: str | None) -> str:
+    """Keep findings and verbose output, removing unmeasured fix claims.
+
+    Args:
+        output: Shared runner's summary and optional raw fix output.
+
+    Returns:
+        Summary without numerical fix claims, preserving raw output verbatim.
+    """
+    summary, separator, raw_output = (output or "").partition("Fix output:\n")
+    summary = "\n".join(
+        line
+        for line in summary.splitlines()
+        if not line.startswith("Fixed ")
+        and line != "All issues were successfully auto-fixed"
+    )
+    summary = summary.strip()
+    if separator:
+        verbose = f"{separator}{raw_output}"
+        return f"{summary}\n{verbose}" if summary else verbose
+    return summary
+
+
 @dataclass
 class OxlintOutputParser:
     """Collect report failures without changing the shared batch parser contract.
@@ -33,6 +56,10 @@ class OxlintOutputParser:
     def finish(self, result: ToolResult) -> ToolResult:
         """Surface rejected records and prevent incomplete reports implying success.
 
+        Either incomplete fix report makes derived fix accounting unknown,
+        including on timeout. Bare non-JSON prose and whitespace still count
+        no failures and can pass clean under ISSUES_ONLY until #3000 lands.
+
         Args:
             result: Check, fix or timeout result from the shared runner.
 
@@ -46,20 +73,19 @@ class OxlintOutputParser:
 
         result.success = False
         message = f"Failed to parse {failures} Oxlint report(s) or diagnostic(s)."
-        if result.initial_issues_count is not None and not result.timed_out:
-            # A difference between incomplete reports cannot measure fixes.
+        if result.initial_issues_count is not None:
+            # Neither a partial baseline nor a partial after-state can measure
+            # fixes. Keep this conservative state through the executor's fold,
+            # even if a later CHECK answers over only the changed files.
+            result.output = _without_fix_claims(result.output)
             result.fixed_issues_count = None
+            result.remaining_issues_count = None
+            result.residual_unknown = True
+            result.residual_unknown_reason = message
             if self.failure_counts[0]:
                 result.initial_issues_count = None
-            if self.failure_counts[-1]:
-                # Verification did not establish a residual. Carry forward the
-                # known before-state, following ToolResult's unknown contract.
-                result.remaining_issues_count = None
-                result.residual_unknown = True
-                result.residual_unknown_reason = message
-                result.issues = list(result.initial_issues or [])
-                result.issues_count = len(result.issues)
-            result.output = message
-        else:
-            result.output = f"{message}\n{result.output}" if result.output else message
+            # Unknown results carry detected findings, not a measured residual.
+            result.issues = list(result.initial_issues or [])
+            result.issues_count = len(result.issues)
+        result.output = f"{message}\n{result.output}" if result.output else message
         return result
