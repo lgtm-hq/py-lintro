@@ -437,8 +437,9 @@ class SemgrepPlugin(BaseToolPlugin):
                 if isinstance(reported_paths, dict)
                 else None
             )
+            # Parsed findings prove inspection even when reported paths are empty.
             inspected_files = (
-                bool(scanned)
+                bool(issues or scanned)
                 if isinstance(scanned, list)
                 and all(isinstance(p, str) and p for p in scanned)
                 else True if issues else None
