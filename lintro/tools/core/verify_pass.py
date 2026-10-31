@@ -81,6 +81,7 @@ from loguru import logger
 from lintro.enums.action import Action
 from lintro.enums.capability import MUTATING_CAPABILITIES, Cap
 from lintro.enums.verify_status import VerifyStatus
+from lintro.formatters.formatter import merge_detected_and_remaining
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.file_cache import FingerprintSnapshot, snapshot_fingerprints
@@ -845,19 +846,31 @@ def _fold_unknown(
         outcome: The tool's ``UNKNOWN`` verify outcome.
 
     Returns:
-        ToolResult: ``mutation`` carrying its pre-fix findings, no fixed or
-        remaining count, and the reason the residual is unknown.
+        ToolResult: ``mutation`` carrying detected findings, no fixed or
+        remaining count, and the reason the residual is unknown. Incomplete
+        reports also retain usable post-fix findings without duplicates.
     """
     detected = _pre_fix_issues(mutation)
     note = RESIDUAL_UNKNOWN_TEMPLATE.format(
         reason=outcome.unknown_reason,
         detected=len(detected),
     )
+    if mutation.parse_failures_count:
+        verified = outcome.result.issues if outcome.result is not None else []
+        detected = merge_detected_and_remaining(
+            [],
+            [*(verified or []), *(mutation.issues or []), *detected],
+        )
+        note = (
+            f"Verify pass: residual unknown — {outcome.unknown_reason}. "
+            "Usable findings from the reports are retained; "
+            "complete fix accounting is unavailable."
+        )
     output = mutation.output or ""
     mutation.output = f"{output}\n{note}" if output.strip() else note
     mutation.issues = detected
     mutation.issues_count = len(detected)
-    if mutation.initial_issues_count is None:
+    if mutation.initial_issues_count is None and not mutation.parse_failures_count:
         mutation.initial_issues_count = len(detected)
     # No after-count exists, so none is reported. Consumers key off
     # ``residual_unknown`` and render "unknown" rather than filling the gap
@@ -913,9 +926,35 @@ def _fold_one(
         fixed count, and a note when the two disagreed. The pre-fix issue list
         is preserved so the "detected / remaining" view still renders.
     """
+    # A later check cannot reconstruct a report that could not be fully parsed.
+    # Execution failures can still gain a measured residual from an answered
+    # check below.
+    verify = outcome.result
+    if verify and verify.parse_failures_count:
+        mutation.parse_failures_count = (mutation.parse_failures_count or 0) + (
+            verify.parse_failures_count
+        )
+    if mutation.parse_failures_count:
+        unknown_reason = "; ".join(
+            dict.fromkeys(
+                reason
+                for reason in (mutation.residual_unknown_reason, outcome.unknown_reason)
+                if reason
+            ),
+        )
+        return _fold_unknown(
+            mutation=mutation,
+            outcome=VerifyOutcome(
+                tool=mutation.name,
+                result=verify,
+                status=VerifyStatus.UNKNOWN,
+                unknown_reason=(
+                    unknown_reason or "tool output could not be fully parsed"
+                ),
+            ),
+        )
     if outcome.status is VerifyStatus.UNKNOWN:
         return _fold_unknown(mutation=mutation, outcome=outcome)
-    verify = outcome.result
     # An ``UNCHANGED`` outcome carries no result: nothing was rewritten, or
     # the tool discovered none of the scope's files, so its pre-fix findings
     # stand as its post-fix findings. Everything that could not answer at all

@@ -201,6 +201,7 @@ class CargoAuditPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=overall_success,
             output=output if should_show_output else None,
             issues_count=len(issues),

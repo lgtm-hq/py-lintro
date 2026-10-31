@@ -18,7 +18,10 @@ import click
 from lintro.api import core as api
 from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.severity_counts import SeverityCounts
-from lintro.utils.meaningful_run import run_inspected_files
+from lintro.utils.meaningful_run import (
+    run_has_unreported_failure,
+    run_inspected_files,
+)
 
 _SHIELDS_STYLES: tuple[str, ...] = (
     "flat",
@@ -44,7 +47,8 @@ def _live_counts_are_usable(artifact: RunArtifact) -> bool:
     run, or a run where nothing inspected any files. **Any** timed-out tool
     also disqualifies the run — a completed clean tool alongside a timed-out
     security scanner would otherwise publish "0 issues" for findings that were
-    never collected.
+    never collected. A non-skipped tool that failed without findings also
+    disqualifies the run; a failed tool that reported findings remains usable.
 
     Args:
         artifact: Completed check run.
@@ -55,6 +59,8 @@ def _live_counts_are_usable(artifact: RunArtifact) -> bool:
     if artifact.early_exit:
         return False
     if any(result.timed_out for result in artifact.tool_results):
+        return False
+    if run_has_unreported_failure(artifact.tool_results):
         return False
     return run_inspected_files(artifact.tool_results)
 
@@ -167,7 +173,7 @@ def resolve_severity_counts(
     Raises:
         click.ClickException: If the live check exits before producing counts,
             no tool actually executed (empty / all-skipped), or any tool timed
-            out.
+            out or failed without reporting findings.
     """
     if override is not None:
         return override
@@ -182,7 +188,8 @@ def resolve_severity_counts(
     if not _live_counts_are_usable(artifact):
         raise click.ClickException(
             "Could not determine usable issue counts because the check "
-            "exited early, was empty, timed out, or all tools were skipped.",
+            "exited early, was empty, timed out, all tools were skipped, "
+            "or a tool failed without reporting findings.",
         )
     return artifact.severity_counts
 

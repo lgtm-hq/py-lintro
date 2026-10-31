@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import json
+import sys
+
+import pytest
 from assertpy import assert_that
 
-from lintro.parsers.oxlint.oxlint_parser import parse_oxlint_output
+from lintro.parsers.oxlint.oxlint_parser import (
+    parse_oxlint_output,
+    parse_oxlint_output_with_stats,
+)
 
 
 def test_parse_oxlint_output_empty() -> None:
@@ -120,11 +127,7 @@ def test_parse_oxlint_output_missing_filename() -> None:
 
 
 def test_parse_oxlint_output_missing_labels() -> None:
-    """Test parsing Oxlint output with missing labels.
-
-    When labels are missing, parser defaults to line=1, column=1
-    (1-based numbering, defaults to start of file).
-    """
+    """Missing labels leave the location unknown."""
     json_output = """{
         "diagnostics": [{
             "message": "Test error",
@@ -137,16 +140,12 @@ def test_parse_oxlint_output_missing_labels() -> None:
     issues = parse_oxlint_output(json_output)
     assert_that(issues).is_length(1)
     issue = issues[0]
-    assert_that(issue.line).is_equal_to(1)
-    assert_that(issue.column).is_equal_to(1)
+    assert_that(issue.line).is_zero()
+    assert_that(issue.column).is_zero()
 
 
 def test_parse_oxlint_output_empty_labels() -> None:
-    """Test parsing Oxlint output with empty labels array.
-
-    When labels array is empty, parser defaults to line=1, column=1
-    (1-based numbering, defaults to start of file).
-    """
+    """Empty labels leave the location unknown."""
     json_output = """{
         "diagnostics": [{
             "message": "Test error",
@@ -160,16 +159,12 @@ def test_parse_oxlint_output_empty_labels() -> None:
     issues = parse_oxlint_output(json_output)
     assert_that(issues).is_length(1)
     issue = issues[0]
-    assert_that(issue.line).is_equal_to(1)
-    assert_that(issue.column).is_equal_to(1)
+    assert_that(issue.line).is_zero()
+    assert_that(issue.column).is_zero()
 
 
 def test_parse_oxlint_output_missing_span() -> None:
-    """Test parsing Oxlint output with labels but missing span.
-
-    When span is missing from label, parser defaults to line=1, column=1
-    (1-based numbering, defaults to start of file).
-    """
+    """A label without a span leaves the location unknown."""
     json_output = """{
         "diagnostics": [{
             "message": "Test error",
@@ -183,8 +178,8 @@ def test_parse_oxlint_output_missing_span() -> None:
     issues = parse_oxlint_output(json_output)
     assert_that(issues).is_length(1)
     issue = issues[0]
-    assert_that(issue.line).is_equal_to(1)
-    assert_that(issue.column).is_equal_to(1)
+    assert_that(issue.line).is_zero()
+    assert_that(issue.column).is_zero()
 
 
 def test_parse_oxlint_output_with_extra_text() -> None:
@@ -220,6 +215,7 @@ def test_parse_oxlint_output_missing_optional_fields() -> None:
     json_output = """{
         "diagnostics": [{
             "filename": "test.js",
+            "message": "Test error",
             "labels": [{"span": {"line": 1, "column": 1}}]
         }]
     }"""
@@ -229,7 +225,7 @@ def test_parse_oxlint_output_missing_optional_fields() -> None:
 
     issue = issues[0]
     assert_that(issue.file).is_equal_to("test.js")
-    assert_that(issue.message).is_equal_to("")
+    assert_that(issue.message).is_equal_to("Test error")
     assert_that(issue.code).is_equal_to("")
     assert_that(issue.severity).is_equal_to("warning")  # Default
     assert_that(issue.help).is_none()
@@ -282,3 +278,157 @@ def test_parse_oxlint_output_no_help_field() -> None:
     issues = parse_oxlint_output(json_output)
     assert_that(issues).is_length(1)
     assert_that(issues[0].help).is_none()
+
+
+@pytest.mark.parametrize("field", ["filename", "message"])
+@pytest.mark.parametrize("value", [None, "", " \n", 42, False, [], {}])
+def test_required_fields_reject_unrenderable_values(field: str, value: object) -> None:
+    """Invalid required fields never reach the issue model."""
+    diagnostic = {"filename": "test.js", "message": "Unused variable", field: value}
+
+    issues, failures = parse_oxlint_output_with_stats(
+        json.dumps({"diagnostics": [diagnostic]}),
+    )
+
+    assert_that(issues).is_empty()
+    assert_that(failures).is_equal_to(1)
+
+
+@pytest.mark.parametrize("field", ["filename", "message"])
+def test_missing_required_field_is_not_a_diagnostic(field: str) -> None:
+    """An absent required string cannot become a defaulted issue."""
+    diagnostic = {"filename": "test.js", "message": "Unused variable"}
+    del diagnostic[field]
+
+    issues, failures = parse_oxlint_output_with_stats(
+        json.dumps({"diagnostics": [diagnostic]}),
+    )
+
+    assert_that(issues).is_empty()
+    assert_that(failures).is_equal_to(1)
+
+
+def test_null_optional_fields_use_model_defaults() -> None:
+    """Explicit nulls normalize before issue rendering or serialization."""
+    diagnostic = {
+        "filename": "test.js",
+        "message": "Unused variable",
+        "code": None,
+        "severity": None,
+        "labels": [{"span": {"line": None, "column": None}}],
+    }
+
+    issues = parse_oxlint_output(json.dumps({"diagnostics": [diagnostic]}))
+
+    assert_that(issues).is_length(1)
+    issue = issues[0]
+    assert_that((issue.code, issue.severity, issue.line, issue.column)).is_equal_to(
+        ("", "warning", 0, 0),
+    )
+    row = issue.to_display_row()
+    assert_that((row["line"], row["column"], row["message"])).is_equal_to(
+        ("-", "-", "Unused variable"),
+    )
+
+
+@pytest.mark.parametrize("labels", [None, [None], [{"span": None}], [{"span": {}}]])
+def test_missing_location_is_unknown(labels: object) -> None:
+    """Nullable location containers preserve a finding without inventing 1:1."""
+    diagnostic = {"filename": "test.js", "message": "Unused variable", "labels": labels}
+
+    issues = parse_oxlint_output(json.dumps({"diagnostics": [diagnostic]}))
+
+    assert_that(issues).is_length(1)
+    assert_that((issues[0].line, issues[0].column)).is_equal_to((0, 0))
+
+
+@pytest.mark.parametrize("line,column", [(0, 0), (3, None), (None, 7)])
+def test_coordinates_default_independently(
+    line: int | None,
+    column: int | None,
+) -> None:
+    """Keep each known coordinate when its counterpart is absent."""
+    diagnostic = {
+        "filename": "test.js",
+        "message": "Unused variable",
+        "labels": [{"span": {"line": line, "column": column}}],
+    }
+
+    issue = parse_oxlint_output(json.dumps({"diagnostics": [diagnostic]}))[0]
+
+    assert_that((issue.line, issue.column)).is_equal_to(
+        (0 if line is None else line, 0 if column is None else column),
+    )
+
+
+@pytest.mark.parametrize("field", ["line", "column"])
+@pytest.mark.parametrize("value", [-5, 1.5, "3", True, False, [], {}])
+def test_invalid_coordinate_is_unknown_without_dropping_the_finding(
+    field: str,
+    value: object,
+) -> None:
+    """Bad coordinates default independently and do not invalidate the record."""
+    span = {"line": 3, "column": 7, field: value}
+    diagnostic = {
+        "filename": "test.js",
+        "message": "Unused variable",
+        "labels": [{"span": span}],
+    }
+
+    issues, failures = parse_oxlint_output_with_stats(
+        json.dumps({"diagnostics": [diagnostic]}),
+    )
+
+    assert_that(failures).is_zero()
+    assert_that(issues).is_length(1)
+    issue = issues[0]
+    assert_that((issue.line, issue.column)).is_equal_to(
+        (0, 7) if field == "line" else (3, 0),
+    )
+    assert_that(issue.to_display_row()[field]).is_equal_to("-")
+
+
+@pytest.mark.parametrize(
+    "envelope",
+    [
+        "[{report}]",
+        "[\n{report}",
+        "[null, {report}]",
+        "[broken, {report}]",
+        "[broken]\n{report}",
+        '{{"outer": {report}}}',
+        '{{"outer": {report}',
+        "{{broken {report}}}",
+        '{{"diagnostics": [{report}',
+    ],
+)
+@pytest.mark.parametrize("prefix", ["note ", "[NOTICE] starting\n", "Using {config}\n"])
+def test_prose_does_not_expose_a_report_inside_an_invalid_envelope(
+    envelope: str,
+    prefix: str,
+) -> None:
+    """A nested object cannot repair a malformed or wrongly shaped envelope."""
+    output = prefix + envelope.format(report='{"diagnostics": []}')
+
+    issues, failures = parse_oxlint_output_with_stats(output)
+
+    assert_that((issues, failures)).is_equal_to(([], 1))
+
+
+@pytest.mark.parametrize(
+    "literal",
+    ["null", "true", "false", "null ", "true ", "NaN", "Infinity", '"NOTICE"', "0"],
+)
+def test_array_literals_are_never_treated_as_log_labels(literal: str) -> None:
+    """Bracketed JSON values before a report are additional containers."""
+    output = f'[{literal}] starting\n{{"diagnostics": []}}'
+
+    assert_that(parse_oxlint_output_with_stats(output)).is_equal_to(([], 1))
+
+
+def test_excessive_json_nesting_is_a_counted_report_failure() -> None:
+    """Decoder recursion failures follow the same contract as malformed JSON."""
+    depth = sys.getrecursionlimit() + 100
+    output = "[" * depth + '{"diagnostics": []}' + "]" * depth
+
+    assert_that(parse_oxlint_output_with_stats(output)).is_equal_to(([], 1))

@@ -46,7 +46,6 @@ def mypy_tool() -> BaseToolPlugin:
     assert_that(tool).described_as(
         "mypy tool not found in registry",
     ).is_not_none()
-    assert tool is not None  # narrow type for mypy
     return tool
 
 

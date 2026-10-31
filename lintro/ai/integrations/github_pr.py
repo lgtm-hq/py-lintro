@@ -219,7 +219,8 @@ class GitHubPRReporter:
             if not rel or rel == OUTSIDE_WORKSPACE_SENTINEL or rel.startswith(".."):
                 continue
             body = _format_inline_comment(s)
-            has_line = isinstance(s.line, int) and s.line > 0
+            line: object = s.line
+            has_line = isinstance(line, int) and line > 0
 
             # Suggestions without a valid line or not in the PR diff fall back
             # to standalone issue comments instead of inline review comments.
@@ -998,7 +999,7 @@ def _detect_repo_root() -> Path | None:
         return None
 
 
-def _files_to_lines(*, files: Sequence[dict[str, Any]]) -> dict[str, set[int]]:
+def _files_to_lines(*, files: Sequence[object]) -> dict[str, set[int]]:
     """Reduce a GitHub files listing to right-side changed lines per path.
 
     Args:

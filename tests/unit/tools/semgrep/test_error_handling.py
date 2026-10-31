@@ -11,6 +11,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.parsers.semgrep.semgrep_parser import parse_semgrep_output
+from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.semgrep.definition import SemgrepPlugin
 from tests.test_samples_helpers import copy_sample
 
@@ -48,7 +49,7 @@ def test_check_with_timeout(
     ):
         with patch.object(
             semgrep_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=subprocess.TimeoutExpired(cmd=["semgrep"], timeout=120),
         ):
             result = semgrep_plugin.check([str(test_file)], {})
@@ -85,8 +86,8 @@ def test_check_with_json_parse_error(
     ):
         with patch.object(
             semgrep_plugin,
-            "_run_subprocess",
-            return_value=(False, invalid_output),
+            "_run_subprocess_result",
+            return_value=SubprocessResult(2, invalid_output, "", invalid_output),
         ):
             result = semgrep_plugin.check([str(test_file)], {})
 
@@ -129,8 +130,8 @@ def test_check_with_semgrep_errors(
     ):
         with patch.object(
             semgrep_plugin,
-            "_run_subprocess",
-            return_value=(False, semgrep_output),
+            "_run_subprocess_result",
+            return_value=SubprocessResult(2, semgrep_output, "", semgrep_output),
         ):
             result = semgrep_plugin.check([str(test_file)], {})
 

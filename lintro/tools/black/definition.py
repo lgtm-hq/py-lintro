@@ -332,6 +332,7 @@ class BlackPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=(success and count == 0 and not supplement.failed),
             output=result_output,
             issues_count=count,
@@ -499,6 +500,7 @@ class BlackPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=(remaining_count == 0 and not supplement.failed),
             output=final_summary,
             issues_count=remaining_count,

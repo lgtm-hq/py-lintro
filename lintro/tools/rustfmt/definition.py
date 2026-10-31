@@ -258,6 +258,7 @@ class RustfmtPlugin(BaseToolPlugin):
         # the residual once, after every mutating tool has run (#2607).
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=True,
             output=None,
             issues_count=0,

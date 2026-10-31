@@ -153,6 +153,34 @@ def test_enabled_with_mocked_engine_reports_issues(
     assert_that(result.skipped).is_false()
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(2)
+    assert_that(result.inspected_files).is_true()
+
+
+@pytest.mark.parametrize("readable", [False, True])
+@pytest.mark.parametrize("mode", ["per-file", "duplication"])
+def test_unreadable_sources_do_not_claim_review_coverage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    readable: bool,
+    mode: str,
+) -> None:
+    """Unreadable files are not reviewed, even when discovery selected them.
+
+    Args:
+        tmp_path: Isolated directory with invalid UTF-8 input.
+        monkeypatch: Installs the local AI engine double.
+        readable: Whether another source can actually be reviewed.
+        mode: Per-file or cross-file signature review.
+    """
+    _patch_engine(monkeypatch)
+    (tmp_path / "broken.py").write_bytes(b"\xff")
+    if readable:
+        (tmp_path / "readable.py").write_text("value = 1\n")
+    result = IdiomReviewPlugin().check([str(tmp_path)], {"enabled": True, "mode": mode})
+    assert_that(result.inspected_files).is_equal_to(readable)
+    assert_that(result.issues_count).is_equal_to(
+        1 if readable and mode == "per-file" else 0,
+    )
 
 
 def test_engine_is_built_from_the_raw_ai_mapping(

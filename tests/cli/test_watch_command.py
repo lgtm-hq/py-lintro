@@ -214,7 +214,7 @@ def test_malformed_watch_config_is_a_clean_click_error() -> None:
         result = runner.invoke(cli, ["watch", "."])
 
     assert_that(result.exit_code).is_not_equal_to(0)
-    assert_that(result.output).contains("watch config must be a mapping")
+    assert_that(result.output).contains("watch must be a mapping")
     assert_that(result.output).does_not_contain("Traceback")
 
 

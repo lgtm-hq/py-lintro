@@ -2,19 +2,134 @@
 
 from __future__ import annotations
 
+import errno
 import json
+import multiprocessing
+import os
+import sys
 from pathlib import Path
+from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import pytest
 from assertpy import assert_that
 
-from lintro.models.core.severity_counts import SeverityCounts
+from lintro.enums.action import Action
+from lintro.models.core.run_artifact import RunArtifact
+from lintro.models.core.severity_counts import SeverityCounts, SeverityDelta
+from lintro.models.core.tool_result import ToolResult
+from lintro.utils.execution.run_aggregation import finalize_artifact
+from lintro.utils.execution.run_context import RunContext
+from lintro.utils.execution.run_renderer import _record_severity_baseline
 from lintro.utils.severity_baseline import (
+    MAX_SEVERITY_BASELINE_SCOPES,
     SEVERITY_BASELINE_FILENAME,
     read_severity_baseline,
     resolve_log_root,
+    severity_baseline_scope,
     write_severity_baseline,
 )
+
+if TYPE_CHECKING:
+    from multiprocessing.synchronize import Event
+    from typing import TextIO
+
+
+def _write_paused_baseline(base_dir: Path, ready: Event, release: Event) -> None:
+    """Pause a real writer after it has read its scope map.
+
+    Args:
+        base_dir: Shared log directory.
+        ready: Signals that the snapshot has been read.
+        release: Allows this writer to merge and persist its counts.
+    """
+    from lintro.utils import severity_baseline
+
+    original_read = severity_baseline._read_baseline
+
+    def paused_read(path: Path) -> dict[str, object] | None:
+        """Hold the snapshot until the competing writer is ready."""
+        scopes = original_read(path)
+        ready.set()
+        assert release.wait(15), "timed out waiting to release the first writer"
+        return scopes
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(severity_baseline, "_read_baseline", paused_read)
+        write_severity_baseline(base_dir, SeverityCounts(errors=2), "scope-a")
+
+
+def _write_competing_baseline(base_dir: Path, settled: Event) -> None:
+    """Signal when a second process has either written or hit a real lock.
+
+    Args:
+        base_dir: Shared log directory.
+        settled: Signals completion or confirmed inter-process contention.
+    """
+    import fcntl
+
+    original_flock = fcntl.flock
+
+    def signal_contention(fd: int, operation: int) -> None:
+        """Probe the real lock before blocking, without a timing assumption."""
+        try:
+            original_flock(fd, operation | fcntl.LOCK_NB)
+        except BlockingIOError:
+            settled.set()
+            original_flock(fd, operation)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(fcntl, "flock", signal_contention)
+        write_severity_baseline(base_dir, SeverityCounts(warnings=3), "scope-b")
+    settled.set()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="uses POSIX lock contention probe")
+@pytest.mark.parametrize("existing", [False, True], ids=["missing", "existing"])
+def test_concurrent_writers_preserve_both_scopes(
+    tmp_path: Path,
+    existing: bool,
+) -> None:
+    """A paused read/merge/write cannot clobber another process's scope.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        existing: Whether a third scope already exists before either writer.
+    """
+    if existing:
+        write_severity_baseline(tmp_path, SeverityCounts(info=4), "prior-scope")
+    context = multiprocessing.get_context("spawn")
+    ready, release, settled = (context.Event() for _ in range(3))
+    first = context.Process(
+        target=_write_paused_baseline,
+        args=(tmp_path, ready, release),
+    )
+    second = context.Process(target=_write_competing_baseline, args=(tmp_path, settled))
+    first.start()
+    try:
+        assert ready.wait(15), "first writer did not read the baseline"
+        second.start()
+        assert settled.wait(15), "second writer neither completed nor reached the lock"
+    finally:
+        release.set()
+        for process in (first, second):
+            if process.pid is not None:
+                process.join(15)
+                if process.is_alive():
+                    process.terminate()
+                    process.join(5)
+
+    assert_that([first.exitcode, second.exitcode]).is_equal_to([0, 0])
+    assert_that(read_severity_baseline(tmp_path, "scope-a")).is_equal_to(
+        SeverityCounts(errors=2),
+    )
+    assert_that(read_severity_baseline(tmp_path, "scope-b")).is_equal_to(
+        SeverityCounts(warnings=3),
+    )
+    if existing:
+        assert_that(read_severity_baseline(tmp_path, "prior-scope")).is_equal_to(
+            SeverityCounts(info=4),
+        )
 
 
 class _Manager:
@@ -37,9 +152,9 @@ def test_baseline_round_trips(tmp_path: Path) -> None:
     """
     counts = SeverityCounts(errors=3, warnings=1, info=7)
 
-    write_severity_baseline(tmp_path, counts)
+    write_severity_baseline(tmp_path, counts, "scope-a")
 
-    assert_that(read_severity_baseline(tmp_path)).is_equal_to(counts)
+    assert_that(read_severity_baseline(tmp_path, "scope-a")).is_equal_to(counts)
 
 
 def test_baseline_is_written_at_the_log_root_as_json(tmp_path: Path) -> None:
@@ -52,12 +167,12 @@ def test_baseline_is_written_at_the_log_root_as_json(tmp_path: Path) -> None:
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
-    write_severity_baseline(tmp_path, SeverityCounts(errors=1, warnings=2))
+    write_severity_baseline(tmp_path, SeverityCounts(errors=1, warnings=2), "scope-a")
 
     path = tmp_path / SEVERITY_BASELINE_FILENAME
     assert_that(path.is_file()).is_true()
     assert_that(json.loads(path.read_text(encoding="utf-8"))).is_equal_to(
-        {"error": 1, "warning": 2, "info": 0, "total": 3},
+        {"scopes": {"scope-a": {"error": 1, "warning": 2, "info": 0, "total": 3}}},
     )
 
 
@@ -67,7 +182,7 @@ def test_missing_baseline_reads_as_none(tmp_path: Path) -> None:
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
-    assert_that(read_severity_baseline(tmp_path / "absent")).is_none()
+    assert_that(read_severity_baseline(tmp_path / "absent", "scope-a")).is_none()
 
 
 def test_unparseable_baseline_reads_as_none(tmp_path: Path) -> None:
@@ -78,7 +193,7 @@ def test_unparseable_baseline_reads_as_none(tmp_path: Path) -> None:
     """
     (tmp_path / SEVERITY_BASELINE_FILENAME).write_text("{not json", encoding="utf-8")
 
-    assert_that(read_severity_baseline(tmp_path)).is_none()
+    assert_that(read_severity_baseline(tmp_path, "scope-a")).is_none()
 
 
 def test_non_mapping_baseline_reads_as_none(tmp_path: Path) -> None:
@@ -89,7 +204,7 @@ def test_non_mapping_baseline_reads_as_none(tmp_path: Path) -> None:
     """
     (tmp_path / SEVERITY_BASELINE_FILENAME).write_text("[1, 2, 3]", encoding="utf-8")
 
-    assert_that(read_severity_baseline(tmp_path)).is_none()
+    assert_that(read_severity_baseline(tmp_path, "scope-a")).is_none()
 
 
 def test_write_creates_the_log_directory(tmp_path: Path) -> None:
@@ -100,9 +215,11 @@ def test_write_creates_the_log_directory(tmp_path: Path) -> None:
     """
     target = tmp_path / "nested" / ".lintro"
 
-    write_severity_baseline(target, SeverityCounts(warnings=2))
+    write_severity_baseline(target, SeverityCounts(warnings=2), "scope-a")
 
-    assert_that(read_severity_baseline(target)).is_equal_to(SeverityCounts(warnings=2))
+    assert_that(read_severity_baseline(target, "scope-a")).is_equal_to(
+        SeverityCounts(warnings=2),
+    )
 
 
 def test_write_failure_is_swallowed(tmp_path: Path) -> None:
@@ -114,9 +231,533 @@ def test_write_failure_is_swallowed(tmp_path: Path) -> None:
     blocker = tmp_path / "blocked"
     blocker.write_text("not a directory", encoding="utf-8")
 
-    write_severity_baseline(blocker, SeverityCounts(errors=1))
+    write_severity_baseline(blocker, SeverityCounts(errors=1), "scope-a")
 
-    assert_that(read_severity_baseline(blocker)).is_none()
+    assert_that(read_severity_baseline(blocker, "scope-a")).is_none()
+
+
+@pytest.mark.parametrize("outcome", ["success", "write-failure", "replace-failure"])
+def test_atomic_write_preserves_the_published_baseline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+) -> None:
+    """Readers retain complete old JSON until a complete replacement is ready.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest fixture for injecting partial writes and failures.
+        outcome: Whether publication succeeds or fails during write or replace.
+    """
+    previous = SeverityCounts(errors=5)
+    current = SeverityCounts(warnings=2)
+    write_severity_baseline(tmp_path, previous, "scope-a")
+    path = tmp_path / SEVERITY_BASELINE_FILENAME
+    original = path.read_bytes()
+
+    def partial_dump(data: object, handle: TextIO, *, indent: int) -> None:
+        """Inspect the public baseline while only partial new JSON exists."""
+        content = json.dumps(data, indent=indent)
+        handle.write(content[:3])
+        handle.flush()
+        assert_that(path.read_bytes()).is_equal_to(original)
+        assert_that(read_severity_baseline(tmp_path, "scope-a")).is_equal_to(previous)
+        assert_that(read_severity_baseline(tmp_path, "scope-b")).is_none()
+        if outcome == "write-failure":
+            raise OSError("simulated full disk during JSON write")
+        handle.write(content[3:])
+
+    def refuse_replace(source: Path, target: Path) -> Path:
+        """Fail publication after the temporary JSON has been fully closed."""
+        assert_that(json.loads(source.read_text(encoding="utf-8"))).is_equal_to(
+            {"scopes": {"scope-a": previous.to_dict(), "scope-b": current.to_dict()}},
+        )
+        assert_that(target.read_bytes()).is_equal_to(original)
+        raise PermissionError("simulated read-only baseline replacement")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(json, "dump", partial_dump)
+        if outcome == "replace-failure":
+            patch.setattr(Path, "replace", refuse_replace)
+        write_severity_baseline(tmp_path, current, "scope-b")
+
+    assert_that(sorted(entry.name for entry in tmp_path.iterdir())).is_equal_to(
+        [SEVERITY_BASELINE_FILENAME, SEVERITY_BASELINE_FILENAME + ".lock"],
+    )
+    if outcome != "success":
+        assert_that(path.read_bytes()).is_equal_to(original)
+        assert_that(read_severity_baseline(tmp_path, "scope-b")).is_none()
+        # A subsequent real write proves cleanup also released the writer lock.
+        write_severity_baseline(tmp_path, current, "scope-b")
+    assert_that(read_severity_baseline(tmp_path, "scope-a")).is_equal_to(previous)
+    assert_that(read_severity_baseline(tmp_path, "scope-b")).is_equal_to(current)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0,
+    reason="requires POSIX directory permissions without root privileges",
+)
+@pytest.mark.parametrize(
+    "existing_lock",
+    [False, True],
+    ids=["new-lock", "existing-lock"],
+)
+def test_read_only_directory_preserves_baseline(
+    tmp_path: Path,
+    existing_lock: bool,
+) -> None:
+    """An unwritable log directory loses neither its old counts nor a lint run.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        existing_lock: Whether the persistent lock file already exists.
+    """
+    previous = SeverityCounts(errors=3)
+    write_severity_baseline(tmp_path, previous, "scope-a")
+    path = tmp_path / SEVERITY_BASELINE_FILENAME
+    original = path.read_bytes()
+    expected_files = [SEVERITY_BASELINE_FILENAME]
+    if existing_lock:
+        expected_files.append(SEVERITY_BASELINE_FILENAME + ".lock")
+    else:
+        (tmp_path / (SEVERITY_BASELINE_FILENAME + ".lock")).unlink()
+    tmp_path.chmod(0o555)
+    try:
+        write_severity_baseline(tmp_path, SeverityCounts(), "scope-a")
+        assert_that(path.read_bytes()).is_equal_to(original)
+        assert_that(read_severity_baseline(tmp_path, "scope-a")).is_equal_to(previous)
+        assert_that(sorted(entry.name for entry in tmp_path.iterdir())).is_equal_to(
+            expected_files,
+        )
+    finally:
+        tmp_path.chmod(0o755)
+
+
+def test_baseline_scopes_advance_independently(
+    tmp_path: Path,
+) -> None:
+    """An A/B/A sequence preserves each population's latest counts.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    counts = SeverityCounts(errors=9, warnings=2)
+    write_severity_baseline(tmp_path, counts, "full-run")
+    assert_that(read_severity_baseline(tmp_path, "scoped-run")).is_none()
+    scoped_counts = SeverityCounts(warnings=3)
+    write_severity_baseline(tmp_path, scoped_counts, "scoped-run")
+
+    assert_that(read_severity_baseline(tmp_path, "full-run")).is_equal_to(counts)
+    write_severity_baseline(tmp_path, SeverityCounts(errors=8), "full-run")
+    assert_that(read_severity_baseline(tmp_path, "scoped-run")).is_equal_to(
+        scoped_counts,
+    )
+    assert_that(read_severity_baseline(tmp_path, "full-run")).is_equal_to(
+        SeverityCounts(errors=8),
+    )
+
+
+def test_matching_scope_updates_the_baseline(tmp_path: Path) -> None:
+    """Consecutive measurements of the same population replace the old counts.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    write_severity_baseline(tmp_path, SeverityCounts(errors=4), "scope-a")
+
+    write_severity_baseline(tmp_path, SeverityCounts(warnings=2), "scope-a")
+
+    assert_that(read_severity_baseline(tmp_path, "scope-a")).is_equal_to(
+        SeverityCounts(warnings=2),
+    )
+
+
+def test_retention_caps_scopes_and_preserves_the_latest_full_path_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Staged-file checks cannot evict the latest full-path measurement.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest fixture for choosing the working directory.
+    """
+    monkeypatch.chdir(tmp_path)
+    ctx = RunContext(
+        action=Action.CHECK,
+        selection_action=Action.CHECK,
+        dry_run_preview=False,
+        output_manager=_Manager(tmp_path / "logs"),
+        logger=None,
+        lintro_config=None,
+        clean_stdout_output=True,
+    )
+    results = [ToolResult(name="ruff", success=True, inspected_files=True)]
+    full = RunArtifact(
+        tool_results=results,
+        paths=(str(tmp_path), "."),
+        severity_counts=SeverityCounts(errors=7),
+    )
+    _record_severity_baseline(full, ctx=ctx)
+    for index in range(MAX_SEVERITY_BASELINE_SCOPES + 5):
+        _record_severity_baseline(
+            RunArtifact(
+                tool_results=results,
+                paths=(f"file-{index}.py",),
+                severity_counts=SeverityCounts(warnings=index),
+            ),
+            ctx=ctx,
+        )
+
+    path = tmp_path / "logs" / SEVERITY_BASELINE_FILENAME
+    scopes = json.loads(path.read_text(encoding="utf-8"))["scopes"]
+    assert_that(scopes).is_length(MAX_SEVERITY_BASELINE_SCOPES)
+    oldest = severity_baseline_scope(paths=["file-0.py"], tool_results=results)
+    assert_that(scopes).does_not_contain_key(oldest)
+    repeated = finalize_artifact(
+        ctx=ctx,
+        all_results=results,
+        total_issues=0,
+        total_fixed=0,
+        total_remaining=0,
+        paths=["."],
+    )
+    assert_that(repeated.previous_severity_counts).is_equal_to(full.severity_counts)
+    assert_that(repeated.severity_delta).is_equal_to(
+        SeverityDelta(errors=-7),
+    )
+
+
+def test_retention_uses_last_write_order_and_cleans_oversized_legacy_maps(
+    tmp_path: Path,
+) -> None:
+    """Updates refresh recency, reads do not, and invalid peers are removed.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    entries: dict[str, object] = {
+        f"scope-{index}": SeverityCounts(info=index).to_dict()
+        for index in range(MAX_SEVERITY_BASELINE_SCOPES + 3)
+    }
+    entries["invalid"] = {"error": -1}
+    entries["old-full"] = {**SeverityCounts(errors=4).to_dict(), "full_run": True}
+    path = tmp_path / SEVERITY_BASELINE_FILENAME
+    path.write_text(json.dumps({"scopes": entries}), encoding="utf-8")
+    assert_that(read_severity_baseline(tmp_path, "scope-1")).is_equal_to(
+        SeverityCounts(info=1),
+    )
+    write_severity_baseline(tmp_path, SeverityCounts(warnings=2), "scope-0")
+    retained = json.loads(path.read_text(encoding="utf-8"))["scopes"]
+    assert_that(retained).is_length(MAX_SEVERITY_BASELINE_SCOPES)
+    assert_that(retained).does_not_contain_key("invalid", "scope-1")
+    write_severity_baseline(
+        tmp_path,
+        SeverityCounts(errors=3),
+        "new-full",
+        full_run=True,
+    )
+    for index in range(MAX_SEVERITY_BASELINE_SCOPES - 2):
+        write_severity_baseline(tmp_path, SeverityCounts(info=index), f"new-{index}")
+
+    stored = json.loads(path.read_text(encoding="utf-8"))["scopes"]
+    assert_that(list(stored)).is_equal_to(
+        ["scope-0", "new-full"]
+        + [f"new-{index}" for index in range(MAX_SEVERITY_BASELINE_SCOPES - 2)],
+    )
+    assert_that(read_severity_baseline(tmp_path, "scope-0")).is_equal_to(
+        SeverityCounts(warnings=2),
+    )
+    assert_that(read_severity_baseline(tmp_path, "old-full")).is_none()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="uses a real POSIX held lock")
+def test_contended_lock_skips_update_without_losing_the_baseline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A held lock costs one update; releasing it lets the next run persist.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest fixture for shortening the contention deadline.
+    """
+    import fcntl
+
+    write_severity_baseline(tmp_path, SeverityCounts(errors=5), "prior")
+    path = tmp_path / SEVERITY_BASELINE_FILENAME
+    original = path.read_bytes()
+    monkeypatch.setattr("lintro.utils.severity_baseline._LOCK_TIMEOUT_SECONDS", 0)
+    with path.with_name(path.name + ".lock").open("a+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        write_severity_baseline(tmp_path, SeverityCounts(warnings=1), "next")
+        assert_that(path.read_bytes()).is_equal_to(original)
+    write_severity_baseline(tmp_path, SeverityCounts(warnings=1), "next")
+    assert_that(read_severity_baseline(tmp_path, "next")).is_equal_to(
+        SeverityCounts(warnings=1),
+    )
+
+
+@pytest.mark.parametrize("outcome", ["success", "replace-failure", "contended"])
+def test_windows_lock_releases_ownership_after_success_or_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+) -> None:
+    """Windows explicitly unlocks its byte and never unlocks another owner.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest fixture for emulating the Windows locking API.
+        outcome: Whether replacement succeeds, fails, or cannot acquire a lock.
+    """
+    write_severity_baseline(tmp_path, SeverityCounts(errors=6), "prior")
+    locked = outcome == "contended"
+
+    def locking(fd: int, operation: int, size: int) -> None:
+        """Emulate one lockable byte with observable ownership."""
+        nonlocal locked
+        assert_that((os.lseek(fd, 0, os.SEEK_CUR), size)).is_equal_to((0, 1))
+        if operation == 2:
+            if locked:
+                raise OSError(errno.EACCES, "lock already owned")
+            locked = True
+        elif operation == 0:
+            assert_that(locked).is_true()
+            locked = False
+        else:
+            raise AssertionError("lock acquisition must be nonblocking")
+
+    def refuse_replace(source: Path, target: Path) -> Path:
+        """Simulate a publication failure after the lock has been acquired."""
+        raise PermissionError(f"cannot replace {target} with {source}")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "platform", "win32")
+        patch.setitem(
+            sys.modules,
+            "msvcrt",
+            SimpleNamespace(LK_NBLCK=2, LK_UNLCK=0, locking=locking),
+        )
+        patch.setattr("lintro.utils.severity_baseline._LOCK_TIMEOUT_SECONDS", 0)
+        with patch.context() as failing:
+            if outcome == "replace-failure":
+                failing.setattr(Path, "replace", refuse_replace)
+            write_severity_baseline(tmp_path, SeverityCounts(info=2), "next")
+        assert_that(locked).is_equal_to(outcome == "contended")
+        assert_that(read_severity_baseline(tmp_path, "next")).is_equal_to(
+            SeverityCounts(info=2) if outcome == "success" else None,
+        )
+        locked = False
+        write_severity_baseline(tmp_path, SeverityCounts(info=3), "next")
+        assert_that(locked).is_false()
+    assert_that(read_severity_baseline(tmp_path, "next")).is_equal_to(
+        SeverityCounts(info=3),
+    )
+
+
+def test_legacy_baseline_has_no_comparable_scope(tmp_path: Path) -> None:
+    """Unattributed legacy counts recover after one eligible measurement.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    path = tmp_path / SEVERITY_BASELINE_FILENAME
+    original = json.dumps(SeverityCounts(errors=6).to_dict())
+    path.write_text(original, encoding="utf-8")
+
+    assert_that(read_severity_baseline(tmp_path, "scope-a")).is_none()
+    write_severity_baseline(tmp_path, SeverityCounts(), "scope-a")
+
+    assert_that(read_severity_baseline(tmp_path, "scope-a")).is_equal_to(
+        SeverityCounts(),
+    )
+
+
+def test_single_scope_baseline_migrates_without_losing_its_counts(
+    tmp_path: Path,
+) -> None:
+    """Adding a scope preserves counts written by the previous scoped format.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    counts = SeverityCounts(errors=6)
+    (tmp_path / SEVERITY_BASELINE_FILENAME).write_text(
+        json.dumps({**counts.to_dict(), "scope": "full-run"}),
+        encoding="utf-8",
+    )
+
+    assert_that(read_severity_baseline(tmp_path, "full-run")).is_equal_to(counts)
+    write_severity_baseline(tmp_path, SeverityCounts(warnings=1), "scoped-run")
+
+    assert_that(read_severity_baseline(tmp_path, "full-run")).is_equal_to(counts)
+    assert_that(read_severity_baseline(tmp_path, "scoped-run")).is_equal_to(
+        SeverityCounts(warnings=1),
+    )
+
+
+@pytest.mark.parametrize("single_scope", [False, True], ids=["map", "single-scope"])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        None,
+        [],
+        {},
+        {"error": -1},
+        {"warning": "2"},
+        {"info": 1.5},
+        {"error": True},
+        {"warning": None},
+        {"total": 99},
+        {"total": False},
+    ],
+    ids=[
+        "null",
+        "list",
+        "missing-fields",
+        "negative",
+        "string",
+        "float",
+        "boolean",
+        "null-count",
+        "inconsistent-total",
+        "boolean-total",
+    ],
+)
+def test_invalid_counts_are_incomparable_and_replaced(
+    tmp_path: Path,
+    payload: dict[str, object] | list[object] | None,
+    single_scope: bool,
+) -> None:
+    """Invalid counts cannot fabricate zero issues in either scoped format.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        payload: Invalid payload or overrides for otherwise valid counts.
+        single_scope: Whether to exercise the older single-scope format.
+    """
+    entry = (
+        {**SeverityCounts().to_dict(), **payload}
+        if isinstance(payload, dict) and payload
+        else payload
+    )
+    stored: dict[str, object] = {"scopes": {"scope-a": entry}}
+    if single_scope:
+        stored = {"scope": "scope-a"}
+        if isinstance(entry, dict):
+            stored.update(entry)
+    (tmp_path / SEVERITY_BASELINE_FILENAME).write_text(
+        json.dumps(stored),
+        encoding="utf-8",
+    )
+
+    assert_that(read_severity_baseline(tmp_path, "scope-a")).is_none()
+    replacement = SeverityCounts(warnings=2)
+    write_severity_baseline(tmp_path, replacement, "scope-a")
+    assert_that(read_severity_baseline(tmp_path, "scope-a")).is_equal_to(replacement)
+
+
+def test_scope_normalizes_paths_and_executed_tool_sets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ordering, duplicate arguments and skipped tools do not alter scope.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest fixture for changing the working directory.
+    """
+    monkeypatch.chdir(tmp_path)
+    ruff = ToolResult(name="ruff", success=True)
+    pylint = ToolResult(name="pylint", success=False, issues_count=2)
+    expected = severity_baseline_scope(paths=["a", "b"], tool_results=[ruff, pylint])
+
+    actual = severity_baseline_scope(
+        paths=[str(tmp_path / "b"), "./a", "a/../b"],
+        tool_results=[
+            pylint,
+            ruff,
+            ruff,
+            ToolResult(name="hadolint", skipped=True, skip_reason="not installed"),
+        ],
+    )
+
+    assert_that(actual).is_equal_to(expected)
+
+
+@pytest.mark.parametrize("failure", [OSError, ValueError, RuntimeError])
+def test_unresolvable_scope_leaves_counts_usable_and_baseline_unchanged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: type[Exception],
+) -> None:
+    """Path failures omit only the optional comparison and update.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest fixture for injecting path resolution failures.
+        failure: Filesystem, invalid-path or symlink-loop exception.
+    """
+    write_severity_baseline(tmp_path, SeverityCounts(errors=8), "prior")
+    path = tmp_path / SEVERITY_BASELINE_FILENAME
+    original = path.read_bytes()
+    ctx = RunContext(
+        action=Action.CHECK,
+        selection_action=Action.CHECK,
+        dry_run_preview=False,
+        output_manager=_Manager(tmp_path),
+        logger=None,
+        lintro_config=None,
+        clean_stdout_output=True,
+    )
+
+    def cannot_resolve(self: Path, strict: bool = False) -> Path:
+        """Fail path normalization as the real filesystem sometimes does."""
+        raise failure("unresolvable path")
+
+    monkeypatch.setattr(Path, "resolve", cannot_resolve)
+    artifact = finalize_artifact(
+        ctx=ctx,
+        all_results=[ToolResult(name="ruff", success=True, inspected_files=True)],
+        total_issues=0,
+        total_fixed=0,
+        total_remaining=0,
+        paths=["invalid\x00path"],
+    )
+    _record_severity_baseline(artifact, ctx=ctx)
+
+    assert_that(artifact.exit_code).is_equal_to(0)
+    assert_that(artifact.severity_counts).is_equal_to(SeverityCounts())
+    assert_that(artifact.previous_severity_counts).is_none()
+    assert_that(path.read_bytes()).is_equal_to(original)
+
+
+@pytest.mark.parametrize(
+    ("paths", "tool_names"),
+    [(["a.py"], ["ruff", "pylint"]), (["."], ["ruff"])],
+    ids=["paths", "tools"],
+)
+def test_scope_changes_with_paths_or_executed_tools(
+    paths: list[str],
+    tool_names: list[str],
+) -> None:
+    """Both path selection and tool selection identify the measured population.
+
+    Args:
+        paths: Paths for the scoped run.
+        tool_names: Executed tool names for the scoped run.
+    """
+    full = severity_baseline_scope(
+        paths=["."],
+        tool_results=[ToolResult(name=name) for name in ("ruff", "pylint")],
+    )
+    scoped = severity_baseline_scope(
+        paths=paths,
+        tool_results=[ToolResult(name=name) for name in tool_names],
+    )
+
+    assert_that(scoped).is_not_equal_to(full)
 
 
 def test_resolve_log_root_accepts_a_path(tmp_path: Path) -> None:

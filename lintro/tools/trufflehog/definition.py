@@ -345,6 +345,7 @@ class TrufflehogPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=True,
             output=None,
             issues=all_issues,
@@ -475,6 +476,7 @@ class TrufflehogPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=True,
             output=None,
             issues_count=issues_count,

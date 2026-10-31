@@ -211,7 +211,7 @@ def test_load_config_rejects_non_mapping_review_section(
     monkeypatch.chdir(tmp_path)
     clear_config_cache()
 
-    with pytest.raises(ValueError, match="review config must be a mapping"):
+    with pytest.raises(ValueError, match="review must be a mapping"):
         load_config(config_path=config_file)
 
 
@@ -228,7 +228,7 @@ def test_load_config_rejects_non_mapping_review_section_from_pyproject(
     monkeypatch.chdir(tmp_path)
     clear_config_cache()
 
-    with pytest.raises(ValueError, match="review config must be a mapping"):
+    with pytest.raises(ValueError, match="review must be a mapping"):
         load_config()
 
 

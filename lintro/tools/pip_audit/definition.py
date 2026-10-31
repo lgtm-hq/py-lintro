@@ -369,6 +369,7 @@ class PipAuditPlugin(BaseToolPlugin):
                     "matched paths; skipping pip-audit."
                 ),
                 issues_count=0,
+                inspected_files=False,
             )
 
         base_cmd = self._build_command()
@@ -432,6 +433,7 @@ class PipAuditPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=overall_success,
             output=combined_output if should_show_output else None,
             issues_count=len(issues),

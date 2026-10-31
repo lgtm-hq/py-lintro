@@ -35,6 +35,26 @@ configure specific commands rather than tool resolution.
 3. **`defaults` provide fallbacks** - Only used when a tool has no native config file
 4. **Simple and transparent** - Users know exactly which config is used
 
+### Section Types and Null Values
+
+Omitting a section uses its defaults. When present, each of `enforce`, `execution`,
+`defaults`, `tools`, `ai`, `review`, `output`, `watch`, and `deps` must be a mapping.
+Use an empty mapping such as `ai: {}` for default settings. Explicit nulls (`ai: null`,
+`ai: ~`, or a bare `ai:`), lists, and scalar section values raise `ConfigurationError`.
+This applies to both project and global config, and to `[tool.lintro]` sections in
+`pyproject.toml` (TOML has no null value). Each source is checked before merging, so a
+project mapping cannot hide an invalid global section.
+
+A YAML config document must also be a mapping. A top-level list, scalar, null, or an
+empty or comment-only file raises `ConfigurationError` instead of silently loading
+defaults or falling back to `pyproject.toml`. An empty mapping document (`{}`) retains
+the existing fallback behavior.
+
+**Migration:** Empty and comment-only YAML files that previously loaded defaults now
+raise an error. Remove an unused config file or replace its contents with `{}` to keep
+the fallback behavior. Replace bare section keys such as `ai:` with `ai: {}` when
+default section settings are intended.
+
 ### Tiered Configuration Flow
 
 The configuration system works in a specific order:
@@ -117,9 +137,10 @@ sections:
    or `[tool.lintro]` in `pyproject.toml`. Overrides the global config per key.
 
 A value set in the global config survives only where the project config does not
-override that exact key path. An auto-discovered global file that is absent or empty is
-never an error — only an explicit `LINTRO_GLOBAL_CONFIG` path that does not exist is
-(see [below](#user-level-global-config)).
+override that exact key path. An absent auto-discovered global file or one containing an
+empty mapping (`{}`) is never an error. A non-mapping document or an explicit
+`LINTRO_GLOBAL_CONFIG` path that does not exist raises an error (see
+[below](#user-level-global-config)).
 
 In the `tools:` section a scalar entry such as `ruff: false` is a complete statement
 about the tool, so a project scalar replaces the global mapping wholesale. A project
@@ -282,6 +303,20 @@ The comparison baseline is stored as `severity-baseline.json` at the root of the
 directory — `LINTRO_LOG_DIR`, default `.lintro` — rather than inside a `run-*`
 directory, so run pruning never removes it.
 
+Counts are compared only when the normalized path arguments and executed tool set match.
+The file retains at most 32 scopes in last-write order; updating a scope makes it
+newest, while reading it does not. The latest run whose paths resolve to the full
+working directory is protected from eviction, even across many staged-file checks. Older
+scopes are discarded first, and invalid entries are removed on the next write. Older
+files without retention metadata remain readable; a new full-path check establishes the
+protected scope. `--diff` and `--incremental` checks neither compare against nor update
+this file.
+
+Writers use `severity-baseline.json.lock` beside the baseline and wait up to one second
+for contention before skipping the optional update. The lock file remains after the run
+so concurrent writers always coordinate on the same file; include it with the rest of
+`.lintro/` in your ignore rules.
+
 Only a run that actually measured the project reads or writes it, and the same rule
 governs both sides. A run qualifies when it is a `check` (not `format` or `test`, which
 measure something else), is not a `fmt --dry-run` preview (those report as checks but
@@ -328,7 +363,10 @@ A live badge **refuses to publish** rather than assert a quality claim the run d
 support. It exits non-zero, printing no snippet, when the check exited early, when any
 tool timed out, and when nothing actually inspected a file — which covers an empty
 directory, an all-skipped toolset, and a toolset that declined to run for want of
-configuration.
+configuration. Coverage comes from the producer's `ToolResult.inspected_files` signal,
+never its message text. Results that leave this signal as `None` have unknown coverage
+and cannot alone qualify a badge. A severity baseline also rejects mixed runs containing
+both inspected and unknown results, for comparison and storage.
 
 #### JSON output
 
@@ -357,7 +395,8 @@ comparable baseline exists; on a first run the key is absent rather than zero. T
 
 `--output` files and configured JSON artifacts carry the same two severity keys, but the
 rest of their `summary` object differs from the stdout document by design — it adds
-`timestamp` and `tools_run`, and omits `total_remaining`:
+`tools_run` and omits `total_remaining`. `timestamp` and `action` are at the document
+root:
 
 ```json
 {
@@ -686,6 +725,10 @@ Resolution rules:
   of how loading was enabled.
 - With no allowlist configured, enabling loads all discovered `lintro.plugins` entry
   points — use this only in fully trusted environments.
+- A global or project YAML file that cannot be read or parsed, or whose root is not a
+  mapping, disables external plugin loading, even with
+  `LINTRO_ENABLE_EXTERNAL_PLUGINS=1`. This includes empty and comment-only files. An
+  empty mapping (`{}`) is valid.
 
 ### Pre-Execution Summary
 

@@ -57,7 +57,7 @@ async def _generate_all_suggestions(
     workspace_root: Path,
     is_json: bool,
     telemetry: AITelemetry,
-    budget: CostBudget | None,
+    budget: CostBudget,
 ) -> list[AIFixSuggestion]:
     """Iterate tools, generate fix suggestions, and collect telemetry.
 
@@ -69,7 +69,7 @@ async def _generate_all_suggestions(
         workspace_root: Workspace root path.
         is_json: Whether output is JSON (suppresses console progress).
         telemetry: Telemetry accumulator to update.
-        budget: Optional cost budget tracker.
+        budget: Session cost budget tracker, optionally uncapped.
 
     Returns:
         All generated fix suggestions across tools.
@@ -94,8 +94,7 @@ async def _generate_all_suggestions(
             break
         if not issues:
             continue
-        if budget is not None:
-            budget.check()
+        budget.check()
 
         loguru_logger.debug(
             f"AI fix: {tool_name} has {len(issues)} issues, budget={remaining_budget}",
@@ -144,8 +143,7 @@ async def _generate_all_suggestions(
                 seen_calls.add((s.input_tokens, s.output_tokens))
         telemetry.total_api_calls += len(seen_calls)
 
-        if budget is not None:
-            budget.record(sum(s.cost_estimate for s in suggestions))
+        budget.record(sum(s.cost_estimate for s in suggestions))
 
         if ai_config.verbose:
             tool_cost = sum(s.cost_estimate for s in suggestions)
@@ -336,7 +334,7 @@ async def _verify_and_refine(
     is_json: bool,
     workspace_root: Path,
     telemetry: AITelemetry,
-    budget: CostBudget | None,
+    budget: CostBudget,
 ) -> ValidationResult | None:
     """Verify applied fixes and attempt refinement for unverified ones.
 
@@ -369,8 +367,7 @@ async def _verify_and_refine(
                 telemetry.total_input_tokens += s.input_tokens
                 telemetry.total_output_tokens += s.output_tokens
                 telemetry.total_cost_usd += s.cost_estimate
-            if budget is not None:
-                budget.record(refinement_cost)
+            budget.record(refinement_cost)
 
             re_validation = validate_applied_fixes(refined)
             if re_validation:
@@ -427,11 +424,13 @@ async def run_fix_pipeline(
         logger: Console logger for output.
         output_format: Output format string.
         workspace_root: Workspace root path.
-        budget: Optional cost budget tracker.
+        budget: Session cost budget tracker. Omission creates a fresh
+            unlimited tracker for this pipeline run.
 
     Returns:
         Tuple of (fixes_applied, fixes_failed).
     """
+    budget = budget if budget is not None else CostBudget()
     telemetry = AITelemetry()
 
     by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]] = {}
@@ -457,7 +456,6 @@ async def run_fix_pipeline(
     # Step 2: Apply confidence threshold filter
     total_generated = len(all_suggestions)
     all_suggestions = _filter_by_confidence(all_suggestions, ai_config)
-    filtered_out = total_generated - len(all_suggestions)
 
     if not all_suggestions:
         telemetry.successful_fixes = 0
@@ -499,7 +497,7 @@ async def run_fix_pipeline(
     )
 
     telemetry.successful_fixes = applied
-    telemetry.failed_fixes = (len(all_suggestions) - applied) + filtered_out
+    telemetry.failed_fixes = total_generated - applied
 
     # Step 4: Verify and refine applied fixes
     validation = None

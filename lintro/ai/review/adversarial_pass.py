@@ -6,16 +6,16 @@ second look that is told what was already reported and asked what it missed
 the main pass's answers -- so its partial carries an empty summary and checklist
 and the caller merges its findings into the chunk's.
 
-A malformed sweep answer is not an error: the chunk keeps the main pass's result
-and the sweep contributes usage alone.
+A malformed sweep answer raises an AI error carrying its usage so the depth
+wrapper records degraded coverage while keeping the main pass's result and
+the completed sweep's token and cost usage.
 """
 
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import TYPE_CHECKING
-
-from loguru import logger
 
 from lintro.ai.cli_bounds import CallShape
 from lintro.ai.json_response import strip_json_fences
@@ -25,6 +25,7 @@ from lintro.ai.prompts.review import (
 )
 from lintro.ai.review import provider_call
 from lintro.ai.review.delta import delta_scope_note
+from lintro.ai.review.depth_degradation import DepthPassParseError
 from lintro.ai.review.diff_gate import DiffGate, hunks_from_diff
 from lintro.ai.review.finding_parser import parse_findings, reject_context_findings
 from lintro.ai.review.merge import ChunkReviewPartial
@@ -70,6 +71,10 @@ async def run_adversarial_pass(
 
     Returns:
         A partial carrying any additional findings and usage.
+
+    Raises:
+        DepthPassParseError: When the answer is invalid JSON, is not an
+            object, or does not contain a findings list. Carries billed usage.
     """
     prior_json = json.dumps(
         [
@@ -99,27 +104,33 @@ async def run_adversarial_pass(
         use_one_shot=shape.use_one_shot,
         no_tools=shape.no_tools,
     )
+    usage = ChunkReviewPartial(
+        findings=(),
+        input_tokens=response.input_tokens,
+        output_tokens=response.output_tokens,
+        cost_estimate=response.cost_estimate,
+    )
     try:
         payload = json.loads(strip_json_fences(content=response.content))
-    except (json.JSONDecodeError, ValueError):
-        logger.warning("Failed to parse adversarial sweep response")
-        return ChunkReviewPartial(
-            findings=(),
-            input_tokens=response.input_tokens,
-            output_tokens=response.output_tokens,
-            cost_estimate=response.cost_estimate,
-        )
+    except ValueError as exc:
+        raise DepthPassParseError(
+            "Adversarial sweep response was not valid JSON",
+            usage=usage,
+        ) from exc
 
     if not isinstance(payload, dict):
-        logger.warning("Adversarial sweep payload was not an object")
-        return ChunkReviewPartial(
-            findings=(),
-            input_tokens=response.input_tokens,
-            output_tokens=response.output_tokens,
-            cost_estimate=response.cost_estimate,
+        raise DepthPassParseError(
+            "Adversarial sweep response must be a JSON object",
+            usage=usage,
         )
 
-    findings_raw = payload.get("findings", [])
+    findings_raw = payload.get("findings")
+    if not isinstance(findings_raw, list):
+        raise DepthPassParseError(
+            "Adversarial sweep response must contain a findings list",
+            usage=usage,
+        )
+
     # The sweep answers for the same chunk, so its findings are bounded to
     # the same hunks (#2711); the counts fold into the chunk partial.
     gate = DiffGate(
@@ -140,11 +151,9 @@ async def run_adversarial_pass(
         allowed_paths=set(chunk.files),
         eligible_paths=set(eligible_paths),
     )
-    return ChunkReviewPartial(
+    return replace(
+        usage,
         findings=kept,
-        input_tokens=response.input_tokens,
-        output_tokens=response.output_tokens,
-        cost_estimate=response.cost_estimate,
         converted_flags=flags,
         diff_gate=gate.counts,
     )

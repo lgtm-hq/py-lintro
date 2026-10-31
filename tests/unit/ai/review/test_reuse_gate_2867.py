@@ -8,6 +8,7 @@ inherited every stored round is re-checked against the current lane row.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from unittest.mock import MagicMock
 
 import pytest
@@ -24,6 +25,7 @@ from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.run_usage import RunUsage
 from lintro.ai.review.resume import plan_resume
 from lintro.ai.review.reuse_gate import (
     agent_model_overrides,
@@ -215,6 +217,71 @@ def _prior() -> ReviewState:
         runs=(_run(1, state="legacy"), _run(2)),
         coverage=(CoverageRecord("a.py", patch_hash, reviewed_sha="old", round=1),),
     )
+
+
+@pytest.mark.parametrize("verification", [None, "", "unreported", "mismatch", "bogus"])
+def test_unverified_stored_usage_is_queued_for_review(verification: object) -> None:
+    """Null or blank cannot hide a completed call and inherit coverage (#3010)."""
+    record = RunRecord.from_dict(
+        {
+            **_run(1).to_dict(),
+            "model_verification": verification,
+            "prompt": 10,
+            "completion": 5,
+            "total": 15,
+        },
+    )
+    prior = replace(_prior(), runs=(record,))
+    rounds = _rounds(record)
+
+    plan = plan_resume(context=_context(), prior=prior, reusable_rounds=rounds)
+
+    assert_that(rounds).is_empty()
+    assert_that(plan.queue).is_equal_to(("a.py",))
+    assert_that(plan.coverage).is_empty()
+
+
+@pytest.mark.parametrize(
+    "usage",
+    [
+        pytest.param(RunUsage(prompt=1), id="prompt"),
+        pytest.param(RunUsage(completion=1), id="completion"),
+        pytest.param(RunUsage(total=1), id="total"),
+        pytest.param(RunUsage(context=1), id="context"),
+        pytest.param(RunUsage(cost=0.01), id="cost"),
+        pytest.param(RunUsage(cost_shadow=0.01), id="shadow-cost"),
+    ],
+)
+def test_blank_verification_requires_every_usage_counter_to_be_zero(
+    usage: RunUsage,
+) -> None:
+    """Tokens or charges contradict the blank no-call state (#3010)."""
+    record = replace(_run(1, state="", reported=()), usage=usage)
+
+    assert_that(_rounds(record, _run(2))).is_equal_to(frozenset({2}))
+
+
+@pytest.mark.parametrize("explicit_blank", [False, True])
+def test_zero_usage_with_omitted_or_blank_verification_keeps_coverage(
+    explicit_blank: bool,
+) -> None:
+    """A no-call round remains reusable despite time spent on setup (#3010)."""
+    payload = _run(1, state="", reported=()).to_dict()
+    if explicit_blank:
+        payload["model_verification"] = ""
+    payload["duration"] = 12.5
+    record = RunRecord.from_dict(payload)
+    prior = replace(_prior(), runs=(record,))
+
+    plan = plan_resume(
+        context=_context(),
+        prior=prior,
+        reusable_rounds=_rounds(record),
+    )
+
+    assert_that(_rounds(record)).is_equal_to(frozenset({1}))
+    assert_that(plan.queue).is_empty()
+    assert_that(plan.coverage).is_equal_to(prior.coverage)
 
 
 def test_coverage_from_an_excluded_round_is_queued_again() -> None:

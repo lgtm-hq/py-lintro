@@ -32,13 +32,14 @@ class ToolResult:
         - ``issues_count`` should mirror ``remaining_issues_count`` for
           backward compatibility in format-mode summaries
 
-    When ``residual_unknown`` is set the run-level verify pass (#1743) never
-    measured an after-state, so there is no count to mirror:
+    When ``residual_unknown`` is set the tool or run-level verify pass (#1743)
+    could not establish complete fix accounting, so there is no count to mirror:
     ``fixed_issues_count`` and ``remaining_issues_count`` are both ``None``
-    (enforced below) and ``issues_count`` is a **before**-count — the number of
-    pre-fix findings carried forward, which is what ``issues`` holds. It is not
-    a residual, and consumers must render "unknown" rather than presenting it
-    as one.
+    (enforced below) and ``issues_count`` counts the usable findings carried
+    forward in ``issues``. These include pre-fix findings and, for incomplete
+    reports, successfully parsed post-fix findings without duplicates. It is
+    not a measured residual, and consumers must render "unknown" rather than
+    presenting it as one.
 
     The ``issues`` field can contain parsed issue objects (tool-specific) to
     support unified table formatting.
@@ -114,10 +115,11 @@ class ToolResult:
     # directly in a test).
     duration_seconds: float | None = field(default=None)
 
-    # Set when the run-level verify pass (#1743) could not measure this
-    # tool's residual: its ``CHECK`` raised, timed out, was skipped, or the
-    # tool could not be resolved. This is a third state beside "clean" and "N
-    # remaining" — the count after the mutation phase was never taken, so
+    # Set when the tool or run-level verify pass (#1743) could not measure
+    # complete fix accounting: a report was incomplete, its ``CHECK`` raised,
+    # timed out, was skipped, or the tool could not be resolved.
+    # This is a third state beside "clean" and "N remaining": the difference
+    # between complete before/after measurements is unavailable, so
     # ``fixed_issues_count`` and ``remaining_issues_count`` are cleared to
     # ``None`` and consumers must render "unknown" rather than a number. The
     # run fails either way, which is enforced below: ``success`` must be
@@ -134,12 +136,21 @@ class ToolResult:
     # built directly in a test).
     capability: Cap | None = field(default=None)
 
+    # Whether the producer actually inspected files. None preserves the unknown
+    # state for legacy plugins; neither output text nor success proves inspection.
+    # False with no_files=True means empty discovery; False without it means a
+    # decline (for example missing configuration), skip, or timeout.
+    inspected_files: bool | None = field(default=None)
+
     def __post_init__(self) -> None:
         """Validate that the issue counts and skip state are consistent.
 
         Raises:
             ValueError: If issue counts are inconsistent or skip state is invalid.
         """
+        if self.no_files or self.skipped or self.timed_out:
+            self.inspected_files = False
+
         # Skipped tools are not failures — they just didn't run
         if self.skipped:
             self.success = True
@@ -160,7 +171,7 @@ class ToolResult:
 
         if self.residual_unknown_reason and not self.residual_unknown:
             raise ValueError(
-                "residual_unknown_reason can only be set when " "residual_unknown=True",
+                "residual_unknown_reason can only be set when residual_unknown=True",
             )
 
         if self.residual_unknown and self.success:

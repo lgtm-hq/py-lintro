@@ -168,7 +168,8 @@ class StylelintPlugin(BaseToolPlugin):
             issues_count=0,
             # No config means stylelint examined no file, so the run-level
             # verify pass (#1743) must not read this zero as a clean verdict.
-            no_files=True,
+            skipped=True,
+            skip_reason="No stylelint configuration found",
             cwd=cwd,
         )
 
@@ -307,6 +308,7 @@ class StylelintPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=success,
             output=output if not success else None,
             issues_count=issues_count,
@@ -447,6 +449,7 @@ class StylelintPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=success,
             output=final_message,
             issues_count=remaining_count,

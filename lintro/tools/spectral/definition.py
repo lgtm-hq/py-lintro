@@ -388,6 +388,7 @@ class SpectralPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=success_flag,
             output=final_output,
             issues_count=issues_count,

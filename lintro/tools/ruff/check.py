@@ -174,6 +174,7 @@ def execute_ruff_check(
 
     return ToolResult(
         name=tool.definition.name,
+        inspected_files=True,
         success=success,
         output=output_summary,
         issues_count=issues_count,
