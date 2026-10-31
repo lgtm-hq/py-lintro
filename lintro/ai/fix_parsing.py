@@ -76,7 +76,8 @@ def _parse_suggestion(
 ) -> AIFixSuggestion | None:
     """Validate a fix entry, preserving empty patches as valid absence.
 
-    Confidence defaults to medium; unrecognized risk stays unclassified.
+    Missing or non-string confidence defaults to medium; unknown labels
+    stay low-confidence. Unrecognized risk stays unclassified.
 
     Args:
         data: Decoded fix entry.
@@ -105,12 +106,14 @@ def _parse_suggestion(
         return None
 
     try:
-        confidence = ConfidenceLevel(_optional_string(data, "confidence", "medium"))
+        confidence = ConfidenceLevel(
+            _optional_string(data, "confidence", "medium").strip().lower(),
+        )
     except ValueError:
-        confidence = ConfidenceLevel.MEDIUM
+        confidence = ConfidenceLevel.LOW
     risk: RiskLevel | str
     try:
-        risk = RiskLevel(_optional_string(data, "risk_level"))
+        risk = RiskLevel(_optional_string(data, "risk_level").strip().lower())
     except ValueError:
         risk = ""
 
@@ -155,7 +158,9 @@ def parse_fix_response(
         ) from exc
 
     if not isinstance(data, dict):
-        raise AIFixParseError(f"AI fix response must be a JSON object for {file_path}")
+        raise AIFixParseError(
+            f"AI fix response must be a JSON object for {file_path}:{line}",
+        )
     return _parse_suggestion(data, file_path, line, code)
 
 
@@ -226,7 +231,7 @@ def parse_batch_response(
         except (TypeError, ValueError):
             line = 0
         raw_code = item.get("code", "")
-        code = str(raw_code) if not isinstance(raw_code, str) else raw_code
+        code = str(raw_code) if raw_code is not None else ""
         suggestion = _parse_suggestion(item, file_path, line, code)
         if suggestion is not None:
             results.append(suggestion)

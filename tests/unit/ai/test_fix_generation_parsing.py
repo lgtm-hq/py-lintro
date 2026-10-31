@@ -62,19 +62,51 @@ async def test_single_generation_logs_only_malformed_response_as_failure(
 
 
 @pytest.mark.parametrize(
-    "content",
+    "content,malformed",
     [
-        "[]",
-        '{"fixes": []}',
-        '[{"original_code": "x = 1", "suggested_code": "x = 1"}]',
-        "not json",
+        pytest.param("[]", False, id="empty-array"),
+        pytest.param('{"fixes": []}', False, id="empty-wrapper"),
+        pytest.param(
+            json.dumps(
+                [
+                    {"original_code": "x = 1", "suggested_code": "x = 1"},
+                    {"original_code": "y = 2", "suggested_code": "y = 2"},
+                ],
+            ),
+            False,
+            id="all-noop",
+        ),
+        pytest.param(
+            json.dumps(
+                [
+                    {"original_code": "x = 1", "suggested_code": "x = 9"},
+                    {"original_code": "y = 2", "suggested_code": "y = 2"},
+                ],
+            ),
+            False,
+            id="partial-noop",
+        ),
+        pytest.param(
+            '[{"original_code": "x = 1", "suggested_code": "x = 9"}]',
+            False,
+            id="too-few",
+        ),
+        pytest.param(
+            json.dumps(
+                [{"original_code": "x = 1", "suggested_code": "x = 9"}] * 3,
+            ),
+            False,
+            id="too-many",
+        ),
+        pytest.param("not json", True, id="malformed-json"),
     ],
 )
-async def test_batch_generation_falls_back_only_for_malformed_response(
+async def test_batch_generation_recovers_from_missing_or_malformed_suggestions(
     tmp_path,
     content,
+    malformed,
 ):
-    """Valid absence completes the batch; malformed JSON logs and recovers."""
+    """Count mismatches retry every issue; only malformed replies log failure."""
     source = tmp_path / "batch.py"
     source.write_text("x = 1\ny = 2\n")
     issues = [
@@ -88,6 +120,7 @@ async def test_batch_generation_falls_back_only_for_malformed_response(
     provider = MockAIProvider(responses=[_response(content), *fallback])
     messages: list[str] = []
     logger.add(messages.append, format="{message}", level="DEBUG")
+    progress: list[tuple[int, int]] = []
 
     result = await generate_fixes(
         issues,
@@ -95,12 +128,15 @@ async def test_batch_generation_falls_back_only_for_malformed_response(
         tool_name="ruff",
         workspace_root=tmp_path,
         max_workers=1,
+        progress_callback=lambda done, total: progress.append((done, total)),
     )
 
-    malformed = content == "not json"
     assert_that([s.suggested_code for s in result]).is_equal_to(
-        ["x = 2", "y = 3"] if malformed else [],
+        ["x = 2", "y = 3"],
     )
+    assert_that([s.line for s in result]).is_equal_to([1, 2])
+    assert_that(progress).is_equal_to([(1, 2), (2, 2)])
     transcript = "".join(messages)
     assert_that("Batch AI fix generation failed" in transcript).is_equal_to(malformed)
     assert_that("malformed response" in transcript).is_equal_to(malformed)
+    assert_that("count mismatch" in transcript).is_equal_to(not malformed)

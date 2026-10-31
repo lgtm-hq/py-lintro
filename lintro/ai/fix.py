@@ -311,8 +311,9 @@ async def _generate_batch_fixes(
     """Generate fixes for multiple issues in one file via a batch prompt.
 
     Returns a list of suggestions on success, or None if the batch prompt
-    does not fit within the token budget or the response cannot be parsed
-    (signalling the caller to fall back to single-issue mode).
+    does not fit within the token budget, the response cannot be parsed, or
+    the suggestion count differs from the issue count (signalling the caller
+    to fall back to single-issue mode).
 
     Args:
         file_path: Resolved absolute file path.
@@ -390,12 +391,6 @@ async def _generate_batch_fixes(
             batch=True,
         )
         suggestions = parse_batch_response(response.content, file_path)
-        if not suggestions:
-            logger.debug(
-                f"Batch response contains no suggestions for {file_path}",
-            )
-            return []
-
         if len(suggestions) != len(file_issues):
             logger.debug(
                 f"Batch response count mismatch for {file_path}: "

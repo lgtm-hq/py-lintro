@@ -76,12 +76,9 @@ def test_parse_fix_response_valid_response():
 )
 def test_parse_fix_response_rejects_malformed_responses(content):
     """Broken JSON, wrong shapes, and missing or non-string code raise."""
-    assert_that(parse_fix_response).raises(AIFixParseError).when_called_with(
-        content,
-        "main.py",
-        10,
-        "B101",
-    )
+    with pytest.raises(AIFixParseError) as exc_info:
+        parse_fix_response(content, "main.py", 10, "B101")
+    assert_that(str(exc_info.value)).contains("main.py:10")
 
 
 def test_parse_fix_response_identical_code():
@@ -206,15 +203,18 @@ def test_fix_metadata_defaults_survive_serialization(shape, metadata):
 
 
 @pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("padded_uppercase", [False, True])
 @pytest.mark.parametrize("confidence", list(ConfidenceLevel))
 @pytest.mark.parametrize("risk", list(RiskLevel))
-def test_fix_metadata_uses_existing_enums(batch, confidence, risk):
-    """Recognized labels become enums without losing explanation text."""
+def test_fix_metadata_uses_existing_enums(batch, padded_uppercase, confidence, risk):
+    """Recognized labels normalize case and whitespace, preserving explanation."""
     entry = {
         "original_code": "x = 1",
         "suggested_code": "x = 2",
-        "confidence": confidence.value,
-        "risk_level": risk.value,
+        "confidence": (
+            f" {confidence.value.upper()} " if padded_uppercase else confidence
+        ),
+        "risk_level": f" {risk.value.upper()} " if padded_uppercase else risk,
         "explanation": "Change the value",
     }
     result: AIFixSuggestion | None
@@ -229,22 +229,29 @@ def test_fix_metadata_uses_existing_enums(batch, confidence, risk):
     assert_that(result.explanation).is_equal_to("Change the value")
 
 
-@pytest.mark.parametrize("label", ["", "unknown", "HIGH"])
-def test_unknown_metadata_labels_keep_defaults(label):
-    """Unrecognized strings cannot become confidence or safe-risk claims."""
-    content = json.dumps(
-        [
-            {
-                "original_code": "old",
-                "suggested_code": "new",
-                "confidence": label,
-                "risk_level": label,
-            },
-        ],
-    )
-    suggestion = parse_batch_response(content, "main.py")[0]
-    assert_that(suggestion.confidence).is_same_as(ConfidenceLevel.MEDIUM)
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("label", ["", "unknown", "garbage", " \t "])
+def test_unknown_metadata_labels_stay_low_confidence_and_unclassified(batch, label):
+    """Unrecognized strings cannot become medium-confidence or safe-risk claims."""
+    entry = {
+        "original_code": "old",
+        "suggested_code": "new",
+        "confidence": label,
+        "risk_level": label,
+    }
+    suggestion: AIFixSuggestion | None
+    if batch:
+        suggestion = parse_batch_response(json.dumps([entry]), "main.py")[0]
+    else:
+        suggestion = parse_fix_response(json.dumps(entry), "main.py", 1, "B101")
+    if suggestion is None:
+        pytest.fail("Expected a suggestion for a non-empty patch")
+    assert_that(suggestion.confidence).is_same_as(ConfidenceLevel.LOW)
     assert_that(suggestion.risk_level).is_equal_to("")
+    assert_that(suggestion_to_payload(suggestion).to_dict()).contains_entry(
+        {"confidence": "low"},
+        {"risk_level": ""},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -340,7 +347,7 @@ def test_parse_batch_response_skips_empty_or_identical_code(original, suggested)
 
 
 def test_parse_batch_response_coerces_line_and_code():
-    """Verify line is coerced to int and code to str from non-standard types."""
+    """Coerce numeric codes while defaulting null codes and invalid lines."""
     content = json.dumps(
         [
             {
@@ -364,7 +371,8 @@ def test_parse_batch_response_coerces_line_and_code():
     assert_that(result[0].code).is_equal_to("123")
     # Non-numeric string falls back to 0
     assert_that(result[1].line).is_equal_to(0)
-    assert_that(result[1].code).is_equal_to("None")
+    assert_that(result[1].code).is_equal_to("")
+    assert_that(suggestion_to_payload(result[1]).to_dict()).contains_entry({"code": ""})
 
 
 #: One batch entry in the shape the CLI fix schema requires (#2573).
