@@ -87,6 +87,8 @@ def run_fix_with_retry(
 
     # Merge: keep initial_issues_count and initial_issues from first pass,
     # rest from last pass, including failure accounting and execution metadata.
+    # Empty collections alone do not establish a measured zero. Producers
+    # record that measurement explicitly in initial_issues_count.
     if initial_issues_count is None and first_pass_initial_issues:
         initial_issues_count = len(first_pass_initial_issues)
     if result.residual_unknown or result.parse_failures_count:
@@ -94,13 +96,14 @@ def run_fix_with_retry(
         # failures also retain the latest report's usable partial findings.
         issues = (
             first_pass_initial_issues
-            if not result.parse_failures_count and first_pass_initial_issues
+            if not result.parse_failures_count
+            and (first_pass_initial_issues or initial_issues_count == 0)
             else result.issues
         )
         return replace(
             result,
             issues=issues,
-            issues_count=len(issues),
+            issues_count=max(len(issues), result.issues_count),
             initial_issues_count=initial_issues_count,
             initial_issues=first_pass_initial_issues,
             fixed_issues_count=None,

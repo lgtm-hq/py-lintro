@@ -9,8 +9,10 @@ from unittest.mock import MagicMock
 import pytest
 from assertpy import assert_that
 
+from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
+from lintro.utils.execution.exit_codes import aggregate_tool_results
 from lintro.utils.execution.fix_retry import run_fix_with_retry
 from lintro.utils.tool_executor import _run_fix_with_retry
 
@@ -180,6 +182,101 @@ def test_fix_retry_merges_results_correctly() -> None:
     # fixed = initial - remaining = 3 - 0 = 3
     assert_that(result.fixed_issues_count).is_equal_to(3)
     assert_that(tool._call_count).is_equal_to(3)
+
+
+@pytest.mark.parametrize("initial_count", [None, 4])
+@pytest.mark.parametrize("failure_kind", ["parse", "unknown"])
+@pytest.mark.parametrize("parsed_count", [0, 1])
+def test_retry_preserves_count_only_accounting(
+    initial_count: int | None,
+    failure_kind: str,
+    parsed_count: int,
+) -> None:
+    """An incomplete retry must retain counts beyond its parsed findings.
+
+    Args:
+        initial_count: First-pass measurement, if one was available.
+        failure_kind: Whether parsing or execution left the residual unknown.
+        parsed_count: Number of usable findings in the incomplete report.
+    """
+    partial = [BaseIssue(file="partial.txt", message="remaining")][:parsed_count]
+    tool = MagicMock()
+    tool.fix.side_effect = [
+        ToolResult(
+            name="formatter",
+            issues_count=4,
+            initial_issues_count=initial_count,
+        ),
+        ToolResult(
+            name="formatter",
+            issues_count=7,
+            issues=partial,
+            parse_failures_count=1 if failure_kind == "parse" else None,
+            residual_unknown=failure_kind == "unknown",
+            residual_unknown_reason=(
+                "verification unavailable" if failure_kind == "unknown" else None
+            ),
+        ),
+    ]
+
+    result = run_fix_with_retry(tool, ["."], {}, max_retries=3)
+
+    assert_that(result.issues_count).is_equal_to(7)
+    assert_that(result.issues).is_equal_to(partial)
+    assert_that(result.initial_issues_count).is_equal_to(initial_count)
+    assert_that(result.initial_issues).is_empty()
+    assert_that(result.success).is_false()
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(aggregate_tool_results([result], Action.FIX)).is_equal_to((7, 0, 0))
+
+
+@pytest.mark.parametrize("initial_count", [None, 0])
+@pytest.mark.parametrize("failure_kind", ["parse", "unknown"])
+def test_retry_distinguishes_measured_zero_from_unmeasured_initial_issues(
+    initial_count: int | None,
+    failure_kind: str,
+) -> None:
+    """An empty detected list is measured only when its count says so.
+
+    Args:
+        initial_count: An explicit measured zero or an unavailable baseline.
+        failure_kind: Whether the latest findings came from a partial report.
+    """
+    latest = [BaseIssue(file="new.txt", message="finding introduced after fixing")]
+    tool = MagicMock()
+    tool.fix.side_effect = [
+        ToolResult(
+            name="formatter",
+            issues_count=1,
+            initial_issues_count=initial_count,
+        ),
+        ToolResult(
+            name="formatter",
+            issues_count=1,
+            issues=latest,
+            initial_issues_count=1,
+            initial_issues=latest,
+            parse_failures_count=1 if failure_kind == "parse" else None,
+            residual_unknown=failure_kind == "unknown",
+            residual_unknown_reason=(
+                "verification unavailable" if failure_kind == "unknown" else None
+            ),
+        ),
+    ]
+
+    result = run_fix_with_retry(tool, ["."], {}, max_retries=3)
+
+    assert_that(result.initial_issues_count).is_equal_to(initial_count)
+    assert_that(result.initial_issues).is_empty()
+    expected = () if initial_count == 0 and failure_kind == "unknown" else latest
+    assert_that(result.issues).is_equal_to(expected)
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.success).is_false()
+    assert_that(result.residual_unknown).is_true()
 
 
 @pytest.mark.parametrize("failure_pass", [1, 2, 3])

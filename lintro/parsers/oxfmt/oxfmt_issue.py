@@ -14,8 +14,10 @@ class OxfmtIssue(BaseIssue):
     Attributes:
         DEFAULT_SEVERITY: Defaults to INFO (pure formatter).
         code: Tool-specific code identifying the rule (default: FORMAT).
+        fixable: Formatting findings are auto-fixable by default.
     """
 
     DEFAULT_SEVERITY: ClassVar[SeverityLevel] = SeverityLevel.INFO
 
     code: str = field(default="FORMAT")
+    fixable: bool = field(default=True)

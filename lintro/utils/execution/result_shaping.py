@@ -85,11 +85,10 @@ def issue_would_be_fixed(issue: BaseIssue) -> bool:
     example, ruff sets ``fixable`` from ruff's own ``fix`` field, so its
     non-``--fix``-able lint diagnostics are excluded.
 
-    Issue types that expose no ``fixable`` attribute at all (the pure-formatter
-    parsers such as prettier, oxfmt, taplo, sqlfluff) carry no fixability
-    distinction. Because dry-run only runs fix-capable (formatter) tools, every
-    diagnostic such a tool reports in check mode represents a reformat that a
-    real ``fmt`` run would apply, so it is treated as fixable.
+    Formatter issue types without a native per-issue fixability signal
+    (prettier, oxfmt, taplo, sqlfluff) default ``fixable`` to True so their
+    check-mode diagnostics remain included in the preview. Explicit False
+    values still exclude diagnostics that cannot be fixed.
 
     Args:
         issue: The parsed issue to classify.
@@ -97,11 +96,9 @@ def issue_would_be_fixed(issue: BaseIssue) -> bool:
     Returns:
         bool: True if the issue would be fixed by a real ``fmt`` run.
     """
-    field_map = getattr(issue, "DISPLAY_FIELD_MAP", {})
+    field_map = issue.DISPLAY_FIELD_MAP
     fixable_attr = field_map.get("fixable", "fixable")
-    if not hasattr(issue, fixable_attr):
-        return True
-    return bool(getattr(issue, fixable_attr, False))
+    return bool(getattr(issue, fixable_attr))
 
 
 def filter_result_to_fixable(result: ToolResult) -> ToolResult:

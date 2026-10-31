@@ -20,6 +20,7 @@ class TaploIssue(BaseIssue):
         DISPLAY_FIELD_MAP: Mapping of display field names to attribute names.
         level: Severity level (error, warning).
         code: Rule code (e.g., invalid_value, expected_table_array).
+        fixable: Findings are included in format previews by default.
     """
 
     DISPLAY_FIELD_MAP: ClassVar[dict[str, str]] = {
@@ -29,3 +30,4 @@ class TaploIssue(BaseIssue):
 
     level: str = field(default="error")
     code: str = field(default="")
+    fixable: bool = field(default=True)

@@ -18,6 +18,7 @@ class SqlfluffIssue(BaseIssue):
         rule_name: Full rule name (e.g., capitalisation.keywords).
         end_line: End line number for multi-line issues.
         end_column: End column number for multi-line issues.
+        fixable: Findings are included in format previews by default.
     """
 
     DISPLAY_FIELD_MAP: ClassVar[dict[str, str]] = {
@@ -29,3 +30,4 @@ class SqlfluffIssue(BaseIssue):
     rule_name: str = field(default="")
     end_line: int | None = field(default=None)
     end_column: int | None = field(default=None)
+    fixable: bool = field(default=True)
