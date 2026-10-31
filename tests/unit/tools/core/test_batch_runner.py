@@ -312,17 +312,17 @@ def test_batch_fix_stops_on_any_failed_stage_without_parsed_issues(
     assert_that(result.success).is_false()
     assert_that(result.output).is_equal_to(failure_output)
     assert_that(result.issues_count).is_equal_to(expected_remaining)
-    expected_reported = expected_remaining * (2 if plugin_cls is PrettierPlugin else 1)
-    assert_that(len(result.issues or [])).is_equal_to(expected_reported)
+    assert_that(len(result.issues or [])).is_equal_to(expected_remaining)
     assert_that(result.initial_issues_count).is_equal_to(expected_remaining)
-    assert_that(result.remaining_issues_count).is_equal_to(expected_remaining)
-    assert_that(result.fixed_issues_count).is_equal_to(0 if failed_stage == 0 else None)
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.fixed_issues_count).is_none()
     assert_that(result.cwd).is_equal_to(str(ts_file.parent))
     assert_that(result.timed_out).is_false()
 
 
 @pytest.mark.parametrize("failed_stage", [0, 1, 2])
-def test_an_unexpected_fix_stage_exit_keeps_parsed_findings(
+def test_an_unexpected_fix_stage_exit_preserves_the_report_as_unknown(
     failed_stage: int,
     ts_file: Path,
 ) -> None:
@@ -340,8 +340,9 @@ def test_an_unexpected_fix_stage_exit_keeps_parsed_findings(
 
     assert_that(result.success).is_false()
     assert_that(result.output).is_equal_to(OXFMT_DIFFERENT)
-    assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.fixed_issues_count).is_equal_to(0 if failed_stage == 0 else None)
+    assert_that(result.issues_count).is_equal_to(int(failed_stage == 0))
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.fixed_issues_count).is_none()
 
 
 @pytest.mark.parametrize("failed_stage", [0, 1, 2], ids=["precheck", "fix", "verify"])
@@ -388,19 +389,17 @@ def test_failed_fix_preserves_initial_accounting_and_reporting(
         )
 
     expected_initial = stage_issues if failed_stage == 0 else initial_issues
-    expected_report = (
-        [*expected_initial, *stage_issues] if report_initial else stage_issues
-    )
     assert_that(result.success).is_false()
     assert_that(result.output).is_equal_to(OXFMT_DIFFERENT)
     assert_that(result.initial_issues_count).is_equal_to(len(expected_initial))
     assert_that(result.initial_issues).is_equal_to(
         expected_initial if expected_initial or always_report_initial else None,
     )
-    assert_that(result.remaining_issues_count).is_equal_to(1)
-    assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.issues).is_equal_to(expected_report)
-    assert_that(result.fixed_issues_count).is_equal_to(0 if failed_stage == 0 else None)
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.issues_count).is_equal_to(len(expected_initial))
+    assert_that(result.issues).is_equal_to(expected_initial)
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.fixed_issues_count).is_none()
 
 
 def test_prettier_keeps_mixed_warnings_and_errors(ts_file: Path) -> None:
@@ -638,7 +637,8 @@ def test_batch_fix_default_does_not_accept_findings_status(ts_file: Path) -> Non
     assert_that(result.success).is_false()
     assert_that(result.output).is_equal_to(OXFMT_DIFFERENT)
     assert_that(result.issues).is_equal_to(list(_ONE_ISSUE))
-    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.residual_unknown).is_true()
 
 
 @pytest.mark.parametrize("returncode", [0, 2])

@@ -911,6 +911,9 @@ def _fold_one(
         and not verify.timed_out
         and (verify.success or bool(verify.issues))
     )
+    if mutation.residual_unknown and not check_answered:
+        # No check answered, so an execution failure still has no residual.
+        return mutation
     verified_paths = _verified_paths(
         scope=scope,
         verify=verify if check_answered else None,
@@ -956,6 +959,8 @@ def _fold_one(
     mutation.initial_issues_count = fixed + residual
     mutation.fixed_issues_count = fixed
     mutation.remaining_issues_count = residual
+    mutation.residual_unknown = False
+    mutation.residual_unknown_reason = None
     mutation.output = output
     # ``success`` follows the authoritative residual, not the fix pass's
     # opinion of itself: a leftover on a file the pass did not need to verify

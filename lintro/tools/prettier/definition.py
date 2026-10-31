@@ -27,9 +27,10 @@ from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.batch_runner import (
-    ISSUES_ONLY_BATCH_CHECK_POLICY,
+    BatchCheckPolicy,
     BatchCommands,
     BatchFixPolicy,
+    BatchSuccess,
     run_batch_check,
     run_batch_fix,
 )
@@ -42,6 +43,9 @@ from lintro.utils.path_utils import find_file_upward
 
 # Constants for Prettier configuration
 PRETTIER_DEFAULT_TIMEOUT: int = 120
+# --check returns 1 for unformatted files and 2 for errors.
+# https://prettier.io/docs/cli#exit-codes
+PRETTIER_FINDINGS_EXIT_CODES: tuple[int, ...] = (1,)
 # Note: JS/TS/Vue files are handled by oxfmt (faster).
 # Prettier handles file types that oxfmt doesn't support.
 PRETTIER_CONFIG_FILENAMES: tuple[str, ...] = (
@@ -405,14 +409,16 @@ class PrettierPlugin(BaseToolPlugin):
         cmd.extend(ctx.rel_files)
         logger.debug(f"[PrettierPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
 
-        # Prettier --check returns 1 for unformatted files and 2 for errors.
-        # https://prettier.io/docs/cli#exit-codes
         return run_batch_check(
             ctx,
             plugin=self,
             cmd=cmd,
             parse=lambda output: parse_prettier_output(output=output),
-            policy=ISSUES_ONLY_BATCH_CHECK_POLICY,
+            policy=BatchCheckPolicy(
+                success=BatchSuccess.ISSUES_ONLY,
+                findings_exit_codes=PRETTIER_FINDINGS_EXIT_CODES,
+                report_cwd=True,
+            ),
             cwd=ctx.cwd,
             on_timeout=lambda: self._create_timeout_result(
                 timeout_val=ctx.timeout,
@@ -511,7 +517,8 @@ class PrettierPlugin(BaseToolPlugin):
             commands=BatchCommands(check=check_cmd, fix=fix_cmd),
             parse=lambda output: parse_prettier_output(output=output),
             policy=BatchFixPolicy(
-                findings_exit_codes=(1,),
+                findings_exit_codes=PRETTIER_FINDINGS_EXIT_CODES,
+                parse_fix_output=False,
                 fixed_label="formatting issue",
                 all_fixed_message=(
                     "All formatting issues were successfully auto-fixed"

@@ -10,6 +10,7 @@ from assertpy import assert_that
 
 from lintro.enums.capability import Cap
 from lintro.plugins.registry import ToolRegistry
+from lintro.plugins.subprocess_executor import SubprocessResult
 
 _MUTATING: frozenset[Cap] = frozenset({Cap.FIX, Cap.FORMAT})
 
@@ -77,6 +78,11 @@ def test_check_discovers_the_same_file_fix_rewrote(
             return_value=None,
         ),
         patch.object(plugin, "_run_subprocess", return_value=(True, "")),
+        patch.object(
+            plugin,
+            "_run_subprocess_result",
+            return_value=SubprocessResult(0, "", "", ""),
+        ),
     ):
         fixed = plugin.fix([str(target)], {})
         checked = plugin.check([str(target)], {})

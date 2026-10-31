@@ -6,6 +6,7 @@ It provides fast linting with minimal configuration.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,9 +25,10 @@ from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.batch_runner import (
-    ISSUES_ONLY_BATCH_CHECK_POLICY,
+    BatchCheckPolicy,
     BatchCommands,
     BatchFixPolicy,
+    BatchSuccess,
     run_batch_check,
     run_batch_fix,
 )
@@ -41,6 +43,9 @@ from lintro.tools.core.option_validators import (
 
 # Constants for Oxlint configuration
 OXLINT_DEFAULT_TIMEOUT: int = 30
+# Exit 1 covers diagnostics and configuration errors; parsed findings are required.
+# https://github.com/oxc-project/oxc/blob/main/apps/oxlint/src/result.rs
+OXLINT_FINDINGS_EXIT_CODES: tuple[int, ...] = (1,)
 OXLINT_FILE_PATTERNS: list[str] = [
     "*.js",
     "*.mjs",
@@ -54,6 +59,36 @@ OXLINT_FILE_PATTERNS: list[str] = [
     "*.svelte",
     "*.astro",
 ]
+
+
+def _is_no_files_result(returncode: int, stdout: str, stderr: str) -> bool:
+    """Recognize oxlint's ignored-all-files report without hiding failures.
+
+    Args:
+        returncode: Captured oxlint exit status.
+        stdout: Captured standard output.
+        stderr: Captured standard error.
+
+    Returns:
+        Whether exit 1 contains only the no-files sentence and an empty report.
+    """
+    if returncode != 1 or stderr.strip():
+        return False
+    message, separator, report = stdout.strip().partition("\n")
+    if not separator or message != (
+        "No files found to lint. Please check your paths and ignore patterns."
+    ):
+        return False
+    try:
+        data = json.loads(report)
+    except (ValueError, TypeError):
+        return False
+    return (
+        isinstance(data, dict)
+        and type(data.get("number_of_files")) is int
+        and data["number_of_files"] == 0
+        and data.get("diagnostics") == []
+    )
 
 
 @register_tool
@@ -329,15 +364,18 @@ class OxlintPlugin(BaseToolPlugin):
         cmd.extend(ctx.rel_files)
         logger.debug(f"[OxlintPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
 
-        # Oxlint returns 1 for diagnostics and configuration errors alike;
-        # the findings exit code is expected only with parsed diagnostics.
-        # https://github.com/oxc-project/oxc/blob/main/apps/oxlint/src/result.rs
         return run_batch_check(
             ctx,
             plugin=self,
             cmd=cmd,
             parse=lambda output: parse_oxlint_output(output=output),
-            policy=ISSUES_ONLY_BATCH_CHECK_POLICY,
+            policy=BatchCheckPolicy(
+                success=BatchSuccess.ISSUES_ONLY,
+                findings_exit_codes=OXLINT_FINDINGS_EXIT_CODES,
+                parse_stdout=True,
+                no_files=_is_no_files_result,
+                report_cwd=True,
+            ),
             cwd=ctx.cwd,
             on_timeout=lambda: self._create_timeout_result(
                 timeout_val=ctx.timeout,
@@ -420,8 +458,11 @@ class OxlintPlugin(BaseToolPlugin):
             commands=BatchCommands(check=check_cmd, fix=fix_cmd),
             parse=lambda output: parse_oxlint_output(output=output),
             policy=BatchFixPolicy(
-                findings_exit_codes=(1,),
+                findings_exit_codes=OXLINT_FINDINGS_EXIT_CODES,
+                parse_stdout=True,
+                no_files=_is_no_files_result,
                 verbose=bool(merged_options.get("verbose_fix_output", False)),
+                verbose_output_label="Fix output (oxlint JSON)",
                 always_report_initial_issues=True,
                 report_cwd=True,
             ),
