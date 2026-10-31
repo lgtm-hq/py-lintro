@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from lintro.ai.exceptions import AICostBudgetExceededError, AIError
+from lintro.ai.exceptions import AICostBudgetExceededError, AIError, AIProviderError
 from lintro.ai.invoke import call_ai
 from lintro.ai.json_response import strip_json_fences
 from lintro.ai.prompts.review import (
@@ -210,25 +210,23 @@ def _findings_from_response(
         content: Raw model response text.
 
     Returns:
-        Parsed findings, empty when the payload is unusable.
+        Parsed findings, empty when the findings list is empty.
+
+    Raises:
+        AIProviderError: When the payload is not a JSON object containing a
+            findings list.
     """
     try:
         payload = json.loads(strip_json_fences(content=content))
-    except (json.JSONDecodeError, ValueError):
-        logger.warning(
-            "Custom review agent {agent} returned unparseable JSON; skipping "
-            "its findings.",
-            agent=agent.name,
-        )
-        return ()
+    except ValueError as error:
+        raise AIProviderError("Custom agent response was not valid JSON") from error
     if not isinstance(payload, dict):
-        logger.warning(
-            "Custom review agent {agent} response was not a JSON object.",
-            agent=agent.name,
-        )
-        return ()
+        raise AIProviderError("Custom agent response must be a JSON object")
+    raw_findings = payload.get("findings")
+    if not isinstance(raw_findings, list):
+        raise AIProviderError("Custom agent response must contain a findings list")
     return parse_findings(
-        raw_findings=payload.get("findings", []),
+        raw_findings=raw_findings,
         source=agent.name,
         severity_override=agent.severity,
     )
@@ -262,8 +260,8 @@ class CustomAgentPassRequest:
             as soon as it finishes, so a caller can recover work already done
             if a later pass trips the cost cap.
         on_agent_failed: Optional callback invoked with the agent's name when
-            a non-budget provider error skips it, so a caller can count it
-            toward skipped-agent metadata (issue #1245).
+            a non-budget provider error or unusable response skips it, so a
+            caller can count it toward skipped-agent metadata (issue #1245).
     """
 
     selected: tuple[SelectedCustomAgent, ...]
@@ -287,9 +285,9 @@ async def run_custom_agent_passes(
     """Run every selected custom review agent against its scoped diff.
 
     Passes run sequentially. A cost-cap stop propagates so the caller can
-    finalize a partial review; any other provider failure is logged and that
-    single agent is skipped, because one bad workspace-authored agent must not
-    discard an otherwise complete review.
+    finalize a partial review; any other provider failure or unusable response
+    is logged and that single agent is skipped, because one bad
+    workspace-authored agent must not discard an otherwise complete review.
 
     Args:
         request: The run-scope inputs every pass reads.
@@ -349,6 +347,10 @@ async def run_custom_agent_passes(
                 use_one_shot=use_one_shot,
                 no_tools=request.tools_disabled,
             )
+            findings = _findings_from_response(
+                agent=agent,
+                content=response.content,
+            )
         except AICostBudgetExceededError:
             raise
         except AIError as error:
@@ -363,10 +365,7 @@ async def run_custom_agent_passes(
 
         result = CustomAgentPassResult(
             agent_name=agent.name,
-            findings=_findings_from_response(
-                agent=agent,
-                content=response.content,
-            ),
+            findings=findings,
             files=entry.files,
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,

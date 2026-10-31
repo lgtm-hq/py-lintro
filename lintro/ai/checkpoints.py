@@ -212,23 +212,18 @@ def _expand_directory(*, root: Path, rel_dir: str) -> list[str]:
     ``git ls-files -co --exclude-standard`` returns tracked plus untracked
     files while honouring ``.gitignore``. Walking the directory manually
     instead would drag ``.git/``, ``.venv/`` and every other ignored tree into
-    the snapshot.
+    the snapshot. A git failure propagates as :class:`CheckpointError`.
 
     Args:
         root: Repository root.
         rel_dir: Repo-relative directory (``""`` for the root itself).
 
     Returns:
-        Repo-relative POSIX file paths, or an empty list when git fails.
+        Repo-relative POSIX file paths, or an empty list when no files match.
     """
     args = ["ls-files", "-co", "--exclude-standard", "-z", "--"]
     args.append(rel_dir or ".")
-    try:
-        result = _run_git(args, cwd=str(root))
-    except CheckpointError:
-        return []
-    if result.returncode != 0:
-        return []
+    result = _run_git(args, cwd=str(root), check=True)
     return [entry for entry in result.stdout.split("\0") if entry]
 
 
@@ -242,7 +237,8 @@ def _normalize_paths(
 
     Directories are expanded through :func:`_expand_directory` so ignored
     trees never enter a snapshot. Files that do not exist are kept so that a
-    restore can delete paths lintro created after capture.
+    restore can delete paths lintro created after capture. Enumeration errors
+    propagate as :class:`CheckpointError`; no partial path list is returned.
 
     Args:
         paths: Absolute or relative path strings (files or directories).
@@ -298,7 +294,9 @@ def capture_checkpoint(
 
     Uses a temporary ``GIT_INDEX_FILE``: ``read-tree HEAD`` (or empty tree),
     ``add`` target paths (including untracked), ``write-tree``, ``update-ref``.
-    Does not modify the user index, stash, or ``HEAD``.
+    Does not modify the user index, stash, or ``HEAD``. Directory enumeration
+    failures propagate as :class:`CheckpointError`, aborting capture before
+    any checkpoint refs are pruned or written.
 
     Args:
         paths: Files (and/or directories) to include in the snapshot.

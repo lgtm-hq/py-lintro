@@ -101,13 +101,14 @@ def test_validate_suggestions_unverified_when_issue_remains():
     assert_that(result.unverified).is_equal_to(1)
 
 
-def test_validate_suggestions_skips_tool_without_fresh_issues():
-    """When a tool has no entry in fresh_issues_by_tool, its suggestions are skipped."""
+def test_validate_suggestions_unverified_without_fresh_issues():
+    """A tool without a fresh measurement cannot verify its suggestions."""
     suggestion = _make_suggestion(tool_name="ruff")
     result = _validate_suggestions([suggestion], {})
 
     assert_that(result.verified).is_equal_to(0)
-    assert_that(result.unverified).is_equal_to(0)
+    assert_that(result.unverified).is_equal_to(1)
+    assert_that(result.unverified_by_tool).is_equal_to({"ruff": 1})
 
 
 # -- verify_fixes (unified entry point) ---------------------------------------

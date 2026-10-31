@@ -150,15 +150,16 @@ def test_validate_applied_fixes_skips_unknown_tool(mock_check):
 
 
 @patch("lintro.ai.validation._run_tool_check")
-def test_validate_applied_fixes_skips_when_check_returns_none(mock_check):
-    """Verify None is returned when all tool checks return None."""
+def test_validate_applied_fixes_unverified_when_check_returns_none(mock_check):
+    """An unavailable tool leaves its suggestion unverified."""
     mock_check.return_value = None  # Tool not available
     suggestion = _make_suggestion()
 
     result = validate_applied_fixes([suggestion])
 
-    # No tool successfully ran, so validate_applied_fixes returns None.
-    assert_that(result).is_none()
+    assert_that(result).is_not_none()
+    assert_that(result.verified).is_equal_to(0)  # type: ignore[union-attr]
+    assert_that(result.unverified).is_equal_to(1)  # type: ignore[union-attr]
 
 
 @patch("lintro.ai.validation._run_tool_check")
