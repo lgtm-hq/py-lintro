@@ -777,6 +777,7 @@ source_modules = [
   "lintro.parsers",
   "lintro.plugins",
   "lintro.profiling",
+  "lintro.rules",
   "lintro.tools",
   "lintro.utils",
   "lintro.watch",

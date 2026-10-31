@@ -69,3 +69,69 @@ def normal():
         raise
     # ok: lintro.python.none-coercion.except-return
     return []
+
+
+def success_only():
+    try:
+        # ok: lintro.python.none-coercion.except-return
+        return []
+    except Exception:
+        raise
+
+
+def is_present():
+    try:
+        lookup()
+        # ok: lintro.python.none-coercion.except-return
+        return True
+    except LookupError:
+        # ok: lintro.python.none-coercion.except-return
+        return False
+
+
+async def has_permission():
+    try:
+        await lookup()
+        # ok: lintro.python.none-coercion.except-return
+        return True
+    except LookupError:
+        # ok: lintro.python.none-coercion.except-return
+        return False
+
+
+def deferred_fallback():
+    try:
+        return scan()
+    except Exception:
+        def later():
+            # ok: lintro.python.none-coercion.except-return
+            return []
+
+        async def later_async():
+            # ok: lintro.python.none-coercion.except-return
+            return False
+
+        return later
+
+
+def conditional_fallback():
+    try:
+        # ok: lintro.python.none-coercion.except-return
+        return True
+    except Exception as error:
+        if retryable(error):
+            # ruleid: lintro.python.none-coercion.except-return
+            return []
+        raise
+
+
+def handler_with_nested_function():
+    try:
+        return scan()
+    except Exception:
+        def later():
+            # ok: lintro.python.none-coercion.except-return
+            return []
+
+        # ruleid: lintro.python.none-coercion.except-return
+        return []

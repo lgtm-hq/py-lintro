@@ -23,7 +23,9 @@ Ship Semgrep YAML under `lintro/rules/<language>/<pack>.yaml`, versioned with th
 release and selected explicitly through `tools.semgrep.rule_packs`.
 `lintro list-tools --rules` lists the installed packs. Unknown names are configuration
 errors. Packs augment native or explicitly selected Semgrep rules; selecting a pack
-replaces the default `auto` registry lookup with local rules.
+replaces only the implicit `auto` registry lookup with local rules. An explicit
+`config=auto` is preserved alongside the packs. User rule IDs keep Semgrep's normal path
+prefixes; only marked packaged findings have installation-path prefixes removed.
 
 The first pack, `python/none-coercion`, reports INFO candidates with review questions
 about empty versus unknown values. It does not prove a bug. It includes fixtures for all

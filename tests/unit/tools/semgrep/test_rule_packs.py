@@ -8,11 +8,13 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
+from pydantic import ValidationError
 
 from lintro.cli_utils.commands.list_tools import list_tools_command
 from lintro.config.config_loader import load_config
 from lintro.config.config_validator import validate_config_file
 from lintro.config.lintro_config import LintroConfig
+from lintro.config.tool_config import LintroToolConfig
 from lintro.enums.action import Action
 from lintro.exceptions.errors import ConfigurationError
 from lintro.tools.semgrep.definition import SemgrepPlugin
@@ -63,6 +65,137 @@ def test_pack_can_run_alone_or_with_explicit_config(tmp_path: Path) -> None:
     cmd = plugin._build_check_command(["sample.py"], cwd=str(tmp_path))
     assert_that(cmd.count("--config")).is_equal_to(2)
     assert_that(cmd[cmd.index("--config") + 1]).is_equal_to("custom.yaml")
+
+
+def test_explicit_auto_survives_pack_selection_and_copy(tmp_path: Path) -> None:
+    """An explicit registry choice survives later options and execution copies.
+
+    Args:
+        tmp_path: Empty scan project root.
+    """
+    plugin = SemgrepPlugin()
+    plugin.set_options(config="auto")
+    plugin.set_options(rule_packs=[PACK])
+    copied = plugin.copy_for_execution()
+    copied.set_options(jobs=1)
+    cmd = copied._build_check_command(["sample.py"], cwd=str(tmp_path))
+    configs = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "--config"]
+    assert_that(configs).is_length(2).contains("auto")
+
+    copied.reset_options()
+    copied.set_options(rule_packs=[PACK])
+    reset_cmd = copied._build_check_command(["sample.py"], cwd=str(tmp_path))
+    assert_that(reset_cmd.count("--config")).is_equal_to(1)
+    assert_that(reset_cmd).does_not_contain("auto")
+
+
+@pytest.mark.parametrize("source", ["pyproject", "cli"])
+def test_explicit_auto_reaches_execution_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+) -> None:
+    """Execution configuration retains auto from both public option sources.
+
+    Args:
+        tmp_path: Project containing an explicit Semgrep registry setting.
+        monkeypatch: Isolate project configuration discovery.
+        source: Supply config through pyproject or CLI overrides.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.lintro.semgrep]\nconfig = "auto"\n' if source == "pyproject" else "",
+        encoding="utf-8",
+    )
+    configured = configure_tool_for_execution(
+        tool=SemgrepPlugin(),
+        tool_name="semgrep",
+        config_manager=UnifiedConfigManager(),
+        tool_option_dict={"semgrep": {"config": "auto"}} if source == "cli" else {},
+        exclude=None,
+        include_venv=False,
+        incremental=False,
+        action=Action.CHECK,
+        selected_tools={"semgrep"},
+        lintro_config=LintroConfig.model_validate(
+            {"tools": {"semgrep": {"rule_packs": [PACK]}}},
+        ),
+    )
+    if not isinstance(configured, SemgrepPlugin):
+        pytest.fail("Semgrep execution setup must retain the plugin type")
+    cmd = configured._build_check_command(["sample.py"], cwd=str(tmp_path))
+    assert_that(cmd.count("--config")).is_equal_to(2)
+    assert_that(cmd[cmd.index("--config") + 1]).is_equal_to("auto")
+
+
+@pytest.mark.parametrize("toml", [False, True], ids=["yaml", "pyproject"])
+def test_non_semgrep_packs_are_rejected_by_loader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    toml: bool,
+) -> None:
+    """Unsupported tool packs fail both loading and configuration diagnostics.
+
+    Args:
+        tmp_path: Project configuration directory.
+        monkeypatch: Isolate pyproject fallback discovery.
+        toml: Whether to configure the unsupported tool through TOML.
+    """
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / ("pyproject.toml" if toml else ".lintro-config.yaml")
+    path.write_text(
+        (
+            f'[tool.lintro.ruff]\nrule_packs = ["{PACK}"]\n'
+            if toml
+            else f"tools:\n  ruff:\n    rule_packs: [{PACK}]\n"
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("lintro.config.config_loader._find_config_file", lambda: None)
+    with pytest.raises(ConfigurationError, match=r"ruff.*rule_packs.*[Ss]emgrep"):
+        load_config(None if toml else path)
+    assert_that(validate_config_file(path).is_valid).is_false()
+
+
+@pytest.mark.parametrize("tool", ["ruff", "RUFF", "unknown-tool"])
+@pytest.mark.parametrize("model_instance", [False, True], ids=["mapping", "model"])
+def test_direct_model_rejects_unsupported_packs(
+    tool: str,
+    model_instance: bool,
+) -> None:
+    """Direct root validation rejects packs even with prevalidated tool models.
+
+    Args:
+        tool: Unsupported tool name, including case variants.
+        model_instance: Whether the nested tool config was already validated.
+    """
+    selection = (
+        LintroToolConfig(rule_packs=[PACK])
+        if model_instance
+        else {"rule_packs": [PACK]}
+    )
+    with pytest.raises(ValidationError, match=r"rule_packs.*[Ss]emgrep"):
+        LintroConfig.model_validate(
+            {"tools": {tool: selection}},
+        )
+
+
+@pytest.mark.parametrize(
+    "tool,packs",
+    [("ruff", []), ("semgrep", [PACK]), ("SEMGREP", [PACK])],
+)
+def test_direct_model_accepts_supported_pack_selections(
+    tool: str,
+    packs: list[str],
+) -> None:
+    """Empty selections remain valid everywhere and Semgrep accepts named packs.
+
+    Args:
+        tool: Tool name to validate.
+        packs: Valid selection for this tool.
+    """
+    config = LintroConfig.model_validate({"tools": {tool: {"rule_packs": packs}}})
+    assert_that(config.get_tool_config(tool).rule_packs).is_equal_to(packs)
 
 
 @pytest.mark.parametrize(

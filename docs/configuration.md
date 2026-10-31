@@ -4008,10 +4008,11 @@ rule_packs = ["python/none-coercion"]
 
 Run `lintro check src --tools semgrep` with Semgrep installed. Each pack adds a local
 `--config` path alongside `.semgrep.yaml`, `.semgrep.yml`, or `.semgrep/` in the scan
-project root. With packs enabled, the default `auto` registry lookup is replaced by
-these local rules; an explicit Semgrep `config` option can still select another file or
-registry ruleset. No packs run by default, and unknown pack names raise a configuration
-error with the available names.
+project root. With packs enabled, the implicit `auto` registry lookup is replaced by
+these local rules. An explicit Semgrep `config` option, including `config=auto`, is
+preserved alongside the packs. No packs run by default, and unknown pack names raise a
+configuration error with the available names. Nonempty `rule_packs` selections are
+rejected for tools other than Semgrep.
 
 `python/none-coercion` asks whether missing values mean empty or unknown. Its eight INFO
 rule families cover literal-attribute `getattr` defaults, falsey `or` fallbacks,

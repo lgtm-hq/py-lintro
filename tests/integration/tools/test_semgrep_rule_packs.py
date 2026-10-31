@@ -107,15 +107,18 @@ def test_none_coercion_matches_exactly(
     assert_that(sorted(actual)).is_equal_to(sorted(expected))
 
 
+@pytest.mark.parametrize("explicit_config", [False, True], ids=["native", "explicit"])
 def test_plugin_runs_pack_and_native_rules_together(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    explicit_config: bool,
 ) -> None:
     """Real plugin execution returns both local and shipped findings with stable IDs.
 
     Args:
         tmp_path: Isolated project with native rules and source to scan.
         monkeypatch: Keep Semgrep settings, logging and project discovery local.
+        explicit_config: Select a user configuration in a subdirectory explicitly.
     """
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("SEMGREP_SETTINGS_FILE", str(tmp_path / "settings.yml"))
@@ -126,7 +129,13 @@ def test_plugin_runs_pack_and_native_rules_together(
         '[project]\nname = "pack-test"\nversion = "0.0.0"\n',
         encoding="utf-8",
     )
-    (tmp_path / ".semgrep.yaml").write_text(
+    config = (
+        tmp_path / "custom" / "rules.yaml"
+        if explicit_config
+        else tmp_path / ".semgrep.yaml"
+    )
+    config.parent.mkdir(exist_ok=True)
+    config.write_text(
         "rules:\n  - id: local-rule\n    languages: [python]\n"
         "    severity: WARNING\n    message: Local finding\n"
         "    pattern: local_call()\n",
@@ -134,9 +143,24 @@ def test_plugin_runs_pack_and_native_rules_together(
     )
     source = tmp_path / "sample.py"
     source.write_text("items = result.issues or []\nlocal_call()\n", encoding="utf-8")
+    options: dict[str, object] = {"jobs": 1}
+    if explicit_config:
+        options["config"] = str(config.relative_to(tmp_path))
+    original = SemgrepPlugin().check(
+        [str(source)],
+        {**options, "config": str(config.relative_to(tmp_path))},
+    )
+    assert_that(original.success).is_true()
+    original_ids = {
+        issue.check_id
+        for issue in original.issues or []
+        if isinstance(issue, SemgrepIssue)
+    }
+    assert_that(original_ids).is_length(1)
+
     result = SemgrepPlugin().check(
         [str(source)],
-        {"rule_packs": ["python/none-coercion"], "jobs": 1},
+        {**options, "rule_packs": ["python/none-coercion"]},
     )
 
     assert_that(result.success).is_true()
@@ -146,6 +170,6 @@ def test_plugin_runs_pack_and_native_rules_together(
         pytest.fail("A successful scan with findings must include issue objects")
     findings = [issue for issue in result.issues if isinstance(issue, SemgrepIssue)]
     assert_that({issue.check_id for issue in findings}).is_equal_to(
-        {"local-rule", "lintro.python.none-coercion.or-fallback"},
+        original_ids | {"lintro.python.none-coercion.or-fallback"},
     )
     assert_that({issue.severity for issue in findings}).is_equal_to({"INFO", "WARNING"})
