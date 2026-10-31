@@ -402,6 +402,10 @@ class OxlintPlugin(BaseToolPlugin):
             cwd=ctx.cwd,
         ) + [
             "--fix",
+            # Unfixable diagnostics still exit 1; keep them parseable so the
+            # batch runner can distinguish findings from an execution failure.
+            "--format",
+            "json",
         ]
         if config_args:
             fix_cmd.extend(config_args)

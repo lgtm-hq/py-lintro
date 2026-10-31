@@ -88,47 +88,54 @@ def test_fix_partial_fix(oxlint_plugin: OxlintPlugin, tmp_path: Path) -> None:
         tmp_path: Temporary directory path for test files.
     """
     test_file = pathlib.Path(tmp_path) / "test.js"
-    test_file.write_text("var x = 1;\n")
+    test_file.write_text("let x = 1;\nconsole.log(x);\nif (true) {}\n")
 
     initial_output = """{
         "diagnostics": [
             {
-                "message": "Use 'const' instead of 'var'.",
+                "message": "Variable 'x' is never reassigned. Use 'const' instead.",
                 "code": "eslint(prefer-const)",
-                "severity": "warning",
+                "severity": "error",
                 "filename": "test.js",
                 "labels": [{"span": {"line": 1, "column": 1}}]
             },
             {
-                "message": "Unused variable x.",
-                "code": "eslint(no-unused-vars)",
-                "severity": "warning",
+                "message": "Unexpected empty block statements",
+                "code": "eslint(no-empty)",
+                "severity": "error",
                 "filename": "test.js",
-                "labels": [{"span": {"line": 1, "column": 5}}]
+                "labels": [{"span": {"line": 3, "column": 11}}]
             }
         ]
     }"""
     final_output = """{
         "diagnostics": [
             {
-                "message": "Unused variable x.",
-                "code": "eslint(no-unused-vars)",
-                "severity": "warning",
+                "message": "Unexpected empty block statements",
+                "code": "eslint(no-empty)",
+                "severity": "error",
                 "filename": "test.js",
-                "labels": [{"span": {"line": 1, "column": 7}}]
+                "labels": [{"span": {"line": 3, "column": 11}}]
             }
         ]
     }"""
 
     call_count = 0
 
-    def mock_run_subprocess(*args, **kwargs):
+    def mock_run_subprocess(cmd: list[str], **kwargs: object) -> SubprocessResult:
         nonlocal call_count
         call_count += 1
         if call_count == 1:
             return SubprocessResult(1, initial_output, "", initial_output)
         elif call_count == 2:
-            return SubprocessResult(0, "", "", "")
+            # Real oxlint --fix exits 1 when unfixable errors remain. Without
+            # --format json its text output cannot be read by the JSON parser.
+            output = (
+                final_output
+                if "--format" in cmd and cmd[cmd.index("--format") + 1] == "json"
+                else "x eslint(no-empty): Unexpected empty block statements\n"
+            )
+            return SubprocessResult(1, output, "", output)
         else:
             return SubprocessResult(1, final_output, "", final_output)
 

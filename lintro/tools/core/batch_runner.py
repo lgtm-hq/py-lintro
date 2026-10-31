@@ -508,6 +508,8 @@ def _batch_fix_failure_result(
     output: str,
     initial_issues: Sequence[IssueT],
     stage_issues: Sequence[IssueT],
+    policy: BatchFixPolicy,
+    initial_check: bool,
     cwd: str | None,
 ) -> ToolResult:
     """Keep diagnostics and avoid claiming fixes after an execution failure.
@@ -517,22 +519,33 @@ def _batch_fix_failure_result(
         output: Raw output from the failed stage, including an empty report.
         initial_issues: Findings seen before attempting to fix files.
         stage_issues: Findings parsed from the failed stage.
+        policy: Per-tool issue reporting choices.
+        initial_check: Whether the failure occurred before any writes.
         cwd: Working directory to report on the result.
 
     Returns:
         A failed result with no verified fixes and the known remaining issues.
     """
     remaining = list(stage_issues or initial_issues)
+    reported_issues = (
+        [*initial_issues, *remaining] if policy.report_initial_issues else remaining
+    )
     return ToolResult(
         name=plugin.definition.name,
         success=False,
         output=output,
         issues_count=len(remaining),
-        issues=remaining,
-        initial_issues_count=len(remaining),
-        fixed_issues_count=0,
+        issues=reported_issues,
+        initial_issues_count=len(initial_issues),
+        # Once writes may have begun, an execution failure cannot establish
+        # how many findings were fixed. Keep the observed counts independent.
+        fixed_issues_count=0 if initial_check else None,
         remaining_issues_count=len(remaining),
-        initial_issues=list(initial_issues) or None,
+        initial_issues=(
+            list(initial_issues)
+            if initial_issues or policy.always_report_initial_issues
+            else None
+        ),
         cwd=cwd,
     )
 
@@ -574,11 +587,16 @@ def run_batch_fix(
     initial_issues: list[IssueT] = []
     result_cwd = cwd if policy.report_cwd else None
 
-    def run_stage(cmd: list[str]) -> tuple[str, list[IssueT]] | ToolResult:
+    def run_stage(
+        cmd: list[str],
+        *,
+        initial_check: bool = False,
+    ) -> tuple[str, list[IssueT]] | ToolResult:
         """Run one stage of the fix pipeline.
 
         Args:
             cmd: Command line for this stage.
+            initial_check: Whether this stage establishes the pre-fix findings.
 
         Returns:
             The command's output and parsed issues, or an early failure result.
@@ -619,6 +637,8 @@ def run_batch_fix(
                 raise
             return on_error(exc)
         stage_issues = list(parse(process.output))
+        if initial_check:
+            initial_issues.extend(stage_issues)
         if _execution_failed(
             exit_success=process.success,
             returncode=process.returncode,
@@ -630,14 +650,15 @@ def run_batch_fix(
                 output=process.output,
                 initial_issues=initial_issues,
                 stage_issues=stage_issues,
+                policy=policy,
+                initial_check=initial_check,
                 cwd=result_cwd,
             )
         return process.output, stage_issues
 
-    check_output = run_stage(commands.check)
+    check_output = run_stage(commands.check, initial_check=True)
     if isinstance(check_output, ToolResult):
         return check_output
-    initial_issues.extend(check_output[1])
 
     fix_output = run_stage(commands.fix)
     if isinstance(fix_output, ToolResult):
