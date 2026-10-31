@@ -914,6 +914,13 @@ def _fold_one(
             verify.parse_failures_count
         )
     if mutation.parse_failures_count:
+        unknown_reason = "; ".join(
+            dict.fromkeys(
+                reason
+                for reason in (mutation.residual_unknown_reason, outcome.unknown_reason)
+                if reason
+            ),
+        )
         return _fold_unknown(
             mutation=mutation,
             outcome=VerifyOutcome(
@@ -921,8 +928,7 @@ def _fold_one(
                 result=verify,
                 status=VerifyStatus.UNKNOWN,
                 unknown_reason=(
-                    mutation.residual_unknown_reason
-                    or "tool output could not be fully parsed"
+                    unknown_reason or "tool output could not be fully parsed"
                 ),
             ),
         )

@@ -7,6 +7,7 @@ retry loop so the executor itself stays free of tool-specific behaviour.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from lintro.models.core.tool_result import ToolResult
@@ -50,6 +51,10 @@ def run_fix_with_retry(
     remaining = get_remaining_count(result)
 
     for attempt in range(2, max_retries + 1):
+        # An incomplete report is not a convergence measurement. Retrying
+        # must not replace its failure evidence with a later clean result.
+        if result.residual_unknown or result.parse_failures_count:
+            return result
         if remaining == 0:
             break
 
@@ -61,42 +66,21 @@ def run_fix_with_retry(
         result = tool.fix(paths, options)
         remaining = get_remaining_count(result)
 
+    if result.residual_unknown or result.parse_failures_count:
+        return result
+
     # Merge: keep initial_issues_count and initial_issues from first pass,
-    # rest from last pass. ``timed_out`` must be carried over from the final
-    # pass: rebuilding the result field-by-field would otherwise erase it, and
-    # a tool that really did time out would serialize ``timed_out: false``.
+    # rest from last pass, including failure accounting and execution metadata.
+    if initial_issues_count is None and first_pass_initial_issues is not None:
+        initial_issues_count = len(first_pass_initial_issues)
     if initial_issues_count is not None:
-        fixed = max(0, initial_issues_count - remaining)
-        result = ToolResult(
-            name=result.name,
-            success=result.success,
-            output=result.output,
+        result = replace(
+            result,
             issues_count=remaining,
-            issues=result.issues,
             initial_issues_count=initial_issues_count,
-            fixed_issues_count=fixed,
+            fixed_issues_count=max(0, initial_issues_count - remaining),
             remaining_issues_count=remaining,
-            formatted_output=result.formatted_output,
             initial_issues=first_pass_initial_issues,
-            cwd=result.cwd,
-            timed_out=result.timed_out,
-        )
-    elif first_pass_initial_issues is not None:
-        # Preserve initial_issues even when initial_issues_count is absent
-        fixed = max(0, len(first_pass_initial_issues) - remaining)
-        result = ToolResult(
-            name=result.name,
-            success=result.success,
-            output=result.output,
-            issues_count=remaining,
-            issues=result.issues,
-            initial_issues_count=len(first_pass_initial_issues),
-            fixed_issues_count=fixed,
-            remaining_issues_count=remaining,
-            formatted_output=result.formatted_output,
-            initial_issues=first_pass_initial_issues,
-            cwd=result.cwd,
-            timed_out=result.timed_out,
         )
 
     return result

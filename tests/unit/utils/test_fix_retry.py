@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from unittest.mock import MagicMock
 
+import pytest
 from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
+from lintro.utils.execution.fix_retry import run_fix_with_retry
 from lintro.utils.tool_executor import _run_fix_with_retry
 
 
@@ -176,3 +180,54 @@ def test_fix_retry_merges_results_correctly() -> None:
     # fixed = initial - remaining = 3 - 0 = 3
     assert_that(result.fixed_issues_count).is_equal_to(3)
     assert_that(tool._call_count).is_equal_to(3)
+
+
+@pytest.mark.parametrize("failure_pass", [1, 2, 3])
+@pytest.mark.parametrize("initial_count", [None, 2])
+@pytest.mark.parametrize("failure_kind", ["parse", "unknown"])
+def test_incomplete_fix_pass_is_preserved_without_more_retries(
+    failure_pass: int,
+    initial_count: int | None,
+    failure_kind: str,
+) -> None:
+    """Neither first nor later failures may be rebuilt into measured results."""
+    detected = [BaseIssue(file="a.txt", message="format"), BaseIssue(file="b.txt")]
+    incomplete = ToolResult(
+        name="formatter",
+        success=False,
+        output="incomplete report",
+        issues_count=2,
+        issues=detected,
+        initial_issues=detected,
+        initial_issues_count=initial_count,
+        parse_failures_count=1 if failure_kind == "parse" else None,
+        residual_unknown=failure_kind == "unknown",
+        residual_unknown_reason=(
+            "verification unavailable" if failure_kind == "unknown" else None
+        ),
+    )
+    measured = ToolResult(
+        name="formatter",
+        success=False,
+        issues_count=2,
+        initial_issues_count=2,
+        fixed_issues_count=0,
+        remaining_issues_count=2,
+        initial_issues=detected,
+    )
+    tool = MagicMock()
+    tool.fix.side_effect = [measured] * (failure_pass - 1) + [incomplete]
+
+    result = run_fix_with_retry(tool, ["."], {}, max_retries=3)
+
+    assert_that(result).is_same_as(incomplete)
+    assert_that(result.initial_issues_count).is_equal_to(initial_count)
+    assert_that(result.issues_count).is_equal_to(2)
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.parse_failures_count).is_equal_to(
+        1 if failure_kind == "parse" else None,
+    )
+    assert_that(result.residual_unknown_reason).is_equal_to(
+        "verification unavailable" if failure_kind == "unknown" else None,
+    )

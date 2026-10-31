@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 from assertpy import assert_that
@@ -385,3 +386,49 @@ def test_invalid_coordinate_is_unknown_without_dropping_the_finding(
         (0, 7) if field == "line" else (3, 0),
     )
     assert_that(issue.to_display_row()[field]).is_equal_to("-")
+
+
+@pytest.mark.parametrize(
+    "envelope",
+    [
+        "[{report}]",
+        "[\n{report}",
+        "[null, {report}]",
+        "[broken, {report}]",
+        "[broken]\n{report}",
+        '{{"outer": {report}}}',
+        '{{"outer": {report}',
+        "{{broken {report}}}",
+        '{{"diagnostics": [{report}',
+    ],
+)
+@pytest.mark.parametrize("prefix", ["note ", "[NOTICE] starting\n", "Using {config}\n"])
+def test_prose_does_not_expose_a_report_inside_an_invalid_envelope(
+    envelope: str,
+    prefix: str,
+) -> None:
+    """A nested object cannot repair a malformed or wrongly shaped envelope."""
+    output = prefix + envelope.format(report='{"diagnostics": []}')
+
+    issues, failures = parse_oxlint_output_with_stats(output)
+
+    assert_that((issues, failures)).is_equal_to(([], 1))
+
+
+@pytest.mark.parametrize(
+    "literal",
+    ["null", "true", "false", "null ", "true ", "NaN", "Infinity", '"NOTICE"', "0"],
+)
+def test_array_literals_are_never_treated_as_log_labels(literal: str) -> None:
+    """Bracketed JSON values before a report are additional containers."""
+    output = f'[{literal}] starting\n{{"diagnostics": []}}'
+
+    assert_that(parse_oxlint_output_with_stats(output)).is_equal_to(([], 1))
+
+
+def test_excessive_json_nesting_is_a_counted_report_failure() -> None:
+    """Decoder recursion failures follow the same contract as malformed JSON."""
+    depth = sys.getrecursionlimit() + 100
+    output = "[" * depth + '{"diagnostics": []}' + "]" * depth
+
+    assert_that(parse_oxlint_output_with_stats(output)).is_equal_to(([], 1))

@@ -14,12 +14,15 @@ from assertpy import assert_that
 
 import lintro.tools.oxlint.definition as oxlint_definition
 import lintro.utils.tool_executor as executor
+from lintro.config.lintro_config import LintroConfig
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import ExecutionContext
+from lintro.tools import tool_manager
 from lintro.tools.core.batch_runner import BatchFixPolicy
 from lintro.tools.core.verify_pass import VerifyBaseline
 from lintro.tools.oxlint.definition import OxlintPlugin
+from lintro.utils.execution.fix_retry import run_fix_with_retry
 from lintro.utils.json_output import serialize_tool_result
 
 
@@ -155,14 +158,16 @@ def test_empty_report_is_clean_after_an_invalid_run(
 
 
 @pytest.mark.parametrize("failed_stage", ["initial", "verify", "both"])
+@pytest.mark.parametrize("retry", [False, True])
 def test_fix_parse_failures_cannot_claim_a_clean_or_fixed_result(
     prepared_oxlint: OxlintPlugin,
     monkeypatch: pytest.MonkeyPatch,
     failed_stage: str,
+    retry: bool,
 ) -> None:
     """Either report in the fix pipeline can fail independently of its exit code."""
     valid = '{"diagnostics": [{"filename": "test.js", "message": "Use const"}]}'
-    invalid = '{"diagnostics": null}'
+    invalid = '{"diagnostics": [null]}'
     outputs = [
         (True, invalid if failed_stage in {"initial", "both"} else valid),
         (True, ""),
@@ -177,7 +182,11 @@ def test_fix_parse_failures_cannot_claim_a_clean_or_fixed_result(
         MagicMock(side_effect=outputs),
     )
 
-    result = prepared_oxlint.fix(["test.js"], {})
+    result = (
+        run_fix_with_retry(prepared_oxlint, ["test.js"], {}, max_retries=3)
+        if retry
+        else prepared_oxlint.fix(["test.js"], {})
+    )
 
     assert_that(result.success).is_false()
     assert_that(result.parse_failures_count).is_equal_to(
@@ -188,6 +197,7 @@ def test_fix_parse_failures_cannot_claim_a_clean_or_fixed_result(
         "All issues were successfully auto-fixed",
     )
     assert_that(result.residual_unknown).is_true()
+    assert_that(result.residual_unknown_reason).contains("Failed to parse")
     assert_that(result.remaining_issues_count).is_none()
     assert_that(result.issues_count).is_equal_to(
         1 if failed_stage == "verify" else 0,
@@ -248,7 +258,16 @@ def test_partial_fix_verification_keeps_new_findings_without_duplicates(
 @pytest.mark.parametrize("method", ["check", "fix"])
 @pytest.mark.parametrize("exit_success", [True, False])
 @pytest.mark.parametrize("nonclean", [True, False])
-@pytest.mark.parametrize("prefix", ["Found report:\n", "note ", "[WARN] note\n"])
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "Found report:\n",
+        "note ",
+        "[WARN] note\n",
+        "[NOTICE] starting\n",
+        "Using {config}\n",
+    ],
+)
 def test_prose_wrapped_array_never_becomes_an_object_report(
     prepared_oxlint: OxlintPlugin,
     monkeypatch: pytest.MonkeyPatch,
@@ -289,6 +308,9 @@ def test_prose_wrapped_array_never_becomes_an_object_report(
         ("Warning: using default configuration\n", "\nDone"),
         ("[WARN] using default configuration\n", "\nFinished {threads: 4}"),
         ("[INFO] start\n[WARNING] config\n", " trailing {oops}"),
+        ("[NOTICE] starting\n", "\n[NOTICE] finished"),
+        ("Using {config}\n", "\nFinished {threads: 4}"),
+        ("[1/2] linting\n[oxc] starting\n[WARNING: x] config\n", " Done"),
         ("", "\nFinished }"),
     ],
 )
@@ -320,6 +342,50 @@ def test_report_tolerates_log_prefixes_and_trailing_braces(
         )
     else:
         assert_that(result.output).is_none()
+
+
+@pytest.mark.parametrize("method", ["check", "fix"])
+@pytest.mark.parametrize("prefix", ["", "[NOTICE] starting\n"])
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        '\n{"diagnostics": []}',
+        '\n{"diagnostics": [',
+        "\n[",
+        "\n[broken]",
+        '\n[{"diagnostics": []}]',
+        "\n{}",
+        "\n}",
+        "\n]",
+        '\nDone\n{"diagnostics": [',
+        '\n[NOTICE] finished\n[{"diagnostics": []}]',
+    ],
+)
+def test_additional_or_truncated_container_cannot_pass_as_a_clean_report(
+    prepared_oxlint: OxlintPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    prefix: str,
+    suffix: str,
+) -> None:
+    """Discarded JSON tails must fail the plugin and invalidate fix counts."""
+    output = prefix + '{"diagnostics": []}' + suffix
+    monkeypatch.setattr(
+        prepared_oxlint,
+        "_run_subprocess",
+        MagicMock(return_value=(True, output)),
+    )
+
+    result = getattr(prepared_oxlint, method)(["test.js"], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(2 if method == "fix" else 1)
+    assert_that(result.output).contains("Failed to parse")
+    if method == "fix":
+        serialized = serialize_tool_result(replace(result), action=Action.FIX)
+        assert_that(serialized["residual_unknown"]).is_true()
+        assert_that(serialized["fixed"]).is_none()
+        assert_that(serialized["remaining"]).is_none()
 
 
 @pytest.mark.parametrize("verbose_label", ["Fix output", "Fix output (oxlint JSON)"])
@@ -428,14 +494,32 @@ def test_executor_fold_preserves_unknown_fix_accounting(
         "_run_subprocess",
         MagicMock(side_effect=outputs),
     )
-    mutation = prepared_oxlint.fix(["test.js"], {})
-    results = [mutation]
     monkeypatch.setattr(
         executor,
         "configure_tool_for_execution",
         MagicMock(return_value=prepared_oxlint),
     )
-    ctx = MagicMock(action=Action.FIX, dry_run_preview=False, clean_stdout_output=True)
+    monkeypatch.setattr(tool_manager, "get_tool", lambda name: prepared_oxlint)
+    ctx = MagicMock(
+        action=Action.FIX,
+        dry_run_preview=False,
+        clean_stdout_output=True,
+        lintro_config=LintroConfig(),
+    )
+    results = executor._execute_tools_sequential(
+        ctx=ctx,
+        tools_to_run=["oxlint"],
+        paths=["test.js"],
+        config_manager=MagicMock(),
+        tool_option_dict={},
+        exclude=None,
+        include_venv=False,
+        selected_tools={"oxlint"},
+        incremental=False,
+        effective_auto_install=False,
+        diff_base=None,
+        on_tool_result=None,
+    )
 
     executor._run_verify_phase(
         ctx=ctx,
@@ -459,6 +543,8 @@ def test_executor_fold_preserves_unknown_fix_accounting(
         expected_failures += 1
     assert_that(result.parse_failures_count).is_equal_to(expected_failures)
     assert_that(result.residual_unknown).is_true()
+    assert_that(result.residual_unknown_reason).is_not_empty()
+    assert_that(result.duration_seconds).is_not_none()
     assert_that(result.success).is_false()
     assert_that(result.fixed_issues_count).is_none()
     assert_that(result.remaining_issues_count).is_none()

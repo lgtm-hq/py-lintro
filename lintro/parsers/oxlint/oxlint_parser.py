@@ -16,13 +16,23 @@ from lintro.parsers.base_parser import (
 )
 from lintro.parsers.oxlint.oxlint_issue import OxlintIssue
 
-# Bracketed log levels are prose, not the start of an array report.
-_REPORT_START = re.compile(r"\[(?:WARN(?:ING)?|INFO|DEBUG|TRACE|ERROR)\]|[\[{]", re.I)
+# Skip bracketed prose labels and inline, unquoted brace fragments. Neither
+# pattern can consume a nested container or a quoted JSON object key. JSON
+# literals remain array candidates rather than being mistaken for log labels.
+# Unrecognized labels need following prose; standalone malformed arrays fail.
+_REPORT_START = re.compile(
+    r"\[(?:WARN(?:ING)?|INFO|DEBUG|TRACE|ERROR)\]"
+    r"|\[(?!(?:true|false|null|NaN|Infinity)[ \t]*\])"
+    r"(?:[A-Za-z][\w :/.-]*|\d+/\d+)\](?=[ \t]+[A-Za-z])"
+    r'|\b[A-Za-z]\w*[ \t]+\{[A-Za-z_][^{}\[\]"\r\n]*\}'
+    r"|[\[{]",
+    re.I,
+)
 _NO_REPORT = object()
 
 
 def _decode_report(output: str) -> Any:
-    """Decode the first JSON value, allowing prose and bracketed log levels.
+    """Decode one JSON value, allowing surrounding prose.
 
     Malformed JSON at the first candidate propagates to the counted parser;
     searching again could accept a nested object from an invalid envelope.
@@ -32,13 +42,23 @@ def _decode_report(output: str) -> Any:
 
     Returns:
         The decoded value, or ``_NO_REPORT`` if there is no container opener.
+
+    Raises:
+        ValueError: If a candidate is malformed or another container follows it.
     """
     try:
         return json.loads(output)
     except json.JSONDecodeError:
         for match in _REPORT_START.finditer(output):
             if len(match.group()) == 1:
-                value, _end = json.JSONDecoder().raw_decode(output, match.start())
+                value, end = json.JSONDecoder().raw_decode(output, match.start())
+                suffix = output[end:]
+                if suffix.lstrip().startswith(("}", "]")) or any(
+                    len(tail.group()) == 1 for tail in _REPORT_START.finditer(suffix)
+                ):
+                    raise ValueError(
+                        "Additional or malformed Oxlint report container",
+                    ) from None
                 return value
     return _NO_REPORT
 
@@ -78,7 +98,7 @@ def parse_oxlint_output_with_stats(output: str) -> tuple[list[OxlintIssue], int]
 
     try:
         oxlint_data = _decode_report(output)
-    except (ValueError, TypeError) as e:
+    except (ValueError, TypeError, RecursionError) as e:
         logger.debug(f"Error processing Oxlint output: {e}")
         return [], 1
 
