@@ -664,6 +664,7 @@ def _record_severity_baseline(artifact: RunArtifact, *, ctx: RunContext) -> None
         dry_run_preview=artifact.dry_run_preview,
         tool_results=artifact.tool_results,
         early_exit=artifact.early_exit,
+        partial_scan=artifact.partial_scan,
     ):
         return
 

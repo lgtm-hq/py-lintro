@@ -163,6 +163,7 @@ def baseline_is_eligible(
     dry_run_preview: bool,
     tool_results: Sequence[ToolResult],
     early_exit: bool = False,
+    partial_scan: bool = False,
 ) -> bool:
     """Return whether a run may read or write the severity baseline.
 
@@ -185,6 +186,9 @@ def baseline_is_eligible(
       would make the next real check report every existing issue as newly
       introduced.
     * It did not exit before running anything.
+    * It did not request ``--diff`` or ``--incremental``. These modes narrow
+      the measured files without changing the path arguments or tool set,
+      and their file population can change even with the same flags.
     * No tool failed without parsed findings. Such a failure would undercount
       the population and make the next healthy run report spurious new issues.
 
@@ -193,11 +197,12 @@ def baseline_is_eligible(
         dry_run_preview: Whether this run is a ``fmt --dry-run`` preview.
         tool_results: Every result the run produced.
         early_exit: Whether the run stopped before executing any tool.
+        partial_scan: Whether ``--diff`` or ``--incremental`` was requested.
 
     Returns:
         bool: ``True`` when the run is a comparable measurement.
     """
-    if early_exit or dry_run_preview or action != Action.CHECK:
+    if early_exit or dry_run_preview or partial_scan or action != Action.CHECK:
         return False
     return not run_has_unreported_failure(tool_results) and run_inspected_files(
         tool_results,

@@ -48,6 +48,9 @@ class RunArtifact:
             the diagnostic has already been printed by the execute phase.
         paths: Path arguments measured by the run, retained so aggregation
             and rendering use the same severity-baseline scope.
+        partial_scan: Whether ``--diff`` or ``--incremental`` was requested.
+            These runs cannot read or write severity baselines because their
+            measured file set can change between invocations.
     """
 
     tool_results: list[ToolResult] = field(default_factory=list)
@@ -62,6 +65,7 @@ class RunArtifact:
     dry_run_preview: bool = False
     early_exit: bool = False
     paths: tuple[str, ...] = (".",)
+    partial_scan: bool = False
 
     @property
     def success(self) -> bool:

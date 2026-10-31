@@ -8,6 +8,8 @@ than inside a ``run-*`` directory so run pruning never deletes it.
 Scope is a fingerprint of the sorted, normalised path arguments and the set
 of non-skipped tool names. The file maps each scope to its latest counts, so
 scoped runs preserve the full-run entry and each scope advances independently.
+``--diff`` and ``--incremental`` runs neither compare nor record baselines:
+their changing file subsets are not represented by this scope fingerprint.
 Older single-scope files are migrated on write. Legacy baselines without
 scope and unreadable files are incomparable and replaced by the next eligible
 run, restoring deltas automatically on the following run.

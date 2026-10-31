@@ -40,6 +40,7 @@ def finalize_artifact(
     total_fixed: int,
     total_remaining: int,
     paths: Sequence[str] = (".",),
+    partial_scan: bool = False,
 ) -> RunArtifact:
     """Tally the run and resolve its exit code into a :class:`RunArtifact`.
 
@@ -50,6 +51,7 @@ def finalize_artifact(
         total_fixed: Aggregated fixed count.
         total_remaining: Aggregated remaining count.
         paths: Path arguments measured by this run.
+        partial_scan: Whether ``--diff`` or ``--incremental`` was requested.
 
     Returns:
         RunArtifact: The completed artifact for the render phase.
@@ -88,6 +90,7 @@ def finalize_artifact(
         # without reaching this function. Named anyway so both call sites pass
         # the same arguments and cannot drift apart.
         early_exit=False,
+        partial_scan=partial_scan,
     )
     log_root = resolve_log_root(ctx.output_manager) if eligible else None
     previous_counts = None
@@ -107,6 +110,7 @@ def finalize_artifact(
         exit_code=exit_code,
         dry_run_preview=ctx.dry_run_preview,
         paths=tuple(paths),
+        partial_scan=partial_scan,
     )
 
 
@@ -147,6 +151,7 @@ def refresh_artifact(
         total_fixed=total_fixed,
         total_remaining=total_remaining,
         paths=artifact.paths,
+        partial_scan=artifact.partial_scan,
     )
     if force_failure:
         refreshed.exit_code = DEFAULT_EXIT_CODE_FAILURE

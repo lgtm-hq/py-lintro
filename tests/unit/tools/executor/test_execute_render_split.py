@@ -27,6 +27,7 @@ from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.tools import tool_manager
 from lintro.utils.execution.run_aggregation import finalize_artifact
 from lintro.utils.execution.run_context import RunContext
+from lintro.utils.execution.run_preflight import DiffScope
 from lintro.utils.execution.run_renderer import render_run
 from lintro.utils.execution.tool_configuration import SkippedTool, ToolsToRunResult
 from lintro.utils.severity_baseline import (
@@ -802,6 +803,85 @@ def test_scoped_check_preserves_the_full_run_baseline(
     assert_that(
         read_severity_baseline(ctx.output_manager.base_dir, scoped_scope),
     ).is_equal_to(repeated_scoped.severity_counts)
+
+
+@pytest.mark.parametrize(
+    "partial_options",
+    [{"diff_base": "HEAD"}, {"incremental": True}],
+    ids=["diff", "incremental"],
+)
+def test_partial_checks_neither_compare_nor_replace_the_full_baseline(
+    tmp_path: Path,
+    fake_logger: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    executor_doubles: None,
+    partial_options: dict[str, Any],
+) -> None:
+    """Full checks retain their exact delta across a partial check and refresh.
+
+    Args:
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+        monkeypatch: Pytest fixture for substituting tools and git resolution.
+        executor_doubles: Neutralized executor collaborators.
+        partial_options: Flags that narrow the intermediate check's file set.
+    """
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger, output_format="json")
+    monkeypatch.setattr(
+        te,
+        "get_tools_to_run",
+        lambda tools, action, **_kw: ToolsToRunResult(to_run=["ruff"]),
+    )
+    monkeypatch.setattr(
+        te,
+        "resolve_diff_scope",
+        lambda **kwargs: DiffScope(base=kwargs["diff_base"]),
+    )
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool",
+        lambda name: _FakeTool(issues_count=4),
+    )
+    full = _run_execute(ctx=ctx, output_format="json")
+    render_run(full, ctx=ctx, output_format="grid")
+    baseline = ctx.output_manager.base_dir / SEVERITY_BASELINE_FILENAME
+    original = baseline.read_bytes()
+
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool",
+        lambda name: _FakeTool(issues_count=1),
+    )
+    partial = _run_execute(ctx=ctx, output_format="json", **partial_options)
+    assert_that(partial.previous_severity_counts).is_none()
+    for artifact in (partial, te.refresh_artifact(partial, ctx=ctx)):
+        fake_logger.calls.clear()
+        render_run(artifact, ctx=ctx, output_format="grid")
+
+        assert_that(artifact.severity_counts).is_equal_to(SeverityCounts(warnings=1))
+        assert_that(artifact.severity_delta).is_none()
+        assert_that(_console_texts(fake_logger)).does_not_contain(
+            "Change since last run",
+        )
+        assert_that(baseline.read_bytes()).is_equal_to(original)
+
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool",
+        lambda name: _FakeTool(issues_count=2),
+    )
+    fake_logger.calls.clear()
+    repeated = _run_execute(ctx=ctx, output_format="json")
+    render_run(repeated, ctx=ctx, output_format="grid")
+
+    assert_that(repeated.previous_severity_counts).is_equal_to(full.severity_counts)
+    assert_that(_console_texts(fake_logger)).contains(
+        "Change since last run: -2 warnings",
+    )
+    scope = severity_baseline_scope(paths=full.paths, tool_results=full.tool_results)
+    assert_that(read_severity_baseline(ctx.output_manager.base_dir, scope)).is_equal_to(
+        SeverityCounts(warnings=2),
+    )
 
 
 @pytest.mark.parametrize(
