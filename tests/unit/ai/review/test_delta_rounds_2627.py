@@ -829,7 +829,7 @@ def test_the_adversarial_sweep_and_split_halves_read_the_delta(
 
     async def _call_ai(**kwargs: Any) -> AIResponse:
         captured.append(kwargs)
-        return AIResponse(content="[]", model="m", provider="anthropic")
+        return AIResponse(content='{"findings": []}', model="m", provider="anthropic")
 
     with patch("lintro.ai.review.provider_call.call_ai", _call_ai):
         asyncio.run(

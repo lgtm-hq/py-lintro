@@ -141,6 +141,20 @@ def _round_is_reusable(
     state = identity.model_verification
     if state not in _REUSABLE_STATES:
         return False
+    # Blank means no completed call. Tokens or charges contradict that claim,
+    # including charges for calls whose results were dropped (#3010).
+    usage = record.usage
+    if state == "" and any(
+        (
+            usage.prompt,
+            usage.completion,
+            usage.total,
+            usage.context,
+            usage.cost,
+            usage.cost_shadow,
+        ),
+    ):
+        return False
     if state == ModelVerification.UNREPORTED.value and provenance.reports_model_usage:
         return False
     if identity.lane != provenance.lane or identity.endpoint != provenance.endpoint:
