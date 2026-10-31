@@ -165,7 +165,7 @@ class OsvScannerPlugin(BaseToolPlugin):
         ]
 
     @staticmethod
-    def _payload_has_valid_results(payload: dict[str, Any]) -> bool:
+    def _payload_has_valid_results(payload: object) -> bool:
         """Return whether an osv-scanner payload is a valid scan report.
 
         A well-formed osv-scanner JSON report is an object whose ``results``

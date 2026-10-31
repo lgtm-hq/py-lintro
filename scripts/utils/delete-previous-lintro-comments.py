@@ -69,6 +69,7 @@ def get_pr_comments(
     Raises:
         Exception: If the GitHub API request fails after retries or returns
             a non-successful response status.
+        RuntimeError: If the retry loop ends without a successful response.
     """
     base_url: str = os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip(
         "/",
@@ -97,6 +98,8 @@ def get_pr_comments(
                     if attempt == 2:
                         raise
                     sleep(0.5 * (2**attempt))
+            else:
+                raise RuntimeError("Comment request exhausted its retries")
             data = response.json()
             if not isinstance(data, list) or not data:
                 break

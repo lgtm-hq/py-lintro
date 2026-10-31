@@ -245,7 +245,9 @@ def test_all_external_tools_registered_in_tool_versions() -> None:
         ToolName.SQLFLUFF,
         ToolName.TAPLO,
     }
-    if manifest_path.exists():
+    manifest_tools = expected_non_npm_tools
+    has_manifest = manifest_path.exists()
+    if has_manifest:
         manifest = json.loads(manifest_path.read_text())
         manifest_tools = {
             normalize_tool_name(tool["name"])
@@ -258,7 +260,7 @@ def test_all_external_tools_registered_in_tool_versions() -> None:
 
     # All tools (including npm-managed) should be available via get_all_expected_versions
     all_versions = get_all_expected_versions()
-    if manifest_path.exists():
+    if has_manifest:
         assert_that(set(all_versions.keys())).is_equal_to(manifest_tools)
     else:
         expected_all_tools = {

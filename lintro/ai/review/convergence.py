@@ -362,7 +362,7 @@ def evaluate_convergence(
     *,
     runs: tuple[RunRecord, ...],
     threshold: float | None,
-    stable_rounds: int,
+    stable_rounds: object,
     pending_resume_work: bool = False,
 ) -> ConvergenceDecision:
     """Decide, in code, whether another review round would be redundant.

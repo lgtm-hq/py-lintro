@@ -559,153 +559,131 @@ disallow_untyped_defs = false
 check_untyped_defs = true
 
 # --- None-check baseline (#3022, epic #2996): entries may only be deleted. ---
-# Exact module/code identities and ceilings live in
+# Exact module/code and None-equality identities and ceilings live in
 # tests/unit/test_mypy_none_baseline.py. Keep runtime validation at raw-data
 # boundaries intact while the owning None-audit refactors are reconciled.
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro._tool_versions"]
 disable_error_code = ["redundant-expr"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.ai.config_overrides"]
 disable_error_code = ["unreachable"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.ai.providers.base"]
 disable_error_code = ["unreachable"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.ai.rate_limit"]
-disable_error_code = ["comparison-overlap", "unreachable"]
+strict_equality_for_none = false
+disable_error_code = ["unreachable"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.ai.review.exceptions"]
 disable_error_code = ["unreachable"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.ai.review.models.changed_file"]
 disable_error_code = ["unreachable"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.ai.transport"]
-disable_error_code = ["comparison-overlap", "redundant-expr"]
+strict_equality_for_none = false
+disable_error_code = ["redundant-expr"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.config.config_loader"]
-disable_error_code = ["comparison-overlap", "redundant-expr"]
+strict_equality_for_none = false
+disable_error_code = ["redundant-expr"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.config.tool_config_generator"]
-disable_error_code = ["comparison-overlap"]
+strict_equality_for_none = false
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.parsers.bandit.bandit_parser"]
 disable_error_code = ["unreachable"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.parsers.semgrep.semgrep_parser"]
-disable_error_code = ["comparison-overlap", "redundant-expr", "unreachable"]
+strict_equality_for_none = false
+disable_error_code = ["redundant-expr", "unreachable"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.parsers.streaming"]
 disable_error_code = ["redundant-expr"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.plugins.discovery"]
 disable_error_code = ["unreachable"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.plugins.subprocess_executor"]
 disable_error_code = ["redundant-expr", "unreachable"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.tools.core.tool_registry"]
 disable_error_code = ["unreachable"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.tools.pytest.collection"]
 disable_error_code = ["unreachable"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.tools.pytest.coverage_processor"]
-disable_error_code = ["comparison-overlap"]
+strict_equality_for_none = false
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.tools.pytest.definition"]
-disable_error_code = ["comparison-overlap", "redundant-expr"]
+strict_equality_for_none = false
+disable_error_code = ["redundant-expr"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.tools.pytest.output_parsers"]
 disable_error_code = ["unreachable"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.tools.pytest.test_analytics"]
 disable_error_code = ["redundant-expr"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.utils.async_tool_executor"]
 disable_error_code = ["redundant-expr", "unreachable"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.utils.config_priority"]
 disable_error_code = ["redundant-expr"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.utils.config_validation"]
 disable_error_code = ["redundant-expr"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.utils.environment.collectors"]
 disable_error_code = ["possibly-undefined"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.utils.execution.fix_retry"]
 disable_error_code = ["redundant-expr", "unreachable"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.utils.execution.result_shaping"]
-disable_error_code = ["comparison-overlap", "unreachable"]
+strict_equality_for_none = false
+disable_error_code = ["unreachable"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.utils.file_cache"]
 disable_error_code = ["possibly-undefined"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.utils.json_output"]
 disable_error_code = ["redundant-expr"]
 
-# #3022: remaining None-audit diagnostics; delete only.
 [[tool.mypy.overrides]]
 module = ["lintro.utils.native_parsers"]
-disable_error_code = ["comparison-overlap", "possibly-undefined", "unreachable"]
+strict_equality_for_none = false
+disable_error_code = ["possibly-undefined", "unreachable"]
 
 [tool.uv]
 # pydoclint (the `full` extra) depends on `docstring-parser-fork`; anthropic (the

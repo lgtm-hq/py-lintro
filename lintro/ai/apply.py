@@ -62,18 +62,19 @@ def _apply_fix(
             original_lines[-1] += "\n"
 
         # Validate line number before doing arithmetic.
-        if not isinstance(suggestion.line, int) or suggestion.line < 0:
+        line: object = suggestion.line
+        if not isinstance(line, int) or line < 0:
             logger.debug(
                 f"Invalid line {suggestion.line!r} for {suggestion.file}, skipping fix",
             )
             return False
 
         # line == 0 means "unspecified" — no line-targeted search possible.
-        if suggestion.line >= 1:
+        if line >= 1:
             # Search outward from the target line (closest match wins).
             # Clamp to last line when the AI reports a stale/out-of-range
             # number so the search radius still gets a chance.
-            target_idx = min(suggestion.line - 1, len(lines) - 1)  # 0-based
+            target_idx = min(line - 1, len(lines) - 1)  # 0-based
             search_order = [target_idx]
             for offset in range(1, search_radius + 1):
                 if target_idx - offset >= 0:
