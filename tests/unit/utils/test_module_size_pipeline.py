@@ -278,7 +278,7 @@ def test_measured_oversized_module_is_warning_only(
         monkeypatch: Pytest patch fixture.
         capsys: Captured gate warnings.
     """
-    (tmp_path / "large.py").write_bytes(b"# coding: latin-1\n# caf\xe9\n")
+    (tmp_path / "large.py").write_bytes(b"# coding: latin-1\n# tea\xe9\n")
     monkeypatch.setattr(gates, "load_module_size_config", lambda: {"threshold": 1})
     monkeypatch.setattr(gates, "load_lintro_tool_config", lambda _name: {})
     results: list[ToolResult] = []

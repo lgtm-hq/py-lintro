@@ -140,9 +140,9 @@ def test_unreadable_module_fails_gate(
     "content",
     [
         b"# valid first line\n\xff\n",
-        b"# coding: latin-1\nname = 'caf\xe9'\n",
-        b"# coding: latin-1\r\nname = 'caf\xe9'",
-        b"# coding: latin-1\rname = 'caf\xe9'\r",
+        b"# coding: latin-1\nname = 'tea\xe9'\n",
+        b"# coding: latin-1\r\nname = 'tea\xe9'",
+        b"# coding: latin-1\rname = 'tea\xe9'\r",
     ],
     ids=["malformed-utf8", "pep263", "crlf-unterminated", "cr"],
 )
