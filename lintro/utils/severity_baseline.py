@@ -8,6 +8,9 @@ than inside a ``run-*`` directory so run pruning never deletes it.
 Scope is a fingerprint of the sorted, normalised path arguments and the set
 of non-skipped tool names. The file maps each scope to its latest counts, so
 scoped runs preserve the full-run entry and each scope advances independently.
+At most 32 scopes are retained in last-write order. The latest full-path run
+(paths resolving to the working directory) is protected from eviction; other
+old scopes are discarded first. Reads do not refresh retention order.
 ``--diff`` and ``--incremental`` runs neither compare nor record baselines:
 their changing file subsets are not represented by this scope fingerprint.
 Older single-scope files are migrated on write. Legacy baselines without
@@ -16,6 +19,7 @@ run, restoring deltas automatically on the following run.
 
 Writers hold a persistent sibling file lock across reading, merging and
 atomically replacing the baseline. Readers see either complete version.
+Lock contention costs at most one second before the optional update is skipped.
 
 Every operation here is best-effort: a workspace with no baseline, an
 unreadable file, or a read-only directory must never fail a lint run. The
@@ -24,10 +28,12 @@ delta simply is not reported.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import sys
 import tempfile
+import time
 from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -37,11 +43,12 @@ from loguru import logger
 from lintro.models.core.severity_counts import SeverityCounts
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Callable, Iterator, Sequence
 
     from lintro.models.core.tool_result import ToolResult
 
 __all__ = [
+    "MAX_SEVERITY_BASELINE_SCOPES",
     "SEVERITY_BASELINE_FILENAME",
     "read_severity_baseline",
     "resolve_log_root",
@@ -50,13 +57,15 @@ __all__ = [
 ]
 
 SEVERITY_BASELINE_FILENAME: str = "severity-baseline.json"
+MAX_SEVERITY_BASELINE_SCOPES: int = 32
+_LOCK_TIMEOUT_SECONDS: float = 1.0
 
 
 def severity_baseline_scope(
     *,
     paths: Sequence[str],
     tool_results: Sequence[ToolResult],
-) -> str:
+) -> str | None:
     """Fingerprint the paths and tools measured by a run.
 
     Args:
@@ -64,10 +73,15 @@ def severity_baseline_scope(
         tool_results: Every result, including skipped placeholders.
 
     Returns:
-        str: Stable SHA-256 of sorted absolute paths and executed tool names.
+        str | None: Stable SHA-256 of sorted absolute paths and executed tool
+        names, or ``None`` when a path cannot be resolved.
     """
+    try:
+        resolved_paths = sorted({str(Path(path).resolve()) for path in paths})
+    except (OSError, ValueError, RuntimeError):
+        return None
     scope = {
-        "paths": sorted({str(Path(path).resolve()) for path in paths}),
+        "paths": resolved_paths,
         "tools": sorted({result.name for result in tool_results if not result.skipped}),
     }
     return hashlib.sha256(json.dumps(scope, sort_keys=True).encode("utf-8")).hexdigest()
@@ -155,26 +169,53 @@ def _parse_counts(data: object) -> SeverityCounts | None:
     return counts if data["total"] == counts.total else None
 
 
-def read_severity_baseline(base_dir: Path | str, scope: str) -> SeverityCounts | None:
+def read_severity_baseline(
+    base_dir: Path | str,
+    scope: str | None,
+) -> SeverityCounts | None:
     """Read the previous run's counts only for a matching scope.
 
     Args:
         base_dir: Root of the run-log directory (normally ``.lintro``).
-        scope: Fingerprint of the current run's paths and executed tools.
+        scope: Fingerprint of the current run, or ``None`` if incomparable.
 
     Returns:
         SeverityCounts | None: Recorded counts, or ``None`` for a missing,
         unreadable, legacy, or differently scoped baseline.
     """
+    if scope is None:
+        return None
     scopes = _read_baseline(_baseline_path(base_dir))
     if scopes is None:
         return None
     return _parse_counts(scopes.get(scope))
 
 
+def _acquire_baseline_lock(acquire: Callable[[], None]) -> None:
+    """Retry a nonblocking lock briefly, then leave persistence to another run.
+
+    Args:
+        acquire: Platform-specific nonblocking exclusive lock operation.
+
+    Raises:
+        OSError: Acquisition failed or contention outlasted the deadline.
+    """
+    deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
+    while True:
+        try:
+            acquire()
+            return
+        except OSError as exc:
+            if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                raise
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
+
+
 @contextmanager
 def _baseline_lock(path: Path) -> Iterator[None]:
-    """Lock a stable sibling file until the handle closes, including on error.
+    """Lock a stable sibling file and explicitly unlock it, including on error.
 
     Keep the lock file in place: unlinking it would let waiters and new
     writers lock different inodes after an atomic baseline replacement.
@@ -194,12 +235,65 @@ def _baseline_lock(path: Path) -> Iterator[None]:
                 handle.write("0")
                 handle.flush()
             handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            _acquire_baseline_lock(
+                lambda: msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1),
+            )
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
         else:
             import fcntl
 
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        yield
+            _acquire_baseline_lock(
+                lambda: fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB),
+            )
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _retained_scopes(
+    scopes: dict[str, Any],
+    scope: str,
+    counts: SeverityCounts,
+    *,
+    full_run: bool,
+) -> dict[str, Any]:
+    """Validate entries and cap last-write order, protecting the latest full run.
+
+    Args:
+        scopes: Previously stored entries in their persisted write order.
+        scope: Fingerprint to advance to the newest position.
+        counts: Current run's counts.
+        full_run: Whether this run measured the full working-directory path.
+
+    Returns:
+        dict[str, Any]: Valid, bounded entries in oldest-to-newest write order.
+    """
+    retained: dict[str, Any] = {}
+    for key, entry in scopes.items():
+        parsed = _parse_counts(entry)
+        if parsed is not None:
+            retained[key] = parsed.to_dict()
+            if entry.get("full_run") is True:
+                retained[key]["full_run"] = True
+    retained.pop(scope, None)
+    retained[scope] = counts.to_dict()
+    if full_run:
+        retained[scope]["full_run"] = True
+    latest_full = next(
+        (key for key in reversed(retained) if retained[key].get("full_run") is True),
+        None,
+    )
+    for key in tuple(retained):
+        if len(retained) <= MAX_SEVERITY_BASELINE_SCOPES:
+            break
+        if key != latest_full:
+            del retained[key]
+    return retained
 
 
 def _replace_baseline(path: Path, scopes: dict[str, Any]) -> None:
@@ -232,7 +326,9 @@ def _replace_baseline(path: Path, scopes: dict[str, Any]) -> None:
 def write_severity_baseline(
     base_dir: Path | str,
     counts: SeverityCounts,
-    scope: str,
+    scope: str | None,
+    *,
+    full_run: bool = False,
 ) -> None:
     """Record the current run's severity counts for the next run to compare.
 
@@ -242,14 +338,21 @@ def write_severity_baseline(
     Args:
         base_dir: Root of the run-log directory (normally ``.lintro``).
         counts: Severity tallies for the run that just finished.
-        scope: Fingerprint of the current run's paths and executed tools.
+        scope: Fingerprint of the current run, or ``None`` if incomparable.
+        full_run: Whether the paths resolve to the full working directory.
     """
+    if scope is None:
+        return
     path = _baseline_path(base_dir)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with _baseline_lock(path):
-            scopes = _read_baseline(path) or {}
-            scopes[scope] = counts.to_dict()
+            scopes = _retained_scopes(
+                _read_baseline(path) or {},
+                scope,
+                counts,
+                full_run=full_run,
+            )
             _replace_baseline(path, scopes)
     except OSError as exc:
         logger.debug(f"Failed to write severity baseline {path}: {exc}")

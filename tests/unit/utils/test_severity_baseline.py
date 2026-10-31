@@ -2,19 +2,27 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import multiprocessing
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
 from assertpy import assert_that
 
-from lintro.models.core.severity_counts import SeverityCounts
+from lintro.enums.action import Action
+from lintro.models.core.run_artifact import RunArtifact
+from lintro.models.core.severity_counts import SeverityCounts, SeverityDelta
 from lintro.models.core.tool_result import ToolResult
+from lintro.utils.execution.run_aggregation import finalize_artifact
+from lintro.utils.execution.run_context import RunContext
+from lintro.utils.execution.run_renderer import _record_severity_baseline
 from lintro.utils.severity_baseline import (
+    MAX_SEVERITY_BASELINE_SCOPES,
     SEVERITY_BASELINE_FILENAME,
     read_severity_baseline,
     resolve_log_root,
@@ -364,6 +372,190 @@ def test_matching_scope_updates_the_baseline(tmp_path: Path) -> None:
     )
 
 
+def test_retention_caps_scopes_and_preserves_the_latest_full_path_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Staged-file checks cannot evict the latest full-path measurement.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest fixture for choosing the working directory.
+    """
+    monkeypatch.chdir(tmp_path)
+    ctx = RunContext(
+        action=Action.CHECK,
+        selection_action=Action.CHECK,
+        dry_run_preview=False,
+        output_manager=_Manager(tmp_path / "logs"),
+        logger=None,
+        lintro_config=None,
+        clean_stdout_output=True,
+    )
+    results = [ToolResult(name="ruff", success=True)]
+    full = RunArtifact(
+        tool_results=results,
+        paths=(str(tmp_path), "."),
+        severity_counts=SeverityCounts(errors=7),
+    )
+    _record_severity_baseline(full, ctx=ctx)
+    for index in range(MAX_SEVERITY_BASELINE_SCOPES + 5):
+        _record_severity_baseline(
+            RunArtifact(
+                tool_results=results,
+                paths=(f"file-{index}.py",),
+                severity_counts=SeverityCounts(warnings=index),
+            ),
+            ctx=ctx,
+        )
+
+    path = tmp_path / "logs" / SEVERITY_BASELINE_FILENAME
+    scopes = json.loads(path.read_text(encoding="utf-8"))["scopes"]
+    assert_that(scopes).is_length(MAX_SEVERITY_BASELINE_SCOPES)
+    oldest = severity_baseline_scope(paths=["file-0.py"], tool_results=results)
+    assert_that(scopes).does_not_contain_key(oldest)
+    repeated = finalize_artifact(
+        ctx=ctx,
+        all_results=results,
+        total_issues=0,
+        total_fixed=0,
+        total_remaining=0,
+        paths=["."],
+    )
+    assert_that(repeated.previous_severity_counts).is_equal_to(full.severity_counts)
+    assert_that(repeated.severity_delta).is_equal_to(
+        SeverityDelta(errors=-7),
+    )
+
+
+def test_retention_uses_last_write_order_and_cleans_oversized_legacy_maps(
+    tmp_path: Path,
+) -> None:
+    """Updates refresh recency, reads do not, and invalid peers are removed.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    entries: dict[str, object] = {
+        f"scope-{index}": SeverityCounts(info=index).to_dict()
+        for index in range(MAX_SEVERITY_BASELINE_SCOPES + 3)
+    }
+    entries["invalid"] = {"error": -1}
+    entries["old-full"] = {**SeverityCounts(errors=4).to_dict(), "full_run": True}
+    path = tmp_path / SEVERITY_BASELINE_FILENAME
+    path.write_text(json.dumps({"scopes": entries}), encoding="utf-8")
+    assert_that(read_severity_baseline(tmp_path, "scope-1")).is_equal_to(
+        SeverityCounts(info=1),
+    )
+    write_severity_baseline(tmp_path, SeverityCounts(warnings=2), "scope-0")
+    retained = json.loads(path.read_text(encoding="utf-8"))["scopes"]
+    assert_that(retained).is_length(MAX_SEVERITY_BASELINE_SCOPES)
+    assert_that(retained).does_not_contain_key("invalid", "scope-1")
+    write_severity_baseline(
+        tmp_path,
+        SeverityCounts(errors=3),
+        "new-full",
+        full_run=True,
+    )
+    for index in range(MAX_SEVERITY_BASELINE_SCOPES - 2):
+        write_severity_baseline(tmp_path, SeverityCounts(info=index), f"new-{index}")
+
+    stored = json.loads(path.read_text(encoding="utf-8"))["scopes"]
+    assert_that(list(stored)).is_equal_to(
+        ["scope-0", "new-full"]
+        + [f"new-{index}" for index in range(MAX_SEVERITY_BASELINE_SCOPES - 2)],
+    )
+    assert_that(read_severity_baseline(tmp_path, "scope-0")).is_equal_to(
+        SeverityCounts(warnings=2),
+    )
+    assert_that(read_severity_baseline(tmp_path, "old-full")).is_none()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="uses a real POSIX held lock")
+def test_contended_lock_skips_update_without_losing_the_baseline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A held lock costs one update; releasing it lets the next run persist.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest fixture for shortening the contention deadline.
+    """
+    import fcntl
+
+    write_severity_baseline(tmp_path, SeverityCounts(errors=5), "prior")
+    path = tmp_path / SEVERITY_BASELINE_FILENAME
+    original = path.read_bytes()
+    monkeypatch.setattr("lintro.utils.severity_baseline._LOCK_TIMEOUT_SECONDS", 0)
+    with path.with_name(path.name + ".lock").open("a+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        write_severity_baseline(tmp_path, SeverityCounts(warnings=1), "next")
+        assert_that(path.read_bytes()).is_equal_to(original)
+    write_severity_baseline(tmp_path, SeverityCounts(warnings=1), "next")
+    assert_that(read_severity_baseline(tmp_path, "next")).is_equal_to(
+        SeverityCounts(warnings=1),
+    )
+
+
+@pytest.mark.parametrize("outcome", ["success", "replace-failure", "contended"])
+def test_windows_lock_releases_ownership_after_success_or_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+) -> None:
+    """Windows explicitly unlocks its byte and never unlocks another owner.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest fixture for emulating the Windows locking API.
+        outcome: Whether replacement succeeds, fails, or cannot acquire a lock.
+    """
+    write_severity_baseline(tmp_path, SeverityCounts(errors=6), "prior")
+    locked = outcome == "contended"
+
+    def locking(fd: int, operation: int, size: int) -> None:
+        """Emulate one lockable byte with observable ownership."""
+        nonlocal locked
+        assert_that((os.lseek(fd, 0, os.SEEK_CUR), size)).is_equal_to((0, 1))
+        if operation == 2:
+            if locked:
+                raise OSError(errno.EACCES, "lock already owned")
+            locked = True
+        elif operation == 0:
+            assert_that(locked).is_true()
+            locked = False
+        else:
+            raise AssertionError("lock acquisition must be nonblocking")
+
+    def refuse_replace(source: Path, target: Path) -> Path:
+        """Simulate a publication failure after the lock has been acquired."""
+        raise PermissionError(f"cannot replace {target} with {source}")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "platform", "win32")
+        patch.setitem(
+            sys.modules,
+            "msvcrt",
+            SimpleNamespace(LK_NBLCK=2, LK_UNLCK=0, locking=locking),
+        )
+        patch.setattr("lintro.utils.severity_baseline._LOCK_TIMEOUT_SECONDS", 0)
+        with patch.context() as failing:
+            if outcome == "replace-failure":
+                failing.setattr(Path, "replace", refuse_replace)
+            write_severity_baseline(tmp_path, SeverityCounts(info=2), "next")
+        assert_that(locked).is_equal_to(outcome == "contended")
+        assert_that(read_severity_baseline(tmp_path, "next")).is_equal_to(
+            SeverityCounts(info=2) if outcome == "success" else None,
+        )
+        locked = False
+        write_severity_baseline(tmp_path, SeverityCounts(info=3), "next")
+        assert_that(locked).is_false()
+    assert_that(read_severity_baseline(tmp_path, "next")).is_equal_to(
+        SeverityCounts(info=3),
+    )
+
+
 def test_legacy_baseline_has_no_comparable_scope(tmp_path: Path) -> None:
     """Unattributed legacy counts recover after one eligible measurement.
 
@@ -492,6 +684,53 @@ def test_scope_normalizes_paths_and_executed_tool_sets(
     )
 
     assert_that(actual).is_equal_to(expected)
+
+
+@pytest.mark.parametrize("failure", [OSError, ValueError, RuntimeError])
+def test_unresolvable_scope_leaves_counts_usable_and_baseline_unchanged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: type[Exception],
+) -> None:
+    """Path failures omit only the optional comparison and update.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest fixture for injecting path resolution failures.
+        failure: Filesystem, invalid-path or symlink-loop exception.
+    """
+    write_severity_baseline(tmp_path, SeverityCounts(errors=8), "prior")
+    path = tmp_path / SEVERITY_BASELINE_FILENAME
+    original = path.read_bytes()
+    ctx = RunContext(
+        action=Action.CHECK,
+        selection_action=Action.CHECK,
+        dry_run_preview=False,
+        output_manager=_Manager(tmp_path),
+        logger=None,
+        lintro_config=None,
+        clean_stdout_output=True,
+    )
+
+    def cannot_resolve(self: Path, strict: bool = False) -> Path:
+        """Fail path normalization as the real filesystem sometimes does."""
+        raise failure("unresolvable path")
+
+    monkeypatch.setattr(Path, "resolve", cannot_resolve)
+    artifact = finalize_artifact(
+        ctx=ctx,
+        all_results=[ToolResult(name="ruff", success=True)],
+        total_issues=0,
+        total_fixed=0,
+        total_remaining=0,
+        paths=["invalid\x00path"],
+    )
+    _record_severity_baseline(artifact, ctx=ctx)
+
+    assert_that(artifact.exit_code).is_equal_to(0)
+    assert_that(artifact.severity_counts).is_equal_to(SeverityCounts())
+    assert_that(artifact.previous_severity_counts).is_none()
+    assert_that(path.read_bytes()).is_equal_to(original)
 
 
 @pytest.mark.parametrize(

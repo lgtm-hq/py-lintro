@@ -675,7 +675,13 @@ def _record_severity_baseline(artifact: RunArtifact, *, ctx: RunContext) -> None
         paths=artifact.paths,
         tool_results=artifact.tool_results,
     )
-    write_severity_baseline(log_root, artifact.severity_counts, scope)
+    write_severity_baseline(
+        log_root,
+        artifact.severity_counts,
+        scope,
+        full_run=scope
+        == severity_baseline_scope(paths=["."], tool_results=artifact.tool_results),
+    )
 
 
 def render_run(
