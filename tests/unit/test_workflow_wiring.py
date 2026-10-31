@@ -157,6 +157,7 @@ def _evaluate_github_if(
     event_is_pull_request: bool | None = None,
     head_repo_not_fork: bool | None = None,
     pull_request_not_draft: bool | None = None,
+    context_conditions: dict[str, bool] | None = None,
 ) -> bool:
     """Evaluate a workflow ``if:`` expression for representative job results.
 
@@ -171,6 +172,8 @@ def _evaluate_github_if(
         .replace("always()", "True")
         .replace("!cancelled()", repr(not cancelled))
     )
+    for token, value in (context_conditions or {}).items():
+        expr = _replace_github_token(expr, token=token, replacement=repr(value))
     for job, result in results.items():
         expr = _replace_github_token(
             expr,
@@ -266,7 +269,7 @@ def test_version_pr_is_gated_on_a_green_tag_publish() -> None:
     # Fail open on a *missing* verdict: if the gate job dies before its script
     # writes the output, `== 'true'` would freeze every release. Only an
     # explicit `false` stops the version PR.
-    assert_that(_normalize_github_expr(version_pr["if"])).is_equal_to(
+    assert_that(_normalize_github_expr(version_pr["if"])).contains(
         "always() && needs.publish-gate.outputs.publish_green != 'false'",
     )
     # Read-only: the gate inspects run conclusions and touches nothing else.
@@ -296,6 +299,85 @@ def test_version_pr_is_gated_on_a_green_tag_publish() -> None:
     assert_that(_normalize_github_expr(str(gate_step["run"]))).is_equal_to(
         f'python3 {gate_script} "${{FORCE_FLAG}}"',
     )
+
+
+def test_version_pr_skips_an_unfinished_publish() -> None:
+    """The gate's active-publish verdict prevents calling the PR generator."""
+    workflow = _load_workflow(name="release-version-pr.yml")
+    condition = str(workflow["jobs"]["version-pr"]["if"])
+    assert_that(
+        _evaluate_github_if(
+            condition,
+            cancelled=False,
+            results={"publish-gate": "success"},
+            outputs={"publish-gate": {"publish_green": "false"}},
+            context_conditions={
+                "github.event_name != 'workflow_run'": True,
+                "github.event.workflow_run.event == 'push'": False,
+                "github.event.workflow_run.head_repository.full_name "
+                "== github.repository": False,
+            },
+        ),
+    ).is_false()
+
+
+def test_version_pr_resumes_after_tag_publication_completes() -> None:
+    """Publication completion starts fresh generation without another push."""
+    workflow = _load_workflow(name="release-version-pr.yml")
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    trigger = workflow["on"].get("workflow_run", {})
+
+    assert_that(trigger.get("workflows", [])).is_equal_to([publish["name"]])
+    assert_that(trigger.get("types", [])).is_equal_to(["completed"])
+    # Tag runs carry the tag as head_branch; a main branch filter loses them.
+    assert_that(trigger).does_not_contain_key("branches")
+    assert_that(trigger).does_not_contain_key("branches-ignore")
+    # workflow_run supplies current default-branch github.sha, not the completed
+    # publication's old head_sha. Keep the gate checkout on that default too.
+    checkout = next(
+        step
+        for step in workflow["jobs"]["publish-gate"]["steps"]
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+    )
+    assert_that(checkout["with"]).does_not_contain_key("ref")
+    assert_that(workflow["jobs"]["version-pr"]["with"]).does_not_contain_key("ref")
+
+
+@pytest.mark.parametrize(
+    ("event_name", "source_event", "same_repository", "allowed"),
+    [
+        ("workflow_run", "push", True, True),
+        ("workflow_run", "push", False, False),
+        ("workflow_run", "workflow_dispatch", True, False),
+        ("push", "", False, True),
+        ("workflow_dispatch", "", False, True),
+    ],
+)
+@pytest.mark.parametrize("publish_green", ["true", "false", ""])
+def test_version_pr_completion_checks_provenance_and_latest_gate(
+    event_name: str,
+    source_event: str,
+    same_repository: bool,
+    allowed: bool,
+    publish_green: str,
+) -> None:
+    """Completion cannot bypass the gate or trust checks, even on runner loss."""
+    workflow = _load_workflow(name="release-version-pr.yml")
+    condition = str(workflow["jobs"]["version-pr"]["if"])
+    assert_that(
+        _evaluate_github_if(
+            condition,
+            cancelled=False,
+            results={"publish-gate": "success" if publish_green else "failure"},
+            outputs={"publish-gate": {"publish_green": publish_green}},
+            context_conditions={
+                "github.event_name != 'workflow_run'": event_name != "workflow_run",
+                "github.event.workflow_run.event == 'push'": source_event == "push",
+                "github.event.workflow_run.head_repository.full_name "
+                "== github.repository": same_repository,
+            },
+        ),
+    ).is_equal_to(allowed and publish_green != "false")
 
 
 def _module_constant(*, script: Path, name: str) -> str:
