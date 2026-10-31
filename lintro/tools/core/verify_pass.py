@@ -111,6 +111,7 @@ __all__ = [
     "VerifyScope",
     "VerifyStatus",
     "capture_verify_baseline",
+    "check_answered",
     "fold_verify_results",
     "resolve_result_capability",
     "resolve_verify_scope",
@@ -869,6 +870,26 @@ def _fold_unknown(
     return mutation
 
 
+def check_answered(result: ToolResult | None) -> bool:
+    """Return whether a check measured its scope, including remaining findings.
+
+    Args:
+        result: The check result, or None when the tool could not run.
+
+    Returns:
+        True for a completed clean check or one reporting real findings.
+        Skips, empty scopes, timeouts (even with partial findings), and
+        execution failures without findings do not answer the check.
+    """
+    return (
+        result is not None
+        and not result.skipped
+        and not result.no_files
+        and not result.timed_out
+        and (result.success or bool(result.issues))
+    )
+
+
 def _fold_one(
     *,
     mutation: ToolResult,
@@ -904,16 +925,10 @@ def _fold_one(
     # particular looks like an answer — a multi-root aggregator returns the
     # findings the roots that finished produced — and is not one over the
     # scope.
-    check_answered = (
-        verify is not None
-        and not verify.skipped
-        and not verify.no_files
-        and not verify.timed_out
-        and (verify.success or bool(verify.issues))
-    )
+    answered = check_answered(verify)
     verified_paths = _verified_paths(
         scope=scope,
-        verify=verify if check_answered else None,
+        verify=verify if answered else None,
         fallback_cwd=mutation.cwd,
     )
     # A project-scoped CHECK answers over the tool's whole footprint, which
@@ -923,14 +938,14 @@ def _fold_one(
     # still have been rewritten, and a clean answered verdict re-examined
     # every file the tool could ever report on. Its pre-fix findings are
     # superseded wholesale — what its CHECK reports is the residual.
-    project_check_answered = check_answered and project_check
+    project_check_answered = answered and project_check
     survivors: list[BaseIssue] = [
         issue
         for issue in _pre_fix_issues(mutation)
         if not project_check_answered
         and _issue_path(issue, cwd=mutation.cwd) not in verified_paths
     ]
-    if check_answered and verify is not None and verify.issues:
+    if answered and verify is not None and verify.issues:
         # Only an answered CHECK contributes findings. A partial one — a
         # multi-root aggregator that timed out on one root — carries real
         # findings from the roots that finished, but every pre-fix finding is
