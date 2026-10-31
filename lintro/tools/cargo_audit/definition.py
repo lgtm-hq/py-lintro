@@ -205,7 +205,7 @@ class CargoAuditPlugin(BaseToolPlugin):
             success=overall_success,
             output=output if should_show_output else None,
             issues_count=len(issues),
-            issues=issues if issues else None,
+            issues=issues,
             parse_failures_count=parse_failures_count,
         )
 

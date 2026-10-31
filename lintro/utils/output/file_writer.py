@@ -53,7 +53,7 @@ if TYPE_CHECKING:
     from lintro.profiling.models import ProfileData
 
 
-def build_doc_url_map(all_results: Sequence[Any]) -> dict[str, str]:
+def build_doc_url_map(all_results: Sequence[ToolResult]) -> dict[str, str]:
     """Build a mapping of rule codes to documentation URLs from results.
 
     Iterates all issues across results and collects non-empty doc_url
@@ -67,10 +67,10 @@ def build_doc_url_map(all_results: Sequence[Any]) -> dict[str, str]:
     """
     doc_url_map: dict[str, str] = {}
     for result in all_results:
-        if hasattr(result, "issues") and result.issues:
+        if result.issues:
             for issue in result.issues:
                 code = issue.get_code()
-                url = str(getattr(issue, "doc_url", "") or "")
+                url = str(issue.doc_url or "")
                 if code and url:
                     doc_url_map[code] = url
     return doc_url_map
@@ -86,11 +86,7 @@ def _result_has_fix_split(result: ToolResult, action: Action) -> bool:
     Returns:
         True when action is FIX and pre-fix issues are available for display.
     """
-    return (
-        action == Action.FIX
-        and getattr(result, "initial_issues", None) is not None
-        and bool(result.initial_issues)
-    )
+    return action == Action.FIX and bool(result.initial_issues)
 
 
 def _render_markdown_issue_rows(issues: Sequence[BaseIssue]) -> list[str]:
@@ -104,11 +100,11 @@ def _render_markdown_issue_rows(issues: Sequence[BaseIssue]) -> list[str]:
     """
     rows: list[str] = []
     for issue in issues:
-        file_val = str(getattr(issue, "file", "") or "").replace("|", r"\|")
-        line_val = getattr(issue, "line", None) or 0
+        file_val = str(issue.file or "").replace("|", r"\|")
+        line_val = issue.line or 0
         code_val = issue.get_code().replace("|", r"\|")
-        msg_val = str(getattr(issue, "message", "") or "").replace("|", r"\|")
-        doc_url = str(getattr(issue, "doc_url", "") or "")
+        msg_val = str(issue.message or "").replace("|", r"\|")
+        doc_url = str(issue.doc_url or "")
         # Percent-encode pipes in the URL so they don't break the
         # markdown table, and keep the label ("docs") untouched since
         # it has no special chars to escape.
@@ -130,11 +126,11 @@ def _render_html_issue_rows(issues: Sequence[BaseIssue]) -> list[str]:
     """
     rows: list[str] = []
     for issue in issues:
-        f_val = html.escape(str(getattr(issue, "file", "") or ""))
-        l_val = html.escape(str(getattr(issue, "line", None) or 0))
+        f_val = html.escape(str(issue.file or ""))
+        l_val = html.escape(str(issue.line or 0))
         c_val = html.escape(issue.get_code())
-        m_val = html.escape(str(getattr(issue, "message", "") or ""))
-        doc_url = str(getattr(issue, "doc_url", "") or "")
+        m_val = html.escape(str(issue.message or ""))
+        doc_url = str(issue.doc_url or "")
         d_val = (
             f'<a href="{html.escape(doc_url, quote=True)}">docs</a>' if doc_url else ""
         )
@@ -160,7 +156,7 @@ def _merged_issues(result: ToolResult) -> list[BaseIssue]:
 
     Uses ``merge_detected_and_remaining(...)`` so every output format
     reports the same issues the JSON writer does. In check mode
-    ``initial_issues`` is None and the merged list equals ``result.issues``;
+    ``initial_issues`` is empty and the merged list equals ``result.issues``;
     in fix mode the merge deduplicates pre-fix and remaining issues.
 
     Args:
@@ -170,8 +166,8 @@ def _merged_issues(result: ToolResult) -> list[BaseIssue]:
         The merged/deduplicated issue list.
     """
     return merge_detected_and_remaining(
-        getattr(result, "initial_issues", None),
-        getattr(result, "issues", None),
+        result.initial_issues,
+        result.issues,
     )
 
 
@@ -221,11 +217,11 @@ def render_csv_report(all_results: Sequence[ToolResult]) -> str:
                     [
                         sanitize_csv_value(result.name),
                         sanitize_csv_value(str(merged_count)),
-                        sanitize_csv_value(str(getattr(issue, "file", "") or "")),
-                        sanitize_csv_value(str(getattr(issue, "line", None) or 0)),
+                        sanitize_csv_value(str(issue.file or "")),
+                        sanitize_csv_value(str(issue.line or 0)),
                         sanitize_csv_value(issue.get_code()),
-                        sanitize_csv_value(str(getattr(issue, "message", "") or "")),
-                        sanitize_csv_value(str(getattr(issue, "doc_url", "") or "")),
+                        sanitize_csv_value(str(issue.message or "")),
+                        sanitize_csv_value(str(issue.doc_url or "")),
                     ],
                 )
         else:
@@ -267,12 +263,12 @@ def render_markdown_report(
         issues_count = _merged_issue_count(result)
         lines.append(f"### {result.name} ({issues_count} issues)")
         if _result_has_fix_split(result, action):
-            initial = list(result.initial_issues or [])
+            initial = list(result.initial_issues)
             lines.append(f"#### Detected issues ({len(initial)})")
             lines.append(_MARKDOWN_ISSUES_HEADER)
             lines.extend(_render_markdown_issue_rows(initial))
             lines.append("")
-            remaining = list(result.issues or [])
+            remaining = list(result.issues)
             if remaining:
                 lines.append(f"#### Remaining issues ({len(remaining)})")
                 lines.append(_MARKDOWN_ISSUES_HEADER)
@@ -281,14 +277,14 @@ def render_markdown_report(
             else:
                 lines.append("#### All issues were auto-fixed.")
                 lines.append("")
-            tool_output = getattr(result, "output", "") or ""
+            tool_output = result.output or ""
             if tool_output.strip():
                 lines.append("#### Tool output")
                 lines.append("```")
                 lines.append(tool_output.strip())
                 lines.append("```")
                 lines.append("")
-        elif hasattr(result, "issues") and result.issues:
+        elif result.issues:
             lines.append(_MARKDOWN_ISSUES_HEADER)
             lines.extend(_render_markdown_issue_rows(result.issues))
             lines.append("")
@@ -425,12 +421,12 @@ def write_output_file(
                 f"<h3>{html.escape(result.name)} ({issues_count} issues)</h3>",
             )
             if _result_has_fix_split(result, action):
-                initial = list(result.initial_issues or [])
+                initial = list(result.initial_issues)
                 html_lines.append(f"<h4>Detected issues ({len(initial)})</h4>")
                 html_lines.append(_HTML_ISSUES_HEADER)
                 html_lines.extend(_render_html_issue_rows(initial))
                 html_lines.append("</table>")
-                remaining = list(result.issues or [])
+                remaining = list(result.issues)
                 if remaining:
                     html_lines.append(
                         f"<h4>Remaining issues ({len(remaining)})</h4>",
@@ -440,11 +436,11 @@ def write_output_file(
                     html_lines.append("</table>")
                 else:
                     html_lines.append("<p>All issues were auto-fixed.</p>")
-                tool_output = getattr(result, "output", "") or ""
+                tool_output = result.output or ""
                 if tool_output.strip():
                     html_lines.append("<h4>Tool output</h4>")
                     html_lines.append(f"<pre>{html.escape(tool_output.strip())}</pre>")
-            elif hasattr(result, "issues") and result.issues:
+            elif result.issues:
                 html_lines.append(_HTML_ISSUES_HEADER)
                 html_lines.extend(_render_html_issue_rows(result.issues))
                 html_lines.append("</table>")
@@ -478,18 +474,18 @@ def write_output_file(
             lines.append(f"{result.name}: {issues_count} issues")
             if _result_has_fix_split(result, action):
                 split_output = format_fix_results(
-                    detected_issues=list(result.initial_issues or []),
+                    detected_issues=list(result.initial_issues),
                     remaining_issues=list(result.issues) if result.issues else None,
                     output_format=output_format,
                     tool_name=result.name,
                 )
                 if split_output and split_output.strip():
                     lines.append(split_output.strip())
-                tool_output = getattr(result, "output", "") or ""
+                tool_output = result.output or ""
                 if tool_output.strip():
                     lines.append(tool_output.strip())
             else:
-                output_text = getattr(result, "output", "")
+                output_text = result.output
                 if output_text and output_text.strip():
                     lines.append(output_text.strip())
             lines.append("")

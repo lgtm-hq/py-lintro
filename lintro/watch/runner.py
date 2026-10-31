@@ -187,7 +187,7 @@ class WatchRunner:
             status = "✅ passed"
         self.emit(f"  ├─ {result.name}: {status}{duration}")
 
-        for issue in result.issues or ():
+        for issue in result.issues:
             location = self._display_path(issue.file) if issue.file else ""
             if issue.line:
                 location = (

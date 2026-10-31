@@ -18,6 +18,7 @@ import pytest
 from assertpy import assert_that
 from loguru import logger
 
+from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.clippy.clippy_issue import ClippyIssue
 from lintro.parsers.oxfmt.oxfmt_parser import parse_oxfmt_output
 from lintro.plugins.base import BaseToolPlugin, PreparedExecution
@@ -204,6 +205,50 @@ def test_batch_fix_scores_the_difference_between_the_two_checks(
     assert_that(result.output).contains("All issues were successfully auto-fixed")
 
 
+@pytest.mark.parametrize("always_report", [False, True])
+@pytest.mark.parametrize("initial_output", ["", OXFMT_DIFFERENT])
+def test_deprecated_initial_issues_policy_keyword_is_a_noop(
+    always_report: bool,
+    initial_output: str,
+    ts_file: Path,
+) -> None:
+    """Legacy plugin constructors keep working with either keyword value.
+
+    Args:
+        always_report: Deprecated keyword value supplied by an existing plugin.
+        initial_output: Initial check output with zero or one finding.
+        ts_file: File the batch formatter processes.
+    """
+    plugin = OxfmtPlugin()
+    policy = BatchFixPolicy(always_report_initial_issues=always_report)
+    with patch.object(
+        plugin,
+        "_run_subprocess_result",
+        side_effect=[
+            SubprocessResult(0, initial_output, "", initial_output),
+            SubprocessResult(0, "", "", ""),
+            SubprocessResult(0, "", "", ""),
+        ],
+    ):
+        ctx = plugin.prepare([str(ts_file)], {})
+        assert not isinstance(ctx, ToolResult)
+        result = run_batch_fix(
+            ctx,
+            plugin=plugin,
+            commands=BatchCommands(check=["oxfmt", "--check"], fix=["oxfmt"]),
+            parse=lambda output: parse_oxfmt_output(output=output),
+            policy=policy,
+        )
+
+    detected = parse_oxfmt_output(output=initial_output)
+    assert_that(result.initial_issues).is_equal_to(detected)
+    assert_that(result.initial_issues_count).is_equal_to(len(detected))
+    assert_that(result.fixed_issues_count).is_equal_to(len(detected))
+    assert_that(result.remaining_issues_count).is_zero()
+    assert_that(result.issues).is_empty()
+    assert_that(result.success).is_true()
+
+
 def test_a_fix_timeout_keeps_the_pre_fix_issues(ts_file: Path) -> None:
     """Issues detected before the timeout are reported as still remaining.
 
@@ -351,12 +396,10 @@ def test_an_unexpected_fix_stage_exit_preserves_the_report_as_unknown(
 @pytest.mark.parametrize("failed_stage", [0, 1, 2], ids=["precheck", "fix", "verify"])
 @pytest.mark.parametrize("initial_count", [0, 3])
 @pytest.mark.parametrize("report_initial", [False, True])
-@pytest.mark.parametrize("always_report_initial", [False, True])
 def test_failed_fix_preserves_initial_accounting_and_reporting(
     failed_stage: int,
     initial_count: int,
     report_initial: bool,
-    always_report_initial: bool,
     ts_file: Path,
 ) -> None:
     """A failed stage's findings cannot replace the pre-fix count or list policy.
@@ -365,7 +408,6 @@ def test_failed_fix_preserves_initial_accounting_and_reporting(
         failed_stage: Stage returning one finding and an execution error.
         initial_count: Number of findings from a successful pre-check.
         report_initial: Whether to include initial findings in the issue list.
-        always_report_initial: Whether to retain an empty initial list.
         ts_file: File identifying the execution directory.
     """
     initial_output = "app.ts\nsecond.ts\nthird.ts\n" if initial_count else ""
@@ -392,7 +434,6 @@ def test_failed_fix_preserves_initial_accounting_and_reporting(
             policy=BatchFixPolicy(
                 findings_exit_codes=(1,),
                 report_initial_issues=report_initial,
-                always_report_initial_issues=always_report_initial,
             ),
         )
 
@@ -401,7 +442,7 @@ def test_failed_fix_preserves_initial_accounting_and_reporting(
     assert_that(result.output).is_equal_to(OXFMT_DIFFERENT)
     assert_that(result.initial_issues_count).is_equal_to(len(expected_initial))
     assert_that(result.initial_issues).is_equal_to(
-        expected_initial if expected_initial or always_report_initial else None,
+        expected_initial,
     )
     assert_that(result.remaining_issues_count).is_none()
     assert_that(result.issues_count).is_equal_to(len(expected_initial))
@@ -433,7 +474,6 @@ def test_prettier_keeps_mixed_warnings_and_errors(ts_file: Path) -> None:
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
-    assert result.issues is not None
     assert_that(result.issues[0].file).is_equal_to("app.css")
     assert_that(result.output).is_equal_to(output)
 

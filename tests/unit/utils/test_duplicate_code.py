@@ -63,7 +63,7 @@ def _pylint_result(*issues: PylintIssue) -> ToolResult:
         name="pylint",
         success=not issues,
         issues_count=len(issues),
-        issues=list(issues) or None,
+        issues=list(issues),
         metadata={PYLINT_ANALYSED_METADATA_KEY: True},
     )
 
@@ -118,7 +118,7 @@ def test_count_below_baseline_passes_and_strips_findings() -> None:
     assert_that(verdict.exceeded).is_false()
     assert_that(verdict.message).contains("within baseline 3")
     assert_that(result.issues_count).is_equal_to(0)
-    assert_that(result.issues).is_none()
+    assert_that(result.issues).is_empty()
     assert_that(result.success).is_true()
 
 
@@ -157,7 +157,6 @@ def test_non_duplicate_findings_are_left_alone() -> None:
     assert_that(verdict.count).is_equal_to(1)
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.success).is_false()
-    assert result.issues is not None  # narrow type for mypy
     assert_that(result.issues[0].get_code()).is_equal_to("C0116")
 
 

@@ -231,10 +231,10 @@ class AsyncToolExecutor:
             except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
                 raise
             except BaseException as exc:
-                logger.error(f"Tool {name} failed with exception: {exc}")
+                logger.exception(f"Tool {name} failed with exception: {exc}")
                 return _make_failed_result(
                     name=name,
-                    message=f"Parallel execution failed: {exc}",
+                    message=f"Parallel execution failed: {type(exc).__name__}: {exc}",
                     duration_seconds=time.monotonic() - started_at[name],
                 )
             if on_result:

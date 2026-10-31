@@ -187,10 +187,10 @@ def test_summary_attachment_summary_attached_to_all_results_with_issues(
     assert_that(result_b.metadata).is_not_none()
     assert_that(result_a.metadata).contains_key("summary")
     assert_that(result_b.metadata).contains_key("summary")
-    assert_that(result_a.metadata["summary"]["overview"]).is_equal_to(  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result_a.metadata["summary"]["overview"]).is_equal_to(
         "overview",
     )
-    assert_that(result_b.metadata["summary"]["overview"]).is_equal_to(  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result_b.metadata["summary"]["overview"]).is_equal_to(
         "overview",
     )
 
@@ -297,6 +297,6 @@ def test_integration_orchestrator_end_to_end_check_with_real_summary_generation(
 
     assert_that(result.metadata).is_not_none()
     assert_that(result.metadata).contains_key("summary")
-    assert_that(result.metadata["summary"]["overview"]).is_equal_to(  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.metadata["summary"]["overview"]).is_equal_to(
         "Found 1 issue",
     )

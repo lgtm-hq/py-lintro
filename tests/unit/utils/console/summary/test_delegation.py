@@ -20,7 +20,7 @@ from tests.unit.utils.console.conftest import patch_tty_streams
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.unit.utils.conftest import FakeToolResult
+    from lintro.models.core.tool_result import ToolResult
 
 
 # =============================================================================
@@ -29,17 +29,17 @@ if TYPE_CHECKING:
 
 
 def test_print_summary_table_renders_a_row_per_tool(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The summary table renders the tool name, status and issue count.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
-    results = [fake_tool_result_factory(success=False, issues_count=3)]
+    results = [tool_result_factory(success=False, issues_count=3)]
 
     logger._print_summary_table(Action.CHECK, results)
 
@@ -50,21 +50,21 @@ def test_print_summary_table_renders_a_row_per_tool(
 
 
 def test_print_summary_table_accepts_a_string_action(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A string action renders the same table as the matching enum value.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
 
-    logger._print_summary_table(Action.CHECK, [fake_tool_result_factory()])
+    logger._print_summary_table(Action.CHECK, [tool_result_factory()])
     from_enum = capsys.readouterr().out
 
-    logger._print_summary_table("check", [fake_tool_result_factory()])
+    logger._print_summary_table("check", [tool_result_factory()])
     from_string = capsys.readouterr().out
 
     assert_that(from_string).is_equal_to(from_enum)
@@ -80,7 +80,7 @@ def test_print_summary_table_accepts_a_string_action(
     ],
 )
 def test_print_summary_table_action_normalization(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     action_str: str,
     expected_action: Action,
     capsys: pytest.CaptureFixture[str],
@@ -88,17 +88,17 @@ def test_print_summary_table_action_normalization(
     """Every accepted action spelling renders its normalized enum's table.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         action_str: String representation of the action.
         expected_action: Expected Action enum value.
         capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
 
-    logger._print_summary_table(expected_action, [fake_tool_result_factory()])
+    logger._print_summary_table(expected_action, [tool_result_factory()])
     from_enum = capsys.readouterr().out
 
-    logger._print_summary_table(action_str, [fake_tool_result_factory()])
+    logger._print_summary_table(action_str, [tool_result_factory()])
     from_string = capsys.readouterr().out
 
     assert_that(from_string).is_equal_to(from_enum)
@@ -430,17 +430,17 @@ def test_print_ascii_art_is_suppressed_on_a_non_tty(
 
 
 def test_execution_summary_outputs_header_and_border(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The execution summary opens with its styled header and border.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
-    results = [fake_tool_result_factory(success=True, issues_count=0)]
+    results = [tool_result_factory(success=True, issues_count=0)]
 
     logger.print_execution_summary(Action.CHECK, results)
 
@@ -450,17 +450,17 @@ def test_execution_summary_outputs_header_and_border(
 
 
 def test_execution_summary_renders_both_tables(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The summary carries the per-tool table and the totals table together.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
-    results = [fake_tool_result_factory(success=True, issues_count=3)]
+    results = [tool_result_factory(success=True, issues_count=3)]
 
     logger.print_execution_summary(Action.CHECK, results)
 
@@ -493,19 +493,19 @@ def test_execution_summary_empty_results_report_zero_totals(
     [Action.CHECK, Action.FIX, Action.TEST],
 )
 def test_execution_summary_all_action_types(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     action: Action,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """CHECK, FIX and TEST all produce a complete summary without errors.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         action: Action type to test.
         capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
-    results = [fake_tool_result_factory(success=True, issues_count=0)]
+    results = [tool_result_factory(success=True, issues_count=0)]
 
     logger.print_execution_summary(action, results)
 

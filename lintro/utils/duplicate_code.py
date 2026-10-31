@@ -127,9 +127,9 @@ def _was_analysed(*, result: ToolResult) -> bool:
     Returns:
         bool: True when pylint actually analysed files and reported back.
     """
-    if getattr(result, "skipped", False):
+    if result.skipped:
         return False
-    metadata = result.metadata or {}
+    metadata = result.metadata
     return bool(metadata.get(PYLINT_ANALYSED_METADATA_KEY, False))
 
 
@@ -146,13 +146,13 @@ def _strip_duplicate_code_issues(*, result: ToolResult) -> int:
     Returns:
         int: Number of duplicate-code findings removed.
     """
-    issues = list(result.issues or ())
+    issues = list(result.issues)
     duplicates = [issue for issue in issues if is_duplicate_code_issue(issue)]
     if not duplicates:
         return 0
 
     remaining = [issue for issue in issues if not is_duplicate_code_issue(issue)]
-    result.issues = remaining or None
+    result.issues = remaining
     result.issues_count = max(result.issues_count - len(duplicates), len(remaining))
     if result.issues_count == 0:
         result.success = True

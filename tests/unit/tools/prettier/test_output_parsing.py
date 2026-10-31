@@ -48,5 +48,5 @@ def test_check_parses_prettier_output_correctly(
         assert_that(result.success).is_false()
         assert_that(result.issues_count).is_equal_to(2)
         assert_that(result.issues).is_not_none()
-        assert_that(result.issues[0].file).is_equal_to("file1.js")  # type: ignore[index]  # validated via is_not_none
-        assert_that(result.issues[1].file).is_equal_to("file2.js")  # type: ignore[index]  # validated via is_not_none
+        assert_that(result.issues[0].file).is_equal_to("file1.js")
+        assert_that(result.issues[1].file).is_equal_to("file2.js")

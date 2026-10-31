@@ -18,6 +18,7 @@ class TaploIssue(BaseIssue):
 
     Attributes:
         DISPLAY_FIELD_MAP: Mapping of display field names to attribute names.
+        PREVIEW_FIXABLE: Preserve format previews without claiming lint fixes.
         level: Severity level (error, warning).
         code: Rule code (e.g., invalid_value, expected_table_array).
     """
@@ -26,6 +27,7 @@ class TaploIssue(BaseIssue):
         **BaseIssue.DISPLAY_FIELD_MAP,
         "severity": "level",
     }
+    PREVIEW_FIXABLE: ClassVar[bool] = True
 
     level: str = field(default="error")
     code: str = field(default="")

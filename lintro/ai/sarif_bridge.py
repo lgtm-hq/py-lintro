@@ -59,8 +59,6 @@ def suggestions_from_results(
     """
     suggestions: list[AIFixSuggestion] = []
     for result in all_results:
-        if result.metadata is None:
-            continue
         raw_suggestions = result.metadata.get("fix_suggestions", [])
         if not isinstance(raw_suggestions, list):
             continue
@@ -106,8 +104,6 @@ def summary_from_results(
         Reconstructed AISummary, or None if no summary metadata is found.
     """
     for result in all_results:
-        if result.metadata is None:
-            continue
         raw_summary: dict[str, Any] | None = result.metadata.get("summary")
         if not isinstance(raw_summary, dict):
             continue

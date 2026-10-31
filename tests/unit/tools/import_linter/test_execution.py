@@ -42,7 +42,6 @@ def test_check_reports_broken_chain(
     assert_that(result.name).is_equal_to("import-linter")
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
-    assert result.issues is not None  # narrow type for mypy
     assert_that(result.issues[0].message).contains("layered.compat -> layered.api")
 
 
@@ -73,7 +72,7 @@ def test_check_clean_project_succeeds(
     assert_that(run.called).is_true()
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
-    assert_that(result.issues).is_none()
+    assert_that(result.issues).is_empty()
 
 
 def test_check_runs_once_regardless_of_file_count(

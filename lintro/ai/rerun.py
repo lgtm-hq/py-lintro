@@ -111,7 +111,7 @@ def apply_rerun_results(
         if rerun is None or not check_answered(rerun):
             continue
 
-        refreshed_issues = list(rerun.issues) if rerun.issues is not None else []
+        refreshed_issues = list(rerun.issues)
         # Preserve native fix counters — only update remaining issues
         # and issue list. The initial/fixed counts reflect what the native
         # tool originally reported and should not be zeroed.

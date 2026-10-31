@@ -438,7 +438,7 @@ def _advisory_failure_error(results: list[ToolResult]) -> AIError:
         in {ToolRunStatus.ERRORED, ToolRunStatus.TIMED_OUT}
     )
     message = failed.output or f"{failed.name} failed"
-    metadata = failed.metadata or {}
+    metadata = failed.metadata
     if metadata.get(ADVISORY_ERROR_METADATA_KEY) == (ADVISORY_ERROR_PROVIDER_REQUIRED):
         return AIProviderRequiredError(message)
     return AIError(message)

@@ -51,7 +51,6 @@ def test_check_reports_duplicate_code(
     assert_that(result.name).is_equal_to("pylint")
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
-    assert result.issues is not None  # narrow type for mypy
     issue = result.issues[0]
     assert_that(issue.get_code()).is_equal_to("R0801")
     assert_that(issue.message).contains("Similar lines in 2 files", "==first:[12:27]")
@@ -89,7 +88,7 @@ def test_check_clean_report_succeeds(
     assert_that(run.called).is_true()
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
-    assert_that(result.issues).is_none()
+    assert_that(result.issues).is_empty()
     assert_that(result.output).is_none()
 
 
@@ -140,7 +139,7 @@ def test_check_nonzero_empty_report_is_visible_failure(
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_zero()
-    assert_that(result.issues).is_none()
+    assert_that(result.issues).is_empty()
     assert_that(result.parse_failures_count).is_none()
     assert_that(result.output).contains(f"status {returncode}", "fail-under")
     if stderr:

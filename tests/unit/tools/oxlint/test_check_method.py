@@ -61,7 +61,7 @@ def test_check_with_issues(oxlint_plugin: OxlintPlugin, tmp_path: Path) -> None:
         assert_that(result.success).is_false()
         assert_that(result.issues_count).is_equal_to(1)
         assert_that(result.issues).is_not_none()
-        issue = cast(OxlintIssue, result.issues[0])  # type: ignore[index]  # validated via is_not_none
+        issue = cast(OxlintIssue, result.issues[0])
         assert_that(issue.code).is_equal_to("eslint(no-unused-vars)")
 
 

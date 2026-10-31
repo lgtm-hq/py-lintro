@@ -237,7 +237,7 @@ def test_check_no_vulnerabilities(
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.parse_failures_count).is_equal_to(0)
-    assert_that(result.issues).is_none()
+    assert_that(result.issues).is_empty()
     assert_that(result.output).is_none()
 
 

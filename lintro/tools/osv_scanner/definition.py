@@ -472,7 +472,7 @@ class OsvScannerPlugin(BaseToolPlugin):
             success=overall_success,
             output=output if should_show_output else None,
             issues_count=len(issues),
-            issues=issues if issues else None,
+            issues=issues,
             metadata=suppression_metadata,
             parse_failures_count=parse_failures_count,
         )
@@ -483,7 +483,7 @@ class OsvScannerPlugin(BaseToolPlugin):
         timeout: float,
         options: dict[str, object],
         paths: list[str] | None = None,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, Any]:
         """Run a probe scan to classify suppression entries.
 
         Skipped when check_suppressions is disabled or no config file
@@ -498,22 +498,22 @@ class OsvScannerPlugin(BaseToolPlugin):
                 looking active (#1725).
 
         Returns:
-            Metadata dict with suppression classifications, or None.
+            Suppression classifications, or an empty dict when unavailable.
         """
         check = options.get(
             "check_suppressions",
             self.options.get("check_suppressions", True),
         )
         if not check:
-            return None
+            return {}
 
         config_path = self._find_config_file(scan_root)
         if config_path is None:
-            return None
+            return {}
 
         entries = parse_suppressions(config_path)
         if not entries:
-            return None
+            return {}
 
         # Run osv-scanner without suppressions to see all vulnerabilities
         probe_cmd = self._build_probe_command(scan_root)
@@ -525,7 +525,7 @@ class OsvScannerPlugin(BaseToolPlugin):
             )
         except subprocess.TimeoutExpired:
             logger.debug("[osv-scanner] Probe scan timed out, skipping staleness check")
-            return None
+            return {}
 
         parsed_probe_issues = parse_osv_scanner_output(probe.stdout)
 
@@ -541,7 +541,7 @@ class OsvScannerPlugin(BaseToolPlugin):
                 "[osv-scanner] Probe scan failed with no parseable output, "
                 "skipping staleness check",
             )
-            return None
+            return {}
 
         probe_issues = self.filter_excluded_issues(
             issues=parsed_probe_issues,
