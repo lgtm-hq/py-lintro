@@ -300,7 +300,12 @@ async def test_malformed_adversarial_answer_degrades_coverage(
             side_effect=[
                 _questions_response(),
                 _main_pass_response(),
-                _response(content=content),
+                replace(
+                    _response(content=content),
+                    input_tokens=101,
+                    output_tokens=37,
+                    cost_estimate=0.07,
+                ),
             ],
         ),
     )
@@ -318,6 +323,10 @@ async def test_malformed_adversarial_answer_degrades_coverage(
     )
     assert_that(result.metadata.chunks_reviewed).is_equal_to(1)
     assert_that(result.metadata.partial).is_false()
+    assert_that(result.metadata.token_usage).is_equal_to(
+        {"prompt": 121, "completion": 77, "total": 198, "context": 0},
+    )
+    assert_that(result.metadata.cost_estimate_usd).is_close_to(0.09, 1e-9)
 
 
 async def test_degraded_sweep_warns_on_every_surface(
@@ -534,10 +543,10 @@ async def test_cost_budget_exceeded_in_the_sweep_still_aborts(
     ).is_empty()
 
 
-async def test_a_clean_depth_three_run_records_no_degradation(
+async def test_valid_empty_adversarial_answer_completes_sweep_and_keeps_usage(
     tmp_path: Path,
 ) -> None:
-    """A run whose extra passes all succeed is unchanged by #2395.
+    """An explicit empty findings array completes the sweep and keeps its usage.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
@@ -568,6 +577,14 @@ async def test_a_clean_depth_three_run_records_no_degradation(
     assert_that(result.metadata.findings_coverage_complete).is_true()
     assert_that(result.metadata.coverage_degradations).is_empty()
     assert_that(result.metadata.partial).is_false()
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(1)
+    assert_that([finding.title for finding in result.findings]).is_equal_to(
+        ["Main-pass finding"],
+    )
+    assert_that(result.metadata.token_usage).is_equal_to(
+        {"prompt": 30, "completion": 60, "total": 90, "context": 0},
+    )
+    assert_that(result.metadata.cost_estimate_usd).is_close_to(0.03, 1e-9)
 
 
 def _classifier() -> ModuleType:
