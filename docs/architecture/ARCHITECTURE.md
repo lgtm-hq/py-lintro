@@ -119,7 +119,9 @@ class ToolResult:
     name: str                              # Tool name
     success: bool                          # Did execution succeed?
     issues_count: int                      # Total issues found
-    issues: Sequence[BaseIssue] | None     # Issue details
+    issues: Sequence[BaseIssue]            # Issue details; defaults to ()
+    initial_issues: Sequence[BaseIssue]    # Pre-fix details; defaults to ()
+    metadata: dict[str, Any]              # Tool metadata; defaults to {}
     initial_issues_count: int | None       # Before fixes (if applicable)
     fixed_issues_count: int | None         # Issues auto-fixed
     remaining_issues_count: int | None     # After fixes

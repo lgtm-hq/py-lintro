@@ -121,7 +121,6 @@ def test_check_reports_parsed_issues(
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
     issues = result.issues
-    assert issues is not None  # narrow type for mypy
     first_issue = issues[0]
     assert isinstance(first_issue, ClippyIssue)  # narrow type for mypy
     assert_that(first_issue.code).is_equal_to("clippy::needless_return")

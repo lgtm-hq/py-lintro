@@ -147,6 +147,6 @@ def test_check_timeout_keeps_parsed_lint_issues(
     assert_that(result.timed_out).is_true()
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.issues).is_not_none()
-    codes = [cast(BufIssue, issue).code for issue in result.issues]  # type: ignore[union-attr]
+    codes = [cast(BufIssue, issue).code for issue in result.issues]
     assert_that(codes).contains("PACKAGE_LOWER_SNAKE_CASE")
     assert_that(codes).does_not_contain("TIMEOUT")

@@ -8,6 +8,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.action import Action
+from lintro.models.core.tool_result import ToolResult
 from lintro.utils.console import ThreadSafeConsoleLogger, create_logger
 
 
@@ -46,42 +47,21 @@ def test_create_logger_and_basic_methods(
         action=Action.CHECK,
     )
 
-    class Result:
-        def __init__(
-            self,
-            name: str,
-            issues_count: int,
-            success: bool,
-            output: str = "",
-        ) -> None:
-            self.name = name
-            self.issues_count = issues_count
-            self.success = success
-            self.output = output
-
     logger.print_execution_summary(
         action=Action.CHECK,
-        tool_results=[Result("ruff", 1, False)],
+        tool_results=[ToolResult(name="ruff", issues_count=1, success=False)],
     )
-
-    class FmtResult:
-        def __init__(
-            self,
-            name: str,
-            fixed: int,
-            remaining: int,
-            success: bool = True,
-            output: str = "",
-        ) -> None:
-            self.name = name
-            self.fixed_issues_count = fixed
-            self.remaining_issues_count = remaining
-            self.success = success
-            self.output = output
 
     logger.print_execution_summary(
         action=Action.FIX,
-        tool_results=[FmtResult("ruff", fixed=2, remaining=0, success=True)],
+        tool_results=[
+            ToolResult(
+                name="ruff",
+                fixed_issues_count=2,
+                remaining_issues_count=0,
+                success=True,
+            ),
+        ],
     )
     logger.save_console_log()
     assert_that((tmp_path / "console.log").exists()).is_true()
@@ -106,22 +86,11 @@ def test_summary_marks_fail_on_tool_failure(
     """
     logger = create_logger(run_dir=tmp_path, verbose=False, raw_output=False)
 
-    class Result:
-        def __init__(
-            self,
-            name: str,
-            issues_count: int,
-            success: bool,
-            output: str = "",
-        ) -> None:
-            self.name = name
-            self.issues_count = issues_count
-            self.success = success
-            self.output = output
-
     logger.print_execution_summary(
         action=Action.CHECK,
-        tool_results=[Result("bandit", 0, False, output="Failed to parse")],
+        tool_results=[
+            ToolResult(name="bandit", success=False, output="Failed to parse"),
+        ],
     )
     out = capsys.readouterr().out
     assert_that(out).contains("FAIL")

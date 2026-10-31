@@ -74,7 +74,7 @@ def test_check_with_issues(vale_plugin: ValePlugin, tmp_path: Path) -> None:
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.issues).is_not_none()
-    issue = cast(ValeIssue, result.issues[0])  # type: ignore[index]
+    issue = cast(ValeIssue, result.issues[0])
     assert_that(issue.check).is_equal_to("Vale.Repetition")
     assert_that(issue.style).is_equal_to("Vale")
 

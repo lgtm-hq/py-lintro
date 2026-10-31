@@ -122,7 +122,7 @@ def test_check_with_issues(
     assert_that(result.name).is_equal_to("html_validate")
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
-    issue = cast(HtmlValidateIssue, result.issues[0])  # type: ignore[index]
+    issue = cast(HtmlValidateIssue, result.issues[0])
     assert_that(issue.code).is_equal_to("wcag/h37")
     assert_that(issue.severity).is_equal_to("error")
     assert_that(issue.line).is_equal_to(5)

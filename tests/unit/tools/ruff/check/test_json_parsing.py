@@ -42,14 +42,14 @@ def test_execute_ruff_check_parses_json_output_correctly(
         assert_that(result.issues).is_length(2)
 
         # Verify first issue
-        first_issue = cast(RuffIssue, result.issues[0])  # type: ignore[index]  # validated via is_not_none
+        first_issue = cast(RuffIssue, result.issues[0])
         assert_that(first_issue.code).is_equal_to("F401")
         assert_that(first_issue.file).is_equal_to("test.py")
         assert_that(first_issue.line).is_equal_to(1)
         assert_that(first_issue.column).is_equal_to(1)
 
         # Verify second issue
-        second_issue = cast(RuffIssue, result.issues[1])  # type: ignore[index]  # validated via is_not_none
+        second_issue = cast(RuffIssue, result.issues[1])
         assert_that(second_issue.code).is_equal_to("E501")
 
 

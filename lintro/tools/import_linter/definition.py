@@ -268,7 +268,7 @@ class ImportLinterPlugin(BaseToolPlugin):
             success=success and not issues,
             output=output,
             issues_count=len(issues),
-            issues=issues if issues else None,
+            issues=issues,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

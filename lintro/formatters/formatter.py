@@ -64,11 +64,11 @@ class IssueDedupKey:
             A hashable key representing the issue's identity.
         """
         return cls(
-            file=getattr(issue, "file", "") or "",
-            line=getattr(issue, "line", None) or 0,
-            column=getattr(issue, "column", None) or 0,
+            file=issue.file or "",
+            line=issue.line or 0,
+            column=issue.column or 0,
             code=issue.get_code(),
-            message=getattr(issue, "message", "") or "",
+            message=issue.message or "",
         )
 
 
@@ -199,7 +199,7 @@ def format_issues(
 
     # Conditionally include DOC_URL column when at least one issue has a doc_url
     effective_columns = columns
-    if columns is None and any(getattr(issue, "doc_url", "") for issue in issues):
+    if columns is None and any(issue.doc_url for issue in issues):
         effective_columns = [*STANDARD_COLUMNS, DisplayColumn.DOC_URL]
 
     descriptor = UnifiedTableDescriptor(columns=effective_columns)
@@ -322,7 +322,7 @@ def format_issues_with_sections(
     non_fixable: list[BaseIssue] = []
 
     for issue in issues:
-        if getattr(issue, "fixable", False):
+        if issue.fixable:
             fixable.append(issue)
         else:
             non_fixable.append(issue)

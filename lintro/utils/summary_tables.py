@@ -10,6 +10,7 @@ from typing import Any
 
 from lintro.enums.action import Action
 from lintro.enums.tool_name import ToolName, normalize_tool_name
+from lintro.models.core.tool_result import ToolResult
 from lintro.utils.console import (
     get_summary_value,
     get_tool_emoji,
@@ -79,22 +80,22 @@ def _format_tool_display_name(tool_name: str) -> str:
     return tool_name.replace("_", "-")
 
 
-def _get_ai_applied_count(result: object) -> int:
+def _get_ai_applied_count(result: ToolResult) -> int:
     """Get AI-applied fix count from tool result metadata."""
     return get_ai_count(result, "applied_count")
 
 
-def _get_ai_verified_count(result: object) -> int:
+def _get_ai_verified_count(result: ToolResult) -> int:
     """Get count of AI-applied fixes verified as resolved."""
     return get_ai_count(result, "verified_count")
 
 
-def _get_ai_unverified_count(result: object) -> int:
+def _get_ai_unverified_count(result: ToolResult) -> int:
     """Get count of AI-applied fixes that remain unresolved."""
     return get_ai_count(result, "unverified_count")
 
 
-def _is_no_files_result(result: object) -> bool:
+def _is_no_files_result(result: ToolResult) -> bool:
     """Read empty discovery separately from other no-inspection outcomes.
 
     Args:
@@ -104,12 +105,10 @@ def _is_no_files_result(result: object) -> bool:
         True only for an explicit empty file set. A decline or an unknown
         legacy result must not render as "no files matched".
     """
-    return getattr(result, "inspected_files", None) is False and bool(
-        getattr(result, "no_files", False),
-    )
+    return result.inspected_files is False and result.no_files
 
 
-def _is_result_skipped(result: object) -> tuple[bool, str]:
+def _is_result_skipped(result: ToolResult) -> tuple[bool, str]:
     """Read structured skip tracking without interpreting output text.
 
     Args:
@@ -118,12 +117,12 @@ def _is_result_skipped(result: object) -> tuple[bool, str]:
     Returns:
         Tuple of (is_skipped, skip_reason).
     """
-    if getattr(result, "skipped", False):
-        return True, getattr(result, "skip_reason", None) or ""
+    if result.skipped:
+        return True, result.skip_reason or ""
     return False, ""
 
 
-def count_affected_files(tool_results: Sequence[object]) -> int:
+def count_affected_files(tool_results: Sequence[ToolResult]) -> int:
     """Count unique file paths affected across all tool results.
 
     A file is "affected" when it had at least one issue that was either
@@ -131,7 +130,7 @@ def count_affected_files(tool_results: Sequence[object]) -> int:
     ``initial_issues`` with the post-fix ``issues`` so files that were fully
     reformatted (and therefore have no remaining issues) are still counted;
     previously only ``issues`` was consulted, so a file fixed clean reported
-    ``Affected Files 0``. In check mode ``initial_issues`` is absent and the
+    ``Affected Files 0``. In check mode ``initial_issues`` is empty and the
     count falls back to ``issues``.
 
     Args:
@@ -142,18 +141,14 @@ def count_affected_files(tool_results: Sequence[object]) -> int:
     """
     files: set[str] = set()
     for result in tool_results:
-        for attr in ("initial_issues", "issues"):
-            issues = getattr(result, attr, None)
-            if not issues:
-                continue
+        for issues in (result.initial_issues, result.issues):
             for issue in issues:
-                file_path = getattr(issue, "file", "")
-                if file_path:
-                    files.add(str(file_path))
+                if issue.file:
+                    files.add(str(issue.file))
     return len(files)
 
 
-def count_fixable_issues(tool_results: Sequence[object]) -> int:
+def count_fixable_issues(tool_results: Sequence[ToolResult]) -> int:
     """Count issues that the reporting tool marks as auto-fixable.
 
     Only issues whose ``fixable`` attribute is truthy are counted. Tools
@@ -166,21 +161,13 @@ def count_fixable_issues(tool_results: Sequence[object]) -> int:
     Returns:
         Number of issues flagged as auto-fixable across all results.
     """
-    count = 0
-    for result in tool_results:
-        issues = getattr(result, "issues", None)
-        if not issues:
-            continue
-        for issue in issues:
-            if getattr(issue, "fixable", False):
-                count += 1
-    return count
+    return sum(issue.fixable for result in tool_results for issue in result.issues)
 
 
 def print_summary_table(
     console_output_func: Callable[..., None],
     action: Action,
-    tool_results: Sequence[object],
+    tool_results: Sequence[ToolResult],
 ) -> None:
     """Print the summary table for the run.
 
@@ -195,14 +182,14 @@ def print_summary_table(
         # Sort results alphabetically by tool name for consistent output
         sorted_results = sorted(
             tool_results,
-            key=lambda r: getattr(r, "name", "unknown").lower(),
+            key=lambda r: r.name.lower(),
         )
 
         summary_data: list[list[str]] = []
         for result in sorted_results:
-            tool_name: str = getattr(result, "name", "unknown")
-            issues_count: int = getattr(result, "issues_count", 0)
-            success: bool = getattr(result, "success", True)
+            tool_name: str = result.name
+            issues_count: int = result.issues_count
+            success: bool = result.success
 
             emoji: str = get_tool_emoji(tool_name)
             display_name: str = _format_tool_display_name(tool_name)
@@ -233,7 +220,7 @@ def print_summary_table(
                     )
                     continue
 
-                pytest_summary = getattr(result, "pytest_summary", None)
+                pytest_summary = result.pytest_summary
                 if pytest_summary:
                     # Use pytest summary data for more detailed display
                     passed = _safe_cast(pytest_summary, "passed", 0, int)
@@ -329,13 +316,13 @@ def print_summary_table(
                     status_display = f"{_RED}❌ FAIL{_RESET}"
 
                 # Get result output for parsing
-                result_output: str = getattr(result, "output", "")
+                result_output = result.output
 
                 # Prefer standardized counts from ToolResult
-                remaining_std = getattr(result, "remaining_issues_count", None)
-                fixed_std = getattr(result, "fixed_issues_count", None)
+                remaining_std = result.remaining_issues_count
+                fixed_std = result.fixed_issues_count
                 residual_unknown = bool(
-                    getattr(result, "residual_unknown", False),
+                    result.residual_unknown,
                 )
 
                 if residual_unknown:
@@ -425,7 +412,7 @@ def print_summary_table(
                     continue
 
                 # Check if this is an execution failure (timeout/error)
-                result_output = getattr(result, "output", "") or ""
+                result_output = result.output or ""
 
                 has_execution_failure = result_output and (
                     "timeout" in result_output.lower()
@@ -448,9 +435,7 @@ def print_summary_table(
                     notes_display = f"{_YELLOW}deferred to framework checker{_RESET}"
 
                 # Surface stale/expired suppression counts for security tools
-                tool_meta = getattr(result, "metadata", None)
-                if not isinstance(tool_meta, dict):
-                    tool_meta = {}
+                tool_meta = result.metadata
                 suppressions = tool_meta.get("suppressions", [])
                 if suppressions:
                     stale = sum(
