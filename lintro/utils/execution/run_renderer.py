@@ -447,6 +447,11 @@ def _render_console_summary(artifact: RunArtifact, *, ctx: RunContext) -> None:
     """
     logger = ctx.logger
     logger.print_execution_summary(artifact.action, artifact.tool_results)
+    if any(r.baselined_count is not None for r in artifact.tool_results):
+        count = sum(r.baselined_count or 0 for r in artifact.tool_results)
+        logger.console_output(
+            text=f"{artifact.total_issues} issues ({count} baselined)",
+        )
 
     if ctx.profile:
         from lintro.profiling.report import render_profile_report

@@ -299,6 +299,11 @@ severities that actually moved are listed; a run with no movement reads `no chan
 Severities are compared most-severe first, so trading an error for a warning still reads
 as an improvement.
 
+To acknowledge individual existing findings instead, opt in to a
+[fingerprint baseline](guides/baseline.md) with `--baseline PATH` or a top-level
+`baseline: PATH` configuration key. Its filtering is separate from the automatic
+severity-count comparison below; filtered runs leave severity history untouched.
+
 The comparison baseline is stored as `severity-baseline.json` at the root of the log
 directory — `LINTRO_LOG_DIR`, default `.lintro` — rather than inside a `run-*`
 directory, so run pruning never removes it.

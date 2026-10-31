@@ -1023,6 +1023,11 @@ def _fold_one(
     # the verify's, so a broken check cannot read as clean.
     mutation.success = mutation.success and residual == 0
     if verify is not None:
+        # A pre-mutation inspection cannot prove that an unknown verify
+        # inspection measured the final findings. In particular, explicit
+        # fingerprint baselines must not turn such a result green (#438).
+        if verify.inspected_files is not True:
+            mutation.inspected_files = None
         mutation.success = mutation.success and verify.success
         if verify.duration_seconds is not None:
             mutation.duration_seconds = (

@@ -61,6 +61,7 @@ write_healthy_binary() {
 		cat <<'EOF'
 --version) echo "lintro test 0.0.0"; exit 0 ;;
 --help) echo "help"; exit 0 ;;
+baseline) [[ $# -eq 2 && $2 == --help ]] || exit 2; echo "baseline help"; exit 0 ;;
 check|format|test) echo '{"issues": 1}'; exit 1 ;;
 doctor) echo '{"tools": []}'; exit 1 ;;
 watch) exec 3>&-; echo "Watching for changes in ."; sleep 60 ;;
@@ -112,7 +113,7 @@ teardown() {
 
 	run "$SCRIPT" "$BINARY"
 	assert_success
-	for name in badge check completions config deps doctor format init \
+	for name in badge baseline check completions config deps doctor format init \
 		install licenses list-tools review test versions; do
 		assert_output --partial "${name}: OK"
 	done
@@ -182,6 +183,15 @@ EOF
 	run "$SCRIPT" "$BINARY"
 	assert_failure
 	assert_output --partial "doctor crashed (output contains 'No module named')"
+}
+
+@test "verify_built_binary.sh: fails when baseline help has a packaging defect" {
+	write_healthy_binary "baseline" \
+		'[[ $# -eq 2 && $2 == --help ]] || exit 2; echo "No module named lintro.cli_utils.commands.baseline" >&2; exit 0'
+
+	run "$SCRIPT" "$BINARY"
+	assert_failure
+	assert_output --partial "baseline crashed (output contains 'No module named')"
 }
 
 @test "verify_built_binary.sh: fails when a lint command exits above 1" {

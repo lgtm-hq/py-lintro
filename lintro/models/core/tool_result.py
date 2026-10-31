@@ -104,6 +104,10 @@ class ToolResult:
     # the human-readable ``output`` string.
     timed_out: bool = field(default=False)
 
+    # A multi-file check may report real findings alongside a launch/parser
+    # failure on another file. Acknowledging the findings cannot hide that error.
+    execution_failed: bool = field(default=False)
+
     # Parser failures (items that could not be parsed from tool output).
     # Omitted from JSON output unless the tool sets this explicitly.
     parse_failures_count: int | None = field(default=None)
@@ -142,6 +146,18 @@ class ToolResult:
     # decline (for example missing configuration), skip, or timeout.
     inspected_files: bool | None = field(default=None)
 
+    # Exact canonical files successfully examined by this producer. None is
+    # unknown coverage, not the requested scope. Fingerprint pruning requires
+    # both this evidence and a complete result (#438, #2609). A completed
+    # inspection may have lint findings; failed execution supplies no coverage.
+    inspected_paths: frozenset[str] | None = field(default=None)
+    # Codes outside that exact coverage, e.g. a separate formatter check whose
+    # native file exclusions cannot be enumerated by the lint invocation.
+    uninspected_codes: frozenset[str] = field(default_factory=frozenset)
+
+    # None preserves the original reporting schema when baselining is absent.
+    baselined_count: int | None = field(default=None)
+
     def __post_init__(self) -> None:
         """Validate that the issue counts and skip state are consistent.
 
@@ -150,6 +166,8 @@ class ToolResult:
         """
         if self.no_files or self.skipped or self.timed_out:
             self.inspected_files = False
+        if self.execution_failed:
+            self.success = False
 
         # Skipped tools are not failures — they just didn't run
         if self.skipped:

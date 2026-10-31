@@ -51,6 +51,8 @@ class RunArtifact:
         partial_scan: Whether ``--diff`` or ``--incremental`` was requested.
             These runs cannot read or write severity baselines because their
             measured file set can change between invocations.
+        force_failure: A post-execution policy requires a failing exit code,
+            independently of the findings (for example an AI policy gate).
     """
 
     tool_results: list[ToolResult] = field(default_factory=list)
@@ -66,6 +68,7 @@ class RunArtifact:
     early_exit: bool = False
     paths: tuple[str, ...] = (".",)
     partial_scan: bool = False
+    force_failure: bool = False
 
     @property
     def success(self) -> bool:

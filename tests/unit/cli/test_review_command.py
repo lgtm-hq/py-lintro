@@ -1177,7 +1177,15 @@ def test_review_failure_renders_friendly_error_without_traceback() -> None:
     mock_config.review.force_semantic_chunking = False
     mock_config.review.checklist_display = ChecklistDisplay.OFF
 
-    with patch("lintro.cli_utils.commands.review.require_ai"):
+    # This first-round failure must not resume state persisted by another CLI
+    # test: recycled MagicMock head IDs can otherwise match a completed round.
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.load_prior_review_state",
+            return_value=ReviewState(),
+        ),
+    ):
         with patch(
             "lintro.cli_utils.commands.review.get_config",
             return_value=mock_config,

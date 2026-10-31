@@ -85,6 +85,7 @@ def ensure_utf8_stdio() -> None:
 # Maps the canonical command name to the ``(module, attribute)`` pair holding
 # its :class:`click.Command`.
 _COMMAND_MODULES: dict[str, tuple[str, str]] = {
+    "baseline": ("lintro.cli_utils.commands.baseline", "baseline_command"),
     "badge": ("lintro.cli_utils.commands.badge", "badge_command"),
     "check": ("lintro.cli_utils.commands.check", "check_command"),
     "completions": ("lintro.cli_utils.commands.completions", "completions_command"),

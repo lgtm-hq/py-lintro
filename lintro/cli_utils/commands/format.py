@@ -19,6 +19,11 @@ DEFAULT_ACTION: str = "fmt"
 @click.pass_context
 @click.argument("paths", nargs=-1, type=click.Path(exists=True))
 @click.option(
+    "--baseline",
+    type=click.Path(dir_okay=False),
+    help="Apply a fingerprint baseline to final verified findings.",
+)
+@click.option(
     "--tools",
     default=None,
     help=(
@@ -165,6 +170,7 @@ def format_command(
     no_art: bool,
     profile: bool,
     explain_order: bool,
+    baseline: str | None,
 ) -> None:
     """Format code using configured formatting tools.
 
@@ -199,6 +205,7 @@ def format_command(
         profile: bool: Whether to emit a per-tool performance profile.
         explain_order: bool: Print the derived execution order
             and exit without running tools.
+        baseline: str | None: Override the configured fingerprint baseline.
 
     Raises:
         SystemExit: Process exit with the aggregated exit code from tools,
@@ -243,6 +250,7 @@ def format_command(
             dry_run=dry_run,
             no_art=no_art,
             profile=profile,
+            baseline=baseline,
         )
     except ConfigurationError as exc:
         click.echo(str(exc), err=True)

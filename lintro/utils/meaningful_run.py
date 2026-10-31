@@ -128,6 +128,8 @@ def baseline_is_eligible(
     """
     if early_exit or dry_run_preview or partial_scan or action != Action.CHECK:
         return False
+    if any(result.baselined_count is not None for result in tool_results):
+        return False
     if any(result_inspected_files(result) is None for result in tool_results):
         return False
     return not run_has_unreported_failure(tool_results) and run_inspected_files(

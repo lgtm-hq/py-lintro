@@ -153,7 +153,8 @@ def refresh_artifact(
         paths=artifact.paths,
         partial_scan=artifact.partial_scan,
     )
-    if force_failure:
+    refreshed.force_failure = artifact.force_failure or force_failure
+    if refreshed.force_failure:
         refreshed.exit_code = DEFAULT_EXIT_CODE_FAILURE
     return refreshed
 

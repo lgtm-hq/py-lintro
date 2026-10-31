@@ -4,6 +4,7 @@ Functions for running ruff check commands and processing results.
 """
 
 import subprocess  # nosec B404 - subprocess used safely to execute ruff commands with controlled input
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -29,6 +30,46 @@ if TYPE_CHECKING:
     from lintro.tools.ruff.definition import RuffPlugin
 
 __all__ = ["RUFF_DEFAULT_TIMEOUT", "execute_ruff_check"]
+
+
+def _baseline_coverage(
+    tool: "RuffPlugin",
+    *,
+    cmd: list[str],
+    cwd: str | None,
+    timeout: int,
+) -> frozenset[str] | None:
+    """Ask Ruff which explicit inputs survived its native exclusions.
+
+    Args:
+        tool: Configured Ruff plugin.
+        cmd: Original check command with identical configuration and inputs.
+        cwd: Original working directory.
+        timeout: Subprocess deadline.
+
+    Returns:
+        Exact native discovery coverage, or None if it cannot be measured.
+    """
+    if not tool.options.get("_baseline_coverage", False):
+        return None
+    try:
+        success, output = run_subprocess_with_timeout(
+            tool=tool,
+            cmd=[*cmd, "--show-files"],
+            timeout=timeout,
+            cwd=cwd,
+        )
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
+        return None
+    if not success:
+        return None
+    try:
+        paths = [Path(line) for line in output.splitlines() if line.strip()]
+        if any(not path.is_absolute() or not path.is_file() for path in paths):
+            return None
+        return frozenset(str(path.resolve()) for path in paths)
+    except (OSError, RuntimeError):
+        return None
 
 
 def execute_ruff_check(
@@ -178,10 +219,19 @@ def execute_ruff_check(
 
     # Combine linting and formatting issues for the formatters
     all_issues = lint_issues + format_issues
+    complete = bool(
+        (success_lint or lint_issues) and (success_format or format_issues),
+    )
 
     return ToolResult(
         name=tool.definition.name,
-        inspected_files=True,
+        inspected_files=True if complete else None,
+        inspected_paths=(
+            _baseline_coverage(tool, cmd=cmd, cwd=cwd, timeout=timeout)
+            if complete
+            else None
+        ),
+        uninspected_codes=frozenset({"FORMAT"}),
         success=success,
         output=output_summary,
         issues_count=issues_count,

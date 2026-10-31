@@ -371,6 +371,10 @@ def write_output_file(
         # Additive, and mirrors the stdout JSON document so a consumer reading
         # the file sees the same severity evidence (issue #1739).
         extras = json_extras or JsonReportExtras()
+        if any(result.baselined_count is not None for result in all_results):
+            json_data["summary"]["total_baselined"] = sum(
+                result.baselined_count or 0 for result in all_results
+            )
         if extras.severity_counts is not None:
             json_data["summary"]["severity_counts"] = extras.severity_counts.to_dict()
         if extras.severity_delta is not None:
