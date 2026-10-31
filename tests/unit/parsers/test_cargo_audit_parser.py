@@ -5,7 +5,10 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
-from lintro.parsers.cargo_audit.cargo_audit_parser import parse_cargo_audit_output
+from lintro.parsers.cargo_audit.cargo_audit_parser import (
+    extract_cargo_audit_payload,
+    parse_cargo_audit_output,
+)
 
 
 @pytest.mark.parametrize(
@@ -30,17 +33,127 @@ def test_parse_cargo_audit_output_empty_cases(
     assert_that(result).is_length(expected_count)
 
 
-def test_parse_cargo_audit_output_no_vulnerabilities() -> None:
-    """Parser returns empty list when no vulnerabilities found."""
+@pytest.mark.parametrize(
+    "output",
+    [
+        pytest.param(None, id="none"),
+        pytest.param("", id="blank"),
+        pytest.param(" \n\t", id="whitespace"),
+        pytest.param("null", id="null-report"),
+        pytest.param("[]", id="array-report"),
+        pytest.param('[{"vulnerabilities": {"list": []}}]', id="array-of-reports"),
+        pytest.param("warning\n[]", id="warning-prefixed-empty-array"),
+        pytest.param(
+            'warning\n[{"vulnerabilities": {"list": []}}]',
+            id="warning-prefixed-array",
+        ),
+        pytest.param(
+            '[{"vulnerabilities": {"list": []}}]\nwarning',
+            id="warning-suffixed-array",
+        ),
+        pytest.param(
+            'warning\n[{"vulnerabilities": {"list": []}}]\nDone.',
+            id="warning-wrapped-array",
+        ),
+        pytest.param(
+            'warning\n[[{"vulnerabilities": {"list": []}}]]\nDone.',
+            id="warning-wrapped-nested-array",
+        ),
+        pytest.param(
+            'warning\n[{"vulnerabilities": {"list": []}}\nDone.',
+            id="warning-wrapped-unclosed-array",
+        ),
+        pytest.param(
+            '[{"vulnerabilities": {"list": []}}',
+            id="bare-unclosed-array",
+        ),
+        pytest.param(
+            '[WARN]\n[{"vulnerabilities": {"list": []}}]',
+            id="bracketed-warning-array",
+        ),
+        pytest.param(
+            '[INFO] fetching\n[[{"vulnerabilities": {"list": []}}]]\nDone.',
+            id="bracketed-info-nested-array",
+        ),
+        pytest.param(
+            'note [1]\n[{"vulnerabilities": {"list": []}}\nDone.',
+            id="bracketed-note-unclosed-array",
+        ),
+        pytest.param(
+            '[WARN]\n[[{"vulnerabilities": {"list": []}}]\nDone.',
+            id="bracketed-warning-unclosed-outer-array",
+        ),
+        pytest.param(
+            'warning\n["]", {"vulnerabilities": {"list": []}}]\nDone.',
+            id="array-with-quoted-closer",
+        ),
+        pytest.param(
+            'warning\n["[", {"vulnerabilities": {"list": []}}]\nDone.',
+            id="array-with-quoted-opener",
+        ),
+        pytest.param(
+            'warning\n["\\" ]", {"vulnerabilities": {"list": []}}\nDone.',
+            id="unclosed-array-with-escaped-quote",
+        ),
+        pytest.param(
+            'warning\n{"vulnerabilities": {"list": null}}\nDone.',
+            id="warning-wrapped-null-list",
+        ),
+        pytest.param("{}", id="missing-vulnerabilities"),
+        pytest.param('{"vulnerabilities": null}', id="null-vulnerabilities"),
+        pytest.param('{"vulnerabilities": []}', id="array-vulnerabilities"),
+        pytest.param('{"vulnerabilities": {}}', id="missing-list"),
+        pytest.param('{"vulnerabilities": {"list": null}}', id="null-list"),
+        pytest.param('{"vulnerabilities": {"list": {}}}', id="object-list"),
+        pytest.param('{"vulnerabilities": {"list": false}}', id="boolean-list"),
+        pytest.param('{"vulnerabilities": {"list": ""}}', id="string-list"),
+    ],
+)
+def test_extract_cargo_audit_payload_rejects_invalid_schema(output: str | None) -> None:
+    """Distinguish unusable reports from valid reports with no findings.
+
+    Args:
+        output: Missing output or a JSON value without the required report schema.
+    """
+    assert_that(extract_cargo_audit_payload(output)).is_none()
+    assert_that(parse_cargo_audit_output(output)).is_empty()
+
+
+@pytest.mark.parametrize(
+    "report_wrapper",
+    [
+        pytest.param("{}", id="plain"),
+        pytest.param("warning\n{}", id="warning-prefix"),
+        pytest.param("{}\nwarning", id="warning-suffix"),
+        pytest.param("warning\n{}\nDone.", id="warning-wrapped"),
+        pytest.param("[WARN]\n{}", id="bracketed-warning-prefix"),
+        pytest.param("[INFO] fetching\n{}", id="bracketed-info-prefix"),
+        pytest.param("note [1]\n{}", id="bracketed-note-prefix"),
+        pytest.param(
+            "[WARN]\n[INFO] fetching\nnote [1]\n{}\nDone.",
+            id="multiple-bracketed-prefixes",
+        ),
+    ],
+)
+def test_parse_cargo_audit_output_no_vulnerabilities(report_wrapper: str) -> None:
+    """Parser accepts empty reports with surrounding prose.
+
+    Args:
+        report_wrapper: Template for permitted text around the JSON object.
+    """
     output = """{
         "vulnerabilities": {
             "count": 0,
             "list": []
         }
     }"""
+    output = report_wrapper.format(output)
     result = parse_cargo_audit_output(output)
 
     assert_that(result).is_length(0)
+    assert_that(extract_cargo_audit_payload(output)).is_equal_to(
+        {"vulnerabilities": {"count": 0, "list": []}},
+    )
 
 
 def test_parse_cargo_audit_output_single_vulnerability() -> None:

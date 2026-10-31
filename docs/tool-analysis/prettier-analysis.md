@@ -44,6 +44,11 @@ Prettier provides extensive CLI options including:
 - ✅ **Error detection**: Captures formatting violations as issues
 - ✅ **Auto-fixing**: Can automatically format files when `fix()` is called
 
+Lintro checks the batch before running Prettier's `--write`. If that check exits 2 (for
+example, a syntax error in one file), formatting stops for the entire batch, including
+files that could otherwise be formatted. The run fails and preserves the error output.
+Fix the syntax or configuration error and rerun formatting.
+
 **Supported File Patterns:**
 
 ```python

@@ -38,6 +38,7 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.tools.core.timeout_utils import (
     create_timeout_result,
     run_subprocess_with_timeout,
+    subprocess_timeout_context,
 )
 
 if TYPE_CHECKING:
@@ -67,9 +68,9 @@ class BatchSuccess(StrEnum):
     """What makes a batch check run count as a pass.
 
     Attributes:
-        ISSUES_ONLY: The parsed issue list is the whole verdict; the exit
-            status is ignored because the tool exits non-zero purely to report
-            findings.
+        ISSUES_ONLY: Findings fail the run even on exit zero. A declared
+            findings exit code is expected only when issues were parsed;
+            every other non-zero exit is an execution failure.
         EXIT_STATUS: The exit status is the whole verdict; findings are
             reported but do not by themselves fail the run.
         EXIT_AND_ISSUES: Both must be clean.
@@ -111,12 +112,25 @@ class BatchCheckPolicy:
         report_cwd: Record the working directory on the ``ToolResult``. Tools
             that emit issue paths relative to it need this so the AI layer can
             resolve them; tools that emit absolute paths do not.
+        findings_exit_codes: Non-zero statuses used to report findings under
+            ``ISSUES_ONLY``. Unexpected statuses and failed runs without parsed
+            issues always preserve raw output, regardless of ``output``.
+            The empty default treats every non-zero exit as an execution failure.
+            Other success policies ignore this field.
+        parse_stdout: Parse stdout alone, keeping stderr for display. Used
+            only with ``ISSUES_ONLY``.
+        no_files: Recognize a tool's exact ignored-all-targets response from
+            its returncode, stdout and stderr. Used only with ``ISSUES_ONLY``;
+            arbitrary failures must return false.
     """
 
     success: BatchSuccess = BatchSuccess.EXIT_AND_ISSUES
     output: BatchOutput = BatchOutput.ON_FAILURE
     tool_name: str | None = None
     report_cwd: bool = False
+    findings_exit_codes: tuple[int, ...] = ()
+    parse_stdout: bool = False
+    no_files: Callable[[int, str, str], bool] | None = None
 
 
 #: Policy for a tool whose exit status and findings must both be clean.
@@ -141,6 +155,14 @@ class BatchFixPolicy:
         tool_name: Name used in timeout messages when it differs from the
             registered tool name.
         report_cwd: Record the working directory on the ``ToolResult``.
+        findings_exit_codes: Non-zero statuses accepted only with parsed issues
+            in any stage. The empty default fails on every non-zero exit.
+        parse_stdout: Parse stdout alone, keeping stderr for display.
+        parse_fix_output: Whether the write command uses the check report
+            format. False for formatters that print progress during writes.
+        no_files: Recognize the exact ignored-all-targets response from its
+            returncode, stdout and stderr. Only the initial check may return
+            a successful no-files result.
     """
 
     fixed_label: str = "issue"
@@ -151,6 +173,10 @@ class BatchFixPolicy:
     always_report_initial_issues: bool = False
     tool_name: str | None = None
     report_cwd: bool = False
+    findings_exit_codes: tuple[int, ...] = ()
+    parse_stdout: bool = False
+    parse_fix_output: bool = True
+    no_files: Callable[[int, str, str], bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -260,6 +286,29 @@ def batch_fix_timeout_result(
     )
 
 
+def _execution_failed(
+    *,
+    exit_success: bool,
+    returncode: int | None,
+    issues_count: int,
+    findings_exit_codes: tuple[int, ...],
+) -> bool:
+    """Distinguish a declared findings exit from an execution failure.
+
+    Args:
+        exit_success: Whether the command exited zero.
+        returncode: Numeric exit status, if available.
+        issues_count: Number of parsed findings.
+        findings_exit_codes: Non-zero statuses used to report findings.
+
+    Returns:
+        Whether the command failed without a supported findings report.
+    """
+    return not exit_success and not (
+        returncode in findings_exit_codes and issues_count > 0
+    )
+
+
 def batch_check_result(
     *,
     plugin: BaseToolPlugin,
@@ -268,6 +317,7 @@ def batch_check_result(
     issues: Sequence[IssueT],
     policy: BatchCheckPolicy = DEFAULT_BATCH_CHECK_POLICY,
     cwd: str | None = None,
+    returncode: int | None = None,
 ) -> ToolResult:
     """Turn one batch invocation's outcome into a ``ToolResult``.
 
@@ -278,6 +328,9 @@ def batch_check_result(
         issues: Issues the parser extracted from ``output``.
         policy: How to derive the verdict and when to surface ``output``.
         cwd: Working directory to record on the result.
+        returncode: Numeric exit status, required to recognize a declared
+            findings exit code under ``ISSUES_ONLY``. When present, this is
+            the source of truth for ``exit_success``.
 
     Returns:
         ToolResult for the run.
@@ -286,10 +339,19 @@ def batch_check_result(
         ValueError: If the policy names a ``BatchSuccess`` or ``BatchOutput``
             member this function does not handle.
     """
+    if returncode is not None:
+        exit_success = returncode == 0
     issues_count = len(issues)
+    execution_failed = False
     match policy.success:
         case BatchSuccess.ISSUES_ONLY:
-            success = issues_count == 0
+            execution_failed = _execution_failed(
+                exit_success=exit_success,
+                returncode=returncode,
+                issues_count=issues_count,
+                findings_exit_codes=policy.findings_exit_codes,
+            )
+            success = not execution_failed and issues_count == 0
         case BatchSuccess.EXIT_STATUS:
             success = exit_success
         case BatchSuccess.EXIT_AND_ISSUES:
@@ -314,7 +376,7 @@ def batch_check_result(
     return ToolResult(
         name=plugin.definition.name,
         success=success,
-        output=output if show_output else None,
+        output=output if show_output or execution_failed else None,
         issues_count=issues_count,
         issues=list(issues),
         cwd=cwd,
@@ -360,14 +422,46 @@ def run_batch_check(
             handler was supplied.
     """
     result_cwd = cwd if policy.report_cwd else None
+    returncode = None
+    parse_output = ""
     try:
-        exit_success, output = run_subprocess_with_timeout(
-            tool=plugin,
-            cmd=cmd,
-            timeout=ctx.timeout,
-            cwd=cwd,
-            tool_name=policy.tool_name,
-        )
+        if policy.success == BatchSuccess.ISSUES_ONLY:
+            with subprocess_timeout_context(
+                plugin,
+                cmd,
+                ctx.timeout,
+                policy.tool_name,
+            ):
+                process = plugin._run_subprocess_result(
+                    cmd=cmd,
+                    timeout=ctx.timeout,
+                    cwd=cwd,
+                )
+            exit_success, output = process.success, process.output
+            returncode = process.returncode
+            if policy.no_files is not None and policy.no_files(
+                process.returncode,
+                process.stdout,
+                process.stderr,
+            ):
+                return ToolResult(
+                    name=plugin.definition.name,
+                    success=True,
+                    no_files=True,
+                    output=output,
+                    issues=[],
+                    cwd=result_cwd,
+                )
+            parse_output = process.stdout if policy.parse_stdout else output
+        else:
+            exit_success, output = run_subprocess_with_timeout(
+                tool=plugin,
+                cmd=cmd,
+                timeout=ctx.timeout,
+                cwd=cwd,
+                tool_name=policy.tool_name,
+            )
+            parse_output = output
     except subprocess.TimeoutExpired:
         if on_timeout is not None:
             return on_timeout()
@@ -387,9 +481,10 @@ def run_batch_check(
         plugin=plugin,
         exit_success=exit_success,
         output=output,
-        issues=parse(output),
+        issues=parse(parse_output),
         policy=policy,
         cwd=result_cwd,
+        returncode=returncode,
     )
 
 
@@ -431,6 +526,54 @@ def _build_fix_summary(
     return "\n".join(lines) if lines else None
 
 
+def _batch_fix_failure_result(
+    *,
+    plugin: BaseToolPlugin,
+    output: str,
+    initial_issues: Sequence[IssueT],
+    policy: BatchFixPolicy,
+    initial_check: bool,
+    cwd: str | None,
+) -> ToolResult:
+    """Keep diagnostics and avoid claiming fixes after an execution failure.
+
+    Args:
+        plugin: Plugin whose name the result is reported under.
+        output: Raw output from the failed stage, including an empty report.
+        initial_issues: Findings seen before attempting to fix files.
+        policy: Per-tool issue reporting choices.
+        initial_check: Whether the failure occurred before any writes.
+        cwd: Working directory to report on the result.
+
+    Returns:
+        A failed result carrying the observed pre-fix findings. An execution
+        failure leaves no verified residual or fix count.
+    """
+    reported_issues = list(initial_issues)
+    return ToolResult(
+        name=plugin.definition.name,
+        success=False,
+        output=output,
+        issues_count=len(reported_issues),
+        issues=reported_issues,
+        initial_issues_count=len(initial_issues),
+        fixed_issues_count=None,
+        remaining_issues_count=None,
+        residual_unknown=True,
+        residual_unknown_reason=(
+            "Batch initial check failed before writes"
+            if initial_check
+            else "Batch execution failed after writes may have begun"
+        ),
+        initial_issues=(
+            list(initial_issues)
+            if initial_issues or policy.always_report_initial_issues
+            else None
+        ),
+        cwd=cwd,
+    )
+
+
 def run_batch_fix(
     ctx: ExecutionContext,
     *,
@@ -446,7 +589,8 @@ def run_batch_fix(
 
     The pre-fix check establishes what was wrong, the fix command rewrites the
     files, and the same check command run again establishes what survived. The
-    difference is the fixed count.
+    difference is the fixed count. An execution failure in any stage stops the
+    pipeline and preserves that stage's output without claiming verified fixes.
 
     Args:
         ctx: Prepared execution context from ``BaseToolPlugin.prepare``.
@@ -467,15 +611,21 @@ def run_batch_fix(
     initial_issues: list[IssueT] = []
     result_cwd = cwd if policy.report_cwd else None
 
-    def run_stage(cmd: list[str]) -> str | ToolResult:
+    def run_stage(
+        cmd: list[str],
+        *,
+        initial_check: bool = False,
+        fixing: bool = False,
+    ) -> tuple[str, list[IssueT]] | ToolResult:
         """Run one stage of the fix pipeline.
 
         Args:
             cmd: Command line for this stage.
+            initial_check: Whether this stage establishes the pre-fix findings.
+            fixing: Whether this stage writes files rather than checking them.
 
         Returns:
-            The command's output, or the early ``ToolResult`` describing a
-            timeout or execution error.
+            The command's output and parsed issues, or an early failure result.
 
         Raises:
             OSError: Re-raised when the command cannot be launched and no
@@ -486,13 +636,17 @@ def run_batch_fix(
                 ``on_error`` handler was supplied.
         """
         try:
-            _, output = run_subprocess_with_timeout(
-                tool=plugin,
-                cmd=cmd,
-                timeout=ctx.timeout,
-                cwd=cwd,
-                tool_name=policy.tool_name,
-            )
+            with subprocess_timeout_context(
+                plugin,
+                cmd,
+                ctx.timeout,
+                policy.tool_name,
+            ):
+                process = plugin._run_subprocess_result(
+                    cmd=cmd,
+                    timeout=ctx.timeout,
+                    cwd=cwd,
+                )
         except subprocess.TimeoutExpired:
             if on_timeout is not None:
                 return on_timeout(initial_issues)
@@ -508,14 +662,50 @@ def run_batch_fix(
             if on_error is None:
                 raise
             return on_error(exc)
-        return output
+        if (
+            initial_check
+            and policy.no_files is not None
+            and policy.no_files(
+                process.returncode,
+                process.stdout,
+                process.stderr,
+            )
+        ):
+            return ToolResult(
+                name=plugin.definition.name,
+                success=True,
+                no_files=True,
+                output=process.output,
+                issues=[],
+                cwd=result_cwd,
+            )
+        parse_output = process.stdout if policy.parse_stdout else process.output
+        stage_issues = (
+            list(parse(parse_output)) if not fixing or policy.parse_fix_output else []
+        )
+        if initial_check:
+            initial_issues.extend(stage_issues)
+        if _execution_failed(
+            exit_success=process.success,
+            returncode=process.returncode,
+            issues_count=len(stage_issues),
+            findings_exit_codes=policy.findings_exit_codes,
+        ):
+            return _batch_fix_failure_result(
+                plugin=plugin,
+                output=process.output,
+                initial_issues=initial_issues,
+                policy=policy,
+                initial_check=initial_check,
+                cwd=result_cwd,
+            )
+        return process.output, stage_issues
 
-    check_output = run_stage(commands.check)
+    check_output = run_stage(commands.check, initial_check=True)
     if isinstance(check_output, ToolResult):
         return check_output
-    initial_issues.extend(parse(check_output))
 
-    fix_output = run_stage(commands.fix)
+    fix_output = run_stage(commands.fix, fixing=True)
     if isinstance(fix_output, ToolResult):
         return fix_output
 
@@ -523,7 +713,7 @@ def run_batch_fix(
     if isinstance(verify_output, ToolResult):
         return verify_output
 
-    remaining_issues = list(parse(verify_output))
+    remaining_issues = verify_output[1]
     remaining_count = len(remaining_issues)
     fixed_count = max(0, len(initial_issues) - remaining_count)
     # Count what the post-fix state actually reported rather than the
@@ -555,7 +745,7 @@ def run_batch_fix(
             policy=policy,
             fixed_count=fixed_count,
             remaining_issues=remaining_issues,
-            fix_output=fix_output,
+            fix_output=fix_output[0],
         ),
         issues_count=remaining_count,
         issues=reported_issues,
