@@ -1,0 +1,12 @@
+# ruleid: lintro.python.none-coercion.failed-tool-result
+failed = ToolResult(name="scan", success=False, issues_count=0)
+# ruleid: lintro.python.none-coercion.failed-tool-result
+failed_reordered = ToolResult(success=False, name="scan")
+# ok: lintro.python.none-coercion.failed-tool-result
+known_residual = ToolResult(name="scan", success=False, remaining_issues_count=3)
+# ok: lintro.python.none-coercion.failed-tool-result
+unknown_residual = ToolResult(success=False, residual_unknown=True, name="scan")
+# ok: lintro.python.none-coercion.failed-tool-result
+success = ToolResult(name="scan", success=True)
+# ok: lintro.python.none-coercion.failed-tool-result
+unresolved_keywords = ToolResult(success=False, **metadata)

@@ -12,6 +12,7 @@ recursive-include lintro/tools *.json
 # manifest.json is what ships. Mirrors [tool.setuptools.exclude-package-data].
 exclude lintro/tools/manifest.src.json
 recursive-include lintro/ai/prompts/templates *.md *.json
+recursive-include lintro/rules *.yaml
 
 # Include any additional documentation
 recursive-include docs *.md

@@ -1,0 +1,44 @@
+import os
+import subprocess
+
+# ruleid: lintro.python.none-coercion.or-fallback
+issues = result.issues or []
+# ruleid: lintro.python.none-coercion.or-fallback
+count = measured or 0
+# ruleid: lintro.python.none-coercion.or-fallback
+text = payload or ""
+# ruleid: lintro.python.none-coercion.or-fallback
+success = state or False
+# ruleid: lintro.python.none-coercion.or-fallback
+chain = first or second or []
+# ruleid: lintro.python.none-coercion.or-fallback
+multiple_fallbacks = first or [] or second or []
+# ruleid: lintro.python.none-coercion.or-fallback
+unrelated_stdout = payload.stdout or ""
+# ruleid: lintro.python.none-coercion.or-fallback
+mixed_name = constant_table.get(key) or []
+# ruleid: lintro.python.none-coercion.or-fallback
+not_a_table = obj.CONSTANT_TABLE.get(key) or []
+
+proc = subprocess.run(["echo", "hello"], capture_output=True)
+# ok: lintro.python.none-coercion.or-fallback
+stdout = proc.stdout or ""
+# ruleid: lintro.python.none-coercion.or-fallback
+stderr = proc.stderr or ""
+# ok: lintro.python.none-coercion.or-fallback
+direct = subprocess.run(["echo"], capture_output=True).stdout or ""
+# ok: lintro.python.none-coercion.or-fallback
+environment = os.environ.get("OPTIONAL") or ""
+# ok: lintro.python.none-coercion.or-fallback
+constant = CONSTANT_TABLE.get(key) or []
+# ok: lintro.python.none-coercion.or-fallback
+indexed = CONSTANT_TABLE[key] or []
+# ok: lintro.python.none-coercion.or-fallback
+bare_constant = CONSTANT_TABLE or []
+# ok: lintro.python.none-coercion.or-fallback
+different_fallback = value or "unknown"
+
+
+def unrelated_function(proc):
+    # ruleid: lintro.python.none-coercion.or-fallback
+    return proc.stdout or ""

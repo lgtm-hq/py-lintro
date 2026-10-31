@@ -165,7 +165,7 @@ exclude = [
 namespaces = false
 
 [tool.setuptools.package-data]
-lintro = ["tools/*.json", "py.typed", "ascii-art/*.txt"]
+lintro = ["tools/*.json", "py.typed", "ascii-art/*.txt", "rules/*/*.yaml"]
 "lintro.ai.prompts.templates" = ["**/*.md", "**/*.json"]
 "lintro.ai.review.checklist" = ["corpus/*.yaml"]
 
@@ -828,7 +828,7 @@ layers = [
   "config",
   "formatters | parsers",
   "utils",
-  "models",
+  "models | rules",
   "enums",
   "exceptions | licenses | deps",
 ]
