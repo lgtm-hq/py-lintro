@@ -105,8 +105,8 @@ def parse_ruff_output_with_stats(output: str) -> tuple[list[RuffIssue], int]:
     Optional fields, including the null code on a syntax error, retain their
     defaults. Invalid required fields raise inside ``safe_parse_items_with_stats``
     so they count as parse failures rather than intentional filtering. Malformed
-    JSON object lines also count as parse failures. An initial JSON decoding
-    failure counts once when the JSON Lines fallback cannot account for it.
+    JSON object lines also count as parse failures. An invalid array envelope
+    counts as a failure even when JSON Lines fallback recovers diagnostics.
 
     Args:
         output: JSON array or JSON Lines output from Ruff.
@@ -150,7 +150,11 @@ def parse_ruff_output_with_stats(output: str) -> tuple[list[RuffIssue], int]:
             logger.debug(f"Failed to parse ruff JSON line '{line_str[:50]}': {e}")
             continue
 
-    if array_decode_failed and not items and not decode_failures:
+    if (
+        array_decode_failed
+        and not decode_failures
+        and (output.lstrip().startswith("[") or not items)
+    ):
         decode_failures = 1
 
     issues, parse_failures = safe_parse_items_with_stats(

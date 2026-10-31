@@ -108,6 +108,18 @@ def test_ruff_valid_json_lines_do_not_count_array_decode_failure(prefix: str) ->
     )
 
 
+@pytest.mark.parametrize("prefix", ["", " \n\t"])
+def test_ruff_truncated_array_keeps_diagnostics_and_counts_failure(prefix: str) -> None:
+    """Recover complete diagnostics without hiding an invalid array envelope."""
+    output = prefix + '[\n{"filename":"a.py","message":"bad"}\n'
+
+    issues, failures = parse_ruff_output_with_stats(output)
+
+    assert_that(issues).extracting("file", "message").is_equal_to([("a.py", "bad")])
+    assert_that(failures).is_equal_to(1)
+    assert_that(parse_ruff_output(output)).is_equal_to(issues)
+
+
 def test_ruff_null_code_keeps_syntax_error_and_file_alias() -> None:
     """Syntax errors remain findings when Ruff supplies no rule code."""
     output = '[{"file": "syntax.py", "message": "Expected expression", "code": null}]'
