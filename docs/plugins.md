@@ -59,24 +59,75 @@ Update existing packages to the `lintro.tools` group.
 ## Plugin API Version
 
 The plugin-facing contract is versioned so that core refactors never silently break — or
-crash — an installed plugin. The current version is exposed as
+crash — an installed plugin. The current version is **2**, exposed as
 `lintro.plugins.LINTRO_PLUGIN_API_VERSION`.
 
 Declare the version your plugin targets as a class attribute:
 
 ```python
-from lintro.plugins import LINTRO_PLUGIN_API_VERSION
+from lintro.plugins.base import BaseToolPlugin
 
 
 class MyToolPlugin(BaseToolPlugin):
-    LINTRO_PLUGIN_API_VERSION = LINTRO_PLUGIN_API_VERSION
+    LINTRO_PLUGIN_API_VERSION = 2
     ...
 ```
 
 At load time Lintro compares this against its own version. A plugin built for an
 incompatible major version is **logged and skipped**, never loaded. Declaring the
-attribute is optional (an undeclared plugin is assumed compatible) but strongly
-recommended for forward safety.
+attribute is required: undeclared versions and non-integer values (including booleans)
+are rejected before the plugin is instantiated or executed. Importing the entry-point
+module still runs its module-level code, so keep tool execution out of imports.
+
+Pin the integer version your plugin implements. **Do not import the running core's
+version to set this attribute**: that automatically opts old code into future contracts
+without a migration and bypasses the compatibility check.
+
+### Migrating from plugin API v1 to v2
+
+API v2 is a breaking change to result collections and issue fixability. Upgrade the
+plugin package to a v2-compatible release, or make these changes before declaring
+`LINTRO_PLUGIN_API_VERSION = 2`:
+
+- `ToolResult.issues` and `initial_issues` require `Sequence[BaseIssue]` and default
+  to `()`. `metadata` requires `dict[str, Any]` and defaults to a fresh `{}`. Omit
+  empty arguments or pass empty containers; replace `issues=issues if issues else None`
+  with `issues=issues`, and remove explicit `None` for these three fields. Passing
+  `None` raises `TypeError`. Missing or unparseable results must remain failures
+  (`success=False`); an empty collection does not prove a clean run. Fix accounting
+  counts still use `None` for unknown, and failed fix measurements must set
+  `residual_unknown=True` with a reason rather than inventing zero counts.
+- `BaseIssue.fixable` is now a writable boolean dataclass field, defaulting to
+  `False`. A subclass's read-only `@property def fixable` prevents the inherited
+  initializer from assigning the field and raises `AttributeError`. Replace that
+  property with the inherited field, supplying `fixable=` when constructing the issue
+  or computing it in `__post_init__`. For example:
+
+  ```python
+  from dataclasses import dataclass
+
+  from lintro.parsers.base_issue import BaseIssue
+
+
+  @dataclass
+  class MyIssue(BaseIssue):
+      code: str = ""
+
+      def __post_init__(self) -> None:
+          self.fixable = self.code == "FORMAT"
+  ```
+
+  Recompute the field if the inputs used to derive it change after construction.
+- Issues without a per-issue fix signal remain `fixable=False`. If a fix-capable tool
+  should include such findings in `fmt --dry-run` estimates, set
+  `PREVIEW_FIXABLE: ClassVar[bool] = True` on its issue subclass (import `ClassVar`
+  from `typing`). This opt-in affects only the preview; public fixability in totals,
+  issue sections and structured findings remains false.
+
+Plugin API v1 and undeclared plugins are skipped with a migration diagnostic. A plugin
+that incorrectly advertises v2 or bypasses discovery can still fail at execution:
+`TypeError` and legacy `fixable` `AttributeError` failures are contained per tool in
+sequential and parallel runs, with error details preserved and a failed result.
 
 ## Failure Isolation
 
@@ -108,7 +159,6 @@ from lintro.enums.capability import Cap
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
-from lintro.plugins import LINTRO_PLUGIN_API_VERSION
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 
@@ -118,7 +168,7 @@ class MyToolPlugin(BaseToolPlugin):
     """My custom linting tool plugin."""
 
     # Declare the plugin API version this plugin was built against.
-    LINTRO_PLUGIN_API_VERSION = LINTRO_PLUGIN_API_VERSION
+    LINTRO_PLUGIN_API_VERSION = 2
 
     @property
     def definition(self) -> ToolDefinition:
