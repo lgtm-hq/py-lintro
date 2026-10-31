@@ -80,10 +80,13 @@ comments so Renovate can track digest updates. Policy is enforced by
   `publish-gate` job runs `scripts/ci/check-last-publish-green.py` first and skips the
   version PR while the newest version-tag publish is unfinished or concluded
   `startup_failure` (#2516, #2550, #3054). `force: true` overrides a completed startup
-  failure only. The version-update hook also rejects candidates already on live main
-  or tagged; read failures block the hook. See
-  [release race recovery](../../docs/release-race-recovery.md) for the remaining upstream
-  write-time guard and main recovery.
+  failure only. Publication completion triggers fresh generation on current main for
+  same-repository tag pushes, reevaluating the gate without requiring another push. An
+  approval-waiting publish needs its authorized owner to approve or cancel it under
+  normal deployment rules. The version-update hook also rejects candidates already on
+  live main or tagged; read failures block the hook. See
+  [release race recovery](../../docs/release-race-recovery.md) for the remaining
+  upstream write-time guard and main recovery.
 - **release-auto-tag.yml** — Creates tags on release commits via
   `reusable-release-auto-tag.yml` (`create-release: false`; GitHub Release is created by
   publish workflow)

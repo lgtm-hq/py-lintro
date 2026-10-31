@@ -12,6 +12,12 @@ run-name: >-
 'on':
   push:
     branches: [main]
+  # A main push can be deferred by the publish gate. Completion starts a new
+  # run with default-branch github.sha, not the publication's old head_sha.
+  # No branches filter: tag publications carry the tag as head_branch.
+  workflow_run:
+    workflows: [Publish - PyPI Production]
+    types: [completed]
   workflow_dispatch:
     inputs:
       force:
@@ -81,7 +87,13 @@ jobs:
     # somebody noticed. The gate is a skip, not an error (#2516): only an
     # explicit `false` stops the version PR. The tokenless version-update hook
     # also rejects candidates already present on live main or tagged (#3054).
-    if: always() && needs.publish-gate.outputs.publish_green != 'false'
+    # Check workflow_run provenance here as well: even a missing gate verdict
+    # must never admit a foreign run or a manual publication dispatch.
+    if: >-
+      always() && needs.publish-gate.outputs.publish_green != 'false' &&
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     with:

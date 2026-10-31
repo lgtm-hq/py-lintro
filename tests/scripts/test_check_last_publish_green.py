@@ -242,6 +242,39 @@ def test_unfinished_publish_prevents_version_generation_even_when_forced(
     assert_that(result.summary).contains("version PR skipped")
     assert_that(result.summary).contains("Wait for publication to complete")
     assert_that(result.summary).contains(f"`{status or 'unknown'}`")
+    assert_that(result.summary).contains("fresh generation on current main")
+    assert_that(result.summary).contains("approve or cancel")
+
+
+def test_publication_completion_releases_deferred_generation(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A fresh invocation admits deferred work once the same publish finishes."""
+    run = _run_payload(head_branch="v0.173.4", status="in_progress", conclusion=None)
+    before = _invoke(
+        module=module,
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        capsys=capsys,
+        runs=[run],
+    )
+    assert_that(before.output).is_equal_to("publish_green=false\n")
+    run.update(status="completed", conclusion="success")
+    after = _invoke(
+        module=module,
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        capsys=capsys,
+        runs=[run],
+    )
+    assert_that(after.code).is_equal_to(0)
+    assert_that(after.output.splitlines()).is_equal_to(
+        ["publish_green=false", "publish_green=true"],
+    )
+    assert_that(after.stdout).contains("Publish gate: green", "v0.173.4")
 
 
 @pytest.mark.parametrize("conclusion", ["skipped", "neutral", "stale"])

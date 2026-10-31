@@ -37,6 +37,8 @@ waiting or in-progress run blocks generation until publication finishes.
 The release PR can already have merged while the GitHub Release is still
 absent, so allowing generation during that window can recreate its version.
 ``--force`` overrides a completed startup failure, never active publication.
+Publication completion triggers a fresh version-generation run on current main;
+it reevaluates this gate rather than resuming the old triggering checkout.
 
 **The gate is a skip, not an error.** It never fails the job: every path exits
 0 and the verdict travels in the ``publish_green`` output, which the workflow
@@ -273,10 +275,10 @@ def evaluate(
 
     Block the newest version-tag run while active, or after startup failure.
 
-    Never raises: every failure below the gate — an unreachable API, a
-    malformed payload, an exception type nobody anticipated — becomes a green
-    verdict carrying the error in its summary, so the gate cannot redden or
-    stall a release on its own.
+    API read or envelope-parse failures become a green verdict carrying the
+    error in its summary. Once a tag run is found, a missing, malformed or
+    unknown status blocks generation: only ``completed`` proves it finished.
+    This deliberate fail-closed status policy also applies with ``--force``.
 
     Args:
         repo: Repository in ``owner/name`` form.
@@ -334,7 +336,11 @@ def evaluate(
                 f"The last tag publish (`{tag}`) is `{status}` with conclusion "
                 f"`{conclusion}`. Wait for publication to complete before "
                 f"generating another version PR: {run_url}\n\n"
-                "`--force` does not bypass an unfinished publish (#3054)."
+                "Publication completion triggers fresh generation on current "
+                "main and reevaluates this gate. If the run is waiting for "
+                "approval, its owner must approve or cancel it under the "
+                "normal deployment rules. `--force` does not bypass an "
+                "unfinished publish (#3054)."
             ),
         )
     if force:
