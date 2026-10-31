@@ -23,6 +23,42 @@ _VALID_FINDING = {
     "extra": {"message": "Test finding", "severity": "WARNING"},
 }
 
+
+@pytest.mark.parametrize(
+    ("paths", "expected"),
+    [
+        ({"scanned": []}, False),
+        ({"scanned": ["scan.py"]}, True),
+        ({}, None),
+        (None, None),
+        ({"scanned": None}, None),
+    ],
+)
+def test_inspection_uses_reported_scanned_paths(
+    semgrep_plugin: SemgrepPlugin,
+    tmp_path: Path,
+    paths: object,
+    expected: bool | None,
+) -> None:
+    """An explicitly empty scan differs from a report with unknown coverage.
+
+    Args:
+        semgrep_plugin: Real plugin under test.
+        tmp_path: Directory containing a discoverable source.
+        paths: Reported coverage section, including absent or malformed variants.
+        expected: Producer's three-state inspection signal.
+    """
+    (tmp_path / "scan.py").write_text("value = 1\n")
+    report = json.dumps({"results": [], "errors": [], "paths": paths})
+    with patch(
+        "subprocess.run",
+        return_value=subprocess.CompletedProcess(["semgrep"], 0, report, ""),
+    ):
+        result = semgrep_plugin.check([str(tmp_path)], {})
+    assert_that(result.success).is_true()
+    assert_that(result.inspected_files).is_equal_to(expected)
+
+
 # =============================================================================
 # Tests for SemgrepPlugin.check method
 # =============================================================================

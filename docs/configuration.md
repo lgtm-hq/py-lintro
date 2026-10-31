@@ -343,8 +343,9 @@ support. It exits non-zero, printing no snippet, when the check exited early, wh
 tool timed out, and when nothing actually inspected a file — which covers an empty
 directory, an all-skipped toolset, and a toolset that declined to run for want of
 configuration. Coverage comes from the producer's `ToolResult.inspected_files` signal,
-never its message text. Legacy plugins that leave this signal as `None` have unknown
-coverage and cannot alone qualify a badge or severity baseline.
+never its message text. Results that leave this signal as `None` have unknown
+coverage and cannot alone qualify a badge. A severity baseline also rejects mixed
+runs containing both inspected and unknown results, for comparison and storage.
 
 #### JSON output
 

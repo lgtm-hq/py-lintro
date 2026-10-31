@@ -628,10 +628,8 @@ def test_is_no_files_result_prefers_the_structured_flag() -> None:
     """Only structured inspection and discovery flags establish empty discovery.
 
     ``prepare_execution`` and the tool definitions that build their own
-    "nothing was examined" result stamp ``no_files=True`` (#1743). A message
-    such as "No Cargo.toml found; skipping
-    clippy." — must still render the note, and a flagged result with no
-    message at all must too.
+    "nothing was examined" result stamp ``no_files=True`` (#1743). Both a
+    flagged result with a message and one without any message render the note.
     """
     flagged = ToolResult(
         name="clippy",
@@ -641,7 +639,7 @@ def test_is_no_files_result_prefers_the_structured_flag() -> None:
         no_files=True,
     )
     assert_that(_is_no_files_result(flagged.output)).is_false()
-    assert_that(_is_no_files_result(flagged.output, flagged)).is_true()
+    assert_that(_is_no_files_result(flagged)).is_true()
 
     silent = ToolResult(
         name="typos",
@@ -649,7 +647,7 @@ def test_is_no_files_result_prefers_the_structured_flag() -> None:
         issues_count=0,
         no_files=True,
     )
-    assert_that(_is_no_files_result(silent.output, silent)).is_true()
+    assert_that(_is_no_files_result(silent)).is_true()
 
     ran = ToolResult(
         name="ruff",
@@ -657,7 +655,7 @@ def test_is_no_files_result_prefers_the_structured_flag() -> None:
         output="No issues found",
         issues_count=0,
     )
-    assert_that(_is_no_files_result(ran.output, ran)).is_false()
+    assert_that(_is_no_files_result(ran)).is_false()
 
 
 def test_no_files_note_renders_from_the_flag_alone(

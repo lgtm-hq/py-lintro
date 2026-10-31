@@ -10,10 +10,11 @@ from __future__ import annotations
 import csv
 import io
 import json
+import subprocess  # nosec B404 - mocked OSV process results only
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Never
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -25,6 +26,7 @@ from lintro.models.core.severity_counts import SeverityCounts
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.tools import tool_manager
+from lintro.tools.osv_scanner.definition import OsvScannerPlugin
 from lintro.utils.execution.run_aggregation import finalize_artifact
 from lintro.utils.execution.run_context import RunContext
 from lintro.utils.execution.run_preflight import DiffScope
@@ -704,6 +706,56 @@ def test_render_run_records_the_baseline_for_the_next_run(
     )
 
 
+@pytest.mark.parametrize("no_sources", [True, False])
+def test_osv_coverage_controls_baseline_comparison_and_storage(
+    tmp_path: Path,
+    fake_logger: Any,
+    no_sources: bool,
+) -> None:
+    """An OSV no-op cannot compare with or replace a healthy baseline.
+
+    Args:
+        tmp_path: Target and baseline storage directory.
+        fake_logger: Console logger double.
+        no_sources: Recognized empty discovery or a completed clean scan.
+    """
+    if not no_sources:
+        (tmp_path / "requirements.txt").write_text("requests==2.32.0\n")
+    completed = subprocess.CompletedProcess(
+        ["osv-scanner"],
+        128 if no_sources else 0,
+        "" if no_sources else '{"results": []}',
+        "No package sources found" if no_sources else "",
+    )
+    with (
+        patch(
+            "lintro.tools.osv_scanner.definition.verify_tool_version",
+            return_value=None,
+        ),
+        patch("subprocess.run", return_value=completed),
+    ):
+        measured = OsvScannerPlugin().check([str(tmp_path)], {})
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger)
+    paths = [str(tmp_path)]
+    scope = severity_baseline_scope(paths=paths, tool_results=[measured])
+    previous = SeverityCounts(errors=9)
+    write_severity_baseline(ctx.output_manager.base_dir, previous, scope)
+    artifact = finalize_artifact(
+        ctx=ctx,
+        all_results=[measured],
+        total_issues=0,
+        total_fixed=0,
+        total_remaining=0,
+        paths=paths,
+    )
+    assert_that(artifact.previous_severity_counts).is_equal_to(
+        None if no_sources else previous,
+    )
+    render_run(artifact, ctx=ctx, output_format="grid")
+    stored = read_severity_baseline(ctx.output_manager.base_dir, scope)
+    assert_that(stored).is_equal_to(previous if no_sources else SeverityCounts())
+
+
 @pytest.mark.parametrize(
     ("scoped_paths", "scoped_tools"),
     [(["a.py"], None), (["."], "ruff")],
@@ -1002,6 +1054,13 @@ def _unmeasured_artifacts() -> list[tuple[str, RunArtifact]]:
             RunArtifact(
                 action=Action.CHECK,
                 tool_results=[ToolResult(name="legacy", success=True)],
+            ),
+        ),
+        (
+            "mixed-inspected-and-unknown",
+            RunArtifact(
+                action=Action.CHECK,
+                tool_results=[*real, ToolResult(name="legacy", success=True)],
             ),
         ),
         (

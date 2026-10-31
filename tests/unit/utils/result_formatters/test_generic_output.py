@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from assertpy import assert_that
 
+from lintro.models.core.tool_result import ToolResult
 from lintro.utils.result_formatters import print_tool_result
 
 if TYPE_CHECKING:
@@ -102,9 +103,11 @@ def test_success_false_shows_failure_even_with_zero_issues(
     [
         ("No files to lint", "no files to lint message"),
         ("No Python files found to lint", "no Python files found message"),
+        ("", "no display output"),
     ],
-    ids=["no_files_to_lint", "no_python_files_found"],
+    ids=["no_files_to_lint", "no_python_files_found", "silent"],
 )
+@pytest.mark.parametrize("no_files", [True, False])
 def test_no_files_processed_warning(
     console_capture_with_kwargs: tuple[
         Callable[..., None],
@@ -113,14 +116,16 @@ def test_no_files_processed_warning(
     success_capture: tuple[Callable[[str], None], list[str]],
     output_text: str,
     description: str,
+    no_files: bool,
 ) -> None:
-    """Verify warning shown when no files were processed.
+    """Only structured empty discovery produces the no-files warning.
 
     Args:
         console_capture_with_kwargs: Mock console output capture with kwargs.
         success_capture: Mock success message capture.
         output_text: Tool output text to test.
         description: Description of the test case.
+        no_files: Whether the producer explicitly reports empty discovery.
     """
     mock_console, console_output = console_capture_with_kwargs
     mock_success, _ = success_capture
@@ -131,9 +136,10 @@ def test_no_files_processed_warning(
         tool_name="ruff",
         output=output_text,
         issues_count=0,
+        result=ToolResult(name="ruff", success=True, no_files=no_files),
     )
 
     texts = [t for t, _ in console_output]
     assert_that(any("No files processed" in t for t in texts)).described_as(
         f"Expected 'No files processed' warning for {description}",
-    ).is_true()
+    ).is_equal_to(no_files)

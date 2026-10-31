@@ -468,7 +468,7 @@ class OsvScannerPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
-            inspected_files=True,
+            inspected_files=not no_op_success,
             success=overall_success,
             output=output if should_show_output else None,
             issues_count=len(issues),

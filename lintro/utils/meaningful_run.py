@@ -107,6 +107,8 @@ def baseline_is_eligible(
       is not evidence that anything was measured; recording its zero counts
       would make the next real check report every existing issue as newly
       introduced.
+    * Every non-skipped result has known coverage. One inspected tool cannot
+      make an unknown peer's missing findings comparable to a healthy run.
     * It did not exit before running anything.
     * It did not request ``--diff`` or ``--incremental``. These modes narrow
       the measured files without changing the path arguments or tool set,
@@ -125,6 +127,8 @@ def baseline_is_eligible(
         bool: ``True`` when the run is a comparable measurement.
     """
     if early_exit or dry_run_preview or partial_scan or action != Action.CHECK:
+        return False
+    if any(result_inspected_files(result) is None for result in tool_results):
         return False
     return not run_has_unreported_failure(tool_results) and run_inspected_files(
         tool_results,

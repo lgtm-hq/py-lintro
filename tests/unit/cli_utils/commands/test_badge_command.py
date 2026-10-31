@@ -17,11 +17,14 @@ from lintro.cli_utils.commands.badge import (
     badge_command,
     resolve_severity_counts,
 )
+from lintro.enums.action import Action
 from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.severity_counts import SeverityCounts
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.tools.bandit.definition import BanditPlugin
+from lintro.tools.osv_scanner.definition import OsvScannerPlugin
+from lintro.utils.meaningful_run import baseline_is_eligible
 from lintro.utils.severity_counts import count_severities
 
 
@@ -605,3 +608,48 @@ def test_badge_uses_bandit_inspection_signal(tmp_path: Path, scenario: str) -> N
     else:
         assert_that(result.exit_code).is_equal_to(1)
         assert_that(result.output).does_not_contain("img.shields.io")
+
+
+@pytest.mark.parametrize("no_sources", [True, False])
+def test_osv_no_sources_cannot_publish_or_qualify_a_baseline(
+    tmp_path: Path,
+    no_sources: bool,
+) -> None:
+    """The actual OSV plugin distinguishes a recognized no-op from a scan.
+
+    Args:
+        tmp_path: OSV scan root with or without a supported package source.
+        no_sources: Whether OSV reports that there was nothing to scan.
+    """
+    if not no_sources:
+        (tmp_path / "requirements.txt").write_text("requests==2.32.0\n")
+    report = json.dumps({"results": []})
+    completed = CompletedProcess(
+        ["osv-scanner"],
+        128 if no_sources else 0,
+        "" if no_sources else report,
+        "No package sources found" if no_sources else "",
+    )
+    with (
+        patch(
+            "lintro.tools.osv_scanner.definition.verify_tool_version",
+            return_value=None,
+        ),
+        patch("subprocess.run", return_value=completed),
+    ):
+        measured = OsvScannerPlugin().check([str(tmp_path)], {})
+    assert_that(measured.success).is_true()
+    assert_that(measured.output).is_none()
+    assert_that(measured.inspected_files).is_equal_to(not no_sources)
+    assert_that(
+        baseline_is_eligible(
+            action=Action.CHECK,
+            dry_run_preview=False,
+            tool_results=[measured],
+        ),
+    ).is_equal_to(not no_sources)
+    artifact = RunArtifact(tool_results=[measured], severity_counts=SeverityCounts())
+    with patch("lintro.cli_utils.commands.badge.api.check_run", return_value=artifact):
+        result = CliRunner().invoke(badge_command, ["--url"])
+    assert_that(result.exit_code).is_equal_to(1 if no_sources else 0)
+    assert_that("img.shields.io" in result.output).is_equal_to(not no_sources)

@@ -431,10 +431,22 @@ class SemgrepPlugin(BaseToolPlugin):
             execution_success = not (
                 fatal_errors or execution_failure or parse_failures_count
             )
+            reported_paths = semgrep_data.get("paths")
+            scanned = (
+                reported_paths.get("scanned")
+                if isinstance(reported_paths, dict)
+                else None
+            )
+            inspected_files = (
+                bool(scanned)
+                if isinstance(scanned, list)
+                and all(isinstance(p, str) and p for p in scanned)
+                else True if issues else None
+            )
 
             return ToolResult(
                 name=self.definition.name,
-                inspected_files=True,
+                inspected_files=inspected_files,
                 success=execution_success,
                 output=output if not execution_success else None,
                 issues_count=issues_count,

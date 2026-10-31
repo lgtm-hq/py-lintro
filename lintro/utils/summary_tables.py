@@ -94,11 +94,10 @@ def _get_ai_unverified_count(result: object) -> int:
     return get_ai_count(result, "unverified_count")
 
 
-def _is_no_files_result(output: object, result: object = None) -> bool:
+def _is_no_files_result(result: object) -> bool:
     """Read empty discovery separately from other no-inspection outcomes.
 
     Args:
-        output: Legacy argument, retained for callers; never interpreted.
         result: The structured result, when available.
 
     Returns:
@@ -387,7 +386,7 @@ def print_summary_table(
                     notes_display = f"{_YELLOW}{ai_unverified_value} unresolved{_RESET}"
                 elif residual_unknown:
                     notes_display = f"{_YELLOW}{UNKNOWN_RESIDUAL_NOTE}{_RESET}"
-                elif _is_no_files_result(result_output, result):
+                elif _is_no_files_result(result):
                     notes_display = f"{_YELLOW}{NO_FILES_NOTE}{_RESET}"
                 else:
                     notes_display = ""
@@ -436,7 +435,7 @@ def print_summary_table(
 
                 notes_display = (
                     f"{_YELLOW}{NO_FILES_NOTE}{_RESET}"
-                    if _is_no_files_result(result_output, result)
+                    if _is_no_files_result(result)
                     else ""
                 )
 

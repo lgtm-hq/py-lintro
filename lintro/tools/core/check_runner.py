@@ -105,6 +105,7 @@ def check_one_file(
             issues=[],
             skipped=True,
             timed_out=True,
+            inspected_files=False,
         )
     except (OSError, ValueError, RuntimeError) as exc:
         return FileProcessingResult(
@@ -112,6 +113,7 @@ def check_one_file(
             output="",
             issues=[],
             error=str(exc),
+            inspected_files=False if isinstance(exc, OSError) else None,
         )
 
     if not success and not issues and failure_message is not None:
@@ -125,6 +127,7 @@ def check_one_file(
         success=success and not (issues_imply_failure and issues),
         output=output,
         issues=issues,
+        inspected_files=True if issues else None,
     )
 
 
@@ -177,7 +180,7 @@ def run_per_file_check(
 
     return ToolResult(
         name=plugin.definition.name,
-        inspected_files=True,
+        inspected_files=result.inspected_files,
         success=result.all_success and result.total_issues == 0,
         output=result.build_output(timeout=ctx.timeout),
         issues_count=result.total_issues,

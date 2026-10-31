@@ -500,4 +500,23 @@ def test_clean_run_is_a_clean_success(
     assert_that(result.parse_failures_count or 0).is_zero()
     assert_that(result.success).described_as(str(result)).is_true()
     assert_that(result.issues_count).is_zero()
-    assert_that(result.inspected_files).is_true()
+    # Successful execution and proof of inspection are separate contracts.
+    # These reports contain no scanned-file evidence, even on a clean exit.
+    unknown_coverage = {
+        "actionlint",
+        "clippy",
+        "dotenv_linter",
+        "golangci_lint",
+        "hadolint",
+        "html_validate",
+        "pydoclint",
+        "semgrep",
+        "shellcheck",
+        "shfmt",
+        "sqlfluff",
+        "tsc",
+        "vue-tsc",
+    }
+    assert_that(result.inspected_files).is_equal_to(
+        None if tool_name in unknown_coverage else True,
+    )

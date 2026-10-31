@@ -150,6 +150,7 @@ def test_run_has_unreported_failure(
         ),
         skipped=skipped,
         skip_reason="not installed" if skipped else None,
+        inspected_files=True,
     )
 
     assert_that(run_has_unreported_failure([_real_result(), result])).is_equal_to(
@@ -192,6 +193,27 @@ def test_baseline_is_eligible_for_a_real_check() -> None:
             tool_results=[_real_result()],
         ),
     ).is_true()
+
+
+@pytest.mark.parametrize("coverage", [True, False, None])
+def test_mixed_baseline_requires_known_coverage(coverage: bool | None) -> None:
+    """Publication needs one inspection; comparison also rejects unknown peers.
+
+    Args:
+        coverage: A second producer's inspection state.
+    """
+    results = [
+        _real_result(),
+        ToolResult(name="peer", success=True, inspected_files=coverage),
+    ]
+    assert_that(run_inspected_files(results)).is_true()
+    assert_that(
+        baseline_is_eligible(
+            action=Action.CHECK,
+            dry_run_preview=False,
+            tool_results=results,
+        ),
+    ).is_equal_to(coverage is not None)
 
 
 @pytest.mark.parametrize(

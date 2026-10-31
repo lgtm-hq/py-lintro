@@ -22,6 +22,7 @@ tool produces sensible results out of the box.
 
 from __future__ import annotations
 
+import json
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 
@@ -61,6 +62,31 @@ HTML_VALIDATE_CONFIG_FILENAMES: list[str] = [
 # ``fs.globSync``, which is not implemented on every Bun release and aborts the
 # run before any file is validated (see issue #1727).
 _GLOB_METACHARACTERS: frozenset[str] = frozenset("*?[]{}")
+
+
+def _reported_inspection(output: str) -> bool | None:
+    """Read coverage from JSON file reports, preserving absent evidence.
+
+    Args:
+        output: JSON formatter stdout, separate from stderr diagnostics.
+
+    Returns:
+        True when a file report establishes inspection, otherwise None.
+        An empty diagnostics array alone does not establish file coverage.
+    """
+    try:
+        reports = json.loads(output)
+    except ValueError:
+        return None
+    if isinstance(reports, list) and any(
+        isinstance(report, dict)
+        and isinstance(report.get("filePath"), str)
+        and report["filePath"]
+        and isinstance(report.get("messages"), list)
+        for report in reports
+    ):
+        return True
+    return None
 
 
 def contains_glob_syntax(argument: str) -> bool:
@@ -269,7 +295,7 @@ class HtmlValidatePlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
-            inspected_files=True,
+            inspected_files=_reported_inspection(result.stdout),
             success=success_flag,
             output=final_output,
             issues_count=issues_count,
