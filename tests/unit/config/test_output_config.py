@@ -77,7 +77,7 @@ def test_output_rejects_falsey_non_mapping(
 
     with pytest.raises(
         ValueError,
-        match=escape(f"output config must be a mapping, got {expected_type}"),
+        match=escape(f"output must be a mapping, got {expected_type}"),
     ):
         load_config(config_path=config_file)
 

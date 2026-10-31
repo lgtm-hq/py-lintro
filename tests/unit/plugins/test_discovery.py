@@ -441,6 +441,84 @@ def test_malformed_pyproject_config_fails_closed(
     assert_that(ep.load.called).is_false()
 
 
+@pytest.mark.parametrize("source", ["global", "project"])
+@pytest.mark.parametrize(
+    "content",
+    ["", "# comment\n", "null\n", "~\n", "[]\n", "false\n", "0\n", "invalid\n"],
+)
+def test_non_mapping_yaml_denies_external_plugins(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    content: str,
+) -> None:
+    """Invalid YAML must deny plugins before importing, even with env opt-in.
+
+    Args:
+        tmp_path: Temporary directory for isolated configuration sources.
+        monkeypatch: Pytest monkeypatch fixture.
+        source: Configuration tier containing the invalid document.
+        content: Non-mapping YAML document.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.chdir(project)
+    monkeypatch.delenv("LINTRO_GLOBAL_CONFIG", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    monkeypatch.setenv(ENV_ENABLE_EXTERNAL_PLUGINS, "1")
+    config_dir = home if source == "global" else project
+    (config_dir / ".lintro-config.yaml").write_text(content, encoding="utf-8")
+    (project / "pyproject.toml").write_text(
+        '[tool.lintro.plugins]\ntrusted = ["invalid-yaml-plugin"]\n',
+        encoding="utf-8",
+    )
+    entry_point = _FakeEntryPoint(name="invalid-yaml-plugin")
+
+    with patch("importlib.metadata.entry_points", return_value=[entry_point]):
+        registered = discover_external_plugins()
+
+    assert_that(registered).is_equal_to(0)
+    assert_that(entry_point.load_count).is_equal_to(0)
+    assert_that(ToolRegistry.is_registered("invalid-yaml-plugin")).is_false()
+
+
+@pytest.mark.parametrize("source", ["global", "project"])
+def test_empty_mapping_yaml_allows_external_plugin_opt_in(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+) -> None:
+    """An empty YAML mapping remains valid for plugin trust with env opt-in.
+
+    Args:
+        tmp_path: Temporary directory for isolated configuration sources.
+        monkeypatch: Pytest monkeypatch fixture.
+        source: Configuration tier containing the empty mapping.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.chdir(project)
+    monkeypatch.delenv("LINTRO_GLOBAL_CONFIG", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    monkeypatch.setenv(ENV_ENABLE_EXTERNAL_PLUGINS, "1")
+    config_dir = home if source == "global" else project
+    (config_dir / ".lintro-config.yaml").write_text("{}\n", encoding="utf-8")
+    entry_point = _FakeEntryPoint(name="empty-yaml-plugin")
+
+    with patch("importlib.metadata.entry_points", return_value=[entry_point]):
+        registered = discover_external_plugins()
+
+    assert_that(registered).is_equal_to(1)
+    assert_that(entry_point.load_count).is_equal_to(1)
+    assert_that(ToolRegistry.is_registered("empty-yaml-plugin")).is_true()
+
+
 def test_discover_external_plugins_respects_global_config_off(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

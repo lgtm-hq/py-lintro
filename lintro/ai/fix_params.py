@@ -19,6 +19,15 @@ if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
 
 
+def _no_progress(completed: int, total: int) -> None:
+    """Ignore fix completion updates when no progress display is requested.
+
+    Args:
+        completed: Number of completed fixes.
+        total: Total number of fixes.
+    """
+
+
 @dataclass(frozen=True)
 class FixGenParams:
     """Immutable parameter bundle for fix generation.
@@ -45,7 +54,8 @@ class FixGenParams:
         max_workers: Maximum concurrent API calls.
         fallback_models: Ordered fallback model identifiers.
         sanitize_mode: How to handle prompt injection patterns.
-        progress_callback: Optional callback after each fix completes.
+        progress_callback: Callback after each fix completes; defaults to
+            ignoring progress updates.
         ai_config: Optional AI configuration for ``call_ai`` transport
             and retry settings.
     """
@@ -67,5 +77,5 @@ class FixGenParams:
     max_workers: int = 5
     fallback_models: list[str] = field(default_factory=list)
     sanitize_mode: SanitizeMode = SanitizeMode.WARN
-    progress_callback: Callable[[int, int], None] | None = None
+    progress_callback: Callable[[int, int], None] = _no_progress
     ai_config: AIConfig | None = None

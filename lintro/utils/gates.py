@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from lintro.enums.action import Action
 from lintro.enums.output_format import OutputFormat, normalize_output_format
+from lintro.models.core.tool_result import ToolResult
 from lintro.utils.config import (
     load_lintro_tool_config,
     load_module_size_config,
@@ -27,12 +28,12 @@ from lintro.utils.duplicate_code import (
     resolve_duplicate_code_baseline,
 )
 from lintro.utils.module_size import (
+    ModuleSizeReadFailure,
     find_oversized_modules,
     resolve_module_size_settings,
 )
 
 if TYPE_CHECKING:
-    from lintro.models.core.tool_result import ToolResult
     from lintro.utils.console import ThreadSafeConsoleLogger
 
 
@@ -43,11 +44,11 @@ def _run_module_size_gate(
     include_venv: bool,
     json_output_mode: bool,
     logger: ThreadSafeConsoleLogger,
-) -> None:
-    """Run the warn-level module-size gate over the scanned paths.
+) -> ToolResult | None:
+    """Warn about oversized modules and report unmeasurable files as failures.
 
-    This gate never fails the build. It emits a warning for any Python module
-    that exceeds the configured threshold and is not baselined. See
+    Measured size violations only warn. Read failures produce a failing gate
+    result so prior findings and formatting counts can still be rendered. See
     ``lintro/utils/module_size.py`` for the ratchet-down plan.
 
     Args:
@@ -56,40 +57,58 @@ def _run_module_size_gate(
         include_venv: Whether virtual-environment directories are included.
         json_output_mode: Whether output is JSON (suppresses console warnings).
         logger: Logger instance for console output.
+
+    Returns:
+        ToolResult | None: A failed result for read errors, otherwise None.
     """
     cfg = load_module_size_config()
     if not bool(cfg.get("enabled", True)):
-        return
+        return None
 
     threshold, baseline, base_excludes = resolve_module_size_settings(config=cfg)
     exclude_patterns: list[str] = list(base_excludes)
     if exclude:
         exclude_patterns.extend(p.strip() for p in exclude.split(",") if p.strip())
 
+    read_failures: list[ModuleSizeReadFailure] = []
     violations = find_oversized_modules(
         paths=paths,
         threshold=threshold,
         baseline=baseline,
         exclude_patterns=tuple(exclude_patterns),
         include_venv=include_venv,
+        read_failures=read_failures,
     )
 
-    if not violations or json_output_mode:
-        return
-
-    logger.console_output(
-        text=(
-            f"Warning: {len(violations)} module(s) exceed the "
-            f"{threshold}-line size limit (warn-level, non-blocking):"
-        ),
-        color="yellow",
-    )
-    for module in violations:
+    if violations and not json_output_mode:
         logger.console_output(
-            text=f"  {module.path} ({module.line_count} lines)",
+            text=(
+                f"Warning: {len(violations)} module(s) exceed the "
+                f"{threshold}-line size limit (warn-level, non-blocking):"
+            ),
             color="yellow",
         )
-    logger.console_output(text="")
+        for module in violations:
+            logger.console_output(
+                text=f"  {module.path} ({module.line_count} lines)",
+                color="yellow",
+            )
+        logger.console_output(text="")
+
+    if not read_failures:
+        return None
+    message = "\n".join(
+        f"Cannot measure module size for {failure.path}: {failure.error}"
+        for failure in read_failures
+    )
+    if not json_output_mode:
+        logger.console_output(text=message, color="red")
+    return ToolResult(
+        name="module-size",
+        success=False,
+        output=message,
+        issues_count=len(read_failures),
+    )
 
 
 def _run_duplicate_code_gate(
@@ -131,10 +150,8 @@ def _run_duplicate_code_gate(
             logger.console_output(text=verdict.message, color="green")
         return total_issues
 
-    from lintro.models.core.tool_result import ToolResult as _ToolResult
-
     all_results.append(
-        _ToolResult(
+        ToolResult(
             name=DUPLICATE_CODE_GATE_NAME,
             success=False,
             output=verdict.message,
@@ -166,8 +183,8 @@ def execute_gates(
         include_venv: Whether virtual environments are included.
         output_format: Output format for results.
         logger: Logger instance for output.
-        all_results: Results collected during the run. Appended to by the
-            duplicate-code gate.
+        all_results: Results collected during the run. Appended to by gates
+            that fail the run.
         total_issues: Current total issues count.
 
     Returns:
@@ -180,15 +197,17 @@ def execute_gates(
     output_fmt_enum: OutputFormat = normalize_output_format(output_format)
     json_output_mode = output_fmt_enum == OutputFormat.JSON
 
-    # Warn-level module-size gate (issue #1052). Never contributes to failure
-    # counts.
-    _run_module_size_gate(
+    # Size violations warn (#1052); unreadable modules fail the gate (#3016).
+    module_size_result = _run_module_size_gate(
         paths=paths,
         exclude=exclude,
         include_venv=include_venv,
         json_output_mode=json_output_mode,
         logger=logger,
     )
+    if module_size_result is not None:
+        all_results.append(module_size_result)
+        total_issues += module_size_result.issues_count
 
     # Duplicate-code ratchet gate (issue #2293). Runs after the primary tools
     # so it can judge the pylint result the run already produced.
