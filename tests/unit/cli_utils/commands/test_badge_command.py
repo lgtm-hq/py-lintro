@@ -18,6 +18,8 @@ from lintro.cli_utils.commands.badge import (
 from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.severity_counts import SeverityCounts
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.ruff.ruff_issue import RuffIssue
+from lintro.utils.severity_counts import count_severities
 
 
 def test_badge_markdown_default() -> None:
@@ -198,6 +200,56 @@ def test_badge_live_early_exit_prints_no_badge() -> None:
 
     assert_that(result.exit_code).is_not_equal_to(0)
     assert_that(result.output).does_not_contain("img.shields.io")
+
+
+@pytest.mark.parametrize("with_clean_tool", [False, True], ids=["alone", "mixed"])
+def test_badge_refuses_a_tool_failure_without_findings(with_clean_tool: bool) -> None:
+    """A crashed tool cannot produce a clean badge, even beside a clean tool.
+
+    Args:
+        with_clean_tool: Whether a second tool completed cleanly.
+    """
+    results = [
+        ToolResult(
+            name="pylint",
+            success=False,
+            issues_count=0,
+            output="pylint: invalid rcfile",
+        ),
+    ]
+    if with_clean_tool:
+        results.append(ToolResult(name="ruff", success=True))
+    artifact = RunArtifact(tool_results=results, exit_code=1)
+
+    with patch("lintro.cli_utils.commands.badge.api.check_run", return_value=artifact):
+        result = CliRunner().invoke(badge_command, [])
+
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(result.output).contains("failed without reporting findings")
+    assert_that(result.output).does_not_contain("img.shields.io")
+
+
+def test_badge_publishes_findings_from_a_failed_tool() -> None:
+    """A non-zero lint verdict with parsed findings still produces a badge."""
+    tool_result = ToolResult(
+        name="ruff",
+        success=False,
+        issues_count=1,
+        issues=[RuffIssue(file="a.py", line=1, code="F401", message="unused")],
+    )
+    artifact = RunArtifact(
+        tool_results=[tool_result],
+        severity_counts=count_severities([tool_result]),
+        exit_code=1,
+    )
+
+    with patch("lintro.cli_utils.commands.badge.api.check_run", return_value=artifact):
+        result = CliRunner().invoke(badge_command, ["--url"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output.strip()).is_equal_to(
+        "https://img.shields.io/badge/lintro-1%20warning-yellow",
+    )
 
 
 def test_badge_rejects_negative_count() -> None:

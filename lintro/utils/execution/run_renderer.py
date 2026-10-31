@@ -655,6 +655,7 @@ def _record_severity_baseline(artifact: RunArtifact, *, ctx: RunContext) -> None
     from lintro.utils.meaningful_run import baseline_is_eligible
     from lintro.utils.severity_baseline import (
         resolve_log_root,
+        severity_baseline_scope,
         write_severity_baseline,
     )
 
@@ -669,7 +670,11 @@ def _record_severity_baseline(artifact: RunArtifact, *, ctx: RunContext) -> None
     log_root = resolve_log_root(ctx.output_manager)
     if log_root is None:
         return
-    write_severity_baseline(log_root, artifact.severity_counts)
+    scope = severity_baseline_scope(
+        paths=artifact.paths,
+        tool_results=artifact.tool_results,
+    )
+    write_severity_baseline(log_root, artifact.severity_counts, scope)
 
 
 def render_run(

@@ -4,7 +4,8 @@ Two consumers ask the same question in slightly different ways, and both got
 it wrong independently before this module existed (issue #1739):
 
 * ``lintro badge`` must not publish a public "0 issues" badge for a directory
-  nothing inspected, or for a run whose tools timed out.
+  nothing inspected, or for a run whose tools timed out or failed without
+  reporting findings.
 * The severity baseline must not record — or compare against — a run that did
   not measure the same population as a normal ``check``.
 
@@ -44,6 +45,7 @@ if TYPE_CHECKING:
 __all__ = [
     "baseline_is_eligible",
     "result_inspected_files",
+    "run_has_unreported_failure",
     "run_inspected_files",
 ]
 
@@ -138,6 +140,22 @@ def run_inspected_files(results: Sequence[ToolResult]) -> bool:
     return any(result_inspected_files(result) for result in results)
 
 
+def run_has_unreported_failure(results: Sequence[ToolResult]) -> bool:
+    """Return whether a tool failed without reporting any findings.
+
+    Args:
+        results: Every result the run produced, skipped placeholders included.
+
+    Returns:
+        bool: ``True`` when a non-skipped tool failed with zero findings.
+        Failures with findings are ordinary lint verdicts.
+    """
+    return any(
+        not result.skipped and not result.success and result.issues_count == 0
+        for result in results
+    )
+
+
 def baseline_is_eligible(
     *,
     action: Action,
@@ -150,6 +168,9 @@ def baseline_is_eligible(
     The same predicate gates both sides on purpose: a run that must not
     *record* a baseline must not *compare against* one either, or it reports a
     delta between two different populations.
+
+    Baseline storage additionally requires a matching scope fingerprint for
+    both comparison and replacement of an existing baseline.
 
     A run qualifies only when all of the following hold:
 

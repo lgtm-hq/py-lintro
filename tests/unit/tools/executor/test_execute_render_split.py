@@ -28,7 +28,9 @@ from lintro.utils.execution.run_context import RunContext
 from lintro.utils.execution.run_renderer import render_run
 from lintro.utils.execution.tool_configuration import SkippedTool, ToolsToRunResult
 from lintro.utils.severity_baseline import (
+    SEVERITY_BASELINE_FILENAME,
     read_severity_baseline,
+    severity_baseline_scope,
     write_severity_baseline,
 )
 from lintro.utils.severity_counts import count_severities
@@ -38,13 +40,15 @@ from lintro.utils.tool_executor import execute_run
 class _FakeTool:
     """Tool double that reports a fixed number of check-mode issues."""
 
-    def __init__(self, *, issues_count: int) -> None:
+    def __init__(self, *, issues_count: int, name: str = "ruff") -> None:
         """Store the issue count this double reports.
 
         Args:
             issues_count: Number of issues every ``check`` call reports.
+            name: Name of the tool producing the result.
         """
         self._issues_count = issues_count
+        self._name = name
 
     def set_options(self, **_kwargs: Any) -> None:
         """Accept and ignore runtime options."""
@@ -72,7 +76,7 @@ class _FakeTool:
             for index in range(self._issues_count)
         ]
         return ToolResult(
-            name="ruff",
+            name=self._name,
             success=self._issues_count == 0,
             issues_count=self._issues_count,
             issues=issues,
@@ -689,9 +693,124 @@ def test_render_run_records_the_baseline_for_the_next_run(
 
     render_run(artifact, ctx=ctx, output_format="grid")
 
-    assert_that(read_severity_baseline(ctx.output_manager.base_dir)).is_equal_to(
+    scope = severity_baseline_scope(
+        paths=artifact.paths,
+        tool_results=artifact.tool_results,
+    )
+    assert_that(read_severity_baseline(ctx.output_manager.base_dir, scope)).is_equal_to(
         SeverityCounts(errors=2, info=1),
     )
+
+
+@pytest.mark.parametrize(
+    ("scoped_paths", "scoped_tools"),
+    [(["a.py"], None), (["."], "ruff")],
+    ids=["path-selection", "tool-selection"],
+)
+def test_scoped_check_preserves_the_full_run_baseline(
+    tmp_path: Path,
+    fake_logger: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    executor_doubles: None,
+    scoped_paths: list[str],
+    scoped_tools: str | None,
+) -> None:
+    """A scoped check emits no delta and the next full check remains comparable.
+
+    Args:
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+        monkeypatch: Pytest fixture for substituting tool discovery.
+        executor_doubles: Neutralized executor collaborators.
+        scoped_paths: Paths selected for the intermediate check.
+        scoped_tools: Tool selection for the intermediate check.
+    """
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger, output_format="json")
+    monkeypatch.setattr(ctx.lintro_config.execution, "parallel", False)
+    monkeypatch.setattr(
+        te,
+        "get_tools_to_run",
+        lambda tools, action, **_kw: ToolsToRunResult(
+            to_run=tools.split(",") if tools else ["ruff", "pylint"],
+        ),
+    )
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool",
+        lambda name: _FakeTool(issues_count=2, name=name),
+    )
+    full = _run_execute(ctx=ctx, tools=None, output_format="json")
+    render_run(full, ctx=ctx, output_format="grid")
+    baseline = ctx.output_manager.base_dir / SEVERITY_BASELINE_FILENAME
+    original = baseline.read_bytes()
+    fake_logger.calls.clear()
+
+    scoped = _run_execute(
+        ctx=ctx,
+        paths=scoped_paths,
+        tools=scoped_tools,
+        output_format="json",
+    )
+    render_run(scoped, ctx=ctx, output_format="grid")
+
+    assert_that(scoped.severity_delta).is_none()
+    assert_that(_console_texts(fake_logger)).does_not_contain("Change since last run")
+    assert_that(baseline.read_bytes()).is_equal_to(original)
+
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool",
+        lambda name: _FakeTool(issues_count=1, name=name),
+    )
+    repeated = _run_execute(ctx=ctx, tools=None, output_format="json")
+    render_run(repeated, ctx=ctx, output_format="grid")
+
+    assert_that(repeated.previous_severity_counts).is_equal_to(full.severity_counts)
+    assert_that(_console_texts(fake_logger)).contains(
+        "Change since last run: -2 warnings",
+    )
+
+
+def test_consecutive_scoped_checks_report_and_update_the_exact_delta(
+    tmp_path: Path,
+    fake_logger: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    executor_doubles: None,
+) -> None:
+    """A stable scoped population remains comparable after artifact refresh.
+
+    Args:
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+        monkeypatch: Pytest fixture for substituting tool discovery.
+        executor_doubles: Neutralized executor collaborators.
+    """
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger, output_format="json")
+    monkeypatch.setattr(
+        te,
+        "get_tools_to_run",
+        lambda tools, action, **_kw: ToolsToRunResult(to_run=["ruff"]),
+    )
+    for count in (4, 1, 0):
+        monkeypatch.setattr(
+            tool_manager,
+            "get_tool",
+            lambda name, count=count: _FakeTool(issues_count=count),
+        )
+        artifact = _run_execute(ctx=ctx, paths=["a.py"], output_format="json")
+        refreshed = te.refresh_artifact(artifact, ctx=ctx)
+        fake_logger.calls.clear()
+        render_run(refreshed, ctx=ctx, output_format="grid")
+
+        assert_that(refreshed.paths).is_equal_to(("a.py",))
+        if count == 4:
+            assert_that(refreshed.severity_delta).is_none()
+        else:
+            expected_delta = -3 if count == 1 else -1
+            assert_that(_console_texts(fake_logger)).contains(
+                f"Change since last run: {expected_delta} "
+                f"{'warnings' if count == 1 else 'warning'}",
+            )
 
 
 def _unmeasured_artifacts() -> list[tuple[str, RunArtifact]]:
@@ -780,11 +899,19 @@ def test_render_run_does_not_record_a_baseline_for_an_unmeasured_run(
         artifact: A run shape that measured nothing comparable.
     """
     ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger)
-    write_severity_baseline(ctx.output_manager.base_dir, SeverityCounts(errors=9))
+    scope = severity_baseline_scope(
+        paths=artifact.paths,
+        tool_results=artifact.tool_results,
+    )
+    write_severity_baseline(
+        ctx.output_manager.base_dir,
+        SeverityCounts(errors=9),
+        scope,
+    )
 
     render_run(artifact, ctx=ctx, output_format="grid")
 
-    assert_that(read_severity_baseline(ctx.output_manager.base_dir)).is_equal_to(
+    assert_that(read_severity_baseline(ctx.output_manager.base_dir, scope)).is_equal_to(
         SeverityCounts(errors=9),
     )
 
@@ -805,7 +932,11 @@ def test_render_run_does_not_record_a_baseline_for_fmt(
 
     render_run(artifact, ctx=ctx, output_format="grid")
 
-    assert_that(read_severity_baseline(ctx.output_manager.base_dir)).is_none()
+    scope = severity_baseline_scope(
+        paths=artifact.paths,
+        tool_results=artifact.tool_results,
+    )
+    assert_that(read_severity_baseline(ctx.output_manager.base_dir, scope)).is_none()
 
 
 def test_render_run_json_carries_the_counts_and_delta(

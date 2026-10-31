@@ -592,6 +592,7 @@ def execute_run(
             total_issues=0,
             total_fixed=0,
             total_remaining=0,
+            paths=paths,
         )
 
     if not tools_to_run and skipped_tools:
@@ -783,6 +784,7 @@ def execute_run(
         total_issues=total_issues,
         total_fixed=total_fixed,
         total_remaining=total_remaining,
+        paths=paths,
     )
 
 

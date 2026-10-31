@@ -10,6 +10,7 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.utils.meaningful_run import (
     baseline_is_eligible,
     result_inspected_files,
+    run_has_unreported_failure,
     run_inspected_files,
 )
 
@@ -95,6 +96,48 @@ def test_run_inspected_files_needs_only_one_real_tool() -> None:
     ]
 
     assert_that(run_inspected_files(results)).is_true()
+
+
+@pytest.mark.parametrize(
+    ("success", "issues_count", "skipped", "expected"),
+    [
+        (False, 0, False, True),
+        (False, 1, False, False),
+        (True, 0, False, False),
+        (False, 0, True, False),
+    ],
+    ids=["unreported-failure", "findings", "clean", "skipped"],
+)
+def test_run_has_unreported_failure(
+    success: bool,
+    issues_count: int,
+    skipped: bool,
+    expected: bool,
+) -> None:
+    """Only a non-skipped failure without findings disqualifies counts.
+
+    Args:
+        success: Whether the tool succeeded.
+        issues_count: Number of findings reported by the tool.
+        skipped: Whether the tool was skipped.
+        expected: Whether the run has an unreported failure.
+    """
+    result = ToolResult(
+        name="pylint",
+        success=success,
+        issues_count=issues_count,
+        skipped=skipped,
+        skip_reason="not installed" if skipped else None,
+    )
+
+    assert_that(run_has_unreported_failure([_real_result(), result])).is_equal_to(
+        expected,
+    )
+
+
+def test_run_has_unreported_failure_accepts_an_empty_run() -> None:
+    """An empty run has no failed tool, even though it cannot publish counts."""
+    assert_that(run_has_unreported_failure([])).is_false()
 
 
 def test_run_inspected_files_rejects_an_all_skipped_run() -> None:

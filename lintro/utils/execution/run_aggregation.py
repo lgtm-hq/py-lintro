@@ -20,6 +20,8 @@ from lintro.utils.execution.exit_codes import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from lintro.models.core.tool_result import ToolResult
     from lintro.utils.execution.run_context import RunContext
 
@@ -37,6 +39,7 @@ def finalize_artifact(
     total_issues: int,
     total_fixed: int,
     total_remaining: int,
+    paths: Sequence[str] = (".",),
 ) -> RunArtifact:
     """Tally the run and resolve its exit code into a :class:`RunArtifact`.
 
@@ -46,6 +49,7 @@ def finalize_artifact(
         total_issues: Aggregated issue count.
         total_fixed: Aggregated fixed count.
         total_remaining: Aggregated remaining count.
+        paths: Path arguments measured by this run.
 
     Returns:
         RunArtifact: The completed artifact for the render phase.
@@ -56,6 +60,7 @@ def finalize_artifact(
     from lintro.utils.severity_baseline import (
         read_severity_baseline,
         resolve_log_root,
+        severity_baseline_scope,
     )
     from lintro.utils.severity_counts import count_severities
 
@@ -85,7 +90,8 @@ def finalize_artifact(
         early_exit=False,
     )
     log_root = resolve_log_root(ctx.output_manager) if eligible else None
-    previous_counts = read_severity_baseline(log_root) if log_root else None
+    scope = severity_baseline_scope(paths=paths, tool_results=all_results)
+    previous_counts = read_severity_baseline(log_root, scope) if log_root else None
 
     return RunArtifact(
         tool_results=all_results,
@@ -98,6 +104,7 @@ def finalize_artifact(
         total_remaining=total_remaining,
         exit_code=exit_code,
         dry_run_preview=ctx.dry_run_preview,
+        paths=tuple(paths),
     )
 
 
@@ -137,6 +144,7 @@ def refresh_artifact(
         total_issues=total_issues,
         total_fixed=total_fixed,
         total_remaining=total_remaining,
+        paths=artifact.paths,
     )
     if force_failure:
         refreshed.exit_code = DEFAULT_EXIT_CODE_FAILURE
