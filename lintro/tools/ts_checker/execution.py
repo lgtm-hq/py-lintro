@@ -355,6 +355,7 @@ def _check_multi_project(
     any_succeeded = False
     had_subproject_error = False
     any_subproject_timed_out = False
+    coverage: bool | None = False
 
     try:
         for tsconfig_info, project_files in partitions:
@@ -435,6 +436,9 @@ def _check_multi_project(
                 had_subproject_error = True
             issues = plugin._parse_output(output or "")
             all_issues.extend(issues)
+            # Clean execution on selected source also establishes coverage.
+            # Preserve affirmative evidence from earlier projects on failure.
+            coverage = bool(proc_success or issues) or coverage or None
 
             try:
                 rel_project = project_dir.relative_to(cwd_path)
@@ -449,6 +453,7 @@ def _check_multi_project(
         success = any_succeeded and not had_subproject_error and total_issues == 0
         return ToolResult(
             name=plugin.definition.name,
+            inspected_files=coverage,
             success=success,
             output=output_text,
             issues_count=total_issues,
@@ -520,6 +525,7 @@ def _run_and_parse(
             success=False,
             output=plugin._not_found_output(e),
             issues_count=0,
+            inspected_files=False,
         )
     except OSError as e:
         logger.error(
@@ -533,6 +539,7 @@ def _run_and_parse(
             success=False,
             output=f"{plugin._tool_label} execution failed: " + str(e),
             issues_count=0,
+            inspected_files=False,
         )
 
     # Parse output (parser handles ANSI stripping internally)
@@ -574,6 +581,7 @@ def _run_and_parse(
 
         return ToolResult(
             name=plugin.definition.name,
+            inspected_files=True,
             success=False,
             output="\n".join(dep_output_lines),
             issues_count=issues_count,
@@ -609,6 +617,8 @@ def _run_and_parse(
 
     return ToolResult(
         name=plugin.definition.name,
+        # Unsuccessful invocations without findings returned above.
+        inspected_files=True,
         success=success and issues_count == 0,
         output=None,
         issues_count=issues_count,

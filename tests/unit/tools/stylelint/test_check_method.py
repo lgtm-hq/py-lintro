@@ -7,10 +7,14 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
+import pytest
 from assertpy import assert_that
 
+from lintro.enums.action import Action
 from lintro.parsers.stylelint.stylelint_issue import StylelintIssue
 from lintro.tools.stylelint.definition import StylelintPlugin
+from lintro.utils.meaningful_run import result_inspected_files
+from lintro.utils.summary_tables import NO_FILES_NOTE, print_summary_table
 from tests.test_samples_helpers import copy_sample
 from tests.unit.tools.conftest import record_subprocess_argv
 from tests.unit.tools.stylelint.conftest import make_ctx
@@ -131,6 +135,34 @@ def test_check_skips_when_no_config(
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.output).contains("no stylelint configuration")
+    assert_that(result.no_files).is_false()
+    assert_that(result_inspected_files(result)).is_false()
+    rows: list[str] = []
+    print_summary_table(lambda text: rows.append(text), Action.CHECK, [result])
+    assert_that("".join(rows)).does_not_contain(NO_FILES_NOTE)
+    assert_that("".join(rows)).contains("SKIP", "No stylelint configuration found")
+
+
+@pytest.mark.parametrize("method", ["check", "fix"])
+def test_empty_discovery_is_distinct_from_missing_config(
+    stylelint_plugin: StylelintPlugin,
+    tmp_path: Path,
+    method: str,
+) -> None:
+    """Empty discovery gets the no-files note for both supported operations.
+
+    Args:
+        stylelint_plugin: Plugin under test.
+        tmp_path: Directory without any stylesheet files.
+        method: The plugin operation to exercise.
+    """
+    result = getattr(stylelint_plugin, method)([str(tmp_path)], {})
+    rows: list[str] = []
+    print_summary_table(lambda text: rows.append(text), Action.CHECK, [result])
+
+    assert_that(result.inspected_files).is_false()
+    assert_that(result.skipped).is_false()
+    assert_that("".join(rows)).contains(NO_FILES_NOTE)
 
 
 def test_check_timeout(

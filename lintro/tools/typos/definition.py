@@ -399,6 +399,7 @@ class TyposPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=not issues,
             output=outcome.output if issues else None,
             issues_count=len(issues),
@@ -495,6 +496,7 @@ class TyposPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=remaining_count == 0,
             output=_fix_summary(fixed=fixed_count, remaining=remaining_count),
             # Only the surviving typos are reported as issues: unfixed typos

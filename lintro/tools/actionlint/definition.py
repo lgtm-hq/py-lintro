@@ -111,6 +111,7 @@ class ActionlintPlugin(BaseToolPlugin):
         try:
             success, output = self._run_subprocess(cmd=cmd, timeout=timeout)
             issues = parse_actionlint_output(output)
+            results["coverage"].append(True if success or issues else None)
 
             if not success:
                 results["all_success"] = False
@@ -119,11 +120,13 @@ class ActionlintPlugin(BaseToolPlugin):
             if issues:
                 results["all_issues"].extend(issues)
         except subprocess.TimeoutExpired:
+            results["coverage"].append(False)
             results["skipped_files"].append(file_path)
             results["all_success"] = False
             results["execution_failures"] += 1
             results["timed_out"] = True
-        except (OSError, ValueError, RuntimeError) as e:  # pragma: no cover
+        except (OSError, ValueError, RuntimeError) as e:
+            results["coverage"].append(False if isinstance(e, OSError) else None)
             results["all_success"] = False
             results["all_outputs"].append(f"Error checking {file_path}: {e}")
             results["execution_failures"] += 1
@@ -180,6 +183,7 @@ class ActionlintPlugin(BaseToolPlugin):
             "skipped_files": [],
             "execution_failures": 0,
             "timed_out": False,
+            "coverage": [],
         }
 
         # Show progress bar only when processing multiple files
@@ -228,6 +232,11 @@ class ActionlintPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=(
+                True
+                if True in results["coverage"]
+                else None if None in results["coverage"] else False
+            ),
             success=results["all_success"],
             output=combined_output,
             issues_count=len(results["all_issues"]),

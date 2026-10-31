@@ -99,6 +99,7 @@ class PytestResultProcessor:
 
         result = ToolResult(
             name=self.tool_name,
+            inspected_files=True,
             success=success,
             issues=failed_issues,
             output=output_text,

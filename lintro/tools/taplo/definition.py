@@ -293,6 +293,7 @@ class TaploPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=(all_success and count == 0),
             output=output if count > 0 else None,
             issues_count=count,
@@ -412,6 +413,7 @@ class TaploPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=True,
             output=final_summary,
             issues_count=0,

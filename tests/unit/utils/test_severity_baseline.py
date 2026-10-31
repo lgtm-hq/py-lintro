@@ -392,7 +392,7 @@ def test_retention_caps_scopes_and_preserves_the_latest_full_path_run(
         lintro_config=None,
         clean_stdout_output=True,
     )
-    results = [ToolResult(name="ruff", success=True)]
+    results = [ToolResult(name="ruff", success=True, inspected_files=True)]
     full = RunArtifact(
         tool_results=results,
         paths=(str(tmp_path), "."),
@@ -719,7 +719,7 @@ def test_unresolvable_scope_leaves_counts_usable_and_baseline_unchanged(
     monkeypatch.setattr(Path, "resolve", cannot_resolve)
     artifact = finalize_artifact(
         ctx=ctx,
-        all_results=[ToolResult(name="ruff", success=True)],
+        all_results=[ToolResult(name="ruff", success=True, inspected_files=True)],
         total_issues=0,
         total_fixed=0,
         total_remaining=0,

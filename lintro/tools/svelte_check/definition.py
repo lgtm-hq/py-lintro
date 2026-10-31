@@ -317,6 +317,7 @@ class SvelteCheckPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            inspected_files=True,
             success=success and issues_count == 0,
             output=None,
             issues_count=issues_count,

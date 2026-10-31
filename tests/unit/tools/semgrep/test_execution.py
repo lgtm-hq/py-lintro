@@ -23,6 +23,63 @@ _VALID_FINDING = {
     "extra": {"message": "Test finding", "severity": "WARNING"},
 }
 
+
+@pytest.mark.parametrize("results", [[], [_VALID_FINDING]], ids=["empty", "finding"])
+@pytest.mark.parametrize(
+    ("coverage", "expected"),
+    [
+        ({"paths": {"scanned": []}}, False),
+        ({"paths": {"scanned": ["scan.py"]}}, True),
+        ({}, None),
+        ({"paths": None}, None),
+        ({"paths": []}, None),
+        ({"paths": {}}, None),
+        ({"paths": {"scanned": None}}, None),
+        ({"paths": {"scanned": "scan.py"}}, None),
+        ({"paths": {"scanned": [""]}}, None),
+        ({"paths": {"scanned": ["scan.py", 1]}}, None),
+    ],
+    ids=[
+        "empty-scan",
+        "scanned-file",
+        "missing-paths",
+        "null-paths",
+        "malformed-paths",
+        "missing-scanned",
+        "null-scanned",
+        "malformed-scanned",
+        "empty-path",
+        "non-string-path",
+    ],
+)
+def test_inspection_uses_reported_scanned_paths(
+    semgrep_plugin: SemgrepPlugin,
+    tmp_path: Path,
+    coverage: dict[str, object],
+    expected: bool | None,
+    results: list[object],
+) -> None:
+    """Parsed findings prove inspection even with empty or unknown coverage.
+
+    Args:
+        semgrep_plugin: Real plugin under test.
+        tmp_path: Directory containing a discoverable source.
+        coverage: Reported coverage, including absent or malformed variants.
+        expected: Producer's three-state inspection signal without findings.
+        results: Empty results or a usable file finding proving inspection.
+    """
+    (tmp_path / "scan.py").write_text("value = 1\n")
+    report = json.dumps({"results": results, "errors": [], **coverage})
+    with patch(
+        "subprocess.run",
+        return_value=subprocess.CompletedProcess(["semgrep"], 0, report, ""),
+    ):
+        result = semgrep_plugin.check([str(tmp_path)], {})
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(len(results))
+    assert_that(result.inspected_files).is_equal_to(True if results else expected)
+
+
 # =============================================================================
 # Tests for SemgrepPlugin.check method
 # =============================================================================

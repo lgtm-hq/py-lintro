@@ -369,6 +369,7 @@ def batch_check_result(
 
     return ToolResult(
         name=plugin.definition.name,
+        inspected_files=True if exit_success or issues else None,
         success=success,
         output=output if show_output or execution_failed else None,
         issues_count=issues_count,
@@ -734,6 +735,9 @@ def run_batch_fix(
 
     return ToolResult(
         name=plugin.definition.name,
+        # Every stage passed the execution-failure gate above. A clean
+        # verification over the selected files is an inspection too.
+        inspected_files=True,
         success=remaining_count == 0,
         output=_build_fix_summary(
             policy=policy,
