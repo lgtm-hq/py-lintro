@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from assertpy import assert_that
 
 from lintro.config.licenses_config import LicensesConfig
 from lintro.licenses.ecosystems import NpmLicenseAdapter, PythonLicenseAdapter
+from lintro.licenses.errors import LicenseCollectionError
 from lintro.licenses.models import LicenseStatus
 from lintro.licenses.policy_engine import LicensePolicyEngine
 
@@ -113,6 +115,122 @@ def test_npm_adapter_missing_file_returns_empty(tmp_path: Path) -> None:
         tmp_path / "package.json",
     )
     assert_that(packages).is_empty()
+
+
+@pytest.mark.parametrize("content", ["", "{", "null", "[]", '"root"', "1", "true"])
+def test_npm_adapter_rejects_malformed_root(tmp_path: Path, content: str) -> None:
+    """Invalid JSON and non-object roots are typed collection failures.
+
+    Args:
+        tmp_path: Temporary project directory.
+        content: Malformed root manifest contents.
+    """
+    manifest = tmp_path / "package.json"
+    manifest.write_text(content)
+
+    with pytest.raises(LicenseCollectionError) as caught:
+        NpmLicenseAdapter().get_licenses_from_package_json(manifest)
+
+    assert_that(caught.value.ecosystem).is_equal_to("npm")
+    assert_that(caught.value.source_file).is_equal_to(manifest)
+    assert_that(caught.value.reason).is_not_empty()
+    assert_that(str(caught.value)).contains("uncollected", "package.json")
+
+
+@pytest.mark.parametrize("key", ["dependencies", "devDependencies"])
+@pytest.mark.parametrize("value", [None, [], "pkg", 1, False, {"pkg": None}])
+def test_npm_adapter_validates_root_dependency_fields(
+    tmp_path: Path,
+    key: str,
+    value: object,
+) -> None:
+    """Only dependency maps of string specifications can be classified.
+
+    Args:
+        tmp_path: Temporary project directory.
+        key: Root dependency field consumed by the collector.
+        value: Invalid dependency field value.
+    """
+    manifest = tmp_path / "package.json"
+    manifest.write_text(json.dumps({key: value}))
+
+    with pytest.raises(LicenseCollectionError) as caught:
+        NpmLicenseAdapter().get_licenses_from_package_json(manifest)
+
+    assert_that(caught.value.reason).contains(key, "must be")
+
+
+@pytest.mark.parametrize("name", ["@scope", "@scope/", "@/pkg", "@scope/pkg/extra"])
+def test_npm_adapter_rejects_unresolvable_scoped_root_dependency(
+    tmp_path: Path,
+    name: str,
+) -> None:
+    """Malformed scoped names fail before constructing dependency paths.
+
+    Args:
+        tmp_path: Temporary project directory.
+        name: A scoped name without a usable scope/package pair.
+    """
+    manifest = tmp_path / "package.json"
+    manifest.write_text(json.dumps({"dependencies": {name: "1.0.0"}}))
+
+    with pytest.raises(LicenseCollectionError) as caught:
+        NpmLicenseAdapter().get_licenses_from_package_json(manifest)
+
+    assert_that(caught.value.reason).contains("invalid scoped name", name)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [PermissionError("access denied"), UnicodeError("bad encoding")],
+)
+def test_npm_adapter_wraps_root_read_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+) -> None:
+    """Read failures retain their cause and do not become empty inventories.
+
+    Args:
+        tmp_path: Temporary project directory.
+        monkeypatch: Fixture for simulating read failures regardless of OS user.
+        failure: Error raised while reading the manifest.
+    """
+    manifest = tmp_path / "package.json"
+    manifest.write_text("{}")
+
+    def fail_read(self: Path, **kwargs: object) -> str:
+        raise failure
+
+    monkeypatch.setattr(Path, "read_text", fail_read)
+    with pytest.raises(LicenseCollectionError) as caught:
+        NpmLicenseAdapter().get_licenses_from_package_json(manifest)
+
+    assert_that(caught.value.__cause__).is_same_as(failure)
+    assert_that(caught.value.reason).is_equal_to(str(failure))
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "{}",
+        '{"dependencies": {}, "devDependencies": {}}',
+        '{"dependencies": {"missing": "1", "@scope/missing": "1"}}',
+        '{"unrelated": null, "name": 123}',
+    ],
+)
+def test_npm_adapter_valid_empty_inventory(tmp_path: Path, content: str) -> None:
+    """Valid roots without installed dependencies still have empty inventories.
+
+    Args:
+        tmp_path: Temporary project directory.
+        content: A valid root, including fields the collector does not consume.
+    """
+    manifest = tmp_path / "package.json"
+    manifest.write_text(content)
+    assert_that(
+        NpmLicenseAdapter().get_licenses_from_package_json(manifest),
+    ).is_empty()
 
 
 def test_npm_adapter_reports_shadowed_nested_versions(tmp_path: Path) -> None:

@@ -12,6 +12,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
+from lintro.licenses.errors import LicenseCollectionError
 from lintro.licenses.models import PackageLicense
 from lintro.licenses.spdx import normalize_to_spdx
 
@@ -199,6 +200,50 @@ def _build_dev_prod_map(
     return classification
 
 
+def _read_root_manifest(path: Path) -> dict[str, Any] | None:
+    """Read and validate the root fields used to classify dependencies.
+
+    Args:
+        path: Root ``package.json`` path.
+
+    Returns:
+        dict[str, Any] | None: Root mapping, or None for an absent manifest.
+
+    Raises:
+        LicenseCollectionError: The manifest is unreadable or malformed.
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise LicenseCollectionError("npm", path, str(error)) from error
+
+    if not isinstance(data, dict):
+        raise LicenseCollectionError("npm", path, "root must be a JSON object")
+    for key in ("dependencies", "devDependencies"):
+        mapping = data.get(key, {})
+        if not isinstance(mapping, dict):
+            raise LicenseCollectionError("npm", path, f"{key} must be a JSON object")
+        for name, spec in mapping.items():
+            if not isinstance(spec, str):
+                raise LicenseCollectionError(
+                    "npm",
+                    path,
+                    f"{key}[{name!r}] must be a string",
+                )
+            scope, _, package = name.partition("/")
+            if name.startswith("@") and (
+                name.count("/") != 1 or len(scope) <= 1 or not package
+            ):
+                raise LicenseCollectionError(
+                    "npm",
+                    path,
+                    f"{key} contains an invalid scoped name: {name!r}",
+                )
+    return data
+
+
 class NpmLicenseAdapter:
     """Collect license information for npm packages."""
 
@@ -210,18 +255,17 @@ class NpmLicenseAdapter:
     ) -> list[PackageLicense]:
         """Collect licenses from a ``package.json`` and its ``node_modules``.
 
+        Unreadable or malformed root manifests raise ``LicenseCollectionError``.
+
         Args:
             path: Path to a ``package.json`` file.
 
         Returns:
             list[PackageLicense]: Discovered package licenses. Empty when the
-                file does not exist or cannot be parsed.
+                file does not exist or no installed packages are found.
         """
-        if not path.is_file():
-            return []
-        try:
-            root_data = json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError):
+        root_data = _read_root_manifest(path)
+        if root_data is None:
             return []
 
         node_modules = path.parent / "node_modules"

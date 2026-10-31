@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
+from pathlib import Path
 
+import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
 
 from lintro.cli_utils.commands.licenses import licenses_command
+from lintro.licenses.ecosystems import PythonLicenseAdapter
+from lintro.licenses.models import PackageLicense
 
 
 def test_licenses_json_output_is_parseable() -> None:
@@ -64,3 +70,148 @@ def test_licenses_spdx_format() -> None:
     )
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(result.output).contains("SPDXVersion: SPDX-2.3")
+
+
+@pytest.mark.parametrize(
+    "output_format",
+    ["grid", "json", "csv", "spdx", "attribution"],
+)
+@pytest.mark.parametrize("check", [False, True])
+def test_licenses_reports_uncollected_npm(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    output_format: str,
+    check: bool,
+) -> None:
+    """Every report identifies failed collection, including problems-only mode.
+
+    Args:
+        tmp_path: Temporary project directory.
+        monkeypatch: Fixture for selecting the project directory.
+        output_format: Report format, or attribution output.
+        check: Whether collection failure must change the exit status.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "package.json").write_text("{")
+    args = ["--lang", "npm", "--problems-only"]
+    args += (
+        ["--attribution"]
+        if output_format == "attribution"
+        else ["--format", output_format]
+    )
+    if check:
+        args.append("--check")
+    result = CliRunner().invoke(licenses_command, args)
+
+    assert_that(result.exit_code).is_equal_to(1 if check else 0)
+    assert_that(result.output).contains("npm", "uncollected", "package.json")
+    assert_that(result.output).does_not_contain("No dependencies found", "Traceback")
+    if output_format == "json":
+        payload = json.loads(result.output)
+        assert_that(payload).is_length(1)
+        assert_that(payload[0]["status"]).is_equal_to("uncollected")
+        assert_that(payload[0]["ecosystem"]).is_equal_to("npm")
+        assert_that(payload[0]["reason"]).contains("package.json", "Expecting")
+        assert_that(payload[0]).does_not_contain_key("name")
+    elif output_format == "csv":
+        rows = list(csv.DictReader(io.StringIO(result.output)))
+        assert_that(rows).is_length(1)
+        assert_that(rows[0]["status"]).is_equal_to("uncollected")
+        assert_that(rows[0]["name"]).is_empty()
+    elif output_format == "spdx":
+        assert_that(result.output).contains(
+            "DocumentComment: <text>npm inventory uncollected",
+        )
+
+
+@pytest.mark.parametrize(
+    "content",
+    [None, "{}", '{"dependencies": {}, "devDependencies": {}}'],
+)
+def test_licenses_check_accepts_absent_and_empty_npm_inventory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    content: str | None,
+) -> None:
+    """No npm project and valid empty manifests retain their successful report.
+
+    Args:
+        tmp_path: Temporary project directory.
+        monkeypatch: Fixture for selecting the project directory.
+        content: Manifest contents, or None to leave the manifest absent.
+    """
+    monkeypatch.chdir(tmp_path)
+    if content is not None:
+        (tmp_path / "package.json").write_text(content)
+    result = CliRunner().invoke(
+        licenses_command,
+        ["--lang", "npm", "--check", "--format", "json"],
+    )
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(json.loads(result.output)).is_empty()
+
+
+@pytest.mark.parametrize("failure", ["directory", "encoding", "schema"])
+def test_licenses_check_fails_for_unreadable_or_invalid_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    """Filesystem, decoding, and schema failures produce a clear check failure.
+
+    Args:
+        tmp_path: Temporary project directory.
+        monkeypatch: Fixture for selecting the project directory.
+        failure: Root-manifest failure to exercise.
+    """
+    monkeypatch.chdir(tmp_path)
+    manifest = tmp_path / "package.json"
+    if failure == "directory":
+        manifest.mkdir()
+    elif failure == "encoding":
+        manifest.write_bytes(b"\xff")
+    else:
+        manifest.write_text('{"dependencies": null}')
+    result = CliRunner().invoke(licenses_command, ["--lang", "npm", "--check"])
+
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(result.output).contains("npm", "uncollected", "package.json")
+    assert_that(result.output).does_not_contain("No dependencies found")
+
+
+@pytest.mark.parametrize(
+    "langs",
+    [[], ["--lang", "python"], ["--lang", "npm", "--lang", "python"]],
+)
+def test_licenses_preserves_other_ecosystems_on_npm_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    langs: list[str],
+) -> None:
+    """Npm failure preserves Python output and affects only requested ecosystems.
+
+    Args:
+        tmp_path: Temporary project directory.
+        monkeypatch: Fixture for selecting the directory and Python inventory.
+        langs: Ecosystem selection, including the default selection.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "package.json").write_text("null")
+    monkeypatch.setattr(
+        PythonLicenseAdapter,
+        "get_installed_licenses",
+        lambda self: [PackageLicense(name="python-lib", version="1", license_id="MIT")],
+    )
+    result = CliRunner().invoke(
+        licenses_command,
+        [*langs, "--check", "--format", "json"],
+    )
+    payload = json.loads(result.output)
+    npm_selected = not langs or "npm" in langs
+
+    assert_that(result.exit_code).is_equal_to(1 if npm_selected else 0)
+    assert_that(payload[0]["name"]).is_equal_to("python-lib")
+    assert_that(payload[0]["status"]).is_equal_to("allowed")
+    assert_that(payload).is_length(2 if npm_selected else 1)
+    if npm_selected:
+        assert_that(payload[1]["status"]).is_equal_to("uncollected")
