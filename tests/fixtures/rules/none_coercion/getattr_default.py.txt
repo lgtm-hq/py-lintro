@@ -1,0 +1,12 @@
+# ruleid: lintro.python.none-coercion.getattr-default
+issues = getattr(result, "issues", [])
+# ruleid: lintro.python.none-coercion.getattr-default
+count = getattr(result, "remaining_issues_count", None)
+# ruleid: lintro.python.none-coercion.getattr-default
+name = getattr(result, 'name', "unknown")
+# ok: lintro.python.none-coercion.getattr-default
+dynamic = getattr(result, attribute_name, [])
+# ok: lintro.python.none-coercion.getattr-default
+required = getattr(result, "issues")
+# ok: lintro.python.none-coercion.getattr-default
+constant = getattr(CONSTANT_TABLE, "optional", [])

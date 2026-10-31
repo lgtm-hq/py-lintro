@@ -1,0 +1,71 @@
+def collect():
+    try:
+        return scan()
+    except RuntimeError:
+        # ruleid: lintro.python.none-coercion.except-return
+        return []
+
+
+def measure():
+    try:
+        return scan()
+    except (TypeError, ValueError):
+        # ruleid: lintro.python.none-coercion.except-return
+        return 0
+
+
+def load():
+    try:
+        return scan()
+    except Exception:
+        # ruleid: lintro.python.none-coercion.except-return
+        return {}
+
+
+def succeeded():
+    try:
+        return scan()
+    except:
+        # ruleid: lintro.python.none-coercion.except-return
+        return False
+
+
+def is_valid():
+    try:
+        return validate()
+    except ValueError:
+        # ok: lintro.python.none-coercion.except-return
+        return False
+
+
+async def has_feature():
+    try:
+        return await check()
+    except ValueError:
+        # ok: lintro.python.none-coercion.except-return
+        return False
+
+
+def is_safe():
+    try:
+        return scan()
+    except Exception:
+        # ruleid: lintro.python.none-coercion.except-return
+        return True
+
+
+def has_results():
+    try:
+        return scan()
+    except Exception:
+        # ruleid: lintro.python.none-coercion.except-return
+        return []
+
+
+def normal():
+    try:
+        return scan()
+    except ValueError:
+        raise
+    # ok: lintro.python.none-coercion.except-return
+    return []

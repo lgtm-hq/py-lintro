@@ -31,6 +31,7 @@ ingestion evaluation) and the resulting decision is distilled here.
 | [0009](0009-ai-provider-plugin-contract.md)                     | AI provider plugin contract                               | Accepted                          |
 | [0010](0010-review-shape-and-protocol.md)                       | AI review shape and protocol                              | Accepted                          |
 | [0011](0011-dogfood-review-lanes-provenance-and-degradation.md) | Dogfood review lanes, endpoint provenance and degradation | Accepted (implementation pending) |
+| [0012](0012-packaged-semgrep-rules.md) | Packaged Semgrep rules and deterministic AST checks | Accepted (AST tool and gating proposed) |
 
 ## Writing a new ADR
 

@@ -1,0 +1,14 @@
+import os
+
+# ruleid: lintro.python.none-coercion.stringified-get
+name = str(data.get("name", ""))
+# ruleid: lintro.python.none-coercion.stringified-get
+implicit_default = str(data.get("name"))
+# ruleid: lintro.python.none-coercion.stringified-get
+mixed_name = str(constant_table.get("name", ""))
+# ok: lintro.python.none-coercion.stringified-get
+environment = str(os.environ.get("NAME", ""))
+# ok: lintro.python.none-coercion.stringified-get
+constant = str(CONSTANT_TABLE.get("name", ""))
+# ok: lintro.python.none-coercion.stringified-get
+indexed = str(data["name"])

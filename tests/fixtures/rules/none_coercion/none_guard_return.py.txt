@@ -1,0 +1,26 @@
+def issues(value):
+    # ruleid: lintro.python.none-coercion.none-guard-return
+    if value is not None:
+        return value.issues
+    return []
+
+
+def predicate(value):
+    # ok: lintro.python.none-coercion.none-guard-return
+    if value is not None:
+        return True
+    return False
+
+
+def fail_safe(value):
+    # ok: lintro.python.none-coercion.none-guard-return
+    if value is not None:
+        return True
+    return []
+
+
+def explicit_unknown(value):
+    # ok: lintro.python.none-coercion.none-guard-return
+    if value is not None:
+        return value.issues
+    return None
