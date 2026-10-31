@@ -34,8 +34,8 @@ def test_execute_ruff_check_normalizes_format_paths_to_absolute(
             "lintro.tools.ruff.check.run_subprocess_with_timeout",
         ) as mock_subprocess,
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=[],
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=([], 0),
         ),
         patch(
             "lintro.tools.ruff.check.parse_ruff_format_check_output",

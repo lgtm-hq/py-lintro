@@ -35,6 +35,7 @@ from lintro.enums.severity_level import (
     SeverityLevel,
     normalize_severity_level,
 )
+from lintro.parsers.base_parser import extract_optional_str
 from lintro.parsers.sarif.sarif_issue import SarifIssue
 
 # SARIF ``level`` values that lintro's alias table does not already cover.
@@ -177,7 +178,7 @@ def _parse_result(
     # matches lintro's file/path model; a production parser must resolve
     # ``uriBaseId`` first (tracked in the evaluation doc's risk table).
     artifact = physical.get("artifactLocation") or {}
-    file_path = _uri_to_path(str(artifact.get("uri", "")))
+    file_path = _uri_to_path(extract_optional_str(artifact, "uri"))
 
     region = physical.get("region") or {}
     line = region.get("startLine")
@@ -188,21 +189,21 @@ def _parse_result(
     message = ""
     msg_obj = result.get("message")
     if isinstance(msg_obj, dict):
-        message = str(msg_obj.get("text", ""))
+        message = extract_optional_str(msg_obj, "text")
 
     rule_id = result.get("ruleId")
-    code = rule_id if isinstance(rule_id, str) else str(rule.get("id", ""))
+    code = rule_id if isinstance(rule_id, str) else extract_optional_str(rule, "id")
 
     raw_level = result.get("level")
     if not isinstance(raw_level, str):
         default_config = rule.get("defaultConfiguration") or {}
-        raw_level = default_config.get("level", _DEFAULT_SARIF_LEVEL)
-    level = _normalize_level(str(raw_level))
+        raw_level = extract_optional_str(default_config, "level", _DEFAULT_SARIF_LEVEL)
+    level = _normalize_level(raw_level)
 
     fixes = result.get("fixes")
     fixable = bool(fixes)
 
-    doc_url = str(rule.get("helpUri", "")) if rule else ""
+    doc_url = extract_optional_str(rule, "helpUri")
 
     return SarifIssue(
         file=file_path,
@@ -260,7 +261,7 @@ def parse_sarif_output(output: str | None) -> list[SarifIssue]:
         if not isinstance(run, dict):
             continue
         driver = (run.get("tool") or {}).get("driver") or {}
-        tool_name = str(driver.get("name", ""))
+        tool_name = extract_optional_str(driver, "name")
         rules_by_id = _build_rule_index(driver)
         rules_list = driver.get("rules", []) or []
 

@@ -23,6 +23,55 @@ from lintro.parsers.sarif.sarif_parser import parse_sarif_output
 _FIXTURES = Path(__file__).parent / "sarif_fixtures"
 
 
+@pytest.mark.parametrize("value", [None, 42, False, [], {}])
+def test_sarif_non_string_text_uses_defaults(value: object) -> None:
+    """SARIF's nested text fields use defaults instead of Python reprs."""
+    output = json.dumps(
+        {
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {
+                            "name": value,
+                            "rules": [
+                                {
+                                    "id": value,
+                                    "helpUri": value,
+                                    "defaultConfiguration": {"level": value},
+                                },
+                            ],
+                        },
+                    },
+                    "results": [
+                        {
+                            "ruleIndex": 0,
+                            "ruleId": value,
+                            "message": {"text": value},
+                            "locations": [
+                                {
+                                    "physicalLocation": {
+                                        "artifactLocation": {"uri": value},
+                                    },
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        },
+    )
+    issues = parse_sarif_output(output)
+
+    assert_that(issues).is_length(1)
+    issue = issues[0]
+    assert_that(
+        (issue.file, issue.message, issue.code, issue.doc_url, issue.tool_name),
+    ).is_equal_to(
+        ("", "", "", "", ""),
+    )
+    assert_that(issue.get_severity()).is_equal_to(SeverityLevel.WARNING)
+
+
 @pytest.fixture
 def ruff_sarif() -> str:
     """Return the real ruff SARIF fixture as a string.

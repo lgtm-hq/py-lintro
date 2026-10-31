@@ -33,7 +33,7 @@ class PytestExecutor:
     """
 
     config: PytestConfiguration
-    tool: PytestPlugin | None  # Required: must be set by the parent tool
+    tool: PytestPlugin
 
     def prepare_test_execution(
         self,
@@ -48,15 +48,9 @@ class PytestExecutor:
                 part of the invocation, so it runs under the same timeout the
                 test run itself is held to.
 
-        Raises:
-            ValueError: If tool reference is not set.
-
         Returns:
             int: Total number of available tests.
         """
-        if self.tool is None:
-            raise ValueError("Tool reference not set on executor")
-
         # Collect tests to get total count
         total_available_tests = collect_tests_once(
             self.tool,
@@ -79,15 +73,9 @@ class PytestExecutor:
                 omitted the tool falls back to its own persisted options, so a
                 caller that resolved a per-invocation override must pass it.
 
-        Raises:
-            ValueError: If tool reference is not set.
-
         Returns:
             Tuple[bool, str, int]: Tuple of (success, output, return_code).
         """
-        if self.tool is None:
-            raise ValueError("Tool reference not set on executor")
-
         success, output = self.tool._run_subprocess(cmd, timeout)
         # Parse output with actual success status
         # (pytest returns non-zero on failures)

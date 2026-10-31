@@ -52,8 +52,8 @@ def test_execute_ruff_check_uses_context_timeout(
             side_effect=fake_run,
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=[],
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=([], 0),
         ),
     ):
         result = execute_ruff_check(mock_ruff_tool, ["/test/project"])

@@ -237,8 +237,6 @@ def _plugins_mapping_from_yaml(path: Path) -> dict[str, Any]:
         raise _PluginConfigError(
             f"Could not read plugins config {path}: {e}",
         ) from e
-    if not isinstance(data, dict):
-        return {}
     plugins = data.get("plugins")
     return plugins if isinstance(plugins, dict) else {}
 

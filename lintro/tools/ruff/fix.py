@@ -11,6 +11,8 @@ ruff actually fixed. The counts are still filled in for callers that invoke
 ``fix()`` directly, outside the executor.
 """
 
+from __future__ import annotations
+
 import subprocess  # nosec B404 - subprocess used safely to execute ruff commands with controlled input
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -22,7 +24,7 @@ from lintro.parsers.base_issue import BaseIssue
 from lintro.parsers.ruff.ruff_format_issue import RuffFormatIssue
 from lintro.parsers.ruff.ruff_parser import (
     parse_ruff_format_check_output,
-    parse_ruff_output,
+    parse_ruff_output_with_stats,
 )
 from lintro.tools.core.timeout_utils import create_timeout_result
 
@@ -34,6 +36,7 @@ from lintro.tools.ruff.paths import absolute_issue_paths
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
+    from lintro.parsers.ruff.ruff_issue import RuffIssue
     from lintro.tools.ruff.definition import RuffPlugin
 
 __all__ = ["RUFF_DEFAULT_TIMEOUT", "execute_ruff_fix"]
@@ -43,7 +46,7 @@ DEFAULT_REMAINING_ISSUES_DISPLAY: int = 5
 
 @contextmanager
 def _temporary_option(
-    tool: "RuffPlugin",
+    tool: RuffPlugin,
     option_key: str,
     option_value: object,
 ) -> Generator[None]:
@@ -82,9 +85,9 @@ def _temporary_option(
 
 
 def execute_ruff_fix(
-    tool: "RuffPlugin",
+    tool: RuffPlugin,
     paths: list[str],
-) -> "ToolResult":
+) -> ToolResult:
     """Execute ruff fix command and process results.
 
     Args:
@@ -114,6 +117,7 @@ def execute_ruff_fix(
     python_files: list[str] = ctx.files
     timeout: int = int(ctx.timeout)
     overall_success: bool = True
+    parse_failures: int = 0
 
     # Track unsafe fixes for internal decisioning; do not emit as user-facing noise
     unsafe_fixes_enabled: bool = bool(tool.options.get("unsafe_fixes", False))
@@ -147,9 +151,13 @@ def execute_ruff_fix(
             initial_issues_count=None,
             fixed_issues_count=None,
             remaining_issues_count=None,
+            parse_failures_count=parse_failures,
             cwd=ctx.cwd,
         )
-    initial_issues: list[BaseIssue] = list(parse_ruff_output(output=output_check))
+    initial_lint_issues, parse_failures = parse_ruff_output_with_stats(
+        output=output_check,
+    )
+    initial_issues: list[BaseIssue] = list(initial_lint_issues)
     initial_count: int = len(initial_issues)
 
     # Also check formatting issues before fixing
@@ -188,6 +196,7 @@ def execute_ruff_fix(
                 fixed_issues_count=0,
                 remaining_issues_count=initial_count,
                 timed_out=True,
+                parse_failures_count=parse_failures,
                 cwd=ctx.cwd,
             )
         format_files = parse_ruff_format_check_output(output=output_format_check)
@@ -206,7 +215,7 @@ def execute_ruff_fix(
     total_initial_count: int = initial_count + initial_format_count
 
     # Optionally run ruff check --fix (lint fixes)
-    remaining_issues = []
+    remaining_issues: list[RuffIssue] = []
     remaining_count = 0
     success: bool = True  # Default to True when lint_fix is disabled
     if tool.options.get("lint_fix", True):
@@ -237,9 +246,13 @@ def execute_ruff_fix(
                 fixed_issues_count=0,
                 remaining_issues_count=total_initial_count,
                 timed_out=True,
+                parse_failures_count=parse_failures,
                 cwd=ctx.cwd,
             )
-        remaining_issues = parse_ruff_output(output=output)
+        remaining_issues, final_parse_failures = parse_ruff_output_with_stats(
+            output=output,
+        )
+        parse_failures += final_parse_failures
         remaining_count = len(remaining_issues)
 
     # Compute fixed lint issues by diffing initial vs remaining (internal only)
@@ -259,6 +272,7 @@ def execute_ruff_fix(
         remaining_unsafe = remaining_issues
         success_unsafe: bool = False
         output_unsafe: str = ""
+        unsafe_parse_failures: int = 0
         with _temporary_option(tool, "unsafe_fixes", True):
             # Build command with unsafe_fixes temporarily enabled
             cmd_unsafe: list[str] = build_ruff_check_command(
@@ -278,8 +292,11 @@ def execute_ruff_fix(
             # Don't fail the entire operation for this optional check
             pass
         else:
-            remaining_unsafe = parse_ruff_output(output=output_unsafe)
-        if len(remaining_unsafe) < remaining_count:
+            remaining_unsafe, unsafe_parse_failures = parse_ruff_output_with_stats(
+                output=output_unsafe,
+            )
+            parse_failures += unsafe_parse_failures
+        if unsafe_parse_failures == 0 and len(remaining_unsafe) < remaining_count:
             logger.warning(
                 "Some remaining issues could be fixed by enabling unsafe "
                 "fixes (use --tool-options ruff:unsafe_fixes=True)",
@@ -287,7 +304,7 @@ def execute_ruff_fix(
     # Log remaining issues for debugging (if verbose)
     # Note: Issue details are already included in the ToolResult.issues list
 
-    if not (success and remaining_count == 0):
+    if not (success and remaining_count == 0 and parse_failures == 0):
         overall_success = False
 
     # Run ruff format if enabled (default: True)
@@ -327,6 +344,7 @@ def execute_ruff_fix(
                 fixed_issues_count=fixed_lint_count,
                 remaining_issues_count=total_initial_count - fixed_lint_count,
                 timed_out=True,
+                parse_failures_count=parse_failures,
                 cwd=ctx.cwd,
             )
         # Formatting fixes are counted separately from lint fixes
@@ -364,6 +382,7 @@ def execute_ruff_fix(
         initial_issues_count=total_initial_count,
         fixed_issues_count=fixed_count,
         remaining_issues_count=remaining_count,
+        parse_failures_count=parse_failures,
         # Store pre-fix issues so the display layer can show what was fixed
         initial_issues=initial_issues,
         # The run-level verify pass resolves each issue's file against this

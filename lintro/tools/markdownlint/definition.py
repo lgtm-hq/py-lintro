@@ -220,7 +220,7 @@ class MarkdownlintPlugin(BaseToolPlugin):
 
         # Build command
         cmd: list[str] = self._get_markdownlint_command(
-            cwd=Path(ctx.cwd) if ctx.cwd else None,
+            cwd=Path(ctx.cwd),
         )
 
         # Track temp config for cleanup

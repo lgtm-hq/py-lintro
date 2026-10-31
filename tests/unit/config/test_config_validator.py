@@ -293,8 +293,7 @@ def test_non_mapping_root_is_error(write_config: Callable[..., Path]) -> None:
 def test_empty_config_is_not_valid(write_config: Callable[..., Path]) -> None:
     """An empty config file is not a successful config.
 
-    ``load_config`` ignores empty YAML and continues searching, so validate
-    must not report VALID for an explicit empty path.
+    Empty YAML parses as null and must fail the root mapping requirement.
 
     Args:
         write_config: Fixture writing config content to a temp file.
@@ -304,8 +303,8 @@ def test_empty_config_is_not_valid(write_config: Callable[..., Path]) -> None:
     result = validate_config_file(path)
 
     assert_that(result.is_valid).is_false()
-    assert_that(result.errors[0].code).is_equal_to(ValidationCode.EMPTY_CONFIG)
-    assert_that(result.errors[0].message).contains("empty")
+    assert_that(result.errors[0].code).is_equal_to(ValidationCode.INVALID_TYPE)
+    assert_that(result.errors[0].message).contains("mapping")
 
 
 def test_malformed_yaml_is_error(write_config: Callable[..., Path]) -> None:
@@ -665,7 +664,20 @@ def test_deprecated_keys_warn_with_replacement(
     assert_that(matches[0].message).contains("no longer applied")
 
 
-@pytest.mark.parametrize("section", ["enforce", "execution", "tools", "defaults"])
+@pytest.mark.parametrize(
+    "section",
+    [
+        "enforce",
+        "execution",
+        "tools",
+        "defaults",
+        "ai",
+        "review",
+        "output",
+        "watch",
+        "deps",
+    ],
+)
 def test_null_section_is_error_not_crash(
     write_config: Callable[..., Path],
     section: str,
@@ -786,47 +798,50 @@ def test_missing_file_uses_not_found_code(tmp_path: Path) -> None:
     assert_that(result.errors[0].code).is_equal_to(ValidationCode.NOT_FOUND)
 
 
-def test_autodetect_list_yaml_falls_through_to_pyproject(
+@pytest.mark.parametrize(
+    "content",
+    ["- just\n- a\n- list\n", "invalid\n", "null\n", ""],
+)
+def test_autodetect_non_mapping_yaml_does_not_validate_pyproject(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    content: str,
 ) -> None:
-    """A list YAML on auto-detect must follow the loader into pyproject.
-
-    ``load_config`` maps non-dict YAML to ``{}`` and continues searching.
-    Validate must not stop on ``INVALID_TYPE`` and skip ``[tool.lintro]``.
+    """Validation must reject the same non-mapping documents as the loader.
 
     Args:
         tmp_path: Pytest temporary directory.
         monkeypatch: Pytest monkeypatch fixture.
+        content: Invalid root document alongside a valid pyproject fallback.
     """
-    (tmp_path / ".lintro-config.yaml").write_text(
-        "- just\n- a\n- list\n",
-        encoding="utf-8",
-    )
+    yaml_path = tmp_path / ".lintro-config.yaml"
+    yaml_path.write_text(content, encoding="utf-8")
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text("[tool.lintro]\nfail_fast = true\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
     result = validate_config_file(None)
 
-    assert_that(result.config_path).is_equal_to(pyproject)
-    assert_that(result.is_valid).is_true()
-    assert_that(result.warnings[0].code).is_equal_to(ValidationCode.EMPTY_CONFIG)
+    assert_that(result.config_path).is_equal_to(yaml_path)
+    assert_that(result.is_valid).is_false()
+    assert_that(result.errors[0].code).is_equal_to(ValidationCode.INVALID_TYPE)
+    assert_that(result.errors[0].message).contains("must be a mapping")
+    assert_that(result.warnings).is_empty()
 
 
-def test_autodetect_empty_yaml_reports_invalid_pyproject(
+def test_autodetect_empty_mapping_reports_invalid_pyproject(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Empty auto-detected YAML must not report VALID when pyproject is invalid.
+    """An empty mapping must not report VALID when its fallback is invalid.
 
-    Runtime ``load_config`` ignores empty YAML and applies [tool.lintro].
+    Runtime ``load_config`` ignores an empty mapping and applies [tool.lintro].
 
     Args:
         tmp_path: Pytest temporary directory.
         monkeypatch: Pytest monkeypatch fixture.
     """
-    (tmp_path / ".lintro-config.yaml").write_text("", encoding="utf-8")
+    (tmp_path / ".lintro-config.yaml").write_text("{}\n", encoding="utf-8")
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text(
         '[tool.lintro]\nmax_fix_retries = "not-an-int"\n',
@@ -863,18 +878,18 @@ def test_autodetect_malformed_pyproject_is_parse_error(
     assert_that(result.errors[0].code).is_equal_to(ValidationCode.PARSE_ERROR)
 
 
-def test_autodetect_empty_yaml_without_pyproject_is_not_found(
+def test_autodetect_empty_mapping_without_pyproject_is_not_found(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Empty YAML with no pyproject fallback is not a successful config.
+    """An empty mapping with no pyproject fallback is not a successful config.
 
     Args:
         tmp_path: Pytest temporary directory.
         monkeypatch: Pytest monkeypatch fixture.
     """
     yaml_path = tmp_path / ".lintro-config.yaml"
-    yaml_path.write_text("", encoding="utf-8")
+    yaml_path.write_text("{}\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
     result = validate_config_file(None)

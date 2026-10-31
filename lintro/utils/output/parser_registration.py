@@ -120,6 +120,8 @@ def register_all_parsers() -> None:
     to populate the ParserRegistry with all available tool parsers.
     """
     # Ruff - Python linter/formatter
+    # The registry is used by file_writer.format_tool_output for display only.
+    # Execution paths retain rejected-record counts via the stats parser.
     ParserRegistry.register(
         ToolName.RUFF.value,
         parse_ruff_output,

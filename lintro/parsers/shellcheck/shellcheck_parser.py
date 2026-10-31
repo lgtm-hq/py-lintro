@@ -12,6 +12,7 @@ from typing import Any
 
 from loguru import logger
 
+from lintro.parsers.base_parser import extract_optional_str
 from lintro.parsers.shellcheck.shellcheck_issue import ShellcheckIssue
 
 
@@ -81,20 +82,22 @@ def parse_shellcheck_output(output: str | None) -> list[ShellcheckIssue]:
             continue
 
         # Extract required fields with defaults (using safe conversion)
-        file_path: str = str(item.get("file", ""))
+        file_path = extract_optional_str(item, "file")
         line: int = _safe_int(item.get("line", 0))
         column: int = _safe_int(item.get("column", 0))
         end_line: int = _safe_int(item.get("endLine", 0))
         end_column: int = _safe_int(item.get("endColumn", 0))
-        level: str = str(item.get("level", "error"))
+        level = extract_optional_str(item, "level", "error")
         code: object = item.get("code", 0)
-        message: str = str(item.get("message", ""))
+        message = extract_optional_str(item, "message")
 
         # Format code as SC#### string (handle both int and numeric string codes)
-        if isinstance(code, int) or (isinstance(code, str) and code.isdigit()):
+        if (isinstance(code, int) and not isinstance(code, bool)) or (
+            isinstance(code, str) and code.isdigit()
+        ):
             code_str = f"SC{code}"
         else:
-            code_str = str(code)
+            code_str = extract_optional_str(item, "code")
 
         issues.append(
             ShellcheckIssue(

@@ -286,7 +286,7 @@ class PrettierPlugin(BaseToolPlugin):
 
     def _create_timeout_result(
         self,
-        timeout_val: int,
+        timeout_val: float,
         initial_issues: list[PrettierIssue] | None = None,
         initial_count: int = 0,
         cwd: str | None = None,

@@ -15,6 +15,7 @@ from typing import Any
 
 from loguru import logger
 
+from lintro.parsers.base_parser import extract_optional_str
 from lintro.parsers.idiom_review.idiom_review_issue import IdiomReviewIssue
 
 # Confidence -> display severity. ``HINT`` normalizes to ``INFO`` via
@@ -167,12 +168,12 @@ class IdiomReviewParser:
                     file=file_path,
                     line=line,
                     column=_coerce_int(finding.get("column")),
-                    message=str(finding.get("message", "")),
-                    code=str(finding.get("code", "")),
+                    message=extract_optional_str(finding, "message"),
+                    code=extract_optional_str(finding, "code"),
                     severity=_CONFIDENCE_TO_SEVERITY[confidence],
                     end_line=_coerce_int(finding.get("end_line")) or line,
                     confidence=confidence,
-                    suggested_idiom=str(finding.get("suggested_idiom", "")),
+                    suggested_idiom=extract_optional_str(finding, "suggested_idiom"),
                 ),
             )
         return issues
@@ -210,9 +211,9 @@ class IdiomReviewParser:
             if not isinstance(group, dict):
                 continue
             confidence = _normalize_confidence(group.get("confidence"))
-            code = str(group.get("code", "idiom/cross-file/duplicate"))
-            message = str(group.get("message", ""))
-            suggested = str(group.get("suggested_idiom", ""))
+            code = extract_optional_str(group, "code", "idiom/cross-file/duplicate")
+            message = extract_optional_str(group, "message")
+            suggested = extract_optional_str(group, "suggested_idiom")
             severity = _CONFIDENCE_TO_SEVERITY[confidence]
 
             locations = group.get("locations")
@@ -224,7 +225,7 @@ class IdiomReviewParser:
                 line = _coerce_int(location.get("line"))
                 issues.append(
                     IdiomReviewIssue(
-                        file=str(location.get("file", "")),
+                        file=extract_optional_str(location, "file"),
                         line=line,
                         column=_coerce_int(location.get("column")),
                         message=message,

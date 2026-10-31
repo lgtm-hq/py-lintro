@@ -98,8 +98,8 @@ def test_ruff_check_routes_through_prepare_execution(
             side_effect=fake_run,
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=[],
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=([], 0),
         ),
         patch(
             "lintro.tools.ruff.check.parse_ruff_format_check_output",

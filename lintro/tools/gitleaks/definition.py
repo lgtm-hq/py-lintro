@@ -24,7 +24,7 @@ from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.gitleaks.gitleaks_issue import GitleaksIssue
 from lintro.parsers.gitleaks.gitleaks_parser import parse_gitleaks_output
-from lintro.plugins.base import BaseToolPlugin, ExecutionContext
+from lintro.plugins.base import BaseToolPlugin, PreparedExecution
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.option_validators import (
@@ -189,7 +189,7 @@ class GitleaksPlugin(BaseToolPlugin):
         # rather than raw CLI path arguments. Scan each explicit file when
         # multiple paths are provided so sibling files in the same directory
         # are not included.
-        cwd_path = Path(ctx.cwd) if ctx.cwd else Path.cwd()
+        cwd_path = Path(ctx.cwd)
         scan_explicit_files = bool(paths) and not (
             len(paths) == 1 and paths[0] in {".", "./"}
         )
@@ -228,7 +228,7 @@ class GitleaksPlugin(BaseToolPlugin):
         self,
         *,
         source_path: str,
-        ctx: ExecutionContext,
+        ctx: PreparedExecution,
     ) -> tuple[list[GitleaksIssue], ToolResult | None]:
         """Run Gitleaks against a single source path.
 
