@@ -24,8 +24,8 @@ def test_execute_ruff_check_output_is_none_on_success(
             return_value=(True, "[]"),
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=[],
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=([], 0),
         ),
     ):
         result = execute_ruff_check(mock_ruff_tool, ["/test/project"])
@@ -52,8 +52,8 @@ def test_execute_ruff_check_output_is_none_with_issues(
             return_value=(False, "[]"),
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=lint_issues,
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=(lint_issues, 0),
         ),
     ):
         result = execute_ruff_check(mock_ruff_tool, ["/test/project"])

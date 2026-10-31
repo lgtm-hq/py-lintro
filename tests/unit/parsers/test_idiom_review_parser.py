@@ -4,11 +4,62 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from assertpy import assert_that
 
 from lintro.enums.severity_level import SeverityLevel
 from lintro.parsers.idiom_review.idiom_review_issue import IdiomReviewIssue
 from lintro.parsers.idiom_review.idiom_review_parser import IdiomReviewParser
+
+
+@pytest.mark.parametrize("value", [None, 42, False, [], {}])
+def test_idiom_review_non_string_finding_text_defaults(value: object) -> None:
+    """Per-file findings default optional text without stringification."""
+    response = json.dumps(
+        {
+            "findings": [
+                dict.fromkeys(
+                    ["message", "code", "suggested_idiom"],
+                    value,
+                ),
+            ],
+        },
+    )
+    issues = IdiomReviewParser().parse_file_review(response, "src/mod.py")
+
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].file).is_equal_to("src/mod.py")
+    assert_that(
+        (issues[0].message, issues[0].code, issues[0].suggested_idiom),
+    ).is_equal_to(
+        ("", "", ""),
+    )
+
+
+@pytest.mark.parametrize("value", [None, 42, False, [], {}])
+def test_idiom_review_non_string_duplication_text_defaults(value: object) -> None:
+    """Duplication groups retain their default code for malformed text."""
+    response = json.dumps(
+        {
+            "duplicate_groups": [
+                {
+                    "code": value,
+                    "message": value,
+                    "suggested_idiom": value,
+                    "locations": [{"file": value}],
+                },
+            ],
+        },
+    )
+    issues = IdiomReviewParser().parse_duplication_review(response)
+
+    assert_that(issues).is_length(1)
+    assert_that(
+        (issues[0].file, issues[0].message, issues[0].suggested_idiom),
+    ).is_equal_to(
+        ("", "", ""),
+    )
+    assert_that(issues[0].code).is_equal_to("idiom/cross-file/duplicate")
 
 
 def test_issue_default_field_values() -> None:

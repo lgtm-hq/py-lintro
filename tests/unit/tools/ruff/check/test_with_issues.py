@@ -38,8 +38,8 @@ def test_execute_ruff_check_with_lint_issues_returns_failure(
             return_value=(False, '[{"code": "F401"}]'),
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=lint_issues,
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=(lint_issues, 0),
         ),
     ):
         result = execute_ruff_check(mock_ruff_tool, ["/test/project"])
@@ -72,8 +72,8 @@ def test_execute_ruff_check_with_multiple_lint_issues(
             return_value=(False, "[]"),
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=lint_issues,
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=(lint_issues, 0),
         ),
     ):
         result = execute_ruff_check(mock_ruff_tool, ["/test/project"])
@@ -99,8 +99,8 @@ def test_execute_ruff_check_with_format_issues_returns_failure(
             return_value=(True, ""),
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=[],
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=([], 0),
         ),
         patch(
             "lintro.tools.ruff.check.parse_ruff_format_check_output",
@@ -135,8 +135,8 @@ def test_execute_ruff_check_combines_lint_and_format_issues(
             return_value=(False, "[]"),
         ),
         patch(
-            "lintro.tools.ruff.check.parse_ruff_output",
-            return_value=lint_issues,
+            "lintro.tools.ruff.check.parse_ruff_output_with_stats",
+            return_value=(lint_issues, 0),
         ),
         patch(
             "lintro.tools.ruff.check.parse_ruff_format_check_output",

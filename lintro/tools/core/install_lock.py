@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from lintro.parsers.base_parser import extract_optional_str
+
 
 @dataclass
 class InstallLockEntry:
@@ -42,19 +44,22 @@ class InstallLock:
         tools: list[InstallLockEntry] = []
         if isinstance(raw_tools, list):
             for entry in raw_tools:
-                if isinstance(entry, dict) and entry.get("name"):
+                if not isinstance(entry, dict):
+                    continue
+                name = entry.get("name")
+                if isinstance(name, str) and name:
                     tools.append(
                         InstallLockEntry(
-                            name=str(entry["name"]),
-                            version=str(entry.get("version", "")),
-                            install_hint=str(entry.get("install_hint", "")),
-                            status=str(entry.get("status", "to_install")),
+                            name=name,
+                            version=extract_optional_str(entry, "version"),
+                            install_hint=extract_optional_str(entry, "install_hint"),
+                            status=extract_optional_str(entry, "status", "to_install"),
                         ),
                     )
         langs = data.get("detected_languages", [])
         return cls(
             schema_version=int(data.get("schema_version", 1)),
-            created_at=str(data.get("created_at", "")),
+            created_at=extract_optional_str(data, "created_at"),
             profile=data.get("profile"),
             detected_languages=(
                 [str(x) for x in langs] if isinstance(langs, list) else []
