@@ -20,7 +20,6 @@ from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.oxlint.oxlint_issue import OxlintIssue
-from lintro.parsers.oxlint.oxlint_parser import parse_oxlint_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
@@ -40,6 +39,7 @@ from lintro.tools.core.option_validators import (
     validate_positive_int,
     validate_str,
 )
+from lintro.tools.oxlint.parsing import OxlintOutputParser
 
 # Constants for Oxlint configuration
 OXLINT_DEFAULT_TIMEOUT: int = 30
@@ -364,11 +364,12 @@ class OxlintPlugin(BaseToolPlugin):
         cmd.extend(ctx.rel_files)
         logger.debug(f"[OxlintPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
 
-        return run_batch_check(
+        parser = OxlintOutputParser()
+        result = run_batch_check(
             ctx,
             plugin=self,
             cmd=cmd,
-            parse=lambda output: parse_oxlint_output(output=output),
+            parse=parser.parse,
             policy=BatchCheckPolicy(
                 success=BatchSuccess.ISSUES_ONLY,
                 findings_exit_codes=OXLINT_FINDINGS_EXIT_CODES,
@@ -382,6 +383,7 @@ class OxlintPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             ),
         )
+        return parser.finish(result)
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Fix auto-fixable issues in files with Oxlint.
@@ -452,11 +454,12 @@ class OxlintPlugin(BaseToolPlugin):
         fix_cmd.extend(ctx.rel_files)
         logger.debug(f"[OxlintPlugin] Fixing: {' '.join(fix_cmd)} (cwd={ctx.cwd})")
 
-        return run_batch_fix(
+        parser = OxlintOutputParser()
+        result = run_batch_fix(
             ctx,
             plugin=self,
             commands=BatchCommands(check=check_cmd, fix=fix_cmd),
-            parse=lambda output: parse_oxlint_output(output=output),
+            parse=parser.parse,
             policy=BatchFixPolicy(
                 findings_exit_codes=OXLINT_FINDINGS_EXIT_CODES,
                 parse_stdout=True,
@@ -474,3 +477,4 @@ class OxlintPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             ),
         )
+        return parser.finish(result)

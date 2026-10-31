@@ -11,7 +11,7 @@ from __future__ import annotations
 import ast
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -1882,6 +1882,53 @@ def test_a_failed_verification_reports_the_residual_as_unknown(
     assert_that(folded.output).contains("residual unknown")
 
 
+@pytest.mark.parametrize("has_findings", [False, True])
+def test_answered_verify_measures_residual_after_execution_failure(
+    has_findings: bool,
+) -> None:
+    """An answered check rescues counts and keeps new findings and elapsed time."""
+    before = _issue("/repo/a.py")
+    after = [_issue("/repo/b.py")] if has_findings else []
+    mutation = ToolResult(
+        name="ruff",
+        success=False,
+        output="Batch execution failed after writes may have begun",
+        issues=[before],
+        issues_count=1,
+        initial_issues=[before],
+        initial_issues_count=1,
+        residual_unknown=True,
+        residual_unknown_reason="Batch execution failed after writes may have begun",
+        capability=Cap.FIX,
+    )
+    verify = ToolResult(
+        name="ruff",
+        success=not has_findings,
+        issues=after,
+        issues_count=len(after),
+        duration_seconds=2.0,
+    )
+
+    fold_verify_results(
+        mutation_results=[mutation],
+        verify_results=[
+            VerifyOutcome(tool="ruff", result=verify, status=VerifyStatus.VERIFIED),
+        ],
+        scope=VerifyScope(files=("/repo/a.py",), narrowed=True),
+    )
+
+    result = replace(mutation)
+    assert_that(result.issues).is_equal_to(after)
+    assert_that(result.initial_issues).is_equal_to([before])
+    assert_that(result.remaining_issues_count).is_equal_to(len(after))
+    assert_that(result.fixed_issues_count).is_equal_to(1 - len(after))
+    assert_that(result.residual_unknown).is_false()
+    assert_that(result.residual_unknown_reason).is_none()
+    assert_that(result.duration_seconds).is_equal_to(2.0)
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("Batch execution failed")
+
+
 def test_an_unresolvable_tool_is_a_third_unknown_cause(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1940,3 +1987,65 @@ def test_an_unknown_outcome_must_carry_its_reason() -> None:
             status=VerifyStatus.UNCHANGED,
             unknown_reason=TIMED_OUT_REASON,
         )
+
+
+@pytest.mark.parametrize("parse_source", ["mutation", "verify"])
+@pytest.mark.parametrize("verify_timeout", [False, True])
+def test_non_oxlint_parse_failures_keep_accounting_unknown_and_retain_reasons(
+    parse_source: str,
+    verify_timeout: bool,
+) -> None:
+    """The generic fold keeps parse evidence and an independent timeout reason."""
+    mutation = _unknown_mutation()
+    if parse_source == "mutation":
+        mutation.parse_failures_count = 1
+        mutation.success = False
+        mutation.fixed_issues_count = None
+        mutation.remaining_issues_count = None
+        mutation.residual_unknown = True
+        mutation.residual_unknown_reason = "initial ruff report incomplete"
+    verify = ToolResult(
+        name="ruff",
+        success=False,
+        issues=[_issue("/repo/c.py")],
+        issues_count=1,
+        parse_failures_count=1 if parse_source == "verify" else 0,
+        timed_out=verify_timeout,
+    )
+    results = [mutation]
+
+    fold_verify_results(
+        mutation_results=results,
+        verify_results=[
+            VerifyOutcome(
+                tool="ruff",
+                result=verify,
+                status=(
+                    VerifyStatus.UNKNOWN if verify_timeout else VerifyStatus.VERIFIED
+                ),
+                unknown_reason=TIMED_OUT_REASON if verify_timeout else "",
+            ),
+        ],
+        scope=VerifyScope(
+            files=("/repo/a.py", "/repo/b.py", "/repo/c.py"),
+            narrowed=True,
+        ),
+    )
+
+    result = replace(results[0])
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.success).is_false()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that([issue.file for issue in result.issues or []]).contains(
+        "/repo/a.py",
+        "/repo/b.py",
+        "/repo/c.py",
+    )
+    if parse_source == "mutation":
+        assert_that(result.residual_unknown_reason).contains(
+            "initial ruff report incomplete",
+        )
+    if verify_timeout:
+        assert_that(result.residual_unknown_reason).contains(TIMED_OUT_REASON)

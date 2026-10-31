@@ -7,6 +7,7 @@ retry loop so the executor itself stays free of tool-specific behaviour.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from lintro.models.core.tool_result import ToolResult
@@ -16,6 +17,22 @@ if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
 __all__ = ["run_fix_with_retry"]
+
+
+def _mark_parse_failure_unknown(result: ToolResult) -> None:
+    """Ensure an incomplete report carries explicit unknown fix accounting.
+
+    Args:
+        result: Fix result to normalize before returning or merging it.
+    """
+    if result.parse_failures_count:
+        result.success = False
+        result.fixed_issues_count = None
+        result.remaining_issues_count = None
+        result.residual_unknown = True
+        result.residual_unknown_reason = (
+            result.residual_unknown_reason or "tool output could not be fully parsed"
+        )
 
 
 def run_fix_with_retry(
@@ -41,8 +58,10 @@ def run_fix_with_retry(
     from loguru import logger
 
     result = tool.fix(paths, options)
+    _mark_parse_failure_unknown(result)
 
-    if max_retries <= 1 or result.residual_unknown:
+    # An incomplete first pass has no complete baseline to merge or retry.
+    if max_retries <= 1 or result.residual_unknown or result.parse_failures_count:
         return result
 
     initial_issues_count = getattr(result, "initial_issues_count", None)
@@ -50,6 +69,10 @@ def run_fix_with_retry(
     remaining = get_remaining_count(result)
 
     for attempt in range(2, max_retries + 1):
+        # An incomplete report is not a convergence measurement. Retrying
+        # must not replace its failure evidence with a later clean result.
+        if result.residual_unknown or result.parse_failures_count:
+            break
         if remaining == 0:
             break
 
@@ -59,53 +82,38 @@ def run_fix_with_retry(
             f"({remaining} remaining issues)",
         )
         result = tool.fix(paths, options)
-        if result.residual_unknown:
-            # Execution failures cannot converge through blind write retries.
-            # Keep the first pass's before-state and the failure's unknown counts.
-            result.initial_issues_count = initial_issues_count
-            result.initial_issues = first_pass_initial_issues
-            if first_pass_initial_issues is not None:
-                result.issues = list(first_pass_initial_issues)
-                result.issues_count = len(first_pass_initial_issues)
-            return result
+        _mark_parse_failure_unknown(result)
         remaining = get_remaining_count(result)
 
     # Merge: keep initial_issues_count and initial_issues from first pass,
-    # rest from last pass. ``timed_out`` must be carried over from the final
-    # pass: rebuilding the result field-by-field would otherwise erase it, and
-    # a tool that really did time out would serialize ``timed_out: false``.
-    if initial_issues_count is not None:
-        fixed = max(0, initial_issues_count - remaining)
-        result = ToolResult(
-            name=result.name,
-            success=result.success,
-            output=result.output,
-            issues_count=remaining,
-            issues=result.issues,
-            initial_issues_count=initial_issues_count,
-            fixed_issues_count=fixed,
-            remaining_issues_count=remaining,
-            formatted_output=result.formatted_output,
-            initial_issues=first_pass_initial_issues,
-            cwd=result.cwd,
-            timed_out=result.timed_out,
+    # rest from last pass, including failure accounting and execution metadata.
+    if initial_issues_count is None and first_pass_initial_issues is not None:
+        initial_issues_count = len(first_pass_initial_issues)
+    if result.residual_unknown or result.parse_failures_count:
+        # Execution failures carry the original detected findings. Parse
+        # failures also retain the latest report's usable partial findings.
+        issues = (
+            first_pass_initial_issues
+            if not result.parse_failures_count and first_pass_initial_issues is not None
+            else result.issues
         )
-    elif first_pass_initial_issues is not None:
-        # Preserve initial_issues even when initial_issues_count is absent
-        fixed = max(0, len(first_pass_initial_issues) - remaining)
-        result = ToolResult(
-            name=result.name,
-            success=result.success,
-            output=result.output,
-            issues_count=remaining,
-            issues=result.issues,
-            initial_issues_count=len(first_pass_initial_issues),
-            fixed_issues_count=fixed,
-            remaining_issues_count=remaining,
-            formatted_output=result.formatted_output,
+        return replace(
+            result,
+            issues=issues,
+            issues_count=len(issues) if issues is not None else result.issues_count,
+            initial_issues_count=initial_issues_count,
             initial_issues=first_pass_initial_issues,
-            cwd=result.cwd,
-            timed_out=result.timed_out,
+            fixed_issues_count=None,
+            remaining_issues_count=None,
+        )
+    if initial_issues_count is not None:
+        result = replace(
+            result,
+            issues_count=remaining,
+            initial_issues_count=initial_issues_count,
+            fixed_issues_count=max(0, initial_issues_count - remaining),
+            remaining_issues_count=remaining,
+            initial_issues=first_pass_initial_issues,
         )
 
     return result
