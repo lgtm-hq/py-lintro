@@ -182,6 +182,63 @@ def test_fix_retry_merges_results_correctly() -> None:
     assert_that(tool._call_count).is_equal_to(3)
 
 
+@pytest.mark.parametrize("initial_count", [None, 3])
+@pytest.mark.parametrize("timed_out", [False, True])
+def test_fix_retry_merge_preserves_last_pass_payload(
+    initial_count: int | None,
+    timed_out: bool,
+) -> None:
+    """Preserve last-pass payloads with explicit or inferred first-pass counts."""
+    detected = [
+        BaseIssue(file="a.txt", message="format a"),
+        BaseIssue(file="b.txt", message="format b"),
+        BaseIssue(file="c.txt", message="format c"),
+    ]
+    first = ToolResult(
+        name="formatter",
+        success=False,
+        issues_count=2,
+        initial_issues_count=initial_count,
+        initial_issues=detected,
+        metadata={"stage": "first"},
+        pytest_summary={"passed": 0},
+    )
+    last = ToolResult(
+        name="formatter",
+        success=False,
+        output="last pass",
+        formatted_output="last formatted output",
+        issues_count=1,
+        issues=detected[-1:],
+        initial_issues_count=2,
+        fixed_issues_count=1,
+        remaining_issues_count=1,
+        initial_issues=detected[-2:],
+        metadata={"suppressions": [{"id": "GHSA-example"}]},
+        parse_failures_count=0,
+        pytest_summary={"passed": 2, "failed": 1},
+        timed_out=timed_out,
+    )
+    tool = MagicMock()
+    tool.fix.side_effect = [first, last]
+
+    result = run_fix_with_retry(tool, ["."], {}, max_retries=2)
+
+    assert_that(result.initial_issues_count).is_equal_to(3)
+    assert_that(result.initial_issues).is_equal_to(detected)
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.fixed_issues_count).is_equal_to(2)
+    assert_that(result.remaining_issues_count).is_equal_to(1)
+    assert_that(result.issues).is_equal_to(last.issues)
+    assert_that(result.success).is_false()
+    assert_that(result.output).is_equal_to("last pass")
+    assert_that(result.formatted_output).is_equal_to("last formatted output")
+    assert_that(result.metadata).is_equal_to(last.metadata)
+    assert_that(result.parse_failures_count).is_equal_to(0)
+    assert_that(result.pytest_summary).is_equal_to(last.pytest_summary)
+    assert_that(result.timed_out).is_equal_to(timed_out)
+
+
 @pytest.mark.parametrize("failure_pass", [1, 2, 3])
 @pytest.mark.parametrize("initial_count", [None, 1])
 @pytest.mark.parametrize("failure_kind", ["parse", "unknown"])
@@ -214,6 +271,7 @@ def test_incomplete_fix_pass_is_preserved_without_more_retries(
         cwd="/repo",
         duration_seconds=1.5,
         metadata={"stage": "incomplete"},
+        pytest_summary={"passed": 1, "errors": 1},
     )
     measured = ToolResult(
         name="formatter",
@@ -261,4 +319,5 @@ def test_incomplete_fix_pass_is_preserved_without_more_retries(
     assert_that(result.cwd).is_equal_to("/repo")
     assert_that(result.duration_seconds).is_equal_to(1.5)
     assert_that(result.metadata).is_equal_to({"stage": "incomplete"})
+    assert_that(result.pytest_summary).is_equal_to({"passed": 1, "errors": 1})
     assert_that(replace(result)).is_equal_to(result)
