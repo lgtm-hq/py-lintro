@@ -10,6 +10,7 @@ from rich.console import Console
 from lintro.config.licenses_config import load_licenses_config
 from lintro.licenses.attribution import AttributionGenerator
 from lintro.licenses.ecosystems import NpmLicenseAdapter, PythonLicenseAdapter
+from lintro.licenses.errors import LicenseCollectionError
 from lintro.licenses.models import LicenseResult, LicenseStatus, PackageLicense
 from lintro.licenses.policy_engine import LicensePolicyEngine
 from lintro.licenses.report import render_grid, to_csv, to_json, to_spdx
@@ -17,35 +18,42 @@ from lintro.licenses.report import render_grid, to_csv, to_json, to_spdx
 _SUPPORTED_LANGS = ("python", "npm")
 
 
-def _collect_packages(langs: tuple[str, ...]) -> list[PackageLicense]:
+def _collect_packages(
+    langs: tuple[str, ...],
+) -> tuple[list[PackageLicense], list[LicenseCollectionError]]:
     """Collect package licenses across the requested ecosystems.
 
     Args:
         langs: Ecosystems to scan. Empty means all supported ecosystems.
 
     Returns:
-        list[PackageLicense]: Discovered packages.
+        tuple[list[PackageLicense], list[LicenseCollectionError]]: Collected
+            packages and failures for ecosystems that could not be collected.
     """
     selected = set(langs) if langs else set(_SUPPORTED_LANGS)
     packages: list[PackageLicense] = []
+    errors: list[LicenseCollectionError] = []
 
     if "python" in selected:
         packages.extend(PythonLicenseAdapter().get_installed_licenses())
 
     if "npm" in selected:
         package_json = Path.cwd() / "package.json"
-        packages.extend(
-            NpmLicenseAdapter().get_licenses_from_package_json(package_json),
-        )
+        try:
+            packages.extend(
+                NpmLicenseAdapter().get_licenses_from_package_json(package_json),
+            )
+        except LicenseCollectionError as error:
+            errors.append(error)
 
-    return packages
+    return packages, errors
 
 
 @click.command()
 @click.option(
     "--check",
     is_flag=True,
-    help="Exit non-zero when policy violations are found.",
+    help="Exit non-zero when policy violations or collection failures are found.",
 )
 @click.option(
     "--lang",
@@ -90,24 +98,29 @@ def licenses_command(
     \u000c
 
     Args:
-        check: Exit non-zero when any violation is present.
+        check: Exit non-zero when any violation or collection failure is present.
         langs: Ecosystems to scan; empty scans all supported ecosystems.
         output_format: One of ``grid``, ``json``, ``csv``, or ``spdx``.
         problems_only: Only include denied/unknown results in the output.
         attribution: Emit a Markdown attribution document instead of a report.
 
     Raises:
-        SystemExit: When ``check`` is set and policy violations are found.
+        SystemExit: When ``check`` is set and violations or collection failures
+            are found.
     """
     console = Console()
     config = load_licenses_config()
     engine = LicensePolicyEngine(config)
 
-    packages = _collect_packages(langs)
+    packages, errors = _collect_packages(langs)
 
     if attribution:
         content = AttributionGenerator().generate_markdown(packages)
+        for error in errors:
+            content += f"\n> {error}\n"
         click.echo(content, nl=False)
+        if check and errors:
+            raise SystemExit(1)
         return
 
     results = engine.evaluate_all(packages)
@@ -115,9 +128,9 @@ def licenses_command(
     if problems_only:
         results = [r for r in results if r.status is not LicenseStatus.ALLOWED]
 
-    _emit(console, results, output_format)
+    _emit(console, results, output_format, errors)
 
-    if check and _has_violations(results):
+    if check and (errors or _has_violations(results)):
         raise SystemExit(1)
 
 
@@ -125,6 +138,7 @@ def _emit(
     console: Console,
     results: list[LicenseResult],
     output_format: str,
+    errors: list[LicenseCollectionError],
 ) -> None:
     """Render results in the requested format.
 
@@ -132,15 +146,16 @@ def _emit(
         console: The Rich console used for grid output.
         results: Evaluated license results.
         output_format: The chosen output format.
+        errors: Ecosystems whose inventories could not be collected.
     """
     if output_format == "json":
-        click.echo(to_json(results))
+        click.echo(to_json(results, errors))
     elif output_format == "csv":
-        click.echo(to_csv(results), nl=False)
+        click.echo(to_csv(results, errors), nl=False)
     elif output_format == "spdx":
-        click.echo(to_spdx(results), nl=False)
+        click.echo(to_spdx(results, errors), nl=False)
     else:
-        render_grid(console, results)
+        render_grid(console, results, errors)
 
 
 def _has_violations(results: list[LicenseResult]) -> bool:

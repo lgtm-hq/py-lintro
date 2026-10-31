@@ -5,10 +5,12 @@ from __future__ import annotations
 import csv
 import io
 import json
+from collections.abc import Sequence
 
 from rich.console import Console
 from rich.table import Table
 
+from lintro.licenses.errors import LicenseCollectionError
 from lintro.licenses.models import LicenseResult, LicenseStatus
 
 _STATUS_STYLE: dict[LicenseStatus, str] = {
@@ -24,15 +26,23 @@ _STATUS_LABEL: dict[LicenseStatus, str] = {
 }
 
 
-def render_grid(console: Console, results: list[LicenseResult]) -> None:
+def render_grid(
+    console: Console,
+    results: list[LicenseResult],
+    errors: Sequence[LicenseCollectionError] = (),
+) -> None:
     """Render results as a Rich table grouped by ecosystem.
 
     Args:
         console: The Rich console to print to.
         results: Evaluated license results.
+        errors: Ecosystems whose inventories could not be collected.
     """
+    for error in errors:
+        console.print(str(error), style="red", markup=False)
     if not results:
-        console.print("[dim]No dependencies found to check.[/dim]")
+        if not errors:
+            console.print("[dim]No dependencies found to check.[/dim]")
         return
 
     ecosystems = sorted({r.package.ecosystem for r in results})
@@ -91,11 +101,15 @@ def _render_summary(console: Console, results: list[LicenseResult]) -> None:
             )
 
 
-def to_json(results: list[LicenseResult]) -> str:
-    """Serialize results as an indented JSON array.
+def to_json(
+    results: list[LicenseResult],
+    errors: Sequence[LicenseCollectionError] = (),
+) -> str:
+    """Serialize results and uncollected ecosystem records as a JSON array.
 
     Args:
         results: Evaluated license results.
+        errors: Ecosystems whose inventories could not be collected.
 
     Returns:
         str: JSON document.
@@ -112,14 +126,22 @@ def to_json(results: list[LicenseResult]) -> str:
         }
         for r in results
     ]
+    payload.extend(
+        {"ecosystem": error.ecosystem, "status": "uncollected", "reason": str(error)}
+        for error in errors
+    )
     return json.dumps(payload, indent=2)
 
 
-def to_csv(results: list[LicenseResult]) -> str:
+def to_csv(
+    results: list[LicenseResult],
+    errors: Sequence[LicenseCollectionError] = (),
+) -> str:
     """Serialize results as CSV.
 
     Args:
         results: Evaluated license results.
+        errors: Ecosystems whose inventories could not be collected.
 
     Returns:
         str: CSV document including a header row.
@@ -140,14 +162,20 @@ def to_csv(results: list[LicenseResult]) -> str:
                 r.reason,
             ],
         )
+    for error in errors:
+        writer.writerow(["", "", "", error.ecosystem, "uncollected", str(error)])
     return buffer.getvalue()
 
 
-def to_spdx(results: list[LicenseResult]) -> str:
+def to_spdx(
+    results: list[LicenseResult],
+    errors: Sequence[LicenseCollectionError] = (),
+) -> str:
     """Serialize results as a minimal SPDX 2.3 tag-value document.
 
     Args:
         results: Evaluated license results.
+        errors: Ecosystems whose inventories could not be collected.
 
     Returns:
         str: SPDX tag-value document.
@@ -159,6 +187,10 @@ def to_spdx(results: list[LicenseResult]) -> str:
         "DocumentName: lintro-license-report",
         "",
     ]
+    for error in errors:
+        comment = str(error).replace("<text>", "&lt;text&gt;")
+        comment = comment.replace("</text>", "&lt;/text&gt;")
+        lines.append(f"DocumentComment: <text>{comment}</text>")
     for r in results:
         spdx_id = "".join(ch for ch in r.package.name if ch.isalnum())
         concluded = r.package.license_id or "NOASSERTION"
