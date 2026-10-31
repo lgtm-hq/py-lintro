@@ -1,0 +1,30 @@
+def collect(tool):
+    # ruleid: lintro.python.none-coercion.capability-empty
+    if not tool.can_scan:
+        return []
+    return tool.scan()
+
+
+def supported(capability):
+    # ruleid: lintro.python.none-coercion.capability-empty
+    if not capability:
+        return []
+    return scan()
+
+
+def explicit_unknown(tool):
+    # ok: lintro.python.none-coercion.capability-empty
+    if not tool.can_scan:
+        return None
+
+
+def fail_closed(tool):
+    # ok: lintro.python.none-coercion.capability-empty
+    if not tool.can_scan:
+        raise RuntimeError("scan unavailable")
+
+
+def not_a_capability(issues):
+    # ok: lintro.python.none-coercion.capability-empty
+    if not issues:
+        return []

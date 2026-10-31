@@ -3987,6 +3987,50 @@ install-tools:
 }
 ```
 
+## Packaged Semgrep rules
+
+Lintro ships opt-in Semgrep packs, versioned with the Lintro release. List the installed
+packs with `lintro list-tools --rules` (also supports `--json` and `--output`). Enable
+the first pack in `.lintro-config.yaml`:
+
+```yaml
+tools:
+  semgrep:
+    rule_packs: [python/none-coercion]
+```
+
+The equivalent pyproject setting is:
+
+```toml
+[tool.lintro.semgrep]
+rule_packs = ["python/none-coercion"]
+```
+
+Run `lintro check src --tools semgrep` with Semgrep installed. Each pack adds a local
+`--config` path alongside `.semgrep.yaml`, `.semgrep.yml`, or `.semgrep/` in the scan
+project root. With packs enabled, the implicit `auto` registry lookup is replaced by
+these local rules. An explicit Semgrep `config` option, including `config=auto`, is
+preserved alongside the packs. No packs run by default, and unknown pack names raise a
+configuration error with the available names. Nonempty `rule_packs` selections are
+rejected for tools other than Semgrep.
+
+`python/none-coercion` asks whether missing values mean empty or unknown. Its eight INFO
+rule families cover literal-attribute `getattr` defaults, falsey `or` fallbacks,
+concrete exception returns, empty returns after None guards, stringified mapping reads,
+defaults on values decoded with `json.loads`, failed `ToolResult` constructors, and
+empty returns when a capability is unavailable. Findings are review candidates, not
+proven defects. The fixtures document suppressions for known subprocess stdout
+fallbacks, environment reads, ALL_CAPS tables, false-returning `is_*`/`has_*`
+predicates, and true-returning None guards. Other objects with a `stdout` attribute
+remain visible.
+
+Enabling the pack uses the existing Semgrep finding and CLI exit behavior: INFO
+candidates can make `lintro check` exit nonzero. There is no automatic advisory lane,
+precise `ToolResult` gate, or candidate-count ratchet yet. The prerequisite work in
+issues #438 and #3018 must land before precise-rule gating. See
+[ADR-0012](adr/0012-packaged-semgrep-rules.md) for boundaries and the future native
+deterministic AST tool decision.
+
 ## Troubleshooting Configuration
 
 ### Common Issues

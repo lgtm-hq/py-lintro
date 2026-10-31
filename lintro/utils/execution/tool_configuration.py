@@ -263,6 +263,13 @@ def configure_tool_for_execution(
             cli_overrides.update(overrides)
 
     # Apply unified config with CLI overrides
+    if lintro_config is None:
+        lintro_config = get_config()
+    if tool_name == ToolName.SEMGREP.value:
+        cli_overrides.setdefault(
+            "rule_packs",
+            lintro_config.get_tool_config(tool_name).rule_packs,
+        )
     config_manager.apply_config_to_tool(
         tool=tool,
         cli_overrides=cli_overrides if cli_overrides else None,
@@ -284,7 +291,6 @@ def configure_tool_for_execution(
         tool.set_options(diff_base=diff_base)
 
     # Resolve per-tool auto_install: per-tool config > global effective > False
-    lintro_config = lintro_config or get_config()
     tool_cfg = lintro_config.get_tool_config(tool_name)
     if tool_cfg.auto_install is not None:
         effective_tool_auto_install = tool_cfg.auto_install
