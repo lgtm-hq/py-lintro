@@ -316,6 +316,39 @@ function test() {
         assert_that(new_content).is_not_equal_to(original_content)
 
 
+def test_fix_mixed_findings_counts_verified_partial_fixes(tmp_path: Path) -> None:
+    """A findings exit after rewriting files must still reach verification.
+
+    Args:
+        tmp_path: Temporary directory for a mix of fixable and unfixable errors.
+    """
+    from lintro.tools.oxlint.definition import OxlintPlugin
+
+    target = tmp_path / "mixed.js"
+    target.write_text(
+        "let first = 1;\nlet second = 2;\nconsole.log(first, second);\nif (true) {}\n",
+    )
+    plugin = OxlintPlugin()
+    result = plugin.fix(
+        [str(target)],
+        {"allow": ["all"], "deny": ["prefer-const", "no-empty"]},
+    )
+
+    assert_that(target.read_text()).is_equal_to(
+        "const first = 1;\nconst second = 2;\nconsole.log(first, second);\nif (true) {}\n",
+    )
+    assert_that(result.success).is_false()
+    assert_that(result.initial_issues_count).is_equal_to(3)
+    assert_that(len(result.initial_issues or [])).is_equal_to(3)
+    assert_that(result.fixed_issues_count).is_equal_to(2)
+    assert_that(result.remaining_issues_count).is_equal_to(1)
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.issues).extracting("code").is_equal_to(
+        ["eslint(no-empty)"],
+    )
+    assert_that(result.output).contains("Fixed 2 issue(s)", "cannot be auto-fixed")
+
+
 def test_fix_clean_file_unchanged(
     get_plugin: Callable[[str], BaseToolPlugin],
     temp_js_file_clean: str,

@@ -9,6 +9,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
+from lintro.plugins.subprocess_executor import SubprocessResult
 
 if TYPE_CHECKING:
     from lintro.tools.prettier.definition import PrettierPlugin
@@ -26,7 +27,7 @@ def test_fix_success_no_issues(
     """
     with (
         patch.object(prettier_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(prettier_plugin, "_run_subprocess") as mock_run,
+        patch.object(prettier_plugin, "_run_subprocess_result") as mock_run,
         patch.object(prettier_plugin, "_get_executable_command") as mock_exec,
         patch.object(prettier_plugin, "_build_config_args") as mock_config,
     ):
@@ -38,7 +39,12 @@ def test_fix_success_no_issues(
 
         mock_exec.return_value = ["npx", "prettier"]
         mock_config.return_value = []
-        mock_run.return_value = (True, "All matched files use Prettier code style!")
+        mock_run.return_value = SubprocessResult(
+            0,
+            "All matched files use Prettier code style!",
+            "",
+            "All matched files use Prettier code style!",
+        )
 
         result = prettier_plugin.fix(["/tmp/test.js"], {})
 
@@ -58,7 +64,7 @@ def test_fix_success_with_fixes_applied(
     """
     with (
         patch.object(prettier_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(prettier_plugin, "_run_subprocess") as mock_run,
+        patch.object(prettier_plugin, "_run_subprocess_result") as mock_run,
         patch.object(prettier_plugin, "_get_executable_command") as mock_exec,
         patch.object(prettier_plugin, "_build_config_args") as mock_config,
     ):
@@ -71,9 +77,19 @@ def test_fix_success_with_fixes_applied(
         mock_exec.return_value = ["npx", "prettier"]
         mock_config.return_value = []
         mock_run.side_effect = [
-            (False, "[warn] test.js\n[warn] Code style issues found."),
-            (True, "test.js"),
-            (True, "All matched files use Prettier code style!"),
+            SubprocessResult(
+                1,
+                "[warn] test.js\n[warn] Code style issues found.",
+                "",
+                "[warn] test.js\n[warn] Code style issues found.",
+            ),
+            SubprocessResult(0, "test.js", "", "test.js"),
+            SubprocessResult(
+                0,
+                "All matched files use Prettier code style!",
+                "",
+                "All matched files use Prettier code style!",
+            ),
         ]
 
         result = prettier_plugin.fix(["/tmp/test.js"], {})
@@ -115,7 +131,7 @@ def test_fix_timeout_during_check(
 
     with (
         patch.object(prettier_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(prettier_plugin, "_run_subprocess") as mock_run,
+        patch.object(prettier_plugin, "_run_subprocess_result") as mock_run,
         patch.object(prettier_plugin, "_get_executable_command") as mock_exec,
         patch.object(prettier_plugin, "_build_config_args") as mock_config,
         patch.object(

@@ -21,6 +21,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.173.4] - 2026-10-31
+
+### Fixed
+
+- **tools**: a failed batch with no parsed issues is never clean (#3000) (#3034)
+  (aca3ec1)
+- **cargo-audit**: reject missing or invalid vulnerability reports (#3003) (#3036)
+  (ab5e202)
+- **ai**: reject unusable custom-agent answers (#3002) (#3040) (b8600dc)
+- **ai**: abort checkpoint capture on enumeration failure (#3001) (#3039) (06188d2)
+- **ai**: keep unmeasured post-fix checks unverified (#2998) (#3038) (aa94677)
+- **cargo-deny**: keep the exit status so a failed run is never clean (#2999) (#3033)
+  (0e772a2)
+
 ## [0.173.3] - 2026-10-31
 
 ### Changed

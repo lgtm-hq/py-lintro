@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess  # nosec B404 - intercept git plumbing failures in regression tests
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -14,6 +15,7 @@ from lintro.ai.checkpoints import (
     CHECKPOINT_REF_PREFIX,
     Checkpoint,
     CheckpointError,
+    _expand_directory,
     capture_checkpoint,
     diff_checkpoint,
     git_checkpoints_available,
@@ -312,6 +314,77 @@ def test_directory_targets_skip_ignored_and_git_internals(tmp_path: Path) -> Non
     assert_that(paths).contains("tracked.py")
     assert_that([p for p in paths if p.startswith(".git/")]).is_empty()
     assert_that([p for p in paths if p.startswith("ignored/")]).is_empty()
+
+
+@pytest.mark.parametrize("failure", ["exit", "oserror", "timeout"])
+@pytest.mark.parametrize("paths", [["pkg", "tracked.py"], ["tracked.py", "pkg"]])
+def test_capture_aborts_on_directory_enumeration_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+    paths: list[str],
+) -> None:
+    """A failed directory listing cannot publish or prune checkpoint refs."""
+    repo = init_git_repo(
+        tmp_path,
+        files={"pkg/target.py": "value = 1\n", "tracked.py": "alpha = 1\n"},
+    )
+    previous = capture_checkpoint(["tracked.py"], workspace_root=repo)
+    assert_that(previous).is_not_none()
+    refs_before = list_checkpoint_refs(workspace_root=repo)
+    (repo / "pkg/target.py").write_text("value = 'user'\n", encoding="utf-8")
+    (repo / "tracked.py").write_text("alpha = 'user'\n", encoding="utf-8")
+    real_run = subprocess.run
+
+    def fail_directory_listing(
+        args: list[str],
+        **kwargs: Any,
+    ) -> subprocess.CompletedProcess[str]:
+        if args[1] == "ls-files":
+            if failure == "oserror":
+                raise OSError("enumeration failed")
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired(args, 60.0)
+            return subprocess.CompletedProcess(
+                args,
+                1,
+                stdout="pkg/target.py\0",
+                stderr="enumeration failed",
+            )
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr("lintro.ai.checkpoints.subprocess.run", fail_directory_listing)
+
+    with pytest.raises(CheckpointError, match="git ls-files"):
+        capture_checkpoint(paths, workspace_root=repo, keep=1)
+
+    assert_that(list_checkpoint_refs(workspace_root=repo)).is_equal_to(refs_before)
+    assert_that((repo / "pkg/target.py").read_text(encoding="utf-8")).is_equal_to(
+        "value = 'user'\n",
+    )
+    assert_that((repo / "tracked.py").read_text(encoding="utf-8")).is_equal_to(
+        "alpha = 'user'\n",
+    )
+
+
+def test_empty_directory_is_a_valid_checkpoint_expansion(tmp_path: Path) -> None:
+    """A successful empty listing still permits capture of explicit files."""
+    repo = _init_git_repo(tmp_path)
+    (repo / "empty").mkdir()
+
+    assert_that(_expand_directory(root=repo, rel_dir="empty")).is_empty()
+    assert_that(capture_checkpoint(["empty"], workspace_root=repo)).is_none()
+    assert_that(list_checkpoint_refs(workspace_root=repo)).is_empty()
+
+    tracked = repo / "tracked.py"
+    tracked.write_text("alpha = 'user'\n", encoding="utf-8")
+    checkpoint = capture_checkpoint(["empty", "tracked.py"], workspace_root=repo)
+    assert_that(checkpoint).is_not_none()
+    assert_that(checkpoint.paths).is_equal_to(("tracked.py",))  # type: ignore[union-attr]
+    tracked.write_text("alpha = 'formatted'\n", encoding="utf-8")
+    restore_checkpoint(checkpoint)  # type: ignore[arg-type]
+
+    assert_that(tracked.read_text(encoding="utf-8")).is_equal_to("alpha = 'user'\n")
 
 
 def test_diff_ignores_paths_absent_from_checkpoint(tmp_path: Path) -> None:

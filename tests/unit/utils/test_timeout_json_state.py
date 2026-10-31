@@ -128,7 +128,7 @@ def _timed_out_prettier_result(
     target.write_text('{"a":1}\n', encoding="utf-8")
     _assume_tool_installed(monkeypatch)
     plugin = PrettierPlugin()
-    monkeypatch.setattr(plugin, "_run_subprocess", _raise_timeout)
+    monkeypatch.setattr(plugin, "_run_subprocess_result", _raise_timeout)
     return plugin.check(paths=[str(target)], options={})
 
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import subprocess  # nosec B404 - only constructs TimeoutExpired for runner tests
 from dataclasses import replace
-from functools import partial
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -18,12 +17,26 @@ from lintro.config.lintro_config import LintroConfig
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import ExecutionContext
+from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools import tool_manager
 from lintro.tools.core.batch_runner import BatchFixPolicy
 from lintro.tools.core.verify_pass import VerifyBaseline
 from lintro.tools.oxlint.definition import OxlintPlugin
 from lintro.utils.execution.fix_retry import run_fix_with_retry
 from lintro.utils.json_output import serialize_tool_result
+
+
+def _subprocess_result(success: bool, output: str) -> SubprocessResult:
+    """Build a captured Oxlint result with JSON on stdout.
+
+    Args:
+        success: Whether the command exited zero.
+        output: Captured standard output.
+
+    Returns:
+        Separated subprocess output with the matching exit code.
+    """
+    return SubprocessResult(0 if success else 1, output, "", output)
 
 
 @pytest.fixture
@@ -89,8 +102,8 @@ def test_check_invalid_report_is_counted_and_fails(
     """Unusable reports fail even when the subprocess exits zero."""
     monkeypatch.setattr(
         prepared_oxlint,
-        "_run_subprocess",
-        MagicMock(return_value=(exit_success, json.dumps(report))),
+        "_run_subprocess_result",
+        MagicMock(return_value=_subprocess_result(exit_success, json.dumps(report))),
     )
 
     result = prepared_oxlint.check(["test.js"], {})
@@ -120,8 +133,8 @@ def test_check_mixed_report_keeps_findings_and_counts_each_failure(
     }
     monkeypatch.setattr(
         prepared_oxlint,
-        "_run_subprocess",
-        MagicMock(return_value=(False, json.dumps(report))),
+        "_run_subprocess_result",
+        MagicMock(return_value=_subprocess_result(False, json.dumps(report))),
     )
 
     result = prepared_oxlint.check(["test.js"], {})
@@ -141,11 +154,13 @@ def test_empty_report_is_clean_after_an_invalid_run(
     method: str,
 ) -> None:
     """Failure accounting is per invocation and accepts valid empty reports."""
-    subprocess_result = MagicMock(return_value=(True, '{"diagnostics": null}'))
-    monkeypatch.setattr(prepared_oxlint, "_run_subprocess", subprocess_result)
+    subprocess_result = MagicMock(
+        return_value=_subprocess_result(True, '{"diagnostics": null}'),
+    )
+    monkeypatch.setattr(prepared_oxlint, "_run_subprocess_result", subprocess_result)
     run = getattr(prepared_oxlint, method)
     failed = run(["test.js"], {})
-    subprocess_result.return_value = (True, '{"diagnostics": []}')
+    subprocess_result.return_value = _subprocess_result(True, '{"diagnostics": []}')
 
     clean = run(["test.js"], {})
 
@@ -157,7 +172,7 @@ def test_empty_report_is_clean_after_an_invalid_run(
     assert_that(clean.output).is_none()
 
 
-@pytest.mark.parametrize("failed_stage", ["initial", "verify", "both"])
+@pytest.mark.parametrize("failed_stage", ["initial", "fix", "verify", "both"])
 @pytest.mark.parametrize("retry", [False, True])
 def test_fix_parse_failures_cannot_claim_a_clean_or_fixed_result(
     prepared_oxlint: OxlintPlugin,
@@ -165,20 +180,26 @@ def test_fix_parse_failures_cannot_claim_a_clean_or_fixed_result(
     failed_stage: str,
     retry: bool,
 ) -> None:
-    """Either report in the fix pipeline can fail independently of its exit code."""
+    """Every report in the fix pipeline can fail independently of its exit code."""
     valid = '{"diagnostics": [{"filename": "test.js", "message": "Use const"}]}'
     invalid = '{"diagnostics": [null]}'
     outputs = [
-        (True, invalid if failed_stage in {"initial", "both"} else valid),
-        (True, ""),
-        (
+        _subprocess_result(
+            True,
+            invalid if failed_stage in {"initial", "both"} else valid,
+        ),
+        _subprocess_result(
+            True,
+            invalid if failed_stage == "fix" else '{"diagnostics": []}',
+        ),
+        _subprocess_result(
             True,
             invalid if failed_stage in {"verify", "both"} else '{"diagnostics": []}',
         ),
     ]
     monkeypatch.setattr(
         prepared_oxlint,
-        "_run_subprocess",
+        "_run_subprocess_result",
         MagicMock(side_effect=outputs),
     )
 
@@ -200,7 +221,7 @@ def test_fix_parse_failures_cannot_claim_a_clean_or_fixed_result(
     assert_that(result.residual_unknown_reason).contains("Failed to parse")
     assert_that(result.remaining_issues_count).is_none()
     assert_that(result.issues_count).is_equal_to(
-        1 if failed_stage == "verify" else 0,
+        1 if failed_stage in {"fix", "verify"} else 0,
     )
     serialized = serialize_tool_result(replace(result), action=Action.FIX)
     assert_that(serialized["fixed"]).is_none()
@@ -225,12 +246,15 @@ def test_partial_fix_verification_keeps_new_findings_without_duplicates(
     verified = {"filename": "test.js", "message": "Use const", "severity": "error"}
     monkeypatch.setattr(
         prepared_oxlint,
-        "_run_subprocess",
+        "_run_subprocess_result",
         MagicMock(
             side_effect=[
-                (True, json.dumps({"diagnostics": initial})),
-                (True, ""),
-                (False, json.dumps({"diagnostics": [verified, None]})),
+                _subprocess_result(True, json.dumps({"diagnostics": initial})),
+                _subprocess_result(True, '{"diagnostics": []}'),
+                _subprocess_result(
+                    False,
+                    json.dumps({"diagnostics": [verified, None]}),
+                ),
             ],
         ),
     )
@@ -281,8 +305,8 @@ def test_prose_wrapped_array_never_becomes_an_object_report(
     output = f"{prefix}{json.dumps([{'diagnostics': diagnostics}])}\nDone"
     monkeypatch.setattr(
         prepared_oxlint,
-        "_run_subprocess",
-        MagicMock(return_value=(exit_success, output)),
+        "_run_subprocess_result",
+        MagicMock(return_value=_subprocess_result(exit_success, output)),
     )
 
     result = getattr(prepared_oxlint, method)(["test.js"], {})
@@ -293,7 +317,8 @@ def test_prose_wrapped_array_never_becomes_an_object_report(
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_zero()
-    assert_that(result.parse_failures_count).is_equal_to(2 if method == "fix" else 1)
+    expected_failures = 3 if method == "fix" and exit_success else 1
+    assert_that(result.parse_failures_count).is_equal_to(expected_failures)
     assert_that(serialized["success"]).is_false()
     assert_that(serialized["parse_failures_count"]).is_equal_to(
         result.parse_failures_count,
@@ -327,8 +352,8 @@ def test_report_tolerates_log_prefixes_and_trailing_braces(
     output = f"{prefix}{json.dumps({'diagnostics': diagnostics})}{suffix}"
     monkeypatch.setattr(
         prepared_oxlint,
-        "_run_subprocess",
-        MagicMock(return_value=(not nonclean, output)),
+        "_run_subprocess_result",
+        MagicMock(return_value=_subprocess_result(not nonclean, output)),
     )
 
     result = getattr(prepared_oxlint, method)(["test.js"], {})
@@ -372,14 +397,14 @@ def test_additional_or_truncated_container_cannot_pass_as_a_clean_report(
     output = prefix + '{"diagnostics": []}' + suffix
     monkeypatch.setattr(
         prepared_oxlint,
-        "_run_subprocess",
-        MagicMock(return_value=(True, output)),
+        "_run_subprocess_result",
+        MagicMock(return_value=_subprocess_result(True, output)),
     )
 
     result = getattr(prepared_oxlint, method)(["test.js"], {})
 
     assert_that(result.success).is_false()
-    assert_that(result.parse_failures_count).is_equal_to(2 if method == "fix" else 1)
+    assert_that(result.parse_failures_count).is_equal_to(3 if method == "fix" else 1)
     assert_that(result.output).contains("Failed to parse")
     if method == "fix":
         serialized = serialize_tool_result(replace(result), action=Action.FIX)
@@ -403,16 +428,21 @@ def test_incomplete_fix_preserves_findings_summary_and_verbose_output(
     monkeypatch.setattr(
         oxlint_definition,
         "BatchFixPolicy",
-        partial(BatchFixPolicy, verbose_output_label=verbose_label),
+        lambda **kwargs: BatchFixPolicy(
+            **(kwargs | {"verbose_output_label": verbose_label}),
+        ),
     )
     outputs = [
-        (True, json.dumps({"diagnostics": [diagnostic, diagnostic, None]})),
-        (True, raw_fix),
-        (True, json.dumps({"diagnostics": [diagnostic]})),
+        _subprocess_result(
+            True,
+            json.dumps({"diagnostics": [diagnostic, diagnostic, None]}),
+        ),
+        _subprocess_result(True, raw_fix),
+        _subprocess_result(True, json.dumps({"diagnostics": [diagnostic]})),
     ]
     monkeypatch.setattr(
         prepared_oxlint,
-        "_run_subprocess",
+        "_run_subprocess_result",
         MagicMock(side_effect=outputs),
     )
 
@@ -471,27 +501,27 @@ def test_executor_fold_preserves_unknown_fix_accounting(
     }
     final_failed = failed_stage in {"verify", "both"}
     outputs: list[object] = [
-        (True, partial if initial_failed else valid),
-        timeout if failed_stage == "fix-timeout" else (True, ""),
+        _subprocess_result(True, partial if initial_failed else valid),
+        timeout if failed_stage == "fix-timeout" else _subprocess_result(True, clean),
     ]
     if failed_stage != "fix-timeout":
         outputs.append(
             (
                 timeout
                 if failed_stage == "verify-timeout"
-                else (True, partial if final_failed else clean)
+                else _subprocess_result(True, partial if final_failed else clean)
             ),
         )
     # The executor case starts with complete fix reports; its last CHECK fails.
     if failed_stage == "executor" or executor_report == "partial":
-        outputs.append((False, executor_partial))
+        outputs.append(_subprocess_result(False, executor_partial))
     elif executor_report == "timeout":
         outputs.append(timeout)
     else:
-        outputs.append((True, clean))
+        outputs.append(_subprocess_result(True, clean))
     monkeypatch.setattr(
         prepared_oxlint,
-        "_run_subprocess",
+        "_run_subprocess_result",
         MagicMock(side_effect=outputs),
     )
     monkeypatch.setattr(

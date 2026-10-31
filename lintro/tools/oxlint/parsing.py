@@ -62,10 +62,10 @@ class OxlintOutputParser:
     def finish(self, result: ToolResult) -> ToolResult:
         """Surface rejected records and prevent incomplete reports implying success.
 
-        Either incomplete fix report makes derived fix accounting unknown,
+        Any incomplete report makes derived fix accounting unknown,
         including on timeout. Usable verification and initial findings remain
-        visible without duplicates. Bare non-JSON prose and whitespace still
-        count no failures and can pass clean under ISSUES_ONLY until #3000 lands.
+        visible without duplicates. The shared runner classifies failed exits;
+        bare non-JSON prose and whitespace count no parser failures.
 
         Args:
             result: Check, fix or timeout result from the shared runner.

@@ -5,12 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
+import click
 import pytest
 from assertpy import assert_that
+from click.testing import CliRunner
 
 from lintro.ai.checkpoints import (
     CHECKPOINT_REF_PREFIX,
+    CheckpointError,
     capture_checkpoint,
     list_checkpoint_refs,
 )
@@ -107,6 +111,33 @@ def test_fmt_checkpoint_captured_and_announced(
     assert_that(refs).is_length(1)
     assert_that(ctx.logger.lines).is_length(1)
     assert_that(ctx.logger.lines[0]).contains(CHECKPOINT_REF_PREFIX)
+
+
+@pytest.mark.parametrize("clean_stdout_output", [False, True])
+def test_fmt_checkpoint_failure_aborts_before_formatting(
+    clean_stdout_output: bool,
+) -> None:
+    """Capture errors reach stderr and stop fmt without announcing success."""
+    ctx = _make_ctx(clean_stdout_output=clean_stdout_output)
+
+    @click.command()
+    def command() -> None:
+        _capture_fmt_checkpoint(ctx=ctx, paths=["pkg", "tracked.py"])
+        click.echo("formatting started")
+
+    with patch(
+        "lintro.ai.checkpoints.capture_checkpoint",
+        side_effect=CheckpointError("git ls-files failed: enumeration failed"),
+    ):
+        result = CliRunner().invoke(command)
+
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(result.stderr).contains(
+        "Failed to capture fmt checkpoint",
+        "git ls-files failed: enumeration failed",
+    )
+    assert_that(result.stdout).is_empty()
+    assert_that(ctx.logger.lines).is_empty()
 
 
 def test_fmt_checkpoint_skipped_when_disabled(

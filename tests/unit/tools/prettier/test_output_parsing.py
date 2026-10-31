@@ -7,6 +7,8 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
+from lintro.plugins.subprocess_executor import SubprocessResult
+
 if TYPE_CHECKING:
     from lintro.tools.prettier.definition import PrettierPlugin
 
@@ -23,7 +25,7 @@ def test_check_parses_prettier_output_correctly(
     """
     with (
         patch.object(prettier_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(prettier_plugin, "_run_subprocess") as mock_run,
+        patch.object(prettier_plugin, "_run_subprocess_result") as mock_run,
         patch.object(prettier_plugin, "_get_executable_command") as mock_exec,
         patch.object(prettier_plugin, "_build_config_args") as mock_config,
     ):
@@ -35,11 +37,11 @@ def test_check_parses_prettier_output_correctly(
 
         mock_exec.return_value = ["npx", "prettier"]
         mock_config.return_value = []
-        mock_run.return_value = (
-            False,
+        output = (
             "Checking formatting...\n[warn] file1.js\n[warn] file2.js\n"
-            "[warn] Code style issues found in the above file(s).",
+            "[warn] Code style issues found in the above file(s)."
         )
+        mock_run.return_value = SubprocessResult(1, output, "", output)
 
         result = prettier_plugin.check(["/tmp"], {})
 

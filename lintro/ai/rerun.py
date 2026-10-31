@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.tools.core.verify_pass import check_answered
+
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
     from lintro.parsers.base_issue import BaseIssue
@@ -94,7 +96,9 @@ def apply_rerun_results(
     by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]],
     rerun_results: list[ToolResult],
 ) -> None:
-    """Apply fresh rerun issue counts back to original FIX results.
+    """Apply measured rerun issue counts back to original FIX results.
+
+    An unanswered check leaves the original counts and failure flags intact.
 
     Args:
         by_tool: Dict mapping tool name to (result, issues) pairs.
@@ -104,7 +108,7 @@ def apply_rerun_results(
 
     for tool_name, (result, _issues) in by_tool.items():
         rerun = rerun_by_name.get(tool_name)
-        if rerun is None:
+        if rerun is None or not check_answered(rerun):
             continue
 
         refreshed_issues = list(rerun.issues) if rerun.issues is not None else []

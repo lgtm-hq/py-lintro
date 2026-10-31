@@ -150,23 +150,8 @@ class KnownFailOpen(NamedTuple):
 # Measured from the unmarked first run.
 # Keep exit-code variants separate so a fix cannot hide behind another variant.
 KNOWN_FAIL_OPEN: dict[tuple[str, str], KnownFailOpen] = {
-    ("cargo_deny", "case1"): KnownFailOpen(
-        "#2999 cargo-deny discards the failed exit status",
-    ),
-    ("oxfmt", "case1"): KnownFailOpen(
-        "#3000 batch success ignores the failed exit status",
-    ),
-    ("oxlint", "case1"): KnownFailOpen(
-        "#3000 batch success ignores the failed exit status",
-    ),
-    ("prettier", "case1"): KnownFailOpen(
-        "#3000 batch success ignores the failed exit status",
-    ),
     ("bandit", "case2-rc0"): KnownFailOpen("#3024 null results read as clean"),
     ("bandit", "case2-rc1"): KnownFailOpen("#3024 null results read as clean"),
-    ("cargo_audit", "case2-rc0"): KnownFailOpen(
-        "#3003 null vulnerability list reads as clean",
-    ),
     ("checkov", "case2-rc0"): KnownFailOpen("#3026 null failed_checks read as clean"),
     ("golangci_lint", "case2-rc0"): KnownFailOpen("#3026 null Issues read as clean"),
     ("html_validate", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
@@ -184,9 +169,6 @@ KNOWN_FAIL_OPEN: dict[tuple[str, str], KnownFailOpen] = {
     ("sqlfluff", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
     ("stylelint", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
     ("vale", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
-    ("cargo_audit", "case2-blank-rc0"): KnownFailOpen(
-        "#3003 missing report reads as clean",
-    ),
 }
 
 _CARGO_PROJECT = {

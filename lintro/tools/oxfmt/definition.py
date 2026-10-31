@@ -39,6 +39,9 @@ from lintro.tools.core.option_validators import (
 
 # Constants for oxfmt configuration
 OXFMT_DEFAULT_TIMEOUT: int = 30
+# Exit 1 covers formatting mismatches and invalid config; exit 2 is fatal.
+# https://github.com/oxc-project/oxc/blob/main/apps/oxfmt/src/cli/result.rs
+OXFMT_FINDINGS_EXIT_CODES: tuple[int, ...] = (1,)
 # Note: oxfmt (from oxc toolchain) supports JavaScript/TypeScript and Vue files.
 # Unlike Prettier, it does not support Svelte, Astro, JSON, CSS, HTML, Markdown, etc.
 OXFMT_FILE_PATTERNS: list[str] = [
@@ -52,6 +55,27 @@ OXFMT_FILE_PATTERNS: list[str] = [
     "*.tsx",
     "*.vue",
 ]
+
+
+def _is_no_files_result(returncode: int, stdout: str, stderr: str) -> bool:
+    """Recognize only oxfmt's complete no-target response on exit 2.
+
+    Args:
+        returncode: Captured oxfmt exit status.
+        stdout: Captured standard output.
+        stderr: Captured standard error.
+
+    Returns:
+        Whether exactly one stream contains the no-target message.
+    """
+    message = (
+        "Expected at least one target file. "
+        "All matched files may have been excluded by ignore rules."
+    )
+    return returncode == 2 and (
+        stdout.strip(),
+        stderr.strip(),
+    ) in ((message, ""), ("", message))
 
 
 @register_tool
@@ -267,9 +291,6 @@ class OxfmtPlugin(BaseToolPlugin):
         cmd.extend(ctx.rel_files)
         logger.debug(f"[OxfmtPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
 
-        # Standardize: suppress oxfmt's informational output when no issues.
-        # oxfmt exits non-zero purely to signal "some file differs", so the
-        # parsed list — not the exit status — is the verdict.
         return run_batch_check(
             ctx,
             plugin=self,
@@ -277,6 +298,9 @@ class OxfmtPlugin(BaseToolPlugin):
             parse=lambda output: parse_oxfmt_output(output=output),
             policy=BatchCheckPolicy(
                 success=BatchSuccess.ISSUES_ONLY,
+                findings_exit_codes=OXFMT_FINDINGS_EXIT_CODES,
+                parse_stdout=True,
+                no_files=_is_no_files_result,
                 report_cwd=True,
             ),
             cwd=ctx.cwd,
@@ -351,6 +375,10 @@ class OxfmtPlugin(BaseToolPlugin):
             commands=BatchCommands(check=check_cmd, fix=fix_cmd),
             parse=lambda output: parse_oxfmt_output(output=output),
             policy=BatchFixPolicy(
+                findings_exit_codes=OXFMT_FINDINGS_EXIT_CODES,
+                parse_stdout=True,
+                parse_fix_output=False,
+                no_files=_is_no_files_result,
                 fixed_label="formatting issue",
                 all_fixed_message=(
                     "All formatting issues were successfully auto-fixed"
