@@ -120,10 +120,20 @@ def test_parse_semgrep_empty_string_output() -> None:
     assert_that(issues).is_equal_to([])
 
 
-def test_parse_semgrep_missing_results_key() -> None:
-    """Missing results should behave as empty list (no crash)."""
-    issues = parse_semgrep_output(output=json.dumps({}))
-    assert_that(issues).is_equal_to([])
+@pytest.mark.parametrize(
+    "payload",
+    [{}, {"results": None}, {"results": {}}, {"results": ""}, {"results": 0}],
+    ids=["missing", "null", "object", "string", "number"],
+)
+def test_parse_semgrep_rejects_invalid_results(payload: dict[str, object]) -> None:
+    """A missing or non-list results field must signal a schema failure.
+
+    Args:
+        payload: JSON object without a usable results array.
+    """
+    with pytest.raises(ValueError, match="Semgrep results must be a list") as exc:
+        parse_semgrep_output(output=json.dumps(payload))
+    assert_that(str(exc.value)).contains("Semgrep results must be a list")
 
 
 def test_parse_semgrep_handles_malformed_issue_gracefully() -> None:
@@ -204,12 +214,6 @@ def test_parse_semgrep_invalid_json() -> None:
 def test_parse_semgrep_non_object_json() -> None:
     """Non-object JSON should return empty list and log warning."""
     issues = parse_semgrep_output(output=json.dumps([1, 2, 3]))
-    assert_that(issues).is_equal_to([])
-
-
-def test_parse_semgrep_non_list_results() -> None:
-    """Non-list results should return empty list and log warning."""
-    issues = parse_semgrep_output(output=json.dumps({"results": "not a list"}))
     assert_that(issues).is_equal_to([])
 
 

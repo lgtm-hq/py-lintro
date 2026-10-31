@@ -296,14 +296,14 @@ class SemgrepPlugin(BaseToolPlugin):
         output: str
         execution_failure: bool = False
         try:
-            # Note: semgrep returns non-zero exit code when findings exist,
-            # so we intentionally ignore the success return value
-            _, combined = self._run_subprocess(
+            proc = self._run_subprocess_result(
                 cmd=cmd,
                 timeout=ctx.timeout,
                 cwd=ctx.cwd,
             )
-            output = (combined or "").strip()
+            # Exit 1 reports findings with --error; other nonzero codes fail.
+            execution_failure = proc.returncode not in (0, 1)
+            output = proc.output.strip()
         except subprocess.TimeoutExpired:
             timeout_msg = (
                 f"Semgrep execution timed out ({ctx.timeout}s limit exceeded).\n\n"
@@ -387,6 +387,7 @@ class SemgrepPlugin(BaseToolPlugin):
                 success=False,
                 output=(output or f"Failed to parse semgrep output: {str(e)}"),
                 issues_count=0,
+                parse_failures_count=1,
             )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
