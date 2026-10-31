@@ -250,15 +250,18 @@ def _parse_verification(*, payload: dict[str, Any]) -> str:
 
     Returns:
         The canonical state value; ``legacy`` for a pre-ADR-0011 record;
-        empty for a record that carries provenance but recorded no state (a
-        round that completed no call). An unrecognised value is kept, in a
-        bounded form, rather than blanked: blank reads as "no state", which
-        the reuse gate accepts, and a corrupt or newer value must not.
+        empty for omitted or blank state on a provenance-bearing record,
+        which the reuse gate accepts only with zero model usage. Explicit
+        null reads as ``unreported``. An unrecognised value is kept in a
+        bounded form rather than blanked, so a corrupt or newer value cannot
+        be mistaken for a round that completed no call.
     """
     if not any(key in payload for key in _PROVENANCE_KEYS):
         return ModelVerification.LEGACY.value
-    raw = payload.get("model_verification")
-    if raw is None or raw == "":
+    raw = payload.get("model_verification", "")
+    if raw is None:
+        return ModelVerification.UNREPORTED.value
+    if raw == "":
         return ""
     normalized = str(raw).strip().lower()
     try:
