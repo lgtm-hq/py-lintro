@@ -357,22 +357,6 @@ def test_absolute_paths_unchanged_by_resolution():
     assert_that(issue.file).is_equal_to("/absolute/path/to/file.py")
 
 
-def test_no_resolution_when_cwd_is_none():
-    """When cwd is None, relative paths should remain unchanged."""
-    issue = MockIssue(
-        file="relative/path/file.js",
-        line=1,
-        code="no-var",
-        message="test",
-    )
-
-    cwd = None
-    if cwd and not os.path.isabs(issue.file):
-        issue.file = os.path.join(cwd, issue.file)
-
-    assert_that(issue.file).is_equal_to("relative/path/file.js")
-
-
 async def test_generate_fixes_skips_issues_with_unreadable_relative_paths(tmp_path):
     """Relative paths not resolvable from CWD are silently skipped."""
     subdir = tmp_path / "tools" / "js"

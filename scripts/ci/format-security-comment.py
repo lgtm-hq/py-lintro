@@ -128,7 +128,7 @@ def format_comment(json_path: str) -> str | None:
 
     tool_meta = osv_result.get("metadata")
     # None means probe didn't run; [] means probe ran but found no suppressions
-    probe_suppressions: list[dict[str, object]] | None = None
+    probe_suppressions: list[object] | None = None
     if isinstance(tool_meta, dict) and isinstance(
         tool_meta.get("suppressions"),
         list,

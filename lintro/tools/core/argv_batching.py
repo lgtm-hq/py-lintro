@@ -112,7 +112,7 @@ def argv_byte_budget() -> int:
         arg_max = os.sysconf("SC_ARG_MAX")
     except (ValueError, OSError, AttributeError):
         arg_max = ARGV_FALLBACK_LIMIT_BYTES
-    if not isinstance(arg_max, int) or arg_max <= 0:
+    if arg_max <= 0:
         arg_max = ARGV_FALLBACK_LIMIT_BYTES
 
     # ``execve`` counts bytes, not characters, so measure the environment the

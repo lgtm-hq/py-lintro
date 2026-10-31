@@ -216,6 +216,10 @@ def run_tools_parallel(
                                 success=False,
                                 output=f"Failed to initialize tool: {exc}",
                                 issues_count=0,
+                                residual_unknown=action == Action.FIX,
+                                residual_unknown_reason=(
+                                    "tool crashed" if action == Action.FIX else None
+                                ),
                                 duration_seconds=time.monotonic() - attempt_started,
                             ),
                         )

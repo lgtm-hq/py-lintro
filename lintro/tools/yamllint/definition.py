@@ -15,12 +15,8 @@ from pathlib import Path
 from typing import Any
 
 import click
+import yaml
 from loguru import logger
-
-try:
-    import yaml
-except ImportError:
-    yaml = None  # type: ignore[assignment]
 
 from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
@@ -197,12 +193,6 @@ class YamllintPlugin(BaseToolPlugin):
             return []
 
         ignore_patterns: list[str] = []
-        if yaml is None:
-            logger.debug(
-                "[YamllintPlugin] PyYAML not available, cannot parse ignore patterns",
-            )
-            return ignore_patterns
-
         try:
             with open(config_file, encoding="utf-8") as f:
                 config_data = yaml.safe_load(f)

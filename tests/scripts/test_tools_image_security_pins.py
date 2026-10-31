@@ -326,7 +326,6 @@ def test_image_brotli_floor_checks_the_installed_debian_package(
     bash = shutil.which("bash")
     if bash is None or shutil.which("dpkg") is None:
         pytest.skip("Executing the Debian version comparison needs bash and dpkg")
-    assert bash is not None
     query = tmp_path / "dpkg-query"
     query.write_text(
         '#!/bin/sh\nprintf "%s" "$BROTLI_TEST_VERSION"\n'

@@ -503,6 +503,10 @@ mypy_path = ["evals/review-efficacy"]
 # .gitignore keeps them untracked either way; this stops them being created.
 cache_dir = "$MYPY_CONFIG_FILE_DIR/.mypy_cache"
 strict = true
+# None-handling audit (#3022, epic #2996); remaining overrides are delete-only.
+strict_equality_for_none = true
+warn_unreachable = true
+enable_error_code = ["redundant-expr", "truthy-bool", "possibly-undefined"]
 ignore_missing_imports = false
 warn_unused_ignores = true
 warn_unused_configs = true
@@ -553,6 +557,133 @@ check_untyped_defs = true
 module = ["scripts", "scripts.*", "scripts.utils", "scripts.utils.*"]
 disallow_untyped_defs = false
 check_untyped_defs = true
+
+# --- None-check baseline (#3022, epic #2996): entries may only be deleted. ---
+# Exact module/code and None-equality identities and ceilings live in
+# tests/unit/test_mypy_none_baseline.py. Keep runtime validation at raw-data
+# boundaries intact while the owning None-audit refactors are reconciled.
+[[tool.mypy.overrides]]
+module = ["lintro._tool_versions"]
+disable_error_code = ["redundant-expr"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.ai.config_overrides"]
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.ai.providers.base"]
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.ai.rate_limit"]
+strict_equality_for_none = false
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.ai.review.exceptions"]
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.ai.review.models.changed_file"]
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.ai.transport"]
+strict_equality_for_none = false
+disable_error_code = ["redundant-expr"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.config.config_loader"]
+strict_equality_for_none = false
+disable_error_code = ["redundant-expr"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.config.tool_config_generator"]
+strict_equality_for_none = false
+
+[[tool.mypy.overrides]]
+module = ["lintro.parsers.bandit.bandit_parser"]
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.parsers.semgrep.semgrep_parser"]
+strict_equality_for_none = false
+disable_error_code = ["redundant-expr", "unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.parsers.streaming"]
+disable_error_code = ["redundant-expr"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.plugins.discovery"]
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.plugins.subprocess_executor"]
+disable_error_code = ["redundant-expr", "unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.tools.core.tool_registry"]
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.tools.pytest.collection"]
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.tools.pytest.coverage_processor"]
+strict_equality_for_none = false
+
+[[tool.mypy.overrides]]
+module = ["lintro.tools.pytest.definition"]
+strict_equality_for_none = false
+disable_error_code = ["redundant-expr"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.tools.pytest.output_parsers"]
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.tools.pytest.test_analytics"]
+disable_error_code = ["redundant-expr"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.utils.async_tool_executor"]
+disable_error_code = ["redundant-expr", "unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.utils.config_priority"]
+disable_error_code = ["redundant-expr"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.utils.config_validation"]
+disable_error_code = ["redundant-expr"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.utils.environment.collectors"]
+disable_error_code = ["possibly-undefined"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.utils.execution.fix_retry"]
+disable_error_code = ["redundant-expr", "unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.utils.execution.result_shaping"]
+strict_equality_for_none = false
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.utils.file_cache"]
+disable_error_code = ["possibly-undefined"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.utils.json_output"]
+disable_error_code = ["redundant-expr"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.utils.native_parsers"]
+strict_equality_for_none = false
+disable_error_code = ["possibly-undefined", "unreachable"]
 
 [tool.uv]
 # pydoclint (the `full` extra) depends on `docstring-parser-fork`; anthropic (the

@@ -46,12 +46,8 @@ def _run(cmd: list[str]) -> tuple[int, str, bool]:
     except OSError as exc:
         return 125, f"OS error running command: {exc}", False
     except subprocess.TimeoutExpired as exc:
-        stdout = (
-            exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-        )
-        stderr = (
-            exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-        )
+        stdout = (exc.stdout or b"").decode()
+        stderr = (exc.stderr or b"").decode()
         output = stdout + stderr
         if not output:
             output = "Command timed out"

@@ -19,6 +19,8 @@ from difflib import get_close_matches
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from lintro.config.config_loader import (
     EXTERNALLY_HANDLED_SECTIONS,
     _convert_pyproject_to_config,
@@ -38,11 +40,6 @@ from lintro.config.lintro_config import (
 )
 from lintro.enums.validation_code import ValidationCode
 from lintro.utils.config import STRUCTURAL_SECTIONS, _find_pyproject
-
-try:
-    import yaml
-except ImportError:  # pragma: no cover - enforced by packaging
-    yaml = None  # type: ignore[assignment]
 
 # Recognized top-level sections in .lintro-config.yaml. Derived from the real
 # schema rather than hand-copied: every ``LintroConfig`` field (minus the
@@ -240,7 +237,7 @@ def _tool_value_type_error(
 
 
 def _check_tool_names(
-    data: dict[str, Any],
+    data: dict[object, Any],
     warnings: list[ValidationMessage],
     errors: list[ValidationMessage],
 ) -> None:
@@ -737,15 +734,6 @@ def validate_config_file(path: Path | str | None = None) -> ValidationResult:
         config_path = found
 
     result = ValidationResult(config_path=config_path)
-
-    if yaml is None:  # pragma: no cover - enforced by packaging
-        result.errors.append(
-            ValidationMessage(
-                code=ValidationCode.MISSING_DEPENDENCY,
-                message="PyYAML is required to validate configuration.",
-            ),
-        )
-        return result
 
     parsed_pair = _parse_config_file(config_path, result)
     if parsed_pair is None:
