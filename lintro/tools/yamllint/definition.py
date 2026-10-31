@@ -262,7 +262,7 @@ class YamllintPlugin(BaseToolPlugin):
     def _process_single_file(
         self,
         file_path: str,
-        timeout: int,
+        timeout: float,
         results: dict[str, Any],
     ) -> None:
         """Process a single YAML file with yamllint.

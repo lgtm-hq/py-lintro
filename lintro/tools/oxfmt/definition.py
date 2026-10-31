@@ -161,7 +161,7 @@ class OxfmtPlugin(BaseToolPlugin):
 
     def _create_timeout_result(
         self,
-        timeout_val: int,
+        timeout_val: float,
         initial_issues: list[OxfmtIssue] | None = None,
         initial_count: int = 0,
         cwd: str | None = None,

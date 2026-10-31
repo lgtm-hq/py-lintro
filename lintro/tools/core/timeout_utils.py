@@ -39,14 +39,14 @@ class TimeoutResult:
     issues_count: int
     issues: list[Any] = field(default_factory=list)
     timed_out: bool = True
-    timeout_seconds: int = 0
+    timeout_seconds: float = 0
 
 
 @contextmanager
 def subprocess_timeout_context(
     tool: Any,
     cmd: list[str],
-    timeout: int | None = None,
+    timeout: float | None = None,
     tool_name: str | None = None,
 ) -> Iterator[None]:
     """Add timeout context to either subprocess execution API.
@@ -109,7 +109,7 @@ def subprocess_timeout_context(
 def run_subprocess_with_timeout(
     tool: Any,
     cmd: list[str],
-    timeout: int | None = None,
+    timeout: float | None = None,
     cwd: str | None = None,
     tool_name: str | None = None,
 ) -> tuple[bool, str]:
@@ -148,7 +148,7 @@ def get_timeout_value(tool: Any, default_timeout: int | None = None) -> int:
 
 def create_timeout_result(
     tool: Any,
-    timeout: int,
+    timeout: float,
     cmd: list[str] | None = None,
     tool_name: str | None = None,
 ) -> TimeoutResult:

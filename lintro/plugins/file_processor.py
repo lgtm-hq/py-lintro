@@ -174,7 +174,7 @@ class AggregatedResult:
         if result.issues:
             self.all_issues.extend(result.issues)
 
-    def build_output(self, *, timeout: int | None = None) -> str | None:
+    def build_output(self, *, timeout: float | None = None) -> str | None:
         """Build the final output string.
 
         Args:

@@ -34,6 +34,7 @@ from lintro.config.lintro_config import LintroConfig
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.execution_preparation import (
     DEFAULT_TIMEOUT,
+    PreparedExecution,
     build_config_args,
     get_defaults_config_args,
     get_effective_timeout,
@@ -76,16 +77,17 @@ class ExecutionContext:
     Attributes:
         files: List of absolute file paths to process.
         rel_files: List of file paths relative to cwd.
-        cwd: Working directory for command execution.
+        cwd: Working directory for command execution, defaulting to the current
+            directory for legacy callers that construct a context directly.
         early_result: If set, return this result immediately.
         timeout: Timeout value for subprocess execution.
     """
 
     files: list[str] = field(default_factory=list)
     rel_files: list[str] = field(default_factory=list)
-    cwd: str | None = None
+    cwd: str = field(default_factory=lambda: str(Path.cwd()))
     early_result: ToolResult | None = None
-    timeout: int = DEFAULT_TIMEOUT
+    timeout: float = DEFAULT_TIMEOUT
 
     @property
     def should_skip(self) -> bool:
@@ -545,13 +547,8 @@ class BaseToolPlugin(ABC):
     ) -> ExecutionContext:
         """Prepare execution context with common boilerplate steps.
 
-        This method consolidates repeated patterns:
-        1. Merge options with defaults
-        2. Validate input paths
-        3. Discover files matching patterns (returns early if none found)
-        4. Verify tool version requirements (skipped when no files match)
-        5. Compute working directory and relative paths
-        6. Calculate timeout based on provided options
+        Legacy wrapper around :func:`prepare_execution`. Subclasses should
+        use :meth:`prepare` for frozen inputs or an early result.
 
         Args:
             paths: Input paths to process.
@@ -560,14 +557,6 @@ class BaseToolPlugin(ABC):
 
         Returns:
             ExecutionContext with files, cwd, and optional early_result.
-
-        Example:
-            ctx = self._prepare_execution(paths, options)
-            if ctx.should_skip:
-                return ctx.early_result
-
-            cmd = self._build_command(ctx.rel_files)
-            success, output = self._run_subprocess(cmd, cwd=ctx.cwd)
         """
         logger.debug(f"[{self.name}] Preparing execution for {len(paths)} input paths")
 
@@ -581,20 +570,20 @@ class BaseToolPlugin(ABC):
             no_files_message=no_files_message,
         )
 
-        if "early_result" in result:
-            early_result = result["early_result"]
-            logger.debug(f"[{self.name}] Early exit: {early_result.output}")
-            return ExecutionContext(early_result=early_result)
+        if isinstance(result, ToolResult):
+            logger.debug(f"[{self.name}] Early exit: {result.output}")
+            return ExecutionContext(early_result=result)
 
-        files = result.get("files", [])
-        timeout = result.get("timeout", DEFAULT_TIMEOUT)
-        logger.debug(f"[{self.name}] Ready: {len(files)} files, timeout={timeout}s")
+        logger.debug(
+            f"[{self.name}] Ready: {len(result.files)} files, "
+            f"timeout={result.timeout}s",
+        )
 
         return ExecutionContext(
-            files=files,
-            rel_files=result.get("rel_files", []),
-            cwd=result.get("cwd"),
-            timeout=timeout,
+            files=result.files,
+            rel_files=result.rel_files,
+            cwd=result.cwd,
+            timeout=result.timeout,
         )
 
     def prepare(
@@ -603,15 +592,11 @@ class BaseToolPlugin(ABC):
         options: dict[str, object],
         *,
         no_files_message: str = "No files to check.",
-    ) -> ExecutionContext | ToolResult:
+    ) -> PreparedExecution | ToolResult:
         """Prepare execution, returning either a context or an early result.
 
-        This is the typed entry point subclasses should use. Unlike
-        :meth:`_prepare_execution`, which hands back an
-        :class:`ExecutionContext` whose ``early_result`` may or may not be
-        set, this method collapses the two outcomes into a union the caller
-        pattern-matches on, so no ``type: ignore`` is needed to narrow the
-        optional away::
+        Subclasses receive frozen execution inputs or an early result and
+        narrow the return type before running the tool::
 
             prepared = self.prepare(paths, options)
             if isinstance(prepared, ToolResult):
@@ -624,7 +609,7 @@ class BaseToolPlugin(ABC):
             no_files_message: Message when no files are found.
 
         Returns:
-            ExecutionContext | ToolResult: The prepared context when the tool
+            PreparedExecution | ToolResult: The prepared inputs when the tool
             should run, or the finished :class:`ToolResult` to return when
             execution must stop early (no matching files, or an unmet version
             requirement).
@@ -636,13 +621,18 @@ class BaseToolPlugin(ABC):
         )
         if ctx.early_result is not None:
             return ctx.early_result
-        return ctx
+        return PreparedExecution(
+            files=ctx.files,
+            rel_files=ctx.rel_files,
+            cwd=ctx.cwd,
+            timeout=ctx.timeout,
+        )
 
     def _process_files_with_progress(
         self,
         files: list[str],
         processor: Callable[[str], FileProcessingResult],
-        timeout: int,
+        timeout: float,
         *,
         label: str = "Processing files",
         progress_threshold: int = 2,
@@ -805,4 +795,5 @@ __all__ = [
     "DEFAULT_TIMEOUT",
     "BaseToolPlugin",
     "ExecutionContext",
+    "PreparedExecution",
 ]
