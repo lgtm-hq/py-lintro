@@ -92,7 +92,7 @@ def _parse_advisory(item: dict[str, Any]) -> CargoDenyIssue | None:
         if not isinstance(fields, dict):
             return None
 
-        advisory = fields.get("advisory", {})
+        advisory = fields.get("advisory")
         if not isinstance(advisory, dict):
             return None
 
@@ -132,25 +132,56 @@ def _parse_advisory(item: dict[str, Any]) -> CargoDenyIssue | None:
         return None
 
 
-def parse_cargo_deny_output(output: str) -> list[CargoDenyIssue]:
+def _parse_record(item: dict[str, Any]) -> tuple[CargoDenyIssue | None, int]:
+    """Parse a finding or distinguish an ignored record from a failure.
+
+    Args:
+        item: One decoded cargo-deny JSON record.
+
+    Returns:
+        The parsed issue and the number of malformed finding records (0 or 1).
+    """
+    item_type = item.get("type")
+    if item_type == "diagnostic":
+        parsed = _parse_diagnostic(item)
+    elif item_type == "advisory":
+        parsed = _parse_advisory(item)
+    elif item_type in ("summary", "log", "build"):
+        return None, 0
+    else:
+        # Future informational record types may be ignored, but a missing or
+        # invalid type, or finding fields under an unknown type, loses a finding.
+        fields = item.get("fields")
+        finding_fields = isinstance(fields, dict) and (
+            "severity" in fields or "advisory" in fields
+        )
+        invalid_type = not isinstance(item_type, str) or not item_type
+        return None, int(invalid_type or finding_fields)
+
+    return parsed, int(parsed is None)
+
+
+def parse_cargo_deny_output_with_stats(output: str) -> tuple[list[CargoDenyIssue], int]:
     """Parse cargo-deny JSON Lines output into CargoDenyIssue objects.
 
     cargo-deny outputs JSON Lines format (one JSON object per line) when
     using --format json. Each line can be:
     - A diagnostic message with type "diagnostic"
     - An advisory message with type "advisory"
+    - An informational record such as "log" or "summary", which is ignored
 
     Args:
         output: Raw stdout emitted by cargo deny check --format json.
 
     Returns:
-        A list of CargoDenyIssue instances. Returns an empty list when
-        no issues are found or output cannot be parsed.
+        Parsed issues and a count of malformed JSON or finding records.
+        Informational records and non-JSON log lines do not count as failures.
     """
     if not output or not output.strip():
-        return []
+        return [], 0
 
     issues: list[CargoDenyIssue] = []
+    parse_failures_count = 0
 
     for line in output.splitlines():
         line = line.strip()
@@ -162,20 +193,26 @@ def parse_cargo_deny_output(output: str) -> list[CargoDenyIssue]:
             if not isinstance(data, dict):
                 continue
 
-            item_type = data.get("type", "")
-
-            if item_type == "diagnostic":
-                parsed = _parse_diagnostic(data)
-                if parsed is not None:
-                    issues.append(parsed)
-            elif item_type == "advisory":
-                parsed = _parse_advisory(data)
-                if parsed is not None:
-                    issues.append(parsed)
-            # Ignore other types like "summary", "build", etc.
+            parsed, failures = _parse_record(data)
+            parse_failures_count += failures
+            if parsed is not None:
+                issues.append(parsed)
 
         except json.JSONDecodeError as exc:
             logger.debug(f"Failed to decode cargo-deny JSON line: {exc}: {line}")
-            continue
+            parse_failures_count += 1
 
+    return issues, parse_failures_count
+
+
+def parse_cargo_deny_output(output: str) -> list[CargoDenyIssue]:
+    """Parse cargo-deny JSON Lines output into CargoDenyIssue objects.
+
+    Args:
+        output: Raw output emitted by cargo deny check --format json.
+
+    Returns:
+        Parsed issues, omitting informational and malformed records.
+    """
+    issues, _failures = parse_cargo_deny_output_with_stats(output)
     return issues

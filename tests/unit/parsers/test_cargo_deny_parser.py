@@ -5,7 +5,32 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
-from lintro.parsers.cargo_deny.cargo_deny_parser import parse_cargo_deny_output
+from lintro.parsers.cargo_deny.cargo_deny_parser import (
+    parse_cargo_deny_output,
+    parse_cargo_deny_output_with_stats,
+)
+
+
+def test_parse_cargo_deny_output_counts_only_malformed_records() -> None:
+    """Retain valid findings while counting malformed records and ignoring logs."""
+    output = "\n".join(
+        [
+            '{"type":"diagnostic","fields":{"severity":"error","code":"L001",'
+            '"message":"license violation"}}',
+            '{"type":"diagnostic","fields":{"severity":null}}',
+            '{"type":"log","fields":{"level":"INFO","message":"checking"}}',
+            '{"type":"summary","fields":{"licenses":{"errors":1,"warnings":0}}}',
+            '{"type":"advisory","fields":{"advisory":null}}',
+            '{"type":"diagnostic","fields":',
+            '{"type":"build","fields":{}}',
+        ],
+    )
+
+    issues, failures = parse_cargo_deny_output_with_stats(output)
+
+    assert_that(issues).extracting("code").is_equal_to(["L001"])
+    assert_that(issues[0].message).is_equal_to("license violation")
+    assert_that(failures).is_equal_to(3)
 
 
 def test_parse_cargo_deny_output_single_diagnostic() -> None:
