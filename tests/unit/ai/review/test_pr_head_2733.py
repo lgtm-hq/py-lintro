@@ -405,10 +405,17 @@ async def test_every_pass_sends_no_tools_when_the_run_has_no_tree() -> None:
     from lintro.ai.review.response_pipeline import ChunkReviewRequest
 
     captured: list[dict[str, Any]] = []
+    responses = iter(
+        [
+            '{"findings": [], "flagged_files": []}',
+            '{"findings": []}',
+            '{"generated_questions": [{"question": "Does api.py preserve its contract?"}]}',
+        ],
+    )
 
     async def _call_ai(**kwargs: Any) -> AIResponse:
         captured.append(kwargs)
-        return AIResponse(content="{}", model="m", provider="anthropic")
+        return AIResponse(content=next(responses), model="m", provider="anthropic")
 
     context = ReviewContext(
         base_ref="a",
