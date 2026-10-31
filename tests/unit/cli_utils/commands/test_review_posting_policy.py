@@ -323,14 +323,16 @@ def test_the_post_tail_hands_the_poster_a_marked_result_and_re_persists(
     from lintro.ai.review import github as review_github
 
     posted: dict[str, Any] = {}
+
+    def post_review(**kwargs: Any) -> bool:
+        """Capture the posted result and report a successful post."""
+        posted.update(result=kwargs["result"], options=kwargs["options"])
+        return True
+
     monkeypatch.setattr(
         review_github,
         "post_review_to_github",
-        lambda *, result, pr_number, repo, options: posted.update(
-            result=result,
-            options=options,
-        )
-        or True,
+        post_review,
     )
     persisted: dict[str, Any] = {}
     monkeypatch.setattr(

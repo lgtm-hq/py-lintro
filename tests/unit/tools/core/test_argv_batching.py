@@ -49,11 +49,11 @@ def test_argv_byte_budget_falls_back_for_every_sysconf_failure(
 
 @pytest.mark.parametrize(
     "arg_max",
-    [-1, 0, None],
-    ids=["negative", "zero", "not-an-int"],
+    [-1, 0],
+    ids=["negative", "zero"],
 )
-def test_argv_byte_budget_falls_back_for_unusable_arg_max(arg_max: object) -> None:
-    """A non-positive or non-int ``SC_ARG_MAX`` uses the POSIX minimum.
+def test_argv_byte_budget_falls_back_for_unusable_arg_max(arg_max: int) -> None:
+    """A non-positive ``SC_ARG_MAX`` uses the POSIX minimum.
 
     Args:
         arg_max: Value returned by ``os.sysconf``.

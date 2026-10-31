@@ -30,7 +30,7 @@ import subprocess  # nosec B404 - commands are built by callers, shell disabled
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum, auto
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, TypeVar, assert_never
 
 from loguru import logger
 
@@ -334,10 +334,6 @@ def batch_check_result(
 
     Returns:
         ToolResult for the run.
-
-    Raises:
-        ValueError: If the policy names a ``BatchSuccess`` or ``BatchOutput``
-            member this function does not handle.
     """
     if returncode is not None:
         exit_success = returncode == 0
@@ -357,8 +353,7 @@ def batch_check_result(
         case BatchSuccess.EXIT_AND_ISSUES:
             success = exit_success and issues_count == 0
         case _:
-            msg = f"unsupported BatchSuccess member: {policy.success}"
-            raise ValueError(msg)
+            assert_never(policy.success)
 
     match policy.output:
         case BatchOutput.NEVER:
@@ -370,8 +365,7 @@ def batch_check_result(
         case BatchOutput.ON_ISSUES_OR_EXIT_FAILURE:
             show_output = issues_count > 0 or not exit_success
         case _:
-            msg = f"unsupported BatchOutput member: {policy.output}"
-            raise ValueError(msg)
+            assert_never(policy.output)
 
     return ToolResult(
         name=plugin.definition.name,

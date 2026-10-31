@@ -58,6 +58,7 @@ import re
 import sys
 import urllib.error
 import urllib.request
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -207,7 +208,7 @@ def _fetch_page(*, token: str, page: int) -> list[dict[str, Any]]:
     return payload if isinstance(payload, list) else []
 
 
-def latest_published_release(versions: list[dict[str, Any]]) -> tuple[str, str] | None:
+def latest_published_release(versions: Sequence[object]) -> tuple[str, str] | None:
     """Return the newest published ``(version, digest)`` pair.
 
     Only versions carrying a bare ``major.minor.patch`` tag are considered, so
