@@ -21,6 +21,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.173.7] - 2026-10-31
+
+### Changed
+
+- **core**: required collaborators instead of optional fields (#3081) (3d34c08)
+- **ai**: null objects for the cost budget and fix progress (#3082) (e732601)
+
+### Fixed
+
+- **parsers**: validate required fields without stringifying null (#3073) (69abd04)
+- **ai**: validate fix-suggestion metadata and parse failures (#3060) (72a9d58)
+- **module-size**: report unreadable files (#3075) (b77ae27)
+- **config**: reject null sections and non-mapping documents (#3074) (c15240c)
+
 ## [0.173.6] - 2026-10-31
 
 ### Changed
