@@ -12,8 +12,8 @@ Behaviour:
       threshold and is not present in the baseline allowlist.
     * Size violations never fail the build. The gate is warn-level only so it
       can land green while the historical violators are burned down.
-    * Fails with the file path and reason when a module cannot be read or
-      decoded, because its size could not be measured.
+    * Reports read failures with the file path and reason so the run-level
+      gate fails without discarding the results of other tools.
 
 Ratchet-down plan:
     The threshold starts at ``DEFAULT_MODULE_SIZE_THRESHOLD`` (800 lines) with
@@ -150,28 +150,38 @@ class OversizedModule:
     line_count: int
 
 
+@dataclass(frozen=True)
+class ModuleSizeReadFailure:
+    """A module whose physical line count could not be measured.
+
+    Attributes:
+        path: Discovered path of the unreadable module.
+        error: Original filesystem error, retaining its subclass and errno.
+    """
+
+    path: str
+    error: OSError
+
+
 def count_module_lines(
     *,
     file_path: str,
 ) -> int:
-    """Count the physical lines in a file.
+    """Count physical lines without decoding the source's contents.
+
+    Binary iteration handles LF and CRLF; splitting each chunk into lines
+    also counts lone CR terminators accepted by Python. PEP 263 encodings
+    and malformed UTF-8 remain measurable because no decoding is required.
+    Filesystem errors propagate unchanged.
 
     Args:
         file_path: Path to the file to measure.
 
     Returns:
         int: Number of physical lines in the file.
-
-    Raises:
-        OSError: If the file cannot be read or decoded as UTF-8. The message
-            includes the file path and the underlying reason.
     """
-    try:
-        with open(file_path, encoding="utf-8") as handle:
-            return sum(1 for _ in handle)
-    except (OSError, UnicodeDecodeError) as exc:
-        msg = f"Cannot measure module size for {file_path}: {exc}"
-        raise OSError(msg) from exc
+    with open(file_path, "rb") as handle:
+        return sum(len(line.splitlines()) for line in handle)
 
 
 def _normalize(path: str) -> str:
@@ -218,12 +228,13 @@ def find_oversized_modules(
     baseline: tuple[str, ...] = DEFAULT_MODULE_SIZE_BASELINE,
     exclude_patterns: tuple[str, ...] = DEFAULT_MODULE_SIZE_EXCLUDES,
     include_venv: bool = False,
+    read_failures: list[ModuleSizeReadFailure] | None = None,
 ) -> list[OversizedModule]:
     """Find Python modules that exceed the module-size threshold.
 
     Baselined modules are skipped even when they exceed the threshold, so the
-    gate can land green while historical violators are burned down. Read or
-    decoding failures propagate with the file path and underlying reason.
+    gate can land green while historical violators are burned down. Supplying
+    a failure collector lets the gate finish measuring every readable file.
 
     Args:
         paths: Files or directories to scan for Python modules.
@@ -232,11 +243,15 @@ def find_oversized_modules(
         baseline: Grandfathered module paths to skip. Matched by path suffix.
         exclude_patterns: Gitignore-style patterns of paths to skip entirely.
         include_venv: Whether to descend into virtual-environment directories.
+        read_failures: Optional collector for per-file read failures. When
+            omitted, the original filesystem error propagates to the caller.
 
     Returns:
         list[OversizedModule]: Offending modules sorted by descending line
         count, then path. Empty when nothing exceeds the threshold.
 
+    Raises:
+        OSError: If a module cannot be read and no failure collector was supplied.
     """
     baseline_set = frozenset(_normalize(entry) for entry in baseline)
 
@@ -251,7 +266,13 @@ def find_oversized_modules(
     for file_path in files:
         if _is_baselined(file_path=file_path, baseline=baseline_set):
             continue
-        line_count = count_module_lines(file_path=file_path)
+        try:
+            line_count = count_module_lines(file_path=file_path)
+        except OSError as exc:
+            if read_failures is None:
+                raise
+            read_failures.append(ModuleSizeReadFailure(path=file_path, error=exc))
+            continue
         if line_count > threshold:
             display_path = _normalize(os.path.relpath(file_path))
             violations.append(

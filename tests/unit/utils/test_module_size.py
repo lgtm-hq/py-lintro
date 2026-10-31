@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import tomllib
 from pathlib import Path
 from unittest.mock import patch
@@ -10,12 +11,14 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.action import Action
+from lintro.models.core.tool_result import ToolResult
 from lintro.utils import gates
 from lintro.utils.console import ThreadSafeConsoleLogger
 from lintro.utils.module_size import (
     DEFAULT_MODULE_SIZE_BASELINE,
     DEFAULT_MODULE_SIZE_EXCLUDES,
     DEFAULT_MODULE_SIZE_THRESHOLD,
+    ModuleSizeReadFailure,
     OversizedModule,
     count_module_lines,
     find_oversized_modules,
@@ -85,8 +88,12 @@ def test_count_module_lines_handles_valid_text(
 
 @pytest.mark.parametrize(
     "read_error",
-    [PermissionError("permission denied"), OSError("disk read failed")],
-    ids=["permission", "io"],
+    [
+        PermissionError(13, "permission denied"),
+        FileNotFoundError(2, "file disappeared"),
+        OSError("disk read failed"),
+    ],
+    ids=["permission", "disappeared", "io"],
 )
 @pytest.mark.parametrize("output_format", ["plain", "json"])
 def test_unreadable_module_fails_gate(
@@ -95,7 +102,7 @@ def test_unreadable_module_fails_gate(
     read_error: OSError,
     output_format: str,
 ) -> None:
-    """Read failures abort the gate with the file and reason in all modes.
+    """Read failures become gate results while earlier findings survive.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
@@ -105,38 +112,64 @@ def test_unreadable_module_fails_gate(
     """
     module = _write_module(directory=tmp_path, name="unreadable.py", line_count=2)
     monkeypatch.setattr(gates, "load_module_size_config", lambda: {})
+    results = [ToolResult(name="ruff", success=False, issues_count=2)]
 
-    with (
-        patch("lintro.utils.module_size.open", side_effect=read_error),
-        pytest.raises(OSError) as raised,
-    ):
-        gates.execute_gates(
+    with patch("lintro.utils.module_size.open", side_effect=read_error):
+        total = gates.execute_gates(
             action=Action.CHECK,
             paths=[str(tmp_path)],
             exclude=None,
             include_venv=False,
             output_format=output_format,
             logger=ThreadSafeConsoleLogger(),
-            all_results=[],
-            total_issues=0,
+            all_results=results,
+            total_issues=2,
         )
 
-    assert_that(str(raised.value)).contains(str(module), str(read_error))
+    assert_that(total).is_equal_to(3)
+    assert_that(results).is_length(2)
+    assert_that(results[0].issues_count).is_equal_to(2)
+    assert_that(results[-1].name).is_equal_to("module-size")
+    assert_that(results[-1].success).is_false()
+    assert_that(results[-1].issues_count).is_equal_to(1)
+    assert_that(results[-1].output).contains("unreadable.py", str(read_error))
+    assert_that(results[-1].output).contains(str(module))
 
 
-def test_invalid_utf8_module_reports_decoding_failure(tmp_path: Path) -> None:
-    """Invalid UTF-8 cannot be counted as a small, readable module.
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"# valid first line\n\xff\n",
+        b"# coding: latin-1\nname = 'caf\xe9'\n",
+        b"# coding: latin-1\r\nname = 'caf\xe9'",
+        b"# coding: latin-1\rname = 'caf\xe9'\r",
+    ],
+    ids=["malformed-utf8", "pep263", "crlf-unterminated", "cr"],
+)
+def test_non_utf8_module_lines_are_measurable(
+    tmp_path: Path,
+    content: bytes,
+) -> None:
+    """Physical line counts do not depend on a source file's encoding.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
+        content: Source bytes containing two physical lines.
     """
-    module = tmp_path / "invalid.py"
-    module.write_bytes(b"# valid first line\n\xff\n")
+    module = tmp_path / "non_utf8.py"
+    module.write_bytes(content)
+    if content.startswith(b"# coding:"):
+        assert_that(ast.parse(content)).is_instance_of(ast.Module)
 
-    with pytest.raises(OSError) as raised:
-        find_oversized_modules(paths=[str(tmp_path)], baseline=())
+    assert_that(count_module_lines(file_path=str(module))).is_equal_to(2)
+    violations = find_oversized_modules(
+        paths=[str(module)],
+        threshold=1,
+        baseline=(),
+    )
 
-    assert_that(str(raised.value)).contains(str(module), "utf-8", "invalid start byte")
+    assert_that(violations).is_length(1)
+    assert_that(violations[0].line_count).is_equal_to(2)
 
 
 def test_count_module_lines_reports_missing_file(tmp_path: Path) -> None:
@@ -147,10 +180,76 @@ def test_count_module_lines_reports_missing_file(tmp_path: Path) -> None:
     """
     missing = tmp_path / "missing.py"
 
-    with pytest.raises(OSError) as raised:
+    with pytest.raises(FileNotFoundError) as raised:
         count_module_lines(file_path=str(missing))
 
     assert_that(str(raised.value)).contains(str(missing), "No such file")
+    assert_that(raised.value.errno).is_equal_to(2)
+
+
+def test_scan_collects_read_errors_and_keeps_measured_violations(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every read failure is retained and readable oversized modules still warn.
+
+    Args:
+        tmp_path: Workspace for unreadable and oversized modules.
+        capsys: Captured gate output.
+        monkeypatch: Pytest patch fixture.
+    """
+    denied = tmp_path / "denied.py"
+    vanished = tmp_path / "vanished.py"
+    denied.touch()
+    vanished.touch()
+    _write_module(directory=tmp_path, name="large.py", line_count=3)
+    errors = {
+        str(denied): PermissionError(13, "permission denied", str(denied)),
+        str(vanished): FileNotFoundError(2, "file disappeared", str(vanished)),
+    }
+    real_open = open
+
+    def read_source(file: str, mode: str) -> object:
+        if file in errors:
+            raise errors[file]
+        return real_open(file, mode)
+
+    failures: list[ModuleSizeReadFailure] = []
+    monkeypatch.setattr(gates, "load_module_size_config", lambda: {"threshold": 1})
+    monkeypatch.setattr(gates, "load_lintro_tool_config", lambda _name: {})
+    results: list[ToolResult] = []
+    with patch("lintro.utils.module_size.open", side_effect=read_source):
+        violations = find_oversized_modules(
+            paths=[str(tmp_path)],
+            threshold=1,
+            baseline=(),
+            read_failures=failures,
+        )
+        total = gates.execute_gates(
+            action=Action.CHECK,
+            paths=[str(tmp_path)],
+            exclude=None,
+            include_venv=False,
+            output_format="plain",
+            logger=ThreadSafeConsoleLogger(),
+            all_results=results,
+            total_issues=0,
+        )
+
+    assert_that(violations).is_length(1)
+    assert_that(violations[0].line_count).is_equal_to(3)
+    assert_that({failure.path for failure in failures}).is_equal_to(set(errors))
+    for failure in failures:
+        assert_that(failure.error).is_same_as(errors[failure.path])
+    assert_that(total).is_equal_to(2)
+    assert_that(results[-1].issues_count).is_equal_to(2)
+    assert_that(capsys.readouterr().out).contains(
+        "large.py (3 lines)",
+        "non-blocking",
+        "denied.py",
+        "vanished.py",
+    )
 
 
 def test_small_module_produces_no_warning(
