@@ -303,12 +303,13 @@ def test_check_json_default_argv_stdout_is_a_single_document(
     _assert_result_entries(results)
     by_tool = {str(entry[_CHECK_JSON_TOOL_KEY]): entry for entry in results}
     # sample.py + sample.yaml would execute these if the venv/PATH tools
-    # were visible. They must take the skip path the smoke gate sees.
+    # were visible. They must degrade to unavailable, which the smoke gate
+    # sees instead of a mid-run error (#1244).
     for name in ("ruff", "black", "bandit", "yamllint", "mypy"):
         assert_that(by_tool).contains_key(name)
-        assert_that(by_tool[name].get("skipped")).described_as(
-            f"{name} should skip without PATH or python -m tools",
-        ).is_true()
+        assert_that(by_tool[name].get("status")).described_as(
+            f"{name} should be unavailable without PATH or python -m tools",
+        ).is_equal_to("unavailable")
     reported = {name.replace("-", "_") for name in by_tool}
     expected = {name.replace("-", "_") for name in REGISTERING_TOOL_PACKAGES}
     assert_that(reported & expected).is_not_empty()
@@ -355,9 +356,10 @@ def test_check_json_unavailable_tool_keeps_stdout_pure(
     _assert_result_entries(results)
     tool_names = [entry[_CHECK_JSON_TOOL_KEY] for entry in results]
     assert_that(tool_names).contains(_UNAVAILABLE_TOOL)
-    skipped = next(
+    unavailable = next(
         entry for entry in results if entry[_CHECK_JSON_TOOL_KEY] == _UNAVAILABLE_TOOL
     )
-    assert_that(skipped.get("skipped")).is_true()
-    assert_that(skipped.get("skip_reason")).is_not_none()
-    assert_that(result.stderr.lower()).contains("skipping")
+    assert_that(unavailable.get("unavailable")).is_true()
+    assert_that(unavailable.get("status")).is_equal_to("unavailable")
+    assert_that(unavailable.get("skip_reason")).is_not_none()
+    assert_that(result.stderr.lower()).contains("unavailable")
