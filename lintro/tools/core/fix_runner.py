@@ -327,7 +327,7 @@ def _fix_one_file(
     initial_issues = list(initial.issues)
     if not initial_issues:
         return FileFixResult(
-            file_result=FileProcessingResult(success=True, output="", issues=[]),
+            file_result=initial,
             initial_count=0,
             fixed_count=0,
             initial_issues=[],
@@ -447,6 +447,10 @@ def run_per_file_fix(
             timeout=ctx.timeout,
         )
         tally.record(file_path, fix_result)
+        if fix_result.initial_issues:
+            # Preserve the initial inspection even if a later fix fails or
+            # clears every finding. Timeouts still veto the tool result.
+            fix_result.file_result.inspected_files = True
         return fix_result.file_result
 
     result = plugin._process_files_with_progress(
@@ -486,7 +490,7 @@ def run_per_file_fix(
 
     return ToolResult(
         name=plugin.definition.name,
-        inspected_files=True,
+        inspected_files=result.inspected_files,
         success=result.all_success and remaining_count == 0,
         output=final_output,
         issues_count=remaining_count,

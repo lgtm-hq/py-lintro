@@ -111,8 +111,7 @@ class ActionlintPlugin(BaseToolPlugin):
         try:
             success, output = self._run_subprocess(cmd=cmd, timeout=timeout)
             issues = parse_actionlint_output(output)
-            # A returned command without findings does not prove inspection.
-            results["coverage"].append(True if issues else None)
+            results["coverage"].append(True if success or issues else None)
 
             if not success:
                 results["all_success"] = False

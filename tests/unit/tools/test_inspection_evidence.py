@@ -9,10 +9,16 @@ from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
+from click.testing import CliRunner
 
+from lintro.cli_utils.commands.badge import badge_command
+from lintro.enums.action import Action
+from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.registry import ToolRegistry
 from lintro.tools.golangci_lint.definition import _merge_fix_results
+from lintro.utils.meaningful_run import baseline_is_eligible
+from lintro.utils.severity_counts import count_severities
 
 _FINDINGS = {
     "actionlint": ".github/workflows/ci.yml:1:1: unexpected key [syntax-check]",
@@ -64,6 +70,8 @@ def _project(root: Path, tool: str) -> None:
     layouts = {
         "actionlint": {".github/workflows/ci.yml": "name: CI\non: push\njobs: {}\n"},
         "shellcheck": {"test.sh": "#!/bin/sh\necho ok\n"},
+        "shfmt": {"test.sh": "#!/bin/sh\necho ok\n"},
+        "pydoclint": {"main.py": '"""Clean source."""\n'},
         "clippy": {
             "Cargo.toml": '[package]\nname = "demo"\nversion = "0.1.0"\n',
             "src/main.rs": "fn main() {}\n",
@@ -88,25 +96,29 @@ def _project(root: Path, tool: str) -> None:
         for tool in (
             "actionlint",
             "shellcheck",
+            "shfmt",
+            "pydoclint",
             "clippy",
             "html_validate",
             "golangci_lint",
             "tsc",
         )
         for action in (
-            ("check", "fix") if tool in {"clippy", "golangci_lint"} else ("check",)
+            ("check", "fix")
+            if tool in {"clippy", "golangci_lint", "shfmt"}
+            else ("check",)
         )
     ],
 )
 @pytest.mark.parametrize("returncode", [0, 2])
-def test_an_exit_without_file_evidence_leaves_coverage_unknown(
+def test_selected_files_count_as_inspected_only_after_successful_execution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     tool: str,
     action: str,
     returncode: int,
 ) -> None:
-    """Neither a clean exit nor an execution error proves source inspection.
+    """A clean check qualifies for publication; an execution failure does not.
 
     Args:
         tmp_path: Isolated target directory.
@@ -129,7 +141,24 @@ def test_an_exit_without_file_evidence_leaves_coverage_unknown(
 
     assert_that(result.skipped).is_false()
     assert_that(result.no_files).is_false()
-    assert_that(result.inspected_files).is_none()
+    assert_that(result.inspected_files).is_equal_to(True if returncode == 0 else None)
+    assert_that(result.issues_count).is_zero()
+    results = [result, ToolResult(name="ruff", success=True, inspected_files=True)]
+    assert_that(
+        baseline_is_eligible(
+            action=Action.CHECK,
+            dry_run_preview=False,
+            tool_results=results,
+        ),
+    ).is_equal_to(returncode == 0)
+    artifact = RunArtifact(
+        tool_results=[result],
+        severity_counts=count_severities([result]),
+    )
+    with patch("lintro.cli_utils.commands.badge.api.check_run", return_value=artifact):
+        badge = CliRunner().invoke(badge_command, ["--url"])
+    assert_that(badge.exit_code).is_equal_to(0 if returncode == 0 else 1)
+    assert_that("img.shields.io" in badge.output).is_equal_to(returncode == 0)
 
 
 @pytest.mark.parametrize(
@@ -191,17 +220,20 @@ def test_module_fix_aggregation_preserves_child_coverage(
 
 
 @pytest.mark.parametrize("tool", ["golangci_lint", "tsc"])
-def test_every_project_failing_before_inspection_stays_unknown(
+@pytest.mark.parametrize("succeeded", [False, True])
+def test_project_aggregation_preserves_clean_inspection_or_unknown_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     tool: str,
+    succeeded: bool,
 ) -> None:
-    """Multi-project aggregators must retain the absence of file evidence.
+    """Project coverage accepts clean execution and rejects configuration errors.
 
     Args:
         tmp_path: Multi-project workspace root.
         monkeypatch: Restores working directory and version checks.
         tool: Go modules or TypeScript subprojects.
+        succeeded: Whether each project check completed successfully.
     """
     for name in ("one", "two"):
         root = tmp_path / name
@@ -218,15 +250,15 @@ def test_every_project_failing_before_inspection_stays_unknown(
     with patch.object(
         plugin,
         "_run_subprocess",
-        return_value=(False, "invalid configuration"),
+        return_value=(succeeded, "" if succeeded else "invalid configuration"),
     ):
         checked = plugin.check([str(tmp_path)], {})
-        assert_that(checked.success).is_false()
-        assert_that(checked.inspected_files).is_none()
+        assert_that(checked.success).is_equal_to(succeeded)
+        assert_that(checked.inspected_files).is_equal_to(True if succeeded else None)
         if tool == "golangci_lint":
             fixed = plugin.fix([str(tmp_path)], {})
-            assert_that(fixed.success).is_false()
-            assert_that(fixed.inspected_files).is_none()
+            assert_that(fixed.success).is_equal_to(succeeded)
+            assert_that(fixed.inspected_files).is_equal_to(True if succeeded else None)
 
 
 @pytest.mark.parametrize("tool", list(_FINDINGS))

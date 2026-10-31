@@ -216,7 +216,7 @@ class ClippyPlugin(BaseToolPlugin):
         # Clippy's exit status is the verdict; the raw output is only worth
         # surfacing when the command failed with nothing parsed out of it,
         # because that is a compilation or configuration error, not a lint.
-        result = run_batch_check(
+        return run_batch_check(
             ctx,
             plugin=self,
             cmd=cmd,
@@ -228,9 +228,6 @@ class ClippyPlugin(BaseToolPlugin):
             ),
             cwd=str(cargo_root),
         )
-        if not result.timed_out:
-            result.inspected_files = True if result.issues else None
-        return result
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Run `cargo clippy --fix` then re-check for remaining issues.
@@ -339,7 +336,11 @@ class ClippyPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
-            inspected_files=True if initial_issues or remaining_issues else None,
+            inspected_files=(
+                True
+                if success_check or success_after or initial_issues or remaining_issues
+                else None
+            ),
             success=remaining_count == 0,
             output=output_after if should_show_output else None,
             issues_count=remaining_count,

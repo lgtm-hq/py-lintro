@@ -136,6 +136,7 @@ NO_JSON_REPORT: dict[str, str] = {
 # Empty stdout is the default clean output for tools without an envelope.
 CLEAN_OUTPUTS = {name: reports[1] for name, reports in JSON_REPORTS.items()} | {
     "gitleaks": "[]",
+    "semgrep": '{"results": [], "errors": [], "paths": {"scanned": ["test.py"]}}',
 }
 CLEAN_SUCCESS_EXCLUSIONS: dict[str, str] = {}
 
@@ -500,23 +501,4 @@ def test_clean_run_is_a_clean_success(
     assert_that(result.parse_failures_count or 0).is_zero()
     assert_that(result.success).described_as(str(result)).is_true()
     assert_that(result.issues_count).is_zero()
-    # Successful execution and proof of inspection are separate contracts.
-    # These reports contain no scanned-file evidence, even on a clean exit.
-    unknown_coverage = {
-        "actionlint",
-        "clippy",
-        "dotenv_linter",
-        "golangci_lint",
-        "hadolint",
-        "html_validate",
-        "pydoclint",
-        "semgrep",
-        "shellcheck",
-        "shfmt",
-        "sqlfluff",
-        "tsc",
-        "vue-tsc",
-    }
-    assert_that(result.inspected_files).is_equal_to(
-        None if tool_name in unknown_coverage else True,
-    )
+    assert_that(result.inspected_files).is_true()

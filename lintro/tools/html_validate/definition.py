@@ -295,7 +295,9 @@ class HtmlValidatePlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
-            inspected_files=_reported_inspection(result.stdout),
+            inspected_files=(
+                True if result.success else _reported_inspection(result.stdout)
+            ),
             success=success_flag,
             output=final_output,
             issues_count=issues_count,

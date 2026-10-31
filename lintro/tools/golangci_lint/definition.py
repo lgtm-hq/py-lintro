@@ -331,6 +331,7 @@ class GolangciLintPlugin(BaseToolPlugin):
         all_issues: list[GolangciLintIssue] = []
         failure_outputs: list[str] = []
         any_timed_out = False
+        any_inspected = False
         overall_success = True
         for module_root in module_roots:
             try:
@@ -362,6 +363,11 @@ class GolangciLintPlugin(BaseToolPlugin):
                 continue
 
             issues = parse_golangci_lint_output(output=output)
+            any_inspected = (
+                any_inspected
+                or success_cmd
+                or any(i.file != "(module)" for i in issues)
+            )
             _rebase_issue_paths(issues=issues, module_root=module_root)
             all_issues.extend(issues)
             overall_success = overall_success and bool(success_cmd)
@@ -373,9 +379,7 @@ class GolangciLintPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
-            inspected_files=(
-                True if any(i.file != "(module)" for i in all_issues) else None
-            ),
+            inspected_files=True if any_inspected else None,
             success=overall_success,
             output="\n".join(failure_outputs) if failure_outputs else None,
             issues_count=len(all_issues),
@@ -535,7 +539,9 @@ class GolangciLintPlugin(BaseToolPlugin):
             name=self.definition.name,
             inspected_files=(
                 True
-                if any(
+                if success_check
+                or success_after
+                or any(
                     i.file != "(module)" for i in [*initial_issues, *remaining_issues]
                 )
                 else None

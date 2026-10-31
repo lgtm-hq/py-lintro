@@ -436,9 +436,9 @@ def _check_multi_project(
                 had_subproject_error = True
             issues = plugin._parse_output(output or "")
             all_issues.extend(issues)
-            # Findings establish coverage; a returned command alone leaves it
-            # unknown. Keep any affirmative evidence from earlier projects.
-            coverage = bool(issues) or coverage or None
+            # Clean execution on selected source also establishes coverage.
+            # Preserve affirmative evidence from earlier projects on failure.
+            coverage = bool(proc_success or issues) or coverage or None
 
             try:
                 rel_project = project_dir.relative_to(cwd_path)
@@ -581,7 +581,7 @@ def _run_and_parse(
 
         return ToolResult(
             name=plugin.definition.name,
-            inspected_files=True if all_issues else None,
+            inspected_files=True,
             success=False,
             output="\n".join(dep_output_lines),
             issues_count=issues_count,
@@ -617,7 +617,8 @@ def _run_and_parse(
 
     return ToolResult(
         name=plugin.definition.name,
-        inspected_files=True if all_issues else None,
+        # Unsuccessful invocations without findings returned above.
+        inspected_files=True,
         success=success and issues_count == 0,
         output=None,
         issues_count=issues_count,

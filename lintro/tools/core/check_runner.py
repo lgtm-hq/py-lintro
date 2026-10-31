@@ -127,7 +127,9 @@ def check_one_file(
         success=success and not (issues_imply_failure and issues),
         output=output,
         issues=issues,
-        inspected_files=True if issues else None,
+        # Successful execution over the selected file also proves a clean
+        # inspection. Failed invocations without findings remain unknown.
+        inspected_files=True if success or issues else None,
     )
 
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import csv
 import io
 import json
-import subprocess  # nosec B404 - mocked OSV process results only
+import subprocess  # nosec B404 - mocked tool process results only
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Never
@@ -25,8 +25,8 @@ from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.severity_counts import SeverityCounts
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
+from lintro.plugins.registry import ToolRegistry
 from lintro.tools import tool_manager
-from lintro.tools.osv_scanner.definition import OsvScannerPlugin
 from lintro.utils.execution.run_aggregation import finalize_artifact
 from lintro.utils.execution.run_context import RunContext
 from lintro.utils.execution.run_preflight import DiffScope
@@ -707,24 +707,32 @@ def test_render_run_records_the_baseline_for_the_next_run(
 
 
 @pytest.mark.parametrize("no_sources", [True, False])
-def test_osv_coverage_controls_baseline_comparison_and_storage(
+@pytest.mark.parametrize("tool_name", ["osv_scanner", "shellcheck", "pydoclint"])
+def test_plugin_coverage_controls_baseline_comparison_and_storage(
     tmp_path: Path,
     fake_logger: Any,
     no_sources: bool,
+    tool_name: str,
 ) -> None:
-    """An OSV no-op cannot compare with or replace a healthy baseline.
+    """Clean inspections compare and store baselines; no-source runs do neither.
 
     Args:
         tmp_path: Target and baseline storage directory.
         fake_logger: Console logger double.
         no_sources: Recognized empty discovery or a completed clean scan.
+        tool_name: Native scanner or per-file check plugin under test.
     """
+    source_name, source_text, clean_output = {
+        "osv_scanner": ("requirements.txt", "requests==2.32.0\n", '{"results": []}'),
+        "shellcheck": ("safe.sh", "#!/bin/sh\necho ok\n", "[]"),
+        "pydoclint": ("safe.py", '"""Clean source."""\n', ""),
+    }[tool_name]
     if not no_sources:
-        (tmp_path / "requirements.txt").write_text("requests==2.32.0\n")
+        (tmp_path / source_name).write_text(source_text)
     completed = subprocess.CompletedProcess(
-        ["osv-scanner"],
+        [tool_name],
         128 if no_sources else 0,
-        "" if no_sources else '{"results": []}',
+        "" if no_sources else clean_output,
         "No package sources found" if no_sources else "",
     )
     with (
@@ -732,9 +740,13 @@ def test_osv_coverage_controls_baseline_comparison_and_storage(
             "lintro.tools.osv_scanner.definition.verify_tool_version",
             return_value=None,
         ),
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
         patch("subprocess.run", return_value=completed),
     ):
-        measured = OsvScannerPlugin().check([str(tmp_path)], {})
+        measured = type(ToolRegistry.get(tool_name))().check([str(tmp_path)], {})
     ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger)
     paths = [str(tmp_path)]
     scope = severity_baseline_scope(paths=paths, tool_results=[measured])
