@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.budget import CostBudget
@@ -34,13 +35,30 @@ from lintro.ai.review.custom_agents import (
 )
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.enums.file_skip_reason import FileSkipReason
+from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models.changed_file import ChangedFile
+from lintro.ai.review.models.coverage_counts import CoverageCounts
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import Severity
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.session import ReviewSessionOptions
 
 _Patcher = AbstractContextManager[MagicMock]
+
+_UNUSABLE_RESPONSES = (
+    "not json at all",
+    "[]",
+    "null",
+    "true",
+    "42",
+    '"no findings"',
+    "{}",
+    '{"findings": null}',
+    '{"findings": {}}',
+    '{"findings": "none"}',
+    '{"findings": false}',
+    '{"findings": 0}',
+)
 
 _AGENT_TEXT = """---
 name: no-raw-sql
@@ -349,14 +367,18 @@ def test_run_custom_agent_passes_applies_declared_severity(tmp_path: Path) -> No
     assert_that(results[0].findings[0].severity).is_equal_to(Severity.P1)
 
 
-def test_run_custom_agent_passes_tolerates_unparseable_response(
+@pytest.mark.parametrize("content", _UNUSABLE_RESPONSES)
+def test_run_custom_agent_passes_rejects_unusable_response(
     tmp_path: Path,
+    content: str,
 ) -> None:
-    """A non-JSON agent response yields no findings instead of failing."""
+    """An unusable answer fails the pass without completing or crediting it."""
     agent = _agent(tmp_path=tmp_path)
-    provider = _mock_provider(content="not json at all")
+    provider = _mock_provider(content=content)
+    failed: list[str] = []
+    completed: list[str] = []
 
-    with _patch_agent_call(content="not json at all"):
+    with _patch_agent_call(content=content):
         results = asyncio.run(
             run_custom_agent_passes(
                 request=CustomAgentPassRequest(
@@ -366,11 +388,15 @@ def test_run_custom_agent_passes_tolerates_unparseable_response(
                     ai_config=_ai_config(),
                     provider_cache={},
                     budget=CostBudget(),
+                    on_agent_failed=failed.append,
+                    on_pass_complete=lambda result: completed.append(result.agent_name),
                 ),
             ),
         )
 
-    assert_that(results[0].findings).is_empty()
+    assert_that(results).is_empty()
+    assert_that(failed).is_equal_to([agent.name])
+    assert_that(completed).is_empty()
 
 
 def test_run_custom_agent_passes_skips_agent_on_provider_error(
@@ -634,3 +660,59 @@ def test_only_mode_credits_coverage_to_a_completed_agent(
     # docs/readme.md matches no agent glob, so it stays an explicit skip.
     skipped = {entry.path for entry in result.metadata.skipped_files}
     assert_that(skipped).is_equal_to({"docs/readme.md"})
+
+
+@pytest.mark.parametrize(
+    ("content", "successful"),
+    [
+        *((content, False) for content in _UNUSABLE_RESPONSES),
+        ('{"findings": []}', True),
+    ],
+)
+def test_only_mode_coverage_requires_a_usable_agent_response(
+    tmp_path: Path,
+    content: str,
+    successful: bool,
+) -> None:
+    """Only a usable answer can cover the diff and produce a ready verdict."""
+    agent = _agent(
+        tmp_path=tmp_path,
+        text=_AGENT_TEXT.replace("src/**/*.py", "**/*"),
+    )
+    provider = _mock_provider(content=content)
+
+    with _patch_agent_call(content=content):
+        result = run_review(
+            _context(),
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=_ai_config(),
+                checklist_items=[],
+                checklist_text="",
+                classifications=[],
+                custom_agents=(agent,),
+                run_builtin_checklist=False,
+            ),
+        )
+
+    paths = {"src/app.py", "docs/readme.md"}
+    reviewed = paths if successful else set()
+    awaiting = paths - reviewed
+    assert_that(result.findings).is_empty()
+    assert_that(result.metadata.custom_agents_run).is_equal_to(int(successful))
+    assert_that(result.metadata.custom_agents_skipped).is_equal_to(int(not successful))
+    assert_that(result.metadata.files_reviewed).is_equal_to(len(reviewed))
+    assert_that(set(result.metadata.reviewed_paths)).is_equal_to(reviewed)
+    assert_that(
+        {entry.path: entry.reason for entry in result.metadata.skipped_files},
+    ).is_equal_to(dict.fromkeys(awaiting, FileSkipReason.AGENT_SCOPE))
+    assert_that(result.coverage).is_equal_to(
+        CoverageCounts(reviewed=len(reviewed), awaiting=len(awaiting), eligible=2),
+    )
+    assert_that({record.path for record in result.coverage_records}).is_equal_to(
+        reviewed,
+    )
+    assert_that(set(result.awaiting_paths)).is_equal_to(awaiting)
+    assert_that(result.readiness_verdict).is_equal_to(
+        ReviewVerdict.READY if successful else ReviewVerdict.INCOMPLETE,
+    )
