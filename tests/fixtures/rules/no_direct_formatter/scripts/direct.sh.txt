@@ -49,3 +49,7 @@ generate && black generated.py
 generate; bunx oxfmt generated.mjs
 # ruleid: lintro.scripts.no-direct-formatter.native-command
 generate || rustfmt generated.rs
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+prettier "generated file.css" --write
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+prettier --write 'generated file.css'

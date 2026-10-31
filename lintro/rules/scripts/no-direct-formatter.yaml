@@ -33,7 +33,7 @@ rules:
         [@+-]?
         | [^\r\n\#"'`]*?(?:&&|\|\||;)[\t ]*
         | [^\r\n]*?\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync)
-          [\t ]*\([\t ]*["'`]
+          [\t ]*\([\t ]*(?P<command_quote>["'`])
       )
       (?:
         (?:bunx|npx)(?:[\t ]+--yes)?[\t ]+
@@ -41,10 +41,20 @@ rules:
         | python(?:3(?:\.[0-9]+)?)?[\t ]+-m[\t ]+
       )?
       (?:
-        (?:black|oxfmt|rustfmt|shfmt)(?=[\t "'`),;]|$)
-        | prettier(?=[\t "'`),;]|$)
-          (?=[^\r\n\#;]*?(?<![\w-])(?:--write|-w)(?=[\t "'`,\]]|$))
+        (?:black|oxfmt|rustfmt|shfmt)(?=[\t "'`),;&|<>]|$)
+        | prettier(?=[\t "'`),;&|<>]|$)
+          # Stay in this shell command, JS command string, or its argv array.
+          (?=
+            (?(command_quote)
+              (?:
+                (?:(?!(?P=command_quote))[^\r\n\#;&|])*?
+                | (?P=command_quote)[\t ]*,[\t ]*\[[^\r\n\#;\]&|]*?
+              )
+              | [^\r\n\#;&|]*?
+            )
+            (?<![\w-])(?:--write|-w)(?=[\t "'`,\]<>;&|)]|$)
+          )
         | (?:ruff[\t ]+format|buf[\t ]+format|cargo[\t ]+fmt
             | taplo[\t ]+(?:fmt|format)|sqlfluff[\t ]+(?:format|fix))
-          (?=[\t "'`),;]|$)
+          (?=[\t "'`),;&|<>]|$)
       )
