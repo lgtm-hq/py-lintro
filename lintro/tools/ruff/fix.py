@@ -11,6 +11,8 @@ ruff actually fixed. The counts are still filled in for callers that invoke
 ``fix()`` directly, outside the executor.
 """
 
+from __future__ import annotations
+
 import subprocess  # nosec B404 - subprocess used safely to execute ruff commands with controlled input
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -44,7 +46,7 @@ DEFAULT_REMAINING_ISSUES_DISPLAY: int = 5
 
 @contextmanager
 def _temporary_option(
-    tool: "RuffPlugin",
+    tool: RuffPlugin,
     option_key: str,
     option_value: object,
 ) -> Generator[None]:
@@ -83,9 +85,9 @@ def _temporary_option(
 
 
 def execute_ruff_fix(
-    tool: "RuffPlugin",
+    tool: RuffPlugin,
     paths: list[str],
-) -> "ToolResult":
+) -> ToolResult:
     """Execute ruff fix command and process results.
 
     Args:

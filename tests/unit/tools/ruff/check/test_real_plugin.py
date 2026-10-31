@@ -8,7 +8,6 @@ from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
-from loguru import logger
 
 from lintro.enums.tool_name import ToolName
 from lintro.tools.ruff.check import execute_ruff_check
@@ -20,10 +19,9 @@ if TYPE_CHECKING:
 def test_ruff_parse_warning_names_rejected_records(
     ruff_plugin: RuffPlugin,
     temp_python_file: str,
+    loguru_records: list[tuple[str, str]],
 ) -> None:
     """A zero-exit rejected report is diagnosed as a parse failure."""
-    warnings: list[str] = []
-    logger.add(warnings.append, level="WARNING", format="{message}")
     ruff_plugin.options["format_check"] = False
     with patch(
         "lintro.tools.ruff.check.run_subprocess_with_timeout",
@@ -31,11 +29,14 @@ def test_ruff_parse_warning_names_rejected_records(
     ):
         result = execute_ruff_check(ruff_plugin, [temp_python_file])
 
+    warnings = "\n".join(
+        message for level, message in loguru_records if level == "WARNING"
+    )
     assert_that(result.success).is_false()
-    assert_that("\n".join(warnings)).contains(
+    assert_that(warnings).contains(
         "1 diagnostic record(s) could not be parsed",
     )
-    assert_that("\n".join(warnings)).does_not_contain("subprocess failed")
+    assert_that(warnings).does_not_contain("subprocess failed")
 
 
 @pytest.mark.parametrize("success", [True, False])
