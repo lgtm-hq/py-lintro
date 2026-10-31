@@ -103,7 +103,7 @@ def _parse_violations(output: str, cwd: str | None) -> list[LineLengthViolation]
         Parsed violations, including a valid empty array.
 
     Raises:
-        ValueError: If the report is invalid JSON or has an invalid shape.
+        ValueError: If the report is invalid JSON or has invalid diagnostics.
     """
     issues_data = json.loads(output)
     if not isinstance(issues_data, list):
@@ -111,22 +111,33 @@ def _parse_violations(output: str, cwd: str | None) -> list[LineLengthViolation]
 
     violations: list[LineLengthViolation] = []
     for issue in issues_data:
-        if not isinstance(issue, dict) or not isinstance(
-            issue.get("location", {}),
-            dict,
-        ):
-            raise ValueError("Expected a Ruff diagnostic object with a location object")
-        file_path = _ruff_output_path(issue.get("filename", ""), cwd)
-        # Handle both old and new Ruff JSON formats.
-        line = issue.get("location", {}).get("row") or issue.get("row", 0)
-        column = issue.get("location", {}).get("column") or issue.get("column", 0)
+        if not isinstance(issue, dict):
+            raise ValueError("Expected a Ruff diagnostic object")
+        filename = issue.get("filename")
+        message = issue.get("message")
+        if not isinstance(filename, str) or not filename.strip():
+            raise ValueError("Expected a nonempty Ruff diagnostic filename")
+        if not isinstance(message, str) or not message.strip():
+            raise ValueError("Expected a nonempty Ruff diagnostic message")
+        if issue.get("code") != "E501":
+            raise ValueError("Expected Ruff diagnostic rule code E501")
+
+        # Older Ruff reports coordinates at the top level. A present location
+        # must be valid on its own, without falling back to top-level values.
+        location = issue.get("location", issue)
+        if not isinstance(location, dict):
+            raise ValueError("Expected a Ruff diagnostic location object")
+        line = location.get("row")
+        column = location.get("column")
+        if type(line) is not int or line <= 0 or type(column) is not int or column <= 0:
+            raise ValueError("Expected positive integer Ruff row and column")
         violations.append(
             LineLengthViolation(
-                file=file_path,
+                file=_ruff_output_path(filename, cwd),
                 line=line,
                 column=column,
-                message=issue.get("message", "Line too long"),
-                code=issue.get("code", "E501"),
+                message=message,
+                code=issue["code"],
             ),
         )
     return violations

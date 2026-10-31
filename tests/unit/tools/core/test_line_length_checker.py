@@ -23,6 +23,9 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
 
+_MISSING_FIELD = object()
+
+
 # --- LineLengthViolation dataclass tests ---
 
 
@@ -130,21 +133,30 @@ def test_check_line_length_ruff_not_available_is_explicit() -> None:
     assert_that(exc_info.value.timed_out).is_false()
 
 
+@pytest.mark.parametrize(
+    "coordinates",
+    [
+        pytest.param({"location": {"row": 10, "column": 89}}, id="new"),
+        pytest.param({"row": 10, "column": 89}, id="old"),
+    ],
+)
 def test_check_line_length_successful_detection(
     mock_ruff_available: MagicMock,
     mock_subprocess: MagicMock,
+    coordinates: dict[str, object],
 ) -> None:
     """Test successful detection of E501 violations.
 
     Args:
         mock_ruff_available: Mock fixture ensuring ruff is available.
         mock_subprocess: Mock fixture for subprocess operations.
+        coordinates: Valid coordinates in either supported Ruff format.
     """
     ruff_output = json.dumps(
         [
             {
                 "filename": "/path/to/file.py",
-                "location": {"row": 10, "column": 89},
+                **coordinates,
                 "message": "Line too long (100 > 88)",
                 "code": "E501",
             },
@@ -160,6 +172,23 @@ def test_check_line_length_successful_detection(
     assert_that(result[0].column).is_equal_to(89)
     assert_that(result[0].message).is_equal_to("Line too long (100 > 88)")
     assert_that(result[0].code).is_equal_to("E501")
+
+
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_check_line_length_empty_report_is_a_measurement(
+    mock_ruff_available: MagicMock,
+    returncode: int,
+) -> None:
+    """A valid empty array remains a measured zero for either normal exit code.
+
+    Args:
+        mock_ruff_available: Mock fixture ensuring ruff is available.
+        returncode: A normal Ruff exit status.
+    """
+    process = subprocess.CompletedProcess(["ruff"], returncode, "[]", "")
+    with patch("subprocess.run", return_value=process):
+        violations = check_line_length_violations(files=["test.py"])
+    assert_that(violations).is_empty()
 
 
 def test_check_line_length_custom_line_length(
@@ -225,9 +254,27 @@ def test_check_line_length_execution_failure_is_unavailable(
         "null",
         "{}",
         '["invalid diagnostic"]',
+        "[{}]",
         '[{"location": null}]',
+        '[{"filename": "test.py", "message": "Line too long", "code": "E501", '
+        '"location": [], "row": 1, "column": 89}]',
+        '[{"filename": "test.py", "message": "Line too long", "code": "E501", '
+        '"location": {}, "row": 1, "column": 89}]',
+        '[{"filename": "test.py", "message": "Line too long", "code": "E501", '
+        '"location": {"row": 0, "column": 89}, "row": 1, "column": 89}]',
     ],
-    ids=["invalid_json", "empty_stdout", "null", "object", "item", "location"],
+    ids=[
+        "invalid_json",
+        "empty_stdout",
+        "null",
+        "object",
+        "item",
+        "empty_diagnostic",
+        "location",
+        "location_list",
+        "missing_nested_coordinates",
+        "invalid_nested_row",
+    ],
 )
 def test_check_line_length_invalid_output_is_not_a_measurement(
     mock_ruff_available: MagicMock,
@@ -245,6 +292,98 @@ def test_check_line_length_invalid_output_is_not_a_measurement(
     ):
         check_line_length_violations(files=["test.py"])
     assert_that(str(exc_info.value)).contains("Invalid Ruff JSON report")
+    assert_that(exc_info.value.timed_out).is_false()
+
+
+@pytest.mark.parametrize("nested", [True, False], ids=["new", "old"])
+@pytest.mark.parametrize(
+    "field,invalid_value",
+    [
+        ("filename", _MISSING_FIELD),
+        ("filename", None),
+        ("filename", ""),
+        ("filename", " \t"),
+        ("filename", 123),
+        ("filename", True),
+        ("filename", []),
+        ("filename", {}),
+        ("message", _MISSING_FIELD),
+        ("message", None),
+        ("message", ""),
+        ("message", " \t"),
+        ("message", 123),
+        ("message", True),
+        ("message", []),
+        ("message", {}),
+        ("code", _MISSING_FIELD),
+        ("code", None),
+        ("code", ""),
+        ("code", " \t"),
+        ("code", 501),
+        ("code", True),
+        ("code", []),
+        ("code", {}),
+        ("code", "E500"),
+        ("row", _MISSING_FIELD),
+        ("row", None),
+        ("row", 0),
+        ("row", -1),
+        ("row", 1.5),
+        ("row", "1"),
+        ("row", True),
+        ("row", False),
+        ("row", []),
+        ("row", {}),
+        ("column", _MISSING_FIELD),
+        ("column", None),
+        ("column", 0),
+        ("column", -1),
+        ("column", 1.5),
+        ("column", "89"),
+        ("column", True),
+        ("column", False),
+        ("column", []),
+        ("column", {}),
+    ],
+)
+def test_check_line_length_malformed_fields_are_unavailable(
+    mock_ruff_available: MagicMock,
+    nested: bool,
+    field: str,
+    invalid_value: object,
+) -> None:
+    """Missing or malformed fields cannot manufacture measured E501 findings.
+
+    Args:
+        mock_ruff_available: Mock fixture ensuring ruff is available.
+        nested: Whether coordinates use Ruff's location wrapper.
+        field: Required diagnostic field to corrupt or omit.
+        invalid_value: Invalid field value, or the missing-field sentinel.
+    """
+    diagnostic: dict[str, object] = {
+        "filename": "test.py",
+        "message": "Line too long (100 > 88)",
+        "code": "E501",
+    }
+    coordinates: dict[str, object] = {"row": 1, "column": 89}
+    if nested:
+        diagnostic["location"] = coordinates
+    else:
+        diagnostic.update(coordinates)
+    fields = coordinates if nested and field in {"row", "column"} else diagnostic
+    if invalid_value is _MISSING_FIELD:
+        del fields[field]
+    else:
+        fields[field] = invalid_value
+    process = subprocess.CompletedProcess(["ruff"], 1, json.dumps([diagnostic]), "")
+
+    with (
+        patch("subprocess.run", return_value=process),
+        pytest.raises(LineLengthCheckUnavailableError) as exc_info,
+    ):
+        check_line_length_violations(files=["test.py"], cwd="/project")
+    assert_that(str(exc_info.value)).contains("Invalid Ruff JSON report")
+    assert_that(exc_info.value.__cause__).is_instance_of(ValueError)
     assert_that(exc_info.value.timed_out).is_false()
 
 

@@ -114,8 +114,13 @@ def test_fix_reformats_and_rechecks(
             "Invalid Ruff JSON report",
             False,
         ),
+        (
+            subprocess.CompletedProcess(["ruff"], 1, "[{}]", ""),
+            "Invalid Ruff JSON report",
+            False,
+        ),
     ],
-    ids=["timeout", "os-error", "bad-json"],
+    ids=["timeout", "os-error", "bad-json", "missing-fields"],
 )
 @pytest.mark.parametrize("black_clean", [True, False], ids=["clean", "findings"])
 def test_check_surfaces_unmeasured_supplement(
@@ -304,8 +309,22 @@ def test_fix_retains_supplement_timeout(
             "Expected a Ruff JSON array",
             False,
         ),
+        (
+            subprocess.CompletedProcess(["ruff"], 1, "[{}]", ""),
+            "Invalid Ruff JSON report",
+            False,
+        ),
     ],
-    ids=["timeout", "os-error", "disappeared", "config", "bad-json", "empty", "null"],
+    ids=[
+        "timeout",
+        "os-error",
+        "disappeared",
+        "config",
+        "bad-json",
+        "empty",
+        "null",
+        "missing-fields",
+    ],
 )
 @pytest.mark.parametrize("black_fixed", [False, True], ids=["e501-only", "black-fix"])
 def test_fix_retains_e501_when_final_supplement_fails(
@@ -375,15 +394,27 @@ def test_fix_retains_e501_when_final_supplement_fails(
     assert_that(retained.message).contains("Line too long")
 
 
+@pytest.mark.parametrize(
+    "process",
+    [
+        pytest.param(OSError("cannot execute Ruff"), id="os-error"),
+        pytest.param(
+            subprocess.CompletedProcess(["ruff"], 1, "[{}]", ""),
+            id="missing-fields",
+        ),
+    ],
+)
 def test_fix_initial_supplement_failure_reports_unapplied_changes(
     black_plugin: BlackPlugin,
     tmp_path: Path,
+    process: subprocess.CompletedProcess[str] | Exception,
 ) -> None:
     """Aborting before formatting reports proposed changes without claiming writes.
 
     Args:
         black_plugin: Plugin with the version gate bypassed.
         tmp_path: Directory for a file that needs formatting.
+        process: Initial Ruff report or execution exception.
     """
     py_file = tmp_path / "module.py"
     py_file.write_text("x=1\n")
@@ -394,7 +425,7 @@ def test_fix_initial_supplement_failure_reports_unapplied_changes(
             return_value=(False, f"would reformat {py_file}\n"),
         ),
         patch("shutil.which", return_value="/mock/ruff"),
-        patch("subprocess.run", side_effect=OSError("cannot execute Ruff")),
+        patch("subprocess.run", side_effect=[process]),
     ):
         result = black_plugin.fix([str(py_file)], {})
 
