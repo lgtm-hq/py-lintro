@@ -33,6 +33,7 @@ from lintro.config.review_config import (
     ReviewChecklistItemConfig,
     ReviewConfig,
 )
+from lintro.config.template_aware_config import TemplateAwareConfig
 from lintro.config.watch_config import WatchConfig
 from lintro.enums.config_key import ConfigKey
 from lintro.exceptions.errors import ConfigurationError
@@ -1041,6 +1042,7 @@ def _pyproject_lintro_catalog() -> _PyprojectLintroCatalog:
             "deps",
             "output",
             "review",
+            "template_aware",
             "tool",
             "tools",
             "watch",
@@ -1085,6 +1087,35 @@ def known_config_tool_names() -> frozenset[str]:
     return frozenset(catalog.known_tools)
 
 
+def _parse_template_aware_config(data: Any) -> TemplateAwareConfig:
+    """Parse the template-aware preprocessing configuration section.
+
+    Args:
+        data: Raw ``template_aware`` section from config.
+
+    Returns:
+        TemplateAwareConfig: Parsed configuration (disabled by default).
+
+    Raises:
+        ValueError: When the section is not a mapping.
+    """
+    if data is None or data == {}:
+        return TemplateAwareConfig()
+    if not isinstance(data, dict):
+        msg = f"template_aware config must be a mapping, got {type(data).__name__}"
+        raise ValueError(msg)
+
+    known_fields = set(TemplateAwareConfig.model_fields.keys())
+    unknown = set(data.keys()) - known_fields
+    if unknown:
+        logger.warning(
+            "Unknown template_aware config keys ignored: {}",
+            ", ".join(sorted(unknown)),
+        )
+    filtered = {key: value for key, value in data.items() if key in known_fields}
+    return TemplateAwareConfig(**filtered)
+
+
 def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     """Convert pyproject.toml [tool.lintro] format to .lintro-config.yaml format.
 
@@ -1112,6 +1143,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "output": {},
         "watch": {},
         "deps": {},
+        "template_aware": {},
     }
 
     catalog = _pyproject_lintro_catalog()
@@ -1198,6 +1230,8 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             # Pass through non-mappings so ``_parse_deps_config`` fail-closes
             # instead of treating ``deps = true`` as an unrecognized key.
             result["deps"] = value
+        elif key_lower == "template_aware" and isinstance(value, dict):
+            result["template_aware"] = value
         elif key_lower in externally_handled_sections:
             # Parsed elsewhere; nothing to convert here.
             pass
@@ -1426,6 +1460,9 @@ def build_config_from_dict(
     output_config = _parse_output_config(data.get("output", {}))
     watch_config = _parse_watch_config(data.get("watch", {}))
     deps_config = _parse_deps_config(data.get("deps", {}))
+    template_aware_config = _parse_template_aware_config(
+        data.get("template_aware", {}),
+    )
 
     return LintroConfig(
         execution=execution_config,
@@ -1437,6 +1474,7 @@ def build_config_from_dict(
         output=output_config,
         watch=watch_config,
         deps=deps_config,
+        template_aware=template_aware_config,
         config_path=resolved_path,
     )
 
