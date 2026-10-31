@@ -249,13 +249,13 @@ class AstroCheckPlugin(BaseToolPlugin):
             cwd_path = Path(root_opt)
             if not cwd_path.is_absolute():
                 # Resolve relative to ctx.cwd
-                base = Path(ctx.cwd) if ctx.cwd else Path.cwd()
+                base = Path(ctx.cwd)
                 cwd_path = (base / cwd_path).resolve()
             # Sync merged_options with the resolved absolute path
             # so _build_command uses the same absolute root
             merged_options["root"] = str(cwd_path)
         else:
-            cwd_path = Path(ctx.cwd) if ctx.cwd else Path.cwd()
+            cwd_path = Path(ctx.cwd)
 
         # Warn if no astro config found, but still proceed with defaults.
         # When the config lives in a parent directory (common when ctx.cwd

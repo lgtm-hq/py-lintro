@@ -10,7 +10,7 @@ from loguru import logger
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_parser import strip_ansi_codes
-from lintro.plugins.base import ExecutionContext
+from lintro.plugins.base import PreparedExecution
 from lintro.tools.core.timeout_utils import create_timeout_result
 from lintro.utils.tsconfig import (
     discover_tsconfigs,
@@ -69,7 +69,7 @@ def check(
     )
 
     # Determine project configuration strategy
-    cwd_path = Path(ctx.cwd) if ctx.cwd else Path.cwd()
+    cwd_path = Path(ctx.cwd)
 
     # Check if dependencies need installing
     from lintro.utils.node_deps import install_node_deps, should_install_deps
@@ -199,7 +199,7 @@ def check(
 
 def _check_single_project(
     plugin: TypeScriptCheckerPlugin,
-    ctx: ExecutionContext,
+    ctx: PreparedExecution,
     cwd_path: Path,
     options: dict[str, object],
     *,
@@ -328,7 +328,7 @@ def _check_single_project(
 
 def _check_multi_project(
     plugin: TypeScriptCheckerPlugin,
-    ctx: ExecutionContext,
+    ctx: PreparedExecution,
     cwd_path: Path,
     tsconfigs: list[Any],
     options: dict[str, object],
@@ -466,7 +466,7 @@ def _check_multi_project(
 
 def _run_and_parse(
     plugin: TypeScriptCheckerPlugin,
-    ctx: ExecutionContext,
+    ctx: PreparedExecution,
     project_path: str | None,
     options: dict[str, object],
 ) -> ToolResult:
@@ -485,7 +485,7 @@ def _run_and_parse(
         files=ctx.rel_files if not project_path else [],
         project_path=project_path,
         options=options,
-        cwd=Path(ctx.cwd) if ctx.cwd else None,
+        cwd=Path(ctx.cwd),
     )
     logger.debug(
         "[{}] Running with cwd={} and cmd={}",

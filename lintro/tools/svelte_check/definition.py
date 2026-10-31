@@ -214,7 +214,7 @@ class SvelteCheckPlugin(BaseToolPlugin):
 
         logger.debug("[svelte-check] Discovered {} Svelte file(s)", len(ctx.files))
 
-        cwd_path = Path(ctx.cwd) if ctx.cwd else Path.cwd()
+        cwd_path = Path(ctx.cwd)
 
         # Warn if no svelte config found, but still proceed with defaults
         svelte_config = self._find_svelte_config(cwd_path)
@@ -236,7 +236,7 @@ class SvelteCheckPlugin(BaseToolPlugin):
         # Build command
         cmd = self._build_command(
             options=merged_options,
-            cwd=Path(ctx.cwd) if ctx.cwd else None,
+            cwd=Path(ctx.cwd),
         )
         logger.debug("[svelte-check] Running with cwd={} and cmd={}", ctx.cwd, cmd)
 

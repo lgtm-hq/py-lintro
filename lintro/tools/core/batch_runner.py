@@ -43,7 +43,7 @@ from lintro.tools.core.timeout_utils import (
 
 if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
-    from lintro.plugins.base import BaseToolPlugin, ExecutionContext
+    from lintro.plugins.base import BaseToolPlugin, PreparedExecution
 
 #: The concrete issue type a definition's parser yields, threaded through the
 #: runner so a per-tool timeout builder keeps its narrow signature.
@@ -196,7 +196,7 @@ class BatchCommands:
 def batch_timeout_result(
     *,
     plugin: BaseToolPlugin,
-    timeout: int,
+    timeout: float,
     cmd: list[str] | None = None,
     tool_name: str | None = None,
     cwd: str | None = None,
@@ -241,7 +241,7 @@ def batch_timeout_result(
 def batch_fix_timeout_result(
     *,
     plugin: BaseToolPlugin,
-    timeout: int,
+    timeout: float,
     initial_issues: Sequence[IssueT],
     cmd: list[str] | None = None,
     tool_name: str | None = None,
@@ -378,7 +378,7 @@ def batch_check_result(
 
 
 def run_batch_check(
-    ctx: ExecutionContext,
+    ctx: PreparedExecution,
     *,
     plugin: BaseToolPlugin,
     cmd: list[str],
@@ -569,7 +569,7 @@ def _batch_fix_failure_result(
 
 
 def run_batch_fix(
-    ctx: ExecutionContext,
+    ctx: PreparedExecution,
     *,
     plugin: BaseToolPlugin,
     commands: BatchCommands,

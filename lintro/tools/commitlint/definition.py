@@ -160,7 +160,7 @@ class CommitlintPlugin(BaseToolPlugin):
             return ctx
 
         cmd: list[str] = self._get_commitlint_command(
-            cwd=Path(ctx.cwd) if ctx.cwd else None,
+            cwd=Path(ctx.cwd),
         )
         cmd.append("--last")
 

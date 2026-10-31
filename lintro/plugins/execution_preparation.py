@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import math
 import os
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
-from typing import Any
 
 from loguru import logger
 
@@ -32,15 +33,38 @@ DEFAULT_TIMEOUT: int = 30
 _ALLOW_VERSION_LAG_ENV: str = "LINTRO_ALLOW_VERSION_LAG"
 
 
-def _parse_allow_version_lag(raw: str | None) -> set[str] | None:
+@dataclass(frozen=True)
+class PreparedExecution:
+    """Resolved inputs for a runnable tool invocation.
+
+    Attributes:
+        files: Absolute paths to the discovered files.
+        rel_files: File paths relative to the execution directory.
+        cwd: Working directory for command execution.
+        timeout: Resolved subprocess timeout in seconds.
+    """
+
+    files: list[str]
+    rel_files: list[str]
+    cwd: str
+    timeout: float
+
+
+class VersionLagPolicy(Enum):
+    """Explicit wildcard policy for below-minimum tool versions."""
+
+    ALLOW_ALL = "*"
+
+
+def _parse_allow_version_lag(raw: str | None) -> set[str] | VersionLagPolicy:
     """Parse ``LINTRO_ALLOW_VERSION_LAG`` into a tool-name set.
 
     Args:
         raw: Env value: comma-separated tool names, ``*`` for all, or empty.
 
     Returns:
-        A set of lowercased tool names, ``None`` when ``*`` (allow all), or an
-        empty set when unset/blank (full enforcement).
+        A set of lowercased tool names, ``VersionLagPolicy.ALLOW_ALL`` when
+        ``*``, or an empty set when unset/blank (full enforcement).
     """
     if raw is None:
         return set()
@@ -48,7 +72,7 @@ def _parse_allow_version_lag(raw: str | None) -> set[str] | None:
     if not text:
         return set()
     if text == "*":
-        return None
+        return VersionLagPolicy.ALLOW_ALL
     names = {part.strip().lower() for part in text.split(",") if part.strip()}
     return names
 
@@ -63,7 +87,7 @@ def _version_lag_allowed(tool_name: str) -> bool:
         True when the tool is listed in ``LINTRO_ALLOW_VERSION_LAG`` (or ``*``).
     """
     allow = _parse_allow_version_lag(os.environ.get(_ALLOW_VERSION_LAG_ENV))
-    if allow is None:
+    if isinstance(allow, VersionLagPolicy):
         return True
     return tool_name.lower() in allow
 
@@ -238,7 +262,7 @@ def prepare_execution(
     include_venv: bool,
     current_options: dict[str, object],
     no_files_message: str = "No files to check.",
-) -> dict[str, Any]:
+) -> PreparedExecution | ToolResult:
     """Prepare execution context with common boilerplate steps.
 
     This function consolidates repeated patterns:
@@ -259,7 +283,8 @@ def prepare_execution(
         no_files_message: Message when no files are found.
 
     Returns:
-        Dictionary with files, rel_files, cwd, timeout, and optional early_result.
+        Resolved execution inputs, or an early result when no files match or
+        the version requirement is not met.
     """
     # Merge runtime options with defaults
     merged_options = dict(current_options)
@@ -268,15 +293,13 @@ def prepare_execution(
     # Validate paths
     validate_paths(paths)
     if not paths:
-        return {
-            "early_result": ToolResult(
-                name=definition.name,
-                success=True,
-                output=no_files_message,
-                issues_count=0,
-                no_files=True,
-            ),
-        }
+        return ToolResult(
+            name=definition.name,
+            success=True,
+            output=no_files_message,
+            issues_count=0,
+            no_files=True,
+        )
 
     # Discover files matching tool patterns, restricting to the git-diff
     # changed set when a base ref was resolved for this run.
@@ -298,15 +321,13 @@ def prepare_execution(
             if extensions:
                 file_type = "/".join(extensions) + " files"
 
-        return {
-            "early_result": ToolResult(
-                name=definition.name,
-                success=True,
-                output=f"No {file_type} found to check.",
-                issues_count=0,
-                no_files=True,
-            ),
-        }
+        return ToolResult(
+            name=definition.name,
+            success=True,
+            output=f"No {file_type} found to check.",
+            issues_count=0,
+            no_files=True,
+        )
 
     logger.debug(f"Files to process: {files}")
 
@@ -324,7 +345,7 @@ def prepare_execution(
     # Check version requirements (only when files exist to check)
     version_result = verify_tool_version(definition, cwd=cwd)
     if version_result is not None:
-        return {"early_result": version_result}
+        return version_result
 
     rel_files = [os.path.relpath(os.path.abspath(f), cwd) for f in files]
 
@@ -339,12 +360,12 @@ def prepare_execution(
     logger.debug(
         f"Prepared execution: {len(files)} files, cwd={cwd}, timeout={timeout}s",
     )
-    return {
-        "files": files,
-        "rel_files": rel_files,
-        "cwd": cwd,
-        "timeout": timeout,
-    }
+    return PreparedExecution(
+        files=files,
+        rel_files=rel_files,
+        cwd=cwd,
+        timeout=timeout,
+    )
 
 
 # -------------------------------------------------------------------------

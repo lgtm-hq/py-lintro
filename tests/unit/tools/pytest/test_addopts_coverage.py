@@ -9,6 +9,7 @@ lintro detects coverage in configuration ``addopts`` so the banner is accurate.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from assertpy import assert_that
@@ -21,6 +22,9 @@ from lintro.tools.pytest.pytest_command_builder import (
 )
 from lintro.tools.pytest.pytest_config import PytestConfiguration
 from lintro.tools.pytest.pytest_executor import PytestExecutor
+
+if TYPE_CHECKING:
+    from unittest.mock import MagicMock
 
 # Minimal pytest.ini whose addopts force coverage on, mirroring the project
 # configuration that triggered issue #726.
@@ -148,6 +152,7 @@ def test_detects_coverage_in_tox_ini(tmp_path: Path) -> None:
 def test_banner_reports_enabled_when_addopts_force_coverage(
     conflicting_project: Path,
     capsys: pytest.CaptureFixture[str],
+    mock_test_tool: MagicMock,
 ) -> None:
     """Banner reports coverage enabled when addopts force it (issue #726).
 
@@ -158,9 +163,10 @@ def test_banner_reports_enabled_when_addopts_force_coverage(
     Args:
         conflicting_project: Fixture project root with conflicting addopts.
         capsys: Pytest capture fixture for stdout/stderr.
+        mock_test_tool: Tool stub required by the executor.
     """
     config = PytestConfiguration()
-    executor = PytestExecutor(config=config, tool=None)
+    executor = PytestExecutor(config=config, tool=mock_test_tool)
 
     executor.display_run_config(total_tests=1, target_files=["."])
 
@@ -173,6 +179,7 @@ def test_banner_reports_disabled_without_coverage_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    mock_test_tool: MagicMock,
 ) -> None:
     """Banner reports coverage disabled when nothing enables it.
 
@@ -180,12 +187,13 @@ def test_banner_reports_disabled_without_coverage_config(
         tmp_path: Temporary directory provided by pytest.
         monkeypatch: Pytest monkeypatch fixture used to switch the cwd.
         capsys: Pytest capture fixture for stdout/stderr.
+        mock_test_tool: Tool stub required by the executor.
     """
     (tmp_path / "pytest.ini").write_text(_PYTEST_INI_NO_COV, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
     config = PytestConfiguration()
-    executor = PytestExecutor(config=config, tool=None)
+    executor = PytestExecutor(config=config, tool=mock_test_tool)
 
     executor.display_run_config(total_tests=1, target_files=["."])
 
@@ -216,14 +224,16 @@ def test_zero_coverage_threshold_enables_collection(
 
 def test_banner_reports_enabled_for_zero_coverage_threshold(
     capsys: pytest.CaptureFixture[str],
+    mock_test_tool: MagicMock,
 ) -> None:
     """Banner reports coverage enabled when threshold is explicitly zero.
 
     Args:
         capsys: Pytest capture fixture for stdout/stderr.
+        mock_test_tool: Tool stub required by the executor.
     """
     config = PytestConfiguration(coverage_threshold=0)
-    executor = PytestExecutor(config=config, tool=None)
+    executor = PytestExecutor(config=config, tool=mock_test_tool)
 
     executor.display_run_config(total_tests=1, target_files=["."])
 

@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, ClassVar, NoReturn
 
 from lintro.models.core.tool_result import ToolResult
-from lintro.plugins.base import BaseToolPlugin, ExecutionContext
+from lintro.plugins.base import BaseToolPlugin, PreparedExecution
 from lintro.tools.core.option_validators import (
     OptionSchema,
     validate_option_types,
@@ -231,7 +231,7 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
 
     def _check_single_project(
         self,
-        ctx: ExecutionContext,
+        ctx: PreparedExecution,
         cwd_path: Path,
         options: dict[str, object],
         *,
@@ -266,7 +266,7 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
 
     def _check_multi_project(
         self,
-        ctx: ExecutionContext,
+        ctx: PreparedExecution,
         cwd_path: Path,
         tsconfigs: list[Any],
         options: dict[str, object],
@@ -292,7 +292,7 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
 
     def _run_and_parse(
         self,
-        ctx: ExecutionContext,
+        ctx: PreparedExecution,
         project_path: str | None,
         options: dict[str, object],
     ) -> ToolResult:

@@ -270,7 +270,7 @@ class SpectralPlugin(BaseToolPlugin):
         # nearest ruleset discovered from each file so nested project configs
         # cannot leak onto unrelated files. An explicit option intentionally
         # overrides discovery for the whole invocation.
-        execution_root = ctx.cwd or str(Path.cwd())
+        execution_root = ctx.cwd
         discovery_boundary = find_project_root(execution_root)
         ruleset_groups: dict[str, list[str]] = {}
         explicit_ruleset = merged_options.get("ruleset")
