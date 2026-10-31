@@ -89,19 +89,19 @@ API v2 is a breaking change to result collections and issue fixability. Upgrade 
 plugin package to a v2-compatible release, or make these changes before declaring
 `LINTRO_PLUGIN_API_VERSION = 2`:
 
-- `ToolResult.issues` and `initial_issues` require `Sequence[BaseIssue]` and default
-  to `()`. `metadata` requires `dict[str, Any]` and defaults to a fresh `{}`. Omit
-  empty arguments or pass empty containers; replace `issues=issues if issues else None`
-  with `issues=issues`, and remove explicit `None` for these three fields. Passing
-  `None` raises `TypeError`. Missing or unparseable results must remain failures
+- `ToolResult.issues` and `initial_issues` require `Sequence[BaseIssue]` and default to
+  `()`. `metadata` requires `dict[str, Any]` and defaults to a fresh `{}`. Omit empty
+  arguments or pass empty containers; replace `issues=issues if issues else None` with
+  `issues=issues`, and remove explicit `None` for these three fields. Passing `None`
+  raises `TypeError`. Missing or unparseable results must remain failures
   (`success=False`); an empty collection does not prove a clean run. Fix accounting
   counts still use `None` for unknown, and failed fix measurements must set
   `residual_unknown=True` with a reason rather than inventing zero counts.
-- `BaseIssue.fixable` is now a writable boolean dataclass field, defaulting to
-  `False`. A subclass's read-only `@property def fixable` prevents the inherited
-  initializer from assigning the field and raises `AttributeError`. Replace that
-  property with the inherited field, supplying `fixable=` when constructing the issue
-  or computing it in `__post_init__`. For example:
+- `BaseIssue.fixable` is now a writable boolean dataclass field, defaulting to `False`.
+  A subclass's read-only `@property def fixable` prevents the inherited initializer from
+  assigning the field and raises `AttributeError`. Replace that property with the
+  inherited field, supplying `fixable=` when constructing the issue or computing it in
+  `__post_init__`. For example:
 
   ```python
   from dataclasses import dataclass
@@ -118,11 +118,12 @@ plugin package to a v2-compatible release, or make these changes before declarin
   ```
 
   Recompute the field if the inputs used to derive it change after construction.
+
 - Issues without a per-issue fix signal remain `fixable=False`. If a fix-capable tool
   should include such findings in `fmt --dry-run` estimates, set
-  `PREVIEW_FIXABLE: ClassVar[bool] = True` on its issue subclass (import `ClassVar`
-  from `typing`). This opt-in affects only the preview; public fixability in totals,
-  issue sections and structured findings remains false.
+  `PREVIEW_FIXABLE: ClassVar[bool] = True` on its issue subclass (import `ClassVar` from
+  `typing`). This opt-in affects only the preview; public fixability in totals, issue
+  sections and structured findings remains false.
 
 Plugin API v1 and undeclared plugins are skipped with a migration diagnostic. A plugin
 that incorrectly advertises v2 or bypasses discovery can still fail at execution:
