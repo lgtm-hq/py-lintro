@@ -104,6 +104,94 @@ def test_fix_reformats_and_rechecks(
     assert_that(result.remaining_issues_count).is_equal_to(0)
 
 
+@pytest.mark.parametrize("code", [None, "invalid-syntax"], ids=["null", "named"])
+@pytest.mark.parametrize("include_e501", [False, True], ids=["syntax-only", "mixed"])
+def test_fix_formats_files_despite_ruff_invalid_syntax(
+    black_plugin: BlackPlugin,
+    tmp_path: Path,
+    code: str | None,
+    include_e501: bool,
+) -> None:
+    """A Ruff target-version mismatch allows Black writes and measured E501 counts.
+
+    Args:
+        black_plugin: Plugin with the version gate bypassed.
+        tmp_path: Directory for actual discovered Python files.
+        code: Syntax diagnostic code in either supported Ruff schema.
+        include_e501: Whether a separate file has an unfixable long line.
+    """
+    py_file = tmp_path / "module.py"
+    py_file.write_text("x=1\n")
+    syntax_file = tmp_path / "match.py"
+    syntax_file.write_text("match value:\n    case 1:\n        result = 1\n")
+    diagnostics = [
+        {
+            "cell": None,
+            "code": code,
+            "end_location": {"column": 6, "row": 1},
+            "filename": str(syntax_file),
+            "fix": None,
+            "location": {"column": 1, "row": 1},
+            "message": "Cannot use `match` statement on Python 3.9",
+            "name": "invalid-syntax",
+            "noqa_row": None,
+            "severity": "error",
+            "url": None,
+        },
+    ]
+    if include_e501:
+        long_file = tmp_path / "long.py"
+        long_file.write_text('value = "' + "x" * 100 + '"\n')
+        diagnostics.append(
+            {
+                "filename": str(long_file),
+                "code": "E501",
+                "location": {"row": 1, "column": 89},
+                "message": "Line too long (110 > 88)",
+            },
+        )
+    report = subprocess.CompletedProcess(["ruff"], 1, json.dumps(diagnostics), "")
+
+    def run_black(cmd: list[str], **kwargs: object) -> tuple[bool, str]:
+        """Emulate Black checks and write formatting only on the fix invocation.
+
+        Args:
+            cmd: Black command assembled by the plugin.
+            **kwargs: Subprocess settings supplied by the plugin.
+
+        Returns:
+            A formatting verdict and Black's corresponding output.
+        """
+        if "--check" in cmd:
+            needs_format = py_file.read_text() == "x=1\n"
+            return (
+                not needs_format,
+                f"would reformat {py_file}\n" if needs_format else "",
+            )
+        py_file.write_text("x = 1\n")
+        return True, f"reformatted {py_file}\n"
+
+    with (
+        patch.object(black_plugin, "_run_subprocess", side_effect=run_black),
+        patch("shutil.which", return_value="/mock/ruff"),
+        patch("subprocess.run", return_value=report),
+    ):
+        result = black_plugin.fix([str(tmp_path)], {})
+
+    assert_that(py_file.read_text()).is_equal_to("x = 1\n")
+    assert_that(result.success).is_equal_to(not include_e501)
+    assert_that(result.initial_issues_count).is_equal_to(1 + int(include_e501))
+    assert_that(result.fixed_issues_count).is_equal_to(1)
+    assert_that(result.remaining_issues_count).is_equal_to(int(include_e501))
+    assert_that(result.issues_count).is_equal_to(int(include_e501))
+    assert_that(result.output).contains("Fixed 1 issue(s)")
+    assert_that(result.output).does_not_contain("E501 supplement failed")
+    assert_that(result.timed_out).is_false()
+    if include_e501:
+        assert result.issues is not None
+        assert_that(result.issues[-1]).has_file(str(long_file)).has_code("E501")
+
+
 @pytest.mark.parametrize(
     "process,reason,timed_out",
     [
@@ -384,7 +472,12 @@ def test_fix_retains_e501_when_final_supplement_fails(
     assert_that(result.fixed_issues_count).is_equal_to(int(black_fixed))
     assert_that(result.remaining_issues_count).is_equal_to(1)
     assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.output).contains("E501 supplement failed", reason)
+    assert_that(result.output).contains(
+        "E501 supplement failed",
+        reason,
+        "E501 findings retained from the initial check",
+        "line and column positions may be stale after formatting",
+    )
     if not black_fixed:
         assert_that(result.output).does_not_contain("Fixed")
     assert result.issues is not None

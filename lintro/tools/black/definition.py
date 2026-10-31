@@ -480,7 +480,18 @@ class BlackPlugin(BaseToolPlugin):
             )
         final_summary = "\n".join(summary) if summary else "No fixes applied."
         notes = dict.fromkeys(
-            note for note in (initial_supplement.note, supplement.note) if note
+            note
+            for note in (
+                initial_supplement.note,
+                supplement.note,
+                (
+                    "E501 findings retained from the initial check; "
+                    "line and column positions may be stale after formatting."
+                    if supplement.note and line_length_issues
+                    else ""
+                ),
+            )
+            if note
         )
         final_summary = "\n".join([final_summary, *notes])
 

@@ -83,6 +83,28 @@ def mock_subprocess() -> Generator[MagicMock, None, None]:
 
 
 @pytest.fixture
+def invalid_syntax_diagnostic() -> dict[str, object]:
+    """Provide Ruff's JSON schema for a target-version syntax diagnostic.
+
+    Returns:
+        A syntax diagnostic emitted even when only E501 is selected.
+    """
+    return {
+        "cell": None,
+        "code": None,
+        "end_location": {"column": 6, "row": 1},
+        "filename": "/project/match.py",
+        "fix": None,
+        "location": {"column": 1, "row": 1},
+        "message": "Cannot use `match` statement on Python 3.9",
+        "name": "invalid-syntax",
+        "noqa_row": None,
+        "severity": "error",
+        "url": None,
+    }
+
+
+@pytest.fixture
 def recorded_ruff_argv() -> Generator[list[list[str]], None, None]:
     """Record the argv of every ``subprocess.run`` call made by the checker.
 
@@ -189,6 +211,97 @@ def test_check_line_length_empty_report_is_a_measurement(
     with patch("subprocess.run", return_value=process):
         violations = check_line_length_violations(files=["test.py"])
     assert_that(violations).is_empty()
+
+
+@pytest.mark.parametrize("code", [None, "invalid-syntax"], ids=["null", "named"])
+@pytest.mark.parametrize("include_e501", [False, True], ids=["syntax-only", "mixed"])
+def test_check_line_length_skips_syntax_diagnostics(
+    mock_ruff_available: MagicMock,
+    invalid_syntax_diagnostic: dict[str, object],
+    code: str | None,
+    include_e501: bool,
+) -> None:
+    """Syntax reports do not erase E501 findings from other files.
+
+    Args:
+        mock_ruff_available: Mock fixture ensuring Ruff is available.
+        invalid_syntax_diagnostic: A real-shaped target-version diagnostic.
+        code: Ruff's old null code or newer diagnostic-name code.
+        include_e501: Whether another file has a line-length violation.
+    """
+    invalid_syntax_diagnostic["code"] = code
+    diagnostics = [invalid_syntax_diagnostic]
+    if include_e501:
+        diagnostics.append(
+            {
+                "filename": "/project/long.py",
+                "code": "E501",
+                "location": {"row": 2, "column": 89},
+                "message": "Line too long (110 > 88)",
+            },
+        )
+    process = subprocess.CompletedProcess(["ruff"], 1, json.dumps(diagnostics), "")
+    with patch("subprocess.run", return_value=process):
+        violations = check_line_length_violations(
+            files=["match.py", "long.py"],
+            cwd="/project",
+        )
+
+    expected = (
+        [LineLengthViolation("/project/long.py", 2, 89, "Line too long (110 > 88)")]
+        if include_e501
+        else []
+    )
+    assert_that(violations).is_equal_to(expected)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"code": _MISSING_FIELD},
+        {"code": "E500"},
+        {"code": ""},
+        {"code": 501},
+        {"code": False},
+        {"code": []},
+        {"code": {}},
+        {"name": _MISSING_FIELD},
+        {"name": "other"},
+        {"name": None},
+        {"filename": None},
+        {"message": ""},
+        {"location": None},
+        {"location": {"row": True, "column": 1}},
+        {"location": {"row": 1, "column": 0}},
+    ],
+)
+def test_check_line_length_rejects_malformed_syntax_diagnostics(
+    mock_ruff_available: MagicMock,
+    invalid_syntax_diagnostic: dict[str, object],
+    overrides: dict[str, object],
+) -> None:
+    """The syntax exception still requires valid fields and a recognized code.
+
+    Args:
+        mock_ruff_available: Mock fixture ensuring Ruff is available.
+        invalid_syntax_diagnostic: Valid syntax diagnostic to corrupt.
+        overrides: Malformed fields, including missing-field sentinels.
+    """
+    invalid_syntax_diagnostic.update(overrides)
+    diagnostic = {
+        key: value
+        for key, value in invalid_syntax_diagnostic.items()
+        if value is not _MISSING_FIELD
+    }
+    process = subprocess.CompletedProcess(["ruff"], 1, json.dumps([diagnostic]), "")
+    with (
+        patch("subprocess.run", return_value=process),
+        pytest.raises(LineLengthCheckUnavailableError) as exc_info,
+    ):
+        check_line_length_violations(files=["match.py"], cwd="/project")
+
+    assert_that(str(exc_info.value)).contains("Invalid Ruff JSON report")
+    assert_that(exc_info.value.__cause__).is_instance_of(ValueError)
 
 
 def test_check_line_length_custom_line_length(

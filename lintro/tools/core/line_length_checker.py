@@ -100,7 +100,7 @@ def _parse_violations(output: str, cwd: str | None) -> list[LineLengthViolation]
         cwd: Working directory Ruff ran in.
 
     Returns:
-        Parsed violations, including a valid empty array.
+        Parsed E501 violations, ignoring valid Ruff syntax diagnostics.
 
     Raises:
         ValueError: If the report is invalid JSON or has invalid diagnostics.
@@ -119,9 +119,6 @@ def _parse_violations(output: str, cwd: str | None) -> list[LineLengthViolation]
             raise ValueError("Expected a nonempty Ruff diagnostic filename")
         if not isinstance(message, str) or not message.strip():
             raise ValueError("Expected a nonempty Ruff diagnostic message")
-        if issue.get("code") != "E501":
-            raise ValueError("Expected Ruff diagnostic rule code E501")
-
         # Older Ruff reports coordinates at the top level. A present location
         # must be valid on its own, without falling back to top-level values.
         location = issue.get("location", issue)
@@ -131,13 +128,20 @@ def _parse_violations(output: str, cwd: str | None) -> list[LineLengthViolation]
         column = location.get("column")
         if type(line) is not int or line <= 0 or type(column) is not int or column <= 0:
             raise ValueError("Expected positive integer Ruff row and column")
+        # Ruff emits syntax diagnostics even with --select E501. Older versions
+        # use a null code; newer versions use the diagnostic name as the code.
+        code = issue.get("code", "")
+        if issue.get("name") == "invalid-syntax" and code in (None, "invalid-syntax"):
+            continue
+        if code != "E501":
+            raise ValueError("Expected Ruff diagnostic rule code E501")
         violations.append(
             LineLengthViolation(
                 file=_ruff_output_path(filename, cwd),
                 line=line,
                 column=column,
                 message=message,
-                code=issue["code"],
+                code=code,
             ),
         )
     return violations

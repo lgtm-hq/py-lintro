@@ -351,7 +351,13 @@ def _run_tool(
             subprocess.CalledProcessError: If check is true and the exit is nonzero.
         """
         record(args)
-        if tool_name == "black" and "--output-format" in args and "json" in args:
+        if tool_name == "black" and args[1:6] == [
+            "check",
+            "--select",
+            "E501",
+            "--output-format",
+            "json",
+        ]:
             # Black's text report and its optional Ruff JSON report are
             # independent subprocesses; this harness varies Black's verdict.
             # Supplement failures are covered in black/test_execution.py.
