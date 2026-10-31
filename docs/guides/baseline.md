@@ -49,8 +49,12 @@ acknowledged findings cannot leak into the final report.
 there is affirmative complete, exact file coverage. Unseen tools and files, unknown
 coverage, skipped checks, execution failures, and incomplete reports retain their old
 entries. `prune` only removes entries; it never acknowledges new findings. A
-partial tool selection cannot discard the other tools' entries. Management scans
-ignore configured suppression and do not invoke AI or install dependencies.
+partial tool selection cannot discard the other tools' entries. User
+`--tool-options` overrides make rule coverage unknown for each named tool, even
+when its file coverage is exact. For those tools, `update` can add observations,
+but neither `update` nor `prune` removes old entries or reduces occurrence budgets.
+Other tools retain their coverage claims. Management scans ignore configured
+suppression and do not invoke AI or install dependencies.
 
 The boolean `inspected_files` proves that some work happened, not which files were
 examined. Until #2609 supplies coverage throughout the tool registry, pruning must

@@ -15,6 +15,7 @@ from lintro.utils.severity_counts import count_severities
 if TYPE_CHECKING:
     from lintro.models.core.fingerprint_baseline import FingerprintBaseline
     from lintro.models.core.run_artifact import RunArtifact
+    from lintro.parsers.base_issue import BaseIssue
 
 
 def apply_baseline(artifact: RunArtifact, baseline: FingerprintBaseline) -> None:
@@ -52,7 +53,16 @@ def apply_baseline(artifact: RunArtifact, baseline: FingerprintBaseline) -> None
             baseline=baseline,
             root=artifact.workspace_root,
         )
-        if not suppressed and not result.initial_issues:
+        detected: list[BaseIssue] = []
+        detected_suppressed = 0
+        if artifact.action == Action.FIX:
+            detected, detected_suppressed = filter_issues(
+                result.initial_issues or [],
+                result=result,
+                baseline=baseline,
+                root=artifact.workspace_root,
+            )
+        if not suppressed and not detected_suppressed:
             continue
         result.issues = retained
         result.issues_count = len(retained)
@@ -62,12 +72,6 @@ def apply_baseline(artifact: RunArtifact, baseline: FingerprintBaseline) -> None
         result.formatted_output = None
         result.output = None
         if artifact.action == Action.FIX:
-            detected, _ = filter_issues(
-                result.initial_issues or [],
-                result=result,
-                baseline=baseline,
-                root=artifact.workspace_root,
-            )
             result.initial_issues = detected
             before = len(detected)
             remaining = len(retained)
@@ -77,7 +81,7 @@ def apply_baseline(artifact: RunArtifact, baseline: FingerprintBaseline) -> None
             result.remaining_issues_count = remaining
         # A complete failure with parsed findings is a lint verdict. Failures
         # without findings never pass result_is_complete and remain failures.
-        result.success = not retained
+        result.success = result.success or not retained
     totals = aggregate_tool_results(artifact.tool_results, artifact.action)
     artifact.total_issues, artifact.total_fixed, artifact.total_remaining = totals
     artifact.exit_code = determine_exit_code(

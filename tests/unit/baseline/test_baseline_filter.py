@@ -201,6 +201,78 @@ def test_acknowledged_fixed_findings_are_not_reported_as_new_fixes(
     assert_that(artifact.success).is_true()
 
 
+@pytest.mark.parametrize("remaining", [0, 1])
+def test_unmatched_format_result_preserves_output_and_accounting(
+    tmp_path: Path,
+    dirty_result: ToolResult,
+    finding: RuffIssue,
+    remaining: int,
+) -> None:
+    """An unrelated baseline leaves the producer's measured format result intact."""
+    baseline = snapshot([dirty_result], root=tmp_path)
+    new = replace(finding, code="F999")
+    result = replace(
+        dirty_result,
+        success=remaining == 0,
+        issues=[new] if remaining else [],
+        issues_count=remaining,
+        initial_issues=[new, new],
+        initial_issues_count=2,
+        fixed_issues_count=2 - remaining,
+        remaining_issues_count=remaining,
+        output=f"Fixed {2 - remaining} issue(s)",
+        formatted_output="producer's formatted output",
+    )
+    expected = replace(result, baselined_count=0)
+    artifact = RunArtifact(
+        action=Action.FIX,
+        tool_results=[result],
+        workspace_root=tmp_path,
+        total_issues=remaining,
+        total_fixed=2 - remaining,
+        total_remaining=remaining,
+        exit_code=int(remaining > 0),
+    )
+
+    apply_baseline(artifact, baseline)
+
+    assert_that(result).is_equal_to(expected)
+    assert_that(artifact.total_fixed).is_equal_to(2 - remaining)
+    assert_that(artifact.total_remaining).is_equal_to(remaining)
+    assert_that(artifact.exit_code).is_equal_to(int(remaining > 0))
+
+
+def test_partial_filtering_preserves_successful_producer_verdict(
+    tmp_path: Path,
+    dirty_result: ToolResult,
+    finding: RuffIssue,
+) -> None:
+    """Retained findings still fail the check without flipping the tool's verdict."""
+    baseline = snapshot([dirty_result], root=tmp_path)
+    new = replace(finding, code="F999")
+    result = replace(
+        dirty_result,
+        success=True,
+        issues=[finding, new],
+        issues_count=2,
+    )
+    artifact = RunArtifact(
+        tool_results=[result],
+        workspace_root=tmp_path,
+        total_issues=2,
+        total_remaining=2,
+        exit_code=1,
+    )
+
+    apply_baseline(artifact, baseline)
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues).is_equal_to([new])
+    assert_that(result.baselined_count).is_equal_to(1)
+    assert_that(artifact.total_issues).is_equal_to(1)
+    assert_that(artifact.exit_code).is_equal_to(1)
+
+
 def test_failed_file_cannot_be_hidden_by_peer_findings_in_the_same_tool(
     workspace: Path,
 ) -> None:

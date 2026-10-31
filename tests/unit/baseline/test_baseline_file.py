@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from assertpy import assert_that
 
+from lintro.models.core.fingerprint_baseline import FingerprintBaseline
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.fingerprint_baseline import snapshot
 from lintro.utils.fingerprint_baseline_file import change_baseline, read_baseline
@@ -145,6 +146,37 @@ def test_failed_atomic_replace_keeps_old_file_and_cleans_temporary(
     with pytest.raises(OSError, match="disk unavailable"):
         change_baseline(path, lambda _: baseline)
     assert_that(path.read_bytes()).is_equal_to(original)
+    assert_that(sorted(p.name for p in tmp_path.iterdir())).is_equal_to(
+        ["baseline.json"],
+    )
+
+
+@pytest.mark.parametrize("fail_transform", [False, True])
+def test_missing_lock_does_not_mask_transaction_outcome(
+    tmp_path: Path,
+    dirty_result: ToolResult,
+    fail_transform: bool,
+) -> None:
+    """An externally removed lock preserves both successful writes and real errors."""
+    baseline = snapshot([dirty_result], root=tmp_path)
+    path = tmp_path / "baseline.json"
+    change_baseline(path, lambda _: baseline, create=True)
+    original = path.read_bytes()
+
+    def transform(previous: FingerprintBaseline | None) -> FingerprintBaseline:
+        path.with_name(path.name + ".lock").unlink()
+        if fail_transform:
+            raise ValueError("transaction rejected")
+        return baseline.model_copy(update={"entries": []})
+
+    if fail_transform:
+        with pytest.raises(ValueError, match="transaction rejected"):
+            change_baseline(path, transform)
+        assert_that(path.read_bytes()).is_equal_to(original)
+    else:
+        updated = change_baseline(path, transform)
+        assert_that(updated.entries).is_empty()
+        assert_that(read_baseline(path)).is_equal_to(updated)
     assert_that(sorted(p.name for p in tmp_path.iterdir())).is_equal_to(
         ["baseline.json"],
     )

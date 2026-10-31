@@ -20,6 +20,7 @@ from lintro.utils.fingerprint_baseline_file import (
     resolve_baseline_path,
 )
 from lintro.utils.tool_executor import build_run_context, execute_run
+from lintro.utils.tool_options import parse_tool_options
 
 if TYPE_CHECKING:
     from lintro.models.core.fingerprint_baseline import FingerprintBaseline
@@ -91,6 +92,12 @@ def _scan(
             "Baseline unchanged: scan failed, was incomplete, "
             "or had unknown inspection.",
         )
+    # Exact file discovery does not prove that user overrides ran every rule.
+    # Only original user options count; our internal Ruff discovery flag does not.
+    overridden_tools = parse_tool_options(tool_options)
+    for result in artifact.tool_results:
+        if result.name.lower() in overridden_tools:
+            result.inspected_paths = None
     return artifact
 
 
@@ -119,7 +126,8 @@ def _manage(
     """
     try:
         path = resolve_baseline_path(baseline, get_config(), default=True)
-        assert path is not None
+        if path is None:
+            raise ValueError("baseline path could not be resolved")
         if mode == "create":
             if path.exists() or path.is_symlink():
                 raise ValueError(f"baseline already exists: {path}")
@@ -200,15 +208,19 @@ _register_management("prune", "Remove proven fixed entries; add no findings.")
 def show(baseline: str | None) -> None:
     """Display per-tool baseline statistics without executing tools.
 
+    \u000c
+
     Args:
         baseline: Explicit destination overriding project configuration.
 
     Raises:
         click.ClickException: If the baseline is missing or invalid.
+        ValueError: If no destination can be resolved (wrapped below).
     """
     try:
         path = resolve_baseline_path(baseline, get_config(), default=True)
-        assert path is not None
+        if path is None:
+            raise ValueError("baseline path could not be resolved")
         loaded = read_baseline(path)
     except (OSError, ValueError, ConfigurationError) as exc:
         raise click.ClickException(str(exc)) from exc

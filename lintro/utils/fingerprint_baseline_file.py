@@ -73,7 +73,7 @@ def _writer_lock(path: Path) -> Iterator[None]:
         os.close(descriptor)
         yield
     finally:
-        lock.unlink()
+        lock.unlink(missing_ok=True)
 
 
 def change_baseline(
