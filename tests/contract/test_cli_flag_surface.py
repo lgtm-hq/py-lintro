@@ -19,6 +19,7 @@ from assertpy import assert_that
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers.cli_contract_check import (
     CliSurfaceReport,
+    VersionFloorResult,
     declared_cli_providers,
     probe_cli_surface_sync,
 )
@@ -28,14 +29,19 @@ from tests.contract.gating import unmet_precondition
 pytestmark = pytest.mark.contract_tier1
 
 
-def _require_surface(provider: AIProvider) -> CliSurfaceReport:
+def _require_surface(
+    provider: AIProvider,
+    *,
+    require_version: bool = False,
+) -> CliSurfaceReport:
     """Probe a provider's CLI, refusing to pass when the probe is meaningless.
 
     Args:
         provider: Provider whose CLI contract is under test.
+        require_version: Whether the assertion also needs version evidence.
 
     Returns:
-        A report whose binary was found and whose help text was readable.
+        A report with readable help and, when required, a known version.
     """
     report = probe_cli_surface_sync(provider=provider)
     if not report.binary_present:
@@ -48,6 +54,8 @@ def _require_surface(provider: AIProvider) -> CliSurfaceReport:
             f"{' '.join(report.contract.help_args)} did not exit cleanly, so its "
             "flag surface cannot be read",
         )
+    if require_version and report.version is None:
+        pytest.skip(f"{report.contract.binary}: version unreadable")
     return report
 
 
@@ -85,10 +93,10 @@ def test_installed_cli_meets_declared_version_floor(
     Args:
         cli_provider: Provider whose CLI contract is under test.
     """
-    report = _require_surface(cli_provider)
-    assert_that(report.meets_version_floor).described_as(
+    report = _require_surface(cli_provider, require_version=True)
+    assert_that(report.version_floor_result).described_as(
         f"installed binary is below the declared floor. {report.describe()}",
-    ).is_true()
+    ).is_equal_to(VersionFloorResult.COMPATIBLE)
 
 
 def test_installed_cli_has_no_contract_violations(
@@ -99,7 +107,7 @@ def test_installed_cli_has_no_contract_violations(
     Args:
         cli_provider: Provider whose CLI contract is under test.
     """
-    report = _require_surface(cli_provider)
+    report = _require_surface(cli_provider, require_version=True)
     assert_that(list(report.violations)).described_as(report.describe()).is_empty()
 
 
