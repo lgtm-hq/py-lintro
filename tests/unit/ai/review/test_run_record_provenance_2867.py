@@ -95,6 +95,24 @@ def test_a_record_with_provenance_but_no_state_is_not_legacy() -> None:
     assert_that(restored.identity.first_party).is_true()
 
 
+@pytest.mark.parametrize("total", [0, 15])
+def test_explicit_null_verification_reads_as_unreported(total: int) -> None:
+    """Null is missing evidence, even when no token usage was recorded (#3010)."""
+    restored = RunRecord.from_dict(
+        {
+            "round": 1,
+            "endpoint": "api.anthropic.com",
+            "model_verification": None,
+            "total": total,
+        },
+    )
+
+    assert_that(restored.identity.model_verification).is_equal_to(
+        ModelVerification.UNREPORTED.value,
+    )
+    assert_that(restored.to_dict()["model_verification"]).is_equal_to("unreported")
+
+
 @pytest.mark.parametrize("raw", ["bogus", 3, ["verified"]])
 def test_an_unrecognised_state_is_kept_visible_not_blanked(raw: object) -> None:
     """A corrupt state must not read as "no state", which reuse would accept."""
