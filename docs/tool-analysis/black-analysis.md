@@ -58,6 +58,15 @@ When Black is configured as a post-check in Lintro, Ruff focuses on linting by d
 to avoid double-formatting. See the Ruff analysis for details on the Ruff↔Black policy
 and how to override with `--tool-options`.
 
+Black also uses an optional Ruff E501 check to report long lines it cannot wrap. Missing
+Ruff adds a visible skip note while preserving Black's own verdict. An E501 execution or
+report failure fails the Black result; a timeout also sets `timed_out`. This includes
+invalid Ruff configuration (exit code 2), even when Black's own configuration is valid.
+
+During formatting, a failed initial E501 check stops the operation before Black writes
+changes. If the final E501 check is unavailable, earlier E501 findings are retained and
+only the measured reduction in Black formatting issues counts as fixed.
+
 ## Usage Comparison
 
 ### Core Black

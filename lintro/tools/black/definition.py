@@ -328,7 +328,7 @@ class BlackPlugin(BaseToolPlugin):
         count = len(all_issues)
         result_output = None if count == 0 else output
         if supplement.note:
-            result_output = "\n".join(filter(None, (output, supplement.note)))
+            result_output = "\n".join(filter(None, (output.rstrip(), supplement.note)))
 
         return ToolResult(
             name=self.definition.name,
@@ -342,6 +342,10 @@ class BlackPlugin(BaseToolPlugin):
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Format files using Black.
+
+        A failed initial E501 supplement aborts before formatting. If the final
+        supplement is unavailable, retain its earlier findings and credit only
+        the measured reduction in Black's own formatting issues.
 
         Args:
             paths: List of file or directory paths to format.
@@ -387,14 +391,14 @@ class BlackPlugin(BaseToolPlugin):
                     initial_count=0,
                     cwd=ctx.cwd,
                 )
-            # Parse the pre-fix ``--check`` output in applied context so the
-            # detected issues read as past-tense "Reformatted file" rather than
-            # the preview-tense "Would reformat file"; fix() applies the
-            # changes immediately below.
-            initial_issues = parse_black_output(output=check_output, applied=True)
             initial_supplement = self._line_length_result(
                 files=ctx.rel_files,
                 cwd=ctx.cwd,
+            )
+            # Use preview wording when the supplement aborts before any writes.
+            initial_issues = parse_black_output(
+                output=check_output,
+                applied=not initial_supplement.failed,
             )
             initial_issues = initial_issues + initial_supplement.issues
             initial_count = len(initial_issues)
@@ -403,7 +407,7 @@ class BlackPlugin(BaseToolPlugin):
                     name=self.definition.name,
                     success=False,
                     output="\n".join(
-                        filter(None, (check_output, initial_supplement.note)),
+                        filter(None, (check_output.rstrip(), initial_supplement.note)),
                     ),
                     issues_count=initial_count,
                     issues=initial_issues,
@@ -455,7 +459,12 @@ class BlackPlugin(BaseToolPlugin):
             cwd=ctx.cwd,
         )
 
-        all_remaining_issues = remaining_issues + supplement.issues
+        # A failed or skipped measurement cannot prove earlier E501 findings
+        # were fixed. Carry them forward so only measured Black fixes count.
+        line_length_issues = (
+            initial_supplement.issues if supplement.note else supplement.issues
+        )
+        all_remaining_issues = remaining_issues + line_length_issues
         remaining_count = len(all_remaining_issues)
 
         fixed_issues_parsed = parse_black_output(output=fix_output)

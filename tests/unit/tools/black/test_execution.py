@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess  # nosec B404 - subprocess results and exceptions only; no real processes
 from pathlib import Path
 from unittest.mock import patch
@@ -151,7 +152,12 @@ def test_check_surfaces_unmeasured_supplement(
 
     assert_that(result.success).is_false()
     assert_that(result.timed_out).is_equal_to(timed_out)
-    assert_that(result.output).contains("E501 supplement failed", reason, black_output)
+    assert_that(result.output).contains(
+        "E501 supplement failed",
+        reason,
+        black_output.rstrip(),
+    )
+    assert_that(result.output).does_not_contain("\n\nE501")
     assert_that(result.issues_count).is_equal_to(0 if black_clean else 1)
     assert_that(result.skipped).is_false()
 
@@ -199,7 +205,7 @@ def test_check_missing_ruff_preserves_black_verdict(
     assert_that(result.output).contains(
         "E501 supplement skipped",
         "Ruff not found",
-        output,
+        output.rstrip(),
     )
     assert_that(result.timed_out).is_false()
     assert_that(result.skipped).is_false()
@@ -270,6 +276,138 @@ def test_fix_retains_supplement_timeout(
     assert_that(result.fixed_issues_count).is_equal_to(
         None if stage == "initial" else 0,
     )
+
+
+@pytest.mark.parametrize(
+    "process,reason,timed_out",
+    [
+        (subprocess.TimeoutExpired(["ruff"], 30), "timed out after 30s", True),
+        (OSError("cannot execute Ruff"), "cannot execute Ruff", False),
+        (FileNotFoundError("ruff disappeared"), "ruff disappeared", False),
+        (
+            subprocess.CompletedProcess(["ruff"], 2, "[]", "invalid configuration"),
+            "invalid configuration",
+            False,
+        ),
+        (
+            subprocess.CompletedProcess(["ruff"], 0, "not json", ""),
+            "Invalid Ruff JSON report",
+            False,
+        ),
+        (
+            subprocess.CompletedProcess(["ruff"], 0, "", ""),
+            "Invalid Ruff JSON report",
+            False,
+        ),
+        (
+            subprocess.CompletedProcess(["ruff"], 0, "null", ""),
+            "Expected a Ruff JSON array",
+            False,
+        ),
+    ],
+    ids=["timeout", "os-error", "disappeared", "config", "bad-json", "empty", "null"],
+)
+@pytest.mark.parametrize("black_fixed", [False, True], ids=["e501-only", "black-fix"])
+def test_fix_retains_e501_when_final_supplement_fails(
+    black_plugin: BlackPlugin,
+    tmp_path: Path,
+    process: subprocess.CompletedProcess[str] | Exception,
+    reason: str,
+    timed_out: bool,
+    black_fixed: bool,
+) -> None:
+    """An unmeasured final E501 pass cannot erase or claim earlier E501 fixes.
+
+    Args:
+        black_plugin: Plugin with the version gate bypassed.
+        tmp_path: Directory for a Python file with a long string.
+        process: Final Ruff report or execution exception.
+        reason: Expected explanation of the failed measurement.
+        timed_out: Expected timeout flag.
+        black_fixed: Whether Black also fixed a formatting issue.
+    """
+    py_file = tmp_path / "module.py"
+    py_file.write_text("value = '" + "x" * 100 + "'\n")
+    initial_report = json.dumps(
+        [
+            {
+                "filename": str(py_file),
+                "location": {"row": 1, "column": 89},
+                "code": "E501",
+                "message": "Line too long (110 > 88)",
+            },
+        ],
+    )
+    with (
+        patch.object(
+            black_plugin,
+            "_run_subprocess",
+            side_effect=[
+                (not black_fixed, f"would reformat {py_file}\n" if black_fixed else ""),
+                (True, f"reformatted {py_file}\n" if black_fixed else ""),
+                (True, ""),
+            ],
+        ),
+        patch("shutil.which", return_value="/mock/ruff"),
+        patch(
+            "subprocess.run",
+            side_effect=[
+                subprocess.CompletedProcess(["ruff"], 1, initial_report, ""),
+                process,
+            ],
+        ),
+    ):
+        result = black_plugin.fix([str(py_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_equal_to(timed_out)
+    assert_that(result.initial_issues_count).is_equal_to(1 + int(black_fixed))
+    assert_that(result.fixed_issues_count).is_equal_to(int(black_fixed))
+    assert_that(result.remaining_issues_count).is_equal_to(1)
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.output).contains("E501 supplement failed", reason)
+    if not black_fixed:
+        assert_that(result.output).does_not_contain("Fixed")
+    assert result.issues is not None
+    retained = result.issues[-1]
+    assert_that(retained).has_file(str(py_file)).has_line(1).has_column(89)
+    assert_that(retained).has_code("E501").has_fixable(False)
+    assert_that(retained.message).contains("Line too long")
+
+
+def test_fix_initial_supplement_failure_reports_unapplied_changes(
+    black_plugin: BlackPlugin,
+    tmp_path: Path,
+) -> None:
+    """Aborting before formatting reports proposed changes without claiming writes.
+
+    Args:
+        black_plugin: Plugin with the version gate bypassed.
+        tmp_path: Directory for a file that needs formatting.
+    """
+    py_file = tmp_path / "module.py"
+    py_file.write_text("x=1\n")
+    with (
+        patch.object(
+            black_plugin,
+            "_run_subprocess",
+            return_value=(False, f"would reformat {py_file}\n"),
+        ),
+        patch("shutil.which", return_value="/mock/ruff"),
+        patch("subprocess.run", side_effect=OSError("cannot execute Ruff")),
+    ):
+        result = black_plugin.fix([str(py_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.output).contains(
+        f"would reformat {py_file}\nE501 supplement failed",
+    )
+    assert_that(result.output).does_not_contain("Reformatted", "\n\nE501")
+    assert result.issues is not None
+    assert_that(result.issues).is_length(1)
+    assert_that(result.issues[0].message).is_equal_to("Would reformat file")
+    assert_that(py_file.read_text()).is_equal_to("x=1\n")
 
 
 @pytest.mark.parametrize("remaining", [True, False], ids=["unfixed", "fixed"])
