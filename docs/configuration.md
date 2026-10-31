@@ -42,8 +42,8 @@ Omitting a section uses its defaults. When present, each of `enforce`, `executio
 Use an empty mapping such as `ai: {}` for default settings. Explicit nulls (`ai: null`,
 `ai: ~`, or a bare `ai:`), lists, and scalar section values raise `ConfigurationError`.
 This applies to both project and global config, and to `[tool.lintro]` sections in
-`pyproject.toml` (TOML has no null value). Each source is checked before merging, so
-a project mapping cannot hide an invalid global section.
+`pyproject.toml` (TOML has no null value). Each source is checked before merging, so a
+project mapping cannot hide an invalid global section.
 
 A YAML config document must also be a mapping. A top-level list, scalar, null, or an
 empty or comment-only file raises `ConfigurationError` instead of silently loading
@@ -51,9 +51,9 @@ defaults or falling back to `pyproject.toml`. An empty mapping document (`{}`) r
 the existing fallback behavior.
 
 **Migration:** Empty and comment-only YAML files that previously loaded defaults now
-raise an error. Remove an unused config file or replace its contents with `{}` to
-keep the fallback behavior. Replace bare section keys such as `ai:` with `ai: {}`
-when default section settings are intended.
+raise an error. Remove an unused config file or replace its contents with `{}` to keep
+the fallback behavior. Replace bare section keys such as `ai:` with `ai: {}` when
+default section settings are intended.
 
 ### Tiered Configuration Flow
 
