@@ -157,8 +157,6 @@ KNOWN_FAIL_OPEN: dict[tuple[str, str], KnownFailOpen] = {
     ("html_validate", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
     ("oxlint", "case2-rc0"): KnownFailOpen("#3005 null diagnostics read as clean"),
     ("ruff", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
-    ("semgrep", "case2-rc0"): KnownFailOpen("#3004 null results read as clean"),
-    ("semgrep", "case2-rc1"): KnownFailOpen("#3004 null results read as clean"),
     ("shellcheck", "case2-rc0"): KnownFailOpen(
         "#3025 null comments crash the parser",
         TypeError,

@@ -53,6 +53,35 @@ SEMGREP_OUTPUT_FORMAT: str = "json"
 SEMGREP_DEFAULT_CONFIG: str = "auto"
 
 
+def _has_unclosed_array(prefix: str) -> bool:
+    """Check for an array still open before the report's first brace.
+
+    Args:
+        prefix: Text preceding the report object.
+
+    Returns:
+        Whether an opening bracket remains outside quoted array strings.
+    """
+    depth = 0
+    in_string = False
+    escaped = False
+    for char in prefix:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"' and depth:
+            in_string = True
+        elif char == "[":
+            depth += 1
+        elif char == "]" and depth:
+            depth -= 1
+    return depth > 0
+
+
 def _extract_semgrep_json(raw_text: str) -> dict[str, Any]:
     """Extract Semgrep's JSON object from mixed stdout/stderr text.
 
@@ -68,7 +97,7 @@ def _extract_semgrep_json(raw_text: str) -> dict[str, Any]:
 
     Raises:
         json.JSONDecodeError: If JSON cannot be parsed.
-        ValueError: If no JSON object boundaries are found.
+        ValueError: If no JSON object boundaries are found or an array wraps it.
     """
     if not raw_text or not raw_text.strip():
         raise json.JSONDecodeError("Empty output", raw_text or "", 0)
@@ -85,9 +114,30 @@ def _extract_semgrep_json(raw_text: str) -> dict[str, Any]:
     if start == -1 or end == -1 or end < start:
         raise ValueError("Could not locate JSON object in Semgrep output")
 
+    # Balanced status prefixes are allowed; complete or truncated array wrappers
+    # leave an opening bracket before the object and must not be sliced away.
+    if _has_unclosed_array(text[:start]):
+        raise ValueError("Semgrep output must be a JSON object, got an array")
+
     json_str: str = text[start : end + 1]
     parsed: dict[str, Any] = json.loads(json_str)
     return parsed
+
+
+def _extract_semgrep_errors(data: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
+    """Extract error objects and count malformed containers or entries.
+
+    Args:
+        data: Parsed Semgrep report.
+
+    Returns:
+        Valid error objects and the number of error parse failures.
+    """
+    raw_errors = data.get("errors", [])
+    if not isinstance(raw_errors, list):
+        return [], 1
+    errors = [error for error in raw_errors if isinstance(error, dict)]
+    return errors, len(raw_errors) - len(errors)
 
 
 @register_tool
@@ -294,16 +344,18 @@ class SemgrepPlugin(BaseToolPlugin):
         logger.debug(f"[semgrep] Running: {' '.join(cmd[:10])}... (cwd={ctx.cwd})")
 
         output: str
+        returncode: int | None = None
         execution_failure: bool = False
         try:
-            # Note: semgrep returns non-zero exit code when findings exist,
-            # so we intentionally ignore the success return value
-            _, combined = self._run_subprocess(
+            proc = self._run_subprocess_result(
                 cmd=cmd,
                 timeout=ctx.timeout,
                 cwd=ctx.cwd,
             )
-            output = (combined or "").strip()
+            # Findings normally exit 0; accept exit 1 with findings for compatibility.
+            returncode = proc.returncode
+            execution_failure = returncode not in (0, 1)
+            output = proc.output.strip()
         except subprocess.TimeoutExpired:
             timeout_msg = (
                 f"Semgrep execution timed out ({ctx.timeout}s limit exceeded).\n\n"
@@ -337,11 +389,18 @@ class SemgrepPlugin(BaseToolPlugin):
             json_output = json.dumps(semgrep_data)
             issues = parse_semgrep_output(output=json_output)
             issues_count = len(issues)
+            errors, error_parse_failures = _extract_semgrep_errors(semgrep_data)
+            # The parser emits one issue per usable result; account for every drop.
+            parse_failures_count = (
+                len(semgrep_data["results"]) - issues_count + error_parse_failures
+            )
+            execution_failure = execution_failure or (
+                returncode == 1 and issues_count == 0
+            )
 
             # Check for errors in the response
             # Partial parsing errors (e.g., TypeScript 4.9+ 'satisfies' keyword)
             # are warnings, not fatal errors. Only fail on actual errors.
-            errors = semgrep_data.get("errors", [])
             fatal_errors = [e for e in errors if e.get("level", "error") == "error"]
 
             def _is_partial_parsing(err: dict[str, Any]) -> bool:
@@ -369,15 +428,17 @@ class SemgrepPlugin(BaseToolPlugin):
                     len(parsing_warnings),
                 )
 
-            execution_success = len(fatal_errors) == 0 and not execution_failure
-            has_fatal_errors = execution_failure or len(fatal_errors) > 0
+            execution_success = not (
+                fatal_errors or execution_failure or parse_failures_count
+            )
 
             return ToolResult(
                 name=self.definition.name,
                 success=execution_success,
-                output=output if has_fatal_errors else None,
+                output=output if not execution_success else None,
                 issues_count=issues_count,
                 issues=issues,
+                parse_failures_count=parse_failures_count or None,
             )
 
         except (json.JSONDecodeError, ValueError) as e:
@@ -387,6 +448,7 @@ class SemgrepPlugin(BaseToolPlugin):
                 success=False,
                 output=(output or f"Failed to parse semgrep output: {str(e)}"),
                 issues_count=0,
+                parse_failures_count=1,
             )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
