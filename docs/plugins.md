@@ -334,10 +334,12 @@ version stays at **2**. Existing `ToolResult(skipped=True, skip_reason="not inst
 and `ToolResult(timed_out=True, success=False, output="partial output")` constructors
 still work. For skipped, no-files and timed-out results, `inspected_files=None` defaults
 to `False`; skipped results retain the historical normalization to `success=True`,
-including when the default `False` is supplied explicitly. An explicit
-`inspected_files=True`, conflicting execution flags or invalid accounting still raises
-`ValueError`. A no-files result requires `success=True`; a timeout requires
-`success=False` and may retain partial findings and output.
+including when the default `False` is supplied explicitly. Construction now rejects
+explicit `inspected_files=True` on inactive results, conflicting execution flags and
+invalid accounting with `ValueError`, rather than waiting until `.outcome` is read. For
+example, a no-files result requires `success=True`, and a skipped result cannot carry
+nonzero counts. A timeout requires `success=False` and may retain partial findings and
+output.
 
 Construct complete results with `ToolResult.from_outcome()`. Use `with_outcome()` to
 replace execution or fix accounting, and `dataclasses.replace()` to update envelope

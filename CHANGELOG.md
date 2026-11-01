@@ -18,7 +18,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   defaults. **Breaking for plugins that assign result fields after construction**:
   migrate to `from_outcome`, `with_outcome` or `dataclasses.replace`; see the
   [guide](docs/plugins.md#immutable-toolresult-migration-api-v2). Mutable payloads such
-  as metadata remain shallowly shared.
+  as metadata remain shallowly shared. **Construction now rejects conflicting execution
+  flags and invalid accounting** with `ValueError`, rather than deferring rejection
+  until `.outcome` is read (for example, no-files results with `success=False` or
+  skipped results carrying nonzero counts).
 
 ### Deprecated
 
