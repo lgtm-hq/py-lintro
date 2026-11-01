@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 
 from lintro.config.deps_config import DepsConfig
 from lintro.config.enforce_config import EnforceConfig
@@ -67,6 +67,7 @@ class LintroConfig(BaseModel):
         output: Console output presentation settings (e.g. ASCII art toggle).
         watch: Watch-mode (``lintro watch``) defaults.
         deps: Dependency version policy configuration.
+        baseline: Optional fingerprint baseline path, relative to project config.
         config_path: Path to the project config file (set by loader).
         global_config_path: Path to the user-level global config file, if one
             was found and merged (set by loader).
@@ -86,6 +87,7 @@ class LintroConfig(BaseModel):
     output: OutputConfig = Field(default_factory=OutputConfig)
     watch: WatchConfig = Field(default_factory=WatchConfig)
     deps: DepsConfig = Field(default_factory=DepsConfig)
+    baseline: StrictStr | None = Field(default=None, min_length=1)
     config_path: str | None = None
     global_config_path: str | None = None
     global_contributed_keys: list[str] = Field(default_factory=list)

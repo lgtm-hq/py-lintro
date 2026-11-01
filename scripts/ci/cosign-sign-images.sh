@@ -16,18 +16,26 @@ set -euo pipefail
 # retry ONLY that token-fetch failure class here with bounded exponential
 # backoff (#1646). A genuine signing rejection or any non-token-fetch
 # error stays fatal — it must never be retried away.
+#
+# Rekor can reject an equivalent log entry (#3114). That response alone is
+# not evidence of a usable signature: recover only if cosign verifies an
+# existing signature for the exact digest under the documented trust policy
+# AND the current workflow's exact identity.
 
 show_help() {
 	cat <<'EOF'
 Sign image digests with Cosign (keyless).
+Requires Bash 4 or newer.
 
 Usage:
   IMAGES=<refs> scripts/ci/cosign-sign-images.sh
 
 Environment:
-  IMAGES                    Whitespace/newline-separated image refs pinned by
+  IMAGES                    Newline-separated image refs pinned by
                             digest, e.g. ghcr.io/lgtm-hq/py-lintro@sha256:...
                             (required)
+  GITHUB_WORKFLOW_REF        GitHub workflow path and ref (set by Actions);
+                            required for equivalent-entry recovery.
   COSIGN_SIGN_MAX_ATTEMPTS  Max attempts per ref when the failure is a
                             transient OIDC token-fetch flake (default: 4)
   COSIGN_SIGN_BASE_DELAY    Base backoff in seconds; delay doubles each retry
@@ -37,6 +45,10 @@ Environment:
 
 Only the ambient-OIDC / ID-token-fetch failure class is retried. A genuine
 signing rejection, a policy failure, or a non-digest ref fails immediately.
+An equivalent-entry Rekor 409 succeeds only if an existing signature verifies
+for the exact digest with the issuer and trusted identities from docs/docker.md
+and the exact current workflow identity from a validated GITHUB_WORKFLOW_REF.
+Repeated identical refs are signed once; different repositories stay separate.
 EOF
 }
 
@@ -95,6 +107,34 @@ is_transient_oidc_error() {
 	return 1
 }
 
+# Match the recorded Rekor equivalent-entry rejection, not arbitrary registry
+# conflicts or an HTTP status alone. Verification remains mandatory afterwards.
+is_equivalent_rekor_entry_error() {
+	local output="$1"
+	grep -qF -- '[POST /api/v1/log/entries][409] createLogEntryConflict' <<<"$output" &&
+		grep -qF -- 'an equivalent entry already exists in the transparency log' <<<"$output"
+}
+
+# The published policy accepts build and promotion signatures. Recovery needs
+# this caller's signature: an earlier build signature cannot prove it persisted.
+verify_current_workflow_signature() {
+	local ref="$1"
+	local workflow_ref="${GITHUB_WORKFLOW_REF:-}"
+	local identity="https://github.com/${workflow_ref}"
+	# Keep this trust policy in sync with docs/docker.md and
+	# docs/release-validation.md. Validate membership before exact verification.
+	local trusted_identity_regexp='^https://github\.com/lgtm-hq/(py-lintro/\.github/workflows/(docker-ci|publish-pypi-on-tag)\.yml|lgtm-ci/\.github/workflows/reusable-docker-(build|multiplatform)\.yml)@'
+	if ! [[ "$identity" =~ $trusted_identity_regexp ]] ||
+		! [[ "$workflow_ref" =~ ^[^[:space:]@]+@(refs/(heads|tags)/[^[:space:]]+)$ ]] ||
+		! git check-ref-format "${BASH_REMATCH[1]}" >/dev/null 2>&1; then
+		echo "Recovery requires a valid, trusted GITHUB_WORKFLOW_REF; failing." >&2
+		return 1
+	fi
+	cosign verify --new-bundle-format "$ref" \
+		--certificate-identity "$identity" \
+		--certificate-oidc-issuer https://token.actions.githubusercontent.com
+}
+
 # sign_ref_with_retry <ref>
 # Sign a single digest ref, retrying only the transient OIDC token-fetch
 # flake with exponential backoff. Exits non-zero (fatal) on any other
@@ -119,6 +159,16 @@ sign_ref_with_retry() {
 
 		if [[ "$status" -eq 0 ]]; then
 			return 0
+		fi
+
+		if is_equivalent_rekor_entry_error "$output"; then
+			echo "Rekor equivalent-entry conflict for ${ref}; verifying an existing signature." >&2
+			if verify_current_workflow_signature "$ref"; then
+				echo "Verified existing current-workflow signature for ${ref}"
+				return 0
+			fi
+			echo "Existing signature verification failed for ${ref}; failing." >&2
+			return "$status"
 		fi
 
 		if ! is_transient_oidc_error "$output"; then
@@ -146,13 +196,18 @@ sign_ref_with_retry() {
 }
 
 refs=()
+declare -A seen_refs=()
 while IFS= read -r ref; do
 	[[ -z "$ref" ]] && continue
-	if [[ "$ref" != *@sha256:* ]]; then
+	if ! [[ "$ref" =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]]; then
 		echo "Refusing to sign non-digest ref: ${ref}" >&2
 		echo "(signatures must bind to a digest, not a floating tag)" >&2
 		exit 2
 	fi
+	# Signatures are stored per repository: deduplicate the complete immutable
+	# ref, never the digest alone (two repositories may contain identical bytes).
+	[[ -n "${seen_refs[$ref]:-}" ]] && continue
+	seen_refs["$ref"]=1
 	refs+=("$ref")
 done <<<"$images"
 

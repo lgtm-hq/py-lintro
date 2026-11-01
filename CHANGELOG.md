@@ -11,6 +11,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **core**: add opt-in finding fingerprint baselines with
+  `baseline create|update|prune`, `--baseline`, and the `baseline:` configuration key
+  (#438).
+
 ### Changed
 
 - **BREAKING (tools/JSON)**: missing tools now report `status: unavailable` with
@@ -35,7 +39,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **core**: fail closed on empty Ruff reports and unexplained nonzero per-file check
+  exits, including runs without fingerprint baselines (#438).
+
 ### Security
+
+## [0.175.5] - 2026-11-01
+
+### Fixed
+
+- **parsers**: fail closed on invalid primary report containers (#3123) (217fe66)
+
+## [0.175.4] - 2026-11-01
+
+### Fixed
+
+- **ci**: restore source-labelled main image publication (#2995) (d879af3)
 
 ## [0.175.3] - 2026-11-01
 

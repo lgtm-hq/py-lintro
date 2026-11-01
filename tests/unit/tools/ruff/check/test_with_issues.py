@@ -10,6 +10,7 @@ from assertpy import assert_that
 from lintro.parsers.ruff.ruff_format_issue import RuffFormatIssue
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.tools.ruff.check import execute_ruff_check
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 
 def test_execute_ruff_check_with_lint_issues_returns_failure(
@@ -34,8 +35,8 @@ def test_execute_ruff_check_with_lint_issues_returns_failure(
 
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
-            return_value=(False, '[{"code": "F401"}]'),
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+            return_value=subprocess_result(False, '[{"code": "F401"}]'),
         ),
         patch(
             "lintro.tools.ruff.check.parse_ruff_output_with_stats",
@@ -68,8 +69,8 @@ def test_execute_ruff_check_with_multiple_lint_issues(
 
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
-            return_value=(False, "[]"),
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+            return_value=subprocess_result(False, "[]"),
         ),
         patch(
             "lintro.tools.ruff.check.parse_ruff_output_with_stats",
@@ -95,8 +96,8 @@ def test_execute_ruff_check_with_format_issues_returns_failure(
 
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
-            return_value=(True, ""),
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+            return_value=subprocess_result(True, ""),
         ),
         patch(
             "lintro.tools.ruff.check.parse_ruff_output_with_stats",
@@ -131,8 +132,8 @@ def test_execute_ruff_check_combines_lint_and_format_issues(
 
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
-            return_value=(False, "[]"),
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+            return_value=subprocess_result(False, "[]"),
         ),
         patch(
             "lintro.tools.ruff.check.parse_ruff_output_with_stats",

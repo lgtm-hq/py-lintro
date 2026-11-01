@@ -176,6 +176,10 @@ def serialize_tool_result(
         data["unavailable_reason"] = execution.reason
     if result.parse_failures_count is not None:
         data["parse_failures_count"] = result.parse_failures_count
+    if result.baselined_count is not None:
+        data["baselined_count"] = result.baselined_count
+    if result.execution_failed:
+        data["execution_failed"] = True
     if action == Action.FIX:
         # These keys belong to every FIX row, including check-only tools and
         # legacy results with no fix measurements.
@@ -273,6 +277,10 @@ def create_json_output(
     }
     # Additive: include the severity tallies under summary when supplied so
     # the existing schema keys remain untouched.
+    if any(result.baselined_count is not None for result in results):
+        json_data["summary"]["total_baselined"] = sum(
+            result.baselined_count or 0 for result in results
+        )
     if severity_counts is not None:
         json_data["summary"]["severity_counts"] = severity_counts.to_dict()
     if severity_delta is not None:

@@ -112,6 +112,89 @@ def test_construction_with_metadata_keyword() -> None:
     assert_that(result.metadata).is_equal_to({"fixed_count": 2})
 
 
+@pytest.mark.parametrize("residual_unknown", [False, True])
+def test_api_v2_fully_positional_constructor_preserves_fields(
+    residual_unknown: bool,
+) -> None:
+    """Every positional argument from API v2 keeps its original meaning.
+
+    Args:
+        residual_unknown: Whether fix accounting was left unmeasured.
+    """
+    issue = BaseIssue(file="a.py", line=1, message="finding")
+    reason = "verification incomplete" if residual_unknown else None
+    result = ToolResult(
+        "plugin",
+        False,
+        "native output",
+        1,
+        "formatted output",
+        [issue],
+        2,
+        None,
+        None,
+        (issue,),
+        {"passed": 2},
+        {"fixed_count": 1},
+        "/repo",
+        False,
+        False,
+        None,
+        False,
+        3,
+        1.25,
+        residual_unknown,
+        reason,
+        Cap.FIX,
+        True,
+    )
+
+    assert_that(result.name).is_equal_to("plugin")
+    assert_that(result.issues).is_equal_to([issue])
+    assert_that(result.metadata).is_equal_to({"fixed_count": 1})
+    assert_that(result.parse_failures_count).is_equal_to(3)
+    assert_that(result.duration_seconds).is_equal_to(1.25)
+    assert_that(result.residual_unknown).is_equal_to(residual_unknown)
+    assert_that(result.residual_unknown_reason).is_equal_to(reason)
+    assert_that(result.capability).is_equal_to(Cap.FIX)
+    assert_that(result.inspected_files).is_true()
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.findings_complete).is_false()
+
+
+def test_api_v2_match_args_prefix_is_preserved() -> None:
+    """Positional patterns retain the field order published on origin/main."""
+    legacy_fields = (
+        "name",
+        "success",
+        "output",
+        "issues_count",
+        "formatted_output",
+        "issues",
+        "initial_issues_count",
+        "fixed_issues_count",
+        "remaining_issues_count",
+        "initial_issues",
+        "pytest_summary",
+        "metadata",
+        "cwd",
+        "no_files",
+        "skipped",
+        "skip_reason",
+        "timed_out",
+        "parse_failures_count",
+        "duration_seconds",
+        "residual_unknown",
+        "residual_unknown_reason",
+        "capability",
+        "inspected_files",
+    )
+
+    assert_that(ToolResult.__match_args__[: len(legacy_fields)]).is_equal_to(
+        legacy_fields,
+    )
+
+
 def test_removed_alias_keyword_is_a_type_error() -> None:
     """The removed ``ai_metadata`` keyword is rejected outright."""
     assert_that(ToolResult).raises(TypeError).when_called_with(

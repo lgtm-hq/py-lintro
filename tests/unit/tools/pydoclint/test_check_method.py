@@ -9,6 +9,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.tools.pydoclint.definition import PydoclintPlugin
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 
 def test_check_with_mocked_subprocess_success(
@@ -30,8 +31,8 @@ def test_check_with_mocked_subprocess_success(
     ):
         with patch.object(
             pydoclint_plugin,
-            "_run_subprocess",
-            return_value=(True, ""),
+            "_run_subprocess_result",
+            return_value=subprocess_result(True, ""),
         ):
             result = pydoclint_plugin.check([str(test_file)], {})
 
@@ -64,8 +65,8 @@ def test_check_with_mocked_subprocess_issues(
     ):
         with patch.object(
             pydoclint_plugin,
-            "_run_subprocess",
-            return_value=(False, pydoclint_output),
+            "_run_subprocess_result",
+            return_value=subprocess_result(False, pydoclint_output),
         ):
             result = pydoclint_plugin.check([str(test_file)], {})
 
@@ -92,7 +93,7 @@ def test_check_with_timeout(
     ):
         with patch.object(
             pydoclint_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=subprocess.TimeoutExpired(cmd=["pydoclint"], timeout=30),
         ):
             result = pydoclint_plugin.check([str(test_file)], {})

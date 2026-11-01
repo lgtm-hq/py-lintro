@@ -16,6 +16,9 @@ from assertpy import assert_that
 from lintro.enums.tool_name import ToolName
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import BaseToolPlugin
+from tests.unit.tools.subprocess_helpers import (
+    subprocess_result as native_subprocess_result,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -199,7 +202,11 @@ def test_check_success_no_issues(
 
     with (
         patch.object(plugin, "_prepare_execution", return_value=ctx),
-        patch.object(plugin, "_run_subprocess", return_value=subprocess_result),
+        patch.object(
+            plugin,
+            "_run_subprocess_result",
+            return_value=native_subprocess_result(*subprocess_result),
+        ),
         patch.object(
             plugin,
             "_get_executable_command",
@@ -262,7 +269,11 @@ def test_check_failure_with_issues(
 
     with (
         patch.object(plugin, "_prepare_execution", return_value=ctx),
-        patch.object(plugin, "_run_subprocess", return_value=subprocess_result),
+        patch.object(
+            plugin,
+            "_run_subprocess_result",
+            return_value=native_subprocess_result(*subprocess_result),
+        ),
         patch.object(
             plugin,
             "_get_executable_command",
@@ -345,7 +356,7 @@ def test_check_timeout_handling(
         patch.object(plugin, "_prepare_execution", return_value=ctx),
         patch.object(
             plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=subprocess.TimeoutExpired(cmd=executable_cmd, timeout=30),
         ),
         patch.object(plugin, "_get_executable_command", return_value=executable_cmd),

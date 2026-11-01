@@ -8,8 +8,10 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.tools.shfmt.definition import ShfmtPlugin
 from tests.test_samples_helpers import copy_sample
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 if TYPE_CHECKING:
     pass
@@ -45,8 +47,8 @@ def test_check_with_mocked_subprocess_success(
     ):
         with patch.object(
             shfmt_plugin,
-            "_run_subprocess",
-            return_value=(True, ""),
+            "_run_subprocess_result",
+            return_value=subprocess_result(True, ""),
         ):
             result = shfmt_plugin.check([str(test_file)], {})
 
@@ -88,8 +90,8 @@ def test_check_with_mocked_subprocess_issues(
     ):
         with patch.object(
             shfmt_plugin,
-            "_run_subprocess",
-            return_value=(False, shfmt_diff_output),
+            "_run_subprocess_result",
+            return_value=subprocess_result(False, shfmt_diff_output),
         ):
             result = shfmt_plugin.check([str(test_file)], {})
 
@@ -156,13 +158,15 @@ def test_fix_with_mocked_subprocess_success(
         cmd: list[str],
         timeout: int,
         cwd: str | None = None,
-    ) -> tuple[bool, str]:
+        *args: object,
+    ) -> SubprocessResult:
         """Mock subprocess that returns diff on check, success on fix.
 
         Args:
             cmd: Command list.
             timeout: Timeout in seconds.
             cwd: Working directory.
+            *args: Remaining settings supplied by the legacy subprocess wrapper.
 
         Returns:
             Tuple of (success, output).
@@ -171,9 +175,9 @@ def test_fix_with_mocked_subprocess_success(
         call_count += 1
         # First call is check with -d flag
         if "-d" in cmd:
-            return (False, shfmt_diff_output)
+            return subprocess_result(False, shfmt_diff_output)
         # Second call is fix with -w flag
-        return (True, "")
+        return subprocess_result(True, "")
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
@@ -181,7 +185,7 @@ def test_fix_with_mocked_subprocess_success(
     ):
         with patch.object(
             shfmt_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=mock_run_subprocess,
         ):
             result = shfmt_plugin.fix([str(test_file)], {})
@@ -217,8 +221,8 @@ def test_fix_with_nothing_to_fix(
     ):
         with patch.object(
             shfmt_plugin,
-            "_run_subprocess",
-            return_value=(True, ""),
+            "_run_subprocess_result",
+            return_value=subprocess_result(True, ""),
         ):
             result = shfmt_plugin.fix([str(test_file)], {})
 

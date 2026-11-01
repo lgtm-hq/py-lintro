@@ -11,6 +11,7 @@ from assertpy import assert_that
 
 from lintro.enums.tool_name import ToolName
 from lintro.tools.ruff.check import execute_ruff_check
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 if TYPE_CHECKING:
     from lintro.tools.ruff.definition import RuffPlugin
@@ -26,8 +27,8 @@ def test_ruff_parse_warning_names_rejected_records(
     """A zero-exit rejected report is diagnosed as a parse failure."""
     ruff_plugin.options["format_check"] = False
     with patch(
-        "lintro.tools.ruff.check.run_subprocess_with_timeout",
-        return_value=(True, output),
+        "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+        return_value=subprocess_result(True, output),
     ):
         result = execute_ruff_check(ruff_plugin, [temp_python_file])
 
@@ -63,8 +64,8 @@ def test_ruff_check_counts_rejected_records(
     """Malformed records are counted even when the subprocess exits zero."""
     ruff_plugin.options["format_check"] = False
     with patch(
-        "lintro.tools.ruff.check.run_subprocess_with_timeout",
-        return_value=(success, output),
+        "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+        return_value=subprocess_result(success, output),
     ):
         result = execute_ruff_check(ruff_plugin, [temp_python_file])
 
@@ -81,9 +82,9 @@ def test_ruff_parse_failure_survives_format_timeout(
     """A later formatter timeout retains the rejected lint record count."""
     ruff_plugin.options["format_check"] = True
     with patch(
-        "lintro.tools.ruff.check.run_subprocess_with_timeout",
+        "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
         side_effect=[
-            (True, "[{}]"),
+            subprocess_result(True, "[{}]"),
             subprocess.TimeoutExpired(cmd=["ruff", "format"], timeout=30),
         ],
     ):
@@ -110,11 +111,16 @@ def test_execute_ruff_check_with_real_plugin_no_files(
         assert_that(result.output).is_equal_to("No files to check.")
 
 
-@pytest.mark.parametrize("output", ["", "[]"])
+@pytest.mark.parametrize(
+    ("output", "expected_success", "expected_failures"),
+    [("", False, 1), ("[]", True, 0)],
+)
 def test_execute_ruff_check_with_real_plugin(
     ruff_plugin: RuffPlugin,
     temp_python_file: str,
     output: str,
+    expected_success: bool,
+    expected_failures: int,
 ) -> None:
     """Execute with real plugin and temp file.
 
@@ -122,17 +128,19 @@ def test_execute_ruff_check_with_real_plugin(
         ruff_plugin: RuffPlugin instance for testing.
         temp_python_file: Temporary Python file for testing.
         output: Empty lint report from Ruff.
+        expected_success: Whether a native JSON array was received.
+        expected_failures: Number of malformed report envelopes.
     """
     with (
         patch.object(ruff_plugin, "_verify_tool_version", return_value=None),
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
-            return_value=(True, output),
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+            return_value=subprocess_result(True, output),
         ),
     ):
         result = execute_ruff_check(ruff_plugin, [temp_python_file])
 
-        assert_that(result.success).is_true()
+        assert_that(result.success).is_equal_to(expected_success)
         assert_that(result.name).is_equal_to(ToolName.RUFF)
-        assert_that(result.parse_failures_count).is_zero()
+        assert_that(result.parse_failures_count).is_equal_to(expected_failures)
         assert_that(result.issues_count).is_zero()

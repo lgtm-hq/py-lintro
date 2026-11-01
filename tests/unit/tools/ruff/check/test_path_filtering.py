@@ -14,13 +14,15 @@ from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
 
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.tools.ruff.check import execute_ruff_check
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 
 def _record_ruff_invocations(
     commands: list[list[str]],
     working_dirs: list[str | None],
-) -> Callable[..., tuple[bool, str]]:
+) -> Callable[..., SubprocessResult]:
     """Build a plain stand-in for the timeout-aware subprocess runner.
 
     Args:
@@ -31,7 +33,7 @@ def _record_ruff_invocations(
         A callable recording each invocation and reporting a clean ruff run.
     """
 
-    def fake_run(**kwargs: object) -> tuple[bool, str]:
+    def fake_run(**kwargs: object) -> SubprocessResult:
         """Record one ruff invocation and report no findings.
 
         Args:
@@ -42,7 +44,7 @@ def _record_ruff_invocations(
         """
         commands.append(list(cast("list[str]", kwargs["cmd"])))
         working_dirs.append(cast("str | None", kwargs.get("cwd")))
-        return (True, "[]")
+        return subprocess_result(True, "[]")
 
     return fake_run
 
@@ -86,7 +88,7 @@ def test_execute_ruff_check_delegates_discovery_to_prepare_execution(
 
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
             side_effect=_record_ruff_invocations(commands, working_dirs),
         ),
         patch(
@@ -128,7 +130,7 @@ def test_execute_ruff_check_converts_paths_to_relative(
 
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
             side_effect=_record_ruff_invocations(commands, working_dirs),
         ),
         patch(
@@ -163,8 +165,8 @@ def test_execute_ruff_check_handles_multiple_directories(
 
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
-            return_value=(True, "[]"),
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+            return_value=subprocess_result(True, "[]"),
         ),
         patch(
             "lintro.tools.ruff.check.parse_ruff_output_with_stats",
@@ -196,7 +198,7 @@ def test_execute_ruff_check_uses_absolute_paths_when_no_cwd(
 
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
             side_effect=_record_ruff_invocations(commands, working_dirs),
         ),
         patch(

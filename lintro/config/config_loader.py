@@ -1059,6 +1059,7 @@ def _pyproject_lintro_catalog() -> _PyprojectLintroCatalog:
         | externally_handled_sections
         | {
             "ai",
+            "baseline",
             "defaults",
             "deps",
             "output",
@@ -1208,6 +1209,8 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         elif key_lower == ConfigKey.VERSIONS.value.lower():
             # Skip versions (handled separately)
             pass
+        elif key_lower == "baseline":
+            result["baseline"] = value
         elif key_lower in ("defaults", "ai", "review", "output", "watch", "deps"):
             # Preserve invalid values for the shared section mapping check.
             result[key_lower] = value
@@ -1463,6 +1466,7 @@ def build_config_from_dict(
         output=output_config,
         watch=watch_config,
         deps=deps_config,
+        baseline=data.get("baseline"),
         config_path=resolved_path,
     )
 

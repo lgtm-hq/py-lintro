@@ -582,6 +582,7 @@ def test_invalid_explicit_outcomes_cannot_be_constructed(
         {"timed_out": True, "inspected_files": True},
         {"skipped": 1, "skip_reason": "missing", "success": True},
         {"success": 1},
+        {"execution_failed": True, "success": True},
         {"residual_unknown": "unknown", "residual_unknown_reason": "failed"},
         {"residual_unknown": True},
         {"residual_unknown_reason": "orphan reason"},

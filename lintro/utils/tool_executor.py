@@ -823,6 +823,7 @@ def run_lint_tools_simple(
     on_tool_result: Callable[[ToolResult], None] | None = None,
     render_summary: bool = True,
     profile: bool = False,
+    baseline: str | None = None,
 ) -> int:
     """Run tools and render their output, returning the process exit code.
 
@@ -865,6 +866,7 @@ def run_lint_tools_simple(
         render_summary: Whether to render the normal final report and summary.
         profile: When True, render a per-tool performance profile after the run
             and include the profile payload in JSON output.
+        baseline: Optional fingerprint baseline path overriding project config.
 
     Invalid plugin results become failed tool results with error details.
 
@@ -881,8 +883,15 @@ def run_lint_tools_simple(
         profile=profile,
     )
     try:
+        from lintro.utils.execution.baseline_filter import apply_baseline
         from lintro.utils.execution.run_renderer import make_result_display
+        from lintro.utils.fingerprint_baseline_file import load_run_baseline
 
+        acknowledgements = (
+            load_run_baseline(baseline, ctx.lintro_config)
+            if ctx.action != Action.TEST
+            else None
+        )
         result_display = on_tool_result or make_result_display(
             logger=ctx.logger,
             output_format=output_format,
@@ -907,8 +916,13 @@ def run_lint_tools_simple(
             run_gates=run_gates,
             ignore_conflicts=ignore_conflicts,
             diff_base=diff_base,
-            on_tool_result=result_display,
+            on_tool_result=None if acknowledgements is not None else result_display,
         )
+        if acknowledgements is not None:
+            apply_baseline(artifact, acknowledgements)
+            if on_tool_result is not None or not ctx.clean_stdout_output:
+                for result in artifact.tool_results:
+                    result_display(result)
         if render_summary:
             render_run(
                 artifact,

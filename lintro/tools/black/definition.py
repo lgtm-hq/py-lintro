@@ -25,7 +25,11 @@ from lintro.models.core.tool_outcome import (
 )
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.black.black_issue import BlackIssue
-from lintro.parsers.black.black_parser import parse_black_output
+from lintro.parsers.black.black_parser import (
+    black_inspected_paths,
+    black_report_parse_failures,
+    parse_black_output,
+)
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
@@ -307,12 +311,14 @@ class BlackPlugin(BaseToolPlugin):
             return ctx
 
         cmd: list[str] = self._get_executable_command(tool_name="black") + ["--check"]
+        if self.options.get("_baseline_coverage", False):
+            cmd.append("--verbose")
         cmd.extend(self._build_common_args())
         cmd.extend(ctx.rel_files)
 
         logger.debug(f"[BlackPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
         try:
-            success, output = self._run_subprocess(
+            process = self._run_subprocess_result(
                 cmd=cmd,
                 timeout=ctx.timeout,
                 cwd=ctx.cwd,
@@ -320,7 +326,12 @@ class BlackPlugin(BaseToolPlugin):
         except subprocess.TimeoutExpired:
             return self._handle_timeout_error(ctx.timeout, cwd=ctx.cwd)
 
+        output = process.output
         black_issues = parse_black_output(output=output)
+        parse_failures = black_report_parse_failures(output, black_issues)
+        execution_failed = process.returncode not in (0, 1) or (
+            process.returncode == 1 and not black_issues
+        )
 
         # Check for line length violations that Black cannot wrap
         supplement = self._line_length_result(
@@ -330,7 +341,7 @@ class BlackPlugin(BaseToolPlugin):
 
         all_issues = black_issues + supplement.issues
         count = len(all_issues)
-        result_output = None if count == 0 else output
+        result_output = output if count or execution_failed or parse_failures else None
         if supplement.note:
             result_output = "\n".join(filter(None, (output.rstrip(), supplement.note)))
 
@@ -340,13 +351,28 @@ class BlackPlugin(BaseToolPlugin):
                     TimedOut(result_output)
                     if supplement.timed_out
                     else Checked(
-                        success=success and count == 0 and (not supplement.failed),
+                        success=process.success
+                        and count == 0
+                        and not supplement.failed,
                         inspected_files=True,
                     )
                 ),
                 issues_count=count,
             ),
             name=self.definition.name,
+            findings_complete=not (
+                execution_failed or parse_failures or supplement.failed
+            ),
+            execution_failed=execution_failed or supplement.failed,
+            parse_failures_count=parse_failures or None,
+            inspected_paths=(
+                black_inspected_paths(output, files=ctx.rel_files, cwd=ctx.cwd)
+                if self.options.get("_baseline_coverage", False)
+                and not (execution_failed or parse_failures or supplement.failed)
+                else None
+            ),
+            # The separate E501 subprocess has its own native exclusions.
+            uninspected_codes=frozenset({"E501"}),
             output=result_output,
             issues=all_issues,
             cwd=ctx.cwd,

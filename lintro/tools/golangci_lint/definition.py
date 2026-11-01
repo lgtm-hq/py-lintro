@@ -31,6 +31,7 @@ from lintro.models.core.tool_outcome import (
     Checked,
     FixMeasured,
     FixPartial,
+    FixUnmeasured,
     NoFiles,
     TimedOut,
     ToolOutcome,
@@ -39,7 +40,7 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.parsers.golangci_lint.golangci_lint_issue import GolangciLintIssue
 from lintro.parsers.golangci_lint.golangci_lint_parser import (
-    parse_golangci_lint_output,
+    parse_golangci_lint_output_with_stats,
 )
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
@@ -227,6 +228,7 @@ def _merge_fix_results(*, name: str, results: list[ToolResult]) -> ToolResult:
         output=output,
         issues=issues,
         initial_issues=initial_issues,
+        parse_failures_count=sum(r.parse_failures_count or 0 for r in results),
     )
 
 
@@ -373,6 +375,7 @@ class GolangciLintPlugin(BaseToolPlugin):
         any_timed_out = False
         any_inspected = False
         overall_success = True
+        parse_failures = 0
         for module_root in module_roots:
             try:
                 success_cmd, output = run_subprocess_with_timeout(
@@ -402,7 +405,8 @@ class GolangciLintPlugin(BaseToolPlugin):
                     failure_outputs.append(timeout_result.output)
                 continue
 
-            issues = parse_golangci_lint_output(output=output)
+            issues, failures = parse_golangci_lint_output_with_stats(output=output)
+            parse_failures += failures
             any_inspected = (
                 any_inspected
                 or success_cmd
@@ -410,11 +414,11 @@ class GolangciLintPlugin(BaseToolPlugin):
             )
             _rebase_issue_paths(issues=issues, module_root=module_root)
             all_issues.extend(issues)
-            overall_success = overall_success and bool(success_cmd)
+            overall_success = overall_success and bool(success_cmd) and failures == 0
 
             # Preserve output when the command fails with no parsed issues so
             # config errors or build failures are visible for debugging.
-            if not success_cmd and not issues:
+            if failures or (not success_cmd and not issues):
                 failure_outputs.append(output)
 
         return ToolResult.from_outcome(
@@ -432,6 +436,7 @@ class GolangciLintPlugin(BaseToolPlugin):
             name=self.definition.name,
             output="\n".join(failure_outputs) if failure_outputs else None,
             issues=all_issues,
+            parse_failures_count=parse_failures,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -504,21 +509,30 @@ class GolangciLintPlugin(BaseToolPlugin):
                 tool_name="golangci_lint",
             )
 
-        initial_issues = parse_golangci_lint_output(output=output_check)
+        initial_issues, parse_failures = parse_golangci_lint_output_with_stats(
+            output=output_check,
+        )
+        _rebase_issue_paths(issues=initial_issues, module_root=module_root)
         # A failed initial check with no parseable JSON means golangci-lint
         # errored (config/build failure) rather than reporting a clean baseline.
         # Abort before the mutating --fix phase and surface the diagnostic.
-        if not success_check and not initial_issues:
+        if parse_failures or (not success_check and not initial_issues):
             return ToolResult.from_outcome(
                 ToolOutcome(
                     execution=Checked(success=False),
-                    accounting=FixMeasured(initial=0, fixed=0, remaining=0),
+                    accounting=(
+                        FixUnmeasured("Invalid golangci-lint initial report.")
+                        if parse_failures and (success_check or initial_issues)
+                        else FixMeasured(initial=0, fixed=0, remaining=0)
+                    ),
+                    issues_count=len(initial_issues),
                 ),
                 name=self.definition.name,
                 output=output_check,
-                issues=[],
+                issues=initial_issues,
+                initial_issues=initial_issues,
+                parse_failures_count=parse_failures,
             )
-        _rebase_issue_paths(issues=initial_issues, module_root=module_root)
         initial_count = len(initial_issues)
 
         # Run fix.
@@ -558,8 +572,15 @@ class GolangciLintPlugin(BaseToolPlugin):
                 tool_name="golangci_lint",
             )
 
-        remaining_issues = parse_golangci_lint_output(output=output_after)
+        fix_issues, fix_failures = parse_golangci_lint_output_with_stats(output_fix)
+        remaining_issues, final_failures = parse_golangci_lint_output_with_stats(
+            output_after,
+        )
+        parse_failures += fix_failures + final_failures
         _rebase_issue_paths(issues=remaining_issues, module_root=module_root)
+        if fix_failures:
+            _rebase_issue_paths(issues=fix_issues, module_root=module_root)
+            remaining_issues.extend(i for i in fix_issues if i not in remaining_issues)
         remaining_count = len(remaining_issues)
         fixed_count = max(0, initial_count - remaining_count)
         # A module re-check can reveal additional findings after rewrites.
@@ -572,11 +593,16 @@ class GolangciLintPlugin(BaseToolPlugin):
         # surface the fix command's output whenever it failed — regardless of how
         # many issues the re-check parsed — so a fixer/config/build error can't be
         # hidden behind a re-check that happens to report remaining issues.
-        success = remaining_count == 0 and success_after and success_fix
+        success = (
+            remaining_count == 0
+            and success_after
+            and success_fix
+            and not parse_failures
+        )
 
-        if not success_fix:
+        if not success_fix or fix_failures:
             output = output_fix or output_after
-        elif not success and remaining_count == 0:
+        elif final_failures or (not success and remaining_count == 0):
             output = output_after
         else:
             output = None
@@ -596,10 +622,14 @@ class GolangciLintPlugin(BaseToolPlugin):
                         else None
                     ),
                 ),
-                accounting=FixMeasured(
-                    initial=initial_count,
-                    fixed=fixed_count,
-                    remaining=remaining_count,
+                accounting=(
+                    FixUnmeasured("Invalid golangci-lint fix report.", initial_count)
+                    if final_failures or (fix_failures and success_fix)
+                    else FixMeasured(
+                        initial=initial_count,
+                        fixed=fixed_count,
+                        remaining=remaining_count,
+                    )
                 ),
                 issues_count=remaining_count,
             ),
@@ -607,4 +637,5 @@ class GolangciLintPlugin(BaseToolPlugin):
             output=output,
             issues=remaining_issues,
             initial_issues=initial_issues,
+            parse_failures_count=parse_failures,
         )

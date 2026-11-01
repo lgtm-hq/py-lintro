@@ -35,7 +35,7 @@ def test_check_with_timeout(
 
     with patch.object(
         shellcheck_plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=subprocess.TimeoutExpired(cmd=["shellcheck"], timeout=30),
     ):
         result = shellcheck_plugin.check([str(test_file)], {})

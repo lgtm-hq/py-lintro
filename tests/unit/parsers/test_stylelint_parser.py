@@ -8,11 +8,16 @@ stdout before parsing).
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from assertpy import assert_that
 
 from lintro.parsers.stylelint.stylelint_issue import StylelintIssue
-from lintro.parsers.stylelint.stylelint_parser import parse_stylelint_output
+from lintro.parsers.stylelint.stylelint_parser import (
+    parse_stylelint_output,
+    parse_stylelint_output_with_stats,
+)
 
 # Real capture: one CSS file, single color-hex-length violation.
 SINGLE_WARNING = (
@@ -85,9 +90,10 @@ def test_parse_invalid_input(output: str) -> None:
     assert_that(parse_stylelint_output(output)).is_empty()
 
 
-def test_parse_clean_output() -> None:
-    """A clean file with no warnings yields no issues."""
-    assert_that(parse_stylelint_output(CLEAN)).is_empty()
+@pytest.mark.parametrize("output", [CLEAN, "[]", "notice\n[]\n[Warning] done"])
+def test_parse_clean_output(output: str) -> None:
+    """A complete clean report remains valid with surrounding logging."""
+    assert_that(parse_stylelint_output_with_stats(output)).is_equal_to(([], 0))
 
 
 def test_parse_single_warning_fields() -> None:
@@ -136,13 +142,230 @@ def test_parse_ignores_surrounding_noise() -> None:
     assert_that(issues[0].code).is_equal_to("color-hex-length")
 
 
-def test_parse_warning_missing_text_is_skipped() -> None:
-    """Warnings without message text are ignored."""
+def test_parse_warning_missing_text_is_counted() -> None:
+    """Warnings without message text are unusable records, not a clean report."""
     output = (
         '[{"source":"/tmp/x.css","warnings":['
         '{"line":1,"column":1,"rule":"color-hex-length","severity":"error"}]}]'
     )
-    assert_that(parse_stylelint_output(output)).is_empty()
+    assert_that(parse_stylelint_output_with_stats(output)).is_equal_to(([], 1))
+
+
+@pytest.mark.parametrize("field", ["warnings", "parseErrors", "invalidOptionWarnings"])
+def test_invalid_warning_records_preserve_usable_neighbors(field: str) -> None:
+    """Every malformed record counts without discarding the valid warning."""
+    result: dict[str, object] = {"source": "a.css", "warnings": []}
+    result[field] = [None, {"line": 1}, {"text": "kept"}]
+    issues, failures = parse_stylelint_output_with_stats(json.dumps([result]))
+
+    assert_that(failures).is_equal_to(2)
+    assert_that(issues).extracting("message").is_equal_to(["kept"])
+
+
+@pytest.mark.parametrize("prefix", ["Plugins: []\n", "[]\n", "[runner] []\n"])
+def test_leading_empty_array_does_not_hide_report(prefix: str) -> None:
+    """Prefer an actual source report to empty arrays embedded in logging."""
+    issues, failures = parse_stylelint_output_with_stats(prefix + SINGLE_WARNING)
+
+    assert_that(failures).is_zero()
+    assert_that(issues).extracting("code").is_equal_to(["color-hex-length"])
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "plugin warning [unfinished\n",
+        "plugin warning {unfinished\n",
+        "[unfinished\n",
+        "{unfinished\n",
+        "plugin warning [\n",
+        "plugin warning {\n",
+        "plugin warning [unfinished\n" * 1000,
+    ],
+    ids=[
+        "log-array",
+        "log-object",
+        "array",
+        "object",
+        "bare-array",
+        "bare-object",
+        "many",
+    ],
+)
+def test_unmatched_log_delimiters_do_not_hide_findings(prefix: str) -> None:
+    """Unmatched logging delimiters cannot swallow the actual JSON report."""
+    issues, failures = parse_stylelint_output_with_stats(prefix + SINGLE_WARNING)
+
+    assert_that(failures).is_zero()
+    assert_that(issues).extracting("file", "line", "code").is_equal_to(
+        [("/tmp/fixme.css", 2, "color-hex-length")],
+    )
+
+
+def test_noisy_extraction_bounds_json_decoding(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Recover findings without repeatedly decoding long overlapping suffixes."""
+    output = (
+        '["warning"]\n' * 1000 + "plugin warning [unfinished\n" * 1000 + SINGLE_WARNING
+    )
+    original_decode = json.JSONDecoder.raw_decode
+    decoded_chars = 0
+
+    def counted_decode(
+        self: json.JSONDecoder,
+        document: str,
+        idx: int = 0,
+    ) -> tuple[object, int]:
+        nonlocal decoded_chars
+        decoded_chars += len(document) - idx
+        return original_decode(self, document, idx)
+
+    with monkeypatch.context() as context:
+        context.setattr(json.JSONDecoder, "raw_decode", counted_decode)
+        issues, failures = parse_stylelint_output_with_stats(output)
+
+    assert_that(failures).is_zero()
+    assert_that(issues).extracting("code").is_equal_to(["color-hex-length"])
+    assert_that(decoded_chars).is_positive().is_less_than_or_equal_to(3 * len(output))
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    ["[null]", "[{}]", "[false]", "[[[]]]", '{"warnings":[]}'],
+)
+@pytest.mark.parametrize("empty_first", [False, True])
+def test_invalid_report_prevents_empty_array_fallback(
+    invalid: str,
+    empty_first: bool,
+) -> None:
+    """A standalone empty array cannot mask an invalid outer report."""
+    reports = ["[]", invalid] if empty_first else [invalid, "[]"]
+    output = "\nnotice\n".join(reports)
+
+    assert_that(parse_stylelint_output_with_stats(output)).is_equal_to(([], 1))
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "Plugins: []",
+        'notice\n[{"source":"a.css","warnings":[]',
+        '[]\nnotice\n[{"source":"a.css","warnings":[]',
+        'notice\n{"other":{"warnings":[]}}',
+        "notice\n[\n[]",
+        'notice\n{\n"warnings":[]',
+        "notice\n[\n" + SINGLE_WARNING,
+        'notice\n{"nested":\n' + SINGLE_WARNING,
+        "[]\nnotice\n[null}",
+    ],
+)
+def test_noise_or_truncated_report_cannot_expose_empty_arrays(output: str) -> None:
+    """Only a complete outer report can establish a clean result."""
+    assert_that(parse_stylelint_output_with_stats(output)).is_equal_to(([], 1))
+
+
+def test_noisy_report_preserves_malformed_source_accounting() -> None:
+    """A usable sibling enables extraction while the malformed entry counts."""
+    output = 'notice\n[1, {"source":"a.css","warnings":[{"text":"kept"}]}]'
+    issues, failures = parse_stylelint_output_with_stats(output)
+
+    assert_that(failures).is_equal_to(1)
+    assert_that(issues).extracting("message").is_equal_to(["kept"])
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    ["[null]", "[{}]", "[false]", "[[[]]]", '{"warnings":[]}', "[null}"],
+)
+@pytest.mark.parametrize("invalid_first", [False, True])
+@pytest.mark.parametrize("report", [CLEAN, SINGLE_WARNING])
+def test_invalid_outer_sibling_is_counted_with_usable_report(
+    invalid: str,
+    invalid_first: bool,
+    report: str,
+) -> None:
+    """Recognizable reports retain findings and failures in either order."""
+    reports = [invalid, report] if invalid_first else [report, invalid]
+    issues, failures = parse_stylelint_output_with_stats("\n".join(reports))
+
+    assert_that(failures).is_equal_to(1)
+    assert_that(issues).extracting("code").is_equal_to(
+        ["color-hex-length"] if report == SINGLE_WARNING else [],
+    )
+
+
+@pytest.mark.parametrize(
+    "scalar",
+    ["null", "false", "true", "42", "-1.5e2", '"scalar"', '"[]"', '"["'],
+)
+@pytest.mark.parametrize("scalar_first", [False, True])
+@pytest.mark.parametrize("report", ["[]", CLEAN, SINGLE_WARNING])
+def test_standalone_scalar_siblings_are_invalid_reports(
+    scalar: str,
+    scalar_first: bool,
+    report: str,
+) -> None:
+    """A scalar on its own line counts without hiding neighboring findings."""
+    reports = [scalar, report] if scalar_first else [report, scalar]
+    issues, failures = parse_stylelint_output_with_stats(
+        "\nnotice\n".join(reports),
+    )
+
+    assert_that(failures).is_equal_to(1)
+    assert_that(issues).extracting("file", "line", "code").is_equal_to(
+        [("/tmp/fixme.css", 2, "color-hex-length")] if report == SINGLE_WARNING else [],
+    )
+
+
+def test_nested_scalars_and_inline_log_values_are_not_outer_reports() -> None:
+    """Only standalone outer scalars add failures during noisy recovery."""
+    output = "\n".join(
+        [
+            "notice null false 42",
+            'plugin value: "[]"',
+            '[\nnull\n,{"source":"a.css","warnings":[{"text":\n"kept"\n}]}\n]',
+        ],
+    )
+    issues, failures = parse_stylelint_output_with_stats(output)
+
+    assert_that(failures).is_equal_to(1)
+    assert_that(issues).extracting("message").is_equal_to(["kept"])
+
+
+def test_scalar_extraction_accumulates_failures_with_bounded_decoding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Count every scalar once while keeping total decoded input linear."""
+    output = ('  "["  \nnull\n' * 1000) + SINGLE_WARNING + ("\nfalse" * 1000)
+    original_decode = json.JSONDecoder.raw_decode
+    decoded_chars = 0
+
+    def counted_decode(
+        self: json.JSONDecoder,
+        document: str,
+        idx: int = 0,
+    ) -> tuple[object, int]:
+        nonlocal decoded_chars
+        decoded_chars += len(document) - idx
+        return original_decode(self, document, idx)
+
+    with monkeypatch.context() as context:
+        context.setattr(json.JSONDecoder, "raw_decode", counted_decode)
+        issues, failures = parse_stylelint_output_with_stats(output)
+
+    assert_that(failures).is_equal_to(3000)
+    assert_that(issues).extracting("code").is_equal_to(["color-hex-length"])
+    assert_that(decoded_chars).is_positive().is_less_than_or_equal_to(3 * len(output))
+
+
+def test_later_reports_keep_findings_and_accumulate_failures() -> None:
+    """Every outer sibling contributes even after the first usable report."""
+    output = "\n".join(["[null]", CLEAN, SINGLE_WARNING, "[false]", "[{", ""])
+    issues, failures = parse_stylelint_output_with_stats(output)
+
+    assert_that(failures).is_equal_to(3)
+    assert_that(issues).extracting("file", "code").is_equal_to(
+        [("/tmp/fixme.css", "color-hex-length")],
+    )
 
 
 def test_parse_multiple_sources() -> None:
@@ -216,6 +439,7 @@ def test_unrelated_json_array_before_payload_is_skipped() -> None:
         '[{"source":"/tmp/a.css","warnings":[{"line":1,"column":1,'
         '"rule":"block-no-empty","severity":"error","text":"empty"}]}]'
     )
-    issues = parse_stylelint_output(output=output)
+    issues, failures = parse_stylelint_output_with_stats(output=output)
+    assert_that(failures).is_zero()
     assert_that(issues).is_length(1)
     assert_that(issues[0].code).is_equal_to("block-no-empty")

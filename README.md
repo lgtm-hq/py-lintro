@@ -55,6 +55,16 @@ lintro check --output-format grid  # Beautiful output
 
 <!-- TODO: Add screenshot of grid output -->
 
+Adopting Lintro in a legacy project? Run `lintro baseline create . --tools ruff,black`,
+then `lintro check . --tools ruff,black --baseline .lintro-baseline.json` to acknowledge
+existing findings and report new ones. Certified check findings currently come from Ruff
+and Black. Other producers, including ShellCheck, Hadolint, shfmt, dotenv-linter,
+pydoclint, SQLFluff, mypy, pylint, and Bandit, cannot yet acknowledge failed findings.
+Default or mixed selections abort baseline management if any active result is incomplete
+or uncertified; `check --baseline` keeps those results visible and failing. See the
+[baseline guide](docs/guides/baseline.md) for limits, updates, conservative pruning, and
+configuration.
+
 ## ✨ Why Lintro?
 
 - **🎯 Unified Interface** - One command for all your linting and formatting tools

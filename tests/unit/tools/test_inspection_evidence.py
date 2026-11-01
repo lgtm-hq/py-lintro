@@ -135,7 +135,8 @@ def test_selected_files_count_as_inspected_only_after_successful_execution(
         lambda *_, **__: None,
     )
     monkeypatch.setattr("shutil.which", lambda *_: "/mock/bin/tool")
-    completed = subprocess.CompletedProcess([tool], returncode, "", "")
+    stdout = '{"Issues": []}' if tool == "golangci_lint" else ""
+    completed = subprocess.CompletedProcess([tool], returncode, stdout, "")
     with patch("subprocess.run", return_value=completed):
         result = getattr(plugin, action)([str(tmp_path)], {})
 
@@ -159,6 +160,44 @@ def test_selected_files_count_as_inspected_only_after_successful_execution(
         badge = CliRunner().invoke(badge_command, ["--url"])
     assert_that(badge.exit_code).is_equal_to(0 if returncode == 0 else 1)
     assert_that("img.shields.io" in badge.output).is_equal_to(returncode == 0)
+
+
+@pytest.mark.parametrize("action", ["check", "fix"])
+@pytest.mark.parametrize("report", ["", " \n\t "])
+def test_absent_go_report_cannot_qualify_for_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+    report: str,
+) -> None:
+    """Exit zero without the requested JSON report cannot establish a baseline."""
+    _project(tmp_path, "golangci_lint")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        lambda *_, **__: None,
+    )
+    monkeypatch.setattr("shutil.which", lambda *_: "/mock/bin/tool")
+    plugin = type(ToolRegistry.get("golangci_lint"))()
+    with patch(
+        "subprocess.run",
+        return_value=subprocess.CompletedProcess(["golangci-lint"], 0, report, ""),
+    ):
+        result = getattr(plugin, action)([str(tmp_path)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.issues_count).is_zero()
+    assert_that(
+        baseline_is_eligible(
+            action=Action.CHECK,
+            dry_run_preview=False,
+            tool_results=[
+                result,
+                ToolResult(name="ruff", success=True, inspected_files=True),
+            ],
+        ),
+    ).is_false()
 
 
 @pytest.mark.parametrize(
@@ -247,10 +286,14 @@ def test_project_aggregation_preserves_clean_inspection_or_unknown_failure(
         lambda *_, **__: None,
     )
     plugin = type(ToolRegistry.get(tool))()
+    clean_output = '{"Issues": []}' if tool == "golangci_lint" else ""
     with patch.object(
         plugin,
         "_run_subprocess",
-        return_value=(succeeded, "" if succeeded else "invalid configuration"),
+        return_value=(
+            succeeded,
+            clean_output if succeeded else "invalid configuration",
+        ),
     ):
         checked = plugin.check([str(tmp_path)], {})
         assert_that(checked.success).is_equal_to(succeeded)

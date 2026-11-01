@@ -132,6 +132,8 @@ def baseline_is_eligible(
         return False
     if any(result.unavailable for result in tool_results):
         return False
+    if any(result.baselined_count is not None for result in tool_results):
+        return False
     if any(result_inspected_files(result) is None for result in tool_results):
         return False
     return not run_has_unreported_failure(tool_results) and run_inspected_files(

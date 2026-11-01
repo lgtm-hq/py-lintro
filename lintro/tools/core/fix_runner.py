@@ -151,18 +151,18 @@ def _run_check_step(
 ) -> FileProcessingResult:
     """Run one check-style invocation and classify its outcome.
 
-    Delegates to the check runner so the fix loop and the check loop classify
-    a timeout, an OS error and a parser failure identically. A non-zero exit
-    without parsed issues is deliberately *not* shared: the fix loop always
-    supplies a ``failure_message`` for it, while the check loop's default
-    policy leaves it reported as an unsuccessful file.
+    Delegates to the check runner so both loops classify timeouts, OS errors,
+    parser failures, and unexplained non-zero exits identically. Only exit 1
+    with parsed findings is accepted as a complete failed lint verdict here.
+    Other non-zero exits preserve parsed findings alongside an execution error;
+    the fix loop supplies its tool-specific ``failure_message`` for that error.
 
     Args:
         plugin: Plugin whose subprocess helper runs the command.
         cmd: Fully built command line.
         parse: Parser turning the command's output into issues.
-        failure_message: Error to record when the command exits non-zero
-            without producing any parseable issue.
+        failure_message: Error to record when a non-zero exit is not explained
+            by parsed findings and an accepted findings exit status.
         timeout: Per-command timeout in seconds.
 
     Returns:

@@ -935,6 +935,35 @@ def check_answered(result: ToolResult | None) -> bool:
             return False
 
 
+def _fold_check_verdict(mutation: ToolResult, verify: ToolResult | None) -> ToolResult:
+    """Retain producer completeness and native errors across verification.
+
+    Args:
+        mutation: Mutation result that will carry the final residual.
+        verify: Final check result, or None for an unchanged scope.
+
+    Returns:
+        A validated replacement carrying both phases' evidence.
+    """
+    # A successful phase needs no proof explaining a failed lint verdict;
+    # failed phases still require the producer's explicit completeness proof.
+    complete = mutation.success or mutation.findings_complete
+    if verify is None:
+        return replace(mutation, findings_complete=complete)
+    failed = mutation.execution_failed or verify.execution_failed
+    output = mutation.output
+    if not verify.success and not verify.findings_complete and verify.output:
+        output = "\n".join(filter(None, (output, verify.output)))
+    return replace(
+        mutation,
+        findings_complete=complete and (verify.success or verify.findings_complete),
+        execution_failed=failed,
+        success=mutation.success and not failed,
+        no_files=mutation.no_files and not failed,
+        output=output,
+    )
+
+
 def _fold_one(
     *,
     mutation: ToolResult,
@@ -964,6 +993,7 @@ def _fold_one(
     mutation_outcome = mutation.outcome
     accounting = mutation_outcome.accounting
     verify = outcome.result
+    mutation = _fold_check_verdict(mutation, verify)
     if verify and verify.parse_failures_count:
         mutation = replace(
             mutation,
@@ -1046,7 +1076,7 @@ def _fold_one(
         output = f"{output}\n{note}" if output.strip() else note
 
     # Retain execution failures even when verification measures zero survivors.
-    success = mutation_outcome.success and residual == 0
+    success = mutation.success and residual == 0
     duration = mutation.duration_seconds
     if verify is not None:
         success = success and answered and verify.outcome.success
@@ -1071,7 +1101,11 @@ def _fold_one(
             if answered
             and verify is not None
             and isinstance(mutation_outcome.execution, NoFiles)
-            else mutation.inspected_files
+            else (
+                mutation.inspected_files
+                if verify is None or verify.inspected_files is True
+                else None
+            )
         ),
     )
 

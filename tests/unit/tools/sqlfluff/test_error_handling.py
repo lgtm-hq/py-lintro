@@ -13,6 +13,7 @@ from lintro.tools.sqlfluff.definition import (
     SqlfluffPlugin,
 )
 from tests.test_samples_helpers import copy_sample
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 # Tests for check method error handling
 
@@ -40,7 +41,7 @@ def test_check_with_timeout(
     # Note: verify_tool_version is already patched by the sqlfluff_plugin fixture
     with patch.object(
         sqlfluff_plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=subprocess.TimeoutExpired(
             cmd=["sqlfluff"],
             timeout=SQLFLUFF_DEFAULT_TIMEOUT,
@@ -74,8 +75,8 @@ def test_check_with_empty_output(
     # Note: verify_tool_version is already patched by the sqlfluff_plugin fixture
     with patch.object(
         sqlfluff_plugin,
-        "_run_subprocess",
-        return_value=(True, ""),
+        "_run_subprocess_result",
+        return_value=subprocess_result(True, ""),
     ):
         result = sqlfluff_plugin.check([str(test_file)], {})
 
@@ -109,7 +110,7 @@ def test_fix_with_timeout(
     # Note: verify_tool_version is already patched by the sqlfluff_plugin fixture
     with patch.object(
         sqlfluff_plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=subprocess.TimeoutExpired(
             cmd=["sqlfluff"],
             timeout=SQLFLUFF_DEFAULT_TIMEOUT,

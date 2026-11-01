@@ -9,6 +9,7 @@ from assertpy import assert_that
 
 from lintro.tools.sqlfluff.definition import SqlfluffPlugin
 from tests.test_samples_helpers import copy_sample
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 SQLFLUFF_LINT_OUTPUT_WITH_ISSUES = """[
     {
@@ -50,11 +51,14 @@ def test_fix_populates_initial_issues(
 
     with patch.object(
         sqlfluff_plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=[
-            (False, SQLFLUFF_LINT_OUTPUT_WITH_ISSUES),  # Initial lint check
-            (True, "Fixed 1 file(s)"),  # Fix command
-            (True, "[]"),  # Verification lint - no issues
+            subprocess_result(
+                False,
+                SQLFLUFF_LINT_OUTPUT_WITH_ISSUES,
+            ),  # Initial lint check
+            subprocess_result(True, "Fixed 1 file(s)"),  # Fix command
+            subprocess_result(True, "[]"),  # Verification lint - no issues
         ],
     ):
         result = sqlfluff_plugin.fix([str(test_file)], {})
@@ -65,6 +69,26 @@ def test_fix_populates_initial_issues(
     assert_that(result.initial_issues_count).is_equal_to(1)
     assert_that(result.fixed_issues_count).is_equal_to(1)
     assert_that(result.remaining_issues_count).is_equal_to(0)
+
+
+def test_null_sqlfluff_baseline_cannot_report_a_successful_fix(
+    sqlfluff_plugin: SqlfluffPlugin,
+    tmp_path: Path,
+) -> None:
+    """A missing baseline is unknown even when SQLFluff exits zero."""
+    source = tmp_path / "a.sql"
+    source.write_text("SELECT 1;\n")
+    with patch.object(
+        sqlfluff_plugin,
+        "_run_subprocess_result",
+        return_value=subprocess_result(True, "null"),
+    ):
+        result = sqlfluff_plugin.fix([str(source)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.fixed_issues_count).is_none()
 
 
 def test_fix_initial_issues_empty_when_no_issues(
@@ -89,8 +113,8 @@ def test_fix_initial_issues_empty_when_no_issues(
 
     with patch.object(
         sqlfluff_plugin,
-        "_run_subprocess",
-        return_value=(True, "[]"),
+        "_run_subprocess_result",
+        return_value=subprocess_result(True, "[]"),
     ):
         result = sqlfluff_plugin.fix([str(test_file)], {})
 
@@ -139,10 +163,13 @@ def test_fix_preserves_initial_issues_for_the_verify_pass(
 
     with patch.object(
         sqlfluff_plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=[
-            (False, SQLFLUFF_LINT_OUTPUT_WITH_ISSUES),  # Initial lint check
-            (True, "Fixed 1 file(s)"),  # Fix command
+            subprocess_result(
+                False,
+                SQLFLUFF_LINT_OUTPUT_WITH_ISSUES,
+            ),  # Initial lint check
+            subprocess_result(True, "Fixed 1 file(s)"),  # Fix command
         ],
     ):
         result = sqlfluff_plugin.fix([str(test_file)], {})
@@ -221,10 +248,10 @@ def test_fix_reports_everything_as_remaining_when_it_exits_nonzero(
 
     with patch.object(
         sqlfluff_plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=[
-            (False, two_issues_output),  # Initial lint: 2 issues
-            (False, "Unfixable rule"),  # Fix: exits non-zero
+            subprocess_result(False, two_issues_output),  # Initial lint: 2 issues
+            subprocess_result(False, "Unfixable rule"),  # Fix: exits non-zero
         ],
     ):
         result = sqlfluff_plugin.fix([str(test_file)], {})

@@ -7,7 +7,9 @@ from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
 
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.tools.ruff.check import execute_ruff_check
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 
 def test_execute_ruff_check_uses_cwd_for_config_discovery(
@@ -24,7 +26,7 @@ def test_execute_ruff_check_uses_cwd_for_config_discovery(
     """
     working_dirs: list[str | None] = []
 
-    def fake_run(**kwargs: object) -> tuple[bool, str]:
+    def fake_run(**kwargs: object) -> SubprocessResult:
         """Record ruff's working directory and report a clean run.
 
         Args:
@@ -34,11 +36,11 @@ def test_execute_ruff_check_uses_cwd_for_config_discovery(
             A successful run with empty JSON findings.
         """
         working_dirs.append(cast("str | None", kwargs.get("cwd")))
-        return (True, "[]")
+        return subprocess_result(True, "[]")
 
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
             side_effect=fake_run,
         ),
         patch(
@@ -66,7 +68,7 @@ def test_execute_ruff_check_with_config_args(
     ]
     commands: list[list[str]] = []
 
-    def fake_run(**kwargs: object) -> tuple[bool, str]:
+    def fake_run(**kwargs: object) -> SubprocessResult:
         """Record the ruff argv and report a clean run.
 
         Args:
@@ -76,11 +78,11 @@ def test_execute_ruff_check_with_config_args(
             A successful run with empty JSON findings.
         """
         commands.append(list(cast("list[str]", kwargs["cmd"])))
-        return (True, "[]")
+        return subprocess_result(True, "[]")
 
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
             side_effect=fake_run,
         ),
         patch(

@@ -22,7 +22,7 @@ The Click commands and the backward-compatible programmatic wrappers in
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from lintro.api.pipeline import run_lint_artifact, run_lint_with_ai
 from lintro.enums.action import Action
@@ -99,6 +99,7 @@ def check(
     yes: bool = False,
     ai_fix: bool = False,
     transport: str | None = None,
+    baseline: str | Literal[False] | None = None,
 ) -> LintroResult:
     """Check files for issues using the specified tools.
 
@@ -123,6 +124,8 @@ def check(
         yes: Skip confirmation prompt and proceed immediately.
         ai_fix: Generate AI fix suggestions.
         transport: Override AI transport (``api`` or ``cli``).
+        baseline: Path overriding the configured fingerprint baseline. ``None``
+            uses project config; ``False`` disables filtering for raw counts.
 
     Returns:
         LintroResult: Structured result carrying the aggregated exit code.
@@ -151,6 +154,7 @@ def check(
         ai_fix=ai_fix,
         ignore_conflicts=ignore_conflicts,
         transport=transport,
+        baseline=baseline,
     )
     return LintroResult(action="check", exit_code=exit_code)
 
@@ -174,6 +178,7 @@ def format(
     auto_install: bool = False,
     yes: bool = False,
     dry_run: bool = False,
+    baseline: str | Literal[False] | None = None,
 ) -> LintroResult:
     """Format code using the configured formatting tools.
 
@@ -195,6 +200,8 @@ def format(
         auto_install: Whether to auto-install Node.js deps if missing.
         yes: Skip confirmation prompt and proceed immediately.
         dry_run: Preview would-be fixes without modifying any files.
+        baseline: Path overriding the configured fingerprint baseline. ``None``
+            uses project config; ``False`` disables filtering for raw counts.
 
     Returns:
         LintroResult: Structured result carrying the aggregated exit code.
@@ -220,6 +227,7 @@ def format(
         auto_install=auto_install,
         yes=yes,
         dry_run=dry_run,
+        baseline=baseline,
     )
     return LintroResult(action="fmt", exit_code=exit_code)
 
@@ -371,6 +379,7 @@ def check_run(
     ai_fix: bool = False,
     transport: str | None = None,
     ai_enabled: bool = True,
+    baseline: str | Literal[False] | None = None,
 ) -> RunArtifact:
     """Check files and return the full run artifact.
 
@@ -400,6 +409,8 @@ def check_run(
         ai_fix: Generate AI fix suggestions.
         transport: Override AI transport (``api`` or ``cli``).
         ai_enabled: Whether post-execution AI enhancement may run.
+        baseline: Path overriding the configured fingerprint baseline. ``None``
+            uses project config; ``False`` disables filtering for raw counts.
 
     Returns:
         RunArtifact: Everything the run produced.
@@ -427,6 +438,7 @@ def check_run(
         ignore_conflicts=ignore_conflicts,
         transport=transport,
         ai_enabled=ai_enabled,
+        baseline=baseline,
     )
 
 
@@ -449,6 +461,7 @@ def format_run(
     auto_install: bool = False,
     yes: bool = False,
     dry_run: bool = False,
+    baseline: str | Literal[False] | None = None,
 ) -> RunArtifact:
     """Format code and return the full run artifact.
 
@@ -472,6 +485,8 @@ def format_run(
         auto_install: Whether to auto-install Node.js deps if missing.
         yes: Skip confirmation prompt and proceed immediately.
         dry_run: Preview would-be fixes without modifying any files.
+        baseline: Path overriding the configured fingerprint baseline. ``None``
+            uses project config; ``False`` disables filtering for raw counts.
 
     Returns:
         RunArtifact: Everything the run produced.
@@ -495,6 +510,7 @@ def format_run(
         auto_install=auto_install,
         yes=yes,
         dry_run=dry_run,
+        baseline=baseline,
     )
 
 
