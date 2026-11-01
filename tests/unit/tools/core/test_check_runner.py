@@ -163,10 +163,18 @@ def test_a_nonzero_exit_without_findings_stays_a_plain_failure(
         shell_script: Shell script the runner is pointed at.
     """
     plugin = ShellcheckPlugin()
-    with patch.object(
-        plugin,
-        "_run_subprocess",
-        return_value=(False, "shellcheck: unknown option"),
+    # Isolate the runner's no-findings policy from ShellCheck's strict JSON
+    # validation; rejected reports have their own plugin-level coverage.
+    with (
+        patch.object(
+            plugin,
+            "_run_subprocess",
+            return_value=(False, "shellcheck: unknown option"),
+        ),
+        patch(
+            "lintro.tools.shellcheck.definition.parse_shellcheck_output_with_stats",
+            return_value=([], 0),
+        ),
     ):
         result = plugin.check([str(shell_script)], {})
 
@@ -259,8 +267,8 @@ def test_a_parser_failure_fails_only_that_file(tmp_path: Path) -> None:
     with (
         patch.object(plugin, "_run_subprocess", return_value=(True, "[]")),
         patch(
-            "lintro.tools.shellcheck.definition.parse_shellcheck_output",
-            side_effect=[ValueError("malformed report"), []],
+            "lintro.tools.shellcheck.definition.parse_shellcheck_output_with_stats",
+            side_effect=[ValueError("malformed report"), ([], 0)],
         ),
     ):
         result = plugin.check([str(first), str(second)], {})
@@ -268,6 +276,8 @@ def test_a_parser_failure_fails_only_that_file(tmp_path: Path) -> None:
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.output).contains("malformed report")
+    # The second file still established inspection after the first parser failed.
+    assert_that(result.inspected_files).is_true()
 
 
 def test_default_policy_reports_findings_from_a_clean_exit(tmp_path: Path) -> None:

@@ -64,7 +64,7 @@ def parse_shellcheck_output(output: str | None) -> list[ShellcheckIssue]:
 def parse_shellcheck_output_with_stats(
     output: str | None,
 ) -> tuple[list[ShellcheckIssue], int]:
-    """Parse ShellCheck findings and count malformed report containers.
+    """Parse ShellCheck findings and count invalid reports.
 
     json1 objects require a list-valued ``comments`` field. Legacy top-level
     lists and absent or blank output remain supported. Invalid JSON or an

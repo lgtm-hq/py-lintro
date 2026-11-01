@@ -61,6 +61,7 @@ def test_parse_returns_empty_for_non_array_json() -> None:
         "0",
         '""',
         "not valid json",
+        '{"comments": []}\nshellcheck: unexpected stderr',
     ],
 )
 def test_parse_malformed_comments_returns_no_findings(output: str) -> None:

@@ -11,11 +11,16 @@ The single-file half is exposed as :func:`check_one_file` because the fix
 runner needs exactly the same step to capture a file's pre-fix issue set.
 
 Example:
+    >>> def parse(output):  # doctest: +SKIP
+    ...     issues, failures = parse_shellcheck_output_with_stats(output)
+    ...     if failures:
+    ...         raise ValueError("Malformed ShellCheck report")
+    ...     return issues
     >>> result = run_per_file_check(  # doctest: +SKIP
     ...     ctx,
     ...     plugin=self,
     ...     command=lambda f: [*self._build_command(), f],
-    ...     parse=lambda output: parse_shellcheck_output(output=output),
+    ...     parse=parse,
     ... )
 """
 

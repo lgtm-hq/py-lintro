@@ -19,6 +19,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **shellcheck**: fail closed on malformed comments, invalid JSON and reports with
+  trailing noise; preserve execution diagnostics (#3025)
+
 ### Security
 
 ## [0.175.2] - 2026-11-01
