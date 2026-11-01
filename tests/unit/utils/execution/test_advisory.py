@@ -161,8 +161,8 @@ def test_run_advisory_tools_forwards_ai_config(
     assert_that(captured["ai_config"]).is_equal_to(ai_config)
 
 
-def test_advisory_findings_count_ignores_skipped_results() -> None:
-    """Skipped advisory tools contribute no findings."""
+def test_advisory_findings_count_totals_findings_alongside_a_skip() -> None:
+    """A valid skip contributes zero alongside another tool's findings."""
     results = [
         ToolResult(
             name="a",

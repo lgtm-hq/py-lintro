@@ -16,9 +16,10 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from lintro.models.core.tool_result import ToolResult
+
 if TYPE_CHECKING:
     from lintro.enums.action import Action
-    from lintro.models.core.tool_result import ToolResult
     from lintro.plugins.base import BaseToolPlugin
 
 
@@ -126,7 +127,7 @@ class AsyncToolExecutor:
                 opts,
             )
         logger.debug(f"Completed async execution of {tool.definition.name}")
-        result.validate_outcome()
+        ToolResult.validate_outcome(result)
         return replace(result, duration_seconds=time.monotonic() - started)
 
     async def run_tools_parallel(
@@ -162,7 +163,6 @@ class AsyncToolExecutor:
         options = options_per_tool or {}
 
         from lintro.enums.action import Action
-        from lintro.models.core.tool_result import ToolResult
 
         def _make_failed_result(
             name: str,
@@ -229,7 +229,7 @@ class AsyncToolExecutor:
                 )
                 # Validate inside the per-tool exception boundary, before
                 # progress callbacks or aggregation see a mutable plugin result.
-                result.validate_outcome()
+                ToolResult.validate_outcome(result)
             except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
                 raise
             except BaseException as exc:

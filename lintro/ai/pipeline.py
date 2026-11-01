@@ -517,6 +517,8 @@ async def run_fix_pipeline(
             budget,
         )
 
+    # Publish after verification/refinement returns normally. An earlier exception
+    # leaves the owning list's original result envelopes in place.
     _publish_verified_results(
         all_results,
         by_tool,

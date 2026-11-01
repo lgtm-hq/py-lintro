@@ -342,8 +342,8 @@ including when the default `False` is supplied explicitly. An explicit
 Construct complete results with `ToolResult.from_outcome()`. Use `with_outcome()` to
 replace execution or fix accounting, and `dataclasses.replace()` to update envelope
 fields. Retain or return the replacement; callers holding the original result keep its
-original state. Every replacement runs construction validation, so update related counts
-and flags together:
+original state. Constructor normalization and validation also run on every replacement,
+so update related counts and flags together:
 
 ```python
 from dataclasses import replace

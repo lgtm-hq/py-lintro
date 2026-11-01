@@ -325,7 +325,7 @@ def _execute_tools_sequential(
             # Untyped third-party results can contradict the outcome contract.
             # Reject them before any consumer
             # (including the live callback) can lose the rest of the run.
-            result.validate_outcome()
+            ToolResult.validate_outcome(result)
             result = replace(result, duration_seconds=time.monotonic() - started)
 
             # Populate doc_url on each issue from the plugin

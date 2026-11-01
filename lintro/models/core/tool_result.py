@@ -193,6 +193,8 @@ class ToolResult:
 
     def validate_outcome(self) -> None:
         """Validate the outcome, raising ValueError for contradictory evidence."""
+        # Plugin boundaries call this unbound so a duck-typed object's own
+        # validator cannot bypass the ToolResult type guard.
         if not isinstance(self, ToolResult):
             raise ValueError("plugin check()/fix() must return ToolResult")
         outcome_from_result(self)

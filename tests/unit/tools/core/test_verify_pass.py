@@ -2194,14 +2194,15 @@ def test_answered_verify_replaces_no_files_inspection_evidence(
     assert_that(mutation.issues).is_equal_to(verify.issues)
 
 
-def test_verify_fold_preserves_unavailable_initial_measurement_on_parse_failure() -> (
-    None
-):
-    """A usable finding cannot supply the missing size of an incomplete report."""
+@pytest.mark.parametrize("initial_count", [None, 7])
+def test_verify_fold_preserves_initial_measurement_on_parse_failure(
+    initial_count: int | None,
+) -> None:
+    """An incomplete report retains only the explicitly supplied initial count."""
     before = _issue("/repo/a.proto")
     after = _issue("/repo/b.proto")
     mutation = ToolResult.from_outcome(
-        ToolOutcome(Checked(False), FixPartial(), issues_count=1),
+        ToolOutcome(Checked(False), FixPartial(initial=initial_count), issues_count=1),
         name="buf",
         issues=[before],
         initial_issues=[before],
@@ -2222,14 +2223,17 @@ def test_verify_fold_preserves_unavailable_initial_measurement_on_parse_failure(
     )
 
     assert_that(results[0].outcome.accounting).is_equal_to(
-        FixUnmeasured("tool output could not be fully parsed"),
+        FixUnmeasured("tool output could not be fully parsed", initial=initial_count),
     )
     assert_that(results[0].issues).contains(before, after)
     assert_that(results[0].initial_issues).is_equal_to([before])
-    assert_that(results[0].initial_issues_count).is_none()
+    assert_that(results[0].initial_issues_count).is_equal_to(initial_count)
     assert_that(results[0].fixed_issues_count).is_none()
     assert_that(results[0].remaining_issues_count).is_none()
     assert_that(results[0].success).is_false()
+    assert_that(mutation.outcome.accounting).is_equal_to(
+        FixPartial(initial=initial_count),
+    )
 
 
 @pytest.mark.parametrize("flag", ["no_files", "skipped", "timed_out"])

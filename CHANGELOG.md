@@ -17,8 +17,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Plugin API-v2 constructors retain skipped success and unset inactive inspection
   defaults. **Breaking for plugins that assign result fields after construction**:
   migrate to `from_outcome`, `with_outcome` or `dataclasses.replace`; see the
-  [plugin migration guide](docs/plugins.md#immutable-toolresult-migration-api-v2).
-  Mutable payloads such as metadata remain shallowly shared.
+  [guide](docs/plugins.md#immutable-toolresult-migration-api-v2). Mutable payloads such
+  as metadata remain shallowly shared.
 
 ### Deprecated
 

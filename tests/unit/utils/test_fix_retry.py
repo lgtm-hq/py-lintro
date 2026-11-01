@@ -399,8 +399,11 @@ def test_incomplete_fix_pass_is_preserved_without_more_retries(
     result = run_fix_with_retry(tool, ["."], {}, max_retries=3)
 
     assert_that(incomplete.residual_unknown).is_equal_to(failure_kind == "unknown")
+    if failure_pass == 1 and failure_kind == "unknown":
+        assert_that(result).is_same_as(incomplete)
+    else:
+        assert_that(result).is_not_same_as(incomplete)
     if failure_pass == 1:
-        assert_that(result is incomplete).is_equal_to(failure_kind == "unknown")
         assert_that(result.initial_issues_count).is_equal_to(initial_count)
         assert_that(result.initial_issues).is_equal_to(detected[-1:])
     else:

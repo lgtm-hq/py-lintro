@@ -8,7 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from assertpy import assert_that
@@ -367,6 +367,34 @@ def test_invalid_plugin_result_fails_closed_without_losing_peer_output(
         assert_that((artifact.total_fixed, artifact.total_remaining)).is_equal_to(
             (2, 0),
         )
+
+
+@pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
+def test_duck_typed_plugin_validator_cannot_bypass_type_guard(
+    run_plugins: Callable[..., RunArtifact],
+    parallel: bool,
+) -> None:
+    """Reject a non-ToolResult before invoking its validator or reporting it.
+
+    Args:
+        run_plugins: Execute registered plugins in an isolated workspace.
+        parallel: Whether to dispatch concurrently.
+    """
+    bad = cast(ToolResult, SimpleNamespace(name="bad", validate_outcome=lambda: None))
+    observed: list[ToolResult] = []
+
+    artifact = run_plugins(bad, parallel, Action.CHECK, observed.append)
+
+    results = {row.name: row for row in artifact.tool_results}
+    assert_that(results["bad"].outcome.execution).is_equal_to(Checked(False))
+    assert_that(results["bad"].output).contains(
+        "ValueError",
+        "plugin check()/fix() must return ToolResult",
+    )
+    assert_that(artifact.exit_code).is_equal_to(1)
+    assert_that(results["peer"].output).is_equal_to("peer output survives")
+    assert_that(observed).is_length(2)
+    assert_that(all(isinstance(row, ToolResult) for row in observed)).is_true()
 
 
 @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
