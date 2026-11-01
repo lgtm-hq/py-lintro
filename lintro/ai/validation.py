@@ -207,9 +207,8 @@ def _validate_suggestions(
                 result.unverified_by_tool[tool_name] = (
                     result.unverified_by_tool.get(tool_name, 0) + 1
                 )
-                rel = Path(s.file).name
                 result.details.append(
-                    f"[{s.code}] {rel}:{s.line} — issue still present",
+                    f"[{s.code}] {Path(s.file).name}:{s.line} — issue still present",
                 )
             else:
                 result.verified += 1

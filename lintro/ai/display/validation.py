@@ -36,7 +36,7 @@ def render_validation_terminal(result: ValidationResult) -> str:
     if result.verified:
         parts.append(f"[green]{result.verified} resolved[/green]")
     if result.unverified:
-        parts.append(f"[yellow]{result.unverified} still present[/yellow]")
+        parts.append(f"[yellow]{result.unverified} unverified[/yellow]")
     if result.new_issues:
         parts.append(f"[red]{result.new_issues} remaining unmatched issues[/red]")
     sep = " \u00b7 "
