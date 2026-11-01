@@ -8,10 +8,11 @@ fixed vs remaining counts for fix-capable tools.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from lintro.enums.capability import Cap
+from lintro.models.core.tool_outcome import ToolOutcome, outcome_from_result
 
 if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
@@ -47,6 +48,15 @@ class ToolResult:
     Convention: for FIX action, remaining issues occupy the tail of the
     ``issues`` list. Tools append all detected issues in order, so the
     last ``remaining_issues_count`` entries are the ones still unfixed.
+
+    Stage 1 of #3019 keeps these fields writable: verify folding, retries and
+    other existing callers still update them in several steps. ``outcome`` is
+    a read-only, validated view computed on each access, not a stored second
+    source of truth. Read it after an update is complete; contradictory legacy
+    state raises instead of returning an obsolete or normalized outcome.
+    ``with_outcome`` derives state fields from frozen variants and preserves
+    the rest of the envelope. Producer/consumer migration and freezing this
+    dataclass belong to subsequent stages.
     """
 
     name: str = field(default="")
@@ -163,6 +173,29 @@ class ToolResult:
 
     # None preserves the original reporting schema when baselining is absent.
     baselined_count: int | None = field(default=None)
+
+    @property
+    def outcome(self) -> ToolOutcome:
+        """Adapt the current mutable fields to a validated frozen outcome.
+
+        Contradictory legacy mutations raise ValueError at the adapter boundary.
+
+        Returns:
+            The current execution and accounting state, without inferred counts.
+        """
+        return outcome_from_result(self)
+
+    def with_outcome(self, outcome: ToolOutcome) -> ToolResult:
+        """Return a result with state derived from an explicit outcome.
+
+        Args:
+            outcome: Frozen execution and accounting state to apply.
+
+        Returns:
+            A replacement preserving issues, metadata and other envelope fields.
+            As with dataclasses.replace, mutable payloads are shared.
+        """
+        return replace(self, **outcome.to_legacy_fields())
 
     def __post_init__(self) -> None:
         """Validate collections, issue counts and execution state.

@@ -1,0 +1,3 @@
+generate:
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+	black generated.py

@@ -1,0 +1,6 @@
+generate:
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+	@bunx oxfmt generated.mjs
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+	prettier --write generated.css
+	uv run lintro fmt generated.mjs generated.css

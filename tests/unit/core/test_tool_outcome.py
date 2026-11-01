@@ -1,0 +1,466 @@
+"""Observable stage-1 outcome adaptation without migrating legacy callers."""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Callable
+from dataclasses import FrozenInstanceError, asdict, fields, replace
+from typing import Any
+
+import pytest
+from assertpy import assert_that
+
+from lintro.enums.action import Action
+from lintro.enums.capability import Cap
+from lintro.enums.verify_status import VerifyStatus
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixMeasured,
+    FixPartial,
+    FixUnmeasured,
+    NoFiles,
+    Skipped,
+    TimedOut,
+    ToolOutcome,
+)
+from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
+from lintro.tools.core.verify_pass import (
+    VerifyOutcome,
+    VerifyScope,
+    fold_verify_results,
+)
+from lintro.utils.execution.exit_codes import (
+    aggregate_tool_results,
+    determine_exit_code,
+)
+from lintro.utils.json_output import serialize_tool_result
+
+
+@pytest.mark.parametrize(
+    ("legacy", "expected"),
+    [
+        ({}, ToolOutcome(Checked(False))),
+        (
+            {"success": True, "inspected_files": True},
+            ToolOutcome(Checked(True, inspected_files=True)),
+        ),
+        (
+            {"success": True, "inspected_files": False},
+            ToolOutcome(Checked(True, inspected_files=False)),
+        ),
+        (
+            {"issues_count": 2},
+            ToolOutcome(Checked(False), issues_count=2),
+        ),
+        (
+            {"skipped": True, "skip_reason": "not installed"},
+            ToolOutcome(Skipped("not installed")),
+        ),
+        (
+            {"success": True, "no_files": True},
+            ToolOutcome(NoFiles()),
+        ),
+        (
+            {
+                "success": True,
+                "no_files": True,
+                "initial_issues_count": 0,
+                "fixed_issues_count": 0,
+                "remaining_issues_count": 0,
+            },
+            ToolOutcome(NoFiles(), FixMeasured(0, 0, 0)),
+        ),
+        (
+            {"timed_out": True},
+            ToolOutcome(TimedOut("raw output")),
+        ),
+        (
+            {"initial_issues_count": 2, "issues_count": 2},
+            ToolOutcome(Checked(False), FixPartial(initial=2), issues_count=2),
+        ),
+        (
+            {"fixed_issues_count": 1, "remaining_issues_count": 0},
+            ToolOutcome(Checked(False), FixPartial(fixed=1, remaining=0)),
+        ),
+        (
+            {
+                "issues_count": 1,
+                "initial_issues_count": 2,
+                "fixed_issues_count": 1,
+                "remaining_issues_count": 1,
+            },
+            ToolOutcome(Checked(False), FixMeasured(2, 1, 1), issues_count=1),
+        ),
+        (
+            {
+                "timed_out": True,
+                "issues_count": 1,
+                "initial_issues_count": 2,
+                "fixed_issues_count": 1,
+                "remaining_issues_count": 1,
+            },
+            ToolOutcome(TimedOut("raw output"), FixMeasured(2, 1, 1), issues_count=1),
+        ),
+        (
+            {
+                "timed_out": True,
+                "issues_count": 2,
+                "initial_issues_count": 2,
+                "residual_unknown": True,
+                "residual_unknown_reason": "verify timed out",
+            },
+            ToolOutcome(
+                TimedOut("raw output"),
+                FixUnmeasured("verify timed out", initial=2),
+                issues_count=2,
+            ),
+        ),
+        (
+            {"residual_unknown": True, "residual_unknown_reason": "report incomplete"},
+            ToolOutcome(Checked(False), FixUnmeasured("report incomplete")),
+        ),
+    ],
+)
+def test_legacy_roundtrip_preserves_payload_and_serialized_bytes(
+    legacy: dict[str, Any],
+    expected: ToolOutcome,
+) -> None:
+    """Both directions retain counters, evidence and the whole result envelope.
+
+    Args:
+        legacy: State recorded by an existing producer.
+        expected: Explicit execution and accounting for those fields.
+    """
+    issue = BaseIssue(file="a.py", line=1, message="finding")
+    original = ToolResult(
+        name="plugin",
+        output="raw output",
+        formatted_output="rendered output",
+        issues=[issue] if expected.issues_count else [],
+        initial_issues=(issue,) if expected.issues_count else (),
+        pytest_summary={"passed": 2},
+        metadata={"suppressions": [{"reason": "accepted"}]},
+        cwd="/repo",
+        parse_failures_count=0,
+        duration_seconds=1.25,
+        capability=Cap.FIX,
+        **legacy,
+    )
+    before = asdict(original)
+    wire = {
+        action: json.dumps(serialize_tool_result(original, action=action))
+        for action in (Action.CHECK, Action.FIX)
+    }
+
+    assert_that(original.outcome).is_equal_to(expected)
+    restored = original.with_outcome(original.outcome)
+
+    assert_that(asdict(restored)).is_equal_to(before)
+    assert_that(asdict(original)).is_equal_to(before)
+    assert_that(restored.outcome).is_equal_to(expected)
+    assert_that(restored.metadata).is_same_as(original.metadata)
+    assert_that(restored.issues).is_same_as(original.issues)
+    assert_that(restored.initial_issues).is_same_as(original.initial_issues)
+    assert_that([f.name for f in fields(restored)]).does_not_contain("outcome")
+    for action, serialized in wire.items():
+        assert_that(
+            json.dumps(serialize_tool_result(restored, action=action)),
+        ).is_equal_to(
+            serialized,
+        )
+
+
+@pytest.mark.parametrize(
+    "counts",
+    [
+        (None, None, None),
+        (None, None, 0),
+        (None, 0, None),
+        (None, 0, 0),
+        (0, None, None),
+        (0, None, 0),
+        (0, 0, None),
+    ],
+)
+def test_incomplete_counts_never_become_measured_or_filled(
+    counts: tuple[int | None, int | None, int | None],
+) -> None:
+    """All missing-counter combinations survive even beside empty findings.
+
+    Args:
+        counts: An incomplete legacy before/fixed/remaining triple.
+    """
+    original = ToolResult(
+        initial_issues_count=counts[0],
+        fixed_issues_count=counts[1],
+        remaining_issues_count=counts[2],
+    )
+    outcome = original.outcome
+    restored = ToolResult().with_outcome(outcome)
+
+    assert_that(outcome.accounting).is_equal_to(FixPartial(*counts))
+    assert_that(
+        (
+            restored.initial_issues_count,
+            restored.fixed_issues_count,
+            restored.remaining_issues_count,
+        ),
+    ).is_equal_to(counts)
+    assert_that(restored.residual_unknown).is_false()
+    assert_that(restored.inspected_files).is_none()
+
+
+def test_unmeasured_adapter_preserves_null_json_and_failure_exit() -> None:
+    """Explicit unknown accounting keeps the existing wire bytes and failed run."""
+    result = ToolResult(
+        name="ruff",
+        issues=[BaseIssue(file="a.py", line=1, message="finding")],
+    ).with_outcome(
+        ToolOutcome(Checked(False), FixUnmeasured("verify failed"), issues_count=1),
+    )
+    wire = json.dumps(serialize_tool_result(result, action=Action.FIX))
+
+    assert_that(wire).is_equal_to(
+        '{"tool": "ruff", "success": false, "issues_count": 1, "skipped": false, '
+        '"skip_reason": null, "timed_out": false, "output": null, '
+        '"net_resolved": null, "fixed": null, "remaining": null, '
+        '"residual_unknown": true, "residual_unknown_reason": "verify failed", '
+        '"issues": [{"file": "a.py", "line": 1, "code": "", "message": "finding"}]}',
+    )
+    assert_that(result.initial_issues_count).is_none()
+    assert_that(aggregate_tool_results([result], Action.FIX)).is_equal_to((1, 0, 0))
+    assert_that(determine_exit_code(Action.FIX, [result], 1, 0)).is_equal_to(1)
+
+
+@pytest.mark.parametrize("execution", [Checked(False), TimedOut("deadline")])
+def test_measured_zero_residual_does_not_erase_execution_failure(
+    execution: Checked | TimedOut,
+) -> None:
+    """Accounting and execution remain independent even with no survivors.
+
+    Args:
+        execution: Failed execution whose later accounting is complete.
+    """
+    result = ToolResult(name="formatter").with_outcome(
+        ToolOutcome(execution, FixMeasured(2, 2, 0)),
+    )
+
+    assert_that(result.success).is_false()
+    assert_that(result.remaining_issues_count).is_zero()
+    assert_that(result.outcome.execution).is_equal_to(execution)
+    assert_that(aggregate_tool_results([result], Action.FIX)).is_equal_to((0, 2, 0))
+    assert_that(determine_exit_code(Action.FIX, [result], 0, 0)).is_equal_to(1)
+
+
+def test_adapter_replaces_state_without_retaining_obsolete_flags() -> None:
+    """A measured replacement of a timeout clears unknown and timeout state."""
+    failed = ToolResult(name="formatter", timed_out=True).with_outcome(
+        ToolOutcome(TimedOut("deadline"), FixUnmeasured("no verification")),
+    )
+    recovered = failed.with_outcome(
+        ToolOutcome(Checked(True, inspected_files=True), FixMeasured(2, 2, 0)),
+    )
+
+    assert_that(recovered.success).is_true()
+    assert_that(recovered.timed_out).is_false()
+    assert_that(recovered.residual_unknown).is_false()
+    assert_that(recovered.residual_unknown_reason).is_none()
+    assert_that(recovered.inspected_files).is_true()
+    assert_that(recovered.fixed_issues_count).is_equal_to(2)
+    assert_that(failed.timed_out).is_true()
+    assert_that(failed.fixed_issues_count).is_none()
+
+
+def test_existing_verify_mutations_are_visible_on_every_outcome_read() -> None:
+    """The unmigrated verify fold cannot leave a stale authoritative outcome."""
+    result = ToolResult(
+        name="ruff",
+        issues_count=1,
+        issues=[BaseIssue(file="/repo/a.py", line=1, message="finding")],
+        initial_issues_count=1,
+        fixed_issues_count=0,
+        remaining_issues_count=1,
+        inspected_files=True,
+    )
+    before = result.outcome
+
+    fold_verify_results(
+        mutation_results=[result],
+        verify_results=[
+            VerifyOutcome(
+                tool="ruff",
+                result=None,
+                status=VerifyStatus.UNKNOWN,
+                unknown_reason="verify failed",
+            ),
+        ],
+        scope=VerifyScope(files=("/repo/a.py",), narrowed=True),
+    )
+
+    assert_that(before.accounting).is_equal_to(FixMeasured(1, 0, 1))
+    assert_that(result.outcome.accounting).is_equal_to(
+        FixUnmeasured("verify failed", 1),
+    )
+    copied = replace(result, output="new display text")
+    assert_that(copied.outcome).is_equal_to(result.outcome)
+    assert_that(copied.output).is_equal_to("new display text")
+    assert_that(result.with_outcome(result.outcome)).is_equal_to(result)
+
+
+@pytest.mark.parametrize(
+    ("factory", "payload", "error"),
+    [
+        (Skipped, {"reason": ""}, ValueError),
+        (Skipped, {"reason": None}, ValueError),
+        (FixUnmeasured, {"reason": "   "}, ValueError),
+        (FixUnmeasured, {"reason": None}, ValueError),
+        (FixUnmeasured, {"reason": "failed", "fixed": 0}, TypeError),
+        (FixUnmeasured, {"reason": "failed", "remaining": 0}, TypeError),
+        (FixUnmeasured, {"reason": "failed", "initial": -1}, ValueError),
+        (FixMeasured, {"initial": None, "fixed": 0, "remaining": 0}, ValueError),
+        (FixMeasured, {"initial": 0, "fixed": None, "remaining": 0}, ValueError),
+        (FixMeasured, {"initial": 0, "fixed": 0, "remaining": None}, ValueError),
+        (FixMeasured, {"initial": 1, "fixed": 0, "remaining": 0}, ValueError),
+        (FixMeasured, {"initial": -1, "fixed": -1, "remaining": 0}, ValueError),
+        (FixMeasured, {"initial": True, "fixed": 1, "remaining": 0}, ValueError),
+        (FixPartial, {"initial": 0, "fixed": 0, "remaining": 0}, ValueError),
+        (FixPartial, {"remaining": -1}, ValueError),
+        (Checked, {"success": None}, ValueError),
+        (Checked, {"success": True, "inspected_files": "unknown"}, ValueError),
+        (TimedOut, {"output": 1}, ValueError),
+        (
+            ToolOutcome,
+            {"execution": Checked(True), "accounting": FixUnmeasured("failed")},
+            ValueError,
+        ),
+        (
+            ToolOutcome,
+            {"execution": NoFiles(), "accounting": FixUnmeasured("failed")},
+            ValueError,
+        ),
+        (ToolOutcome, {"execution": Skipped("missing"), "issues_count": 1}, ValueError),
+        (
+            ToolOutcome,
+            {"execution": NoFiles(), "accounting": FixMeasured(1, 1, 0)},
+            ValueError,
+        ),
+        (ToolOutcome, {"execution": Checked(False), "issues_count": None}, ValueError),
+        (ToolOutcome, {"execution": Checked(False), "issues_count": -1}, ValueError),
+        (ToolOutcome, {"execution": Checked(False), "issues_count": True}, ValueError),
+        (ToolOutcome, {"execution": "checked"}, TypeError),
+        (ToolOutcome, {"execution": Checked(False), "accounting": None}, TypeError),
+    ],
+)
+def test_invalid_explicit_outcomes_cannot_be_constructed(
+    factory: Callable[..., object],
+    payload: dict[str, Any],
+    error: type[Exception],
+) -> None:
+    """Required evidence and state-specific counts are enforced on construction.
+
+    Args:
+        factory: Variant or combined outcome constructor.
+        payload: Contradictory or malformed constructor arguments.
+        error: Required boundary failure.
+    """
+    assert_that(factory).raises(error).when_called_with(**payload)
+
+
+@pytest.mark.parametrize(
+    "mutations",
+    [
+        {"skipped": True, "success": True},
+        {"skip_reason": "orphan reason"},
+        {"skipped": True, "skip_reason": "missing", "success": False},
+        {"no_files": True, "success": True, "timed_out": True},
+        {"no_files": True, "success": False},
+        {"timed_out": True, "success": True},
+        {"timed_out": True, "inspected_files": True},
+        {"skipped": 1, "skip_reason": "missing", "success": True},
+        {"success": 1},
+        {"residual_unknown": "unknown", "residual_unknown_reason": "failed"},
+        {"residual_unknown": True},
+        {"residual_unknown_reason": "orphan reason"},
+        {
+            "residual_unknown": True,
+            "residual_unknown_reason": "failed",
+            "fixed_issues_count": 0,
+        },
+        {
+            "residual_unknown": True,
+            "residual_unknown_reason": "failed",
+            "remaining_issues_count": 0,
+        },
+        {
+            "residual_unknown": True,
+            "residual_unknown_reason": "failed",
+            "success": True,
+        },
+        {
+            "initial_issues_count": 1,
+            "fixed_issues_count": 0,
+            "remaining_issues_count": 0,
+        },
+    ],
+)
+def test_invalid_legacy_mutation_is_rejected_without_repair(
+    mutations: dict[str, Any],
+) -> None:
+    """A property read cannot silently normalize or return the old valid state.
+
+    Args:
+        mutations: Invalid state reached after a valid legacy construction.
+    """
+    result = ToolResult(inspected_files=False)
+    before = result.outcome
+    for name, value in mutations.items():
+        setattr(result, name, value)
+    invalid = asdict(result)
+
+    with pytest.raises(ValueError):
+        _ = result.outcome
+
+    assert_that(asdict(result)).is_equal_to(invalid)
+    assert_that(before).is_equal_to(ToolOutcome(Checked(False, inspected_files=False)))
+
+
+@pytest.mark.parametrize(
+    ("value", "attribute"),
+    [
+        (Checked(False), "success"),
+        (Skipped("missing"), "reason"),
+        (NoFiles(), "extra_flag"),
+        (TimedOut(None), "output"),
+        (FixMeasured(1, 1, 0), "initial"),
+        (FixPartial(initial=1), "remaining"),
+        (FixUnmeasured("failed"), "fixed"),
+        (ToolOutcome(Checked(False)), "execution"),
+    ],
+)
+def test_every_outcome_value_is_frozen(value: Any, attribute: str) -> None:
+    """Neither payloads nor extra flags can be attached to explicit states.
+
+    Args:
+        value: One instance of each frozen state and their composition.
+        attribute: Payload or additional flag that must not be writable.
+    """
+    before = asdict(value)
+    with pytest.raises(FrozenInstanceError):
+        setattr(value, attribute, True)
+    assert_that(asdict(value)).is_equal_to(before)
+
+
+def test_outcome_property_cannot_be_overwritten_or_cached() -> None:
+    """Writable legacy fields remain the sole source of truth in stage 1."""
+    result = ToolResult(success=True)
+    assert_that(setattr).raises(AttributeError).when_called_with(
+        result,
+        "outcome",
+        ToolOutcome(Checked(False)),
+    )
+    result.success = False
+    result.issues_count = 3
+
+    assert_that(result.outcome).is_equal_to(ToolOutcome(Checked(False), issues_count=3))
+    assert_that(vars(result)).does_not_contain_key("outcome")

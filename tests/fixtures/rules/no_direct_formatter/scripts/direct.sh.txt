@@ -1,0 +1,55 @@
+#!/bin/sh
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+bunx oxfmt generated.mjs
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+npx --yes prettier generated.css --write
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+prettier -w generated.json
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+uv run black generated.py
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+python3 -m black generated.py
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+python -m black generated.py
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+python3.14 -m black generated.py
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+npx prettier --write generated.css
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+bunx --yes oxfmt generated.mjs
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+black --check generated.py
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+oxfmt --check generated.mjs
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+rustfmt --check generated.rs
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+shfmt -d generated.sh
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+rustfmt generated.rs
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+cargo fmt --all
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+shfmt -w generated.sh
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+taplo format Cargo.toml
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+taplo fmt Cargo.toml
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+ruff format generated.py
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+buf format --write generated.proto
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+sqlfluff format generated.sql
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+sqlfluff fix generated.sql
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+generate && black generated.py
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+generate; bunx oxfmt generated.mjs
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+generate || rustfmt generated.rs
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+prettier "generated file.css" --write
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+prettier --write 'generated file.css'

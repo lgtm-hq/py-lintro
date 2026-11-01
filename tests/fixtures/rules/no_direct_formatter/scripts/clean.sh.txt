@@ -1,0 +1,19 @@
+#!/bin/sh
+generate
+uv run lintro fmt generated.py
+lintro fmt generated.mjs
+uv run lintro format .
+prettier --check generated.css
+ruff check --fix generated.py
+buf lint generated.proto
+taplo check Cargo.toml
+sqlfluff lint generated.sql
+echo prettier --write generated.css
+# bunx oxfmt generated.mjs
+# example; black generated.py
+  # execSync('black generated.py');
+myblack generated.py
+oxfmt-helper generated.mjs
+# Biome has no builtin FORMAT declaration in this Lintro release.
+biome format generated.js
+biome check --write generated.js

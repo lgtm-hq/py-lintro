@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.174.1] - 2026-11-01
+
+### Fixed
+
+- **tests**: remove obsolete optional Semgrep findings guard (#3099) (9c14645)
+
 ## [0.174.0] - 2026-10-31
 
 ### Added

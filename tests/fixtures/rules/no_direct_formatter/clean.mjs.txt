@@ -1,0 +1,23 @@
+import { execSync } from 'node:child_process';
+execSync('uv run lintro fmt generated.mjs');
+execSync('lintro fmt generated.mjs');
+execSync('ruff check generated.py');
+execSync('prettier --check generated.css');
+const example = 'bunx oxfmt generated.mjs';
+console.log('prettier --write generated.css');
+console.log('example; black generated.py');
+// execSync('black generated.py');
+  // execSync('black generated.py');
+
+// Unsupported dynamic commands and split argument arrays remain unreported.
+const formatter = 'black';
+execSync(`${formatter} generated.py`);
+spawnSync('ruff', ['format', 'generated.py']);
+const run = execSync;
+run('black generated.py');
+execSync('/usr/bin/black generated.py');
+execSync('uv run --no-sync black generated.py');
+execSync(
+  'black generated.py'
+);
+execSync('generate "input"; black generated.py');

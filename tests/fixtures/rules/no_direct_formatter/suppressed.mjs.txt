@@ -1,0 +1,3 @@
+execSync('bunx oxfmt generated.mjs'); // nosemgrep: lintro.scripts.no-direct-formatter.native-command
+// nosemgrep: lintro.scripts.no-direct-formatter.native-command
+execSync('black generated.py');

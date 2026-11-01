@@ -1,0 +1,27 @@
+#!/bin/sh
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+black>format.log
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+black<input.py
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+black&next
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+black|next
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+ruff format>format.log
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+ruff format<input.py
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+ruff format&&next
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+ruff format||next
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+prettier --write>format.log
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+prettier -w<input.css
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+prettier --write&&next
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+prettier -w||next
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+prettier>format.log --write a.css
