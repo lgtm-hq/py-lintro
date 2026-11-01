@@ -119,6 +119,7 @@ def parse_golangci_lint_output_with_stats(
         plugin. An absent report always counts as a parse failure.
     """
     if not output or not output.strip():
+        # JSON output was requested explicitly; only Issues: [] proves clean lint.
         return [], 1
 
     # Strip ANSI codes for consistent parsing across environments.

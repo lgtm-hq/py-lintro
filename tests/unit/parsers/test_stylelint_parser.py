@@ -172,12 +172,90 @@ def test_leading_empty_array_does_not_hide_report(prefix: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "prefix",
+    [
+        "plugin warning [unfinished\n",
+        "plugin warning {unfinished\n",
+        "[unfinished\n",
+        "{unfinished\n",
+        "plugin warning [\n",
+        "plugin warning {\n",
+        "plugin warning [unfinished\n" * 1000,
+    ],
+    ids=[
+        "log-array",
+        "log-object",
+        "array",
+        "object",
+        "bare-array",
+        "bare-object",
+        "many",
+    ],
+)
+def test_unmatched_log_delimiters_do_not_hide_findings(prefix: str) -> None:
+    """Unmatched logging delimiters cannot swallow the actual JSON report."""
+    issues, failures = parse_stylelint_output_with_stats(prefix + SINGLE_WARNING)
+
+    assert_that(failures).is_zero()
+    assert_that(issues).extracting("file", "line", "code").is_equal_to(
+        [("/tmp/fixme.css", 2, "color-hex-length")],
+    )
+
+
+def test_noisy_extraction_bounds_json_decoding(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Recover findings without repeatedly decoding long overlapping suffixes."""
+    output = (
+        '["warning"]\n' * 1000 + "plugin warning [unfinished\n" * 1000 + SINGLE_WARNING
+    )
+    original_decode = json.JSONDecoder.raw_decode
+    decoded_chars = 0
+
+    def counted_decode(
+        self: json.JSONDecoder,
+        document: str,
+        idx: int = 0,
+    ) -> tuple[object, int]:
+        nonlocal decoded_chars
+        decoded_chars += len(document) - idx
+        return original_decode(self, document, idx)
+
+    with monkeypatch.context() as context:
+        context.setattr(json.JSONDecoder, "raw_decode", counted_decode)
+        issues, failures = parse_stylelint_output_with_stats(output)
+
+    assert_that(failures).is_zero()
+    assert_that(issues).extracting("code").is_equal_to(["color-hex-length"])
+    assert_that(decoded_chars).is_positive().is_less_than_or_equal_to(3 * len(output))
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    ["[null]", "[{}]", "[false]", "[[[]]]", '{"warnings":[]}'],
+)
+@pytest.mark.parametrize("empty_first", [False, True])
+def test_invalid_report_prevents_empty_array_fallback(
+    invalid: str,
+    empty_first: bool,
+) -> None:
+    """A standalone empty array cannot mask an invalid outer report."""
+    reports = ["[]", invalid] if empty_first else [invalid, "[]"]
+    output = "\nnotice\n".join(reports)
+
+    assert_that(parse_stylelint_output_with_stats(output)).is_equal_to(([], 1))
+
+
+@pytest.mark.parametrize(
     "output",
     [
         "Plugins: []",
         'notice\n[{"source":"a.css","warnings":[]',
         '[]\nnotice\n[{"source":"a.css","warnings":[]',
         'notice\n{"other":{"warnings":[]}}',
+        "notice\n[\n[]",
+        'notice\n{\n"warnings":[]',
+        "notice\n[\n" + SINGLE_WARNING,
+        'notice\n{"nested":\n' + SINGLE_WARNING,
+        "[]\nnotice\n[null}",
     ],
 )
 def test_noise_or_truncated_report_cannot_expose_empty_arrays(output: str) -> None:

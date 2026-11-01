@@ -31,14 +31,16 @@ NO_CONFIG = "ConfigurationError: No configuration provided for /tmp/a.css"
 
 
 @pytest.mark.parametrize("stage", [0, 1, 2], ids=["initial", "fix", "verification"])
-def test_null_report_cannot_verify_a_stylelint_fix(
+@pytest.mark.parametrize("report", ["null", "[]\nnotice\n[null]"])
+def test_invalid_report_cannot_verify_a_stylelint_fix(
     stylelint_plugin: StylelintPlugin,
     tmp_path: Path,
     stage: int,
+    report: str,
 ) -> None:
-    """An exit-zero null report at any JSON stage makes fix accounting unknown."""
+    """An exit-zero invalid report at any JSON stage makes fix accounting unknown."""
     outputs = [(False, INITIAL_JSON), (True, CLEAN_JSON), (True, CLEAN_JSON)]
-    outputs[stage] = (True, "null")
+    outputs[stage] = (True, report)
     with (
         patch.object(
             stylelint_plugin,

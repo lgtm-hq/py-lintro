@@ -35,6 +35,31 @@ def _looks_like_stylelint_payload(data: Any) -> bool:
     )
 
 
+def _starts_json_container(output: str, index: int) -> bool:
+    """Distinguish JSON openers from unmatched delimiters in log text.
+
+    Args:
+        output: Mixed formatter output and log text.
+        index: Position of an opening array or object delimiter.
+
+    Returns:
+        Whether the next token can begin JSON. A bare opener on its own line
+        remains a container, so truncated and nested reports fail closed.
+    """
+    next_index = index + 1
+    while next_index < len(output) and output[next_index] in " \t\r":
+        next_index += 1
+    if next_index == len(output) or output[next_index] == "\n":
+        line_start = output.rfind("\n", 0, index) + 1
+        return not output[line_start:index].strip()
+    first = output[next_index]
+    if output[index] == "{":
+        return first in '"}'
+    return first in '[{]"0123456789-' or any(
+        output.startswith(literal, next_index) for literal in ("true", "false", "null")
+    )
+
+
 def _outer_json_spans(output: str) -> Iterator[tuple[int, int | None]]:
     """Locate balanced outer values in one pass, respecting JSON strings.
 
@@ -59,7 +84,7 @@ def _outer_json_spans(output: str) -> Iterator[tuple[int, int | None]]:
                 in_string = False
         elif char == '"' and depth:
             in_string = True
-        elif char in "[{":
+        elif char in "[{" and (depth or _starts_json_container(output, index)):
             if not depth:
                 start = index
             depth += 1
@@ -95,12 +120,14 @@ def _extract_json_array(output: str) -> str | None:
             empty_starts.add(offset + line.index("["))
         offset += len(line)
     empty_report = None
+    invalid_report = False
     for start, end in _outer_json_spans(output):
         if end is None:
             return None
         try:
             data = decoder.decode(output[start:end])
         except (json.JSONDecodeError, ValueError):
+            invalid_report = True
             continue
         if _looks_like_stylelint_payload(data):
             return output[start:end]
@@ -108,7 +135,11 @@ def _extract_json_array(output: str) -> str | None:
             # An empty report must occupy its own line. Logging like
             # "Plugins: []" is not a report, and must not hide a later one.
             empty_report = output[start:end]
-    return empty_report
+        elif data != []:
+            # Unknown nonempty containers cannot validate an empty fallback.
+            # Keep looking for a usable report rather than silently passing.
+            invalid_report = True
+    return None if invalid_report else empty_report
 
 
 def parse_stylelint_output(output: str | None) -> list[StylelintIssue]:

@@ -505,7 +505,13 @@ INVALID_PRIMARY_REPORTS = {
     "html_validate": ["null", "{}", "false", '[{"filePath":"a.html"}]'],
     "ruff": ["null", "{}", "false", '"wrong"'],
     "sqlfluff": ["null", "{}", "false", '[{"filepath":"a.sql"}]'],
-    "stylelint": ["null", "{}", "false", '[{"source":"a.css"}]'],
+    "stylelint": [
+        "null",
+        "{}",
+        "false",
+        '[{"source":"a.css"}]',
+        "[]\nnotice\n[null]",
+    ],
     "vale": ["null", "[]", "false", '{"a.md": null}'],
 }
 
