@@ -513,6 +513,10 @@ INVALID_PRIMARY_REPORTS = {
         "[]\nnotice\n[null]",
         '[null]\n[{"source":"a.css","warnings":[]}]',
         '[{"source":"a.css","warnings":[]}]\n[null]',
+        "null\n[]",
+        "[]\nnull",
+        'null\n[{"source":"a.css","warnings":[]}]',
+        '[{"source":"a.css","warnings":[]}]\nnull',
     ],
     "vale": ["null", "[]", "false", '{"a.md": null}'],
 }

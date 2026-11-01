@@ -38,6 +38,10 @@ NO_CONFIG = "ConfigurationError: No configuration provided for /tmp/a.css"
         "[]\nnotice\n[null]",
         '[null]\n[{"source":"a.css","warnings":[]}]',
         '[{"source":"a.css","warnings":[]}]\n[null]',
+        "null\n[]",
+        "[]\nnull",
+        "null\n" + REMAINING_JSON,
+        REMAINING_JSON + "\nnull",
     ],
 )
 def test_invalid_report_cannot_verify_a_stylelint_fix(

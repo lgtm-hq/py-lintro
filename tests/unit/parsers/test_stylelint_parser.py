@@ -293,6 +293,70 @@ def test_invalid_outer_sibling_is_counted_with_usable_report(
     )
 
 
+@pytest.mark.parametrize(
+    "scalar",
+    ["null", "false", "true", "42", "-1.5e2", '"scalar"', '"[]"', '"["'],
+)
+@pytest.mark.parametrize("scalar_first", [False, True])
+@pytest.mark.parametrize("report", ["[]", CLEAN, SINGLE_WARNING])
+def test_standalone_scalar_siblings_are_invalid_reports(
+    scalar: str,
+    scalar_first: bool,
+    report: str,
+) -> None:
+    """A scalar on its own line counts without hiding neighboring findings."""
+    reports = [scalar, report] if scalar_first else [report, scalar]
+    issues, failures = parse_stylelint_output_with_stats(
+        "\nnotice\n".join(reports),
+    )
+
+    assert_that(failures).is_equal_to(1)
+    assert_that(issues).extracting("file", "line", "code").is_equal_to(
+        [("/tmp/fixme.css", 2, "color-hex-length")] if report == SINGLE_WARNING else [],
+    )
+
+
+def test_nested_scalars_and_inline_log_values_are_not_outer_reports() -> None:
+    """Only standalone outer scalars add failures during noisy recovery."""
+    output = "\n".join(
+        [
+            "notice null false 42",
+            'plugin value: "[]"',
+            '[\nnull\n,{"source":"a.css","warnings":[{"text":\n"kept"\n}]}\n]',
+        ],
+    )
+    issues, failures = parse_stylelint_output_with_stats(output)
+
+    assert_that(failures).is_equal_to(1)
+    assert_that(issues).extracting("message").is_equal_to(["kept"])
+
+
+def test_scalar_extraction_accumulates_failures_with_bounded_decoding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Count every scalar once while keeping total decoded input linear."""
+    output = ('  "["  \nnull\n' * 1000) + SINGLE_WARNING + ("\nfalse" * 1000)
+    original_decode = json.JSONDecoder.raw_decode
+    decoded_chars = 0
+
+    def counted_decode(
+        self: json.JSONDecoder,
+        document: str,
+        idx: int = 0,
+    ) -> tuple[object, int]:
+        nonlocal decoded_chars
+        decoded_chars += len(document) - idx
+        return original_decode(self, document, idx)
+
+    with monkeypatch.context() as context:
+        context.setattr(json.JSONDecoder, "raw_decode", counted_decode)
+        issues, failures = parse_stylelint_output_with_stats(output)
+
+    assert_that(failures).is_equal_to(3000)
+    assert_that(issues).extracting("code").is_equal_to(["color-hex-length"])
+    assert_that(decoded_chars).is_positive().is_less_than_or_equal_to(3 * len(output))
+
+
 def test_later_reports_keep_findings_and_accumulate_failures() -> None:
     """Every outer sibling contributes even after the first usable report."""
     output = "\n".join(["[null]", CLEAN, SINGLE_WARNING, "[false]", "[{", ""])

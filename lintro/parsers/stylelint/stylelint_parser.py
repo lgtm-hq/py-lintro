@@ -60,21 +60,56 @@ def _starts_json_container(output: str, index: int) -> bool:
     )
 
 
+def _standalone_scalar_spans(output: str) -> dict[int, int]:
+    """Locate JSON scalar lines without repeatedly decoding overlapping text.
+
+    Args:
+        output: Mixed formatter output and log text.
+
+    Returns:
+        Start and end offsets of scalar lines, including any inside containers.
+    """
+    decoder = json.JSONDecoder()
+    spans = {}
+    offset = 0
+    for line in output.splitlines(keepends=True):
+        value = line.strip()
+        if value and value[0] not in "[{":
+            try:
+                decoder.decode(value)
+            except (json.JSONDecodeError, ValueError):
+                pass
+            else:
+                start = offset + len(line) - len(line.lstrip())
+                spans[start] = offset + len(line)
+        offset += len(line)
+    return spans
+
+
 def _outer_json_spans(output: str) -> Iterator[tuple[int, int | None]]:
-    """Locate balanced outer values in one pass, respecting JSON strings.
+    """Locate outer containers and standalone scalars in bounded linear passes.
 
     Args:
         output: Mixed formatter output and log text.
 
     Yields:
-        tuple[int, int | None]: Start and end offsets of outer arrays or
-        objects. An unfinished trailing container has no end offset.
+        tuple[int, int | None]: Start and end offsets of outer JSON values.
+        An unfinished trailing container has no end offset.
     """
+    scalar_spans = _standalone_scalar_spans(output)
     depth = 0
     start = 0
     in_string = False
     escaped = False
-    for index, char in enumerate(output):
+    index = 0
+    while index < len(output):
+        char = output[index]
+        if not depth and index in scalar_spans:
+            end = scalar_spans[index]
+            yield index, end
+            # Delimiters inside a scalar string cannot start another report.
+            index = end
+            continue
         if in_string:
             if escaped:
                 escaped = False
@@ -92,6 +127,7 @@ def _outer_json_spans(output: str) -> Iterator[tuple[int, int | None]]:
             depth -= 1
             if not depth:
                 yield start, index + 1
+        index += 1
     if depth:
         yield start, None
 
@@ -102,7 +138,8 @@ def _extract_json_array(output: str) -> tuple[list[Any] | None, int]:
     Stylelint writes its JSON payload to stderr, which lintro combines with
     stdout. Skip non-Stylelint JSON arrays (e.g. ``["warning"]`` noise) and
     bracketed log lines so the real payload is selected. Only decode balanced
-    outer values, avoiding repeated scans of nested or truncated JSON.
+    outer containers and standalone scalar lines, avoiding repeated scans of
+    nested or truncated JSON. Scalar reports count as invalid outer siblings.
 
     Args:
         output: The combined stdout/stderr from stylelint.
