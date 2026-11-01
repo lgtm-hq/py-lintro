@@ -30,6 +30,10 @@ from lintro.enums.tool_name import normalize_tool_name, tool_name_aliases
 from lintro.models.core.tool_snapshot import ToolCapabilities as ToolCapabilities
 from lintro.models.core.tool_snapshot import ToolSnapshot as ToolSnapshot
 from lintro.tools.core.command_builders import CommandBuilderRegistry
+from lintro.tools.core.node_fallback import (
+    is_registry_fallback_command,
+    registry_fallback_install_hint,
+)
 from lintro.utils.tool_snapshots import (
     SnapshotProvider,
     register_snapshot_provider,
@@ -675,7 +679,8 @@ def _probe_all_fresh(
         tool_names: Tool names to probe.
         search_root: Project root for config discovery.
         max_workers: Thread pool size.
-        for_introspection: Report ambiguous execution modes without permitting them.
+        for_introspection: Report registry fallbacks and ambiguous modes without
+            executing them or caching their diagnostic snapshots.
 
     Returns:
         Cacheable snapshots and separate, uncached introspection diagnostics.
@@ -690,10 +695,22 @@ def _probe_all_fresh(
 
     workers = max(1, min(max_workers, len(tool_names)))
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = {
-            executor.submit(probe_tool, name, search_root=search_root): name
-            for name in tool_names
-        }
+        futures = {}
+        for name in tool_names:
+            if for_introspection:
+                command = get_executable_command(name, cwd=search_root)
+                if is_registry_fallback_command(command):
+                    diagnostics[name.lower()] = _unavailable_snapshot(
+                        name.lower(),
+                        probe_error=(
+                            "Tool not installed: registry fallback only; "
+                            "introspection does not run package runners"
+                        ),
+                        remediation_hint=registry_fallback_install_hint(command),
+                        command=tuple(command),
+                    )
+                    continue
+            futures[executor.submit(probe_tool, name, search_root=search_root)] = name
         for future in as_completed(futures):
             name = futures[future]
             # Known subprocess failures are classified by check_tool_version.
@@ -782,7 +799,8 @@ def probe_all_tools(
         force: Bypass cache and re-probe.
         cache_root: Directory for ``.lintro-cache``; defaults to cwd.
         tool_names: Optional subset of tool names; defaults to all registered.
-        for_introspection: Include uncached ambiguous-mode diagnostics for listing.
+        for_introspection: Return uncached diagnostics for registry fallbacks and
+            ambiguous modes, without running package runners.
             Execution callers must leave this False to fail closed.
 
     Returns:
@@ -849,11 +867,11 @@ def probe_all_tools(
         with _cache_lock:
             to_write = dict(_memory_caches.get(cache_file, merged))
         _write_disk_cache(cache_file, to_write, ttl=ttl)
-    return diagnostics | {
+    return {
         name: snap
         for name in names
         if (snap := lookup_snapshot(merged, name)) is not None
-    }
+    } | diagnostics
 
 
 def get_tool_snapshot(

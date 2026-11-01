@@ -23,6 +23,7 @@ class SnapshotProvider(Protocol):
         force: bool = False,
         cache_root: Path | None = None,
         tool_names: list[str] | None = None,
+        for_introspection: bool = False,
     ) -> dict[str, ToolSnapshot]:
         """Probe a set of tools through the shared cache.
 
@@ -30,6 +31,7 @@ class SnapshotProvider(Protocol):
             force: Ignore valid cached entries.
             cache_root: Execution and cache directory.
             tool_names: Requested registry names, or all registered tools.
+            for_introspection: Report registry fallbacks without running them.
 
         Returns:
             Snapshot map for the requested tools.
@@ -157,6 +159,7 @@ def probe_all_tools(
     force: bool = False,
     cache_root: Path | None = None,
     tool_names: list[str] | None = None,
+    for_introspection: bool = False,
 ) -> dict[str, ToolSnapshot]:
     """Read capability evidence through the registered tool provider.
 
@@ -164,6 +167,7 @@ def probe_all_tools(
         force: Ignore valid cached entries.
         cache_root: Execution and cache directory.
         tool_names: Requested names, or all registered tools.
+        for_introspection: Report registry fallbacks without running them.
 
     Returns:
         Snapshot map for the requested tools.
@@ -172,6 +176,7 @@ def probe_all_tools(
         force=force,
         cache_root=cache_root,
         tool_names=tool_names,
+        for_introspection=for_introspection,
     )
 
 

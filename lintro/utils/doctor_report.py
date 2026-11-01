@@ -465,7 +465,10 @@ def collect_tool_checks(
 
     if tool_names:
         tools = [registry.get(name) for name in tool_names]
-        snapshots = probe_all_tools(tool_names=[t.name for t in tools])
+        snapshots = probe_all_tools(
+            tool_names=[t.name for t in tools],
+            for_introspection=True,
+        )
         return [
             check_tool(
                 tool=tool,
@@ -477,7 +480,10 @@ def collect_tool_checks(
 
     all_tools = list(registry.all_tools(include_dev=True))
     if check_all or config is None:
-        snapshots = probe_all_tools(tool_names=[t.name for t in all_tools])
+        snapshots = probe_all_tools(
+            tool_names=[t.name for t in all_tools],
+            for_introspection=True,
+        )
         return [
             check_tool(
                 tool=tool,
@@ -488,7 +494,14 @@ def collect_tool_checks(
         ]
 
     enabled = [tool for tool in all_tools if config.is_tool_enabled(tool.name)]
-    snapshots = probe_all_tools(tool_names=[t.name for t in enabled]) if enabled else {}
+    snapshots = (
+        probe_all_tools(
+            tool_names=[t.name for t in enabled],
+            for_introspection=True,
+        )
+        if enabled
+        else {}
+    )
     results: list[ToolCheckResult] = []
     for tool in all_tools:
         if config.is_tool_enabled(tool.name):
