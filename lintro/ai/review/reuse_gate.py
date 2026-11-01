@@ -17,6 +17,7 @@ figures are kept.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from lintro.ai.enums.model_verification import ModelVerification
@@ -36,6 +37,7 @@ __all__ = [
     "INHERITED_EVIDENCE_STATES",
     "agent_model_overrides",
     "evidence_carries_over",
+    "inherit_model_evidence",
     "allowed_models_for",
     "reusable_rounds",
     "reusable_rounds_before_provider",
@@ -46,7 +48,11 @@ __all__ = [
 #: whose model evidence therefore stays on the round's record when a later
 #: checkpoint or the final record replaces it.
 INHERITED_EVIDENCE_STATES: frozenset[str] = frozenset(
-    {ModelVerification.VERIFIED.value, ModelVerification.UNVERIFIABLE.value},
+    {
+        ModelVerification.VERIFIED.value,
+        ModelVerification.UNVERIFIABLE.value,
+        ModelVerification.UNREPORTED.value,
+    },
 )
 
 
@@ -113,7 +119,7 @@ def _normalize(name: str) -> str:
 
 
 def evidence_carries_over(*, earlier: RunIdentity, current: RunIdentity) -> bool:
-    """Return whether an earlier attempt's reported models stay on the record.
+    """Return whether an earlier attempt's model claims may stay on the record.
 
     They stay only when that attempt's coverage could have been inherited:
     its state is one the gate accepts and it ran on the same lane and
@@ -130,6 +136,49 @@ def evidence_carries_over(*, earlier: RunIdentity, current: RunIdentity) -> bool
         earlier.model_verification in INHERITED_EVIDENCE_STATES
         and earlier.lane == current.lane
         and earlier.endpoint == current.endpoint
+    )
+
+
+def inherit_model_evidence(
+    *,
+    earlier: RunIdentity,
+    current: RunIdentity,
+    inherited: bool,
+) -> RunIdentity:
+    """Keep a replaced checkpoint's reported evidence and separate silent claims.
+
+    Args:
+        earlier: Identity of the checkpoint being replaced.
+        current: Identity replacing it, with this attempt's verification state.
+        inherited: Whether gated coverage from the checkpoint survived. Silent
+            claims from a fully re-reviewed attempt must not taint its replacement.
+
+    Returns:
+        The merged identity. Silent coverage cannot become verified; a live
+        mismatch or blank state stays as recorded.
+    """
+    silent = earlier.model_verification == ModelVerification.UNREPORTED.value
+    if not evidence_carries_over(earlier=earlier, current=current) or (
+        (silent or earlier.unreported_models) and not inherited
+    ):
+        return current
+    reported = {model.name: model for model in current.reported_models}
+    for model in earlier.reported_models:
+        reported.setdefault(model.name, model)
+    claims = earlier.unreported_models
+    if silent and not claims:
+        # Only an old purely silent record has an unambiguous request.
+        # A mixed record without claims stays disallowed if inherited.
+        claims = ("",) if earlier.reported_models else (earlier.model,)
+    unreported = tuple(dict.fromkeys((*current.unreported_models, *claims)))
+    state = current.model_verification
+    if unreported and state == ModelVerification.VERIFIED.value:
+        state = ModelVerification.UNREPORTED.value
+    return replace(
+        current,
+        reported_models=tuple(reported.values()),
+        unreported_models=unreported,
+        model_verification=state,
     )
 
 

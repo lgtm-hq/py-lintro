@@ -221,6 +221,8 @@ def _identity_from_payload(*, payload: dict[str, Any]) -> RunIdentity:
         first_party=_optional_bool(payload.get("first_party")),
         credential=str(payload.get("credential", "") or ""),
         reported_models=_reported_models(payload.get("reported_models")),
+        # Omission is an older artifact; explicit null is a malformed claim
+        # and parses to a disallowed blank rather than disappearing.
         unreported_models=_unreported_models(payload.get("unreported_models", [])),
         lane=str(payload.get("lane", "") or ""),
         model_verification=_parse_verification(payload=payload),
