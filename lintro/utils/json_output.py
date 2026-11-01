@@ -19,6 +19,13 @@ from typing import TYPE_CHECKING, Any
 from lintro.enums.action import Action, normalize_action
 from lintro.formatters.formatter import merge_detected_and_remaining
 from lintro.models.core.severity_counts import SeverityCounts, SeverityDelta
+from lintro.models.core.tool_outcome import (
+    FixMeasured,
+    FixPartial,
+    FixUnmeasured,
+    Skipped,
+    TimedOut,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.execution.exit_codes import unknown_residual_tool_names
 from lintro.utils.tool_metadata import normalize_tool_metadata
@@ -72,7 +79,7 @@ def timed_out_tool_names(results: Sequence[ToolResult]) -> list[str]:
     """
     names: list[str] = []
     for result in results:
-        if not result.timed_out:
+        if not isinstance(result.outcome.execution, TimedOut):
             continue
         name = result.name
         if name not in names:
@@ -115,41 +122,42 @@ def serialize_tool_result(
         ``fixed``/``remaining`` in FIX mode, normalized ``metadata`` when
         present, and ``issues`` when any exist.
     """
+    outcome = result.outcome
+    execution = outcome.execution
     merged_issues = merge_detected_and_remaining(
         result.initial_issues,
         result.issues,
     )
     data: dict[str, Any] = {
         "tool": result.name,
-        "success": result.success,
+        "success": outcome.success,
         "issues_count": len(merged_issues),
-        "skipped": result.skipped,
-        "skip_reason": result.skip_reason,
-        "timed_out": bool(result.timed_out),
+        "skipped": isinstance(execution, Skipped),
+        "skip_reason": execution.reason if isinstance(execution, Skipped) else None,
+        "timed_out": isinstance(execution, TimedOut),
         "output": result.output,
     }
     if result.parse_failures_count is not None:
         data["parse_failures_count"] = result.parse_failures_count
     if action == Action.FIX:
-        if result.residual_unknown:
-            # The verify pass could not measure the residual (#1743). Both
-            # counts are null rather than zero: a consumer must be able to
-            # tell "nothing left" from "nobody looked".
-            data["net_resolved"] = None
-            # ``fixed`` is the deprecated spelling of ``net_resolved``, kept
-            # at the same value so existing consumers keep working. It will
-            # be removed in a later release.
-            data["fixed"] = None
-            data["remaining"] = None
-            data["residual_unknown"] = True
-            data["residual_unknown_reason"] = result.residual_unknown_reason
-        else:
-            fixed = result.fixed_issues_count
-            remaining = result.remaining_issues_count
-            data["net_resolved"] = fixed if fixed is not None else 0
-            # Deprecated alias of ``net_resolved``; see above.
-            data["fixed"] = data["net_resolved"]
-            data["remaining"] = remaining if remaining is not None else 0
+        match outcome.accounting:
+            case FixUnmeasured(reason=reason):
+                # No after-count exists. Keep the public nulls and deprecated
+                # ``fixed`` alias of ``net_resolved`` (#1743).
+                data["net_resolved"] = None
+                data["fixed"] = None
+                data["remaining"] = None
+                data["residual_unknown"] = True
+                data["residual_unknown_reason"] = reason
+            case FixMeasured(fixed=fixed, remaining=remaining) | FixPartial(
+                fixed=fixed,
+                remaining=remaining,
+            ):
+                # Preserve the legacy wire defaults for partial accounting;
+                # they do not turn its missing counters into measurements.
+                data["net_resolved"] = fixed if fixed is not None else 0
+                data["fixed"] = data["net_resolved"]
+                data["remaining"] = remaining if remaining is not None else 0
     metadata = result.metadata
     if metadata:
         normalized_metadata = normalize_tool_metadata(metadata)

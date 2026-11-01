@@ -13,6 +13,7 @@ from loguru import logger
 
 from lintro.enums.action import Action, normalize_action
 from lintro.enums.tool_name import ToolName
+from lintro.models.core.tool_outcome import NoFiles
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
@@ -333,7 +334,7 @@ def print_tool_result(
         # If the tool reported a failure (e.g., parse error), do not claim pass
         if success is False:
             console_output_func(text="✗ Tool execution failed", color="red")
-        elif result is not None and result.no_files and result.inspected_files is False:
+        elif result is not None and isinstance(result.outcome.execution, NoFiles):
             console_output_func(
                 text=("⚠️  No files processed (excluded by patterns)"),
             )

@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any, TextIO
 
 from loguru import logger
 
+from lintro.models.core.tool_outcome import FixUnmeasured
+
 if TYPE_CHECKING:
     from lintro.enums.action import Action
     from lintro.models.core.tool_result import ToolResult
@@ -110,20 +112,22 @@ class StreamingResultHandler:
         """
         from lintro.enums.action import Action
 
+        outcome = result.outcome
+        accounting = outcome.accounting
         # Update totals
         self._totals["tools_run"] += 1
-        self._totals["issues"] += result.issues_count
+        self._totals["issues"] += outcome.issues_count
 
         if self.action == Action.FIX:
-            fixed = getattr(result, "fixed_issues_count", None)
-            remaining = getattr(result, "remaining_issues_count", None)
+            fixed = accounting.fixed
+            remaining = accounting.remaining
             if fixed is not None:
                 self._totals["net_resolved"] += fixed
                 self._totals["fixed"] += fixed
             if remaining is not None:
                 self._totals["remaining"] += remaining
 
-        if not result.success:
+        if not outcome.success:
             self._totals["tools_failed"] += 1
 
         # Buffer for summary/JSON output
@@ -174,28 +178,30 @@ class StreamingResultHandler:
         Returns:
             Dictionary representation of the result.
         """
+        outcome = result.outcome
+        accounting = outcome.accounting
         data: dict[str, Any] = {
             "tool": result.name,
-            "success": result.success,
-            "issues_count": result.issues_count,
+            "success": outcome.success,
+            "issues_count": outcome.issues_count,
         }
 
         if result.output:
             data["output"] = result.output
 
-        if result.initial_issues_count is not None:
-            data["initial_issues_count"] = result.initial_issues_count
-        if result.fixed_issues_count is not None:
-            data["net_resolved_count"] = result.fixed_issues_count
+        if accounting.initial is not None:
+            data["initial_issues_count"] = accounting.initial
+        if accounting.fixed is not None:
+            data["net_resolved_count"] = accounting.fixed
             # Deprecated alias of ``net_resolved_count``, same value.
-            data["fixed_issues_count"] = result.fixed_issues_count
-        if result.remaining_issues_count is not None:
-            data["remaining_issues_count"] = result.remaining_issues_count
-        if result.residual_unknown:
+            data["fixed_issues_count"] = accounting.fixed
+        if accounting.remaining is not None:
+            data["remaining_issues_count"] = accounting.remaining
+        if isinstance(accounting, FixUnmeasured):
             # Neither count is present above: the verify pass never measured
             # one (#1743). Flag it so a reader does not infer zero.
             data["residual_unknown"] = True
-            data["residual_unknown_reason"] = result.residual_unknown_reason
+            data["residual_unknown_reason"] = accounting.reason
 
         # Include issues if available
         if result.issues:

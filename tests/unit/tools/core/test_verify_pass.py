@@ -23,6 +23,16 @@ from lintro.enums.action import Action
 from lintro.enums.capability import Cap
 from lintro.enums.verify_status import VerifyStatus
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import (
+    Checked,
+    ExecutionOutcome,
+    FixPartial,
+    FixUnmeasured,
+    NoFiles,
+    Skipped,
+    TimedOut,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.tools.core import verify_pass
@@ -38,6 +48,7 @@ from lintro.tools.core.verify_pass import (
     VerifyOutcome,
     VerifyScope,
     capture_verify_baseline,
+    check_answered,
     fold_verify_results,
     resolve_result_capability,
     resolve_verify_scope,
@@ -2049,3 +2060,104 @@ def test_non_oxlint_parse_failures_keep_accounting_unknown_and_retain_reasons(
         )
     if verify_timeout:
         assert_that(result.residual_unknown_reason).contains(TIMED_OUT_REASON)
+
+
+@pytest.mark.parametrize(
+    ("execution", "has_findings", "status", "reason", "answered"),
+    [
+        (Checked(True, True), False, VerifyStatus.VERIFIED, "", True),
+        (Checked(False, True), True, VerifyStatus.VERIFIED, "", True),
+        (Checked(False), False, VerifyStatus.VERIFIED, "", False),
+        (Skipped("version gate"), False, VerifyStatus.UNKNOWN, SKIPPED_REASON, False),
+        (NoFiles(), False, VerifyStatus.UNCHANGED, "", False),
+        (TimedOut("deadline"), False, VerifyStatus.UNKNOWN, TIMED_OUT_REASON, False),
+        (
+            TimedOut("partial output"),
+            True,
+            VerifyStatus.UNKNOWN,
+            TIMED_OUT_REASON,
+            False,
+        ),
+    ],
+)
+def test_verify_consumes_execution_variants_without_promoting_inactive_results(
+    monkeypatch: pytest.MonkeyPatch,
+    execution: ExecutionOutcome,
+    has_findings: bool,
+    status: VerifyStatus,
+    reason: str,
+    answered: bool,
+) -> None:
+    """Only completed checks can supersede a scope's pre-fix findings.
+
+    Args:
+        monkeypatch: Registry isolation for the check double.
+        execution: Explicit execution evidence returned by the plugin.
+        has_findings: Whether the result carries parsed diagnostics.
+        status: Expected verify-pass classification.
+        reason: Expected reason for a missing verdict.
+        answered: Whether the returned check answered its scope.
+    """
+    result = ToolResult.from_outcome(
+        ToolOutcome(execution, issues_count=int(has_findings)),
+        name="ruff",
+        issues=[_issue("/repo/a.py")] if has_findings else [],
+    )
+    tool = _FakeTool(
+        definition=_FakeDefinition(
+            claims=[Claim(patterns=["*.py"], capabilities={Cap.FIX, Cap.CHECK})],
+        ),
+        result=result,
+    )
+    _register(monkeypatch, {"ruff": tool})
+
+    outcomes = run_verify_pass(
+        tools_to_run=["ruff"],
+        scope=VerifyScope(files=("/repo/a.py",), narrowed=True),
+        configure=lambda *, tool_name: tool,
+    )
+
+    assert_that(check_answered(result)).is_equal_to(answered)
+    assert_that(outcomes[0].status).is_equal_to(status)
+    assert_that(outcomes[0].unknown_reason).is_equal_to(reason)
+    assert_that(outcomes[0].result).is_equal_to(
+        result if status is VerifyStatus.VERIFIED else None,
+    )
+
+
+def test_verify_fold_preserves_unavailable_initial_measurement_on_parse_failure() -> (
+    None
+):
+    """A usable finding cannot supply the missing size of an incomplete report."""
+    before = _issue("/repo/a.proto")
+    after = _issue("/repo/b.proto")
+    mutation = ToolResult.from_outcome(
+        ToolOutcome(Checked(False), FixPartial(), issues_count=1),
+        name="buf",
+        issues=[before],
+        initial_issues=[before],
+        parse_failures_count=1,
+        capability=Cap.FIX,
+    )
+    verify = ToolResult.from_outcome(
+        ToolOutcome(Checked(False, True), issues_count=1),
+        name="buf",
+        issues=[after],
+    )
+    results = [mutation]
+
+    fold_verify_results(
+        mutation_results=results,
+        verify_results=[VerifyOutcome(tool="buf", result=verify)],
+        scope=VerifyScope(files=("/repo/a.proto",), narrowed=True),
+    )
+
+    assert_that(results[0].outcome.accounting).is_equal_to(
+        FixUnmeasured("tool output could not be fully parsed"),
+    )
+    assert_that(results[0].issues).contains(before, after)
+    assert_that(results[0].initial_issues).is_equal_to([before])
+    assert_that(results[0].initial_issues_count).is_none()
+    assert_that(results[0].fixed_issues_count).is_none()
+    assert_that(results[0].remaining_issues_count).is_none()
+    assert_that(results[0].success).is_false()
