@@ -18,6 +18,45 @@ from lintro.utils.meaningful_run import baseline_is_eligible
 from tests.unit.tools.subprocess_helpers import subprocess_result
 
 
+@pytest.mark.parametrize(
+    ("change", "unacknowledgeable"),
+    [
+        ({"file": "a/" * 2046 + "b.py"}, False),
+        ({"file": "a/" * 2047 + "b.py"}, True),
+        ({"code": "X" * 1024}, False),
+        ({"code": "X" * 1025}, True),
+    ],
+    ids=["path-limit", "path-too-long", "code-limit", "code-too-long"],
+)
+def test_fingerprint_limits_keep_unacknowledgeable_findings_failing(
+    tmp_path: Path,
+    dirty_result: ToolResult,
+    finding: RuffIssue,
+    change: dict[str, str],
+    unacknowledgeable: bool,
+) -> None:
+    """Out-of-schema identities survive filtering alongside an acknowledged peer."""
+    changed = replace(finding, **change)
+    result = replace(dirty_result, issues=[finding, changed], issues_count=2)
+    baseline = snapshot([result], root=tmp_path)
+    artifact = RunArtifact(
+        tool_results=[result],
+        workspace_root=tmp_path,
+        total_issues=2,
+        total_remaining=2,
+        exit_code=1,
+    )
+
+    apply_baseline(artifact, baseline)
+
+    assert_that(baseline.entries).is_length(1 if unacknowledgeable else 2)
+    assert_that(result.issues).is_equal_to([changed] if unacknowledgeable else [])
+    assert_that(result.baselined_count).is_equal_to(1 if unacknowledgeable else 2)
+    assert_that(artifact.total_issues).is_equal_to(int(unacknowledgeable))
+    assert_that(artifact.exit_code).is_equal_to(int(unacknowledgeable))
+    assert_that(artifact.success).is_equal_to(not unacknowledgeable)
+
+
 def test_check_filters_findings_exit_and_serialized_counts_together(
     tmp_path: Path,
     dirty_result: ToolResult,

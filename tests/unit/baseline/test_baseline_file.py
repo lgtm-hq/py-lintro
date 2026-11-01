@@ -1,6 +1,8 @@
 """Untrusted baseline validation and atomic persistence."""
 
 import json
+import os
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -125,6 +127,47 @@ def test_roundtrip_is_deterministic_and_creation_does_not_overwrite(
     assert_that(path.with_suffix(".json.lock").exists()).is_false()
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes and umask")
+@pytest.mark.parametrize("mask", [0o002, 0o022, 0o077])
+def test_new_baseline_respects_umask(
+    tmp_path: Path,
+    dirty_result: ToolResult,
+    mask: int,
+) -> None:
+    """New acknowledgements have ordinary file permissions bounded by the umask."""
+    baseline = snapshot([dirty_result], root=tmp_path)
+    path = tmp_path / "baseline.json"
+    previous_mask = os.umask(mask)
+    try:
+        change_baseline(path, lambda _: baseline, create=True)
+    finally:
+        os.umask(previous_mask)
+    assert_that(stat.S_IMODE(path.stat().st_mode)).is_equal_to(0o666 & ~mask)
+    assert_that(read_baseline(path)).is_equal_to(baseline)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes and umask")
+@pytest.mark.parametrize("mode", [0o600, 0o640, 0o664])
+def test_replacement_preserves_existing_baseline_mode(
+    tmp_path: Path,
+    dirty_result: ToolResult,
+    mode: int,
+) -> None:
+    """Updating a snapshot preserves its access policy even under a stricter umask."""
+    baseline = snapshot([dirty_result], root=tmp_path)
+    path = tmp_path / "baseline.json"
+    change_baseline(path, lambda _: baseline, create=True)
+    path.chmod(mode)
+    updated = baseline.model_copy(update={"entries": []})
+    previous_mask = os.umask(0o077)
+    try:
+        change_baseline(path, lambda _: updated)
+    finally:
+        os.umask(previous_mask)
+    assert_that(stat.S_IMODE(path.stat().st_mode)).is_equal_to(mode)
+    assert_that(read_baseline(path)).is_equal_to(updated)
+
+
 def test_failed_atomic_replace_keeps_old_file_and_cleans_temporary(
     tmp_path: Path,
     dirty_result: ToolResult,
@@ -190,11 +233,14 @@ def test_busy_lock_and_symlink_destination_cannot_be_written(
     baseline = snapshot([dirty_result], root=tmp_path)
     path = tmp_path / "baseline.json"
     change_baseline(path, lambda _: baseline, create=True)
+    original = path.read_bytes()
     lock = path.with_suffix(".json.lock")
     lock.write_text("busy", encoding="utf-8")
-    with pytest.raises(FileExistsError):
+    with pytest.raises(ValueError, match="lock already exists") as error:
         change_baseline(path, lambda _: baseline)
+    assert_that(str(error.value)).contains(str(lock), "active", "remove", "retry")
     assert_that(lock.read_text()).is_equal_to("busy")
+    assert_that(path.read_bytes()).is_equal_to(original)
     link = tmp_path / "link.json"
     link.symlink_to(path)
     with pytest.raises(ValueError, match="symlink"):

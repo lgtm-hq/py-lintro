@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Literal
 
 import click
 
+from lintro.enums.action import Action
 from lintro.utils.execution.baseline_filter import apply_baseline
 from lintro.utils.execution.run_renderer import (
     make_result_display,
@@ -33,7 +34,6 @@ from lintro.utils.fingerprint_baseline_file import load_run_baseline
 from lintro.utils.tool_executor import build_run_context, execute_run
 
 if TYPE_CHECKING:
-    from lintro.enums.action import Action
     from lintro.models.core.run_artifact import RunArtifact
     from lintro.models.core.sarif_enrichment import AISarifEnrichment
     from lintro.utils.execution.run_context import RunContext
@@ -248,7 +248,7 @@ def run_lint_artifact(
     )
     acknowledgements = (
         load_run_baseline(baseline, ctx.lintro_config)
-        if str(ctx.action) != "test"
+        if ctx.action != Action.TEST
         else None
     )
     _capture_fmt_checkpoint(ctx=ctx, paths=paths)

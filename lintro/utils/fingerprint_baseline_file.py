@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+from secrets import token_hex
 from typing import TYPE_CHECKING, Any, Literal
 
 from lintro.exceptions.errors import ConfigurationError
@@ -64,11 +65,20 @@ def _writer_lock(path: Path) -> Iterator[None]:
 
     Yields:
         None: While this process owns the lock.
+
+    Raises:
+        ValueError: If another writer or a stale lock owns the destination.
     """
     lock = path.with_name(path.name + ".lock")
     # Exclusive creation rejects symlinks as well as concurrent writers. A
     # killed writer leaves a visible lock requiring deliberate removal.
-    descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError as exc:
+        raise ValueError(
+            f"Baseline lock already exists: {lock}. Check for an active baseline "
+            f"management command; if none is running, remove {lock} and retry.",
+        ) from exc
     try:
         os.close(descriptor)
         yield
@@ -117,8 +127,14 @@ def change_baseline(
             raise ValueError("baseline exceeds 10 MiB")
         temporary: Path | None = None
         try:
-            with NamedTemporaryFile(dir=path.parent, delete=False) as handle:
-                temporary = Path(handle.name)
+            candidate = path.parent / f".lintro-baseline-{token_hex(16)}.tmp"
+            # Exclusive normal-file creation applies the umask without changing
+            # the process-wide mask. Replacements inherit the existing policy
+            # before any acknowledgement data is written to the temporary file.
+            with candidate.open("xb") as handle:
+                temporary = candidate
+                if not create:
+                    temporary.chmod(stat.S_IMODE(path.stat().st_mode))
                 handle.write(payload)
                 handle.flush()
                 os.fsync(handle.fileno())

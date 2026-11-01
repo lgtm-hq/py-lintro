@@ -1,8 +1,9 @@
 # Fingerprint baselines
 
 A fingerprint baseline lets a legacy project acknowledge existing findings while failing
-checks on new findings. It is opt-in; without a CLI option or config entry, Lintro keeps
-its existing behavior.
+checks on new findings. Filtering is opt-in; without a CLI option or config entry,
+findings remain unfiltered. The stricter execution checks described below apply to all
+runs.
 
 ```bash
 lintro baseline create . --tools ruff,black
@@ -19,6 +20,12 @@ the invocation directory; configured paths are relative to the project config. R
 the project root: finding paths in the baseline are relative to that root. Commit the
 baseline alongside the code. Creation refuses to overwrite a file. `show` reads
 statistics without executing tools.
+
+Treat the baseline as a reviewed suppression policy. Review additions, changed
+fingerprints, and increased occurrence counts alongside code changes: `update` can
+acknowledge new regressions, so do not run it automatically to make a failing CI check
+pass. Use `prune` to remove proven-fixed acknowledgements without accepting new ones.
+Keep a separate unfiltered check for tools outside the supported selection.
 
 ## Supported tools and scope
 
@@ -71,9 +78,13 @@ and column are excluded from identity; the stored line is only a hint. Messages
 normalize CRLF to LF but preserve all other content, including numbers: removing
 arbitrary numbers would also hide meaningful changes to a diagnostic. Counts preserve
 multiplicity: acknowledging one occurrence cannot hide two. Entries are sorted
-deterministically, contain no full messages, and can move between clones of the same
-project. Paths outside the invocation root cannot be acknowledged. File moves and
-changed messages or rule codes are new findings.
+deterministically and contain no full messages. Relative finding paths allow reuse
+between clones of the same project only when tool messages are stable: absolute paths,
+clone-specific text, or changing numbers embedded in messages still change their hashes.
+Paths outside the invocation root and findings exceeding the schema limits (including
+paths longer than 4096 characters and rule codes longer than 1024 characters) cannot be
+acknowledged and remain visible. File moves and changed messages or rule codes are new
+findings.
 
 Filtering runs after execution, AI enhancement, and the format verify pass, before final
 display or serialization. It filters detected and residual findings separately and
@@ -106,15 +117,15 @@ examined. Until #2609 supplies coverage throughout the tool registry, pruning mu
 infer it from requested directories or the paths in diagnostics. The additive
 `ToolResult.inspected_paths` contract names exact files a producer successfully
 examined. The shared per-file check runner leaves exact coverage unknown: native
-exclusions in tools such as pydoclint, sqlfluff, and dotenv-linter can skip even explicit
-file arguments and exit successfully. These tools can acknowledge observed findings,
-but cannot remove old entries until they supply affirmative per-file inspection proof.
-Baseline management asks Ruff for its native `--show-files` list, respecting native
-exclusions. Both Ruff discovery and formatter reports must match actual invocation
-identities, without duplicate identities. Multiline names, terminal control characters,
-and ambiguous resolved names make coverage unknown for the invocation. Ruff's lint
-discovery alone does not prove formatter coverage. When the format check completes,
-management also requires the formatter's verbose per-file
+exclusions in tools such as pydoclint, sqlfluff, and dotenv-linter can skip even
+explicit file arguments and exit successfully. These tools can acknowledge observed
+findings, but cannot remove old entries until they supply affirmative per-file
+inspection proof. Baseline management asks Ruff for its native `--show-files` list,
+respecting native exclusions. Both Ruff discovery and formatter reports must match
+actual invocation identities, without duplicate identities. Multiline names, terminal
+control characters, and ambiguous resolved names make coverage unknown for the
+invocation. Ruff's lint discovery alone does not prove formatter coverage. When the
+format check completes, management also requires the formatter's verbose per-file
 execution records and matching completion counts. Coverage is the intersection of the
 lint and formatter file sets. Disabled format checks, formatter exclusions, unknown
 trace formats, and incomplete reports cannot remove `FORMAT` acknowledgements.
@@ -125,15 +136,32 @@ Requested inputs, discovery messages, exclusion messages, and summary counts alo
 not authorize pruning. Black's separate E501 supplement does not yet supply exact file
 coverage, so E501 entries are retained. Other producers retain entries until they supply
 exact coverage. Producers list uncovered codes in `uninspected_codes` to narrow their
-coverage claim. After a completed inspection proves a formatting finding fixed,
-`update` and `prune` remove its acknowledgement; a later regression fails the check.
-An execution failure cannot remove entries. Occurrence budgets shrink only over the
-same coverage. Deleted files are retained because their absence alone is not a
-successful inspection.
+coverage claim. After a completed inspection proves a formatting finding fixed, `update`
+and `prune` remove its acknowledgement; a later regression fails the check. An execution
+failure cannot remove entries. Occurrence budgets shrink only over the same coverage.
+Deleted files are retained because their absence alone is not a successful inspection.
 
 Baseline JSON is untrusted input. Unknown schema versions, unexpected or duplicate JSON
 members, repeated entries, non-canonical paths, parent traversal, absolute paths,
 invalid hashes or counts, and oversized files fail closed before tools run. Writes use
 an exclusive sibling lock and an atomic replacement; an error leaves the existing
-baseline intact. No rule packs (#3023), provenance, or broader ignore system (#1610) are
+baseline intact. Replacements preserve the existing file's permission mode; creation
+uses ordinary file permissions restricted by the process umask. A killed writer can
+leave a sibling `.lock` file. Confirm that no baseline management command is active
+before removing that lock and retrying; locks are never removed automatically by a later
+writer. No rule packs (#3023), provenance, or broader ignore system (#1610) are
 introduced here.
+
+## Execution checks for all runs
+
+These fail-closed checks also apply without a fingerprint baseline:
+
+- Ruff's lint check requires a structured report, including `[]` for a clean result.
+  Empty stdout fails, and diagnostics without positive line and column locations count
+  as parse failures rather than a complete report.
+- The shared per-file check runner accepts a nonzero exit as a complete lint verdict
+  only when it is a declared findings exit status and has parsed findings. Other nonzero
+  exits are execution errors even if some findings were parsed. This also applies to the
+  fix runner's initial check; unknown execution is never a clean check.
+- A format verification pass that cannot confirm inspection leaves `inspected_files`
+  unknown. It supplies no affirmative inspection evidence for subsequent consumers.

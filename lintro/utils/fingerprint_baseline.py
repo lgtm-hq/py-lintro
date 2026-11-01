@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
+from pydantic import ValidationError
+
 from lintro.models.core.fingerprint_baseline import (
     BaselineEntry,
     BaselineFinding,
@@ -62,20 +64,25 @@ def fingerprint(
         cwd: Working directory for relative diagnostic paths.
 
     Returns:
-        Single-occurrence entry, or None for paths outside the workspace.
+        Single-occurrence entry, or None for paths outside the workspace or
+        findings that exceed the baseline schema's bounds.
     """
     file = relative_file(issue.file, root=root, cwd=cwd)
     if file is None:
         return None
     message = issue.message.replace("\r\n", "\n")
-    return BaselineEntry(
-        tool=tool.lower(),
-        file=file,
-        code=issue.get_code(),
-        message_hash=hashlib.sha256(message.encode("utf-8")).hexdigest(),
-        count=1,
-        line=max(0, issue.line),
-    )
+    try:
+        return BaselineEntry(
+            tool=tool.lower(),
+            file=file,
+            code=issue.get_code(),
+            message_hash=hashlib.sha256(message.encode("utf-8")).hexdigest(),
+            count=1,
+            line=max(0, issue.line),
+        )
+    except ValidationError:
+        # Unrepresentable findings stay visible; never truncate their identity.
+        return None
 
 
 def baseline_incomplete_reason(result: ToolResult) -> str | None:
