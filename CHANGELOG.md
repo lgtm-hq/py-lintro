@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.175.5] - 2026-11-01
+
+### Fixed
+
+- **parsers**: fail closed on invalid primary report containers (#3123) (217fe66)
+
 ## [0.175.4] - 2026-11-01
 
 ### Fixed
