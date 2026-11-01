@@ -151,7 +151,9 @@ class ToolSnapshot:
                 or not 0 <= value <= sys.float_info.max
             ):
                 raise ValueError(f"{key} must be a finite nonnegative number")
-        command = values["command"]
+        # Missing command evidence cannot establish a cache's binary identity.
+        # Explicit in-process snapshots still serialize an empty command list.
+        command = data.get("command")
         if not isinstance(command, (list, tuple)) or any(
             not isinstance(part, str) for part in command
         ):

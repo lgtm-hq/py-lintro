@@ -5,16 +5,26 @@ from __future__ import annotations
 import json
 import os
 import subprocess  # nosec B404 - fixed script argv in an isolated test
+import sys
 from pathlib import Path
 
 import pytest
 from assertpy import assert_that
+
+from lintro.enums.action import Action
+from lintro.models.core.tool_outcome import ToolOutcome, Unavailable
+from lintro.models.core.tool_result import ToolResult
+from lintro.utils.json_output import serialize_tool_result
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _REPO_ROOT / "scripts" / "ci" / "dogfood-skip-gate.sh"
 
 _DOCKER_STUB = """#!/usr/bin/env bash
 printf '%s\\n' "$*" >>"${DOCKER_ARGS_LOG}"
+if [[ "$*" == *"--entrypoint python3"* && -n "${CHECKER_PYTHON:-}" ]]; then
+\texec "$CHECKER_PYTHON" "$CHECKER_SCRIPT" \\
+\t\t--report "$CHECKER_REPORT" --allowlist "$CHECKER_ALLOWLIST"
+fi
 if [[ "$*" != *"--entrypoint python3"* ]]; then
 \tprevious=
 \tfor argument in "$@"; do
@@ -98,6 +108,60 @@ def _write_report(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps({"summary": {"total_issues": 0}, "results": []}),
+    )
+
+
+def test_workflow_gate_rejects_real_unavailable_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The CI shell command fails on serialized missing-binary evidence."""
+    missing = ToolResult.from_outcome(
+        ToolOutcome(Unavailable("Executable not found in PATH")),
+        name="gitleaks",
+    )
+    timeout = ToolResult(
+        name="mypy",
+        timed_out=True,
+        output="mypy execution timed out (120s limit exceeded)",
+    )
+    report = tmp_path / "results.json"
+    report.write_text(
+        json.dumps(
+            {
+                "results": [
+                    serialize_tool_result(row, action=Action.CHECK)
+                    for row in (missing, timeout)
+                ],
+                "summary": {"total_issues": 0},
+            },
+        ),
+    )
+    allowlist = tmp_path / "allowlist.yaml"
+    allowlist.write_text("allowlist: []\n")
+    bin_dir, log_path = _docker_stub(tmp_path)
+    output_path = tmp_path / "github-output"
+    for key, value in {
+        "CHECKER_PYTHON": sys.executable,
+        "CHECKER_SCRIPT": str(_REPO_ROOT / "scripts/ci/check-dogfood-skips.py"),
+        "CHECKER_REPORT": str(report),
+        "CHECKER_ALLOWLIST": str(allowlist),
+    }.items():
+        monkeypatch.setenv(key, value)
+    result = _run_gate(
+        cwd=tmp_path,
+        report_json=report.name,
+        allowlist=allowlist,
+        bin_dir=bin_dir,
+        log_path=log_path,
+        output_path=output_path,
+    )
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stderr).contains("gitleaks: unavailable (binary_missing)")
+    assert_that(output_path.read_text().splitlines()).contains(
+        "status=failed",
+        "exit-code=1",
+        "timeout-flake=false",
     )
 
 

@@ -38,7 +38,8 @@ Classification is deliberately conservative and fails closed. It reports
   timeout exit code (124, 143);
 - every timed-out tool contributed zero issues, so a timeout can never mask a
   finding it did report;
-- every other non-skipped tool succeeded with zero issues.
+- every other non-skipped tool succeeded with zero issues;
+- no tool is unavailable, even when the missing-tool policy allows exit 0.
 
 Anything else — a missing summary, a malformed document, a second tool that
 failed for a non-timeout reason, or any issue at all — reports
@@ -160,6 +161,18 @@ def _tool_name(result: dict[str, Any]) -> str:
     return name if _SAFE_TOOL_NAME.match(name) else "unknown"
 
 
+def _is_unavailable(result: dict[str, Any]) -> bool:
+    """Recognize unavailability independently of exit-code policy.
+
+    Args:
+        result: One per-tool object from the lintro report.
+
+    Returns:
+        True when either structured availability marker reports unavailable.
+    """
+    return result.get("status") == "unavailable" or result.get("unavailable") is True
+
+
 def classify(payload: Any) -> Classification:
     """Classify a parsed lintro JSON report.
 
@@ -190,9 +203,13 @@ def classify(payload: Any) -> Classification:
 
     timed_out: list[str] = []
     for entry in results:
-        if not isinstance(entry, dict) or entry.get("skipped"):
+        if not isinstance(entry, dict) or (
+            entry.get("skipped") and not _is_unavailable(entry)
+        ):
             continue
         name = _tool_name(entry)
+        if _is_unavailable(entry):
+            return Classification(False, reason=f"{name} is unavailable")
         issue_count = _result_issue_count(entry)
         if _looks_like_timeout(entry):
             if issue_count:

@@ -13,6 +13,11 @@ import pytest
 import yaml
 from assertpy import assert_that
 
+from lintro.enums.action import Action
+from lintro.models.core.tool_outcome import ToolOutcome, Unavailable
+from lintro.models.core.tool_result import ToolResult
+from lintro.utils.json_output import serialize_tool_result
+
 
 def _load_module() -> ModuleType:
     """Load check-dogfood-skips.py as an importable test module."""
@@ -249,6 +254,42 @@ def test_binary_missing_without_entry_is_violation() -> None:
     assert_that(findings).is_length(1)
     assert_that(findings[0].allowed).is_false()
     assert_that(findings[0].skip_class).is_equal_to(mod.SkipClass.BINARY_MISSING)
+
+
+@pytest.mark.parametrize("strict", [False, True])
+@pytest.mark.parametrize("marker", ["both", "status", "unavailable"])
+def test_serialized_unavailable_is_an_image_failure(
+    tmp_path: Path,
+    strict: bool,
+    marker: str,
+) -> None:
+    """Real unavailable JSON fails the gate regardless of policy or marker."""
+    reason = "No configuration found while probing the external executable"
+    result = ToolResult.from_outcome(
+        ToolOutcome(Unavailable(reason, strict=strict)),
+        name="stylelint",
+    )
+    wire = serialize_tool_result(result, action=Action.CHECK)
+    assert_that(wire["skipped"]).is_false()
+    if marker != "both":
+        wire.pop("unavailable" if marker == "status" else "status")
+    payload = _report(wire)
+    allowlist = _allowlist(
+        allowlist=[
+            {"tool": "stylelint", "reason_class": "no_config", "rationale": "config"},
+        ],
+        interim=None,
+    )
+    findings = mod.evaluate_skips(payload, allowlist)
+    assert_that(findings).is_length(1)
+    assert_that(findings[0].allowed).is_false()
+    assert_that(findings[0].skip_class).is_equal_to(mod.SkipClass.BINARY_MISSING)
+    assert_that(findings[0].reason).is_equal_to(reason)
+    report = tmp_path / "unavailable.json"
+    report.write_text(json.dumps(payload))
+    allow_path = tmp_path / "allow.yaml"
+    allow_path.write_text("allowlist: []\n")
+    assert_that(mod.run(str(report), str(allow_path))).is_equal_to(1)
 
 
 def test_no_config_skip_is_allowed_when_interim_listed() -> None:

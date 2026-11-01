@@ -195,14 +195,23 @@ def _is_cached_snapshot_fresh(snap: ToolSnapshot, *, search_root: Path) -> bool:
             binary_path=snap.binary_path,
             binary_mtime=_binary_mtime(snap.binary_path),
         )
-    if snap.available:
-        from lintro.tools import tool_manager
+    from lintro.tools import tool_manager
 
-        return (
-            tool_manager.is_tool_registered(snap.name)
-            and tool_manager.get_tool(snap.name).definition.in_process is True
-        )
-    return not _resolved_binary(command or [snap.name], search_root=search_root)
+    if tool_manager.is_tool_registered(snap.name):
+        definition = tool_manager.get_tool(snap.name).definition
+        if definition.in_process is True:
+            return snap.available
+        if (
+            definition.in_process is None
+            and definition.version_command is None
+            and definition.min_version is None
+        ):
+            # Old successful unavailable entries must not bypass migration.
+            return False
+    return not snap.available and not _resolved_binary(
+        command or [snap.name],
+        search_root=search_root,
+    )
 
 
 def set_force_fresh_probes(force: bool) -> None:
@@ -441,6 +450,13 @@ def probe_tool(
     binary_mtime = _binary_mtime(binary_path)
 
     if definition.version_command is None and definition.min_version is None:
+        if not binary_path and definition.in_process is None:
+            raise ValueError(
+                f"{name}: no executable or version metadata; execution mode is "
+                "unspecified. Set ToolDefinition(in_process=True) for an "
+                "in-process plugin, or in_process=False for an external tool "
+                "and ensure its executable is on PATH.",
+            )
         return ToolSnapshot(
             name=name,
             available=bool(binary_path),

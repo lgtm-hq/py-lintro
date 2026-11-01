@@ -39,6 +39,7 @@ def local_command(
     definition = ToolDefinition(
         "ruff",
         "project-local linter",
+        in_process=False,
         version_command=None if mode == "versionless" else [executable, "--version"],
     )
     monkeypatch.setattr(

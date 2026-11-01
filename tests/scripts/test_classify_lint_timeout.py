@@ -12,6 +12,11 @@ from typing import Any
 import pytest
 from assertpy import assert_that
 
+from lintro.enums.action import Action
+from lintro.models.core.tool_outcome import ToolOutcome, Unavailable
+from lintro.models.core.tool_result import ToolResult
+from lintro.utils.json_output import serialize_tool_result
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TIMEOUT_OUTPUT = "mypy execution timed out (120.0s limit exceeded).\n"
 
@@ -205,6 +210,28 @@ def test_skipped_tools_are_ignored() -> None:
     )
 
     assert_that(mod.classify(report).timeout_flake).is_true()
+
+
+@pytest.mark.parametrize("strict", [False, True])
+@pytest.mark.parametrize("marker", ["both", "status", "unavailable"])
+def test_unavailable_tool_prevents_timeout_only_verdict(
+    strict: bool,
+    marker: str,
+) -> None:
+    """Unavailability cannot be absorbed as a timeout, even with timeout prose."""
+    unavailable = ToolResult.from_outcome(
+        ToolOutcome(Unavailable("version probe failed", strict=strict)),
+        name="bandit",
+        output=_TIMEOUT_OUTPUT,
+    )
+    wire = serialize_tool_result(unavailable, action=Action.CHECK)
+    if marker != "both":
+        wire.pop("unavailable" if marker == "status" else "status")
+    report = _report([_tool("mypy", success=False, output=_TIMEOUT_OUTPUT), wire])
+    verdict = mod.classify(report)
+    assert_that(verdict.timeout_flake).is_false()
+    assert_that(verdict.timed_out_tools).is_empty()
+    assert_that(verdict.reason).contains("bandit", "unavailable")
 
 
 @pytest.mark.parametrize(

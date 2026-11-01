@@ -251,21 +251,47 @@ class MyToolPlugin(BaseToolPlugin):
 
 The `ToolDefinition` dataclass defines your tool's metadata:
 
-| Field             | Type          | Description                                          |
-| ----------------- | ------------- | ---------------------------------------------------- |
-| `name`            | `str`         | Unique tool identifier                               |
-| `description`     | `str`         | Brief description                                    |
-| `can_fix`         | `bool`        | Whether tool supports auto-fixing                    |
-| `tool_type`       | `ToolType`    | LINTER, FORMATTER, or SECURITY                       |
-| `file_patterns`   | `list[str]`   | Glob patterns for target files                       |
-| `claims`          | `list[Claim]` | Patterns plus the capabilities applied to them       |
-| `reads_tree`      | `bool`        | Reads the working tree, so runs after mutation       |
-| `partitionable`   | `bool`        | File set may be sharded without changing the verdict |
-| `native_configs`  | `list[str]`   | Config file names                                    |
-| `version_command` | `list[str]`   | Command to check version                             |
-| `min_version`     | `str`         | Minimum supported version                            |
-| `default_options` | `dict`        | Default tool options                                 |
-| `default_timeout` | `int`         | Default timeout in seconds                           |
+| Field             | Type           | Description                                          |
+| ----------------- | -------------- | ---------------------------------------------------- |
+| `name`            | `str`          | Unique tool identifier                               |
+| `description`     | `str`          | Brief description                                    |
+| `can_fix`         | `bool`         | Whether tool supports auto-fixing                    |
+| `supports_stdin`  | `bool \| None` | Keyword-only; stdin support, or unknown (`None`)     |
+| `in_process`      | `bool \| None` | Keyword-only; execution mode, unspecified by default |
+| `tool_type`       | `ToolType`     | LINTER, FORMATTER, or SECURITY                       |
+| `file_patterns`   | `list[str]`    | Glob patterns for target files                       |
+| `claims`          | `list[Claim]`  | Patterns plus the capabilities applied to them       |
+| `reads_tree`      | `bool`         | Reads the working tree, so runs after mutation       |
+| `partitionable`   | `bool`         | File set may be sharded without changing the verdict |
+| `native_configs`  | `list[str]`    | Config file names                                    |
+| `version_command` | `list[str]`    | Command to check version                             |
+| `min_version`     | `str`          | Minimum supported version                            |
+| `default_options` | `dict`         | Default tool options                                 |
+| `default_timeout` | `int`          | Default timeout in seconds                           |
+
+### Execution mode and cached availability (API v2)
+
+Declare `in_process=True` when `check()` / `fix()` execute entirely in Python and
+require no external executable. Lintro then permits execution without a binary or
+version probe. Declare `in_process=False` for an external tool, including one with no
+version gate. Lintro resolves its executable even when `version_command` and
+`min_version` are omitted; a missing binary produces an unavailable result rather than
+executing the tool.
+
+`in_process=None` (the default) means the plugin has not declared its execution mode.
+Existing API-v2 plugins with version metadata or a resolvable executable retain their
+probe behavior. An older plugin with **no version metadata and no resolvable binary** is
+ambiguous: it might run in Python, or depend on a missing external tool. Lintro fails
+that invocation with an actionable execution-mode diagnostic, regardless of
+`strict_missing_tools`. It cannot safely infer availability from missing metadata.
+Migrate an in-process plugin by adding `in_process=True` to its `ToolDefinition`;
+migrate an unversioned external plugin by adding `in_process=False` and ensuring its
+command can be resolved. The latter remains unavailable until installed. The plugin API
+remains **2**: these new fields are keyword-only and preserve the existing positional
+constructor. Ambiguous legacy definitions require the explicit migration above and never
+silently become successful skipped runs.
+
+`supports_stdin=None` means unknown; set it to `True` or `False` only when known.
 
 ### Claims and capabilities
 
@@ -304,15 +330,17 @@ configuration guide.
 
 The `ToolResult` dataclass represents execution results:
 
-| Field            | Type                  | Description                           |
-| ---------------- | --------------------- | ------------------------------------- |
-| `name`           | `str`                 | Tool name                             |
-| `success`        | `bool`                | Whether execution succeeded           |
-| `output`         | `str \| None`         | Raw output (errors/warnings)          |
-| `issues_count`   | `int`                 | Number of issues found                |
-| `issues`         | `Sequence[BaseIssue]` | Parsed issues; defaults to `()`       |
-| `initial_issues` | `Sequence[BaseIssue]` | Pre-fix issues; defaults to `()`      |
-| `metadata`       | `dict[str, Any]`      | Tool metadata; defaults to a new `{}` |
+| Field                | Type                  | Description                                   |
+| -------------------- | --------------------- | --------------------------------------------- |
+| `name`               | `str`                 | Tool name                                     |
+| `success`            | `bool`                | Whether execution succeeded                   |
+| `output`             | `str \| None`         | Raw output (errors/warnings)                  |
+| `issues_count`       | `int`                 | Number of issues found                        |
+| `issues`             | `Sequence[BaseIssue]` | Parsed issues; defaults to `()`               |
+| `initial_issues`     | `Sequence[BaseIssue]` | Pre-fix issues; defaults to `()`              |
+| `metadata`           | `dict[str, Any]`      | Tool metadata; defaults to a new `{}`         |
+| `unavailable_reason` | `str \| None`         | Keyword-only reason execution could not start |
+| `unavailable`        | `bool` (read-only)    | Derived from the frozen `Unavailable` outcome |
 
 Omit empty collection arguments or pass an empty sequence or dictionary. Passing `None`
 for `issues`, `initial_issues` or `metadata` raises a `TypeError` naming the field when
@@ -320,6 +348,16 @@ for `issues`, `initial_issues` or `metadata` raises a `TypeError` naming the fie
 `issues=issues if issues else None`. Fix counts such as `initial_issues_count`,
 `fixed_issues_count` and `remaining_issues_count` still accept `None` to mean unknown;
 an empty collection does not establish a measured zero.
+
+Unavailable results carry no inspection evidence or findings, and their fix counts
+remain unknown. Core probing applies `execution.strict_missing_tools`: non-strict
+unavailability permits exit 0, while strict unavailability fails the run. Plugins can
+construct `ToolOutcome(Unavailable(reason, strict=...))` with
+`ToolResult.from_outcome()`. The legacy `unavailable_reason=` constructor derives
+strictness from `success` (default `False` means strict); set policy deliberately.
+Serialized results use `status: unavailable`, `unavailable: true` and
+`unavailable_reason`, with `skipped: false` and `skip_reason: null`. JSON consumers must
+handle that outcome separately from deliberate skips, even when `success` is true.
 
 #### Immutable ToolResult migration (API v2)
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import time
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -17,7 +16,6 @@ from lintro.tools.core.snapshots import (
     DEFAULT_SNAPSHOT_TTL_SECONDS,
     ToolCapabilities,
     ToolSnapshot,
-    clear_snapshot_cache,
     get_tool_snapshot,
     probe_all_tools,
     probe_tool,
@@ -27,17 +25,12 @@ from lintro.tools.core.snapshots import (
 
 
 @pytest.fixture(autouse=True)
-def _reset_snapshot_cache(
+def _snapshot_working_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> Iterator[None]:
-    """Isolate snapshot cache to a temp directory for every test."""
+) -> None:
+    """Use a temporary working directory; conftest isolates probe caches."""
     monkeypatch.chdir(tmp_path)
-    clear_snapshot_cache(cache_root=tmp_path)
-    set_force_fresh_probes(False)
-    yield
-    clear_snapshot_cache(cache_root=tmp_path)
-    set_force_fresh_probes(False)
 
 
 def _fake_snapshot(

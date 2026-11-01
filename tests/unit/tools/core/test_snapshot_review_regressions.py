@@ -128,13 +128,15 @@ def test_malformed_snapshot_field_reprobes_instead_of_claiming_availability(
 
 
 @pytest.mark.parametrize("present", [False, True])
+@pytest.mark.parametrize("in_process", [None, False])
 def test_ungated_external_plugin_requires_an_executable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     present: bool,
+    in_process: bool | None,
 ) -> None:
     """No version metadata does not imply in-process execution."""
-    definition = ToolDefinition("ungated", "external plugin")
+    definition = ToolDefinition("ungated", "external plugin", in_process=in_process)
     monkeypatch.setattr(
         "lintro.tools.tool_manager.is_tool_registered",
         lambda name: True,
@@ -152,10 +154,68 @@ def test_ungated_external_plugin_requires_an_executable(
         "get_executable_command",
         lambda *a, **kw: [str(binary)],
     )
+    if not present and in_process is None:
+        with pytest.raises(ValueError, match="in_process=True"):
+            snapshots.probe_tool("ungated", search_root=tmp_path)
+        return
     result = snapshots.probe_tool("ungated", search_root=tmp_path)
     assert result.available is present
     assert result.version_check_passed is present
     assert result.command == (str(binary),)
+
+
+@pytest.mark.parametrize("hydrate", [False, True], ids=["memory", "disk"])
+def test_old_unavailable_cache_cannot_hide_plugin_migration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hydrate: bool,
+) -> None:
+    """Legacy unavailable entries fail closed, then recover after declaration."""
+    plugin = SimpleNamespace(
+        definition=ToolDefinition("ungated", "plugin", in_process=False),
+    )
+    monkeypatch.setattr(
+        "lintro.tools.tool_manager.is_tool_registered",
+        lambda name: True,
+    )
+    monkeypatch.setattr("lintro.tools.tool_manager.get_tool", lambda name: plugin)
+    monkeypatch.setattr(
+        snapshots,
+        "get_executable_command",
+        lambda *a, **kw: [str(tmp_path / "missing")],
+    )
+    missing = snapshots.get_tool_snapshot("ungated", cache_root=tmp_path)
+    assert missing.available is False
+    plugin.definition = replace(plugin.definition, in_process=None)
+    if hydrate:
+        snapshots.clear_snapshot_cache(include_disk=False)
+    with pytest.raises(ValueError, match="execution mode is unspecified"):
+        verify_tool_version(plugin.definition, cwd=tmp_path)
+    plugin.definition = replace(plugin.definition, in_process=True)
+    assert verify_tool_version(plugin.definition, cwd=tmp_path) is None
+    assert snapshots.get_tool_snapshot("ungated", cache_root=tmp_path).available is True
+
+
+def test_missing_cached_command_requires_fresh_binary_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An incomplete disk entry cannot bypass command identity checks."""
+    entry = _binary_snapshot(tmp_path, "ruff", "stale").to_dict()
+    del entry["command"]
+    cache = tmp_path / snapshots.SNAPSHOT_CACHE_RELPATH
+    cache.parent.mkdir()
+    cache.write_text(
+        json.dumps({"lintro_version": __version__, "snapshots": {"ruff": entry}}),
+    )
+    monkeypatch.setattr(
+        snapshots,
+        "probe_tool",
+        lambda *a, **kw: snapshots.ToolSnapshot(name="ruff", probe_error="missing"),
+    )
+    fresh = snapshots.get_tool_snapshot("ruff", cache_root=tmp_path)
+    assert fresh.available is False
+    assert fresh.probe_error == "missing"
 
 
 @pytest.mark.parametrize(

@@ -311,4 +311,4 @@ def test_tool_definition_preserves_positional_constructor() -> None:
     assert definition.can_fix is True
     assert definition.tool_type is ToolType.FORMATTER
     assert definition.supports_stdin is None
-    assert definition.in_process is False
+    assert definition.in_process is None
