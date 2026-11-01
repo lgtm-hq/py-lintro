@@ -18,8 +18,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Non-strict unavailable results carry `skipped: false`, `success: true`, and unknown
   fix counts; strict mode exits 1. Consumers must check `status` or `unavailable`
   instead of treating `skipped: false` or `success: true` as proof a tool ran. See the
-  [JSON migration
-  guide](docs/plugins.md#cached-availability-migration-for-json-consumers).
+  [migration guide](docs/plugins.md#cached-availability-migration-for-json-consumers).
 - **BREAKING (plugin runtime)**: API-v2 plugins with `in_process=None`, no version
   metadata, and no resolvable executable now fail `chk`/`fmt` with exit 1 even when
   `strict_missing_tools` is false. Set `ToolDefinition(in_process=True)` for Python
