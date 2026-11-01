@@ -13,6 +13,12 @@ run-name: >-
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version override (e.g., 0.175.1); empty detects from commit'
+        required: false
+        type: string
+        default: ''
 
 permissions: {}
 
@@ -25,6 +31,7 @@ jobs:
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-auto-tag.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     with:
+      version: ${{ inputs.version || '' }}
       create-release: false
       tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
       egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
