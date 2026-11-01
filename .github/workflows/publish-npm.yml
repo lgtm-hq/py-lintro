@@ -107,9 +107,9 @@ jobs:
         # install, attest-build-provenance (OIDC token + Sigstore) and the
         # artifact upload service.
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -150,13 +150,13 @@ jobs:
       - name: Set up Node.js
         # Node 24 ships npm ≥ 11.5.1. Do not run `npm install -g npm` here:
         # in-place self-upgrade corrupts the toolcache tree (#1203).
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.14'
 
@@ -222,7 +222,7 @@ jobs:
         # into its packages-dir. The zip drops file modes (every file lands
         # as 644), so the launcher restores the binary's exec bit at run time
         # and smoke_test.sh above proves that path before anything ships.
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: npm-dist
           path: npm/
@@ -244,7 +244,7 @@ jobs:
     name: Publish npm package set
     needs: stage
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-npm-set.yml@22bb159287eb23a812d533090615525eccb839ac # v0.75.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-npm-set.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     permissions:
       # read: checkout of this repository inside the reusable
       contents: read
@@ -290,8 +290,8 @@ jobs:
       # Runs inside the scratch install of the published meta package.
       smoke-command: ./node_modules/.bin/lintro --version
       node-version: '24'
-      tooling-ref: '22bb159287eb23a812d533090615525eccb839ac' # v0.75.1
-      egress-policy: block
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: npm-publish
       # Full list (replace semantics): the reusable passes allowed-endpoints
       # verbatim to harden-runner, so this must carry everything its own

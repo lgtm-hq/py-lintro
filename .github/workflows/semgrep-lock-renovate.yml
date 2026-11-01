@@ -28,9 +28,9 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: block
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -56,7 +56,7 @@ jobs:
         id: uv-version
         run: scripts/ci/read-tools-uv-version.sh
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           # Resolve with the same uv version as the drift gate.
           version: ${{ steps.uv-version.outputs.version }}
@@ -73,7 +73,7 @@ jobs:
         if: steps.compile.outputs.changed == 'true'
         id: digest-app
         # yamllint disable-line rule:line-length
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.DIGEST_APP_ID }}
           private-key: ${{ secrets.DIGEST_APP_PRIVATE_KEY }}
@@ -85,7 +85,7 @@ jobs:
         # Append mode never moves the ref and fails cleanly if Renovate pushed
         # again after this run started; that newer push starts its own run.
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/create-signed-commit@22bb159287eb23a812d533090615525eccb839ac # v0.75.1
+        uses: lgtm-hq/lgtm-ci/.github/actions/create-signed-commit@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
         with:
           token: ${{ steps.digest-app.outputs.token }}
           branch: ${{ github.ref_name }}

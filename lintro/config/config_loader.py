@@ -53,6 +53,19 @@ LINTRO_CONFIG_FILENAMES = [
     "lintro-config.yml",
 ]
 
+# Sections that must be mappings in each source, before any tier is merged.
+MAPPING_SECTIONS: tuple[str, ...] = (
+    "enforce",
+    "execution",
+    "defaults",
+    "tools",
+    "ai",
+    "review",
+    "output",
+    "watch",
+    "deps",
+)
+
 # Config sections that are valid in both ``.lintro-config.yaml`` and
 # ``[tool.lintro]`` but are parsed by other loaders: ``module_size`` by
 # ``lintro.utils.config``, ``licenses`` by ``lintro.config.licenses_config``,
@@ -496,6 +509,7 @@ def _load_yaml_file(path: Path) -> dict[str, Any]:
 
     Raises:
         ImportError: If PyYAML is not installed.
+        ValueError: If the document is not a mapping.
     """
     if yaml is None:
         raise ImportError(
@@ -506,7 +520,10 @@ def _load_yaml_file(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as f:
         content = yaml.safe_load(f)
 
-    return content if isinstance(content, dict) else {}
+    if not isinstance(content, dict):
+        actual = "null" if content is None else type(content).__name__
+        raise ValueError(f"Config document {path} must be a mapping, got {actual}")
+    return content
 
 
 def _load_pyproject_fallback() -> tuple[dict[str, Any], Path | None]:
@@ -697,7 +714,7 @@ def _parse_precedence(raw: Any) -> list[tuple[str, str]]:
 def _parse_tool_config(tool_name: str, data: dict[str, Any]) -> LintroToolConfig:
     """Parse a single tool configuration.
 
-    In the tiered model, tools only have enabled and optional config_source.
+    Tools control enablement, config sources and optional packaged rules.
 
     Args:
         tool_name: Name of the tool being parsed (used in error messages).
@@ -725,6 +742,7 @@ def _parse_tool_config(tool_name: str, data: dict[str, Any]) -> LintroToolConfig
         enabled=enabled,
         config_source=config_source,
         auto_install=auto_install,
+        rule_packs=data.get("rule_packs", []),
     )
 
 
@@ -1102,9 +1120,9 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         dict[str, Any]: Converted configuration in .lintro-config.yaml format.
 
     Raises:
-        ValueError: If a nested ``execution`` or ``enforce`` value is not a
-            mapping. A non-mapping ``deps`` value is passed through so
-            :func:`_parse_deps_config` can fail closed.
+        ValueError: If a nested ``execution``, ``enforce`` or tool table is not
+            a mapping. Other section values are passed through so
+            :func:`build_config_from_dict` can validate their types.
     """
     result: dict[str, Any] = {
         "enforce": {},
@@ -1138,13 +1156,17 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             # Tool-specific config - normalize aliases to canonical names
             canonical_name = tool_aliases.get(key_lower, key_lower)
             result["tools"][canonical_name] = value
-        elif key_lower in ("tool", "tools") and isinstance(value, dict):
+        elif key_lower in ("tool", "tools"):
             # Nested per-tool table, mirroring the ``tools:`` section of
             # .lintro-config.yaml: ``[tool.lintro.tool.trufflehog]`` /
             # ``[tool.lintro.tools.trufflehog]``. Without this the whole table
             # was dropped, so ``enabled = false`` silently did nothing and the
             # tool kept running (#1716).
-            for nested_key, nested_value in value.items():
+            nested_tools = _require_mapping_section(
+                data={key_lower: value},
+                section=key_lower,
+            )
+            for nested_key, nested_value in nested_tools.items():
                 nested_lower = str(nested_key).lower()
                 if nested_lower not in known_tools:
                     unknown_keys.append(f"{key_lower}.{nested_key}")
@@ -1186,22 +1208,9 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         elif key_lower == ConfigKey.VERSIONS.value.lower():
             # Skip versions (handled separately)
             pass
-        elif key_lower == ConfigKey.DEFAULTS.value.lower() and isinstance(value, dict):
-            # Defaults section
-            result["defaults"] = value
-        elif key_lower == "ai" and isinstance(value, dict):
-            # AI configuration section
-            result["ai"] = value
-        elif key_lower == "review":
-            result["review"] = value
-        elif key_lower == "output" and isinstance(value, dict):
-            result["output"] = value
-        elif key_lower == "watch":
-            result["watch"] = value
-        elif key_lower == "deps":
-            # Pass through non-mappings so ``_parse_deps_config`` fail-closes
-            # instead of treating ``deps = true`` as an unrecognized key.
-            result["deps"] = value
+        elif key_lower in ("defaults", "ai", "review", "output", "watch", "deps"):
+            # Preserve invalid values for the shared section mapping check.
+            result[key_lower] = value
         elif key_lower in externally_handled_sections:
             # Parsed elsewhere; nothing to convert here.
             pass
@@ -1235,8 +1244,8 @@ def load_config(
        ``pyproject.toml``)
 
     The global config supplies base values; the project config overrides them
-    key-by-key, including nested ``ai:`` and ``tools:`` sections. A missing or
-    empty global file is not an error, but an explicit
+    key-by-key, including nested ``ai:`` and ``tools:`` sections. A missing
+    global file or an empty mapping is not an error, but an explicit
     ``LINTRO_GLOBAL_CONFIG`` path that does not exist is: that raises
     ``FileNotFoundError`` from ``_find_global_config_file``.
 
@@ -1258,16 +1267,15 @@ def load_config(
         LintroConfig: Loaded configuration.
 
     Raises:
-        ConfigurationError: When a parsed config value is invalid (for
-            example a null ``tools.<name>`` entry or a non-mapping
-            ``execution`` / ``enforce`` table).
+        ConfigurationError: When a document or an explicitly provided section
+            is not a mapping, or a parsed config value is invalid.
     """
     project_data: dict[str, Any] = {}
     resolved_path: str | None = None
 
     try:
-        # Load the user-level global config first (base tier). A missing or empty
-        # file is not an error.
+        # Load the user-level global config first (base tier). A missing file
+        # or an empty mapping is not an error.
         global_data: dict[str, Any] = {}
         global_config_path: str | None = None
         global_file = _find_global_config_file()
@@ -1324,6 +1332,12 @@ def load_config(
                     "Consider migrating to .lintro-config.yaml",
                 )
 
+        # Validate each source before merging: a project mapping must not hide
+        # an invalid global section by replacing it.
+        for source_data in (global_data, project_data):
+            for section in MAPPING_SECTIONS:
+                _require_mapping_section(data=source_data, section=section)
+
         # Tool names are case-insensitive, so both tiers must agree on one key per
         # tool before merging or tracking contributions.
         global_data = _with_normalized_tool_keys(global_data)
@@ -1331,8 +1345,8 @@ def load_config(
 
         # Deep-merge: global config is the base, project config overrides per key.
         data = _deep_merge(base=global_data, override=project_data)
-        # Do not coerce missing/null ``tools`` to ``{}`` — a YAML-null
-        # ``tools:`` must still fail closed in ``build_config_from_dict``.
+        # Keep omitted ``tools`` distinct from an explicitly empty mapping for
+        # tool enablement and contribution tracking.
         global_tools = global_data.get("tools")
         project_tools = project_data.get("tools")
         if isinstance(global_tools, dict) and isinstance(project_tools, dict):
@@ -1370,9 +1384,9 @@ def _require_mapping_section(
 ) -> dict[str, Any]:
     """Return ``section`` as a mapping, or ``{}`` when the key is absent.
 
-    YAML spells an empty section as ``enforce:`` which deserializes to
-    ``None``. ``dict.get(section, {})`` then returns that ``None``, and
-    the typed parsers call ``.get`` / ``.items`` on it.
+    YAML spells a bare section as ``enforce:`` which deserializes to ``None``.
+    Only omission supplies defaults; explicit nulls and other non-mappings
+    must fail before section parsing.
 
     Args:
         data: Normalized configuration mapping.
@@ -1425,11 +1439,19 @@ def build_config_from_dict(
         _require_mapping_section(data=data, section="tools"),
     )
     # Stored verbatim: parsing belongs to the AI layer (issue #724).
-    ai_config = data.get("ai") or {}
-    review_config = _parse_review_config(data.get("review", {}))
-    output_config = _parse_output_config(data.get("output", {}))
-    watch_config = _parse_watch_config(data.get("watch", {}))
-    deps_config = _parse_deps_config(data.get("deps", {}))
+    ai_config = _require_mapping_section(data=data, section="ai")
+    review_config = _parse_review_config(
+        _require_mapping_section(data=data, section="review"),
+    )
+    output_config = _parse_output_config(
+        _require_mapping_section(data=data, section="output"),
+    )
+    watch_config = _parse_watch_config(
+        _require_mapping_section(data=data, section="watch"),
+    )
+    deps_config = _parse_deps_config(
+        _require_mapping_section(data=data, section="deps"),
+    )
 
     return LintroConfig(
         execution=execution_config,

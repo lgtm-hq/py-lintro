@@ -43,12 +43,19 @@ class ReviewState:
         workflow: Trusted workflow filename (CI only).
         event: Workflow event (CI only).
         run_id: Actions run id that wrote the state.
+        run_attempt: Actions run attempt that wrote the state (#2871): a
+            rerun resumes its own earlier attempt's artifact, so the run id
+            alone cannot say which attempt persisted the last record.
         lintro_version: Lintro version that wrote the state.
         truncated: True when older runs or resolved findings were pruned.
         pr_spend_usd: The PR's cumulative review spend in USD (#2796): every
             round's cost, including a round interrupted after a checkpoint.
             Only ever grows; run pruning never lowers it. Read it through
             :attr:`review_spend_usd`.
+        pr_shadow_usd: The PR's cumulative shadow figure (#2867): what its
+            ``list_price_shadow`` and ``unknown`` rounds settled the caps on.
+            Monotonic like ``pr_spend_usd``; read it through
+            :attr:`review_shadow_usd`.
     """
 
     version: int = STATE_VERSION
@@ -65,9 +72,24 @@ class ReviewState:
     workflow: str = ""
     event: str = ""
     run_id: str = ""
+    run_attempt: str = ""
     lintro_version: str = ""
     truncated: bool = False
     pr_spend_usd: float = 0.0
+    pr_shadow_usd: float = 0.0
+
+    @property
+    def review_shadow_usd(self) -> float:
+        """Return the PR's cumulative shadow figure, never below the runs' sum.
+
+        The shadow is what ``list_price_shadow`` and ``unknown`` rounds
+        settled the caps on; it joins the PR-budget prior spend but is never
+        rendered as spend (#2867, ADR-0011 B).
+        """
+        return max(
+            self.pr_shadow_usd,
+            sum(run.usage.cost_shadow for run in self.runs),
+        )
 
     @property
     def review_spend_usd(self) -> float:
@@ -80,10 +102,17 @@ class ReviewState:
 
     @property
     def next_round(self) -> int:
-        """Return the round number the next review run should record."""
-        if not self.runs:
+        """Return the round number the next review run should record.
+
+        A checkpoint record (#2867) is a round that did not finish; the run
+        that resumes it keeps its number, so such records do not count.
+        """
+        finished = [
+            run.identity.round for run in self.runs if not run.coverage.checkpoint
+        ]
+        if not finished:
             return 1
-        return max(run.identity.round for run in self.runs) + 1
+        return max(finished) + 1
 
     @property
     def open_findings(self) -> tuple[FindingRecord, ...]:
@@ -117,6 +146,8 @@ class ReviewState:
             payload["truncated"] = True
         if self.review_spend_usd:
             payload["pr_spend_usd"] = self.review_spend_usd
+        if self.review_shadow_usd:
+            payload["pr_shadow_usd"] = self.review_shadow_usd
         return payload
 
     def to_artifact_dict(self) -> dict[str, Any]:
@@ -135,6 +166,7 @@ class ReviewState:
             "workflow": self.workflow,
             "event": self.event,
             "run_id": self.run_id,
+            "run_attempt": self.run_attempt,
             "lintro_version": self.lintro_version,
             "runs": [run.to_dict() for run in self.runs],
             "findings": [record.to_dict() for record in self.findings],
@@ -149,6 +181,7 @@ class ReviewState:
                 for path, patch_hash in self.consumed_flags
             ],
             "pr_spend_usd": self.review_spend_usd,
+            "pr_shadow_usd": self.review_shadow_usd,
         }
         if self.truncated:
             payload["truncated"] = True
@@ -158,20 +191,24 @@ class ReviewState:
     def from_artifact_dict(cls, payload: dict[str, Any]) -> ReviewState:
         """Parse a schema-3 envelope; unknown coverage rows are dropped.
 
+        Missing or non-list required collections raise ``ValueError`` so
+        no coverage is trusted from an incomplete artifact.
+
         Args:
             payload: Decoded JSON mapping.
 
         Returns:
             Parsed state. Invalid coverage/flag rows are omitted.
         """
+        _validate_artifact_collections(payload)
         coverage: list[CoverageRecord] = []
-        for raw in payload.get("coverage") or []:
+        for raw in payload.get("coverage", []):
             if isinstance(raw, dict):
                 coverage_row = CoverageRecord.from_dict(raw)
                 if coverage_row is not None:
                     coverage.append(coverage_row)
         flagged: list[FlaggedFile] = []
-        for raw in payload.get("flagged_files") or []:
+        for raw in payload.get("flagged_files", []):
             if isinstance(raw, dict):
                 flag_row = FlaggedFile.from_dict(raw)
                 if flag_row is not None:
@@ -186,13 +223,13 @@ class ReviewState:
             version=STATE_VERSION,
             runs=tuple(
                 RunRecord.from_dict(item)
-                for item in payload.get("runs") or []
+                for item in payload.get("runs", [])
                 if isinstance(item, dict)
             ),
             findings=rebaseline_records(
                 records=[
                     record
-                    for item in payload.get("findings") or []
+                    for item in payload.get("findings", [])
                     if isinstance(item, dict)
                     for record in (FindingRecord.from_dict(item),)
                     if record is not None
@@ -210,25 +247,47 @@ class ReviewState:
             workflow=str(payload.get("workflow", "")),
             event=str(payload.get("event", "")),
             run_id=str(payload.get("run_id", "")),
+            run_attempt=str(payload.get("run_attempt", "")),
             lintro_version=str(payload.get("lintro_version", "")),
             truncated=bool(payload.get("truncated", False)),
             pr_spend_usd=spend_from_payload(payload),
+            pr_shadow_usd=spend_from_payload(payload, key="pr_shadow_usd"),
         )
 
 
-def spend_from_payload(payload: dict[str, Any]) -> float:
-    """Return the stored cumulative spend, or 0.0 when absent or invalid.
+def _validate_artifact_collections(payload: dict[str, Any]) -> None:
+    """Reject unknown collection shapes before trusting any artifact coverage."""
+    version = _payload_version(payload)
+    # v2 stored runs/findings; v3 introduced the artifact resume fields.
+    for name, required_since in (
+        ("runs", 2),
+        ("findings", 2),
+        ("coverage", 3),
+        ("flagged_files", 3),
+        ("pending_invalidations", 3),
+        ("consumed_flags", 3),
+    ):
+        if name not in payload and version < required_since:
+            continue
+        if not isinstance(payload.get(name), list):
+            raise ValueError(f"Review-state collection {name!r} must be a list")
+
+
+def spend_from_payload(payload: dict[str, Any], *, key: str = "pr_spend_usd") -> float:
+    """Return a stored cumulative figure, or 0.0 when absent or invalid.
 
     A v4 artifact has no ``pr_spend_usd``; :attr:`ReviewState.review_spend_usd`
-    then seeds the total from the runs that survived pruning.
+    then seeds the total from the runs that survived pruning. The same rule
+    reads ``pr_shadow_usd`` (#2867).
 
     Args:
         payload: Decoded artifact mapping.
+        key: Which cumulative figure to read.
 
     Returns:
         A finite, non-negative USD figure.
     """
-    raw = payload.get("pr_spend_usd")
+    raw = payload.get(key)
     if isinstance(raw, bool) or not isinstance(raw, int | float):
         return 0.0
     value = float(raw)
@@ -239,10 +298,8 @@ def _pending_from_payload(
     payload: dict[str, Any],
 ) -> tuple[tuple[str, str], ...]:
     """Parse pending invalidation pairs from an artifact mapping."""
-    raw = payload.get("pending_invalidations") or []
+    raw = payload.get("pending_invalidations", [])
     parsed: list[tuple[str, str]] = []
-    if not isinstance(raw, list):
-        return ()
     allowed = {"group_invalidated", "import_invalidated"}
     for item in raw:
         if not isinstance(item, dict):
@@ -258,10 +315,8 @@ def _consumed_from_payload(
     payload: dict[str, Any],
 ) -> tuple[tuple[str, str], ...]:
     """Parse honored flag identities from an artifact mapping."""
-    raw = payload.get("consumed_flags") or []
+    raw = payload.get("consumed_flags", [])
     parsed: list[tuple[str, str]] = []
-    if not isinstance(raw, list):
-        return ()
     for item in raw:
         if not isinstance(item, dict):
             continue

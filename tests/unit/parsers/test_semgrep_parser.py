@@ -14,6 +14,7 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.semgrep.semgrep_parser import parse_semgrep_output
 from lintro.plugins import ToolRegistry
 from lintro.tools.core.version_parsing import get_minimum_versions
+from lintro.tools.semgrep.definition import _extract_semgrep_json
 
 
 def _semgrep_version_stdout() -> str:
@@ -104,8 +105,24 @@ def test_parse_semgrep_multiple_issues() -> None:
 
 def test_parse_semgrep_empty_results() -> None:
     """Ensure an empty results list returns no issues."""
-    issues = parse_semgrep_output(output=json.dumps({"results": []}))
+    issues = parse_semgrep_output(output=json.dumps({"results": [], "errors": []}))
     assert_that(issues).is_equal_to([])
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    ["[", "[[", "[[], ", '["]", ', "Running semgrep...\n["],
+    ids=["array", "nested", "empty-item", "quoted-bracket", "prose"],
+)
+def test_extract_semgrep_json_rejects_truncated_arrays(prefix: str) -> None:
+    """Extraction must not discard an incomplete array around a valid object.
+
+    Args:
+        prefix: Incomplete array wrapper preceding a report object.
+    """
+    output = prefix + '{"results": [], "errors": []}'
+    with pytest.raises(ValueError, match="Semgrep output must be a JSON object"):
+        _extract_semgrep_json(output)
 
 
 def test_parse_semgrep_none_output() -> None:
@@ -120,24 +137,37 @@ def test_parse_semgrep_empty_string_output() -> None:
     assert_that(issues).is_equal_to([])
 
 
-def test_parse_semgrep_missing_results_key() -> None:
-    """Missing results should behave as empty list (no crash)."""
-    issues = parse_semgrep_output(output=json.dumps({}))
-    assert_that(issues).is_equal_to([])
+@pytest.mark.parametrize(
+    "payload",
+    [{}, {"results": None}, {"results": {}}, {"results": ""}, {"results": 0}],
+    ids=["missing", "null", "object", "string", "number"],
+)
+def test_parse_semgrep_rejects_invalid_results(payload: dict[str, object]) -> None:
+    """A missing or non-list results field must signal a schema failure.
+
+    Args:
+        payload: JSON object without a usable results array.
+    """
+    with pytest.raises(ValueError, match="Semgrep results must be a list"):
+        parse_semgrep_output(output=json.dumps(payload))
 
 
-def test_parse_semgrep_handles_malformed_issue_gracefully() -> None:
-    """Malformed issue entries should be skipped gracefully.
+@pytest.mark.parametrize(
+    "results",
+    [[None], [42], [{"check_id": "test", "path": "x.py", "start": {"line": "NaN"}}]],
+    ids=["null", "number", "invalid-line"],
+)
+def test_parse_semgrep_handles_malformed_issue_gracefully(
+    results: list[object],
+) -> None:
+    """Malformed result entries produce no parsed findings.
 
-    Note: Warnings are logged via loguru (visible in test output when run with
-    -s flag) but not asserted here due to loguru's capture complexity.
+    Args:
+        results: Entries that cannot be converted to Semgrep issues.
     """
     malformed = {
-        "results": [
-            None,
-            42,
-            {"check_id": "test", "path": "x.py", "start": {"line": "NaN"}},
-        ],
+        "results": results,
+        "errors": [],
     }
     issues = parse_semgrep_output(output=json.dumps(malformed))
     assert_that(issues).is_equal_to([])
@@ -204,12 +234,6 @@ def test_parse_semgrep_invalid_json() -> None:
 def test_parse_semgrep_non_object_json() -> None:
     """Non-object JSON should return empty list and log warning."""
     issues = parse_semgrep_output(output=json.dumps([1, 2, 3]))
-    assert_that(issues).is_equal_to([])
-
-
-def test_parse_semgrep_non_list_results() -> None:
-    """Non-list results should return empty list and log warning."""
-    issues = parse_semgrep_output(output=json.dumps({"results": "not a list"}))
     assert_that(issues).is_equal_to([])
 
 

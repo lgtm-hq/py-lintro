@@ -38,6 +38,9 @@ name: Promote - Lintro Tools Candidate
       - 'package.json'
       - 'pyproject.toml'
       - 'requirements-semgrep.txt'
+      - 'scripts/utils/gitleaks/go.mod'
+      - 'scripts/utils/gitleaks/go.sum'
+      - 'scripts/utils/gitleaks/verify_imports.py'
   workflow_dispatch:
     inputs:
       force_publish:
@@ -81,9 +84,9 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: block
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -120,9 +123,9 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: block
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -144,7 +147,7 @@ jobs:
           persist-credentials: false
       - name: Set up Docker Buildx
         # yamllint disable-line rule:line-length
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           driver: docker
       - name: Log in to GHCR
@@ -186,7 +189,7 @@ jobs:
     needs: resolve
     if: needs.resolve.outputs.action == 'publish' && github.ref == 'refs/heads/main'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@22bb159287eb23a812d533090615525eccb839ac # v0.75.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     permissions:
       contents: read
       packages: write
@@ -208,8 +211,8 @@ jobs:
       cosign-sign: true
       scan: true
       scan-exit-code: '0'
-      tooling-ref: '22bb159287eb23a812d533090615525eccb839ac' # v0.75.1
-      egress-policy: block
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: docker
       allowed-endpoints-mode: replace
       allowed-endpoints: >
@@ -233,6 +236,9 @@ jobs:
         files.pythonhosted.org:443
         static.rust-lang.org:443
         dl.google.com:443
+        proxy.golang.org:443
+        sum.golang.org:443
+        storage.googleapis.com:443
         bun.sh:443
         astral.sh:443
         releases.astral.sh:443
@@ -267,9 +273,9 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: block
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -288,7 +294,7 @@ jobs:
           persist-credentials: false
       - name: Set up Docker Buildx
         # yamllint disable-line rule:line-length
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           driver: docker
       - name: Log in to GHCR

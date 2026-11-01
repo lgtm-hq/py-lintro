@@ -46,7 +46,6 @@ def mypy_tool() -> BaseToolPlugin:
     assert_that(tool).described_as(
         "mypy tool not found in registry",
     ).is_not_none()
-    assert tool is not None  # narrow type for mypy
     return tool
 
 
@@ -113,10 +112,7 @@ def test_mypy_check_finds_violations(
 
     assert_that(result).is_not_none()
     # Mypy should find type errors in the violations file
-    assert_that(
-        result.success is False
-        or (result.issues is not None and len(result.issues) > 0),
-    ).is_true()
+    assert_that(result.success is False or len(result.issues) > 0).is_true()
 
 
 def test_mypy_check_clean_file(
@@ -133,7 +129,7 @@ def test_mypy_check_clean_file(
 
     assert_that(result).is_not_none()
     assert_that(result.success).is_true()
-    assert_that(result.issues is None or len(result.issues) == 0).is_true()
+    assert_that(result.issues).is_empty()
 
 
 def test_mypy_handles_empty_path_list(mypy_tool: BaseToolPlugin) -> None:

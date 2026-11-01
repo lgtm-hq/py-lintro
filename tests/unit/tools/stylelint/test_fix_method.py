@@ -29,6 +29,46 @@ CLEAN_JSON = '[{"source":"/tmp/a.css","errored":false,"warnings":[]}]'
 NO_CONFIG = "ConfigurationError: No configuration provided for /tmp/a.css"
 
 
+def test_fix_preserves_warnings_exposed_by_recheck(
+    stylelint_plugin: StylelintPlugin,
+    tmp_path: Path,
+) -> None:
+    """One initial warning growing to two does not erase the post-fix report."""
+    with (
+        patch.object(
+            stylelint_plugin,
+            "_prepare_execution",
+            return_value=make_ctx(tmp_path, ["a.css"]),
+        ),
+        patch.object(
+            stylelint_plugin,
+            "_get_executable_command",
+            return_value=["stylelint"],
+        ),
+        patch.object(
+            stylelint_plugin,
+            "_run_subprocess",
+            side_effect=[
+                (False, REMAINING_JSON),
+                (False, INITIAL_JSON),
+                (False, INITIAL_JSON),
+            ],
+        ),
+    ):
+        result = stylelint_plugin.fix([str(tmp_path / "a.css")], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.initial_issues).is_length(1)
+    assert_that(result.initial_issues_count).is_equal_to(2)
+    assert_that(result.fixed_issues_count).is_zero()
+    assert_that(result.remaining_issues_count).is_equal_to(2)
+    assert_that(result.issues_count).is_equal_to(2)
+    assert_that(result.issues).extracting("code").is_equal_to(
+        ["color-hex-length", "block-no-empty"],
+    )
+    assert_that(result.output).contains("Found 2 issue(s)").does_not_contain("Fixed")
+
+
 def test_fix_partial_preserves_invariant(
     stylelint_plugin: StylelintPlugin,
     tmp_path: Path,

@@ -10,17 +10,24 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.pylint.definition import PylintPlugin, find_pylint_config
+from lintro.tools.pylint.definition import (
+    PYLINT_NOTHING_TO_LINT,
+    PylintPlugin,
+    find_pylint_config,
+)
+from lintro.utils.output import format_tool_output
 from tests.unit.tools.pylint.conftest import make_result
 
 _VERSION_PATCH = "lintro.plugins.execution_preparation.verify_tool_version"
 _RUN = "_run_subprocess_result"
 
 
+@pytest.mark.parametrize("returncode", [0, 8])
 def test_check_reports_duplicate_code(
     pylint_plugin: PylintPlugin,
     configured_project: Path,
     duplicate_report: str,
+    returncode: int,
 ) -> None:
     """An R0801 report becomes a failing result carrying the clone set.
 
@@ -28,6 +35,7 @@ def test_check_reports_duplicate_code(
         pylint_plugin: Plugin under test.
         configured_project: Project root carrying pylint configuration.
         duplicate_report: json2 output with one R0801 message.
+        returncode: Native status, including a passing score despite messages.
     """
     with (
         patch(_VERSION_PATCH, return_value=None),
@@ -35,7 +43,7 @@ def test_check_reports_duplicate_code(
         patch.object(
             pylint_plugin,
             _RUN,
-            return_value=make_result(returncode=8, stdout=duplicate_report),
+            return_value=make_result(returncode=returncode, stdout=duplicate_report),
         ),
     ):
         result = pylint_plugin.check([str(configured_project)], {})
@@ -43,16 +51,17 @@ def test_check_reports_duplicate_code(
     assert_that(result.name).is_equal_to("pylint")
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
-    assert result.issues is not None  # narrow type for mypy
     issue = result.issues[0]
     assert_that(issue.get_code()).is_equal_to("R0801")
     assert_that(issue.message).contains("Similar lines in 2 files", "==first:[12:27]")
 
 
+@pytest.mark.parametrize("score", [10.0, 0.0])
 def test_check_clean_report_succeeds(
     pylint_plugin: PylintPlugin,
     configured_project: Path,
     clean_report: str,
+    score: float,
 ) -> None:
     """An empty message list produces a passing result with no issues.
 
@@ -60,13 +69,16 @@ def test_check_clean_report_succeeds(
         pylint_plugin: Plugin under test.
         configured_project: Project root carrying pylint configuration.
         clean_report: json2 output with no messages.
+        score: Reported score; exit zero remains authoritative even below the gate.
     """
+    report = json.loads(clean_report)
+    report["statistics"]["score"] = score
     with (
         patch(_VERSION_PATCH, return_value=None),
         patch.object(
             pylint_plugin,
             _RUN,
-            return_value=make_result(returncode=0, stdout=clean_report),
+            return_value=make_result(returncode=0, stdout=json.dumps(report)),
         ) as run,
     ):
         result = pylint_plugin.check([str(configured_project)], {})
@@ -76,7 +88,70 @@ def test_check_clean_report_succeeds(
     assert_that(run.called).is_true()
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
-    assert_that(result.issues).is_none()
+    assert_that(result.issues).is_empty()
+    assert_that(result.output).is_none()
+
+
+@pytest.mark.parametrize(
+    ("returncode", "score", "stderr"),
+    [
+        (1, 0.0, ""),
+        (16, 10.0, "native diagnostic"),
+        (32, None, "native diagnostic"),
+        (-9, None, ""),
+    ],
+)
+def test_check_nonzero_empty_report_is_visible_failure(
+    pylint_plugin: PylintPlugin,
+    configured_project: Path,
+    returncode: int,
+    score: float | None,
+    stderr: str,
+) -> None:
+    """A failed native verdict stays visible without inventing a finding.
+
+    Args:
+        pylint_plugin: Plugin under test.
+        configured_project: Project root carrying pylint configuration.
+        returncode: Score-gate, convention, usage or signal failure status.
+        score: Failing, passing or unavailable native score.
+        stderr: Optional diagnostic accompanying the valid report.
+    """
+    (configured_project / "pyproject.toml").write_text(
+        '[tool.pylint.main]\ndisable = ["all"]\n'
+        'enable = ["duplicate-code"]\nfail-under = 10.0\n',
+        encoding="utf-8",
+    )
+    report = json.dumps({"messages": [], "statistics": {"score": score}})
+    with (
+        patch(_VERSION_PATCH, return_value=None),
+        patch.object(
+            pylint_plugin,
+            _RUN,
+            return_value=make_result(
+                returncode=returncode,
+                stdout=report,
+                stderr=stderr,
+            ),
+        ),
+    ):
+        result = pylint_plugin.check([str(configured_project)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_zero()
+    assert_that(result.issues).is_empty()
+    assert_that(result.parse_failures_count).is_none()
+    assert_that(result.output).contains(f"status {returncode}", "fail-under")
+    if stderr:
+        assert_that(result.output).contains(stderr)
+    rendered = format_tool_output(
+        tool_name=result.name,
+        output=result.output or "",
+        success=result.success,
+        issues_count=result.issues_count,
+    )
+    assert_that(rendered).contains(f"status {returncode}", "fail-under")
+    assert_that(rendered).does_not_contain("No issues found")
 
 
 def test_check_runs_once_over_every_discovered_file(
@@ -203,8 +278,8 @@ def test_check_usage_error_is_a_failure_not_a_pass(
     ("returncode", "stdout", "stderr"),
     [
         (0, "", ""),
-        (32, "No files to lint: exiting.", ""),
-        (32, "", "No files to lint: exiting."),
+        (32, f"{PYLINT_NOTHING_TO_LINT}: exiting.", ""),
+        (32, "", f"{PYLINT_NOTHING_TO_LINT}: exiting."),
     ],
     ids=[
         "empty-clean-exit",
@@ -251,6 +326,7 @@ def test_check_non_report_output_is_clean(
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.output).is_none()
+    assert_that(result.no_files).is_equal_to(returncode == 32)
 
 
 def test_check_report_quoting_the_nothing_to_lint_phrase_is_parsed(

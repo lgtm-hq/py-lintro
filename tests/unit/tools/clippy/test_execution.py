@@ -121,7 +121,6 @@ def test_check_reports_parsed_issues(
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
     issues = result.issues
-    assert issues is not None  # narrow type for mypy
     first_issue = issues[0]
     assert isinstance(first_issue, ClippyIssue)  # narrow type for mypy
     assert_that(first_issue.code).is_equal_to("clippy::needless_return")
@@ -210,6 +209,37 @@ def test_check_ignores_findings_when_the_command_exited_clean(
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.output).is_none()
+
+
+def test_fix_keeps_additional_compiler_findings(
+    clippy_plugin: ClippyPlugin,
+    tmp_path: Path,
+) -> None:
+    """A re-check that exposes another warning returns both remaining findings."""
+    rs_file = _cargo_project(tmp_path)
+    later_issue = _CLIPPY_ISSUE.replace('"line_start":42', '"line_start":43').replace(
+        '"line_end":42',
+        '"line_end":43',
+    )
+    with patch.object(
+        clippy_plugin,
+        "_run_subprocess",
+        side_effect=[
+            (False, _CLIPPY_ISSUE),
+            (True, ""),
+            (False, "\n".join((_CLIPPY_ISSUE, later_issue))),
+        ],
+    ):
+        result = clippy_plugin.fix([str(rs_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.initial_issues).is_length(1)
+    assert_that(result.initial_issues_count).is_equal_to(2)
+    assert_that(result.fixed_issues_count).is_zero()
+    assert_that(result.remaining_issues_count).is_equal_to(2)
+    assert_that(result.issues_count).is_equal_to(2)
+    assert_that(result.issues).extracting("line").is_equal_to([42, 43])
+    assert_that(result.cwd).is_equal_to(str(tmp_path))
 
 
 def test_fix_counts_initial_and_remaining(

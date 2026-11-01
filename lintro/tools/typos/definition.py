@@ -19,10 +19,17 @@ from lintro.enums.capability import Cap
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixMeasured,
+    NoFiles,
+    TimedOut,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.typos.typos_issue import TyposIssue
 from lintro.parsers.typos.typos_parser import parse_typos_report
-from lintro.plugins.base import BaseToolPlugin, ExecutionContext
+from lintro.plugins.base import BaseToolPlugin, PreparedExecution
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.argv_batching import argv_cost, chunk_paths
@@ -252,20 +259,18 @@ class TyposPlugin(BaseToolPlugin):
         Returns:
             A clean, successful ToolResult with nothing to report.
         """
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=NoFiles()),
             name=self.definition.name,
-            success=True,
             output=None,
-            issues_count=0,
             issues=[],
             cwd=cwd,
-            no_files=True,
         )
 
     def _run_batched(
         self,
         files: list[str],
-        ctx: ExecutionContext,
+        ctx: PreparedExecution,
         extra_args: list[str] | None = None,
         stop_on_failure: bool = False,
     ) -> _BatchOutcome:
@@ -387,21 +392,28 @@ class TyposPlugin(BaseToolPlugin):
         # batch produced findings, so the failure is never swallowed — and
         # keep those findings rather than reporting an empty run.
         if outcome.failed:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=(
+                        TimedOut(outcome.failure_message("typos exited with an error."))
+                        if outcome.timed_out
+                        else Checked(success=False)
+                    ),
+                    issues_count=len(issues),
+                ),
                 name=self.definition.name,
-                success=False,
-                timed_out=outcome.timed_out,
                 output=outcome.failure_message("typos exited with an error."),
-                issues_count=len(issues),
                 issues=issues,
                 cwd=ctx.cwd,
             )
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=not issues, inspected_files=True),
+                issues_count=len(issues),
+            ),
             name=self.definition.name,
-            success=not issues,
             output=outcome.output if issues else None,
-            issues_count=len(issues),
             issues=issues,
             cwd=ctx.cwd,
         )
@@ -493,19 +505,23 @@ class TyposPlugin(BaseToolPlugin):
         if initial_count != fixed_count + remaining_count:
             initial_count = fixed_count + remaining_count
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=remaining_count == 0, inspected_files=True),
+                accounting=FixMeasured(
+                    initial=initial_count,
+                    fixed=fixed_count,
+                    remaining=remaining_count,
+                ),
+                issues_count=remaining_count,
+            ),
             name=self.definition.name,
-            success=remaining_count == 0,
             output=_fix_summary(fixed=fixed_count, remaining=remaining_count),
             # Only the surviving typos are reported as issues: unfixed typos
             # appear in both the initial and post-fix reports, so combining
             # the lists would double-count them.
-            issues_count=remaining_count,
             issues=remaining_issues,
-            initial_issues_count=initial_count,
-            fixed_issues_count=fixed_count,
-            remaining_issues_count=remaining_count,
-            initial_issues=initial_issues or None,
+            initial_issues=initial_issues,
             cwd=ctx.cwd,
         )
 
@@ -533,17 +549,20 @@ class TyposPlugin(BaseToolPlugin):
         initial_count = len(initial_issues)
         if after_write:
             message = f"{message}\n{_AFTER_WRITE_NOTE}"
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=TimedOut(message) if timed_out else Checked(success=False),
+                accounting=FixMeasured(
+                    initial=initial_count,
+                    fixed=0,
+                    remaining=initial_count,
+                ),
+                issues_count=initial_count,
+            ),
             name=self.definition.name,
-            success=False,
-            timed_out=timed_out,
             output=message,
-            issues_count=initial_count,
             issues=initial_issues,
-            initial_issues_count=initial_count,
-            fixed_issues_count=0,
-            remaining_issues_count=initial_count,
-            initial_issues=initial_issues or None,
+            initial_issues=initial_issues,
             cwd=cwd,
         )
 

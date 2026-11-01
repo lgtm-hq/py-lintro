@@ -26,6 +26,7 @@ from lintro.ai.config import AIConfig
 from lintro.ai.config_overrides import apply_env_overrides
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AICostBudgetExceededError, AIProviderError
+from lintro.ai.provenance import detect_run_provenance
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.registry import AIProvider
 from lintro.ai.retry import with_retry
@@ -53,6 +54,8 @@ from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_identity import RunIdentity
+from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
 from lintro.ai.review.posting_policy import PostingPolicy, apply_posting_policy
@@ -74,6 +77,7 @@ from lintro.ai.review.synthesis_narrative import (
 from lintro.config.review_config import ReviewSynthesisConfig
 from tests.unit.ai.review.review_fixtures import make_review_context
 from tests.unit.ai.review.test_cross_chunk_synthesis_2269 import (
+    _mock_provider,
     _outcome,
     _pr_context,
     _run,
@@ -255,6 +259,9 @@ async def test_a_failed_second_half_keeps_the_first_half(tmp_path: Path) -> None
             CoverageDegradationReason.SPLIT_HALF_FAILED,
         ],
     )
+    # The loss names only the failed half's files, so a rerun redoes those
+    # and not the half that was reviewed (#2803).
+    assert_that(partial.coverage_degradations[-1].paths).is_equal_to(("src/b.py",))
     assert_that(partial.input_tokens).is_equal_to(10)
 
 
@@ -520,7 +527,25 @@ def _prior_state_with_truncated_record(*, path: str) -> ReviewState:
     hashes = hashes_for_diffs(
         diffs=split_unified_diff_by_file(unified_diff=context.unified_diff),
     )
+    # The reuse gate (#2867) inherits coverage only from a run it can place
+    # on the current lane and endpoint; detect them as the run does.
+    provenance = detect_run_provenance(provider="anthropic", transport=AITransport.API)
+    provider = _mock_provider()
     return ReviewState(
+        runs=(
+            RunRecord(
+                identity=RunIdentity(
+                    round=1,
+                    model=provider.model_name,
+                    provider="anthropic",
+                    transport="api",
+                    endpoint=provenance.endpoint,
+                    first_party=provenance.first_party,
+                    lane=provenance.lane,
+                    model_verification="verified",
+                ),
+            ),
+        ),
         coverage=(
             CoverageRecord(
                 path=path,
@@ -946,7 +971,7 @@ def test_sticky_nit_row_carries_description_and_fix(
         findings=(
             ReviewFinding(
                 severity=Severity.P3,
-                category="code-smell",
+                category="logic-bug",
                 file="src/app.py",
                 line=9,
                 title="Nit title",

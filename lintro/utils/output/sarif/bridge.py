@@ -37,10 +37,10 @@ def standard_issues_from_results(
     """
     standard_issues: list[StandardIssue] = []
     for result in all_results:
-        issues = getattr(result, "issues", None)
+        issues = result.issues
         if not issues:
             continue
-        tool_name = str(getattr(result, "name", "") or "")
+        tool_name = str(result.name or "")
         for issue in issues:
             standard_issues.append(
                 _to_standard_issue(issue, tool_name=tool_name),

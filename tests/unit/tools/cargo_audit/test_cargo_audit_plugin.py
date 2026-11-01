@@ -184,15 +184,33 @@ def test_check_no_cargo_lock(
     assert_that(result.issues_count).is_equal_to(0)
 
 
+@pytest.mark.parametrize(
+    "report_wrapper",
+    [
+        pytest.param("{}", id="plain"),
+        pytest.param("warning\n{}", id="warning-prefix"),
+        pytest.param("{}\nwarning", id="warning-suffix"),
+        pytest.param("warning\n{}\nDone.", id="warning-wrapped"),
+        pytest.param("[WARN]\n{}", id="bracketed-warning-prefix"),
+        pytest.param("[INFO] fetching\n{}", id="bracketed-info-prefix"),
+        pytest.param("note [1]\n{}", id="bracketed-note-prefix"),
+        pytest.param(
+            "[WARN]\n[INFO] fetching\nnote [1]\n{}\nDone.",
+            id="multiple-bracketed-prefixes",
+        ),
+    ],
+)
 def test_check_no_vulnerabilities(
     cargo_audit_plugin: CargoAuditPlugin,
     tmp_path: Path,
+    report_wrapper: str,
 ) -> None:
     """Check returns success when no vulnerabilities found.
 
     Args:
         cargo_audit_plugin: The plugin instance.
         tmp_path: Temporary directory path.
+        report_wrapper: Template for permitted text around the JSON object.
     """
     cargo_lock = tmp_path / "Cargo.lock"
     cargo_lock.write_text('[[package]]\nname = "test"\nversion = "1.0.0"')
@@ -203,6 +221,7 @@ def test_check_no_vulnerabilities(
             "list": []
         }
     }"""
+    mock_output = report_wrapper.format(mock_output)
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
@@ -217,6 +236,9 @@ def test_check_no_vulnerabilities(
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.parse_failures_count).is_equal_to(0)
+    assert_that(result.issues).is_empty()
+    assert_that(result.output).is_none()
 
 
 def test_check_with_vulnerabilities(
@@ -297,15 +319,99 @@ def test_check_timeout(
     assert_that(result.output).contains("timed out")
 
 
-def test_check_garbage_output_with_zero_exit_is_not_clean(
+@pytest.mark.parametrize("success", [True, False], ids=["rc0", "rc1"])
+@pytest.mark.parametrize(
+    "output",
+    [
+        pytest.param("this is not json {[", id="invalid-json"),
+        pytest.param("", id="blank"),
+        pytest.param(" \n\t", id="whitespace"),
+        pytest.param("null", id="null-report"),
+        pytest.param("[]", id="array-report"),
+        pytest.param('[{"vulnerabilities": {"list": []}}]', id="array-of-reports"),
+        pytest.param("warning\n[]", id="warning-prefixed-empty-array"),
+        pytest.param(
+            'warning\n[{"vulnerabilities": {"list": []}}]',
+            id="warning-prefixed-array",
+        ),
+        pytest.param(
+            '[{"vulnerabilities": {"list": []}}]\nwarning',
+            id="warning-suffixed-array",
+        ),
+        pytest.param(
+            'warning\n[{"vulnerabilities": {"list": []}}]\nDone.',
+            id="warning-wrapped-array",
+        ),
+        pytest.param(
+            'warning\n[[{"vulnerabilities": {"list": []}}]]\nDone.',
+            id="warning-wrapped-nested-array",
+        ),
+        pytest.param(
+            'warning\n[{"vulnerabilities": {"list": []}}\nDone.',
+            id="warning-wrapped-unclosed-array",
+        ),
+        pytest.param(
+            '[{"vulnerabilities": {"list": []}}',
+            id="bare-unclosed-array",
+        ),
+        pytest.param(
+            '[WARN]\n[{"vulnerabilities": {"list": []}}]',
+            id="bracketed-warning-array",
+        ),
+        pytest.param(
+            '[INFO] fetching\n[[{"vulnerabilities": {"list": []}}]]\nDone.',
+            id="bracketed-info-nested-array",
+        ),
+        pytest.param(
+            'note [1]\n[{"vulnerabilities": {"list": []}}\nDone.',
+            id="bracketed-note-unclosed-array",
+        ),
+        pytest.param(
+            '[WARN]\n[[{"vulnerabilities": {"list": []}}]\nDone.',
+            id="bracketed-warning-unclosed-outer-array",
+        ),
+        pytest.param(
+            'warning\n["]", {"vulnerabilities": {"list": []}}]\nDone.',
+            id="array-with-quoted-closer",
+        ),
+        pytest.param(
+            'warning\n["[", {"vulnerabilities": {"list": []}}]\nDone.',
+            id="array-with-quoted-opener",
+        ),
+        pytest.param(
+            'warning\n["\\" ]", {"vulnerabilities": {"list": []}}\nDone.',
+            id="unclosed-array-with-escaped-quote",
+        ),
+        pytest.param(
+            'warning\n{"vulnerabilities": {"list": null}}\nDone.',
+            id="warning-wrapped-null-list",
+        ),
+        pytest.param("{}", id="missing-vulnerabilities"),
+        pytest.param('{"vulnerabilities": null}', id="null-vulnerabilities"),
+        pytest.param('{"vulnerabilities": []}', id="array-vulnerabilities"),
+        pytest.param('{"vulnerabilities": {}}', id="missing-list"),
+        pytest.param('{"vulnerabilities": {"list": null}}', id="null-list"),
+        pytest.param('{"vulnerabilities": {"list": {}}}', id="object-list"),
+        pytest.param('{"vulnerabilities": {"list": false}}', id="boolean-list"),
+        pytest.param('{"vulnerabilities": {"list": ""}}', id="string-list"),
+    ],
+)
+def test_check_invalid_report_is_not_clean(
     cargo_audit_plugin: CargoAuditPlugin,
     tmp_path: Path,
+    output: str,
+    success: bool,
 ) -> None:
-    """Unparseable output with a zero exit must not report a clean scan (#1044)."""
+    """Missing or invalid reports fail closed regardless of exit status.
+
+    Args:
+        cargo_audit_plugin: The plugin instance.
+        tmp_path: Temporary directory containing a Cargo.lock to audit.
+        output: Missing output or an invalid cargo-audit report.
+        success: Whether the subprocess exited successfully.
+    """
     cargo_lock = tmp_path / "Cargo.lock"
     cargo_lock.write_text('[[package]]\nname = "test"\nversion = "1.0.0"')
-
-    garbage = "this is not json {["
 
     with (
         patch(
@@ -315,7 +421,7 @@ def test_check_garbage_output_with_zero_exit_is_not_clean(
         patch.object(
             cargo_audit_plugin,
             "_run_subprocess_result",
-            return_value=_proc(success=True, stdout=garbage),
+            return_value=_proc(success=success, stdout=output),
         ),
     ):
         result = cargo_audit_plugin.check([str(cargo_lock)], {})
@@ -323,3 +429,4 @@ def test_check_garbage_output_with_zero_exit_is_not_clean(
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.output).is_equal_to(output)

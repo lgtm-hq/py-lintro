@@ -54,6 +54,8 @@ def sample_results() -> list[ToolResult]:
             skipped=True,
             skip_reason="not installed",
             duration_seconds=None,
+            inspected_files=False,
+            success=True,
         ),
         # An untimed result (e.g. a post-check) must be excluded.
         ToolResult(
@@ -164,6 +166,8 @@ def test_build_profile_data_empty_when_nothing_timed() -> None:
             name="bandit",
             skipped=True,
             skip_reason="not installed",
+            inspected_files=False,
+            success=True,
         ),
     ]
 
@@ -191,7 +195,15 @@ def test_render_profile_report_contains_table_and_total(
 def test_render_profile_report_empty_without_timings() -> None:
     """Rendering with no timed tools returns an empty string."""
     report = render_profile_report(
-        [ToolResult(name="x", skipped=True, skip_reason="skip")],
+        [
+            ToolResult(
+                name="x",
+                skipped=True,
+                skip_reason="skip",
+                inspected_files=False,
+                success=True,
+            ),
+        ],
     )
 
     assert_that(report).is_equal_to("")

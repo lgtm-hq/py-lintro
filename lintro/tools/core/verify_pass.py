@@ -73,7 +73,7 @@ from __future__ import annotations
 
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
 from loguru import logger
@@ -81,6 +81,15 @@ from loguru import logger
 from lintro.enums.action import Action
 from lintro.enums.capability import MUTATING_CAPABILITIES, Cap
 from lintro.enums.verify_status import VerifyStatus
+from lintro.formatters.formatter import merge_detected_and_remaining
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixUnmeasured,
+    NoFiles,
+    Skipped,
+    TimedOut,
+    Unavailable,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.file_cache import FingerprintSnapshot, snapshot_fingerprints
@@ -111,6 +120,7 @@ __all__ = [
     "VerifyScope",
     "VerifyStatus",
     "capture_verify_baseline",
+    "check_answered",
     "fold_verify_results",
     "resolve_result_capability",
     "resolve_verify_scope",
@@ -699,6 +709,8 @@ def run_verify_pass(
         try:
             tool = configure(tool_name=name)
             result = tool.check(files, {})
+            ToolResult.validate_outcome(result)
+            execution = result.outcome.execution
         except (TypeError, AttributeError):
             # Programming errors propagate, exactly as they do out of the
             # mutation phase. Swallowing them here would make a bug in the
@@ -725,7 +737,7 @@ def run_verify_pass(
                 ),
             )
             continue
-        if result.timed_out:
+        if isinstance(execution, TimedOut):
             # A timed-out CHECK examined only part of its target set — a
             # multi-root aggregator such as golangci-lint still returns the
             # findings the roots that finished produced — so it is no verdict
@@ -739,7 +751,7 @@ def run_verify_pass(
                 ),
             )
             continue
-        if result.skipped:
+        if isinstance(execution, Skipped):
             # The check returned without executing — a version gate, most
             # often. ``success=True, issues_count=0`` is the shape of a clean
             # verdict, but no file was examined, so trusting it would drop the
@@ -753,7 +765,7 @@ def run_verify_pass(
                 ),
             )
             continue
-        if result.no_files:
+        if isinstance(execution, NoFiles):
             # The tool's own discovery matched none of the scope's files, so
             # it verified nothing. Unlike a skip this is routine — the scope is
             # the union over every mutating tool, so a tool that rewrote
@@ -767,8 +779,11 @@ def run_verify_pass(
                 ),
             )
             continue
-        result.capability = Cap.CHECK
-        result.duration_seconds = time.monotonic() - started
+        result = replace(
+            result,
+            capability=Cap.CHECK,
+            duration_seconds=time.monotonic() - started,
+        )
         outcomes.append(
             VerifyOutcome(
                 tool=name,
@@ -819,7 +834,7 @@ def _verified_paths(
     if verify is None:
         return set()
     covered = set(scope.files)
-    for issue in verify.issues or ():
+    for issue in verify.issues:
         path = _issue_path(issue, cwd=verify.cwd or fallback_cwd)
         if path:
             covered.add(path)
@@ -844,29 +859,76 @@ def _fold_unknown(
         outcome: The tool's ``UNKNOWN`` verify outcome.
 
     Returns:
-        ToolResult: ``mutation`` carrying its pre-fix findings, no fixed or
-        remaining count, and the reason the residual is unknown.
+        ToolResult: ``mutation`` carrying detected findings, no fixed or
+        remaining count, and the reason the residual is unknown. Incomplete
+        reports also retain usable post-fix findings without duplicates.
     """
     detected = _pre_fix_issues(mutation)
     note = RESIDUAL_UNKNOWN_TEMPLATE.format(
         reason=outcome.unknown_reason,
         detected=len(detected),
     )
+    if mutation.parse_failures_count:
+        verified = outcome.result.issues if outcome.result is not None else []
+        detected = merge_detected_and_remaining(
+            [],
+            [*verified, *mutation.issues, *detected],
+        )
+        note = (
+            f"Verify pass: residual unknown — {outcome.unknown_reason}. "
+            "Usable findings from the reports are retained; "
+            "complete fix accounting is unavailable."
+        )
     output = mutation.output or ""
-    mutation.output = f"{output}\n{note}" if output.strip() else note
-    mutation.issues = detected
-    mutation.issues_count = len(detected)
-    if mutation.initial_issues_count is None:
-        mutation.initial_issues_count = len(detected)
-    # No after-count exists, so none is reported. Consumers key off
-    # ``residual_unknown`` and render "unknown" rather than filling the gap
-    # with a zero or with the pre-fix number.
-    mutation.fixed_issues_count = None
-    mutation.remaining_issues_count = None
-    mutation.residual_unknown = True
-    mutation.residual_unknown_reason = outcome.unknown_reason
-    mutation.success = False
-    return mutation
+    accounting = mutation.outcome.accounting
+    # No after-count exists. Build the failed verification and unknown
+    # accounting together so validation never sees a contradictory intermediate.
+    return replace(
+        mutation,
+        output=f"{output}\n{note}" if output.strip() else note,
+        issues=detected,
+        issues_count=len(detected),
+        initial_issues_count=(
+            len(detected)
+            if accounting.initial is None and not mutation.parse_failures_count
+            else accounting.initial
+        ),
+        fixed_issues_count=None,
+        remaining_issues_count=None,
+        residual_unknown=True,
+        residual_unknown_reason=outcome.unknown_reason,
+        no_files=False,
+        success=False,
+    )
+
+
+def check_answered(result: ToolResult | None) -> bool:
+    """Return whether a check measured its scope, including remaining findings.
+
+    Args:
+        result: The check result, or None when the tool could not run.
+
+    Returns:
+        True for a completed clean check or one reporting real findings.
+        Skips, empty scopes, timeouts (even with partial findings), and
+        execution failures without findings do not answer the check. Reports
+        with parse failures never answer, even when they retain usable findings.
+    """
+    if result is None or result.parse_failures_count:
+        return False
+    try:
+        execution = result.outcome.execution
+    except ValueError:
+        # Legacy plugins can return contradictory flags or counts. They do
+        # not establish a verdict; the strict outcome adapter still rejects
+        # them when read directly.
+        logger.opt(exception=True).debug("Invalid check result cannot verify fixes")
+        return False
+    match execution:
+        case Checked(success=success):
+            return success or bool(result.issues)
+        case Skipped() | Unavailable() | NoFiles() | TimedOut():
+            return False
 
 
 def _fold_one(
@@ -892,9 +954,40 @@ def _fold_one(
         fixed count, and a note when the two disagreed. The pre-fix issue list
         is preserved so the "detected / remaining" view still renders.
     """
+    # A later check cannot reconstruct a report that could not be fully parsed.
+    # Execution failures can still gain a measured residual from an answered
+    # check below.
+    mutation_outcome = mutation.outcome
+    accounting = mutation_outcome.accounting
+    verify = outcome.result
+    if verify and verify.parse_failures_count:
+        mutation = replace(
+            mutation,
+            parse_failures_count=(mutation.parse_failures_count or 0)
+            + verify.parse_failures_count,
+        )
+    if mutation.parse_failures_count:
+        mutation_reason = (
+            accounting.reason if isinstance(accounting, FixUnmeasured) else ""
+        )
+        unknown_reason = "; ".join(
+            dict.fromkeys(
+                reason for reason in (mutation_reason, outcome.unknown_reason) if reason
+            ),
+        )
+        return _fold_unknown(
+            mutation=mutation,
+            outcome=VerifyOutcome(
+                tool=mutation.name,
+                result=verify,
+                status=VerifyStatus.UNKNOWN,
+                unknown_reason=(
+                    unknown_reason or "tool output could not be fully parsed"
+                ),
+            ),
+        )
     if outcome.status is VerifyStatus.UNKNOWN:
         return _fold_unknown(mutation=mutation, outcome=outcome)
-    verify = outcome.result
     # An ``UNCHANGED`` outcome carries no result: nothing was rewritten, or
     # the tool discovered none of the scope's files, so its pre-fix findings
     # stand as its post-fix findings. Everything that could not answer at all
@@ -904,16 +997,13 @@ def _fold_one(
     # particular looks like an answer — a multi-root aggregator returns the
     # findings the roots that finished produced — and is not one over the
     # scope.
-    check_answered = (
-        verify is not None
-        and not verify.skipped
-        and not verify.no_files
-        and not verify.timed_out
-        and (verify.success or bool(verify.issues))
-    )
+    answered = check_answered(verify)
+    if isinstance(accounting, FixUnmeasured) and not answered:
+        # No check answered, so an execution failure still has no residual.
+        return mutation
     verified_paths = _verified_paths(
         scope=scope,
-        verify=verify if check_answered else None,
+        verify=verify if answered else None,
         fallback_cwd=mutation.cwd,
     )
     # A project-scoped CHECK answers over the tool's whole footprint, which
@@ -923,14 +1013,14 @@ def _fold_one(
     # still have been rewritten, and a clean answered verdict re-examined
     # every file the tool could ever report on. Its pre-fix findings are
     # superseded wholesale — what its CHECK reports is the residual.
-    project_check_answered = check_answered and project_check
+    project_check_answered = answered and project_check
     survivors: list[BaseIssue] = [
         issue
         for issue in _pre_fix_issues(mutation)
         if not project_check_answered
         and _issue_path(issue, cwd=mutation.cwd) not in verified_paths
     ]
-    if check_answered and verify is not None and verify.issues:
+    if answered and verify is not None and verify.issues:
         # Only an answered CHECK contributes findings. A partial one — a
         # multi-root aggregator that timed out on one root — carries real
         # findings from the roots that finished, but every pre-fix finding is
@@ -938,38 +1028,48 @@ def _fold_one(
         survivors.extend(list(verify.issues))
 
     residual = len(survivors)
-    initial = mutation.initial_issues_count
+    initial = accounting.initial
     if initial is None:
         initial = len(_pre_fix_issues(mutation))
     fixed = max(0, initial - residual)
 
-    previous = mutation.remaining_issues_count
+    previous = accounting.remaining
     if previous is None:
-        previous = mutation.issues_count
+        previous = mutation_outcome.issues_count
     output = mutation.output or ""
     if previous != residual:
         note = VERIFY_NOTE_TEMPLATE.format(residual=residual, previous=previous)
         output = f"{output}\n{note}" if output.strip() else note
 
-    mutation.issues = survivors
-    mutation.issues_count = residual
-    mutation.initial_issues_count = fixed + residual
-    mutation.fixed_issues_count = fixed
-    mutation.remaining_issues_count = residual
-    mutation.output = output
-    # ``success`` follows the authoritative residual, not the fix pass's
-    # opinion of itself: a leftover on a file the pass did not need to verify
-    # is still a leftover. The mutation phase's own flag is still ANDed in so
-    # an execution failure that produced no issues stays a failure, and so is
-    # the verify's, so a broken check cannot read as clean.
-    mutation.success = mutation.success and residual == 0
+    # Retain execution failures even when verification measures zero survivors.
+    success = mutation_outcome.success and residual == 0
+    duration = mutation.duration_seconds
     if verify is not None:
-        mutation.success = mutation.success and verify.success
+        success = success and answered and verify.outcome.success
         if verify.duration_seconds is not None:
-            mutation.duration_seconds = (
-                mutation.duration_seconds or 0.0
-            ) + verify.duration_seconds
-    return mutation
+            duration = (duration or 0.0) + verify.duration_seconds
+    return replace(
+        mutation,
+        issues=survivors,
+        issues_count=residual,
+        initial_issues_count=fixed + residual,
+        fixed_issues_count=fixed,
+        remaining_issues_count=residual,
+        residual_unknown=False,
+        residual_unknown_reason=None,
+        output=output,
+        success=success,
+        duration_seconds=duration,
+        # An answered or failed verify supersedes empty discovery.
+        no_files=mutation.no_files and not answered and success,
+        inspected_files=(
+            verify.inspected_files
+            if answered
+            and verify is not None
+            and isinstance(mutation_outcome.execution, NoFiles)
+            else mutation.inspected_files
+        ),
+    )
 
 
 def fold_verify_results(
@@ -978,7 +1078,7 @@ def fold_verify_results(
     verify_results: Sequence[VerifyOutcome],
     scope: VerifyScope,
 ) -> None:
-    """Fold each verify outcome into its tool's mutation result, in place.
+    """Replace each list entry with its tool's folded verification result.
 
     Display rolls up to the tool, so the run keeps exactly one result per
     tool: the mutation result carries the net resolved figure and, after this
@@ -986,10 +1086,9 @@ def fold_verify_results(
     output formatter, SARIF writer and AI summary responsible for a grouping
     rule for no user-visible gain.
 
-    A tool with no outcome at all declares no ``CHECK`` capability — prettier,
-    oxfmt, rustfmt and shfmt are ``FORMAT``-only — and keeps its own numbers,
-    including any post-format checking it does for itself, until #2607 makes
-    every mutator declare ``CHECK``.
+    A third-party tool with no ``CHECK`` capability keeps its own numbers.
+    The former built-in ``FORMAT``-only tools (prettier, oxfmt, rustfmt and
+    shfmt) gained ``CHECK`` in #2607 and therefore use this fold.
 
     For a project-scoped ``CHECK`` (``partitionable=False``), an answered
     verdict is authoritative over the tool's whole footprint, so the fold
@@ -997,14 +1096,14 @@ def fold_verify_results(
     files the scope named.
 
     Args:
-        mutation_results: Results from the mutation phase, mutated in place.
+        mutation_results: Results from the mutation phase; list entries are replaced.
         verify_results: Outcomes from the verify pass.
         scope: The file set the verify pass covered.
     """
     by_name = {outcome.tool: outcome for outcome in verify_results}
     project_checks = frozenset(name for name in by_name if _is_project_check(name))
     for index, mutation in enumerate(mutation_results):
-        if mutation.skipped or mutation.timed_out:
+        if isinstance(mutation.outcome.execution, (Skipped, Unavailable, TimedOut)):
             continue
         outcome = by_name.get(mutation.name)
         if outcome is None:

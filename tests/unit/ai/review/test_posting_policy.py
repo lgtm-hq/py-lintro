@@ -38,6 +38,7 @@ from lintro.ai.review.posting_policy import (
     select_inline,
 )
 from lintro.ai.review.sticky import build_sticky_comment
+from lintro.ai.review.sticky.notes import _carried_tag
 from lintro.ai.review.verdict import derive_readiness_verdict
 from lintro.enums.confidence_level import ConfidenceLevel
 
@@ -651,7 +652,8 @@ def test_notes_caption_names_the_configured_floor(
     notes = _notes_body(result=result, policy=policy)
 
     assert_that(notes).contains(
-        "findings below the inline confidence floor (high) and open questions.",
+        "findings below the inline confidence floor (high), P3 findings in the "
+        "code-smell category and open questions.",
     )
     assert_that(notes).contains("**medium**")
 
@@ -669,7 +671,8 @@ def test_notes_caption_drops_questions_when_they_post_inline(
     notes = _notes_body(result=result, policy=policy)
 
     assert_that(notes).contains(
-        "findings below the inline confidence floor (medium).",
+        "findings below the inline confidence floor (medium), P3 findings in the "
+        "code-smell category.",
     )
     assert_that(notes).does_not_contain("open questions")
     assert_that(notes).does_not_contain("**question**")
@@ -843,3 +846,157 @@ def test_a_demoted_p1_still_counts_as_blocking_for_a_converged_skip(
     assert_that(result.has_p1_findings).is_false()
     assert_that(round_one.records).is_length(1)
     assert_that(count_blocking_findings(findings=round_two.records)).is_equal_to(1)
+
+
+# --- category routing (review_note_categories) -------------------------------
+
+
+def test_default_policy_routes_code_smell_to_notes() -> None:
+    """A ``code-smell`` finding is a note whatever its confidence."""
+    inline, notes = select_inline(
+        (
+            _finding(
+                title="smell",
+                category="code-smell",
+                confidence="high",
+                line=1,
+                severity=Severity.P3,
+            ),
+            _finding(
+                title="bug",
+                category="logic-bug",
+                confidence="high",
+                line=2,
+                severity=Severity.P3,
+            ),
+        ),
+        PostingPolicy(),
+    )
+
+    assert_that(_titles(inline)).is_equal_to(["bug"])
+    assert_that(_titles(notes)).is_equal_to(["smell"])
+
+
+def test_category_routing_matches_any_spelling_of_the_category() -> None:
+    """The routing compares canonical categories, so spelling cannot evade it."""
+    policy = PostingPolicy()
+
+    for spelling in ("code-smell", "CODE_SMELL", "Code Smell", " code_smell "):
+        finding = _finding(category=spelling, confidence="high", severity=Severity.P3)
+        assert_that(policy.posts_inline(finding=finding)).described_as(
+            spelling,
+        ).is_false()
+
+
+def test_empty_note_categories_restores_confidence_only_routing() -> None:
+    """With no routed categories a confident code-smell posts inline again."""
+    policy = PostingPolicy(note_categories=frozenset())
+
+    finding = _finding(category="code-smell", confidence="high", severity=Severity.P3)
+
+    assert_that(policy.posts_inline(finding=finding)).is_true()
+
+
+def test_note_categories_do_not_lift_a_low_confidence_finding() -> None:
+    """Category routing is a further reason to be a note, never a promotion."""
+    policy = PostingPolicy(note_categories=frozenset({"test-gap"}))
+    nit = Severity.P3
+
+    assert_that(
+        policy.posts_inline(finding=_finding(category="logic-bug", confidence="low")),
+    ).is_false()
+    assert_that(
+        policy.posts_inline(
+            finding=_finding(category="test-gap", confidence="high", severity=nit),
+        ),
+    ).is_false()
+    assert_that(
+        policy.posts_inline(
+            finding=_finding(category="code-smell", confidence="high", severity=nit),
+        ),
+    ).is_true()
+
+
+def test_policy_from_ai_config_reads_note_categories() -> None:
+    """``ai.review_note_categories`` reaches the policy as canonical values."""
+    config = AIConfig.model_validate(
+        {"review_note_categories": ["TEST_GAP", "code smell", "test-gap"]},
+    )
+
+    policy = PostingPolicy.from_ai_config(config)
+
+    assert_that(config.review_note_categories).is_equal_to(["test-gap", "code-smell"])
+    assert_that(policy.note_categories).is_equal_to(
+        frozenset({"test-gap", "code-smell"}),
+    )
+
+
+def test_config_defaults_note_categories_to_code_smell() -> None:
+    """The committed default routes exactly ``code-smell``."""
+    assert_that(AIConfig().review_note_categories).is_equal_to(["code-smell"])
+    assert_that(PostingPolicy.from_ai_config(AIConfig()).note_categories).is_equal_to(
+        frozenset({"code-smell"}),
+    )
+
+
+def test_config_rejects_an_unknown_note_category() -> None:
+    """A label that is not a review category is refused, naming the key."""
+    with pytest.raises(ValueError, match="review_note_categories.*'nitpick'"):
+        AIConfig.model_validate({"review_note_categories": ["nitpick"]})
+
+
+def test_category_routing_never_touches_a_blocking_severity() -> None:
+    """A P1 or P2 in a routed category still opens a thread (merge gate intact)."""
+    policy = PostingPolicy()
+
+    for severity in (Severity.P1, Severity.P2):
+        finding = _finding(category="code-smell", confidence="high", severity=severity)
+        assert_that(policy.routes_category_to_notes(finding=finding)).is_false()
+        assert_that(policy.posts_inline(finding=finding)).is_true()
+    low = _finding(category="code-smell", confidence="low", severity=Severity.P2)
+    assert_that(policy.posts_inline(finding=low)).is_false()
+    nit = _finding(category="code-smell", confidence="high", severity=Severity.P3)
+    assert_that(policy.routes_category_to_notes(finding=nit)).is_true()
+
+
+def test_carried_tag_names_the_routing_reason() -> None:
+    """A carried note says why its thread stayed: question, category, or floor."""
+    policy = PostingPolicy()
+
+    question = _finding(
+        kind=FindingKind.QUESTION,
+        category="code-smell",
+        severity=Severity.P3,
+    )
+    routed = _finding(category="code-smell", severity=Severity.P3, confidence="low")
+    below = _finding(category="logic-bug", severity=Severity.P3, confidence="low")
+
+    assert_that(policy.routes_category_to_notes(finding=question)).is_false()
+    assert_that(_carried_tag(finding=question, policy=policy)).is_equal_to(
+        "(questions are not posted inline)",
+    )
+    # Category before confidence: a low-confidence routed nit is a category note.
+    assert_that(_carried_tag(finding=routed, policy=policy)).is_equal_to(
+        "(category routed to notes this round)",
+    )
+    assert_that(_carried_tag(finding=below, policy=policy)).is_equal_to(
+        "(below the inline confidence floor this round)",
+    )
+    assert_that(
+        _carried_tag(finding=routed, policy=PostingPolicy(note_categories=frozenset())),
+    ).is_equal_to("(below the inline confidence floor this round)")
+
+
+def test_a_question_in_a_routed_category_follows_the_question_setting() -> None:
+    """Category routing is for defect claims; a question keeps its own rule."""
+    question = _finding(
+        kind=FindingKind.QUESTION,
+        category="code-smell",
+        severity=Severity.P3,
+        confidence="high",
+    )
+
+    assert_that(PostingPolicy().posts_inline(finding=question)).is_false()
+    assert_that(
+        PostingPolicy(post_questions_inline=True).posts_inline(finding=question),
+    ).is_true()

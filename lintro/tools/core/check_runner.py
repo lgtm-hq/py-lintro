@@ -11,11 +11,16 @@ The single-file half is exposed as :func:`check_one_file` because the fix
 runner needs exactly the same step to capture a file's pre-fix issue set.
 
 Example:
+    >>> def parse(output):  # doctest: +SKIP
+    ...     issues, failures = parse_shellcheck_output_with_stats(output)
+    ...     if failures:
+    ...         raise ValueError("Malformed ShellCheck report")
+    ...     return issues
     >>> result = run_per_file_check(  # doctest: +SKIP
     ...     ctx,
     ...     plugin=self,
     ...     command=lambda f: [*self._build_command(), f],
-    ...     parse=lambda output: parse_shellcheck_output(output=output),
+    ...     parse=parse,
     ... )
 """
 
@@ -26,12 +31,13 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from lintro.models.core.tool_outcome import Checked, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.file_processor import FileProcessingResult
 
 if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
-    from lintro.plugins.base import BaseToolPlugin, ExecutionContext
+    from lintro.plugins.base import BaseToolPlugin, PreparedExecution
 
 __all__ = [
     "DEFAULT_CHECK_POLICY",
@@ -72,7 +78,7 @@ def check_one_file(
     plugin: BaseToolPlugin,
     cmd: list[str],
     parse: Callable[[str], Sequence[BaseIssue]],
-    timeout: int,
+    timeout: float,
     failure_message: str | None = None,
     issues_imply_failure: bool = False,
 ) -> FileProcessingResult:
@@ -105,6 +111,7 @@ def check_one_file(
             issues=[],
             skipped=True,
             timed_out=True,
+            inspected_files=False,
         )
     except (OSError, ValueError, RuntimeError) as exc:
         return FileProcessingResult(
@@ -112,6 +119,7 @@ def check_one_file(
             output="",
             issues=[],
             error=str(exc),
+            inspected_files=False if isinstance(exc, OSError) else None,
         )
 
     if not success and not issues and failure_message is not None:
@@ -125,11 +133,14 @@ def check_one_file(
         success=success and not (issues_imply_failure and issues),
         output=output,
         issues=issues,
+        # Successful execution over the selected file also proves a clean
+        # inspection. Failed invocations without findings remain unknown.
+        inspected_files=True if success or issues else None,
     )
 
 
 def run_per_file_check(
-    ctx: ExecutionContext,
+    ctx: PreparedExecution,
     *,
     plugin: BaseToolPlugin,
     command: Callable[[str], list[str]],
@@ -175,11 +186,20 @@ def run_per_file_check(
         label=policy.label,
     )
 
-    return ToolResult(
+    output = result.build_output(timeout=ctx.timeout)
+    return ToolResult.from_outcome(
+        ToolOutcome(
+            execution=(
+                TimedOut(output)
+                if result.timed_out
+                else Checked(
+                    success=result.all_success and result.total_issues == 0,
+                    inspected_files=result.inspected_files,
+                )
+            ),
+            issues_count=result.total_issues,
+        ),
         name=plugin.definition.name,
-        success=result.all_success and result.total_issues == 0,
-        output=result.build_output(timeout=ctx.timeout),
-        issues_count=result.total_issues,
-        timed_out=result.timed_out,
+        output=output,
         issues=result.all_issues,
     )

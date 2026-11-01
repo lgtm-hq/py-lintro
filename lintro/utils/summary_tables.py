@@ -10,6 +10,8 @@ from typing import Any
 
 from lintro.enums.action import Action
 from lintro.enums.tool_name import ToolName, normalize_tool_name
+from lintro.models.core.tool_outcome import FixUnmeasured, NoFiles, Skipped, Unavailable
+from lintro.models.core.tool_result import ToolResult
 from lintro.utils.console import (
     get_summary_value,
     get_tool_emoji,
@@ -36,60 +38,12 @@ UNKNOWN_RESIDUAL_ROW: str = "Residual Unknown (tools)"
 # run and a genuinely clean run are both ``PASS 0``; without this note they are
 # indistinguishable, which is how a fully excluded scan reads as green (#1678).
 NO_FILES_NOTE: str = "no files matched"
-# Fragments (any terminal period stripped before matching) that a framework
-# "nothing to do" message ends with. Covers every discovery outcome —
-# ``No <ext> found to check``, ``No files to format``, ``No .py/.pyi files
-# found`` — across check and fix. Deliberately excludes ``No issues found``
-# and ``No configuration found``, which mean the tool *did* run.
-_NO_FILES_SUFFIXES: tuple[str, ...] = (
-    " found to check",
-    " found to fix",
-    " files to check",
-    " files to fix",
-    " files to format",
-    " files found",
-)
-
 # ANSI color codes — only emit when stdout is a terminal
 _USE_COLOR = sys.stdout.isatty()
 _GREEN = "\033[92m" if _USE_COLOR else ""
 _RED = "\033[91m" if _USE_COLOR else ""
 _YELLOW = "\033[93m" if _USE_COLOR else ""
 _RESET = "\033[0m" if _USE_COLOR else ""
-
-
-def _extract_skip_reason(output: str) -> str:
-    """Extract abbreviated skip reason from tool output.
-
-    Skip messages have format: "Skipping {tool}: {error}. Minimum required: ..."
-
-    Args:
-        output: The tool output containing the skip message.
-
-    Returns:
-        Abbreviated reason string for display in the summary table.
-    """
-    if ":" in output and ". Minimum" in output:
-        colon_idx = output.index(":")
-        minimum_idx = output.index(". Minimum")
-        # Ensure colon comes before ". Minimum" to get a valid slice
-        if colon_idx >= minimum_idx:
-            return "SKIPPED"
-        start = colon_idx + 1
-        end = minimum_idx
-        reason = output[start:end].strip()
-        # Abbreviate common error messages
-        if "Command failed" in reason:
-            return "Cmd failed"
-        if "Could not parse version" in reason:
-            return "No version"
-        if "below minimum" in reason:
-            return "Outdated"
-        if "Failed to run" in reason:
-            return "Not found"
-        # Truncate if too long
-        return reason[:20] if len(reason) > 20 else reason
-    return "SKIPPED"
 
 
 def _safe_cast(
@@ -127,98 +81,65 @@ def _format_tool_display_name(tool_name: str) -> str:
     return tool_name.replace("_", "-")
 
 
-def _get_ai_applied_count(result: object) -> int:
+def _get_ai_applied_count(result: ToolResult) -> int:
     """Get AI-applied fix count from tool result metadata."""
     return get_ai_count(result, "applied_count")
 
 
-def _get_ai_verified_count(result: object) -> int:
+def _get_ai_verified_count(result: ToolResult) -> int:
     """Get count of AI-applied fixes verified as resolved."""
     return get_ai_count(result, "verified_count")
 
 
-def _get_ai_unverified_count(result: object) -> int:
+def _get_ai_unverified_count(result: ToolResult) -> int:
     """Get count of AI-applied fixes that remain unresolved."""
     return get_ai_count(result, "unverified_count")
 
 
-def _is_no_files_result(output: object, result: object = None) -> bool:
-    """Report whether a tool result means "no files were inspected".
-
-    The structured ``no_files`` flag on ``ToolResult`` is the authority: it is
-    stamped by every producer of a "nothing to check" result. The prose match
-    stays as a fallback for legacy result shapes (plain objects and dicts built
-    in tests or by out-of-tree consumers) that carry only the message.
+def _is_no_files_result(result: ToolResult) -> bool:
+    """Read empty discovery separately from other no-inspection outcomes.
 
     Args:
-        output: The tool result ``output`` value.
-        result: The tool result itself, when available.
+        result: The structured result, when available.
 
     Returns:
-        True when the result is flagged as a no-files result, or its output is
-        one of the framework's no-files messages.
+        True only for an explicit empty file set. A decline or an unknown
+        legacy result must not render as "no files matched".
     """
-    if result is not None and getattr(result, "no_files", False):
-        return True
-    if not isinstance(output, str):
-        return False
-    text = output.strip().rstrip(".")
-    return text.startswith("No ") and text.endswith(_NO_FILES_SUFFIXES)
+    return isinstance(result.outcome.execution, NoFiles)
 
 
-def _is_result_skipped(result: object) -> tuple[bool, str]:
-    """Check if a tool result represents a skipped or unavailable tool.
-
-    Uses the first-class ``unavailable`` / ``skipped`` fields if available,
-    falling back to legacy output string matching for backward compatibility.
+def _is_result_skipped(result: ToolResult) -> tuple[bool, str]:
+    """Read structured skip tracking without interpreting output text.
 
     Args:
         result: Tool result object.
 
     Returns:
-        Tuple of (is_non_run, reason). Unavailable tools are treated as
-        non-run so they appear in the summary instead of being silent.
+        Tuple of (is_skipped, skip_reason).
     """
-    if getattr(result, "unavailable", False):
-        reason = getattr(result, "skip_reason", None) or ""
-        return True, reason or "unavailable"
-
-    # First-class field (preferred)
-    skipped = getattr(result, "skipped", False)
-    if skipped:
-        skip_reason = getattr(result, "skip_reason", None) or ""
-        return True, skip_reason
-
-    # Legacy fallback: match "Skipping {tool}: ..." pattern in output
-    tool_name = getattr(result, "name", "unknown")
-    result_output = getattr(result, "output", "") or ""
-    if (
-        result_output
-        and isinstance(result_output, str)
-        and result_output.lower().startswith(f"skipping {tool_name.lower()}:")
-    ):
-        return True, _extract_skip_reason(result_output)
-
-    return False, ""
+    match result.outcome.execution:
+        case Skipped(reason=reason) | Unavailable(reason=reason):
+            return True, reason
+        case _:
+            return False, ""
 
 
-def _non_run_status_label(result: object, reason: str) -> str:
-    """Format the summary-table status cell for skipped/unavailable tools.
+def _non_run_status_label(result: ToolResult) -> str:
+    """Render probe failures distinctly from deliberate skips.
 
     Args:
-        result: Tool result object.
-        reason: Human-readable reason string (unused; notes column shows it).
+        result: Frozen non-run result.
 
     Returns:
-        Colored status label string.
+        Human-readable summary status.
     """
-    del reason  # notes column carries the reason
-    if getattr(result, "unavailable", False):
+    if isinstance(result.outcome.execution, Unavailable):
         return f"{_YELLOW}⚠️  UNAVAIL{_RESET}"
     return f"{_YELLOW}⏭️  SKIP{_RESET}"
 
 
-def count_affected_files(tool_results: Sequence[object]) -> int:
+def count_affected_files(tool_results: Sequence[ToolResult]) -> int:
     """Count unique file paths affected across all tool results.
 
     A file is "affected" when it had at least one issue that was either
@@ -226,7 +147,7 @@ def count_affected_files(tool_results: Sequence[object]) -> int:
     ``initial_issues`` with the post-fix ``issues`` so files that were fully
     reformatted (and therefore have no remaining issues) are still counted;
     previously only ``issues`` was consulted, so a file fixed clean reported
-    ``Affected Files 0``. In check mode ``initial_issues`` is absent and the
+    ``Affected Files 0``. In check mode ``initial_issues`` is empty and the
     count falls back to ``issues``.
 
     Args:
@@ -237,18 +158,14 @@ def count_affected_files(tool_results: Sequence[object]) -> int:
     """
     files: set[str] = set()
     for result in tool_results:
-        for attr in ("initial_issues", "issues"):
-            issues = getattr(result, attr, None)
-            if not issues:
-                continue
+        for issues in (result.initial_issues, result.issues):
             for issue in issues:
-                file_path = getattr(issue, "file", "")
-                if file_path:
-                    files.add(str(file_path))
+                if issue.file:
+                    files.add(str(issue.file))
     return len(files)
 
 
-def count_fixable_issues(tool_results: Sequence[object]) -> int:
+def count_fixable_issues(tool_results: Sequence[ToolResult]) -> int:
     """Count issues that the reporting tool marks as auto-fixable.
 
     Only issues whose ``fixable`` attribute is truthy are counted. Tools
@@ -261,21 +178,13 @@ def count_fixable_issues(tool_results: Sequence[object]) -> int:
     Returns:
         Number of issues flagged as auto-fixable across all results.
     """
-    count = 0
-    for result in tool_results:
-        issues = getattr(result, "issues", None)
-        if not issues:
-            continue
-        for issue in issues:
-            if getattr(issue, "fixable", False):
-                count += 1
-    return count
+    return sum(issue.fixable for result in tool_results for issue in result.issues)
 
 
 def print_summary_table(
     console_output_func: Callable[..., None],
     action: Action,
-    tool_results: Sequence[object],
+    tool_results: Sequence[ToolResult],
 ) -> None:
     """Print the summary table for the run.
 
@@ -290,20 +199,21 @@ def print_summary_table(
         # Sort results alphabetically by tool name for consistent output
         sorted_results = sorted(
             tool_results,
-            key=lambda r: getattr(r, "name", "unknown").lower(),
+            key=lambda r: r.name.lower(),
         )
 
         summary_data: list[list[str]] = []
         for result in sorted_results:
-            tool_name: str = getattr(result, "name", "unknown")
-            issues_count: int = getattr(result, "issues_count", 0)
-            success: bool = getattr(result, "success", True)
+            outcome = result.outcome
+            tool_name: str = result.name
+            issues_count: int = outcome.issues_count
+            success: bool = outcome.success
 
             emoji: str = get_tool_emoji(tool_name)
             display_name: str = _format_tool_display_name(tool_name)
             tool_display: str = f"{emoji} {display_name}"
 
-            # Check skip status (first-class field or legacy fallback)
+            # Read the producer's structured skip status
             is_skipped, skip_reason = _is_result_skipped(result)
 
             # Special handling for pytest/test action
@@ -317,7 +227,7 @@ def print_summary_table(
                     summary_data.append(
                         [
                             tool_display,
-                            _non_run_status_label(result, skip_reason),
+                            _non_run_status_label(result),
                             "-",
                             "-",
                             "-",
@@ -328,7 +238,7 @@ def print_summary_table(
                     )
                     continue
 
-                pytest_summary = getattr(result, "pytest_summary", None)
+                pytest_summary = result.pytest_summary
                 if pytest_summary:
                     # Use pytest summary data for more detailed display
                     passed = _safe_cast(pytest_summary, "passed", 0, int)
@@ -368,7 +278,7 @@ def print_summary_table(
                     summary_data.append(
                         [
                             tool_display,
-                            _non_run_status_label(result, skip_reason),
+                            _non_run_status_label(result),
                             "-",
                             "-",
                             "-",
@@ -407,7 +317,7 @@ def print_summary_table(
                     summary_data.append(
                         [
                             tool_display,
-                            _non_run_status_label(result, skip_reason),
+                            _non_run_status_label(result),
                             "-",  # Fixed
                             "-",  # AI-Applied
                             "-",  # AI-Resolved
@@ -424,14 +334,13 @@ def print_summary_table(
                     status_display = f"{_RED}❌ FAIL{_RESET}"
 
                 # Get result output for parsing
-                result_output: str = getattr(result, "output", "")
+                result_output = result.output
 
                 # Prefer standardized counts from ToolResult
-                remaining_std = getattr(result, "remaining_issues_count", None)
-                fixed_std = getattr(result, "fixed_issues_count", None)
-                residual_unknown = bool(
-                    getattr(result, "residual_unknown", False),
-                )
+                accounting = outcome.accounting
+                remaining_std = accounting.remaining
+                fixed_std = accounting.fixed
+                residual_unknown = isinstance(accounting, FixUnmeasured)
 
                 if residual_unknown:
                     # No after-count was taken. Say so rather than falling
@@ -481,7 +390,7 @@ def print_summary_table(
                     notes_display = f"{_YELLOW}{ai_unverified_value} unresolved{_RESET}"
                 elif residual_unknown:
                     notes_display = f"{_YELLOW}{UNKNOWN_RESIDUAL_NOTE}{_RESET}"
-                elif _is_no_files_result(result_output, result):
+                elif _is_no_files_result(result):
                     notes_display = f"{_YELLOW}{NO_FILES_NOTE}{_RESET}"
                 else:
                     notes_display = ""
@@ -512,7 +421,7 @@ def print_summary_table(
                     summary_data.append(
                         [
                             tool_display,
-                            _non_run_status_label(result, skip_reason),
+                            _non_run_status_label(result),
                             "-",  # Issues
                             f"{_YELLOW}{skip_reason}{_RESET}" if skip_reason else "",
                         ],
@@ -520,7 +429,7 @@ def print_summary_table(
                     continue
 
                 # Check if this is an execution failure (timeout/error)
-                result_output = getattr(result, "output", "") or ""
+                result_output = result.output or ""
 
                 has_execution_failure = result_output and (
                     "timeout" in result_output.lower()
@@ -530,7 +439,7 @@ def print_summary_table(
 
                 notes_display = (
                     f"{_YELLOW}{NO_FILES_NOTE}{_RESET}"
-                    if _is_no_files_result(result_output, result)
+                    if _is_no_files_result(result)
                     else ""
                 )
 
@@ -543,9 +452,7 @@ def print_summary_table(
                     notes_display = f"{_YELLOW}deferred to framework checker{_RESET}"
 
                 # Surface stale/expired suppression counts for security tools
-                tool_meta = getattr(result, "metadata", None)
-                if not isinstance(tool_meta, dict):
-                    tool_meta = {}
+                tool_meta = result.metadata
                 suppressions = tool_meta.get("suppressions", [])
                 if suppressions:
                     stale = sum(

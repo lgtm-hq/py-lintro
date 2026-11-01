@@ -18,6 +18,24 @@ from loguru import logger
 from lintro.utils.path_utils import absolute_path_without_resolving
 
 
+class LineLengthCheckUnavailableError(RuntimeError):
+    """An E501 measurement failed, with a reason and timeout status."""
+
+    def __init__(self, reason: str, *, timed_out: bool = False) -> None:
+        """Record why the supplement could not run.
+
+        Args:
+            reason: Human-readable execution or report failure.
+            timed_out: Whether Ruff exceeded its execution deadline.
+        """
+        super().__init__(reason)
+        self.timed_out = timed_out
+
+
+class RuffNotFoundError(LineLengthCheckUnavailableError):
+    """Ruff is absent from PATH, so the optional E501 pass is skipped."""
+
+
 @dataclass
 class LineLengthViolation:
     """Represents a line length violation.
@@ -74,6 +92,61 @@ def _ruff_output_path(file_path: str, cwd: str | None) -> str:
     return file_path
 
 
+def _parse_violations(output: str, cwd: str | None) -> list[LineLengthViolation]:
+    """Convert a Ruff JSON array to line length violations.
+
+    Args:
+        output: Ruff's JSON report.
+        cwd: Working directory Ruff ran in.
+
+    Returns:
+        Parsed E501 violations, ignoring valid Ruff syntax diagnostics.
+
+    Raises:
+        ValueError: If the report is invalid JSON or has invalid diagnostics.
+    """
+    issues_data = json.loads(output)
+    if not isinstance(issues_data, list):
+        raise ValueError("Expected a Ruff JSON array")
+
+    violations: list[LineLengthViolation] = []
+    for issue in issues_data:
+        if not isinstance(issue, dict):
+            raise ValueError("Expected a Ruff diagnostic object")
+        filename = issue.get("filename")
+        message = issue.get("message")
+        if not isinstance(filename, str) or not filename.strip():
+            raise ValueError("Expected a nonempty Ruff diagnostic filename")
+        if not isinstance(message, str) or not message.strip():
+            raise ValueError("Expected a nonempty Ruff diagnostic message")
+        # Older Ruff reports coordinates at the top level. A present location
+        # must be valid on its own, without falling back to top-level values.
+        location = issue.get("location", issue)
+        if not isinstance(location, dict):
+            raise ValueError("Expected a Ruff diagnostic location object")
+        line = location.get("row")
+        column = location.get("column")
+        if type(line) is not int or line <= 0 or type(column) is not int or column <= 0:
+            raise ValueError("Expected positive integer Ruff row and column")
+        # Ruff emits syntax diagnostics even with --select E501. Older versions
+        # use a null code; newer versions use the diagnostic name as the code.
+        code = issue.get("code", "")
+        if issue.get("name") == "invalid-syntax" and code in (None, "invalid-syntax"):
+            continue
+        if code != "E501":
+            raise ValueError("Expected Ruff diagnostic rule code E501")
+        violations.append(
+            LineLengthViolation(
+                file=_ruff_output_path(filename, cwd),
+                line=line,
+                column=column,
+                message=message,
+                code=code,
+            ),
+        )
+    return violations
+
+
 def check_line_length_violations(
     files: list[str],
     cwd: str | None = None,
@@ -95,7 +168,11 @@ def check_line_length_violations(
 
     Returns:
         List of LineLengthViolation objects representing E501 violations.
-        Returns an empty list if Ruff is not available or if an error occurs.
+        An empty list means no files or a valid report with no violations.
+
+    Raises:
+        RuffNotFoundError: If Ruff is not available in PATH.
+        LineLengthCheckUnavailableError: If execution or report parsing fails.
 
     Example:
         >>> violations = check_line_length_violations(
@@ -112,8 +189,7 @@ def check_line_length_violations(
     # Check if Ruff is available
     ruff_path = shutil.which("ruff")
     if not ruff_path:
-        logger.debug("Ruff not found in PATH, skipping line length check")
-        return []
+        raise RuffNotFoundError("Ruff not found in PATH")
 
     # Convert relative paths to absolute paths
     abs_files: list[str] = []
@@ -148,44 +224,20 @@ def check_line_length_violations(
             check=False,  # Don't raise on non-zero exit (violations cause exit 1)
         )
 
-        # Parse JSON output
-        if not result.stdout.strip():
-            return []
-
-        try:
-            issues_data = json.loads(result.stdout)
-        except json.JSONDecodeError as e:
-            logger.debug(f"Failed to parse Ruff JSON output: {e}")
-            return []
-
-        # Convert to LineLengthViolation objects
-        violations: list[LineLengthViolation] = []
-        for issue in issues_data:
-            # Ruff JSON format has: filename, row, column, message, code
-            file_path = _ruff_output_path(issue.get("filename", ""), cwd)
-
-            # Handle both old and new Ruff JSON formats
-            line = issue.get("location", {}).get("row") or issue.get("row", 0)
-            column = issue.get("location", {}).get("column") or issue.get("column", 0)
-
-            violations.append(
-                LineLengthViolation(
-                    file=file_path,
-                    line=line,
-                    column=column,
-                    message=issue.get("message", "Line too long"),
-                    code=issue.get("code", "E501"),
-                ),
-            )
-
-        return violations
-
-    except subprocess.TimeoutExpired:
-        logger.debug(f"Line length check timed out after {timeout}s")
-        return []
-    except FileNotFoundError:
-        logger.debug("Ruff executable not found")
-        return []
+    except subprocess.TimeoutExpired as e:
+        raise LineLengthCheckUnavailableError(
+            f"Ruff line length check timed out after {timeout}s",
+            timed_out=True,
+        ) from e
     except (OSError, ValueError, RuntimeError) as e:
-        logger.debug(f"Failed to check line length violations: {e}")
-        return []
+        raise LineLengthCheckUnavailableError(f"Failed to execute Ruff: {e}") from e
+
+    if result.returncode not in (0, 1):
+        raise LineLengthCheckUnavailableError(
+            f"Ruff exited with code {result.returncode}: "
+            f"{result.stderr.strip() or result.stdout.strip()}",
+        )
+    try:
+        return _parse_violations(result.stdout, cwd)
+    except (ValueError, TypeError) as e:
+        raise LineLengthCheckUnavailableError(f"Invalid Ruff JSON report: {e}") from e

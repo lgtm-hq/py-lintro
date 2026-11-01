@@ -17,12 +17,13 @@ from assertpy import assert_that
 
 from lintro.enums.action import Action
 from lintro.utils.console.logger import ThreadSafeConsoleLogger
+from tests.unit.tool_result_helpers import legacy_result
 from tests.unit.utils.console.conftest import patch_tty_streams
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.unit.utils.conftest import FakeToolResult
+    from lintro.models.core.tool_result import ToolResult
 
 # Braille block used by the decorative ASCII art (U+2800..U+28FF).
 _BRAILLE_RE = re.compile(r"[\u2800-\u28ff]")
@@ -54,18 +55,18 @@ def _totals_row(*, output: str) -> dict[str, int]:
 
 @pytest.mark.usefixtures("labelled_ascii_art")
 def test_execution_summary_check_no_issues(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A clean CHECK run reports zero issues and shows the success art.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         monkeypatch: Pytest monkeypatch fixture.
     """
     stdout, _ = patch_tty_streams(monkeypatch=monkeypatch)
     logger = ThreadSafeConsoleLogger()
-    results = [fake_tool_result_factory(success=True, issues_count=0)]
+    results = [tool_result_factory(success=True, issues_count=0)]
 
     logger.print_execution_summary(Action.CHECK, results)
 
@@ -76,7 +77,7 @@ def test_execution_summary_check_no_issues(
 
 @pytest.mark.usefixtures("labelled_ascii_art")
 def test_execution_summary_check_with_issues(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The aggregated total reaches both the totals table and the art choice.
@@ -86,14 +87,14 @@ def test_execution_summary_check_with_issues(
     success art.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         monkeypatch: Pytest monkeypatch fixture.
     """
     stdout, _ = patch_tty_streams(monkeypatch=monkeypatch)
     logger = ThreadSafeConsoleLogger()
     results = [
-        fake_tool_result_factory(success=True, issues_count=5),
-        fake_tool_result_factory(success=True, issues_count=3),
+        tool_result_factory(success=True, issues_count=5),
+        tool_result_factory(success=True, issues_count=3),
     ]
 
     logger.print_execution_summary(Action.CHECK, results)
@@ -106,7 +107,7 @@ def test_execution_summary_check_with_issues(
 
 @pytest.mark.usefixtures("labelled_ascii_art")
 def test_execution_summary_check_failed_tool_shows_minimum_issues(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A failed tool reporting zero issues still shows the failure art.
@@ -115,12 +116,12 @@ def test_execution_summary_check_failed_tool_shows_minimum_issues(
     pass, so the art is selected as if there were at least one issue.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         monkeypatch: Pytest monkeypatch fixture.
     """
     stdout, _ = patch_tty_streams(monkeypatch=monkeypatch)
     logger = ThreadSafeConsoleLogger()
-    results = [fake_tool_result_factory(success=False, issues_count=0)]
+    results = [tool_result_factory(success=False, issues_count=0)]
 
     logger.print_execution_summary(Action.CHECK, results)
 
@@ -140,7 +141,7 @@ def test_execution_summary_check_failed_tool_shows_minimum_issues(
     ],
 )
 def test_execution_summary_check_issue_aggregation(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     issue_counts: list[int],
     expected_total: int,
     capsys: pytest.CaptureFixture[str],
@@ -148,15 +149,14 @@ def test_execution_summary_check_issue_aggregation(
     """The totals table reports the sum of every tool's issue count.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         issue_counts: List of issue counts for each tool.
         expected_total: Expected total issues after aggregation.
         capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
     results = [
-        fake_tool_result_factory(success=True, issues_count=count)
-        for count in issue_counts
+        tool_result_factory(success=True, issues_count=count) for count in issue_counts
     ]
 
     logger.print_execution_summary(Action.CHECK, results)
@@ -172,18 +172,18 @@ def test_execution_summary_check_issue_aggregation(
 
 
 def test_execution_summary_fix_with_standardized_counts(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Standardized fix counts are reported verbatim, not re-parsed from output.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
     results = [
-        fake_tool_result_factory(
+        tool_result_factory(
             success=True,
             fixed_issues_count=10,
             remaining_issues_count=2,
@@ -198,7 +198,7 @@ def test_execution_summary_fix_with_standardized_counts(
 
 
 def test_execution_summary_omits_an_unknown_residual_from_the_totals(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A residual nobody measured contributes to neither total (#1743).
@@ -210,12 +210,12 @@ def test_execution_summary_omits_an_unknown_residual_from_the_totals(
     fails on the unknown tool's own ``success=False``.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
     results = [
-        fake_tool_result_factory(
+        tool_result_factory(
             name="ruff",
             success=False,
             issues_count=2,
@@ -224,7 +224,7 @@ def test_execution_summary_omits_an_unknown_residual_from_the_totals(
             residual_unknown=True,
             residual_unknown_reason="the verify check timed out",
         ),
-        fake_tool_result_factory(
+        tool_result_factory(
             name="taplo",
             success=True,
             fixed_issues_count=3,
@@ -250,7 +250,7 @@ def test_execution_summary_omits_an_unknown_residual_from_the_totals(
 
 
 def test_execution_summary_fix_fallback_to_issues_count(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Verify print_execution_summary falls back when fixed_issues_count not provided.
 
@@ -259,11 +259,11 @@ def test_execution_summary_fix_fallback_to_issues_count(
 
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     logger = ThreadSafeConsoleLogger()
     results = [
-        fake_tool_result_factory(
+        tool_result_factory(
             success=True,
             issues_count=5,
             fixed_issues_count=None,
@@ -280,7 +280,7 @@ def test_execution_summary_fix_fallback_to_issues_count(
 
 
 def test_execution_summary_fix_failed_tool_handled(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Verify print_execution_summary handles failed tools in fix action gracefully.
 
@@ -289,11 +289,11 @@ def test_execution_summary_fix_failed_tool_handled(
 
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     logger = ThreadSafeConsoleLogger()
     results = [
-        fake_tool_result_factory(
+        tool_result_factory(
             success=False,
             issues_count=0,
             remaining_issues_count=None,
@@ -310,7 +310,7 @@ def test_execution_summary_fix_failed_tool_handled(
 
 
 def test_execution_summary_fix_ignores_prose_when_no_count_is_reported(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A remaining count is never read off a tool's prose output (#2607).
@@ -320,17 +320,17 @@ def test_execution_summary_fix_ignores_prose_when_no_count_is_reported(
     to the remaining total, whatever its text says.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
     results = [
-        fake_tool_result_factory(
+        tool_result_factory(
             success=True,
             output="5 remaining issues that cannot be auto-fixed",
             remaining_issues_count=None,
         ),
-        fake_tool_result_factory(
+        tool_result_factory(
             success=True,
             output="Found 3 issues that cannot be auto-fixed",
             remaining_issues_count=None,
@@ -344,40 +344,13 @@ def test_execution_summary_fix_ignores_prose_when_no_count_is_reported(
     )
 
 
-def test_execution_summary_fix_handles_string_sentinel_remaining(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
-) -> None:
-    """Verify print_execution_summary handles string sentinels.
-
-    String sentinel values (like 'N/A') should not be added to numeric
-    totals to prevent type errors in calculations.
-
-
-    Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
-    """
-    logger = ThreadSafeConsoleLogger()
-    result = fake_tool_result_factory(success=True)
-    # Set a string sentinel using object attribute
-    result.remaining_issues_count = "N/A"  # type: ignore[assignment]
-    results = [result]
-
-    with (
-        patch.object(logger, "console_output"),
-        patch.object(logger, "_print_summary_table"),
-        patch.object(logger, "_print_ascii_art"),
-    ):
-        # Should not raise or add string sentinel to numeric total
-        logger.print_execution_summary(Action.FIX, results)
-
-
 # =============================================================================
 # ASCII Art Gating - Buffer / TTY / Toggle
 # =============================================================================
 
 
 def test_art_never_enters_tracked_buffer_on_tty(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Verify braille art reaches the TTY but never the captured buffer.
@@ -387,11 +360,11 @@ def test_art_never_enters_tracked_buffer_on_tty(
     stay free of the non-ASCII braille blob, even during an interactive run.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         capsys: Pytest capture fixture for stdout/stderr.
     """
     logger = ThreadSafeConsoleLogger()
-    results = [fake_tool_result_factory(success=False, issues_count=3)]
+    results = [tool_result_factory(success=False, issues_count=3)]
 
     with patch(
         "lintro.utils.display_helpers.sys.stdout.isatty",
@@ -407,17 +380,17 @@ def test_art_never_enters_tracked_buffer_on_tty(
 
 
 def test_art_suppressed_in_buffer_and_stdout_when_not_tty(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Verify no braille art on stdout or in the buffer when not a TTY.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         capsys: Pytest capture fixture for stdout/stderr.
     """
     logger = ThreadSafeConsoleLogger()
-    results = [fake_tool_result_factory(success=False, issues_count=3)]
+    results = [tool_result_factory(success=False, issues_count=3)]
 
     with patch(
         "lintro.utils.display_helpers.sys.stdout.isatty",
@@ -431,17 +404,17 @@ def test_art_suppressed_in_buffer_and_stdout_when_not_tty(
 
 
 def test_art_suppressed_when_art_disabled_even_on_tty(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Verify ``art_enabled=False`` suppresses art on an interactive TTY.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         capsys: Pytest capture fixture for stdout/stderr.
     """
     logger = ThreadSafeConsoleLogger(art_enabled=False)
-    results = [fake_tool_result_factory(success=False, issues_count=3)]
+    results = [tool_result_factory(success=False, issues_count=3)]
 
     with patch(
         "lintro.utils.display_helpers.sys.stdout.isatty",
@@ -464,7 +437,7 @@ def test_art_suppressed_when_art_disabled_even_on_tty(
     ],
 )
 def test_execution_summary_fix_various_counts(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
     fixed: int,
     remaining: int,
     expected_remaining: int,
@@ -473,7 +446,7 @@ def test_execution_summary_fix_various_counts(
     """Each fixed/remaining combination reaches the totals table intact.
 
     Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        tool_result_factory: Factory for creating ToolResult instances.
         fixed: Number of fixed issues.
         remaining: Number of remaining issues.
         expected_remaining: Expected remaining issues total.
@@ -481,7 +454,7 @@ def test_execution_summary_fix_various_counts(
     """
     logger = ThreadSafeConsoleLogger()
     results = [
-        fake_tool_result_factory(
+        tool_result_factory(
             success=True,
             fixed_issues_count=fixed,
             remaining_issues_count=remaining,
@@ -493,3 +466,13 @@ def test_execution_summary_fix_various_counts(
     rows = _totals_row(output=capsys.readouterr().out)
     assert_that(rows).contains_entry({"Net Resolved (Native)": fixed})
     assert_that(rows).contains_entry({"Remaining Issues": expected_remaining})
+
+
+def test_execution_summary_rejects_legacy_non_numeric_remaining_sentinel() -> None:
+    """An untyped legacy sentinel cannot silently contribute zero to a summary."""
+    result = legacy_result(name="legacy", remaining_issues_count="N/A")
+    logger = ThreadSafeConsoleLogger(art_enabled=False)
+    assert_that(logger.print_execution_summary).raises(ValueError).when_called_with(
+        Action.FIX,
+        [result],
+    )

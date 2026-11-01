@@ -35,6 +35,7 @@ from lintro.enums.execution_class import ExecutionClass
 from lintro.enums.idiom_review_mode import IdiomReviewMode
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, Skipped, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
@@ -136,14 +137,15 @@ class IdiomReviewPlugin(BaseToolPlugin):
 
         # Opt-in gate — disabled by default.
         if not bool(merged.get("enabled", False)):
-            return ToolResult(
-                name=IDIOM_REVIEW_TOOL_NAME,
-                skipped=True,
-                skip_reason=(
-                    "idiom-review is disabled by default; enable it via "
-                    "tools.idiom-review or "
-                    "--tool-options idiom-review:enabled=true"
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=Skipped(
+                        "idiom-review is disabled by default; enable it via "
+                        "tools.idiom-review or "
+                        "--tool-options idiom-review:enabled=true",
+                    ),
                 ),
+                name=IDIOM_REVIEW_TOOL_NAME,
                 output="idiom-review is disabled (opt-in required).",
             )
 
@@ -155,13 +157,14 @@ class IdiomReviewPlugin(BaseToolPlugin):
 
         # Graceful no-credentials path — never require live API access.
         if not is_ai_available():
-            return ToolResult(
-                name=IDIOM_REVIEW_TOOL_NAME,
-                skipped=True,
-                skip_reason=(
-                    "No AI provider available. Install lintro[ai] and set an "
-                    "API key to enable idiom-review."
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=Skipped(
+                        "No AI provider available. Install lintro[ai] and set "
+                        "an API key to enable idiom-review.",
+                    ),
                 ),
+                name=IDIOM_REVIEW_TOOL_NAME,
                 output="idiom-review skipped: no AI provider available.",
             )
 
@@ -177,9 +180,9 @@ class IdiomReviewPlugin(BaseToolPlugin):
                 ADVISORY_ERROR_PROVIDER_REQUIRED,
             )
 
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=IDIOM_REVIEW_TOOL_NAME,
-                success=False,
                 output=str(exc),
                 metadata={
                     ADVISORY_ERROR_METADATA_KEY: ADVISORY_ERROR_PROVIDER_REQUIRED,
@@ -188,10 +191,9 @@ class IdiomReviewPlugin(BaseToolPlugin):
         except AIError as exc:
             # Depleted credits / auth / rate limits degrade gracefully.
             logger.warning("[idiom-review] AI unavailable, skipping: {}", exc)
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Skipped(f"AI provider error: {exc}")),
                 name=IDIOM_REVIEW_TOOL_NAME,
-                skipped=True,
-                skip_reason=f"AI provider error: {exc}",
                 output=f"idiom-review skipped: {exc}",
             )
 
@@ -244,9 +246,9 @@ class IdiomReviewPlugin(BaseToolPlugin):
                 f"idiom-review: invalid mode {mode!r}; "
                 f"expected one of {sorted(valid_modes)}."
             )
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=IDIOM_REVIEW_TOOL_NAME,
-                success=False,
                 output=message,
             )
 
@@ -264,9 +266,9 @@ class IdiomReviewPlugin(BaseToolPlugin):
                 f"idiom-review: invalid max_files {raw_max_files!r}; "
                 "expected a positive integer."
             )
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=IDIOM_REVIEW_TOOL_NAME,
-                success=False,
                 output=message,
             )
 
@@ -282,7 +284,7 @@ class IdiomReviewPlugin(BaseToolPlugin):
         # The engine is async end to end; this tool runs inside the
         # synchronous plugin protocol, so ``asyncio.run`` is entered once
         # here for the whole review rather than per provider call.
-        issues = asyncio.run(
+        issues, inspected_files = asyncio.run(
             self._collect_issues(
                 engine=engine,
                 scoped=files[:max_files],
@@ -295,11 +297,16 @@ class IdiomReviewPlugin(BaseToolPlugin):
         min_rank = _confidence_rank(min_conf)
         filtered = [i for i in issues if _confidence_rank(i.confidence) >= min_rank]
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(
+                    success=len(filtered) == 0,
+                    inspected_files=inspected_files,
+                ),
+                issues_count=len(filtered),
+            ),
             name=IDIOM_REVIEW_TOOL_NAME,
-            success=len(filtered) == 0,
             output=None,
-            issues_count=len(filtered),
             issues=filtered,
         )
 
@@ -311,7 +318,7 @@ class IdiomReviewPlugin(BaseToolPlugin):
         run_per_file: bool,
         run_dupe: bool,
         language: str,
-    ) -> list[IdiomReviewIssue]:
+    ) -> tuple[list[IdiomReviewIssue], bool]:
         """Drive the async engine over the scoped files.
 
         Args:
@@ -322,10 +329,11 @@ class IdiomReviewPlugin(BaseToolPlugin):
             language: Target language for the per-file prompts.
 
         Returns:
-            All issues reported across the requested modes.
+            All issues and whether any readable source was inspected.
         """
         issues: list[IdiomReviewIssue] = []
         signatures: list[Signature] = []
+        inspected_files = False
 
         for file_path in scoped:
             source = self._read_source(file_path)
@@ -341,11 +349,12 @@ class IdiomReviewPlugin(BaseToolPlugin):
                 )
             if run_dupe:
                 signatures.extend(extract_python_signatures(file_path, source))
+            inspected_files = True
 
         if run_dupe:
             issues.extend(await engine.review_duplication(signatures))
 
-        return issues
+        return issues, inspected_files
 
     @staticmethod
     def _read_source(file_path: str) -> str | None:

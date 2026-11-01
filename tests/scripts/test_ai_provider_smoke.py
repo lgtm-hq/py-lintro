@@ -120,14 +120,17 @@ def _row(**overrides: str) -> dict[str, str]:
 def test_committed_table_loads_and_covers_the_funded_providers(
     smoke: ModuleType,
 ) -> None:
-    """The shipped table must validate and carry the four rows #2600 names.
+    """The shipped table validates and carries the four rows #2600 names.
+
+    Plus the Z.ai Anthropic-protocol route the dogfood's zai lane takes
+    (#2873).
 
     Args:
         smoke: The loaded smoke runner module.
     """
     rows = smoke.load_table(path=_TABLE)
     assert_that([row.name for row in rows]).is_equal_to(
-        ["anthropic-api", "openai-api", "kimi-api", "zai-api"],
+        ["anthropic-api", "openai-api", "kimi-api", "zai-api", "zai-anthropic-api"],
     )
     for row in rows:
         assert_that(smoke.SUPPORTED_PROTOCOLS).contains(row.protocol)

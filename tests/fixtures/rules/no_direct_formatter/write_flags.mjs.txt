@@ -1,0 +1,14 @@
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+execSync('prettier --write a.css && next');
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+execSync("prettier a.css -w || next");
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+execSync(`prettier --write a.css`);
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+spawnSync('prettier', ['--write', 'a.css']);
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+execFileSync('prettier', ['a.css', '-w']);
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+spawn('prettier', ["--write", 'a.css']);
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+execFile('prettier', ['a.css', '--write'], callback);

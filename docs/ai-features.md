@@ -330,15 +330,16 @@ findings that clear the posting policy; the rest become _notes_:
   which case questions that clear the same floor open threads too. These open threads,
   count in the review body's header, feed the derived verdict, and are tracked across
   rounds.
-- **Notes** — everything else: `low` confidence findings, and questions unless
-  `ai.review_post_questions_inline` is `true`. Notes render in the sticky comment under
-  a collapsed **💬 Notes and questions (N)** block, each linked to its `file:line` at
-  the reviewed commit. They open no thread, are excluded from the verdict, the severity
-  tiles, the open-findings table and the fix prompts, and open no record of their own.
-  Notes are round-scoped, like the summary and the reasoning block: nothing persists
-  them, so a sticky comment re-rendered from state alone — a converged skip, an error
-  surface — shows no notes block. The comment posted by the round that routed them still
-  carries it.
+- **Notes** — everything else: `low` confidence findings, P3 findings whose `category`
+  is listed in `ai.review_note_categories` (default `[code-smell]`, whatever their
+  confidence), and questions unless `ai.review_post_questions_inline` is `true`. Notes
+  render in the sticky comment under a collapsed **💬 Notes and questions (N)** block,
+  each linked to its `file:line` at the reviewed commit. They open no thread, are
+  excluded from the verdict, the severity tiles, the open-findings table and the fix
+  prompts, and open no record of their own. Notes are round-scoped, like the summary and
+  the reasoning block: nothing persists them, so a sticky comment re-rendered from state
+  alone — a converged skip, an error surface — shows no notes block. The comment posted
+  by the round that routed them still carries it.
 
 A note never resolves an existing thread. When a finding posted inline in an earlier
 round comes back as a note, its record is carried forward open — the model still asserts
@@ -360,17 +361,40 @@ With the default floor that means a `low` confidence P1; with
 `review_inline_min_confidence: low` no confidence is below the floor, so every P1
 finding blocks again.
 
+The same holds for category routing: a P3 in a routed category (default `code-smell`)
+opens no record and does not move the verdict, so a PR whose only nits are `code-smell`
+reads `ready`, not `nits only`. That applies to findings first seen after the category
+was routed. A `code-smell` P3 recorded by an earlier round, before the upgrade or before
+the category was added to the list, is an existing record: its note re-asserts it, so
+the record is carried open, keeps its row and the `nits only` verdict, and resolves when
+the smell is fixed or the model stops reporting it, exactly as it did before.
+
 ```yaml
 # .lintro-config.yaml
 ai:
   review_inline_min_confidence: medium # low | medium | high
   review_post_questions_inline: false # true opens a thread per question
+  review_note_categories: [code-smell] # categories that are always notes
 ```
 
 Set `review_inline_min_confidence: low` to restore posting every `kind: finding` entry
 inline. Questions stay in the notes block regardless of the floor — set
-`review_post_questions_inline: true` to open threads for them too. The two keys are
-independent; restoring the pre-#2572 behaviour of a thread per entry takes both.
+`review_post_questions_inline: true` to open threads for them too. The keys are
+independent; making every entry eligible for a thread again takes all three (an empty
+`review_note_categories`), and even then P3 findings stay in the sticky comment under
+the posting tiers described below.
+
+`review_note_categories` routes a category's P3 findings to the notes block; a P1 or P2
+in a routed category still goes through the confidence floor and opens a thread, so the
+routing can shorten the nit list but never hide a blocking finding. It defaults to
+`code-smell` because, on the review corpus (32 labelled bugs across 26 pull requests,
+two models), only 2 of the 35 distinct `code-smell` findings described a defect, both P3
+nits, and none sat on a labelled bug; routing keeps them readable in the notes block
+without a thread each. Values are review categories (`logic-bug`, `silent-failure`,
+`integration`, `test-gap`, `contract-drift`, `security`, `breaking-change`,
+`code-smell`, `architecture`), compared after the same normalization the parser applies
+to a model's label; a label that is not a category is a configuration error. An empty
+list routes by confidence alone.
 
 ### Posting tiers: P1/P2 inline, P3 in the sticky
 
@@ -466,21 +490,27 @@ may go unreported.
   (the file is still credited as covered at its current hash so the review converges;
   its coverage record carries a `truncated` marker, and every later round that skips the
   file as covered re-records the degradation with a `chunk_index` of `-2` until the
-  file's diff changes and it is reviewed again), a failed depth pass, or — when the
-  synthesis pass ran — `synthesis_truncated` / `synthesis_failed`) and the
-  `chunk_index`. The synthesis reasons carry a placeholder `chunk_index` of `-1`. A
-  chunk that was split and whose depth-3 sweep also failed contributes two entries with
-  the same `chunk_index`. `findings_coverage_complete` is the derived "per-file finding
-  depth was not limited" boolean: any per-file entry in `coverage_degradations` makes it
-  false. The two synthesis reasons do **not** (#2702): findings coverage is per file and
-  every file was reviewed at depth whether or not the whole-PR narrative pass saw all of
-  it, so a truncated or failed synthesis is a narrative degradation, exposed as
+  file's diff changes and it is reviewed again), `turn_limit_reached` when a chunk hit
+  the per-call turn limit twice and its files were left unreviewed, a failed depth pass
+  (`adversarial_sweep_failed` for the depth-3 sweep), or — when the synthesis pass ran —
+  `synthesis_truncated` / `synthesis_failed`) and the `chunk_index`. The synthesis
+  reasons carry a placeholder `chunk_index` of `-1`. A chunk that was split and whose
+  depth-3 sweep also failed contributes two entries with the same `chunk_index`.
+  `findings_coverage_complete` is the derived "per-file finding depth was not limited"
+  boolean: any per-file entry in `coverage_degradations` makes it false. The two
+  synthesis reasons do **not** (#2702): findings coverage is per file and every file was
+  reviewed at depth whether or not the whole-PR narrative pass saw all of it, so a
+  truncated or failed synthesis is a narrative degradation, exposed as
   `ReviewMetadata.synthesis_degraded` and described by the synthesis note, never as a
   partial review. The persisted run record carries the same flag as
   `synthesis_degraded`, so the sticky's run history marks the round
   `ℹ️ synthesis limited`; it never keys the convergence stop rule or forces another
   round, because per-file coverage is complete and a large PR would otherwise re-review
-  forever (#2704).
+  forever (#2704). A failed per-PR question pass (`generated_questions_failed`) is
+  narrative too (#2803): every file was still reviewed against the full rubric, so it is
+  shown as a note beside the synthesis and verification notes, and the CI check passes
+  with a `::warning::`. The other narrative reasons are `verification_failed`,
+  `delegated_diff_embedded` and `no_tree_for_agent`.
 - The terminal prints a `⚠ Coverage limited` banner under the run header.
 - The GitHub review body (in **📊 Run stats**) and the sticky comment both carry the
   same warning row, and the sticky's run history marks the round `⚠️ coverage limited`.
@@ -1956,10 +1986,11 @@ developer's login.
 - **Never default an unset secret.** Forwarding `${{ secrets.X }}` unset lets the run
   report a visible skip naming the missing credential; substituting a placeholder turns
   it into a false pass.
-- **Trusted install.** Lintro installs itself from the PR's _base_ ref before the step
-  that holds the provider credential, so PR-controlled code never executes with the
-  secret in scope. The PR is reviewed as data (the diff is fetched through the GitHub
-  API).
+- **Trusted install.** Lintro installs itself from the commit that supplied the workflow
+  (`github.workflow_sha`: the tip of the PR's base branch, or the default branch on a
+  comment-triggered run) before the step that holds the provider credential, so
+  PR-controlled code never executes with the secret in scope. The PR is reviewed as data
+  (the diff is fetched through the GitHub API).
 - **A subscription works in CI, on the `cli` transport.** Lintro's own `ai-review.yml`
   runs `ai.transport: cli` against a version-pinned `claude` CLI
   (`npm install -g @anthropic-ai/claude-code@<pin>`) authenticated by a
@@ -1968,16 +1999,17 @@ developer's login.
   because `--bare` disables OAuth session login (see the `--bare` note above). Set
   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and `DISABLE_AUTOUPDATER=1` to keep the
   binary's egress and version predictable under an egress allowlist.
-- **Two more subscription lanes (#2472).** With provider `anthropic` (the default) and
-  the `ZAI_BASE_URL` variable set, the pinned `claude` binary is pointed at a gateway
-  (e.g. z.ai's GLM Coding Plan endpoint) via `ANTHROPIC_BASE_URL` +
-  `ANTHROPIC_AUTH_TOKEN` — the CLI transport forwards `os.environ` to the subprocess, so
-  no product code is involved. `LINTRO_AI_PROVIDER=openai` runs the version-pinned
-  `codex` CLI on a ChatGPT-plan session: the workflow resolves the Renovate-pinned
-  version, installs the CLI and decodes an org secret into `~/.codex/auth.json` (Codex
-  has no OAuth-token env var; `CODEX_API_KEY` is metered API billing, not the
-  subscription) before the review step; with the secret unset the run fails visibly at
-  the credential gate.
+- **Lanes, selected by one variable (ADR-0011).** Where the review goes is a named row
+  in the committed manifest `scripts/ci/ai_review_lanes.json`. The repository variable
+  `LINTRO_AI_PROVIDER` picks the row by id and `LINTRO_AI_MODEL` overrides its default
+  model; no variable supplies an endpoint, a credential binding or an egress host. The
+  declared rows are `anthropic` (the Claude subscription, the default), `openai` (the
+  Codex ChatGPT-plan session, decoded from the `CODEX_AUTH_JSON` secret into
+  `~/.codex/auth.json` for the attempt; `CODEX_API_KEY` is metered API billing, not the
+  subscription), `cursor`, `zai` and `kimi` (two declared gateways). A secret-free job
+  resolves the chain, the review job's egress and credentials follow from it, and the
+  wrapper refuses a competing credential or an override that names another host. See
+  `docs/ai-review-transports.md` for the binding rules.
 - **`ai.max_cost_usd` is API-path accounting.** Lintro prices the tokens it billed
   itself, so under the `cli` transport the cap is advisory — the call bills the
   subscription (or, in bare mode with a reachable API key, that key — see the billing

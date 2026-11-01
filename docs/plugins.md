@@ -59,24 +59,76 @@ Update existing packages to the `lintro.tools` group.
 ## Plugin API Version
 
 The plugin-facing contract is versioned so that core refactors never silently break — or
-crash — an installed plugin. The current version is exposed as
+crash — an installed plugin. The current version is **2**, exposed as
 `lintro.plugins.LINTRO_PLUGIN_API_VERSION`.
 
 Declare the version your plugin targets as a class attribute:
 
 ```python
-from lintro.plugins import LINTRO_PLUGIN_API_VERSION
+from lintro.plugins.base import BaseToolPlugin
 
 
 class MyToolPlugin(BaseToolPlugin):
-    LINTRO_PLUGIN_API_VERSION = LINTRO_PLUGIN_API_VERSION
+    LINTRO_PLUGIN_API_VERSION = 2
     ...
 ```
 
 At load time Lintro compares this against its own version. A plugin built for an
 incompatible major version is **logged and skipped**, never loaded. Declaring the
-attribute is optional (an undeclared plugin is assumed compatible) but strongly
-recommended for forward safety.
+attribute is required: undeclared versions and non-integer values (including booleans)
+are rejected before the plugin is instantiated or executed. Importing the entry-point
+module still runs its module-level code, so keep tool execution out of imports.
+
+Pin the integer version your plugin implements. **Do not import the running core's
+version to set this attribute**: that automatically opts old code into future contracts
+without a migration and bypasses the compatibility check.
+
+### Migrating from plugin API v1 to v2
+
+API v2 is a breaking change to result collections and issue fixability. Upgrade the
+plugin package to a v2-compatible release, or make these changes before declaring
+`LINTRO_PLUGIN_API_VERSION = 2`:
+
+- `ToolResult.issues` and `initial_issues` require `Sequence[BaseIssue]` and default to
+  `()`. `metadata` requires `dict[str, Any]` and defaults to a fresh `{}`. Omit empty
+  arguments or pass empty containers; replace `issues=issues if issues else None` with
+  `issues=issues`, and remove explicit `None` for these three fields. Passing `None`
+  raises `TypeError`. Missing or unparseable results must remain failures
+  (`success=False`); an empty collection does not prove a clean run. Fix accounting
+  counts still use `None` for unknown, and failed fix measurements must set
+  `residual_unknown=True` with a reason rather than inventing zero counts.
+- `BaseIssue.fixable` is now a writable boolean dataclass field, defaulting to `False`.
+  A subclass's read-only `@property def fixable` prevents the inherited initializer from
+  assigning the field and raises `AttributeError`. Replace that property with the
+  inherited field, supplying `fixable=` when constructing the issue or computing it in
+  `__post_init__`. For example:
+
+  ```python
+  from dataclasses import dataclass
+
+  from lintro.parsers.base_issue import BaseIssue
+
+
+  @dataclass
+  class MyIssue(BaseIssue):
+      code: str = ""
+
+      def __post_init__(self) -> None:
+          self.fixable = self.code == "FORMAT"
+  ```
+
+  Recompute the field if the inputs used to derive it change after construction.
+
+- Issues without a per-issue fix signal remain `fixable=False`. If a fix-capable tool
+  should include such findings in `fmt --dry-run` estimates, set
+  `PREVIEW_FIXABLE: ClassVar[bool] = True` on its issue subclass (import `ClassVar` from
+  `typing`). This opt-in affects only the preview; public fixability in totals, issue
+  sections and structured findings remains false.
+
+Plugin API v1 and undeclared plugins are skipped with a migration diagnostic. A plugin
+that incorrectly advertises v2 or bypasses discovery can still fail at execution:
+`TypeError` and legacy `fixable` `AttributeError` failures are contained per tool in
+sequential and parallel runs, with error details preserved and a failed result.
 
 ## Failure Isolation
 
@@ -108,7 +160,6 @@ from lintro.enums.capability import Cap
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
-from lintro.plugins import LINTRO_PLUGIN_API_VERSION
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 
@@ -118,7 +169,7 @@ class MyToolPlugin(BaseToolPlugin):
     """My custom linting tool plugin."""
 
     # Declare the plugin API version this plugin was built against.
-    LINTRO_PLUGIN_API_VERSION = LINTRO_PLUGIN_API_VERSION
+    LINTRO_PLUGIN_API_VERSION = 2
 
     @property
     def definition(self) -> ToolDefinition:
@@ -169,6 +220,9 @@ class MyToolPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
+            # Parsed file findings prove inspection. For clean runs, use the
+            # tool's structured coverage report; an exit code is not proof.
+            inspected_files=True if issues else None,
             # success=True means the check passed (tool ran AND no issues found)
             # If you want success to only reflect tool execution, use just `success`
             success=success and len(issues) == 0,
@@ -250,13 +304,72 @@ configuration guide.
 
 The `ToolResult` dataclass represents execution results:
 
-| Field          | Type                      | Description                  |
-| -------------- | ------------------------- | ---------------------------- |
-| `name`         | `str`                     | Tool name                    |
-| `success`      | `bool`                    | Whether execution succeeded  |
-| `output`       | `str \| None`             | Raw output (errors/warnings) |
-| `issues_count` | `int`                     | Number of issues found       |
-| `issues`       | `list[BaseIssue] \| None` | Parsed issues                |
+| Field            | Type                  | Description                           |
+| ---------------- | --------------------- | ------------------------------------- |
+| `name`           | `str`                 | Tool name                             |
+| `success`        | `bool`                | Whether execution succeeded           |
+| `output`         | `str \| None`         | Raw output (errors/warnings)          |
+| `issues_count`   | `int`                 | Number of issues found                |
+| `issues`         | `Sequence[BaseIssue]` | Parsed issues; defaults to `()`       |
+| `initial_issues` | `Sequence[BaseIssue]` | Pre-fix issues; defaults to `()`      |
+| `metadata`       | `dict[str, Any]`      | Tool metadata; defaults to a new `{}` |
+
+Omit empty collection arguments or pass an empty sequence or dictionary. Passing `None`
+for `issues`, `initial_issues` or `metadata` raises a `TypeError` naming the field when
+`ToolResult` is constructed. For example, use `issues=issues` rather than
+`issues=issues if issues else None`. Fix counts such as `initial_issues_count`,
+`fixed_issues_count` and `remaining_issues_count` still accept `None` to mean unknown;
+an empty collection does not establish a measured zero.
+
+#### Immutable ToolResult migration (API v2)
+
+`check()` and `fix()` must return a `ToolResult` instance, as specified by
+`LintroPlugin`; arbitrary objects with similarly named attributes are unsupported.
+`ToolResult` is now frozen. **Plugins that assign or delete result fields after
+construction must migrate**: those operations raise `dataclasses.FrozenInstanceError`.
+This includes assignments to counts, output, duration and metadata itself.
+
+API-v2 constructor arguments and readable fields remain available, so the plugin API
+version stays at **2**. Existing `ToolResult(skipped=True, skip_reason="not installed")`
+and `ToolResult(timed_out=True, success=False, output="partial output")` constructors
+still work. For skipped, no-files and timed-out results, `inspected_files=None` defaults
+to `False`; skipped results retain the historical normalization to `success=True`,
+including when the default `False` is supplied explicitly. Construction now rejects
+explicit `inspected_files=True` on inactive results, conflicting execution flags and
+invalid accounting with `ValueError`, rather than waiting until `.outcome` is read. For
+example, a no-files result requires `success=True`, and a skipped result cannot carry
+nonzero counts. A timeout requires `success=False` and may retain partial findings and
+output.
+
+Construct complete results with `ToolResult.from_outcome()`. Use `with_outcome()` to
+replace execution or fix accounting, and `dataclasses.replace()` to update envelope
+fields. Retain or return the replacement; callers holding the original result keep its
+original state. Constructor normalization and validation also run on every replacement,
+so update related counts and flags together:
+
+```python
+from dataclasses import replace
+
+from lintro.models.core.tool_outcome import Checked, FixMeasured, ToolOutcome
+from lintro.models.core.tool_result import ToolResult
+
+result = ToolResult.from_outcome(
+    ToolOutcome(Checked(False, inspected_files=True), issues_count=2),
+    name="my-tool",
+    issues=issues,
+)
+# Replace result.success = True and individual count assignments with one update.
+result = result.with_outcome(
+    ToolOutcome(Checked(True, inspected_files=True), FixMeasured(2, 2, 0)),
+)
+result = replace(result, issues=(), output="Fixed 2 issues")
+```
+
+Freezing is shallow: issue sequences, issue objects and the metadata dictionary are
+shared with replacements unless you supply new payloads. Incremental metadata updates
+such as `result.metadata["fixed_count"] = 2` remain supported and are visible through
+both envelopes. For independent metadata, pass `metadata=dict(result.metadata)` to
+`replace()`; nested values still share their original objects.
 
 ### BaseToolPlugin Helpers
 
@@ -396,10 +509,12 @@ emitting issue paths relative to it need).
 `run_batch_fix()` takes both fully built command lines as a
 `BatchCommands(check=..., fix=...)` bundle — the check command runs twice, once before
 the fix and once to score it — plus a `BatchFixPolicy` holding the wording of the
-summary (`fixed_label`, `all_fixed_message`, `verbose_output_label`) and two reporting
-switches: `report_initial_issues` prefixes `ToolResult.issues` with the pre-fix set for
-tools that render a two-table view, and `always_report_initial_issues` passes an empty
-list rather than `None` when nothing was detected.
+summary (`fixed_label`, `all_fixed_message`, `verbose_output_label`). The reporting
+switch `report_initial_issues` prefixes `ToolResult.issues` with the pre-fix set for
+tools that render a two-table view. The constructor still accepts
+`always_report_initial_issues` as a deprecated no-op for existing plugins; new plugins
+should omit it. `ToolResult.initial_issues` is always a sequence, including when nothing
+was detected.
 
 Both entry points take `on_timeout` and `on_error` hooks. Leave `on_timeout` out to get
 the standard `batch_timeout_result()` / `batch_fix_timeout_result()` shape, and pass it

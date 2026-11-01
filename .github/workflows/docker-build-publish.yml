@@ -70,9 +70,9 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: block
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -121,7 +121,7 @@ jobs:
     # Base image (tools layer) publishes before full; a full-image failure must
     # not block repairing py-lintro-base tags during backfill dispatch.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@22bb159287eb23a812d533090615525eccb839ac # v0.75.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     permissions:
       contents: read
       packages: write
@@ -179,8 +179,8 @@ jobs:
       cosign-sign: true
       scan: true
       scan-exit-code: '0'
-      tooling-ref: '22bb159287eb23a812d533090615525eccb839ac' # v0.75.1
-      egress-policy: block
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: docker
       # Shared allowlist, maintained once in
       # .github/allowed-endpoints/docker-build-publish.txt: the reusable
@@ -200,7 +200,7 @@ jobs:
       needs.resolve-endpoints.result == 'success' &&
       needs.docker-base.result == 'success'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@22bb159287eb23a812d533090615525eccb839ac # v0.75.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     permissions:
       contents: read
       packages: write
@@ -258,8 +258,8 @@ jobs:
       cosign-sign: true
       scan: true
       scan-exit-code: '0'
-      tooling-ref: '22bb159287eb23a812d533090615525eccb839ac' # v0.75.1
-      egress-policy: block
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: docker
       # Shared allowlist, maintained once in
       # .github/allowed-endpoints/docker-build-publish.txt: the reusable
@@ -287,7 +287,7 @@ jobs:
       needs.resolve-endpoints.result == 'success' &&
       needs.docker-full.result == 'success'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@22bb159287eb23a812d533090615525eccb839ac # v0.75.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     permissions:
       contents: read
       packages: write
@@ -345,8 +345,8 @@ jobs:
       cosign-sign: true
       scan: true
       scan-exit-code: '0'
-      tooling-ref: '22bb159287eb23a812d533090615525eccb839ac' # v0.75.1
-      egress-policy: block
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: docker
       # Shared allowlist, maintained once in
       # .github/allowed-endpoints/docker-build-publish.txt (see docker-base).

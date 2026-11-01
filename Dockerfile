@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 # =============================================================================
 # Lintro Docker Image (multi-stage)
 # =============================================================================
@@ -15,7 +15,7 @@
 # Built from docker/tools.Dockerfile and published by docker-tools-publish.yml
 # (cosign-signed, SBOM + provenance). Renovate manages the digest bump (#1360).
 # yamllint / hadolint: pin is immutable by digest; tag is informational.
-FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:fe019c85cd498a3fcb693a38e66f351bc8819c7d187e4a04d67757d9fa916025 AS tools
+FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:eabaa1e9b26a48a2e613c07cf46bc8b53935fa0bea4999f844b73c4a3f3d33fb AS tools
 
 # -----------------------------------------------------------------------------
 # Stage: full — lintro application (default target)
@@ -76,10 +76,13 @@ RUN chmod +x /app/scripts/utils/install-tools.sh && \
     /app/scripts/utils/install-tools.sh --docker --tools typos,spectral,buf,import-linter,pylint,cppcheck,checkov && \
     rm -rf /var/lib/apt/lists/*
 
+# Refresh the decoder even while FROM still pins an older tools image.
+# CVE-2026-111497 is backported in Debian trixie's 1.1.0-2+deb13u1.
 # hadolint ignore=DL3008
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends gosu && \
+    apt-get update && apt-get install -y --no-install-recommends gosu libbrotli1 && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libbrotli1)" ge '1.1.0-2+deb13u1' && \
     rm -rf /var/lib/apt/lists/* && \
     gosu nobody true
 
@@ -136,7 +139,7 @@ CMD ["--help"]
 # -----------------------------------------------------------------------------
 # Stage: base — minimal runtime without external toolchains
 # -----------------------------------------------------------------------------
-FROM python:3.14-slim@sha256:caaf356f40667c496d405780745b9ac25771c189a51dfcc42430d531ea09f8a2 AS base
+FROM python:3.14-slim@sha256:cd89c30eda26ee911a4611b18680086e0ea42e6f5f8cbe653d07fa7958c9cec8 AS base
 
 LABEL org.opencontainers.image.description="Lintro base image (no external tools); GHCR package py-lintro-base"
 
@@ -147,13 +150,24 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# This stage does not FROM `tools`, so it must prove its own base seeds a safe
+# pip: `python -m venv` installs CPython's bundled ensurepip wheel, which ships
+# its own private CA bundle. Probe a throwaway venv from its own interpreter and
+# require pip >= 26.2.2 (the release that drops the compromised root) before
+# installing anything.
+RUN python3 -m venv /tmp/lintro-seed-check && \
+    /tmp/lintro-seed-check/bin/python -c 'import pip; from pip._vendor.packaging.version import Version; assert Version(pip.__version__) >= Version("26.2.2"), pip.__version__' && \
+    rm -rf /tmp/lintro-seed-check
+
 WORKDIR /app
 
 # hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
+    libbrotli1 \
     gosu && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libbrotli1)" ge '1.1.0-2+deb13u1' && \
     gosu nobody true && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
@@ -193,7 +207,7 @@ CMD ["--help"]
 # manages the digest bump. Only the `ai` target below depends on this stage, so
 # `--target base` / `--target full` builds never pull it.
 # yamllint / hadolint: pin is immutable by digest; tag is informational.
-FROM ghcr.io/lgtm-hq/lintro-ai-tools:latest@sha256:6e8f5297929bd7fd26cda7700206456719363a21df6360f90aada994e8d89106 AS aitools
+FROM ghcr.io/lgtm-hq/lintro-ai-tools:latest@sha256:5049c077f9ab408615b3e326d2f2e5c1ddd27469effbbd0e498d6dadcd6489ee AS aitools
 
 # -----------------------------------------------------------------------------
 # Stage: ai — full image plus the agent CLIs `--transport cli` drives

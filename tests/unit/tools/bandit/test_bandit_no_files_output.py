@@ -11,6 +11,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.tools.bandit.definition import BanditPlugin
+from lintro.utils.meaningful_run import result_inspected_files
 
 
 def test_check_no_python_files_returns_empty_output(tmp_path: Path) -> None:
@@ -54,6 +55,7 @@ def test_check_no_python_files_returns_empty_output(tmp_path: Path) -> None:
     # with the output nulled it is byte-identical to a clean pass, so the
     # badge and the severity baseline read the flag, not the text.
     assert_that(result.no_files).is_true()
+    assert_that(result.inspected_files).is_false()
 
 
 def test_check_empty_output_clean_pass_has_empty_output(tmp_path: Path) -> None:
@@ -88,3 +90,4 @@ def test_check_empty_output_clean_pass_has_empty_output(tmp_path: Path) -> None:
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.output).is_none()
+    assert_that(result_inspected_files(result)).is_true()

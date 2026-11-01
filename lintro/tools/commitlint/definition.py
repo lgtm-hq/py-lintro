@@ -28,6 +28,7 @@ from lintro._tool_versions import get_min_version
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.tool_outcome import Checked, Skipped, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.commitlint.commitlint_parser import parse_commitlint_output
 from lintro.plugins.base import BaseToolPlugin
@@ -160,7 +161,7 @@ class CommitlintPlugin(BaseToolPlugin):
             return ctx
 
         cmd: list[str] = self._get_commitlint_command(
-            cwd=Path(ctx.cwd) if ctx.cwd else None,
+            cwd=Path(ctx.cwd),
         )
         cmd.append("--last")
 
@@ -202,13 +203,10 @@ class CommitlintPlugin(BaseToolPlugin):
                 "validation."
             )
             logger.debug(f"[CommitlintPlugin] {skip_message}")
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Skipped(skip_message)),
                 name=self.definition.name,
-                success=True,
                 output=skip_message,
-                issues_count=0,
-                skipped=True,
-                skip_reason=skip_message,
             )
 
         issues_count: int = len(issues)
@@ -218,11 +216,13 @@ class CommitlintPlugin(BaseToolPlugin):
         if success_flag:
             final_output = None
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=success_flag, inspected_files=True),
+                issues_count=issues_count,
+            ),
             name=self.definition.name,
-            success=success_flag,
             output=final_output,
-            issues_count=issues_count,
             issues=issues,
         )
 

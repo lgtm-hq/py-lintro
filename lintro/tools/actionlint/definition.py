@@ -19,6 +19,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, NoFiles, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.actionlint.actionlint_parser import parse_actionlint_output
 from lintro.plugins.base import BaseToolPlugin
@@ -97,7 +98,7 @@ class ActionlintPlugin(BaseToolPlugin):
     def _process_single_file(
         self,
         file_path: str,
-        timeout: int,
+        timeout: float,
         results: dict[str, Any],
     ) -> None:
         """Process a single file with actionlint.
@@ -111,6 +112,7 @@ class ActionlintPlugin(BaseToolPlugin):
         try:
             success, output = self._run_subprocess(cmd=cmd, timeout=timeout)
             issues = parse_actionlint_output(output)
+            results["coverage"].append(True if success or issues else None)
 
             if not success:
                 results["all_success"] = False
@@ -119,11 +121,13 @@ class ActionlintPlugin(BaseToolPlugin):
             if issues:
                 results["all_issues"].extend(issues)
         except subprocess.TimeoutExpired:
+            results["coverage"].append(False)
             results["skipped_files"].append(file_path)
             results["all_success"] = False
             results["execution_failures"] += 1
             results["timed_out"] = True
-        except (OSError, ValueError, RuntimeError) as e:  # pragma: no cover
+        except (OSError, ValueError, RuntimeError) as e:
+            results["coverage"].append(False if isinstance(e, OSError) else None)
             results["all_success"] = False
             results["all_outputs"].append(f"Error checking {file_path}: {e}")
             results["execution_failures"] += 1
@@ -164,12 +168,10 @@ class ActionlintPlugin(BaseToolPlugin):
         ]
 
         if not workflow_files:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=NoFiles()),
                 name=self.definition.name,
-                success=True,
                 output="No GitHub workflow files found to check.",
-                issues_count=0,
-                no_files=True,
             )
 
         # Accumulate results across all files
@@ -180,6 +182,7 @@ class ActionlintPlugin(BaseToolPlugin):
             "skipped_files": [],
             "execution_failures": 0,
             "timed_out": False,
+            "coverage": [],
         }
 
         # Show progress bar only when processing multiple files
@@ -226,13 +229,25 @@ class ActionlintPlugin(BaseToolPlugin):
                 else failure_msg
             )
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=(
+                    TimedOut(combined_output)
+                    if bool(results["timed_out"])
+                    else Checked(
+                        success=results["all_success"],
+                        inspected_files=(
+                            True
+                            if True in results["coverage"]
+                            else None if None in results["coverage"] else False
+                        ),
+                    )
+                ),
+                issues_count=len(results["all_issues"]),
+            ),
             name=self.definition.name,
-            success=results["all_success"],
             output=combined_output,
-            issues_count=len(results["all_issues"]),
             issues=results["all_issues"],
-            timed_out=bool(results["timed_out"]),
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

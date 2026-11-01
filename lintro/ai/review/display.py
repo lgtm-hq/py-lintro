@@ -7,7 +7,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from lintro.ai.cost import format_cost
-from lintro.ai.display.shared import cost_str, print_section_header
+from lintro.ai.display.shared import print_section_header
 from lintro.ai.resolved_ai_config import (
     MAX_COST_LABEL,
     format_max_cost_label,
@@ -19,11 +19,17 @@ from lintro.ai.review.checklist_display import (
 from lintro.ai.review.coverage_degradation import (
     COVERAGE_LIMITED_HEADLINE,
     describe_coverage_degradations,
+    format_narrative_note,
 )
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.patch_validation import describe_suggestion_drops
+from lintro.ai.review.provenance_display import (
+    model_label,
+    terminal_cost_info,
+    view_from_metadata,
+)
 from lintro.ai.review.severity_gate import (
     describe_cross_chunk_contradictions,
     describe_downgrades,
@@ -73,7 +79,7 @@ def render_review_terminal(
         )
         max_cost_parts = f" | {MAX_COST_LABEL}: {cap_label}"
     header_detail = (
-        f"Model: {format_sourced_value(metadata.model, metadata.model_source)} | "
+        f"Model: {model_label(view_from_metadata(metadata), plain=True)} | "
         f"Provider: "
         f"{format_sourced_value(metadata.provider, metadata.provider_source)} | "
         f"Transport: {transport_label} | "
@@ -84,11 +90,8 @@ def render_review_terminal(
         f"Structured checks: {metadata.checklist_items}"
         f"{max_cost_parts}"
     )
-    token_info = cost_str(
-        metadata.token_usage.get("prompt", 0),
-        metadata.token_usage.get("completion", 0),
-        metadata.cost_estimate_usd,
-    )
+    # The figure carries its basis; a gateway round shows no dollars (#2868).
+    token_info = terminal_cost_info(metadata)
     print_section_header(
         output,
         "🔍",
@@ -118,6 +121,11 @@ def render_review_terminal(
     verification_note = format_verification_note(metadata=metadata)
     if verification_note:
         output.print(f"[dim]{verification_note}[/dim]")
+    narrative_note = format_narrative_note(metadata=metadata)
+    if narrative_note:
+        # Narrative notes: a failed question pass, a carried synthesis or
+        # verification failure; none is a coverage loss (#2803).
+        output.print(f"[yellow]{narrative_note}[/yellow]")
 
     if metadata.timings is not None:
         # One line, always on: which phase dominated the wait (#2148).

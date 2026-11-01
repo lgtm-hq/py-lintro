@@ -39,7 +39,6 @@ def test_check_reports_exactly_one_duplicate_code_issue(
     assert_that(result.success).is_false()
     assert_that(result.skipped).is_false()
     assert_that(result.issues_count).is_equal_to(1)
-    assert result.issues is not None  # narrow type for mypy
     issue = result.issues[0]
     assert isinstance(issue, PylintIssue)  # nosec B101 - narrow type for mypy
     assert_that(issue.code).is_equal_to("R0801")

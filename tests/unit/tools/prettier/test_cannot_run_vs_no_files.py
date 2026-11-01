@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 import pytest
 from assertpy import assert_that
 
-from lintro.plugins import execution_preparation
+from lintro.tools.core.command_builders import CommandBuilderRegistry
 from lintro.tools.oxlint.definition import OxlintPlugin
 from lintro.tools.prettier.definition import PrettierPlugin
 
@@ -38,9 +38,9 @@ def unresolvable_binary(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch: Pytest monkeypatch fixture.
     """
     monkeypatch.setattr(
-        execution_preparation,
-        "get_executable_command",
-        lambda tool_name, cwd=None: [_MISSING_BINARY],
+        CommandBuilderRegistry,
+        "get_command",
+        lambda tool_name, tool_name_enum, cwd=None: [_MISSING_BINARY],
     )
 
 
@@ -62,8 +62,8 @@ def test_prettier_cannot_run_is_loudly_unavailable_not_a_pass(
     result = plugin.check([str(target)], {})
 
     assert_that(result.unavailable).is_true()
-    assert_that(result.skip_reason).is_not_none()
-    assert_that(result.skip_reason).is_not_equal_to("")
+    assert_that(result.unavailable_reason).is_not_none()
+    assert_that(result.unavailable_reason).is_not_equal_to("")
     assert_that(result.output).contains("prettier unavailable")
 
 
@@ -85,8 +85,8 @@ def test_oxlint_cannot_run_is_loudly_unavailable_not_a_pass(
     result = plugin.check([str(target)], {})
 
     assert_that(result.unavailable).is_true()
-    assert_that(result.skip_reason).is_not_none()
-    assert_that(result.skip_reason).is_not_equal_to("")
+    assert_that(result.unavailable_reason).is_not_none()
+    assert_that(result.unavailable_reason).is_not_equal_to("")
 
 
 def test_prettier_with_no_matching_files_is_a_plain_pass(tmp_path: Path) -> None:

@@ -66,7 +66,6 @@ def test_check_detects_secret(
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.issues).is_length(1)
     issues = result.issues
-    assert issues is not None  # nosec B101 - narrows Optional for type checkers
     issue = issues[0]
     assert isinstance(issue, TrufflehogIssue)
     assert_that(issue.detector_name).is_equal_to("Github")

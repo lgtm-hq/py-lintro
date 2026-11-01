@@ -174,12 +174,12 @@ def test_rows_outside_section_are_untouched(module: ModuleType) -> None:
     assert_that(result).contains("| 0.80.x  | keep |")
 
 
-def test_main_stamps_both_files(
+def test_main_stamps_the_root_file(
     module: ModuleType,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The CLI stamps root and .github SECURITY.md when both exist."""
+    """The CLI stamps the root SECURITY.md and leaves the .github copy alone."""
     repo = tmp_path
     root_security = repo / "SECURITY.md"
     root_security.write_text(_ROOT_TABLE, encoding="utf-8")
@@ -188,12 +188,13 @@ def test_main_stamps_both_files(
     github_security = github_dir / "SECURITY.md"
     github_security.write_text(_GITHUB_TABLE, encoding="utf-8")
 
-    # ``main`` derives the repo root from its own file location; redirect the
-    # file discovery to the temp tree instead.
+    # ``main`` derives the repo root from its own file location; point the
+    # real file discovery at the temp tree instead.
+    real_security_files = module._security_files
     monkeypatch.setattr(
         module,
         "_security_files",
-        lambda root: [root_security, github_security],
+        lambda root: real_security_files(repo),
     )
 
     # Version supplied via argv so no pyproject.toml is required.
@@ -203,8 +204,31 @@ def test_main_stamps_both_files(
     assert_that(root_security.read_text(encoding="utf-8")).contains(
         "| 0.81.x  | ✅        |",
     )
-    assert_that(github_security.read_text(encoding="utf-8")).contains(
-        "| 0.81.x  | :white_check_mark: |",
+    assert_that(github_security.read_text(encoding="utf-8")).is_equal_to(
+        _GITHUB_TABLE,
+    )
+
+
+def test_security_files_never_include_the_github_copy(
+    module: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """``.github/SECURITY.md`` is outside the version-update hook's scope.
+
+    lgtm-ci v0.76.0+ rejects a version-update diff that touches ``.github/``
+    (#849), so stamping that copy would fail every minor/major release PR.
+
+    Args:
+        module: The loaded update-security-support module.
+        tmp_path: Temporary repository root.
+    """
+    (tmp_path / "SECURITY.md").write_text(_ROOT_TABLE, encoding="utf-8")
+    github_dir = tmp_path / ".github"
+    github_dir.mkdir()
+    (github_dir / "SECURITY.md").write_text(_GITHUB_TABLE, encoding="utf-8")
+
+    assert_that(module._security_files(tmp_path)).is_equal_to(
+        [tmp_path / "SECURITY.md"],
     )
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -15,8 +16,15 @@ from lintro.ai.rerun import (
     apply_rerun_results,
     rerun_tools,
 )
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixPartial,
+    FixUnmeasured,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
+from tests.unit.tool_result_helpers import legacy_result
 
 from .conftest import MockIssue
 
@@ -195,8 +203,8 @@ def test_rerun_tools_with_missing_tools() -> None:
 # -- TestApplyRerunResults: Tests for apply_rerun_results. -------------------
 
 
-def test_apply_rerun_results_preserves_native_counters() -> None:
-    """Native initial/fixed counts are preserved after rerun."""
+def test_apply_rerun_results_preserves_native_fixed_count_as_partial() -> None:
+    """The post-AI residual changes without adding AI fixes to native fixes."""
     original_result = ToolResult(
         name="ruff",
         success=False,
@@ -240,9 +248,14 @@ def test_apply_rerun_results_preserves_native_counters() -> None:
     )
 
     apply_rerun_results(by_tool=by_tool, rerun_results=[rerun_result])
+    updated = by_tool["ruff"][0]
+    assert_that(updated).is_not_same_as(original_result)
 
-    assert_that(original_result.initial_issues_count).is_equal_to(10)
-    assert_that(original_result.fixed_issues_count).is_equal_to(7)
+    assert_that(updated.initial_issues_count).is_none()
+    assert_that(updated.fixed_issues_count).is_equal_to(7)
+    assert_that(updated.outcome.accounting).is_equal_to(
+        FixPartial(fixed=7, remaining=2),
+    )
 
 
 def test_apply_rerun_results_updates_remaining_issues() -> None:
@@ -281,10 +294,67 @@ def test_apply_rerun_results_updates_remaining_issues() -> None:
     )
 
     apply_rerun_results(by_tool=by_tool, rerun_results=[rerun_result])
+    updated = by_tool["ruff"][0]
+    assert_that(updated).is_not_same_as(original_result)
 
-    assert_that(original_result.remaining_issues_count).is_equal_to(1)
-    assert_that(original_result.issues_count).is_equal_to(1)
-    assert_that(original_result.issues).is_length(1)
-    assert_that(original_result.issues).is_not_none()
-    assert_that(original_result.issues[0].message).is_equal_to("remaining issue")  # type: ignore[index]  # assertpy is_not_none narrows this
-    assert_that(original_result.success).is_true()
+    assert_that(updated.remaining_issues_count).is_equal_to(1)
+    assert_that(updated.issues_count).is_equal_to(1)
+    assert_that(updated.issues).is_length(1)
+    assert_that(updated.issues).is_not_none()
+    assert_that(updated.issues[0].message).is_equal_to("remaining issue")
+    assert_that(updated.success).is_true()
+
+
+@pytest.mark.parametrize("incomplete_report", ["original", "rerun"])
+def test_rerun_cannot_turn_an_incomplete_report_into_measured_accounting(
+    incomplete_report: str,
+) -> None:
+    """Neither an incomplete before-report nor after-report supports a new total."""
+    original = ToolResult.from_outcome(
+        ToolOutcome(Checked(False), FixUnmeasured("verify failed", initial=3)),
+        name="ruff",
+        parse_failures_count=int(incomplete_report == "original"),
+    )
+    before = deepcopy(original)
+    rerun = ToolResult(
+        name="ruff",
+        success=True,
+        parse_failures_count=int(incomplete_report == "rerun"),
+    )
+
+    apply_rerun_results(by_tool={"ruff": (original, [])}, rerun_results=[rerun])
+
+    assert_that(original).is_equal_to(before)
+    assert_that(original.outcome.accounting).is_equal_to(before.outcome.accounting)
+    assert_that(original.outcome.success).is_false()
+
+
+@pytest.mark.parametrize("invalid_side", ["original", "rerun"])
+def test_invalid_rerun_state_does_not_discard_other_tool_updates(
+    invalid_side: str,
+) -> None:
+    """Invalid original or rerun state supplies no accounting, and peers refresh."""
+    originals = {
+        name: ToolResult.from_outcome(
+            ToolOutcome(Checked(False), FixUnmeasured("verify failed", initial=3)),
+            name=name,
+        )
+        for name in ("bad", "peer")
+    }
+    reruns = {name: ToolResult(name=name, success=True) for name in originals}
+    invalid = originals["bad"] if invalid_side == "original" else reruns["bad"]
+    invalid = legacy_result(**(vars(invalid) | {"no_files": True, "success": False}))
+    (originals if invalid_side == "original" else reruns)["bad"] = invalid
+    before = deepcopy(originals["bad"])
+
+    by_tool: _ByTool = {name: (result, []) for name, result in originals.items()}
+    apply_rerun_results(
+        by_tool=by_tool,
+        rerun_results=list(reruns.values()),
+    )
+
+    assert_that(originals["bad"]).is_equal_to(before)
+    assert_that(by_tool["peer"][0].outcome.accounting).is_equal_to(
+        FixPartial(initial=3, remaining=0),
+    )
+    assert_that(by_tool["peer"][0].outcome.success).is_true()

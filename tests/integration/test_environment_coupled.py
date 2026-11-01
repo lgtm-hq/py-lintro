@@ -17,14 +17,12 @@ import os
 import subprocess  # nosec B404 - fixed installer argv; shell=False
 from pathlib import Path
 
-import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
 
 from lintro.cli_utils.commands.badge import badge_command
 from lintro.enums.update_channel import UpdateChannel
 from lintro.tools.core.update_channels import detect_update_channel
-from tests.integration._tools import tool_runs_for_lintro
 
 # pytest does not chdir to the repository root, so the installer script
 # and its cwd must be resolved from this file rather than Path.cwd().
@@ -62,19 +60,6 @@ def test_installer_dry_run_simulates_spectral_verification() -> None:
     assert_that(result.stdout).does_not_contain("spectral: not found")
 
 
-@pytest.mark.xfail(
-    tool_runs_for_lintro("osv-scanner"),
-    strict=True,
-    reason=(
-        "osv_scanner bypasses lintro's file-discovery pipeline (it finds "
-        "lockfiles itself), so over an empty directory it returns "
-        "skipped=False with empty output and no 'no files found to check' "
-        "marker. badge.py's _result_checked_any_files reads that text "
-        "heuristically, so that one result makes an empty scan look like a "
-        "real clean run. Product gap, not a test defect: the badge command "
-        "publishes a zero-issue badge for a directory nothing inspected."
-    ),
-)
 def test_badge_empty_directory_does_not_publish(tmp_path: Path) -> None:
     """A real empty directory must not publish a zero-issue badge.
 
@@ -83,12 +68,8 @@ def test_badge_empty_directory_does_not_publish(tmp_path: Path) -> None:
     contract at ``resolve_severity_counts``, this one drives the whole pipeline
     over a directory with nothing in it.
 
-    The xfail above is conditional and ``strict``: it fires only where
-    lintro would actually run osv-scanner (present *and* clearing its
-    version floor, since below that the plugin skips it and the gap does
-    not arise). Everywhere else this must pass outright, and the day the
-    gap is closed the XPASS fails the suite so the marker has to be
-    removed rather than rotting.
+    OSV's native no-source response must also carry explicit non-inspection,
+    so an installed scanner cannot make this empty run publishable.
 
     Args:
         tmp_path: Pytest temporary directory fixture.

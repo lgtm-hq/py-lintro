@@ -18,6 +18,7 @@ from lintro.ai.review.coverage import (
     queue_paths,
     review_eligible_paths,
 )
+from lintro.ai.review.degradation_carry import redo_scope
 from lintro.ai.review.delta import open_thread_paths
 from lintro.ai.review.enums.file_review_need import FileReviewNeed
 from lintro.ai.review.import_graph import importers_of
@@ -52,6 +53,11 @@ class ResumePlan:
             planner after the delta is applied so the mid-run checkpoints
             and the final round match on the same inputs. Empty on a full
             round.
+        coverage: The prior coverage records this round may inherit, after
+            the reuse gate (#2867). Persistence merges onto these, never
+            onto the raw prior, so a record from an excluded round is
+            dropped rather than carried under a round number the resumed
+            round reuses.
     """
 
     classified: tuple[ClassifiedFile, ...]
@@ -59,6 +65,7 @@ class ResumePlan:
     hashes: dict[str, str]
     eligible: tuple[str, ...]
     reviewed_ranges: tuple[tuple[str, int, int], ...] = ()
+    coverage: tuple[CoverageRecord, ...] = ()
 
     def counts(self, *, reviewed_now: Sequence[str]) -> CoverageCounts:
         """Return counters after the provider finished *reviewed_now*."""
@@ -75,6 +82,7 @@ def plan_resume(
     extra_skips: Sequence[SkippedFile] = (),
     groups: Sequence[Sequence[str]] = (),
     force_full: bool = False,
+    reusable_rounds: Collection[int] | None = None,
 ) -> ResumePlan:
     """Classify the current diff against prior coverage.
 
@@ -84,6 +92,9 @@ def plan_resume(
         extra_skips: Chunker / agent-scope skips.
         groups: Semantic groups from this round's chunker.
         force_full: Discard carried coverage (``--full``).
+        reusable_rounds: Round numbers whose coverage may be inherited
+            (ADR-0011 B, #2867); ``None`` inherits every record. A record
+            from any other round is re-reviewed.
 
     Returns:
         Queue and hashes for this round.
@@ -95,6 +106,18 @@ def plan_resume(
         skipped=(*context.skipped_files, *extra_skips),
     )
     coverage = () if prior is None or force_full else prior.coverage
+    if reusable_rounds is not None:
+        coverage = tuple(
+            record for record in coverage if record.round in reusable_rounds
+        )
+    # A file the last round degraded but still credited is reviewed again
+    # while its patch hash is unchanged, whatever the head, so no later round
+    # can pass on the carry (#2803).
+    if prior is not None and not force_full:
+        coverage = redo_scope(prior=prior, hashes=hashes).filter_coverage(
+            coverage=coverage,
+            hashes=hashes,
+        )
     flags = () if prior is None or force_full else prior.flagged_files
     pending = () if prior is None or force_full else prior.pending_invalidations
     consumed = () if prior is None or force_full else prior.consumed_flags
@@ -127,6 +150,7 @@ def plan_resume(
         queue=queue_paths(classified=classified),
         hashes=hashes,
         eligible=eligible,
+        coverage=tuple(coverage),
     )
 
 
@@ -192,7 +216,15 @@ def records_for_reviewed(
     }
     merged: dict[tuple[str, str], CoverageRecord] = {}
     if prior is not None:
-        for record in prior.coverage:
+        # The plan's coverage, not the prior's: the reuse gate has already
+        # dropped what this round may not inherit (#2867). The redo's
+        # eviction holds in the saved coverage too: a file set aside for a
+        # redo this round never reached keeps no credit (#2803).
+        kept = redo_scope(prior=prior, hashes=plan.hashes).filter_coverage(
+            coverage=plan.coverage,
+            hashes=plan.hashes,
+        )
+        for record in kept:
             merged[record.identity] = record
     reviewed = set(reviewed_paths)
     for item in plan.classified:

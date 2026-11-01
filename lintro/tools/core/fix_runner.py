@@ -30,13 +30,14 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.models.core.tool_outcome import Checked, FixMeasured, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.file_processor import FileFixResult, FileProcessingResult
 from lintro.tools.core.check_runner import check_one_file
 
 if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
-    from lintro.plugins.base import BaseToolPlugin, ExecutionContext
+    from lintro.plugins.base import BaseToolPlugin, PreparedExecution
 
 __all__ = [
     "PerFileFixPolicy",
@@ -146,7 +147,7 @@ def _run_check_step(
     cmd: list[str],
     parse: Callable[[str], Sequence[BaseIssue]],
     failure_message: str,
-    timeout: int,
+    timeout: float,
 ) -> FileProcessingResult:
     """Run one check-style invocation and classify its outcome.
 
@@ -217,7 +218,7 @@ def _verify_and_score(
     check_cmd: list[str],
     parse: Callable[[str], Sequence[BaseIssue]],
     policy: PerFileFixPolicy,
-    timeout: int,
+    timeout: float,
     initial_issues: list[BaseIssue],
     fix_success: bool,
     fix_output: str,
@@ -292,7 +293,7 @@ def _fix_one_file(
     fix_command: Callable[[str], list[str]],
     parse: Callable[[str], Sequence[BaseIssue]],
     policy: PerFileFixPolicy,
-    timeout: int,
+    timeout: float,
 ) -> FileFixResult:
     """Check, fix and (optionally) verify a single file.
 
@@ -327,7 +328,7 @@ def _fix_one_file(
     initial_issues = list(initial.issues)
     if not initial_issues:
         return FileFixResult(
-            file_result=FileProcessingResult(success=True, output="", issues=[]),
+            file_result=initial,
             initial_count=0,
             fixed_count=0,
             initial_issues=[],
@@ -404,7 +405,7 @@ def _build_summary(
 
 
 def run_per_file_fix(
-    ctx: ExecutionContext,
+    ctx: PreparedExecution,
     *,
     plugin: BaseToolPlugin,
     check_command: Callable[[str], list[str]],
@@ -447,6 +448,10 @@ def run_per_file_fix(
             timeout=ctx.timeout,
         )
         tally.record(file_path, fix_result)
+        if fix_result.initial_issues:
+            # Preserve the initial inspection even if a later fix fails or
+            # clears every finding. Timeouts still veto the tool result.
+            fix_result.file_result.inspected_files = True
         return fix_result.file_result
 
     result = plugin._process_files_with_progress(
@@ -484,17 +489,27 @@ def run_per_file_fix(
         f"fixed={tally.fixed_total}, remaining={remaining_count}",
     )
 
-    return ToolResult(
+    return ToolResult.from_outcome(
+        ToolOutcome(
+            execution=(
+                TimedOut(final_output)
+                if result.timed_out
+                else Checked(
+                    success=result.all_success and remaining_count == 0,
+                    inspected_files=result.inspected_files,
+                )
+            ),
+            accounting=FixMeasured(
+                initial=initial_total,
+                fixed=tally.fixed_total,
+                remaining=remaining_count,
+            ),
+            issues_count=remaining_count,
+        ),
         name=plugin.definition.name,
-        success=result.all_success and remaining_count == 0,
         output=final_output,
-        issues_count=remaining_count,
         issues=tally.remaining_issues,
-        initial_issues_count=initial_total,
-        fixed_issues_count=tally.fixed_total,
-        remaining_issues_count=remaining_count,
-        initial_issues=tally.initial_issues or None,
-        timed_out=result.timed_out,
+        initial_issues=tally.initial_issues,
         # The project root the per-file paths were resolved from — not the
         # subprocess working directory, which this runner never sets. The
         # run-level verify pass anchors a relative ``issue.file`` here when it

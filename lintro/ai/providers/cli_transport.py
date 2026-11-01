@@ -23,6 +23,7 @@ import shutil
 import signal
 import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from typing import Any
 
 from loguru import logger
@@ -256,6 +257,7 @@ class CliTransport(ABC):
         input_text: str | None = None,
         timeout: float,
         cwd: str | None = None,
+        extra_env: Mapping[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Run *cmd*, dropping optional flags the binary rejects and retrying.
 
@@ -269,6 +271,8 @@ class CliTransport(ABC):
             input_text: Optional stdin payload.
             timeout: Subprocess timeout in seconds.
             cwd: Optional working directory.
+            extra_env: Variables set on the child's environment only, over
+                a copy of this process's (#2549).
 
         Returns:
             The completed subprocess result. Exit-code mapping stays with the
@@ -286,6 +290,7 @@ class CliTransport(ABC):
                 input_text=input_text,
                 timeout=timeout,
                 cwd=cwd,
+                extra_env=extra_env,
             )
             if result.returncode == 0:
                 return result
@@ -322,6 +327,7 @@ class CliTransport(ABC):
         input_text: str | None = None,
         timeout: float,
         cwd: str | None = None,
+        extra_env: Mapping[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Execute a CLI command with timeout and env forwarding.
 
@@ -335,6 +341,9 @@ class CliTransport(ABC):
             input_text: Optional stdin payload.
             timeout: Subprocess timeout in seconds.
             cwd: Optional working directory.
+            extra_env: Variables set on the child's environment only, over
+                a copy of this process's. The parent environment is never
+                written (#2549).
 
         Returns:
             Completed subprocess result.
@@ -345,6 +354,8 @@ class CliTransport(ABC):
             asyncio.CancelledError: Re-raised after the child is stopped.
         """
         env = os.environ.copy()
+        if extra_env:
+            env.update(extra_env)
 
         logger.debug(
             f"{self._binary_name} CLI: cmd={' '.join(cmd[:4])}..., "
@@ -527,11 +538,17 @@ class CliTransport(ABC):
         return content
 
     @abstractmethod
-    def parse_stdout(self, stdout: str) -> Any:
+    def parse_stdout(self, stdout: str, *, model: str) -> Any:
         """Parse provider-specific stdout into a transport payload.
+
+        The model is part of the contract rather than transport state because
+        it is resolved per call: a per-call override or a fallback runs as
+        ``--model <that>``, and the response must name what answered and be
+        priced at its rate (#2532).
 
         Args:
             stdout: Raw stdout from the CLI.
+            model: The model the call was invoked with.
 
         Returns:
             Provider-specific parsed payload.

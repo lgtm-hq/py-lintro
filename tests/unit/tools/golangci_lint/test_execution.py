@@ -7,15 +7,70 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
+import pytest
 from assertpy import assert_that
 
+from lintro.models.core.tool_outcome import FixPartial
+from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.golangci_lint.golangci_lint_issue import GolangciLintIssue
-from lintro.tools.golangci_lint.definition import GolangciLintPlugin
+from lintro.tools.golangci_lint.definition import GolangciLintPlugin, _merge_fix_results
 from tests.unit.tools.golangci_lint.conftest import (
     GOLANGCI_JSON_NO_ISSUES,
     GOLANGCI_JSON_ONE_ISSUE,
     GOLANGCI_JSON_TWO_ISSUES,
 )
+
+
+def test_fix_retains_findings_newly_reported_by_module_recheck(
+    golangci_lint_plugin: GolangciLintPlugin,
+    tmp_path: Path,
+) -> None:
+    """Module aggregation retains a larger residual and its rebased issue paths."""
+    _make_go_module(tmp_path)
+    with patch.object(
+        golangci_lint_plugin,
+        "_run_subprocess",
+        side_effect=[
+            (False, GOLANGCI_JSON_ONE_ISSUE),
+            (True, ""),
+            (False, GOLANGCI_JSON_TWO_ISSUES),
+        ],
+    ):
+        result = golangci_lint_plugin.fix([str(tmp_path)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.initial_issues).is_length(1)
+    assert_that(result.initial_issues_count).is_equal_to(2)
+    assert_that(result.fixed_issues_count).is_zero()
+    assert_that(result.remaining_issues_count).is_equal_to(2)
+    assert_that(result.issues_count).is_equal_to(2)
+    assert_that(result.issues).extracting("code").is_equal_to(
+        ["errcheck", "ineffassign"],
+    )
+    assert_that(result.issues).extracting("file").is_equal_to(
+        [str(tmp_path / "main.go")] * 2,
+    )
+
+
+def test_merge_preserves_unmeasured_fix_counts() -> None:
+    """An unmeasured module must not become a measured zero during aggregation."""
+    measured = ToolResult(
+        name="golangci_lint",
+        initial_issues_count=3,
+        fixed_issues_count=1,
+        remaining_issues_count=2,
+    )
+    unmeasured = ToolResult(name="golangci_lint", issues_count=1)
+
+    result = _merge_fix_results(name="golangci_lint", results=[measured, unmeasured])
+
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.initial_issues_count).is_none()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.issues).is_empty()
+    assert_that(result.initial_issues).is_empty()
+    assert_that(result.outcome.accounting).is_equal_to(FixPartial())
 
 
 def _make_go_module(root: Path) -> None:
@@ -516,3 +571,81 @@ def test_fix_invokes_golangci_lint_with_parallel_runners_allowed(
     for argv in recorded:
         assert_that(argv).contains("golangci-lint", "run", "--allow-parallel-runners")
     assert_that([argv for argv in recorded if "--fix" in argv]).is_not_empty()
+
+
+@pytest.mark.parametrize("operation", ["check", "fix"])
+def test_dependency_only_module_has_no_lintable_source(
+    golangci_lint_plugin: GolangciLintPlugin,
+    tmp_path: Path,
+    operation: str,
+) -> None:
+    """A command dependency lock must not invoke a source-code linter.
+
+    Args:
+        golangci_lint_plugin: Plugin under test.
+        tmp_path: Dependency-only module directory.
+        operation: Check or fix entry point.
+    """
+    (tmp_path / "go.mod").write_text("module example.com/tools\n\ngo 1.21\n")
+    with patch.object(
+        golangci_lint_plugin,
+        "_run_subprocess",
+        side_effect=AssertionError("a dependency lock has no source to lint"),
+    ):
+        result = getattr(golangci_lint_plugin, operation)([str(tmp_path)], {})
+    assert_that(result.success).is_true()
+    assert_that(result.no_files).is_true()
+    assert_that(result.output).contains("No go.mod with Go source")
+
+
+@pytest.mark.parametrize("directory", ["vendor", "testdata", ".hidden", "_ignored"])
+def test_ignored_directories_do_not_make_a_module_lintable(
+    tmp_path: Path,
+    directory: str,
+) -> None:
+    """Go-ignored source trees must not turn a dependency lock into a package.
+
+    Args:
+        tmp_path: Dependency-only module directory.
+        directory: Directory omitted by Go recursive package selection.
+    """
+    from lintro.tools.golangci_lint.definition import _find_go_module_roots
+
+    (tmp_path / "go.mod").write_text("module example.com/tools\n\ngo 1.21\n")
+    child = tmp_path / directory
+    child.mkdir()
+    (child / "ignored.go").write_text("package ignored\n")
+    assert_that(_find_go_module_roots([str(tmp_path / "go.mod")])).is_empty()
+
+
+def test_nested_source_does_not_make_its_dependency_only_parent_lintable(
+    tmp_path: Path,
+) -> None:
+    """A nested module is linted without invoking its empty parent module.
+
+    Args:
+        tmp_path: Parent dependency-only module directory.
+    """
+    from lintro.tools.golangci_lint.definition import _find_go_module_roots
+
+    (tmp_path / "go.mod").write_text("module example.com/tools\n\ngo 1.21\n")
+    child = tmp_path / "child"
+    child.mkdir()
+    _make_go_module(child)
+    roots = _find_go_module_roots([str(tmp_path / "go.mod"), str(child / "main.go")])
+    assert_that(roots).is_equal_to([child])
+
+
+def test_unreadable_module_is_not_reported_as_empty(tmp_path: Path) -> None:
+    """Failure to discover packages must fail rather than skip the module.
+
+    Args:
+        tmp_path: Module directory whose scan will fail.
+    """
+    from lintro.tools.golangci_lint.definition import _module_has_go_sources
+
+    with (
+        patch("os.scandir", side_effect=PermissionError("unreadable module")),
+        pytest.raises(PermissionError, match="unreadable module"),
+    ):
+        _module_has_go_sources(tmp_path)

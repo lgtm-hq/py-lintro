@@ -855,3 +855,47 @@ def test_mcp_extra_status_reports_missing_without_failing() -> None:
 
     assert_that(info["status"]).is_equal_to(ToolStatus.DISABLED.value)
     assert_that(info["hint"]).contains("lintro[mcp]")
+
+
+def test_manifest_only_tool_shares_one_probe_with_doctor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dev tool without a plugin still uses its complete manifest command.
+
+    Args:
+        tmp_path: Isolated executable and cache directory.
+        monkeypatch: Scoped registry and working-directory overrides.
+    """
+    from lintro.tools.core.snapshots import get_tool_snapshot
+
+    binary = tmp_path / "rustc"
+    binary.write_text(
+        "#!/bin/sh\n"
+        'test "$#" -eq 1 && test "$1" = --version || exit 1\n'
+        'printf x >> "$0.probed"\n'
+        'printf "rustc 99.0.0\\n"\n',
+    )
+    binary.chmod(0o755)
+    tool = _make_tool(
+        "rustc",
+        version="99.0.0",
+        install_type="rustup",
+        version_command=(str(binary), "--version"),
+    )
+    registry = ManifestRegistry(tools={"rustc": tool}, language_map={}, profiles={})
+    monkeypatch.setattr(ManifestRegistry, "load", lambda: registry)
+    monkeypatch.chdir(tmp_path)
+
+    snapshot = get_tool_snapshot("rustc")
+    checks = collect_tool_checks(
+        registry=registry,
+        context=_make_context(),
+        tool_names=["rustc"],
+    )
+
+    assert_that(snapshot.available).is_true()
+    assert_that(snapshot.version).is_equal_to("99.0.0")
+    assert_that(checks[0].status).is_equal_to(ToolStatus.OK)
+    assert_that(checks[0].installed_version).is_equal_to(snapshot.version)
+    assert_that(Path(str(binary) + ".probed").read_text()).is_equal_to("x")

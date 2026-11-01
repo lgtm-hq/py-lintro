@@ -20,17 +20,36 @@ class ToolOutcome(Protocol):
     ``lintro.enums`` is the bottom layer, so it must not name
     ``lintro.models.core.ToolResult`` even under ``TYPE_CHECKING``: an
     ``import-linter`` layering contract counts type-checking imports as edges.
-    ``ToolResult`` satisfies this protocol structurally.
-
-    Attributes:
-        success: Whether the tool reported a clean run.
-        skipped: Whether the tool never executed.
-        timed_out: Whether the tool's subprocess exceeded its deadline.
+    Read-only properties let frozen ``ToolResult`` instances and mutable
+    plugin attributes satisfy this protocol structurally.
     """
 
-    success: bool
-    skipped: bool
-    timed_out: bool
+    @property
+    def success(self) -> bool:
+        """Read the tool's verdict.
+
+        Returns:
+            Whether the tool reported a clean run.
+        """
+        ...
+
+    @property
+    def skipped(self) -> bool:
+        """Read whether execution was skipped.
+
+        Returns:
+            Whether the tool never executed.
+        """
+        ...
+
+    @property
+    def timed_out(self) -> bool:
+        """Read whether execution exceeded its deadline.
+
+        Returns:
+            Whether the tool's subprocess timed out.
+        """
+        ...
 
 
 class ToolRunStatus(StrEnum):
@@ -40,6 +59,7 @@ class ToolRunStatus(StrEnum):
         PASSED: The tool ran and reported no issues.
         ISSUES: The tool ran and reported at least one issue.
         SKIPPED: The tool did not run (unavailable, disabled, filtered out).
+        UNAVAILABLE: A capability probe could not establish a runnable tool.
         TIMED_OUT: The tool's subprocess exceeded its deadline and was killed.
         ERRORED: The tool failed for a reason that is not a lint finding.
     """
@@ -47,6 +67,7 @@ class ToolRunStatus(StrEnum):
     PASSED = auto()
     ISSUES = auto()
     SKIPPED = auto()
+    UNAVAILABLE = auto()
     TIMED_OUT = auto()
     ERRORED = auto()
 
@@ -67,6 +88,8 @@ def tool_run_status(*, result: ToolOutcome, issue_count: int) -> ToolRunStatus:
     Returns:
         ToolRunStatus: The collapsed status.
     """
+    if getattr(result, "unavailable", False):
+        return ToolRunStatus.UNAVAILABLE
     if result.skipped:
         return ToolRunStatus.SKIPPED
     if result.timed_out:

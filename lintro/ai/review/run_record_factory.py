@@ -14,8 +14,10 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from lintro.ai.enums.cost_basis import SHADOW_COST_BASES
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.github_badges import severity_counts
+from lintro.ai.review.models.degradation_record import DegradationRecord
 from lintro.ai.review.models.review_finding import Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
@@ -81,7 +83,7 @@ def run_record_from_result(
             round_number=totals.round_number,
             auth_mode=effective_auth,
         ),
-        coverage=_coverage(result=result),
+        coverage=_coverage(result=result, head_sha=request.head_sha),
         usage=_usage(
             request=request,
             auth_mode=effective_auth,
@@ -118,14 +120,25 @@ def _identity(
         depth=metadata.depth,
         strictness=metadata.strictness,
         merge_base=metadata.merge_base,
+        endpoint=metadata.endpoint,
+        first_party=metadata.first_party,
+        credential=metadata.credential,
+        reported_models=tuple(metadata.reported_models),
+        unreported_models=tuple(metadata.unreported_models),
+        lane=metadata.lane,
+        model_verification=metadata.model_verification,
+        fallback_from=metadata.fallback_from,
+        fallback_reason=metadata.fallback_reason,
     )
 
 
-def _coverage(*, result: ReviewResult) -> RunCoverage:
+def _coverage(*, result: ReviewResult, head_sha: str) -> RunCoverage:
     """Assemble the coverage group for this round.
 
     Args:
         result: Current review result.
+        head_sha: The head this round reviewed, stamped on its degradation
+            records (#2803).
 
     Returns:
         The coverage group.
@@ -145,6 +158,10 @@ def _coverage(*, result: ReviewResult) -> RunCoverage:
         questions_diff_trimmed=metadata.questions_diff_trimmed,
         delta_since=metadata.delta_since,
         delta_reason=metadata.delta_reason,
+        degradations=tuple(
+            DegradationRecord.from_degradation(degradation=item, head_sha=head_sha)
+            for item in metadata.coverage_degradations
+        ),
     )
 
 
@@ -160,19 +177,24 @@ def _usage(*, request: StickyRequest, auth_mode: str) -> RunUsage:
     """
     metadata = request.result.metadata
     tokens = metadata.token_usage
+    basis = _cost_basis(
+        metadata=metadata,
+        requested=request.cost_basis,
+        auth_mode=auth_mode,
+    )
+    # A shadow-basis figure settles the caps but is not money anyone was
+    # billed, so it is recorded apart from spend (#2867, ADR-0011 B).
+    shadow = basis in {value.value for value in SHADOW_COST_BASES}
     return RunUsage(
         duration=metadata.duration_seconds,
         prompt=int(tokens.get("prompt", 0)),
         completion=int(tokens.get("completion", 0)),
         total=int(tokens.get("total", 0)),
         context=int(tokens.get("context", 0)),
-        cost=metadata.cost_estimate_usd,
+        cost=0.0 if shadow else metadata.cost_estimate_usd,
+        cost_shadow=metadata.cost_estimate_usd if shadow else 0.0,
         estimated=bool(metadata.token_usage_estimated),
-        cost_basis=_cost_basis(
-            metadata=metadata,
-            requested=request.cost_basis,
-            auth_mode=auth_mode,
-        ),
+        cost_basis=basis,
     )
 
 

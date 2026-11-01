@@ -171,6 +171,7 @@ def union_states(states: Iterable[ReviewState]) -> ReviewState:
     consumed: dict[tuple[str, str], None] = {}
     truncated = False
     pr_spend = 0.0
+    pr_shadow = 0.0
     identity = ReviewState()
     for state in states:
         identity = state
@@ -188,6 +189,7 @@ def union_states(states: Iterable[ReviewState]) -> ReviewState:
         truncated = truncated or state.truncated
         # Monotonic: a later part never lowers the PR's spend (#2796).
         pr_spend = max(pr_spend, state.review_spend_usd)
+        pr_shadow = max(pr_shadow, state.review_shadow_usd)
     return ReviewState(
         version=ARTIFACT_STATE_VERSION,
         runs=runs,
@@ -203,9 +205,11 @@ def union_states(states: Iterable[ReviewState]) -> ReviewState:
         workflow=identity.workflow,
         event=identity.event,
         run_id=identity.run_id,
+        run_attempt=identity.run_attempt,
         lintro_version=identity.lintro_version,
         truncated=truncated,
         pr_spend_usd=pr_spend,
+        pr_shadow_usd=pr_shadow,
     )
 
 
@@ -359,7 +363,11 @@ def _load_artifact_file(
         if skipped is not None:
             skipped.append(path.name)
         return None
-    return ReviewState.from_artifact_dict(payload)
+    try:
+        return ReviewState.from_artifact_dict(payload)
+    except ValueError as exc:
+        logger.warning("Skipping unusable review-state part {}: {}", path.name, exc)
+        return None
 
 
 def _pr_key(raw: object) -> int | None:

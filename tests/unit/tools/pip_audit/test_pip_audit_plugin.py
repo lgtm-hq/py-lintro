@@ -175,6 +175,48 @@ def test_set_options_non_numeric_timeout(pip_audit_plugin: PipAuditPlugin) -> No
         pip_audit_plugin.set_options(timeout="invalid")
 
 
+def test_set_options_ignore_vulns_accepts_a_list_or_a_pipe_string(
+    pip_audit_plugin: PipAuditPlugin,
+) -> None:
+    """``[tool.lintro.pip_audit] ignore_vulns`` and ``--tool-options`` both work."""
+    pip_audit_plugin.set_options(ignore_vulns=["CVE-2026-59951", "GHSA-84m7-p3x7-pcfv"])
+    assert_that(pip_audit_plugin.options["ignore_vulns"]).is_equal_to(
+        ["CVE-2026-59951", "GHSA-84m7-p3x7-pcfv"],
+    )
+    pip_audit_plugin.set_options(
+        ignore_vulns="PYSEC-2019-217| CVE-2019-10906 |PYSEC-2019-217",
+    )
+    assert_that(pip_audit_plugin.options["ignore_vulns"]).is_equal_to(
+        ["PYSEC-2019-217", "CVE-2019-10906"],
+    )
+    pip_audit_plugin.set_options(ignore_vulns=None)
+    assert_that(pip_audit_plugin.options["ignore_vulns"]).is_empty()
+
+
+def test_set_options_ignore_vulns_refuses_a_malformed_id(
+    pip_audit_plugin: PipAuditPlugin,
+) -> None:
+    """Only advisory ids reach the command line."""
+    for bad in (["cve-2026-1"], "GHSA-84m7 p3x7", ["CVE-1;rm"], [42]):
+        with pytest.raises(ValueError, match="not an advisory id"):
+            pip_audit_plugin.set_options(ignore_vulns=bad)
+
+
+def test_build_command_carries_each_ignored_vuln(
+    pip_audit_plugin: PipAuditPlugin,
+) -> None:
+    """Every ignored id becomes one ``--ignore-vuln`` pair, after the fixed flags."""
+    assert_that(pip_audit_plugin._build_command()).does_not_contain("--ignore-vuln")
+    pip_audit_plugin.set_options(ignore_vulns=["CVE-2026-59951", "GHSA-84m7-p3x7-pcfv"])
+    command = pip_audit_plugin._build_command()
+    assert_that(command[:6]).is_equal_to(
+        ["pip-audit", "--strict", "--format", "json", "--progress-spinner", "off"],
+    )
+    assert_that(command[6:]).is_equal_to(
+        ["--ignore-vuln", "CVE-2026-59951", "--ignore-vuln", "GHSA-84m7-p3x7-pcfv"],
+    )
+
+
 def test_fix_raises_not_implemented(pip_audit_plugin: PipAuditPlugin) -> None:
     """Verify fix raises NotImplementedError.
 
@@ -324,6 +366,7 @@ def test_check_requirements_directory_respects_version_skip(
         issues_count=0,
         skipped=True,
         skip_reason="not installed",
+        inspected_files=False,
     )
 
     with patch(
@@ -368,7 +411,6 @@ def test_check_with_vulnerabilities(
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.issues).is_not_none()
-    assert result.issues is not None
     first = result.issues[0]
     assert isinstance(first, PipAuditIssue)
     assert_that(first.vuln_id).is_equal_to("PYSEC-2019-217")

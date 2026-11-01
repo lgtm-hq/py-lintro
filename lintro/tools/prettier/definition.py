@@ -20,6 +20,7 @@ from lintro.enums.capability import Cap
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, FixMeasured, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.prettier.prettier_issue import PrettierIssue
 from lintro.parsers.prettier.prettier_parser import parse_prettier_output
@@ -43,6 +44,9 @@ from lintro.utils.path_utils import find_file_upward
 
 # Constants for Prettier configuration
 PRETTIER_DEFAULT_TIMEOUT: int = 120
+# --check returns 1 for unformatted files and 2 for errors.
+# https://prettier.io/docs/cli#exit-codes
+PRETTIER_FINDINGS_EXIT_CODES: tuple[int, ...] = (1,)
 # Note: JS/TS/Vue files are handled by oxfmt (faster).
 # Prettier handles file types that oxfmt doesn't support.
 PRETTIER_CONFIG_FILENAMES: tuple[str, ...] = (
@@ -99,6 +103,7 @@ class PrettierPlugin(BaseToolPlugin):
                 "and Astro (JS/TS handled by oxfmt for better performance)"
             ),
             can_fix=True,
+            supports_stdin=True,
             tool_type=ToolType.FORMATTER,
             file_patterns=PRETTIER_FILE_PATTERNS,
             claims=[
@@ -241,16 +246,15 @@ class PrettierPlugin(BaseToolPlugin):
         Returns:
             ToolResult: ToolResult instance representing Prettier not found.
         """
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=Checked(success=False)),
             name=self.definition.name,
-            success=False,
             output=(
                 "Prettier not found.\n\n"
                 "Please ensure prettier is installed:\n"
                 "  - Run 'npm install -g prettier' or 'bun add -g prettier'\n"
                 "  - Or install locally: 'npm install prettier'"
             ),
-            issues_count=0,
             cwd=cwd,
         )
 
@@ -273,17 +277,16 @@ class PrettierPlugin(BaseToolPlugin):
         if isinstance(exc, FileNotFoundError):
             return self._create_not_found_result(cwd=cwd)
         logger.error(f"Failed to run prettier: {exc}")
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=Checked(success=False)),
             name=self.definition.name,
-            success=False,
             output=f"Prettier execution failed: {exc}",
-            issues_count=0,
             cwd=cwd,
         )
 
     def _create_timeout_result(
         self,
-        timeout_val: int,
+        timeout_val: float,
         initial_issues: list[PrettierIssue] | None = None,
         initial_count: int = 0,
         cwd: str | None = None,
@@ -314,17 +317,19 @@ class PrettierPlugin(BaseToolPlugin):
         detected_issues = list(initial_issues or [])
         remaining_count = len(detected_issues)
         # Maintain invariant: initial = fixed + remaining
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=TimedOut(timeout_msg),
+                accounting=FixMeasured(
+                    initial=remaining_count,
+                    fixed=0,
+                    remaining=remaining_count,
+                ),
+                issues_count=remaining_count,
+            ),
             name=self.definition.name,
-            success=False,
-            output=timeout_msg,
-            issues_count=remaining_count,
             issues=detected_issues,
-            initial_issues_count=remaining_count,
-            fixed_issues_count=0,
-            remaining_issues_count=remaining_count,
             cwd=cwd,
-            timed_out=True,
         )
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -406,9 +411,6 @@ class PrettierPlugin(BaseToolPlugin):
         cmd.extend(ctx.rel_files)
         logger.debug(f"[PrettierPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
 
-        # Standardize: suppress Prettier's informational output when no issues.
-        # Prettier exits non-zero purely to report unformatted files, so the
-        # parsed list — not the exit status — is the verdict.
         return run_batch_check(
             ctx,
             plugin=self,
@@ -416,6 +418,7 @@ class PrettierPlugin(BaseToolPlugin):
             parse=lambda output: parse_prettier_output(output=output),
             policy=BatchCheckPolicy(
                 success=BatchSuccess.ISSUES_ONLY,
+                findings_exit_codes=PRETTIER_FINDINGS_EXIT_CODES,
                 report_cwd=True,
             ),
             cwd=ctx.cwd,
@@ -516,6 +519,8 @@ class PrettierPlugin(BaseToolPlugin):
             commands=BatchCommands(check=check_cmd, fix=fix_cmd),
             parse=lambda output: parse_prettier_output(output=output),
             policy=BatchFixPolicy(
+                findings_exit_codes=PRETTIER_FINDINGS_EXIT_CODES,
+                parse_fix_output=False,
                 fixed_label="formatting issue",
                 all_fixed_message=(
                     "All formatting issues were successfully auto-fixed"
@@ -528,7 +533,7 @@ class PrettierPlugin(BaseToolPlugin):
             cwd=ctx.cwd,
             on_timeout=lambda detected: self._create_timeout_result(
                 timeout_val=ctx.timeout,
-                initial_issues=list(detected) or None,
+                initial_issues=list(detected),
                 initial_count=len(detected),
                 cwd=ctx.cwd,
             ),

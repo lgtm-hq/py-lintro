@@ -24,6 +24,7 @@ from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.import_linter.import_linter_parser import (
     parse_import_linter_output,
@@ -237,11 +238,10 @@ class ImportLinterPlugin(BaseToolPlugin):
 
         config_path = find_import_linter_config(paths)
         if config_path is None:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=True, inspected_files=False)),
                 name=self.definition.name,
-                success=True,
                 output="No import-linter configuration found; skipping.",
-                issues_count=0,
             )
 
         cmd = self._build_command(config_path=config_path)
@@ -252,21 +252,25 @@ class ImportLinterPlugin(BaseToolPlugin):
                 cwd=str(config_path.parent),
             )
         except subprocess.TimeoutExpired:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=TimedOut(f"import-linter timed out after {ctx.timeout}s"),
+                ),
                 name=self.definition.name,
-                success=False,
-                output=f"import-linter timed out after {ctx.timeout}s",
-                issues_count=0,
-                timed_out=True,
             )
 
         issues = parse_import_linter_output(output=output)
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(
+                    success=success and (not issues),
+                    inspected_files=True,
+                ),
+                issues_count=len(issues),
+            ),
             name=self.definition.name,
-            success=success and not issues,
             output=output,
-            issues_count=len(issues),
-            issues=issues if issues else None,
+            issues=issues,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

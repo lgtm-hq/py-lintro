@@ -16,6 +16,7 @@ from lintro.enums.capability import Cap
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, FixMeasured, NoFiles, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.rustfmt.rustfmt_parser import parse_rustfmt_output
 from lintro.plugins.base import BaseToolPlugin
@@ -136,12 +137,10 @@ class RustfmtPlugin(BaseToolPlugin):
         resolved = resolve_cargo_root(ctx.files, tool_label="rustfmt")
         cargo_root = resolved.root
         if cargo_root is None:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=NoFiles()),
                 name=self.definition.name,
-                success=True,
                 output=resolved.skip_message("rustfmt"),
-                issues_count=0,
-                no_files=True,
             )
 
         cmd = _build_rustfmt_check_command()
@@ -182,15 +181,13 @@ class RustfmtPlugin(BaseToolPlugin):
         resolved = resolve_cargo_root(ctx.files, tool_label="rustfmt")
         cargo_root = resolved.root
         if cargo_root is None:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=NoFiles(),
+                    accounting=FixMeasured(initial=0, fixed=0, remaining=0),
+                ),
                 name=self.definition.name,
-                success=True,
                 output=resolved.skip_message("rustfmt"),
-                issues_count=0,
-                initial_issues_count=0,
-                fixed_issues_count=0,
-                remaining_issues_count=0,
-                no_files=True,
             )
 
         check_cmd = _build_rustfmt_check_command()
@@ -240,32 +237,39 @@ class RustfmtPlugin(BaseToolPlugin):
 
         # If fix command failed, return early with the fix output
         if not fix_success:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=Checked(success=False),
+                    accounting=FixMeasured(
+                        initial=initial_count,
+                        fixed=0,
+                        remaining=initial_count,
+                    ),
+                    issues_count=initial_count,
+                ),
                 name=self.definition.name,
-                success=False,
                 output=fix_output,
-                issues_count=initial_count,
                 issues=initial_issues,
-                initial_issues_count=initial_count,
-                fixed_issues_count=0,
-                remaining_issues_count=initial_count,
-                initial_issues=initial_issues if initial_issues else None,
+                initial_issues=initial_issues,
                 cwd=str(cargo_root),
             )
 
         # No private recheck: a successful `cargo fmt` resolved every diff the
         # pre-fix check found, and the run-level verify pass (#1743) measures
         # the residual once, after every mutating tool has run (#2607).
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=True, inspected_files=True),
+                accounting=FixMeasured(
+                    initial=initial_count,
+                    fixed=initial_count,
+                    remaining=0,
+                ),
+            ),
             name=self.definition.name,
-            success=True,
             output=None,
-            issues_count=0,
             issues=[],
-            initial_issues_count=initial_count,
-            fixed_issues_count=initial_count,
-            remaining_issues_count=0,
-            initial_issues=initial_issues if initial_issues else None,
+            initial_issues=initial_issues,
             # rustfmt runs from the crate root and its parser can report paths
             # relative to it. The run-level verify pass (#1743) resolves each
             # issue's file against this directory to decide whether the file

@@ -70,7 +70,7 @@ def test_check_empty_directory_skips_cleanly(
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
-    assert_that(result.issues).is_none()
+    assert_that(result.issues).is_empty()
 
 
 def test_check_only_non_python_files_skips_cleanly(
@@ -94,7 +94,7 @@ def test_check_only_non_python_files_skips_cleanly(
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
-    assert_that(result.issues).is_none()
+    assert_that(result.issues).is_empty()
 
 
 def test_check_no_python_files_error_output_skips_cleanly(
@@ -136,7 +136,7 @@ def test_check_no_python_files_error_output_skips_cleanly(
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
-    assert_that(result.issues).is_none()
+    assert_that(result.issues).is_empty()
     assert_that(result.output).contains("No .py/.pyi files found")
 
 

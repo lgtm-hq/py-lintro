@@ -16,12 +16,24 @@ from loguru import logger
 from lintro.enums.capability import Cap
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixMeasured,
+    FixPartial,
+    TimedOut,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.black.black_issue import BlackIssue
 from lintro.parsers.black.black_parser import parse_black_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.line_length_checker import (
+    LineLengthCheckUnavailableError,
+    RuffNotFoundError,
+    check_line_length_violations,
+)
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_bool,
@@ -32,6 +44,16 @@ from lintro.tools.core.option_validators import (
 # Constants for Black configuration
 BLACK_DEFAULT_TIMEOUT: int = 30
 BLACK_FILE_PATTERNS: list[str] = ["*.py", "*.pyi"]
+
+
+@dataclass
+class _LineLengthResult:
+    """E501 findings or an explicit reason the supplement was not measured."""
+
+    issues: list[BlackIssue]
+    note: str = ""
+    failed: bool = False
+    timed_out: bool = False
 
 
 @register_tool
@@ -53,6 +75,7 @@ class BlackPlugin(BaseToolPlugin):
             name="black",
             description="Opinionated Python code formatter",
             can_fix=True,
+            supports_stdin=True,
             tool_type=ToolType.FORMATTER,
             file_patterns=BLACK_FILE_PATTERNS,
             claims=[
@@ -152,8 +175,6 @@ class BlackPlugin(BaseToolPlugin):
         if not files:
             return []
 
-        from lintro.tools.core.line_length_checker import check_line_length_violations
-
         line_length_opt = self.options.get("line_length")
         timeout_opt = self.options.get("timeout", BLACK_DEFAULT_TIMEOUT)
         line_length_val: int | None = None
@@ -196,9 +217,35 @@ class BlackPlugin(BaseToolPlugin):
 
         return black_issues
 
+    def _line_length_result(
+        self,
+        files: list[str],
+        cwd: str | None,
+    ) -> _LineLengthResult:
+        """Collect E501 issues while preserving execution failures and skips.
+
+        Args:
+            files: Files included in the Black run.
+            cwd: Working directory for the supplement.
+
+        Returns:
+            Findings, a visible skip note, or an execution failure.
+        """
+        try:
+            return _LineLengthResult(self._check_line_length_violations(files, cwd))
+        except RuffNotFoundError as e:
+            return _LineLengthResult([], note=f"E501 supplement skipped: {e}")
+        except LineLengthCheckUnavailableError as e:
+            return _LineLengthResult(
+                [],
+                note=f"E501 supplement failed: {e}",
+                failed=True,
+                timed_out=e.timed_out,
+            )
+
     def _handle_timeout_error(
         self,
-        timeout_val: int,
+        timeout_val: float,
         initial_count: int | None = None,
         cwd: str | None = None,
     ) -> ToolResult:
@@ -224,24 +271,20 @@ class BlackPlugin(BaseToolPlugin):
             "  - Need to increase timeout via --tool-options black:timeout=N"
         )
         if initial_count is not None:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=TimedOut(timeout_msg),
+                    accounting=FixPartial(initial=initial_count),
+                ),
                 name=self.definition.name,
-                success=False,
-                output=timeout_msg,
-                issues_count=0,
                 issues=[],
-                initial_issues_count=initial_count,
                 cwd=cwd,
-                timed_out=True,
             )
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=TimedOut(timeout_msg)),
             name=self.definition.name,
-            success=False,
-            output=timeout_msg,
-            issues_count=0,
             issues=[],
             cwd=cwd,
-            timed_out=True,
         )
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -280,25 +323,41 @@ class BlackPlugin(BaseToolPlugin):
         black_issues = parse_black_output(output=output)
 
         # Check for line length violations that Black cannot wrap
-        line_length_issues = self._check_line_length_violations(
+        supplement = self._line_length_result(
             files=ctx.rel_files,
             cwd=ctx.cwd,
         )
 
-        all_issues = black_issues + line_length_issues
+        all_issues = black_issues + supplement.issues
         count = len(all_issues)
+        result_output = None if count == 0 else output
+        if supplement.note:
+            result_output = "\n".join(filter(None, (output.rstrip(), supplement.note)))
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=(
+                    TimedOut(result_output)
+                    if supplement.timed_out
+                    else Checked(
+                        success=success and count == 0 and (not supplement.failed),
+                        inspected_files=True,
+                    )
+                ),
+                issues_count=count,
+            ),
             name=self.definition.name,
-            success=(success and count == 0),
-            output=None if count == 0 else output,
-            issues_count=count,
+            output=result_output,
             issues=all_issues,
             cwd=ctx.cwd,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Format files using Black.
+
+        A failed initial E501 supplement aborts before formatting. If the final
+        supplement is unavailable, retain its earlier findings and credit only
+        the measured reduction in Black's own formatting issues.
 
         Args:
             paths: List of file or directory paths to format.
@@ -329,7 +388,7 @@ class BlackPlugin(BaseToolPlugin):
 
         if self.options.get("diff"):
             initial_issues = []
-            initial_line_length_issues = []
+            initial_supplement = _LineLengthResult([])
             initial_count = 0
         else:
             try:
@@ -344,21 +403,39 @@ class BlackPlugin(BaseToolPlugin):
                     initial_count=0,
                     cwd=ctx.cwd,
                 )
-            # Parse the pre-fix ``--check`` output in applied context so the
-            # detected issues read as past-tense "Reformatted file" rather than
-            # the preview-tense "Would reformat file"; fix() applies the
-            # changes immediately below.
-            initial_issues = parse_black_output(output=check_output, applied=True)
-            initial_line_length_issues = self._check_line_length_violations(
+            initial_supplement = self._line_length_result(
                 files=ctx.rel_files,
                 cwd=ctx.cwd,
             )
-            initial_issues = initial_issues + initial_line_length_issues
+            # Use preview wording when the supplement aborts before any writes.
+            initial_issues = parse_black_output(
+                output=check_output,
+                applied=not initial_supplement.failed,
+            )
+            initial_issues = initial_issues + initial_supplement.issues
             initial_count = len(initial_issues)
+            if initial_supplement.failed:
+                failure_output = "\n".join(
+                    filter(None, (check_output.rstrip(), initial_supplement.note)),
+                )
+                return ToolResult.from_outcome(
+                    ToolOutcome(
+                        execution=(
+                            TimedOut(failure_output)
+                            if initial_supplement.timed_out
+                            else Checked(success=False)
+                        ),
+                        accounting=FixPartial(initial=initial_count),
+                        issues_count=initial_count,
+                    ),
+                    name=self.definition.name,
+                    output=failure_output,
+                    issues=initial_issues,
+                    cwd=ctx.cwd,
+                )
 
         # Apply formatting
-        fix_cmd_base: list[str] = self._get_executable_command(tool_name="black")
-        fix_cmd: list[str] = list(fix_cmd_base)
+        fix_cmd: list[str] = list(self._get_executable_command(tool_name="black"))
         if self.options.get("diff"):
             fix_cmd.append("--diff")
         fix_cmd.extend(self._build_common_args())
@@ -394,11 +471,16 @@ class BlackPlugin(BaseToolPlugin):
         remaining_issues = parse_black_output(output=final_output)
 
         # Check for line length violations that Black cannot wrap
-        line_length_issues = self._check_line_length_violations(
+        supplement = self._line_length_result(
             files=ctx.rel_files,
             cwd=ctx.cwd,
         )
 
+        # A failed or skipped measurement cannot prove earlier E501 findings
+        # were fixed. Carry them forward so only measured Black fixes count.
+        line_length_issues = (
+            initial_supplement.issues if supplement.note else supplement.issues
+        )
         all_remaining_issues = remaining_issues + line_length_issues
         remaining_count = len(all_remaining_issues)
 
@@ -414,18 +496,45 @@ class BlackPlugin(BaseToolPlugin):
                 f"Found {remaining_count} issue(s) that cannot be auto-fixed",
             )
         final_summary = "\n".join(summary) if summary else "No fixes applied."
+        notes = dict.fromkeys(
+            note
+            for note in (
+                initial_supplement.note,
+                supplement.note,
+                (
+                    "E501 findings retained from the initial check; "
+                    "line and column positions may be stale after formatting."
+                    if supplement.note and line_length_issues
+                    else ""
+                ),
+            )
+            if note
+        )
+        final_summary = "\n".join([final_summary, *notes])
 
         all_issues = (fixed_issues_parsed or []) + all_remaining_issues
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=(
+                    TimedOut(final_summary)
+                    if supplement.timed_out
+                    else Checked(
+                        success=remaining_count == 0 and (not supplement.failed),
+                        inspected_files=True,
+                    )
+                ),
+                accounting=FixMeasured(
+                    # Include new post-format findings, as the batch runner does.
+                    initial=max(initial_count, fixed_count + remaining_count),
+                    fixed=fixed_count,
+                    remaining=remaining_count,
+                ),
+                issues_count=remaining_count,
+            ),
             name=self.definition.name,
-            success=(remaining_count == 0),
             output=final_summary,
-            issues_count=remaining_count,
             issues=all_issues,
-            initial_issues_count=initial_count,
-            fixed_issues_count=fixed_count,
-            remaining_issues_count=remaining_count,
-            initial_issues=initial_issues if initial_issues else None,
+            initial_issues=initial_issues,
             cwd=ctx.cwd,
         )

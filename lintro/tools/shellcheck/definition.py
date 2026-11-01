@@ -6,7 +6,8 @@ syntax issues, and suggests improvements for bash/sh/dash/ksh scripts.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, replace
 from typing import Any
 
 from lintro._tool_versions import get_min_version
@@ -16,7 +17,10 @@ from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
-from lintro.parsers.shellcheck.shellcheck_parser import parse_shellcheck_output
+from lintro.parsers.shellcheck.shellcheck_issue import ShellcheckIssue
+from lintro.parsers.shellcheck.shellcheck_parser import (
+    parse_shellcheck_output_with_stats,
+)
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
@@ -34,6 +38,7 @@ SHELLCHECK_DEFAULT_TIMEOUT: int = 30
 SHELLCHECK_FILE_PATTERNS: list[str] = ["*.sh", "*.bash", "*.ksh"]
 SHELLCHECK_DEFAULT_FORMAT: str = "json1"
 SHELLCHECK_DEFAULT_SEVERITY: str = "style"
+SHELLCHECK_DIAGNOSTIC_LIMIT: int = 200
 
 # Valid severity levels for shellcheck
 SHELLCHECK_SEVERITY_LEVELS: tuple[str, ...] = ("error", "warning", "info", "style")
@@ -254,12 +259,50 @@ class ShellcheckPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        return run_per_file_check(
+        parse_failures_count = 0
+
+        def parse(output: str) -> list[ShellcheckIssue]:
+            """Count malformed reports for the shared per-file error handler.
+
+            Args:
+                output: The current file's ShellCheck report.
+
+            Returns:
+                Parsed findings from a valid report.
+
+            Raises:
+                ValueError: If the report could not be parsed.
+            """
+            nonlocal parse_failures_count
+            issues, failures = parse_shellcheck_output_with_stats(output)
+            parse_failures_count += failures
+            if failures:
+                # The stats API keeps its two-item return shape. Classify only
+                # rejected reports here so execution diagnostics are not lost.
+                try:
+                    json.loads(output)
+                except json.JSONDecodeError as exc:
+                    reason = f"invalid JSON ({exc.msg})"
+                else:
+                    reason = "expected a list report or an object with a comments list"
+                context = output.strip()
+                if len(context) > SHELLCHECK_DIAGNOSTIC_LIMIT:
+                    half = SHELLCHECK_DIAGNOSTIC_LIMIT // 2
+                    context = f"{context[:half]}...{context[-half:]}"
+                raise ValueError(
+                    f"Malformed ShellCheck report: {reason}; output: {context}",
+                )
+            return issues
+
+        result = run_per_file_check(
             ctx,
             plugin=self,
             command=lambda f: [*self._build_command(), str(f)],
-            parse=lambda output: parse_shellcheck_output(output=output),
+            parse=parse,
         )
+        if parse_failures_count:
+            return replace(result, parse_failures_count=parse_failures_count)
+        return result
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Shellcheck cannot fix issues, only report them.

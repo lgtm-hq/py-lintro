@@ -16,6 +16,7 @@ from lintro.enums.capability import Cap
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import FixMeasured, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.oxfmt.oxfmt_issue import OxfmtIssue
 from lintro.parsers.oxfmt.oxfmt_parser import parse_oxfmt_output
@@ -39,6 +40,9 @@ from lintro.tools.core.option_validators import (
 
 # Constants for oxfmt configuration
 OXFMT_DEFAULT_TIMEOUT: int = 30
+# Exit 1 covers formatting mismatches and invalid config; exit 2 is fatal.
+# https://github.com/oxc-project/oxc/blob/main/apps/oxfmt/src/cli/result.rs
+OXFMT_FINDINGS_EXIT_CODES: tuple[int, ...] = (1,)
 # Note: oxfmt (from oxc toolchain) supports JavaScript/TypeScript and Vue files.
 # Unlike Prettier, it does not support Svelte, Astro, JSON, CSS, HTML, Markdown, etc.
 OXFMT_FILE_PATTERNS: list[str] = [
@@ -52,6 +56,27 @@ OXFMT_FILE_PATTERNS: list[str] = [
     "*.tsx",
     "*.vue",
 ]
+
+
+def _is_no_files_result(returncode: int, stdout: str, stderr: str) -> bool:
+    """Recognize only oxfmt's complete no-target response on exit 2.
+
+    Args:
+        returncode: Captured oxfmt exit status.
+        stdout: Captured standard output.
+        stderr: Captured standard error.
+
+    Returns:
+        Whether exactly one stream contains the no-target message.
+    """
+    message = (
+        "Expected at least one target file. "
+        "All matched files may have been excluded by ignore rules."
+    )
+    return returncode == 2 and (
+        stdout.strip(),
+        stderr.strip(),
+    ) in ((message, ""), ("", message))
 
 
 @register_tool
@@ -137,7 +162,7 @@ class OxfmtPlugin(BaseToolPlugin):
 
     def _create_timeout_result(
         self,
-        timeout_val: int,
+        timeout_val: float,
         initial_issues: list[OxfmtIssue] | None = None,
         initial_count: int = 0,
         cwd: str | None = None,
@@ -167,17 +192,19 @@ class OxfmtPlugin(BaseToolPlugin):
         )
         combined_issues = list(initial_issues or [])
         combined_count = len(combined_issues)
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=TimedOut(timeout_msg),
+                accounting=FixMeasured(
+                    initial=combined_count,
+                    fixed=0,
+                    remaining=combined_count,
+                ),
+                issues_count=combined_count,
+            ),
             name=self.definition.name,
-            success=False,
-            output=timeout_msg,
-            issues_count=combined_count,
             issues=combined_issues,
-            initial_issues_count=combined_count,
-            fixed_issues_count=0,
-            remaining_issues_count=combined_count,
             cwd=cwd,
-            timed_out=True,
         )
 
     def _build_oxfmt_args(self, options: dict[str, object]) -> list[str]:
@@ -267,9 +294,6 @@ class OxfmtPlugin(BaseToolPlugin):
         cmd.extend(ctx.rel_files)
         logger.debug(f"[OxfmtPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
 
-        # Standardize: suppress oxfmt's informational output when no issues.
-        # oxfmt exits non-zero purely to signal "some file differs", so the
-        # parsed list — not the exit status — is the verdict.
         return run_batch_check(
             ctx,
             plugin=self,
@@ -277,6 +301,9 @@ class OxfmtPlugin(BaseToolPlugin):
             parse=lambda output: parse_oxfmt_output(output=output),
             policy=BatchCheckPolicy(
                 success=BatchSuccess.ISSUES_ONLY,
+                findings_exit_codes=OXFMT_FINDINGS_EXIT_CODES,
+                parse_stdout=True,
+                no_files=_is_no_files_result,
                 report_cwd=True,
             ),
             cwd=ctx.cwd,
@@ -351,6 +378,10 @@ class OxfmtPlugin(BaseToolPlugin):
             commands=BatchCommands(check=check_cmd, fix=fix_cmd),
             parse=lambda output: parse_oxfmt_output(output=output),
             policy=BatchFixPolicy(
+                findings_exit_codes=OXFMT_FINDINGS_EXIT_CODES,
+                parse_stdout=True,
+                parse_fix_output=False,
+                no_files=_is_no_files_result,
                 fixed_label="formatting issue",
                 all_fixed_message=(
                     "All formatting issues were successfully auto-fixed"
@@ -362,7 +393,7 @@ class OxfmtPlugin(BaseToolPlugin):
             cwd=ctx.cwd,
             on_timeout=lambda detected: self._create_timeout_result(
                 timeout_val=ctx.timeout,
-                initial_issues=list(detected) or None,
+                initial_issues=list(detected),
                 initial_count=len(detected),
                 cwd=ctx.cwd,
             ),

@@ -314,9 +314,7 @@ def check_credentials_are_declared(plugin: ProviderPlugin) -> None:
     """
     metadata = plugin.metadata
     key_env = metadata.default_api_key_env
-    declared = bool(isinstance(key_env, str) and key_env.strip()) or (
-        metadata.cli_auth_probe is not None
-    )
+    declared = bool(key_env.strip()) or metadata.cli_auth_probe is not None
     assert_that(declared).described_as(
         f"{plugin.name.value} declares neither default_api_key_env nor "
         "cli_auth_probe, so doctor cannot report how it authenticates",

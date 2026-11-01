@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig, AITransportProfiles, CliTransportProfile
 from lintro.ai.enums import AITransport, CostBasis
+from lintro.ai.providers.anthropic.metadata import ANTHROPIC_MANAGED_SETTINGS_ENV
 from lintro.ai.registry import AIProvider
 from lintro.ai.transport import (
     DEFAULT_API_TIMEOUT,
@@ -18,19 +21,38 @@ from lintro.ai.transport import (
 
 
 @pytest.fixture(autouse=True)
-def _isolate_bare_mode_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Clear ambient bare-mode inputs so CLI provenance is deterministic.
+def _isolate_bare_mode_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Clear ambient bare-mode and provenance inputs so CLI provenance is fixed.
 
     ``resolve_transport_settings`` consults ``should_send_bare`` on the CLI
-    branch; a developer machine exporting ``ANTHROPIC_API_KEY`` would flip
-    ``subscription``/``unpriceable`` expectations to ``api_key``/``estimated``.
-    Tests that need those variables set them explicitly via monkeypatch.
+    branch and, since #2867, the credential and base-URL override the run
+    would use. A developer machine exporting ``ANTHROPIC_API_KEY`` would flip
+    ``subscription``/``unpriceable`` to ``api_key``/``estimated``, and a Claude
+    settings file routing through a proxy would flip the basis to ``unknown``.
+    Tests that need those inputs set them explicitly via monkeypatch.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Per-test directory the Claude settings lookups stay inside.
     """
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("LINTRO_CLI_BARE", raising=False)
+    for name in (
+        "ANTHROPIC_API_KEY",
+        "LINTRO_CLI_BARE",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "LINTRO_REVIEW_LANE",
+        "LINTRO_REVIEW_ENDPOINT",
+        "LINTRO_REVIEW_FIRST_PARTY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    config_dir = tmp_path / "claude-config"
+    config_dir.mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv(
+        ANTHROPIC_MANAGED_SETTINGS_ENV,
+        str(tmp_path / "managed-settings.json"),
+    )
 
 
 def test_cli_defaults_to_per_chunk_timeout() -> None:

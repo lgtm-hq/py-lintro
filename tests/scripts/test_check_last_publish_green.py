@@ -199,15 +199,20 @@ def test_completed_non_startup_failure_conclusions_report_green(
     assert_that(result.summary).contains(f"`{conclusion}`")
 
 
-@pytest.mark.parametrize("status", ["queued", "waiting", "in_progress"])
-def test_non_completed_statuses_report_green(
+@pytest.mark.parametrize(
+    "status",
+    ["queued", "waiting", "in_progress", "requested", "pending", ""],
+)
+@pytest.mark.parametrize("force", [False, True])
+def test_unfinished_publish_prevents_version_generation_even_when_forced(
     module: Any,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     status: str,
+    force: bool,
 ) -> None:
-    """A run that has not finished carries no startup failure to gate on.
+    """No new version PR may race an unfinished publish (#3054).
 
     Args:
         module: The loaded gate module.
@@ -215,6 +220,7 @@ def test_non_completed_statuses_report_green(
         tmp_path: Temporary directory for the Actions output files.
         capsys: Capture fixture for stdout.
         status: Non-completed run status under test.
+        force: Whether the manual startup-failure override was requested.
     """
     result = _invoke(
         module=module,
@@ -228,12 +234,47 @@ def test_non_completed_statuses_report_green(
                 conclusion=None,
             ),
         ],
+        argv=["--force"] if force else [],
     )
 
     assert_that(result.code).is_equal_to(0)
-    assert_that(result.output).contains("publish_green=true")
-    assert_that(result.summary).contains("Publish gate: green")
-    assert_that(result.summary).contains(f"`{status}`")
+    assert_that(result.output).contains("publish_green=false")
+    assert_that(result.summary).contains("version PR skipped")
+    assert_that(result.summary).contains("Wait for publication to complete")
+    assert_that(result.summary).contains(f"`{status or 'unknown'}`")
+    assert_that(result.summary).contains("fresh generation on current main")
+    assert_that(result.summary).contains("approve or cancel")
+
+
+def test_publication_completion_releases_deferred_generation(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A fresh invocation admits deferred work once the same publish finishes."""
+    run = _run_payload(head_branch="v0.173.4", status="in_progress", conclusion=None)
+    before = _invoke(
+        module=module,
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        capsys=capsys,
+        runs=[run],
+    )
+    assert_that(before.output).is_equal_to("publish_green=false\n")
+    run.update(status="completed", conclusion="success")
+    after = _invoke(
+        module=module,
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        capsys=capsys,
+        runs=[run],
+    )
+    assert_that(after.code).is_equal_to(0)
+    assert_that(after.output.splitlines()).is_equal_to(
+        ["publish_green=false", "publish_green=true"],
+    )
+    assert_that(after.stdout).contains("Publish gate: green", "v0.173.4")
 
 
 @pytest.mark.parametrize("conclusion", ["skipped", "neutral", "stale"])
@@ -363,19 +404,13 @@ def test_no_tag_runs_reports_green(
     assert_that(result.summary).contains("no broken publish to gate on")
 
 
-def test_in_flight_run_hides_an_older_startup_failure(
+def test_newest_in_flight_run_blocks_without_resurrecting_an_older_failure(
     module: Any,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The newest run wins even when it has not finished (#2550).
-
-    The gate used to skip past in-flight runs to the newest *completed* one.
-    It now judges the newest run by ``created_at`` whatever its status, so a
-    fresh publish already under way is the verdict and an older startup
-    failure no longer blocks the next version PR.
-    """
+    """The active run itself blocks generation, rather than an older failure."""
     result = _invoke(
         module=module,
         monkeypatch=monkeypatch,
@@ -397,9 +432,10 @@ def test_in_flight_run_hides_an_older_startup_failure(
         ],
     )
 
-    assert_that(result.output).contains("publish_green=true")
+    assert_that(result.output).contains("publish_green=false")
     assert_that(result.summary).contains("v0.152.8")
     assert_that(result.summary).does_not_contain("v0.152.7")
+    assert_that(result.summary).does_not_contain("failed at startup")
 
 
 def test_newest_startup_failure_wins_over_an_older_success(
@@ -455,7 +491,7 @@ def test_api_failure_fails_open(
     assert_that(result.summary).contains("could not be evaluated")
 
 
-def test_force_reports_green_without_consulting_the_api(
+def test_force_overrides_a_completed_startup_failure(
     module: Any,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -46,6 +46,7 @@ from lintro.ai.review.pr_budget import run_cost_ceiling
 from lintro.ai.review.progress import NullReviewProgress
 from lintro.ai.review.prompts import estimate_prompt_overhead
 from lintro.ai.review.resume import filter_chunks, plan_resume
+from lintro.ai.review.reuse_gate import reusable_rounds_for
 from lintro.ai.review.sensitivity import (
     ReviewSensitivityPolicy,
     format_strictness_prompt_section,
@@ -390,12 +391,17 @@ def plan_run(
     # post-image set, so its cost scales with the diff; it gets its own span
     # rather than hiding in the gap between the phase sum and the total.
     with timings.phase(name=ReviewPhase.RESUME_PLANNING):
+        # The reuse gate (#2867) bounds both what coverage this round
+        # inherits and which prior head may anchor a delta read; its
+        # provenance detection belongs to this span, not the gap.
+        reusable = reusable_rounds_for(options=options)
         resume = plan_resume(
             context=context,
             prior=options.prior_state,
             extra_skips=chunk_skips,
             groups=tuple(tuple(chunk.files) for chunk in chunks),
             force_full=options.force_full,
+            reusable_rounds=reusable,
         )
         if resume.queue:
             chunks = filter_chunks(chunks=chunks, queue=resume.queue)
@@ -409,6 +415,7 @@ def plan_run(
         context=context,
         repo_root=repo_root,
         force_full=options.force_full,
+        reusable_rounds=reusable,
     )
     reviewed_ranges: tuple[tuple[str, int, int], ...] = ()
     if delta.is_delta and chunks:

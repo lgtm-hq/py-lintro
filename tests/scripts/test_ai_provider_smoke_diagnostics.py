@@ -146,6 +146,8 @@ def test_the_gateway_rows_pin_the_models_the_project_uses(smoke: ModuleType) -> 
     assert_that(rows["zai-api"].model).is_equal_to("glm-5.3-flash")
     assert_that(rows["kimi-api"].max_tokens).is_equal_to(1024)
     assert_that(rows["zai-api"].max_tokens).is_equal_to(1024)
+    assert_that(rows["zai-anthropic-api"].model).is_equal_to("glm-5.3-flash")
+    assert_that(rows["zai-anthropic-api"].max_tokens).is_equal_to(1024)
     assert_that(rows["anthropic-api"].max_tokens).is_equal_to(smoke.SMOKE_MAX_TOKENS)
     assert_that(rows["openai-api"].max_tokens).is_equal_to(smoke.SMOKE_MAX_TOKENS)
 

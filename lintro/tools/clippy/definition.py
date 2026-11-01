@@ -21,6 +21,13 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixMeasured,
+    NoFiles,
+    Skipped,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.clippy.clippy_parser import parse_clippy_output
 from lintro.plugins.base import BaseToolPlugin
@@ -140,11 +147,14 @@ class ClippyPlugin(BaseToolPlugin):
             f"{version_info.install_hint}"
         )
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Skipped(
+                    version_info.error_message or "Clippy version check failed",
+                ),
+            ),
             name=self.definition.name,
-            success=True,  # Not an error, just skipping
             output=skip_message,
-            issues_count=0,
         )
 
     def set_options(
@@ -198,12 +208,10 @@ class ClippyPlugin(BaseToolPlugin):
         resolved = resolve_cargo_root(ctx.files, tool_label="clippy")
         cargo_root = resolved.root
         if cargo_root is None:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=NoFiles()),
                 name=self.definition.name,
-                success=True,
                 output=resolved.skip_message("clippy"),
-                issues_count=0,
-                no_files=True,
             )
 
         cmd = _build_clippy_command(
@@ -249,15 +257,13 @@ class ClippyPlugin(BaseToolPlugin):
         resolved = resolve_cargo_root(ctx.files, tool_label="clippy")
         cargo_root = resolved.root
         if cargo_root is None:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=NoFiles(),
+                    accounting=FixMeasured(initial=0, fixed=0, remaining=0),
+                ),
                 name=self.definition.name,
-                success=True,
                 output=resolved.skip_message("clippy"),
-                issues_count=0,
-                initial_issues_count=0,
-                fixed_issues_count=0,
-                remaining_issues_count=0,
-                no_files=True,
             )
 
         selection = cargo_package_args(ctx.files, cargo_root)
@@ -327,21 +333,37 @@ class ClippyPlugin(BaseToolPlugin):
         remaining_issues = parse_clippy_output(output=output_after)
         remaining_count = len(remaining_issues)
         fixed_count = max(0, initial_count - remaining_count)
+        # Recompiling after fixes can surface additional warnings.
+        initial_count = max(initial_count, fixed_count + remaining_count)
 
         # Preserve output when command fails but no issues were parsed
         # This allows users to see error messages like compilation failures
         should_show_output = not success_after and remaining_count == 0
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(
+                    success=remaining_count == 0,
+                    inspected_files=(
+                        True
+                        if success_check
+                        or success_after
+                        or initial_issues
+                        or remaining_issues
+                        else None
+                    ),
+                ),
+                accounting=FixMeasured(
+                    initial=initial_count,
+                    fixed=fixed_count,
+                    remaining=remaining_count,
+                ),
+                issues_count=remaining_count,
+            ),
             name=self.definition.name,
-            success=remaining_count == 0,
             output=output_after if should_show_output else None,
-            issues_count=remaining_count,
             issues=remaining_issues,
-            initial_issues_count=initial_count,
-            fixed_issues_count=fixed_count,
-            remaining_issues_count=remaining_count,
-            initial_issues=initial_issues if initial_issues else None,
+            initial_issues=initial_issues,
             # clippy runs from the crate root, and its parser can report paths
             # relative to it. The run-level verify pass (#1743) resolves each
             # issue's file against this directory to decide whether the file

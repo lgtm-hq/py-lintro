@@ -17,8 +17,9 @@ import click
 from loguru import logger
 
 from lintro.enums.action import Action, normalize_action
-from lintro.enums.severity_level import SeverityLevel
 from lintro.enums.tool_name import ToolName
+from lintro.models.core.tool_outcome import FixUnmeasured
+from lintro.models.core.tool_result import ToolResult
 from lintro.utils.console.constants import (
     BORDER_LENGTH,
     get_tool_emoji,
@@ -29,6 +30,7 @@ from lintro.utils.display_helpers import (
     print_final_status_format,
 )
 from lintro.utils.execution.exit_codes import unknown_residual_tool_names
+from lintro.utils.severity_counts import count_severities
 from lintro.utils.tool_metadata import get_ai_count as _get_ai_count
 
 
@@ -188,7 +190,7 @@ class ThreadSafeConsoleLogger:
     def print_execution_summary(
         self,
         action: Action,
-        tool_results: Sequence[object],
+        tool_results: Sequence[ToolResult],
     ) -> None:
         """Print the execution summary for all tools.
 
@@ -224,13 +226,13 @@ class ThreadSafeConsoleLogger:
             total_ai_applied: int = 0
             total_ai_verified: int = 0
             for result in tool_results:
-                fixed_std = getattr(result, "fixed_issues_count", None)
-                remaining_std = getattr(result, "remaining_issues_count", None)
-                getattr(result, "success", True)
+                outcome = result.outcome
+                fixed_std = outcome.accounting.fixed
+                remaining_std = outcome.accounting.remaining
                 total_ai_applied += _get_ai_count(result, "applied_count")
                 total_ai_verified += _get_ai_count(result, "verified_count")
 
-                if getattr(result, "residual_unknown", False):
+                if isinstance(outcome.accounting, FixUnmeasured):
                     # The verify pass could not measure this tool's residual
                     # (#1743), so it contributes to neither total. The run
                     # already fails on the result's own ``success=False``.
@@ -239,9 +241,9 @@ class ThreadSafeConsoleLogger:
                 if fixed_std is not None:
                     total_fixed += fixed_std
                 else:
-                    total_fixed += getattr(result, "issues_count", 0)
+                    total_fixed += outcome.issues_count
 
-                if isinstance(remaining_std, int):
+                if remaining_std is not None:
                     total_remaining += remaining_std
                 # A result with no structured residual adds nothing: the
                 # prose fallback that read a number off the tool's own text
@@ -265,40 +267,24 @@ class ThreadSafeConsoleLogger:
             )
         else:
             total_issues: int = sum(
-                (getattr(result, "issues_count", 0) for result in tool_results),
+                (result.outcome.issues_count for result in tool_results),
             )
             any_failed: bool = any(
-                not getattr(result, "success", True) for result in tool_results
+                not result.outcome.success for result in tool_results
             )
             total_for_art: int = (
                 total_issues if not any_failed else max(1, total_issues)
             )
 
-            # Tally severity breakdown across all issues
-            sev_errors = 0
-            sev_warnings = 0
-            sev_info = 0
-            for result in tool_results:
-                issues = getattr(result, "issues", None)
-                if issues:
-                    for issue in issues:
-                        get_sev = getattr(issue, "get_severity", None)
-                        if get_sev:
-                            level = get_sev()
-                            if level == SeverityLevel.ERROR:
-                                sev_errors += 1
-                            elif level == SeverityLevel.WARNING:
-                                sev_warnings += 1
-                            elif level == SeverityLevel.INFO:
-                                sev_info += 1
+            severities = count_severities(tool_results)
 
             self._print_totals_table(
                 action=action,
                 total_issues=total_issues,
                 affected_files=affected_files,
-                severity_errors=sev_errors,
-                severity_warnings=sev_warnings,
-                severity_info=sev_info,
+                severity_errors=severities.errors,
+                severity_warnings=severities.warnings,
+                severity_info=severities.info,
                 total_fixable=count_fixable_issues(tool_results),
             )
             self._print_ascii_art(total_issues=total_for_art)
@@ -310,7 +296,7 @@ class ThreadSafeConsoleLogger:
     def _print_summary_table(
         self,
         action: Action | str,
-        tool_results: Sequence[object],
+        tool_results: Sequence[ToolResult],
     ) -> None:
         """Print the summary table for the run.
 

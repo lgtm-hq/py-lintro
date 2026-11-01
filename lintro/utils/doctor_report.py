@@ -52,8 +52,8 @@ from lintro.tools.core.version_parsing import (
 
 if TYPE_CHECKING:
     from lintro.config.lintro_config import LintroConfig
+    from lintro.models.core.tool_snapshot import ToolSnapshot
     from lintro.tools.core.install_context import RuntimeContext
-    from lintro.tools.core.snapshots import ToolSnapshot
 
 __all__ = [
     "DoctorCheck",
@@ -148,7 +148,7 @@ def tool_status_for_versions(
 def _check_tool_from_snapshot(
     *,
     tool: ManifestTool,
-    snapshot: object,
+    snapshot: ToolSnapshot,
     hint: str,
     upgrade_hint: str,
 ) -> ToolCheckResult:
@@ -163,11 +163,11 @@ def _check_tool_from_snapshot(
     Returns:
         ToolCheckResult with status and details.
     """
-    available = bool(getattr(snapshot, "available", False))
-    version = getattr(snapshot, "version", None)
-    binary_path = getattr(snapshot, "binary_path", "") or None
-    probe_error = getattr(snapshot, "probe_error", None)
-    remediation = getattr(snapshot, "remediation_hint", None) or hint
+    available = snapshot.available
+    version = snapshot.version
+    binary_path = snapshot.binary_path or None
+    probe_error = snapshot.probe_error
+    remediation = snapshot.remediation_hint or hint
     if not available:
         return ToolCheckResult(
             tool=tool,
@@ -228,7 +228,7 @@ def check_tool(
     *,
     tool: ManifestTool,
     context: RuntimeContext,
-    snapshot: object | None = None,
+    snapshot: ToolSnapshot | None = None,
 ) -> ToolCheckResult:
     """Check a single tool's installation status and version.
 
@@ -420,7 +420,7 @@ def _snapshot_for_tool(
     Returns:
         Matching snapshot, or None.
     """
-    from lintro.tools.core.snapshots import lookup_snapshot
+    from lintro.utils.tool_snapshots import lookup_snapshot
 
     return lookup_snapshot(snapshots=snapshots, name=name)
 
@@ -454,7 +454,7 @@ def collect_tool_checks(
     Returns:
         list[ToolCheckResult]: One result per selected tool, in manifest order.
     """
-    from lintro.tools.core.snapshots import probe_all_tools
+    from lintro.utils.tool_snapshots import probe_all_tools
 
     if tool_names:
         tools = [registry.get(name) for name in tool_names]

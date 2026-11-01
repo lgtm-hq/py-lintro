@@ -18,9 +18,16 @@ from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action, normalize_action
 from lintro.enums.tool_result_status import ToolResultStatus
-from lintro.enums.tool_run_status import ToolRunStatus, tool_run_status
 from lintro.formatters.formatter import merge_detected_and_remaining
 from lintro.models.core.severity_counts import SeverityCounts, SeverityDelta
+from lintro.models.core.tool_outcome import (
+    FixMeasured,
+    FixPartial,
+    FixUnmeasured,
+    Skipped,
+    TimedOut,
+    Unavailable,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.execution.exit_codes import unknown_residual_tool_names
 from lintro.utils.tool_metadata import normalize_tool_metadata
@@ -29,46 +36,33 @@ if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
 
 
-_RUN_STATUS_TO_RESULT_STATUS: dict[ToolRunStatus, ToolResultStatus] = {
-    ToolRunStatus.PASSED: ToolResultStatus.OK,
-    ToolRunStatus.ISSUES: ToolResultStatus.FAILED,
-    ToolRunStatus.SKIPPED: ToolResultStatus.SKIPPED,
-    ToolRunStatus.TIMED_OUT: ToolResultStatus.FAILED,
-    ToolRunStatus.ERRORED: ToolResultStatus.FAILED,
-}
-
-
 def status_for_tool_result(
     result: ToolResult,
     *,
     issue_count: int | None = None,
 ) -> ToolResultStatus:
-    """Derive the JSON ``status`` field for a completed tool result.
-
-    Classification follows :func:`~lintro.enums.tool_run_status.tool_run_status`
-    so timeouts and issue counts are not collapsed into ``ok``/``failed``
-    incorrectly. ``unavailable`` is checked first because it is outside the run
-    status vocabulary.
+    """Derive public status from validated execution evidence.
 
     Args:
-        result: Tool result from a check/format/test run.
-        issue_count: Optional precomputed issue count. When omitted, merged
-            initial and remaining issues are counted like
-            :func:`~lintro.utils.json_output.serialize_tool_result`.
+        result: Frozen result to report.
+        issue_count: Optional serialized issue count.
 
     Returns:
-        ToolResultStatus: ``unavailable``, ``skipped``, ``ok``, or ``failed``.
+        Stable JSON status for the execution outcome.
     """
-    if getattr(result, "unavailable", False):
-        return ToolResultStatus.UNAVAILABLE
-    if issue_count is None:
-        merged_issues = merge_detected_and_remaining(
-            getattr(result, "initial_issues", None),
-            getattr(result, "issues", None),
-        )
-        issue_count = len(merged_issues)
-    run_status = tool_run_status(result=result, issue_count=issue_count)
-    return _RUN_STATUS_TO_RESULT_STATUS[run_status]
+    outcome = result.outcome
+    match outcome.execution:
+        case Unavailable():
+            return ToolResultStatus.UNAVAILABLE
+        case Skipped():
+            return ToolResultStatus.SKIPPED
+        case _:
+            count = outcome.issues_count if issue_count is None else issue_count
+            return (
+                ToolResultStatus.OK
+                if outcome.success and not count
+                else ToolResultStatus.FAILED
+            )
 
 
 def serialize_issue(issue: "BaseIssue") -> dict[str, Any]:
@@ -83,18 +77,18 @@ def serialize_issue(issue: "BaseIssue") -> dict[str, Any]:
         ``path`` included when it is a non-empty string.
     """
     data: dict[str, Any] = {
-        "file": getattr(issue, "file", "") or "",
-        "line": getattr(issue, "line", None) or 0,
+        "file": issue.file or "",
+        "line": issue.line or 0,
         "code": issue.get_code(),
-        "message": getattr(issue, "message", "") or "",
+        "message": issue.message or "",
     }
-    doc_url = getattr(issue, "doc_url", "") or ""
+    doc_url = issue.doc_url or ""
     if doc_url:
         data["doc_url"] = doc_url
     raw_path = getattr(issue, "path", "")
     if isinstance(raw_path, str) and raw_path:
         data["path"] = raw_path
-    raw_category = getattr(issue, "category", None)
+    raw_category = issue.category
     if isinstance(raw_category, str) and raw_category:
         data["category"] = raw_category
     return data
@@ -116,7 +110,7 @@ def timed_out_tool_names(results: Sequence[ToolResult]) -> list[str]:
     """
     names: list[str] = []
     for result in results:
-        if not getattr(result, "timed_out", False):
+        if not isinstance(result.outcome.execution, TimedOut):
             continue
         name = result.name
         if name not in names:
@@ -157,51 +151,57 @@ def serialize_tool_result(
         ``issues_count``, ``skipped``, ``skip_reason``, ``timed_out`` and
         ``output``; plus ``parse_failures_count`` when set,
         ``fixed``/``remaining`` in FIX mode, normalized ``metadata`` when
-        present, and ``issues`` when any exist. ``status`` is always one of
-        ``ok``, ``failed``, ``skipped``, or ``unavailable``
-        (:class:`~lintro.enums.tool_result_status.ToolResultStatus`).
-        Unavailable tools also set ``unavailable: true``.
+        present, and ``issues`` when any exist. ``status`` names the execution
+        verdict; unavailable results also carry ``unavailable: true`` and
+        ``unavailable_reason`` separately from deliberate skip evidence.
     """
+    outcome = result.outcome
+    execution = outcome.execution
     merged_issues = merge_detected_and_remaining(
-        getattr(result, "initial_issues", None),
-        getattr(result, "issues", None),
+        result.initial_issues,
+        result.issues,
     )
     data: dict[str, Any] = {
         "tool": result.name,
-        "success": getattr(result, "success", False),
+        "success": outcome.success,
         "issues_count": len(merged_issues),
-        "skipped": getattr(result, "skipped", False),
-        "skip_reason": getattr(result, "skip_reason", None),
-        "timed_out": bool(getattr(result, "timed_out", False)),
-        "output": getattr(result, "output", ""),
+        "skipped": isinstance(execution, Skipped),
+        "skip_reason": execution.reason if isinstance(execution, Skipped) else None,
+        "timed_out": isinstance(execution, TimedOut),
+        "output": result.output,
     }
-    if getattr(result, "unavailable", False):
-        data["unavailable"] = True
     data["status"] = status_for_tool_result(result)
+    if isinstance(execution, Unavailable):
+        data["unavailable"] = True
+        data["unavailable_reason"] = execution.reason
     if result.parse_failures_count is not None:
         data["parse_failures_count"] = result.parse_failures_count
     if action == Action.FIX:
-        if getattr(result, "residual_unknown", False):
-            # The verify pass could not measure the residual (#1743). Both
-            # counts are null rather than zero: a consumer must be able to
-            # tell "nothing left" from "nobody looked".
-            data["net_resolved"] = None
-            # ``fixed`` is the deprecated spelling of ``net_resolved``, kept
-            # at the same value so existing consumers keep working. It will
-            # be removed in a later release.
-            data["fixed"] = None
-            data["remaining"] = None
-            data["residual_unknown"] = True
-            data["residual_unknown_reason"] = result.residual_unknown_reason
-        else:
-            fixed = getattr(result, "fixed_issues_count", None)
-            remaining = getattr(result, "remaining_issues_count", None)
-            data["net_resolved"] = fixed if fixed is not None else 0
-            # Deprecated alias of ``net_resolved``; see above.
-            data["fixed"] = data["net_resolved"]
-            data["remaining"] = remaining if remaining is not None else 0
-    metadata = getattr(result, "metadata", None)
-    if isinstance(metadata, dict) and metadata:
+        # These keys belong to every FIX row, including check-only tools and
+        # legacy results with no fix measurements.
+        data.update(net_resolved=0, fixed=0, remaining=0)
+        match outcome.accounting:
+            case FixUnmeasured(reason=reason):
+                # No after-count exists. Keep the public nulls and deprecated
+                # ``fixed`` alias of ``net_resolved`` (#1743).
+                data["net_resolved"] = None
+                data["fixed"] = None
+                data["remaining"] = None
+                data["residual_unknown"] = True
+                data["residual_unknown_reason"] = reason
+            case FixMeasured(fixed=fixed, remaining=remaining) | FixPartial(
+                fixed=fixed,
+                remaining=remaining,
+            ):
+                # Preserve the legacy wire defaults for partial accounting;
+                # they do not turn its missing counters into measurements.
+                data["net_resolved"] = fixed if fixed is not None else 0
+                data["fixed"] = data["net_resolved"]
+                data["remaining"] = remaining if remaining is not None else 0
+    if action == Action.FIX and isinstance(execution, Unavailable):
+        data.update(net_resolved=None, fixed=None, remaining=None)
+    metadata = result.metadata
+    if metadata:
         normalized_metadata = normalize_tool_metadata(metadata)
         if normalized_metadata:
             data["metadata"] = normalized_metadata

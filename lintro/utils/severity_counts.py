@@ -18,6 +18,8 @@ from lintro.models.core.severity_counts import SeverityCounts, SeverityDelta
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from lintro.models.core.tool_result import ToolResult
+
 __all__ = [
     "COLOR_BETTER",
     "COLOR_NON_ERROR",
@@ -39,15 +41,14 @@ COLOR_UNCHANGED: str = "cyan"
 COLOR_NON_ERROR: str = "yellow"
 
 
-def count_severities(tool_results: Sequence[object]) -> SeverityCounts:
+def count_severities(tool_results: Sequence[ToolResult]) -> SeverityCounts:
     """Tally issue severities across all tool results.
 
     Iterates every issue on every result, normalising each to ERROR / WARNING
-    / INFO via its ``get_severity()`` method. Results and issues without
-    severity support are skipped gracefully.
+    / INFO via its ``get_severity()`` method.
 
     Args:
-        tool_results: Sequence of ToolResult-like objects.
+        tool_results: Tool results whose parsed issues should be counted.
 
     Returns:
         SeverityCounts: Aggregated per-severity counts.
@@ -56,14 +57,8 @@ def count_severities(tool_results: Sequence[object]) -> SeverityCounts:
     warnings = 0
     info = 0
     for result in tool_results:
-        issues = getattr(result, "issues", None)
-        if not issues:
-            continue
-        for issue in issues:
-            get_sev = getattr(issue, "get_severity", None)
-            if not callable(get_sev):
-                continue
-            level = get_sev()
+        for issue in result.issues:
+            level = issue.get_severity()
             if level == SeverityLevel.ERROR:
                 errors += 1
             elif level == SeverityLevel.WARNING:

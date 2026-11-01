@@ -14,7 +14,8 @@ Public plugin contract (stable surface for third-party plugins):
        otherwise satisfy the :class:`LintroPlugin` protocol below — i.e. expose
        a ``definition`` property plus ``check``, ``fix`` and ``set_options``
        methods.
-    2. Optionally declare ``LINTRO_PLUGIN_API_VERSION`` (a class attribute) so
+    2. Declare ``LINTRO_PLUGIN_API_VERSION`` as the integer major version the
+       plugin was built against (currently ``2``) so
        the loader can reject plugins built against an incompatible core.
 
     Subclassing ``BaseToolPlugin`` is strongly preferred: it provides the same
@@ -48,7 +49,7 @@ if TYPE_CHECKING:
 #: Current major version of the public Lintro plugin API.
 #:
 #: This is the stability contract for third-party tool plugins discovered via
-#: the ``lintro.tools`` entry-point group. External plugins may declare the API
+#: the ``lintro.tools`` entry-point group. External plugins must declare the API
 #: version they were written against with a class-level
 #: ``LINTRO_PLUGIN_API_VERSION`` attribute; at load time the registry compares
 #: it against this constant and skips (with a warning) any plugin built for an
@@ -56,21 +57,23 @@ if TYPE_CHECKING:
 #: crash — installed plugins.
 #:
 #: Bump this only on a breaking change to the plugin-facing contract
-#: (``BaseToolPlugin`` / ``LintroPlugin`` / ``ToolDefinition``).
-LINTRO_PLUGIN_API_VERSION: int = 1
+#: (``BaseToolPlugin`` / ``LintroPlugin`` / ``ToolDefinition`` / ``ToolResult`` /
+#: ``BaseIssue``). API v2 requires non-optional result collections and a writable
+#: ``BaseIssue.fixable`` field; undeclared plugins are no longer accepted.
+LINTRO_PLUGIN_API_VERSION: int = 2
 
 
 def is_compatible_api_version(declared: object) -> bool:
     """Report whether a plugin's declared API version is compatible with core.
 
-    A plugin may declare the plugin-API major version it targets via a
+    A plugin must declare the plugin-API major version it targets via a
     class-level ``LINTRO_PLUGIN_API_VERSION`` attribute. Compatibility rules:
 
-    - ``None`` (undeclared) is treated as compatible for convenience, though
-      declaring a version is strongly recommended for forward safety.
     - An integer equal to :data:`LINTRO_PLUGIN_API_VERSION` is compatible.
-    - Anything else (a different major version, or a non-integer value) is
-      incompatible.
+    - Anything else (including ``None`` for an undeclared version, a different
+      major version, or a non-integer value) is incompatible.
+    - Plugins must pin the version they implement, rather than importing the
+      running core's version, which would bypass negotiation on upgrade.
 
     Args:
         declared: The value of the plugin's ``LINTRO_PLUGIN_API_VERSION``
@@ -79,8 +82,6 @@ def is_compatible_api_version(declared: object) -> bool:
     Returns:
         True if the declared version is compatible with the running core.
     """
-    if declared is None:
-        return True
     if isinstance(declared, bool) or not isinstance(declared, int):
         return False
     return declared == LINTRO_PLUGIN_API_VERSION
@@ -97,6 +98,7 @@ class ToolDefinition:
         name: Unique identifier for the tool (lowercase, e.g., "hadolint").
         description: Human-readable description of what the tool does.
         can_fix: Whether the tool can auto-fix issues.
+        supports_stdin: Declared stdin support, or None when unspecified.
         tool_type: Bitmask of ToolType flags describing capabilities.
         execution_class: Whether the tool is deterministic (runs under ``chk``
             and ``fmt``) or advisory (an AI finder; runs under
@@ -130,6 +132,7 @@ class ToolDefinition:
 
     # Capabilities
     can_fix: bool = False
+    supports_stdin: bool | None = None
     tool_type: ToolType = ToolType.LINTER
     execution_class: ExecutionClass = ExecutionClass.DETERMINISTIC
 

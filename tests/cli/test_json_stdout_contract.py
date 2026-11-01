@@ -171,6 +171,8 @@ def _assert_result_entries(results: Any) -> None:
 
 def test_list_tools_json_stdout_is_a_single_document(
     cli_runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``list-tools --json`` stdout is one JSON object of every builtin.
 
@@ -179,7 +181,10 @@ def test_list_tools_json_stdout_is_a_single_document(
 
     Args:
         cli_runner: Click test runner instance.
+        tmp_path: Empty PATH directory for isolated capability probing.
+        monkeypatch: Scoped environment overrides.
     """
+    _isolate_tool_path(monkeypatch, tmp_path)
     _require_discovered_builtin_origins()
     result = _invoke_cli(cli_runner, ["list-tools", "--json"])
 
@@ -361,5 +366,5 @@ def test_check_json_unavailable_tool_keeps_stdout_pure(
     )
     assert_that(unavailable.get("unavailable")).is_true()
     assert_that(unavailable.get("status")).is_equal_to("unavailable")
-    assert_that(unavailable.get("skip_reason")).is_not_none()
+    assert_that(unavailable.get("unavailable_reason")).is_not_none()
     assert_that(result.stderr.lower()).contains("unavailable")

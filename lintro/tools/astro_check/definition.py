@@ -15,7 +15,7 @@ Example:
 from __future__ import annotations
 
 import subprocess  # nosec B404 - used safely with shell disabled
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -27,6 +27,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.astro_check.astro_check_parser import parse_astro_check_output
 from lintro.parsers.base_parser import strip_ansi_codes
@@ -238,7 +239,7 @@ class AstroCheckPlugin(BaseToolPlugin):
             # patterns; detect and normalize robustly.
             output_lower = (ctx.output or "").lower()
             if "no" in output_lower and "astro" in output_lower:
-                ctx.output = self._NO_FILES_MESSAGE
+                return replace(ctx, output=self._NO_FILES_MESSAGE)
             return ctx
 
         logger.debug("[astro-check] Discovered {} Astro file(s)", len(ctx.files))
@@ -249,13 +250,13 @@ class AstroCheckPlugin(BaseToolPlugin):
             cwd_path = Path(root_opt)
             if not cwd_path.is_absolute():
                 # Resolve relative to ctx.cwd
-                base = Path(ctx.cwd) if ctx.cwd else Path.cwd()
+                base = Path(ctx.cwd)
                 cwd_path = (base / cwd_path).resolve()
             # Sync merged_options with the resolved absolute path
             # so _build_command uses the same absolute root
             merged_options["root"] = str(cwd_path)
         else:
-            cwd_path = Path(ctx.cwd) if ctx.cwd else Path.cwd()
+            cwd_path = Path(ctx.cwd)
 
         # Warn if no astro config found, but still proceed with defaults.
         # When the config lives in a parent directory (common when ctx.cwd
@@ -322,22 +323,20 @@ class AstroCheckPlugin(BaseToolPlugin):
                 issues=[],
             )
         except FileNotFoundError as e:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=f"Astro not found: {e}\n\n"
                 "Please ensure astro is installed:\n"
                 "  - Run 'bun add astro' or 'npm install astro'\n"
                 "  - Or install globally: 'bun add -g astro'",
-                issues_count=0,
             )
         except OSError as e:
             logger.error("[astro-check] Failed to run astro check: {}", e)
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output="astro check execution failed: " + str(e),
-                issues_count=0,
             )
 
         # Parse output
@@ -360,34 +359,33 @@ class AstroCheckPlugin(BaseToolPlugin):
                     "  - Run 'bun install' or 'npm install' in your project\n"
                     "  - Use '--auto-install' flag to auto-install dependencies"
                 )
-                return ToolResult(
+                return ToolResult.from_outcome(
+                    ToolOutcome(execution=Checked(success=False)),
                     name=self.definition.name,
-                    success=False,
                     output=helpful_output,
-                    issues_count=0,
                 )
 
             # Generic failure
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=normalized_output or "astro check execution failed.",
-                issues_count=0,
             )
 
         if not success and issues_count == 0:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output="astro check execution failed.",
-                issues_count=0,
             )
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=issues_count == 0, inspected_files=True),
+                issues_count=issues_count,
+            ),
             name=self.definition.name,
-            success=issues_count == 0,
             output=None,
-            issues_count=issues_count,
             issues=all_issues,
         )
 

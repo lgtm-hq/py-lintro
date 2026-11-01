@@ -178,7 +178,7 @@ def test_missing_binary_yields_unavailable_snapshot() -> None:
     with (
         patch("lintro.plugins.registry.ToolRegistry.get", return_value=plugin),
         patch(
-            "lintro.plugins.execution_preparation.get_executable_command",
+            "lintro.tools.core.snapshots.get_executable_command",
             return_value=["missingtool"],
         ),
         patch("shutil.which", return_value=None),
@@ -409,8 +409,7 @@ def test_serialize_tool_result_emits_unavailable_status() -> None:
         name="ghost",
         success=True,
         output="ghost unavailable: not found",
-        unavailable=True,
-        skip_reason="not found",
+        unavailable_reason="not found",
     )
     data: dict[str, Any] = serialize_tool_result(result, action=Action.CHECK)
     from lintro.enums.tool_result_status import ToolResultStatus
@@ -544,7 +543,7 @@ def test_unavailable_cache_invalidates_on_resolved_executable(
 
     with (
         patch(
-            "lintro.plugins.execution_preparation.get_executable_command",
+            "lintro.tools.core.snapshots.get_executable_command",
             return_value=["markdownlint-cli2"],
         ),
         patch("lintro.tools.core.snapshots.shutil.which", side_effect=fake_which),

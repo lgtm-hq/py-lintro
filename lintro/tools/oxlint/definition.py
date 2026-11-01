@@ -6,6 +6,7 @@ It provides fast linting with minimal configuration.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,9 +18,9 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import FixPartial, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.oxlint.oxlint_issue import OxlintIssue
-from lintro.parsers.oxlint.oxlint_parser import parse_oxlint_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
@@ -39,9 +40,13 @@ from lintro.tools.core.option_validators import (
     validate_positive_int,
     validate_str,
 )
+from lintro.tools.oxlint.parsing import OxlintOutputParser
 
 # Constants for Oxlint configuration
 OXLINT_DEFAULT_TIMEOUT: int = 30
+# Exit 1 covers diagnostics and configuration errors; parsed findings are required.
+# https://github.com/oxc-project/oxc/blob/main/apps/oxlint/src/result.rs
+OXLINT_FINDINGS_EXIT_CODES: tuple[int, ...] = (1,)
 OXLINT_FILE_PATTERNS: list[str] = [
     "*.js",
     "*.mjs",
@@ -55,6 +60,36 @@ OXLINT_FILE_PATTERNS: list[str] = [
     "*.svelte",
     "*.astro",
 ]
+
+
+def _is_no_files_result(returncode: int, stdout: str, stderr: str) -> bool:
+    """Recognize oxlint's ignored-all-files report without hiding failures.
+
+    Args:
+        returncode: Captured oxlint exit status.
+        stdout: Captured standard output.
+        stderr: Captured standard error.
+
+    Returns:
+        Whether exit 1 contains only the no-files sentence and an empty report.
+    """
+    if returncode != 1 or stderr.strip():
+        return False
+    message, separator, report = stdout.strip().partition("\n")
+    if not separator or message != (
+        "No files found to lint. Please check your paths and ignore patterns."
+    ):
+        return False
+    try:
+        data = json.loads(report)
+    except (ValueError, TypeError):
+        return False
+    return (
+        isinstance(data, dict)
+        and type(data.get("number_of_files")) is int
+        and data["number_of_files"] == 0
+        and data.get("diagnostics") == []
+    )
 
 
 @register_tool
@@ -166,7 +201,7 @@ class OxlintPlugin(BaseToolPlugin):
 
     def _create_timeout_result(
         self,
-        timeout_val: int,
+        timeout_val: float,
         initial_issues: list[OxlintIssue] | None = None,
         initial_count: int = 0,
         cwd: str | None = None,
@@ -198,16 +233,16 @@ class OxlintPlugin(BaseToolPlugin):
             pre_fix_count = len(initial_issues)
         else:
             pre_fix_count = initial_count
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=TimedOut(timeout_msg),
+                accounting=FixPartial(initial=pre_fix_count),
+                issues_count=pre_fix_count,
+            ),
             name=self.definition.name,
-            success=False,
-            output=timeout_msg,
-            issues_count=pre_fix_count,
             issues=list(initial_issues or []),
-            initial_issues_count=pre_fix_count,
-            initial_issues=initial_issues if initial_issues is not None else None,
+            initial_issues=initial_issues if initial_issues is not None else (),
             cwd=cwd,
-            timed_out=True,
         )
 
     def _build_oxlint_args(self, options: dict[str, object]) -> list[str]:
@@ -330,16 +365,17 @@ class OxlintPlugin(BaseToolPlugin):
         cmd.extend(ctx.rel_files)
         logger.debug(f"[OxlintPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
 
-        # Standardize: suppress Oxlint's informational output when no issues.
-        # Oxlint exits non-zero purely to report findings, so the parsed list —
-        # not the exit status — is the verdict.
-        return run_batch_check(
+        parser = OxlintOutputParser()
+        result = run_batch_check(
             ctx,
             plugin=self,
             cmd=cmd,
-            parse=lambda output: parse_oxlint_output(output=output),
+            parse=parser.parse,
             policy=BatchCheckPolicy(
                 success=BatchSuccess.ISSUES_ONLY,
+                findings_exit_codes=OXLINT_FINDINGS_EXIT_CODES,
+                parse_stdout=True,
+                no_files=_is_no_files_result,
                 report_cwd=True,
             ),
             cwd=ctx.cwd,
@@ -348,6 +384,7 @@ class OxlintPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             ),
         )
+        return parser.finish(result)
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Fix auto-fixable issues in files with Oxlint.
@@ -406,6 +443,10 @@ class OxlintPlugin(BaseToolPlugin):
             cwd=ctx.cwd,
         ) + [
             "--fix",
+            # Unfixable diagnostics still exit 1; keep them parseable so the
+            # batch runner can distinguish findings from an execution failure.
+            "--format",
+            "json",
         ]
         if config_args:
             fix_cmd.extend(config_args)
@@ -414,21 +455,26 @@ class OxlintPlugin(BaseToolPlugin):
         fix_cmd.extend(ctx.rel_files)
         logger.debug(f"[OxlintPlugin] Fixing: {' '.join(fix_cmd)} (cwd={ctx.cwd})")
 
-        return run_batch_fix(
+        parser = OxlintOutputParser()
+        result = run_batch_fix(
             ctx,
             plugin=self,
             commands=BatchCommands(check=check_cmd, fix=fix_cmd),
-            parse=lambda output: parse_oxlint_output(output=output),
+            parse=parser.parse,
             policy=BatchFixPolicy(
+                findings_exit_codes=OXLINT_FINDINGS_EXIT_CODES,
+                parse_stdout=True,
+                no_files=_is_no_files_result,
                 verbose=bool(merged_options.get("verbose_fix_output", False)),
-                always_report_initial_issues=True,
+                verbose_output_label="Fix output (oxlint JSON)",
                 report_cwd=True,
             ),
             cwd=ctx.cwd,
             on_timeout=lambda detected: self._create_timeout_result(
                 timeout_val=ctx.timeout,
-                initial_issues=list(detected) or None,
+                initial_issues=list(detected),
                 initial_count=len(detected),
                 cwd=ctx.cwd,
             ),
         )
+        return parser.finish(result)

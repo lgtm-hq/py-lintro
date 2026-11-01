@@ -94,7 +94,7 @@ def _runtime_annotations(tree: ast.Module) -> list[ast.expr]:
             )
             if node.returns is not None:
                 annotations.append(node.returns)
-        elif isinstance(node, ast.AnnAssign) and node.annotation is not None:
+        elif isinstance(node, ast.AnnAssign):
             annotations.append(node.annotation)
     return annotations
 

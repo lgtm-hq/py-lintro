@@ -70,11 +70,11 @@ def test_fix_populates_initial_issues(
     assert_that(result.remaining_issues_count).is_equal_to(0)
 
 
-def test_fix_initial_issues_none_when_no_issues(
+def test_fix_initial_issues_empty_when_no_issues(
     rustfmt_plugin: RustfmtPlugin,
     tmp_path: Path,
 ) -> None:
-    """Fix sets initial_issues to None when no issues detected.
+    """Fix keeps initial_issues empty when no issues are detected.
 
     Args:
         rustfmt_plugin: The RustfmtPlugin instance to test.
@@ -99,7 +99,7 @@ def test_fix_initial_issues_none_when_no_issues(
             result = rustfmt_plugin.fix([str(test_file)], {})
 
     assert_that(result.success).is_true()
-    assert_that(result.initial_issues).is_none()
+    assert_that(result.initial_issues).is_empty()
 
 
 def test_fix_trusts_a_successful_fix_and_makes_no_private_recheck(

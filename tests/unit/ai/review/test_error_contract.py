@@ -87,6 +87,7 @@ def test_auth_401_envelope_shape(auth_error: AIAuthenticationError) -> None:
                     "Anthropic authentication failed: Error code: 401 - "
                     "authentication_error"
                 ),
+                "completed_chunks": None,
             },
         },
     )
@@ -107,6 +108,7 @@ def test_rate_limit_429_envelope_shape(rate_limit_error: AIRateLimitError) -> No
                 "message": (
                     "Anthropic rate limit exceeded: Error code: 429 - rate_limit_error"
                 ),
+                "completed_chunks": None,
             },
         },
     )
@@ -137,6 +139,7 @@ def test_server_5xx_envelope_shape(server_error: AIProviderError) -> None:
                 "retryable": True,
                 "provider_unavailable": True,
                 "message": "Anthropic API error: Error code: 529 - overloaded_error",
+                "completed_chunks": None,
             },
         },
     )
@@ -157,6 +160,7 @@ def test_invalid_response_envelope_shape(
                 "retryable": False,
                 "provider_unavailable": False,
                 "message": "Expecting value: line 1 column 1 (char 0)",
+                "completed_chunks": None,
             },
         },
     )
@@ -195,8 +199,83 @@ def test_envelope_keys_are_stable(auth_error: AIAuthenticationError) -> None:
             "retryable",
             "provider_unavailable",
             "message",
+            "completed_chunks",
         },
     )
+
+
+def test_completed_chunks_is_null_for_a_failure_outside_the_run(
+    auth_error: AIAuthenticationError,
+) -> None:
+    """No count means unknown, which a fallback chain reads as "stay"."""
+    contract = build_error_contract(provider="anthropic", error=auth_error)
+
+    assert_that(contract["error"]["completed_chunks"]).is_none()
+
+
+def test_completed_chunks_comes_from_the_execution_error_or_the_annotation(
+    auth_error: AIAuthenticationError,
+) -> None:
+    """The run boundary's annotation and the execution error's field both count."""
+    from lintro.ai.review.exceptions import (
+        ReviewExecutionError,
+        annotate_completed_chunks,
+    )
+
+    annotate_completed_chunks(auth_error, completed=2)
+    wrapped = ReviewExecutionError(
+        message="aborted",
+        completed_chunks=1,
+        cause_message="401",
+    )
+    annotate_completed_chunks(wrapped, completed=3)
+    fresh = ReviewExecutionError(message="aborted", cause_message="401")
+    # The chunk pass fills the field with the failing chunk's position; when
+    # chunk 2 fails first under concurrency nothing has completed, and the
+    # run boundary's count must win over that position.
+    positional = ReviewExecutionError(
+        message="aborted",
+        chunk_index=2,
+        completed_chunks=2,
+        cause_message="401",
+    )
+    annotate_completed_chunks(positional, completed=0)
+    # Without an annotation the field is all there is. lintro's run boundary
+    # always annotates what it re-raises, so this only describes an error
+    # built outside the run; the wrapper then sees the field as given.
+    unannotated = ReviewExecutionError(
+        message="aborted",
+        chunk_index=2,
+        completed_chunks=2,
+        cause_message="401",
+    )
+
+    assert_that(
+        build_error_contract(provider="anthropic", error=auth_error)["error"][
+            "completed_chunks"
+        ],
+    ).is_equal_to(2)
+    assert_that(
+        build_error_contract(provider="anthropic", error=wrapped)["error"][
+            "completed_chunks"
+        ],
+    ).is_equal_to(3)
+    assert_that(
+        build_error_contract(provider="anthropic", error=positional)["error"][
+            "completed_chunks"
+        ],
+    ).is_equal_to(0)
+    assert_that(
+        build_error_contract(provider="anthropic", error=unannotated)["error"][
+            "completed_chunks"
+        ],
+    ).is_equal_to(2)
+    # A raise site that did not count reads as unknown, never as zero.
+    assert_that(
+        build_error_contract(provider="anthropic", error=fresh)["error"][
+            "completed_chunks"
+        ],
+    ).is_none()
 
 
 def test_retryable_kinds_membership() -> None:

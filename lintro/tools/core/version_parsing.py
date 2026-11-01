@@ -5,6 +5,7 @@ import shutil
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass, field
 from functools import lru_cache
+from pathlib import Path
 
 from loguru import logger
 from packaging.version import InvalidVersion, Version
@@ -209,14 +210,16 @@ def check_tool_version(
     command: list[str],
     *,
     append_version: bool = True,
+    cwd: str | Path | None = None,
 ) -> ToolVersionInfo:
     """Check if a tool meets minimum version requirements.
 
     Args:
-        tool_name: Name of the tool to check
-        command: Command list to run the tool (e.g., ["python", "-m", "ruff"])
-        append_version: Whether to append --version to command (default True).
+        tool_name: str: Name of the tool to check.
+        command: list[str]: Command prefix for the tool.
+        append_version: bool: Whether to append --version (default True).
             Set to False when command already includes a version subcommand.
+        cwd: str | Path | None: Execution directory for project-local resolution.
 
     Returns:
         ToolVersionInfo: Version check results
@@ -305,6 +308,7 @@ def check_tool_version(
             text=True,
             timeout=VERSION_CHECK_TIMEOUT,  # Configurable version check timeout
             env=run_env,
+            cwd=cwd,
         )
 
         if result.returncode != 0:

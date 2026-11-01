@@ -102,6 +102,7 @@ def _display_fix_result(
     from lintro.utils.output import format_tool_output
     from lintro.utils.result_formatters import print_tool_result
 
+    outcome = result.outcome
     # When in fix mode and initial_issues is populated, show two tables:
     # "Detected issues" (pre-fix) and "Remaining issues" (post-fix).
     if action == Action.FIX and result.initial_issues and not raw_output:
@@ -121,12 +122,13 @@ def _display_fix_result(
             success_func=success_func,
             tool_name=result.name,
             output=result.output or "",
-            issues_count=result.issues_count,
+            issues_count=outcome.issues_count,
             raw_output_for_meta=result.output,
             action=action,
-            success=result.success,
+            success=outcome.success,
             metadata=result.metadata,
             parse_failures_count=result.parse_failures_count or 0,
+            result=result,
         )
         return
 
@@ -140,8 +142,8 @@ def _display_fix_result(
             output=result.output or "",
             output_format=output_format,
             issues=list(result.issues) if result.issues else None,
-            success=result.success,
-            issues_count=result.issues_count,
+            success=outcome.success,
+            issues_count=outcome.issues_count,
             group_by=group_by,
         )
     if result.output and raw_output:
@@ -153,18 +155,15 @@ def _display_fix_result(
             success_func=success_func,
             tool_name=result.name,
             output=display_output,
-            issues_count=result.issues_count,
+            issues_count=outcome.issues_count,
             raw_output_for_meta=result.output,
             action=action,
-            success=result.success,
+            success=outcome.success,
             metadata=result.metadata,
             parse_failures_count=result.parse_failures_count or 0,
+            result=result,
         )
-    elif (
-        result.issues_count == 0
-        and result.success
-        and not getattr(result, "fixed_issues_count", 0)
-    ):
+    elif outcome.issues_count == 0 and outcome.success and not outcome.accounting.fixed:
         print_tool_result(
             console_output_func=console_output_func,
             success_func=success_func,
@@ -172,9 +171,10 @@ def _display_fix_result(
             output="",
             issues_count=0,
             action=action,
-            success=result.success,
+            success=outcome.success,
             metadata=result.metadata,
             parse_failures_count=result.parse_failures_count or 0,
+            result=result,
         )
 
 
@@ -655,6 +655,7 @@ def _record_severity_baseline(artifact: RunArtifact, *, ctx: RunContext) -> None
     from lintro.utils.meaningful_run import baseline_is_eligible
     from lintro.utils.severity_baseline import (
         resolve_log_root,
+        severity_baseline_scope,
         write_severity_baseline,
     )
 
@@ -663,13 +664,24 @@ def _record_severity_baseline(artifact: RunArtifact, *, ctx: RunContext) -> None
         dry_run_preview=artifact.dry_run_preview,
         tool_results=artifact.tool_results,
         early_exit=artifact.early_exit,
+        partial_scan=artifact.partial_scan,
     ):
         return
 
     log_root = resolve_log_root(ctx.output_manager)
     if log_root is None:
         return
-    write_severity_baseline(log_root, artifact.severity_counts)
+    scope = severity_baseline_scope(
+        paths=artifact.paths,
+        tool_results=artifact.tool_results,
+    )
+    write_severity_baseline(
+        log_root,
+        artifact.severity_counts,
+        scope,
+        full_run=scope
+        == severity_baseline_scope(paths=["."], tool_results=artifact.tool_results),
+    )
 
 
 def render_run(

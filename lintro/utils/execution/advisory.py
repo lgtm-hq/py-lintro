@@ -29,6 +29,7 @@ from lintro.config.config_loader import get_config
 from lintro.enums.action import Action
 from lintro.enums.advisory_tools_value import AdvisoryToolsValue
 from lintro.enums.tool_run_status import ToolRunStatus, tool_run_status
+from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools import tool_manager
 from lintro.utils.execution.tool_configuration import (
@@ -230,9 +231,9 @@ def run_advisory_tools(
         except Exception as exc:
             logger.warning("[{}] advisory tool failed: {}", tool_name, exc)
             results.append(
-                ToolResult(
+                ToolResult.from_outcome(
+                    ToolOutcome(execution=Checked(success=False)),
                     name=tool_name,
-                    success=False,
                     output=f"{tool_name} failed: {exc}",
                 ),
             )
@@ -248,11 +249,7 @@ def advisory_findings_count(results: list[ToolResult]) -> int:
     Returns:
         Sum of the per-tool issue counts, ignoring skipped tools.
     """
-    return sum(
-        result.issues_count or 0
-        for result in results
-        if not getattr(result, "skipped", False)
-    )
+    return sum(result.issues_count for result in results if not result.skipped)
 
 
 def advisory_tools_errored(results: list[ToolResult]) -> bool:
@@ -272,7 +269,7 @@ def advisory_tools_errored(results: list[ToolResult]) -> bool:
     return any(
         tool_run_status(
             result=result,
-            issue_count=result.issues_count or 0,
+            issue_count=result.issues_count,
         )
         in {ToolRunStatus.ERRORED, ToolRunStatus.TIMED_OUT}
         for result in results
@@ -302,7 +299,7 @@ def render_advisory_results(
     blocks: list[str] = []
     for result in results:
         header = f"Advisory: {result.name}"
-        if getattr(result, "skipped", False):
+        if result.skipped:
             reason = result.skip_reason or "skipped"
             blocks.append(f"{header}\n  skipped — {reason}")
             continue
@@ -334,10 +331,10 @@ def advisory_results_to_payload(results: list[ToolResult]) -> list[dict[str, obj
                 "tool": result.name,
                 "success": bool(result.success),
                 "output": result.output,
-                "skipped": bool(getattr(result, "skipped", False)),
+                "skipped": result.skipped,
                 "skip_reason": result.skip_reason,
-                "issues_count": result.issues_count or 0,
-                "issues": [issue.to_display_row() for issue in (result.issues or [])],
+                "issues_count": result.issues_count,
+                "issues": [issue.to_display_row() for issue in result.issues],
             },
         )
     return payload

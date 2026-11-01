@@ -225,7 +225,7 @@ def clear_all_caches() -> None:
         logger.debug("No cache directory to clear")
 
     try:
-        from lintro.tools.core.snapshots import (
+        from lintro.utils.tool_snapshots import (
             clear_snapshot_cache,
             set_force_fresh_probes,
         )

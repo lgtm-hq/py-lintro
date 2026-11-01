@@ -166,7 +166,7 @@ def test_line_length_check_accepts_float_timeout(black_plugin: BlackPlugin) -> N
     assert_that(black_plugin.options.get("timeout")).is_equal_to(120.0)
 
     with patch(
-        "lintro.tools.core.line_length_checker.check_line_length_violations",
+        "lintro.tools.black.definition.check_line_length_violations",
         return_value=[],
     ) as mock_check:
         issues = black_plugin._check_line_length_violations(

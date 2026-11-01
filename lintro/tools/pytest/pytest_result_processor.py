@@ -7,6 +7,7 @@ processing, summary generation, and ToolResult building.
 from dataclasses import dataclass, field
 from typing import Any
 
+from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.pytest.pytest_issue import PytestIssue
 from lintro.tools.pytest.pytest_config import PytestConfiguration
@@ -97,15 +98,15 @@ class PytestResultProcessor:
 
         output_text = build_output_with_failures(summary_data, all_issues, raw_output)
 
-        result = ToolResult(
+        result = ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=success, inspected_files=True),
+                issues_count=len(failed_issues),
+            ),
             name=self.tool_name,
-            success=success,
             issues=failed_issues,
             output=output_text,
-            issues_count=len(failed_issues),
+            pytest_summary=summary_data,
         )
-
-        # Store summary data for display in Execution Summary table
-        result.pytest_summary = summary_data
 
         return result

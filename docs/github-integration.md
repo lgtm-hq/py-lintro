@@ -88,32 +88,34 @@ workflow runs an AI diff review and prints the JSON result to the job log.
 **Features:**
 
 - 🤖 **AI diff review** via `lintro review --pr <n> --depth 1 --output json`
-- 🛡️ **Trusted install** — lintro is installed from the PR's **base ref** (`main`, via
-  `pull_request.base.sha`), never the PR head. The code that runs with the credential is
-  always trusted, so a PR cannot substitute its own `lintro/**` to exfiltrate it. The PR
-  is still reviewed: `lintro review --pr` fetches the diff through `gh` (GitHub API), so
-  the PR's changes are reviewed as data and never executed with the secret. Trade-off: a
-  PR that breaks the review code itself isn't caught by this job — that is covered by
-  the unit tests.
-- 🔑 **Bring-your-own credential** — runs the `cli` transport. Provider and model come
-  from the `LINTRO_AI_PROVIDER` / `LINTRO_AI_MODEL` Actions variables. When those
-  variables are unset, `ai-review.yml` still passes `LINTRO_AI_PROVIDER: anthropic` and
-  `run-ai-review.sh` falls back the same way (`${LINTRO_AI_PROVIDER:-anthropic}`), and
-  that env overlay wins over the committed `.lintro-config.yaml`, so the workflow — not
-  the config — makes the choice. Those two CI-side literals are the deliberate
-  exceptions to #2143's no-default rule, which governs the shipped product; #2143's
-  workflow restructure removes both. Operators can set the variables to `cursor` and
-  `cursor-grok-4.6-high` for current dogfood. Cursor uses `CURSOR_API_KEY`; Anthropic
-  uses the pinned `claude` CLI authenticated by `CLAUDE_CODE_OAUTH_TOKEN` (a Claude
-  subscription session). `ANTHROPIC_API_KEY` is deliberately **not** in scope, and
+- 🛡️ **Trusted install** — lintro is installed from the **commit that supplied the
+  workflow** (`github.workflow_sha`: the tip of the PR's base branch, or the default
+  branch on a comment-triggered run), never the PR head. The code that runs with the
+  credential is always trusted, so a PR cannot substitute its own `lintro/**` to
+  exfiltrate it. The PR is still reviewed: `lintro review --pr` fetches the diff through
+  `gh` (GitHub API), so the PR's changes are reviewed as data and never executed with
+  the secret. Trade-off: a PR that breaks the review code itself isn't caught by this
+  job — that is covered by the unit tests.
+- 🔑 **A declared lane, selected by a variable (ADR-0011)** — runs the `cli` transport
+  on the lane the repository variable `LINTRO_AI_PROVIDER` names in the committed
+  manifest `scripts/ci/ai_review_lanes.json` (`anthropic`, `openai`, `cursor`, `zai` or
+  `kimi`; unset means the manifest's default). `LINTRO_AI_MODEL` overrides that row's
+  default model. Transport, endpoint, egress and the credential binding come from the
+  row: a secret-free `lane` job resolves it, the review job's allowlist and credentials
+  follow from the outputs, and `run-ai-review.sh` exports the row's values over the
+  committed `.lintro-config.yaml` and refuses when the effective config, a competing
+  credential or a base-URL override disagrees with the row. `LINTRO_AI_MAX_COST_USD` and
+  `LINTRO_AI_REVIEW_PR_BUDGET_USD` remain the budget variables. The default lane is the
+  Claude subscription: the pinned `claude` CLI authenticated by
+  `CLAUDE_CODE_OAUTH_TOKEN`. `ANTHROPIC_API_KEY` is deliberately **not** in scope, and
   `LINTRO_CLI_BARE: never` keeps `--bare` off the command line so an OAuth session is
   actually used (#1838). CLI versions are pinned in `docker/ai-tools.Dockerfile` and
   installed from npm at those exact versions.
 - 💸 **Operator-set spend ceiling (advisory under the CLI transport)** — the trusted
   base config ships **no** `ai.max_cost_usd`, so there is no committed default cap. A PR
-  still cannot raise spend: the workflow installs lintro from the base ref and forwards
-  `LINTRO_AI_MAX_COST_USD` from the repository Actions variable. Operators set that
-  variable to a positive USD cap or to `uncapped` (overlay `0` is rejected as
+  still cannot raise spend: the workflow installs lintro from `github.workflow_sha` and
+  forwards `LINTRO_AI_MAX_COST_USD` from the repository Actions variable. Operators set
+  that variable to a positive USD cap or to `uncapped` (overlay `0` is rejected as
   ambiguous). It prices only the tokens lintro billed itself, so on the `cli` transport
   — where the call bills the subscription — it bounds lintro's own accounting rather
   than enforcing spend. Setting a cap does **not** serialize provider calls: the budget
@@ -129,29 +131,36 @@ workflow runs an AI diff review and prints the JSON result to the job log.
 - ⏭️ **Skipped, not failed, where it cannot run** — draft PRs and fork PRs (which cannot
   read secrets) never start the job at all.
 
-To activate it, add the matching secret (**Settings → Secrets and variables →
-Actions**): `CURSOR_API_KEY` plus `LINTRO_AI_PROVIDER=cursor` (and optionally
-`LINTRO_AI_MODEL` / `LINTRO_AI_MAX_COST_USD=uncapped`) for Cursor, or
-`CLAUDE_CODE_OAUTH_TOKEN` (mint with `claude setup-token`) for Anthropic. Because
-reviews run using lintro from the trusted base branch, the credential is safe to enable.
+To activate it, add the secret the lane's row binds (**Settings → Secrets and variables
+→ Actions**): `CLAUDE_CODE_OAUTH_TOKEN` (mint with `claude setup-token`) for
+`anthropic`, `CODEX_AUTH_JSON` for `openai`, `CURSOR_API_KEY` for `cursor`,
+`ZAI_AUTH_TOKEN` for `zai`, `KIMI_API_KEY` for `kimi`. To switch lanes, set the
+repository variable `LINTRO_AI_PROVIDER` to the lane id, and optionally
+`LINTRO_AI_MODEL`; the switch reaches every open PR on its next run. Optionally set
+`LINTRO_AI_MAX_COST_USD=uncapped`. Because reviews run using lintro from the commit that
+supplied the workflow, the credential is safe to enable.
 
 #### Activation precondition (security audit #1317)
 
 Before enabling the provider credential, confirm the dogfood workflow still satisfies
-all three controls (also asserted in `tests/scripts/test_run_ai_review.py`):
+all four controls (also asserted in `tests/scripts/test_run_ai_review.py`):
 
 1. **Same-repo only** — the job `if` guard requires
    `pull_request.head.repo.full_name == github.repository` (fork PRs never run).
-2. **Trusted install** — the checkout step uses `pull_request.base.sha`, never the PR
-   head, so code that runs with the credential is always from the trusted base ref. The
-   `claude` CLI is installed at a version pinned in that same trusted checkout.
-3. **Secret ordering** — `CLAUDE_CODE_OAUTH_TOKEN` and `CURSOR_API_KEY` are injected
-   only into the final review step's `env`, after checkout, the CLI install, and
-   dependency install.
+2. **Trusted install** — the checkout step uses `github.workflow_sha`, never the PR
+   head, so code that runs with the credential is always the commit that supplied the
+   workflow. The `claude` CLI is installed at a version pinned in that same trusted
+   checkout.
+3. **Secret ordering** — `CLAUDE_CODE_OAUTH_TOKEN`, `CURSOR_API_KEY`, `CODEX_AUTH_JSON`,
+   `ZAI_AUTH_TOKEN` and `KIMI_API_KEY` are injected only into the final review step's
+   `env`, after checkout, the CLI install, and dependency install.
+4. **Lane-selected credentials** — each secret is forwarded by one literal expression
+   gated on its lane being in the resolved chain, never by a variable's presence.
 
 These controls landed with #1074; #1317 verified them against current `main`. A
-dedicated GitHub Environment with required reviewers is optional once (1–3) hold. Re-run
-the audit if the checkout ref, job guard, or secret injection site changes.
+dedicated GitHub Environment with required reviewers is optional once (1–4) hold. Re-run
+the audit if the checkout ref, job guard, secret injection site, or the chain-gated
+credential-forwarding expressions change.
 
 #### JSON error contract
 
@@ -233,9 +242,9 @@ The request is validated in a separate `request` job that holds no secrets and o
 read-only token (`scripts/ci/resolve_review_request.py`, with the parser in
 `lintro/ai/review/commands.py`). The comment text reaches it only through the
 environment, never a shell line. On `issue_comment` there is no pull-request base
-commit, so the review job installs lintro from the default-branch commit that supplied
-the workflow (`github.workflow_sha`). `issue_comment` is not affected by GitHub's
-2026-11-02 default restriction on `pull_request_target`.
+commit, so the review job installs lintro from the commit that supplied the workflow
+(`github.workflow_sha`). `issue_comment` is not affected by GitHub's 2026-11-02 default
+restriction on `pull_request_target`.
 
 #### Review slots and the per-PR budget
 
@@ -444,8 +453,26 @@ parallel release paths.
 ### Labels & guards
 
 - Release PRs are labeled `release-bump` to make them easy to target in policies.
-- Tagging is handled by `release-auto-tag.yml`, which only tags commits matching
-  `chore(release): version …` after Release PR merges.
+- Automatic tagging is handled by `release-auto-tag.yml` after Release PR merges. Use
+  the squash title `chore(release): version X (#PR)`, where `X` is the version without a
+  `v` prefix, for example `chore(release): version 0.175.1 (#3110)`.
+
+### Recover a missing release tag
+
+If a release PR was merged with an unsupported squash title and its tag is absent, use
+the auto-tag workflow's optional `version` dispatch input. After the recovery workflow
+change reaches `main`, confirm that main still contains the intended version in its
+version files, then dispatch (for #3052):
+
+```bash
+lgtm-ai gh workflow run release-auto-tag.yml --repo lgtm-hq/py-lintro \
+  --ref main -f version=0.175.1
+```
+
+The override tags the dispatched main snapshot and starts the normal tag publication
+flow. It does not rewrite the release commit. Existing tag collision checks still apply.
+Leave `version` empty for normal commit-title detection; pushes to main also keep that
+default behavior.
 
 ### Security & Pinning
 

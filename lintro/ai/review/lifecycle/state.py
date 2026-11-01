@@ -29,6 +29,7 @@ from dataclasses import replace
 
 from loguru import logger
 
+from lintro.ai.enums.cost_basis import SHADOW_COST_BASES
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
@@ -209,8 +210,8 @@ def _state_pr_number(pr_number: int | None) -> int:
     return pr_number or 0
 
 
-def _checkpointed_spend(*, repo: str, pr_number: int | None) -> float:
-    """Return the PR spend this run's checkpoints already put on disk (#2796).
+def _checkpointed_totals(*, repo: str, pr_number: int | None) -> tuple[float, float]:
+    """Return the spend and shadow this run's checkpoints put on disk (#2796).
 
     A floor, kept on purpose (ruling 20 on #2814). Since #2814 the round's
     cost is everything it charged to its budget, so the final write's total
@@ -230,17 +231,18 @@ def _checkpointed_spend(*, repo: str, pr_number: int | None) -> float:
         pr_number: Pull request number the parts must belong to.
 
     Returns:
-        The largest total among this PR's parts, or 0.0 when there are none.
+        The largest spend and shadow totals among this PR's parts, or zeros
+        when there are none.
     """
     pr_key = _state_pr_number(pr_number)
     if not _in_actions() or not pr_key:
-        return 0.0
+        return 0.0, 0.0
     on_disk = load_ci_state(
         directory=state_dir(ci=True),
         repo=repo,
         pr_number=pr_key,
     )
-    return on_disk.review_spend_usd
+    return on_disk.review_spend_usd, on_disk.review_shadow_usd
 
 
 def persist_review_state(
@@ -291,14 +293,27 @@ def persist_review_state(
         workflow=_WORKFLOW,
         event=os.environ.get("GITHUB_EVENT_NAME", ""),
         run_id=os.environ.get("GITHUB_RUN_ID", ""),
+        run_attempt=os.environ.get("GITHUB_RUN_ATTEMPT", ""),
         lintro_version=_lintro_version(pkg_version),
     )
+    # A round on a shadow basis checkpointed its figure as spend when the
+    # profile could not yet tell (the subscription CLI) or as shadow when it
+    # could (a gateway); the final write's own totals already carry it, so
+    # only the matching total is floored and the figure is never counted
+    # twice (#2867).
+    checkpointed_spend, checkpointed_shadow = _checkpointed_totals(
+        repo=repo,
+        pr_number=pr_number,
+    )
+    shadow_round = result.metadata.cost_basis in {b.value for b in SHADOW_COST_BASES}
     state = replace(
         state,
-        pr_spend_usd=max(
-            state.pr_spend_usd,
-            _checkpointed_spend(repo=repo, pr_number=pr_number),
+        pr_spend_usd=(
+            state.pr_spend_usd
+            if shadow_round
+            else max(state.pr_spend_usd, checkpointed_spend)
         ),
+        pr_shadow_usd=max(state.pr_shadow_usd, checkpointed_shadow),
     )
     write_state_part(
         state=state,

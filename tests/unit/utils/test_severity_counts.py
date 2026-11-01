@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
 
 import pytest
 from assertpy import assert_that
@@ -10,6 +10,7 @@ from assertpy import assert_that
 from lintro.enums.severity_level import SeverityLevel
 from lintro.models.core.severity_counts import SeverityCounts, SeverityDelta
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.severity_counts import (
     count_severities,
     counts_color,
@@ -19,24 +20,11 @@ from lintro.utils.severity_counts import (
 )
 
 
-class _Issue:
-    """Minimal issue double exposing only ``get_severity``."""
+@dataclass
+class _Issue(BaseIssue):
+    """Issue carrying a severity understood by the shared base implementation."""
 
-    def __init__(self, level: SeverityLevel) -> None:
-        """Store the severity this issue reports.
-
-        Args:
-            level: Severity the double returns.
-        """
-        self._level = level
-
-    def get_severity(self) -> SeverityLevel:
-        """Return the configured severity.
-
-        Returns:
-            SeverityLevel: The severity this double was built with.
-        """
-        return self._level
+    severity: SeverityLevel = SeverityLevel.WARNING
 
 
 def _result(*levels: SeverityLevel) -> ToolResult:
@@ -48,7 +36,7 @@ def _result(*levels: SeverityLevel) -> ToolResult:
     Returns:
         ToolResult: Result whose issues report those severities.
     """
-    issues: list[Any] = [_Issue(level) for level in levels]
+    issues = [_Issue(severity=level) for level in levels]
     return ToolResult(
         name="ruff",
         success=not levels,
@@ -79,6 +67,7 @@ def test_count_severities_skips_results_without_issues() -> None:
                 success=True,
                 skipped=True,
                 skip_reason="no files matched",
+                inspected_files=False,
             ),
             ToolResult(name="black", success=True, issues=[]),
         ],
@@ -87,21 +76,11 @@ def test_count_severities_skips_results_without_issues() -> None:
     assert_that(counts).is_equal_to(SeverityCounts())
 
 
-def test_count_severities_ignores_non_result_objects() -> None:
-    """Anything that is not result-shaped is skipped rather than raising."""
-    assert_that(count_severities([object()])).is_equal_to(SeverityCounts())
+def test_count_severities_uses_the_base_issue_default() -> None:
+    """A tool without native severity still reports the base warning level."""
+    result = ToolResult(issues=[BaseIssue(file="a.py")], issues_count=1)
 
-
-def test_count_severities_ignores_issues_without_severity() -> None:
-    """An issue that cannot report a severity is skipped, not guessed at."""
-
-    class _Opaque:
-        """Issue double with no ``get_severity`` method."""
-
-    issues: list[Any] = [_Opaque()]
-    result = ToolResult(name="ruff", success=False, issues_count=1, issues=issues)
-
-    assert_that(count_severities([result])).is_equal_to(SeverityCounts())
+    assert_that(count_severities([result])).is_equal_to(SeverityCounts(warnings=1))
 
 
 def test_counts_to_dict_includes_the_total() -> None:
@@ -280,7 +259,10 @@ def test_counts_from_dict_keeps_valid_keys_beside_invalid_ones() -> None:
 
 def test_count_severities_tallies_issues_on_a_successful_result() -> None:
     """A tool that reports success can still carry advisory findings."""
-    issues: list[Any] = [_Issue(SeverityLevel.WARNING), _Issue(SeverityLevel.INFO)]
+    issues = [
+        _Issue(severity=SeverityLevel.WARNING),
+        _Issue(severity=SeverityLevel.INFO),
+    ]
     result = ToolResult(name="ruff", success=True, issues_count=2, issues=issues)
 
     assert_that(count_severities([result])).is_equal_to(
@@ -298,6 +280,6 @@ def test_count_severities_ignores_a_count_only_result() -> None:
     the failure. Pinned here so the contract is explicit rather than
     accidental.
     """
-    result = ToolResult(name="pylint", success=False, issues_count=7, issues=None)
+    result = ToolResult(name="pylint", success=False, issues_count=7)
 
     assert_that(count_severities([result])).is_equal_to(SeverityCounts())

@@ -11,7 +11,7 @@ from __future__ import annotations
 import ast
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -23,6 +23,17 @@ from lintro.enums.action import Action
 from lintro.enums.capability import Cap
 from lintro.enums.verify_status import VerifyStatus
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import (
+    Checked,
+    ExecutionOutcome,
+    FixMeasured,
+    FixPartial,
+    FixUnmeasured,
+    NoFiles,
+    Skipped,
+    TimedOut,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.tools.core import verify_pass
@@ -38,6 +49,7 @@ from lintro.tools.core.verify_pass import (
     VerifyOutcome,
     VerifyScope,
     capture_verify_baseline,
+    check_answered,
     fold_verify_results,
     resolve_result_capability,
     resolve_verify_scope,
@@ -50,6 +62,7 @@ from lintro.utils.file_cache import (
     FingerprintSnapshot,
     snapshot_fingerprints,
 )
+from tests.unit.tool_result_helpers import legacy_result
 
 if TYPE_CHECKING:
     from lintro.tools.core.verify_pass import VerifiableTool
@@ -499,6 +512,7 @@ def test_fold_keeps_pre_fix_issues_when_the_check_timed_out() -> None:
         issues=[],
         timed_out=True,
         capability=Cap.CHECK,
+        inspected_files=False,
     )
     results = [mutation]
 
@@ -692,7 +706,13 @@ def test_fold_leaves_a_tool_without_a_verify_result_alone() -> None:
 
 def test_fold_skips_a_skipped_or_timed_out_tool() -> None:
     """A tool that never ran, or died on a deadline, keeps its own state."""
-    skipped = ToolResult(name="ruff", skipped=True, skip_reason="disabled in config")
+    skipped = ToolResult(
+        name="ruff",
+        skipped=True,
+        skip_reason="disabled in config",
+        inspected_files=False,
+        success=True,
+    )
     timed_out = ToolResult(
         name="black",
         success=False,
@@ -701,6 +721,7 @@ def test_fold_skips_a_skipped_or_timed_out_tool() -> None:
         initial_issues_count=7,
         fixed_issues_count=0,
         remaining_issues_count=7,
+        inspected_files=False,
     )
     results = [skipped, timed_out]
 
@@ -1400,6 +1421,7 @@ def test_run_verify_pass_reports_a_skipped_check_as_unverified(
             issues_count=0,
             skipped=True,
             skip_reason="ruff 0.1.0 is older than the required 0.5.0",
+            inspected_files=False,
         ),
     )
     _register(monkeypatch, {"ruff": ruff})
@@ -1440,6 +1462,7 @@ def test_run_verify_pass_treats_a_no_files_check_as_verifying_nothing(
             output="No .py files found to check.",
             issues_count=0,
             no_files=True,
+            inspected_files=False,
         ),
     )
     _register(monkeypatch, {"ruff": ruff})
@@ -1484,6 +1507,7 @@ def test_fold_never_reads_a_skipped_check_as_a_clean_verdict() -> None:
         issues=[],
         skipped=True,
         skip_reason="ruff is older than the required version",
+        inspected_files=False,
     )
     results = [mutation]
 
@@ -1581,6 +1605,7 @@ def test_run_verify_pass_reports_a_timed_out_check_as_unverified(
             issues_count=1,
             issues=[_issue("/repo/a.go")],
             timed_out=True,
+            inspected_files=False,
         ),
     )
     _register(monkeypatch, {"golangci-lint": golangci})
@@ -1624,6 +1649,7 @@ def test_fold_never_reads_a_timed_out_check_as_a_verdict() -> None:
         issues=[_issue("/repo/a.go")],
         timed_out=True,
         capability=Cap.CHECK,
+        inspected_files=False,
     )
     results = [mutation]
 
@@ -1779,6 +1805,7 @@ def _unknown_mutation() -> ToolResult:
                 issues_count=1,
                 issues=[_issue("/repo/a.py")],
                 timed_out=True,
+                inspected_files=False,
             ),
             None,
             TIMED_OUT_REASON,
@@ -1791,6 +1818,7 @@ def _unknown_mutation() -> ToolResult:
                 issues_count=0,
                 skipped=True,
                 skip_reason="ruff 0.1.0 is older than the required 0.5.0",
+                inspected_files=False,
             ),
             None,
             SKIPPED_REASON,
@@ -1882,6 +1910,55 @@ def test_a_failed_verification_reports_the_residual_as_unknown(
     assert_that(folded.output).contains("residual unknown")
 
 
+@pytest.mark.parametrize("has_findings", [False, True])
+def test_answered_verify_measures_residual_after_execution_failure(
+    has_findings: bool,
+) -> None:
+    """An answered check rescues counts and keeps new findings and elapsed time."""
+    before = _issue("/repo/a.py")
+    after = [_issue("/repo/b.py")] if has_findings else []
+    mutation = ToolResult(
+        name="ruff",
+        success=False,
+        output="Batch execution failed after writes may have begun",
+        issues=[before],
+        issues_count=1,
+        initial_issues=[before],
+        initial_issues_count=1,
+        residual_unknown=True,
+        residual_unknown_reason="Batch execution failed after writes may have begun",
+        capability=Cap.FIX,
+    )
+    verify = ToolResult(
+        name="ruff",
+        success=not has_findings,
+        issues=after,
+        issues_count=len(after),
+        duration_seconds=2.0,
+    )
+
+    folded_results = [mutation]
+    fold_verify_results(
+        mutation_results=folded_results,
+        verify_results=[
+            VerifyOutcome(tool="ruff", result=verify, status=VerifyStatus.VERIFIED),
+        ],
+        scope=VerifyScope(files=("/repo/a.py",), narrowed=True),
+    )
+    mutation = folded_results[0]
+
+    result = replace(mutation)
+    assert_that(result.issues).is_equal_to(after)
+    assert_that(result.initial_issues).is_equal_to([before])
+    assert_that(result.remaining_issues_count).is_equal_to(len(after))
+    assert_that(result.fixed_issues_count).is_equal_to(1 - len(after))
+    assert_that(result.residual_unknown).is_false()
+    assert_that(result.residual_unknown_reason).is_none()
+    assert_that(result.duration_seconds).is_equal_to(2.0)
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("Batch execution failed")
+
+
 def test_an_unresolvable_tool_is_a_third_unknown_cause(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1940,3 +2017,282 @@ def test_an_unknown_outcome_must_carry_its_reason() -> None:
             status=VerifyStatus.UNCHANGED,
             unknown_reason=TIMED_OUT_REASON,
         )
+
+
+@pytest.mark.parametrize("parse_source", ["mutation", "verify"])
+@pytest.mark.parametrize("verify_timeout", [False, True])
+def test_non_oxlint_parse_failures_keep_accounting_unknown_and_retain_reasons(
+    parse_source: str,
+    verify_timeout: bool,
+) -> None:
+    """The generic fold keeps parse evidence and an independent timeout reason."""
+    mutation = _unknown_mutation()
+    if parse_source == "mutation":
+        mutation = replace(
+            mutation,
+            parse_failures_count=1,
+            success=False,
+            fixed_issues_count=None,
+            remaining_issues_count=None,
+            residual_unknown=True,
+            residual_unknown_reason="initial ruff report incomplete",
+        )
+    verify = ToolResult(
+        name="ruff",
+        success=False,
+        issues=[_issue("/repo/c.py")],
+        issues_count=1,
+        parse_failures_count=1 if parse_source == "verify" else 0,
+        timed_out=verify_timeout,
+        inspected_files=False if verify_timeout else None,
+    )
+    results = [mutation]
+
+    fold_verify_results(
+        mutation_results=results,
+        verify_results=[
+            VerifyOutcome(
+                tool="ruff",
+                result=verify,
+                status=(
+                    VerifyStatus.UNKNOWN if verify_timeout else VerifyStatus.VERIFIED
+                ),
+                unknown_reason=TIMED_OUT_REASON if verify_timeout else "",
+            ),
+        ],
+        scope=VerifyScope(
+            files=("/repo/a.py", "/repo/b.py", "/repo/c.py"),
+            narrowed=True,
+        ),
+    )
+
+    result = replace(results[0])
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.success).is_false()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that([issue.file for issue in result.issues or []]).contains(
+        "/repo/a.py",
+        "/repo/b.py",
+        "/repo/c.py",
+    )
+    if parse_source == "mutation":
+        assert_that(result.residual_unknown_reason).contains(
+            "initial ruff report incomplete",
+        )
+    if verify_timeout:
+        assert_that(result.residual_unknown_reason).contains(TIMED_OUT_REASON)
+
+
+@pytest.mark.parametrize(
+    ("execution", "has_findings", "status", "reason", "answered"),
+    [
+        (Checked(True, True), False, VerifyStatus.VERIFIED, "", True),
+        (Checked(False, True), True, VerifyStatus.VERIFIED, "", True),
+        (Checked(False), False, VerifyStatus.VERIFIED, "", False),
+        (Skipped("version gate"), False, VerifyStatus.UNKNOWN, SKIPPED_REASON, False),
+        (NoFiles(), False, VerifyStatus.UNCHANGED, "", False),
+        (TimedOut("deadline"), False, VerifyStatus.UNKNOWN, TIMED_OUT_REASON, False),
+        (
+            TimedOut("partial output"),
+            True,
+            VerifyStatus.UNKNOWN,
+            TIMED_OUT_REASON,
+            False,
+        ),
+    ],
+)
+def test_verify_consumes_execution_variants_without_promoting_inactive_results(
+    monkeypatch: pytest.MonkeyPatch,
+    execution: ExecutionOutcome,
+    has_findings: bool,
+    status: VerifyStatus,
+    reason: str,
+    answered: bool,
+) -> None:
+    """Only completed checks can supersede a scope's pre-fix findings.
+
+    Args:
+        monkeypatch: Registry isolation for the check double.
+        execution: Explicit execution evidence returned by the plugin.
+        has_findings: Whether the result carries parsed diagnostics.
+        status: Expected verify-pass classification.
+        reason: Expected reason for a missing verdict.
+        answered: Whether the returned check answered its scope.
+    """
+    result = ToolResult.from_outcome(
+        ToolOutcome(execution, issues_count=int(has_findings)),
+        name="ruff",
+        issues=[_issue("/repo/a.py")] if has_findings else [],
+    )
+    tool = _FakeTool(
+        definition=_FakeDefinition(
+            claims=[Claim(patterns=["*.py"], capabilities={Cap.FIX, Cap.CHECK})],
+        ),
+        result=result,
+    )
+    _register(monkeypatch, {"ruff": tool})
+
+    outcomes = run_verify_pass(
+        tools_to_run=["ruff"],
+        scope=VerifyScope(files=("/repo/a.py",), narrowed=True),
+        configure=lambda *, tool_name: tool,
+    )
+
+    assert_that(check_answered(result)).is_equal_to(answered)
+    assert_that(outcomes[0].status).is_equal_to(status)
+    assert_that(outcomes[0].unknown_reason).is_equal_to(reason)
+    if status is VerifyStatus.VERIFIED:
+        verified = outcomes[0].result
+        assert verified is not None
+        assert_that(verified).is_not_same_as(result)
+        assert_that(verified.outcome).is_equal_to(result.outcome)
+        assert_that(verified.capability).is_equal_to(Cap.CHECK)
+        assert_that(verified.duration_seconds).is_greater_than_or_equal_to(0)
+        assert_that(result.duration_seconds).is_none()
+    else:
+        assert_that(outcomes[0].result).is_none()
+
+
+@pytest.mark.parametrize("inspected_files", [True, None])
+@pytest.mark.parametrize("has_findings", [False, True])
+def test_answered_verify_replaces_no_files_inspection_evidence(
+    inspected_files: bool | None,
+    has_findings: bool,
+) -> None:
+    """An answered check supersedes empty discovery without inventing evidence.
+
+    Args:
+        inspected_files: Explicit inspection evidence or an unknown legacy value.
+        has_findings: Whether verification found a residual diagnostic.
+    """
+    mutation = ToolResult.from_outcome(ToolOutcome(NoFiles()), name="ruff")
+    verify = ToolResult.from_outcome(
+        ToolOutcome(
+            Checked(not has_findings, inspected_files),
+            issues_count=int(has_findings),
+        ),
+        name="ruff",
+        issues=[_issue("/repo/a.py")] if has_findings else [],
+    )
+
+    folded_results = [mutation]
+    fold_verify_results(
+        mutation_results=folded_results,
+        verify_results=[VerifyOutcome(tool="ruff", result=verify)],
+        scope=VerifyScope(files=("/repo/a.py",), narrowed=True),
+    )
+    mutation = folded_results[0]
+
+    assert_that(mutation.no_files).is_false()
+    assert_that(mutation.inspected_files).is_equal_to(inspected_files)
+    assert_that(mutation.outcome.execution).is_equal_to(verify.outcome.execution)
+    assert_that(mutation.outcome.accounting).is_equal_to(
+        FixMeasured(int(has_findings), 0, int(has_findings)),
+    )
+    assert_that(mutation.issues).is_equal_to(verify.issues)
+
+
+@pytest.mark.parametrize("initial_count", [None, 7])
+def test_verify_fold_preserves_initial_measurement_on_parse_failure(
+    initial_count: int | None,
+) -> None:
+    """An incomplete report retains only the explicitly supplied initial count."""
+    before = _issue("/repo/a.proto")
+    after = _issue("/repo/b.proto")
+    mutation = ToolResult.from_outcome(
+        ToolOutcome(Checked(False), FixPartial(initial=initial_count), issues_count=1),
+        name="buf",
+        issues=[before],
+        initial_issues=[before],
+        parse_failures_count=1,
+        capability=Cap.FIX,
+    )
+    verify = ToolResult.from_outcome(
+        ToolOutcome(Checked(False, True), issues_count=1),
+        name="buf",
+        issues=[after],
+    )
+    results = [mutation]
+
+    fold_verify_results(
+        mutation_results=results,
+        verify_results=[VerifyOutcome(tool="buf", result=verify)],
+        scope=VerifyScope(files=("/repo/a.proto",), narrowed=True),
+    )
+
+    assert_that(results[0].outcome.accounting).is_equal_to(
+        FixUnmeasured("tool output could not be fully parsed", initial=initial_count),
+    )
+    assert_that(results[0].issues).contains(before, after)
+    assert_that(results[0].initial_issues).is_equal_to([before])
+    assert_that(results[0].initial_issues_count).is_equal_to(initial_count)
+    assert_that(results[0].fixed_issues_count).is_none()
+    assert_that(results[0].remaining_issues_count).is_none()
+    assert_that(results[0].success).is_false()
+    assert_that(mutation.outcome.accounting).is_equal_to(
+        FixPartial(initial=initial_count),
+    )
+
+
+@pytest.mark.parametrize("flag", ["no_files", "skipped", "timed_out"])
+def test_invalid_plugin_result_is_an_unanswered_verify(
+    monkeypatch: pytest.MonkeyPatch,
+    flag: str,
+) -> None:
+    """Malformed plugin evidence fails closed without weakening the adapter."""
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        issues=[_issue("/repo/a.py")],
+        issues_count=1,
+    )
+    result = legacy_result(**(vars(result) | {flag: True}))
+    tool = _FakeTool(
+        definition=_FakeDefinition(
+            claims=[Claim(patterns=["*.py"], capabilities={Cap.FIX, Cap.CHECK})],
+        ),
+        result=result,
+    )
+    _register(monkeypatch, {"ruff": tool})
+
+    assert_that(check_answered(result)).is_false()
+    with pytest.raises(ValueError):
+        _ = result.outcome
+    outcomes = run_verify_pass(
+        tools_to_run=["ruff"],
+        scope=VerifyScope(files=("/repo/a.py",), narrowed=True),
+        configure=lambda *, tool_name: tool,
+    )
+
+    assert_that(outcomes[0].status).is_equal_to(VerifyStatus.UNKNOWN)
+    assert_that(outcomes[0].result).is_none()
+    assert_that(outcomes[0].unknown_reason).contains("ValueError")
+
+
+def test_non_tool_result_cannot_crash_or_verify_a_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A duck-typed return violates the plugin contract even with valid fields.
+
+    Args:
+        monkeypatch: Fixture isolating the plugin registry.
+    """
+    tool = _FakeTool(
+        definition=_FakeDefinition(
+            claims=[Claim(patterns=["*.py"], capabilities={Cap.FIX, Cap.CHECK})],
+        ),
+        result=legacy_result(name="ruff", success=True),
+    )
+    _register(monkeypatch, {"ruff": tool})
+
+    outcomes = run_verify_pass(
+        tools_to_run=["ruff"],
+        scope=VerifyScope(files=("/repo/a.py",), narrowed=True),
+        configure=lambda *, tool_name: tool,
+    )
+
+    assert_that(outcomes[0].status).is_equal_to(VerifyStatus.UNKNOWN)
+    assert_that(outcomes[0].result).is_none()
+    assert_that(outcomes[0].unknown_reason).contains("must return ToolResult")

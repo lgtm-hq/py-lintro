@@ -12,21 +12,35 @@ import contextlib
 import json
 import os
 import shutil
+import sys
+import sysconfig
 import tempfile
 import threading
 import time
-from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass, field
+from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 from loguru import logger
 
 from lintro import __version__
+from lintro.enums.tool_name import normalize_tool_name
+from lintro.models.core.tool_snapshot import ToolCapabilities as ToolCapabilities
+from lintro.models.core.tool_snapshot import ToolSnapshot as ToolSnapshot
+from lintro.tools.core.command_builders import CommandBuilderRegistry
+from lintro.utils.tool_snapshots import (
+    SnapshotProvider,
+    register_snapshot_provider,
+)
+from lintro.utils.tool_snapshots import (
+    lookup_snapshot as lookup_snapshot,
+)
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
+    from lintro.tools.core.tool_registry import ManifestTool
+    from lintro.tools.core.version_parsing import ToolVersionInfo
 
 # Default TTL for on-disk snapshot cache (seconds).
 DEFAULT_SNAPSHOT_TTL_SECONDS: int = 600
@@ -41,166 +55,73 @@ _memory_probed_at: float | None = None
 _force_fresh: bool = False
 
 
-@dataclass(frozen=True)
-class ToolCapabilities:
-    """Declared / discovered capabilities for a tool.
-
-    Attributes:
-        can_fix: Whether the tool can auto-fix issues.
-        supports_stdin: Whether the tool accepts stdin input.
-        config_found: Whether a native config file was found in the project.
-    """
-
-    can_fix: bool = False
-    supports_stdin: bool = False
-    config_found: bool = False
-
-    def to_dict(self) -> dict[str, bool]:
-        """Serialize capabilities for JSON cache / API output.
-
-        Returns:
-            Dictionary of capability flags.
-        """
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> ToolCapabilities:
-        """Deserialize capabilities from a cache entry.
-
-        Args:
-            data: Raw capabilities dict, or None for defaults.
-
-        Returns:
-            ToolCapabilities instance.
-        """
-        if not data:
-            return cls()
-        return cls(
-            can_fix=bool(data.get("can_fix", False)),
-            supports_stdin=bool(data.get("supports_stdin", False)),
-            config_found=bool(data.get("config_found", False)),
-        )
-
-
-@dataclass(frozen=True)
-class ToolSnapshot:
-    """Cached probe result for a single tool.
-
-    Attributes:
-        name: Canonical tool name.
-        available: True when the binary exists and version probe succeeded.
-        version: Detected version string, or None.
-        capabilities: Capability flags for the tool.
-        probe_error: Error message when unavailable or probe failed.
-        remediation_hint: Install / upgrade hint for the user.
-        binary_path: Resolved executable path (empty when missing).
-        binary_mtime: mtime of the binary when probed (0.0 when missing).
-        version_check_passed: Whether the installed version meets the minimum.
-        min_version: Minimum required version used during the probe.
-        recommended_version: Recommended version from requirements, if any.
-        below_recommended: True when installed version is below recommended.
-    """
-
-    name: str
-    available: bool = False
-    version: str | None = None
-    capabilities: ToolCapabilities = field(default_factory=ToolCapabilities)
-    probe_error: str | None = None
-    remediation_hint: str | None = None
-    binary_path: str = ""
-    binary_mtime: float = 0.0
-    version_check_passed: bool = False
-    min_version: str = ""
-    recommended_version: str = ""
-    below_recommended: bool = False
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize the snapshot for JSON cache / API output.
-
-        Returns:
-            Dictionary representation of the snapshot.
-        """
-        return {
-            "name": self.name,
-            "available": self.available,
-            "version": self.version,
-            "capabilities": self.capabilities.to_dict(),
-            "probe_error": self.probe_error,
-            "remediation_hint": self.remediation_hint,
-            "binary_path": self.binary_path,
-            "binary_mtime": self.binary_mtime,
-            "version_check_passed": self.version_check_passed,
-            "min_version": self.min_version,
-            "recommended_version": self.recommended_version,
-            "below_recommended": self.below_recommended,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ToolSnapshot:
-        """Deserialize a snapshot from a cache entry.
-
-        Args:
-            data: Raw snapshot dict.
-
-        Returns:
-            ToolSnapshot instance.
-        """
-        return cls(
-            name=str(data.get("name", "")),
-            available=bool(data.get("available", False)),
-            version=data.get("version"),
-            capabilities=ToolCapabilities.from_dict(data.get("capabilities")),
-            probe_error=data.get("probe_error"),
-            remediation_hint=data.get("remediation_hint"),
-            binary_path=str(data.get("binary_path", "") or ""),
-            binary_mtime=float(data.get("binary_mtime", 0.0) or 0.0),
-            version_check_passed=bool(data.get("version_check_passed", False)),
-            min_version=str(data.get("min_version", "") or ""),
-            recommended_version=str(data.get("recommended_version", "") or ""),
-            below_recommended=bool(data.get("below_recommended", False)),
-        )
-
-    def cache_key_matches(
-        self,
-        *,
-        binary_path: str,
-        binary_mtime: float,
-    ) -> bool:
-        """Return True when path+mtime still match this snapshot.
-
-        Args:
-            binary_path: Current resolved binary path.
-            binary_mtime: Current binary mtime (0.0 when missing).
-
-        Returns:
-            True if the cache key components still match.
-        """
-        return self.binary_path == binary_path and self.binary_mtime == binary_mtime
-
-
-def lookup_snapshot(
-    snapshots: Mapping[str, ToolSnapshot],
-    name: str,
-) -> ToolSnapshot | None:
-    """Return a snapshot for ``name``, trying hyphen and underscore aliases.
+def _manifest_tool(name: str) -> ManifestTool | None:
+    """Resolve version-only manifest entries that have no execution plugin.
 
     Args:
-        snapshots: Map keyed by tool name.
-        name: Requested tool name (manifest or registry spelling).
+        name: Manifest or registry spelling of the tool.
 
     Returns:
-        Matching snapshot, or None when no alias hits.
+        Matching manifest entry, or None when the name is unknown.
     """
     from lintro.enums.tool_name import tool_name_aliases
+    from lintro.tools.core.tool_registry import ManifestRegistry
 
-    for candidate in tool_name_aliases(name):
-        snap = snapshots.get(candidate)
-        if snap is not None:
-            return snap
+    registry = ManifestRegistry.load()
+    for alias in tool_name_aliases(name):
+        if alias in registry:
+            return registry.get(alias)
     return None
 
 
-def _is_cached_snapshot_fresh(snap: ToolSnapshot) -> bool:
+def get_executable_command(
+    tool_name: str,
+    cwd: Path | None = None,
+) -> list[str]:
+    """Resolve the same command builders used by execution preparation.
+
+    Args:
+        tool_name: Registered name to resolve.
+        cwd: Execution directory for project-local resolution.
+
+    Returns:
+        Command prefix selected for this directory.
+    """
+    from lintro.tools import tool_manager
+
+    if not tool_manager.is_tool_registered(tool_name):
+        manifest = _manifest_tool(tool_name)
+        if manifest is not None and manifest.version_command:
+            return list(manifest.version_command)
+    try:
+        normalized = normalize_tool_name(tool_name)
+    except ValueError:
+        normalized = None
+    return CommandBuilderRegistry.get_command(tool_name, normalized, cwd)
+
+
+def _resolved_binary(command: list[str]) -> str:
+    """Identify the tool executable behind an interpreter command.
+
+    Args:
+        command: Resolved execution or version-probe prefix.
+
+    Returns:
+        Executable path whose mtime changes when the tool is upgraded.
+    """
+    if not command:
+        return ""
+    if len(command) >= 3 and command[1] == "-m" and command[0] == sys.executable:
+        scripts_dir = sysconfig.get_path("scripts")
+        module_binary = (
+            shutil.which(command[2], path=scripts_dir) if scripts_dir else None
+        )
+        if module_binary:
+            return module_binary
+    return shutil.which(command[0]) or ""
+
+
+def _is_cached_snapshot_fresh(snap: ToolSnapshot, *, search_root: Path) -> bool:
     """Return True when a cached snapshot should still be served.
 
     Available snapshots with a binary path are keyed on path + mtime.
@@ -211,6 +132,11 @@ def _is_cached_snapshot_fresh(snap: ToolSnapshot) -> bool:
     checks miss tools whose command name differs from the lintro tool name
     (e.g. ``markdownlint-cli2`` for ``markdownlint``).
     """
+    command = get_executable_command(snap.name, cwd=search_root)
+    if snap.command:
+        resolved = _resolved_binary(command)
+        if tuple(command) != snap.command or resolved != snap.binary_path:
+            return False
     if snap.binary_path:
         if not Path(snap.binary_path).exists():
             return False
@@ -220,9 +146,6 @@ def _is_cached_snapshot_fresh(snap: ToolSnapshot) -> bool:
         )
     if snap.available:
         return True
-    from lintro.plugins.execution_preparation import get_executable_command
-
-    command = get_executable_command(snap.name)
     main_cmd = command[0] if command else snap.name
     return shutil.which(main_cmd) is None
 
@@ -279,7 +202,7 @@ def get_snapshot_ttl() -> int:
         from lintro.config.config_loader import get_config
 
         ttl = get_config().execution.tool_snapshot_ttl
-        if isinstance(ttl, int) and ttl >= 1:
+        if ttl >= 1:
             return ttl
     except (ImportError, OSError, ValueError, AttributeError, RuntimeError):
         pass
@@ -356,6 +279,7 @@ def _unavailable_snapshot(
     binary_mtime: float = 0.0,
     capabilities: ToolCapabilities | None = None,
     min_version: str = "",
+    command: tuple[str, ...] = (),
 ) -> ToolSnapshot:
     """Build an unavailable snapshot with remediation context.
 
@@ -367,6 +291,7 @@ def _unavailable_snapshot(
         binary_mtime: mtime if binary exists but probe failed.
         capabilities: Optional capability flags.
         min_version: Minimum version string for display.
+        command: Command used for the failed probe.
 
     Returns:
         Unavailable ToolSnapshot.
@@ -382,6 +307,7 @@ def _unavailable_snapshot(
         binary_mtime=binary_mtime,
         version_check_passed=False,
         min_version=min_version,
+        command=command,
     )
 
 
@@ -399,8 +325,7 @@ def probe_tool(
     Returns:
         Fresh ToolSnapshot (not read from cache).
     """
-    from lintro.plugins.execution_preparation import get_executable_command
-    from lintro.plugins.registry import ToolRegistry
+    from lintro.tools import tool_manager
     from lintro.tools.core.version_checking import get_install_hints
     from lintro.tools.core.version_parsing import check_tool_version
 
@@ -408,18 +333,39 @@ def probe_tool(
     name = tool_name.lower()
 
     try:
-        plugin = ToolRegistry.get(name)
+        plugin = tool_manager.get_tool(name)
         definition = plugin.definition
     except (KeyError, ValueError) as exc:
-        return _unavailable_snapshot(
+        manifest = _manifest_tool(name)
+        if manifest is None or not manifest.version_command:
+            return _unavailable_snapshot(
+                name,
+                probe_error=f"Tool not registered: {exc}",
+            )
+        command = list(manifest.version_command)
+        binary_path = _resolved_binary(command)
+        snapshot = ToolSnapshot(
+            name=name,
+            binary_path=binary_path,
+            binary_mtime=_binary_mtime(binary_path),
+            command=tuple(command),
+        )
+        version_info = check_tool_version(
             name,
-            probe_error=f"Tool not registered: {exc}",
+            command,
+            append_version=False,
+            cwd=root,
+        )
+        return _snapshot_from_version(
+            snapshot,
+            version_info,
+            get_install_hints().get(name, f"Install {name} and ensure it is on PATH"),
         )
 
     can_fix = bool(definition.can_fix)
-    # Stdin support is not yet declared on ToolDefinition; leave False for v1
-    # so the capability surface is present without inventing false positives.
-    supports_stdin = False
+    supports_stdin = definition.supports_stdin
+    if not isinstance(supports_stdin, bool):
+        supports_stdin = None
     config_found = _find_native_config(
         list(definition.native_configs or []),
         search_root=root,
@@ -454,9 +400,8 @@ def probe_tool(
             below_recommended=False,
         )
 
-    command = get_executable_command(definition.name)
-    main_cmd = command[0] if command else definition.name
-    binary_path = shutil.which(main_cmd) or ""
+    command = get_executable_command(definition.name, cwd=root)
+    binary_path = _resolved_binary(command)
     binary_mtime = _binary_mtime(binary_path)
 
     # Always run the version probe — do not gate on shutil.which alone.
@@ -466,109 +411,57 @@ def probe_tool(
         definition.name,
         command,
         append_version=True,
+        cwd=root,
     )
-    recommended = version_info.recommended_version or ""
-    below_rec = bool(version_info.below_recommended)
-
-    if (
-        version_info.current_version is None
-        and version_info.error_message
-        and "Could not parse version" in version_info.error_message
-        and binary_path
-    ):
-        # Unparseable version with a live binary: treat as available but
-        # note that the version check could not be completed.
-        return ToolSnapshot(
-            name=name,
-            available=True,
-            version=None,
-            capabilities=capabilities,
-            probe_error=version_info.error_message,
-            remediation_hint=remediation,
-            binary_path=binary_path,
-            binary_mtime=binary_mtime,
-            version_check_passed=True,
-            min_version=version_info.min_version,
-            recommended_version=recommended,
-            below_recommended=below_rec,
-        )
-
-    if version_info.version_check_passed:
-        # Tools without a declared minimum still set version_check_passed on
-        # OSError. Treat a failed probe with no parsed version as unavailable
-        # so missing binaries degrade visibly instead of proceeding.
-        if (
-            version_info.current_version is None
-            and version_info.error_message
-            and (
-                "Failed to run version check" in version_info.error_message
-                or "Command failed" in version_info.error_message
-                or "not found" in version_info.error_message.lower()
-            )
-        ):
-            probe_error = (
-                f"{main_cmd} not found in PATH"
-                if not binary_path
-                else version_info.error_message
-            )
-            return _unavailable_snapshot(
-                name,
-                probe_error=probe_error,
-                remediation_hint=remediation,
-                binary_path=binary_path,
-                binary_mtime=binary_mtime,
-                capabilities=capabilities,
-                min_version=version_info.min_version,
-            )
-        return ToolSnapshot(
-            name=name,
-            available=True,
-            version=version_info.current_version,
-            capabilities=capabilities,
-            probe_error=None,
-            remediation_hint=remediation,
-            binary_path=binary_path,
-            binary_mtime=binary_mtime,
-            version_check_passed=True,
-            min_version=version_info.min_version,
-            recommended_version=recommended,
-            below_recommended=below_rec,
-        )
-
-    # Version below minimum: still "available" so consumers can skip with
-    # the same remediation messaging as before.
-    if (
-        version_info.current_version is not None
-        and version_info.error_message
-        and "below minimum" in version_info.error_message
-    ):
-        return ToolSnapshot(
-            name=name,
-            available=True,
-            version=version_info.current_version,
-            capabilities=capabilities,
-            probe_error=version_info.error_message,
-            remediation_hint=remediation,
-            binary_path=binary_path,
-            binary_mtime=binary_mtime,
-            version_check_passed=False,
-            min_version=version_info.min_version,
-            recommended_version=recommended,
-            below_recommended=below_rec,
-        )
-
-    probe_error = version_info.error_message or f"{main_cmd} not found in PATH"
-    if not binary_path and not version_info.error_message:
-        probe_error = f"{main_cmd} not found in PATH"
-
-    return _unavailable_snapshot(
-        name,
-        probe_error=probe_error,
-        remediation_hint=remediation,
+    snapshot = ToolSnapshot(
+        name=name,
+        capabilities=capabilities,
         binary_path=binary_path,
         binary_mtime=binary_mtime,
-        capabilities=capabilities,
+        command=tuple(command),
+    )
+    return _snapshot_from_version(snapshot, version_info, remediation)
+
+
+def _snapshot_from_version(
+    snapshot: ToolSnapshot,
+    version_info: ToolVersionInfo,
+    remediation: str,
+) -> ToolSnapshot:
+    """Combine one version probe with its resolution and capability evidence.
+
+    Args:
+        snapshot: Command, path and declared capability evidence.
+        version_info: Result of the shared version parser.
+        remediation: Installation or upgrade guidance.
+
+    Returns:
+        Available, below-minimum or degraded snapshot without re-probing.
+    """
+    error = version_info.error_message or ""
+    unparseable = bool(snapshot.binary_path and "Could not parse version" in error)
+    failed_probe = version_info.current_version is None and any(
+        text in error.lower()
+        for text in ("failed to run version check", "command failed", "not found")
+    )
+    passed = version_info.version_check_passed and not failed_probe
+    below_minimum = (
+        version_info.current_version is not None and "below minimum" in error
+    )
+    available = passed or unparseable or below_minimum
+    if not available and not snapshot.binary_path:
+        main_cmd = snapshot.command[0] if snapshot.command else snapshot.name
+        error = f"{main_cmd} not found in PATH. {error}".strip()
+    return replace(
+        snapshot,
+        available=available,
+        version=version_info.current_version if available else None,
+        probe_error=None if passed else error or "tool unavailable",
+        remediation_hint=remediation,
+        version_check_passed=passed or unparseable,
         min_version=version_info.min_version,
+        recommended_version=version_info.recommended_version or "",
+        below_recommended=version_info.below_recommended,
     )
 
 
@@ -576,12 +469,14 @@ def _load_disk_cache(
     cache_file: Path,
     *,
     ttl: int,
-) -> dict[str, ToolSnapshot] | None:
+    search_root: Path,
+) -> tuple[dict[str, ToolSnapshot], float] | None:
     """Load snapshots from disk when the cache file is valid.
 
     Args:
         cache_file: Path to the JSON cache.
         ttl: Maximum age in seconds.
+        search_root: Directory used to resolve current commands.
 
     Returns:
         Snapshot map, or None when missing / corrupt / expired / version mismatch.
@@ -604,7 +499,8 @@ def _load_disk_cache(
     probed_at = raw.get("probed_at")
     if not isinstance(probed_at, (int, float)):
         return None
-    if time.time() - float(probed_at) > ttl:
+    age = time.time() - float(probed_at)
+    if not 0 <= age <= ttl:
         logger.debug("Snapshot cache TTL expired; re-probing")
         return None
 
@@ -620,7 +516,7 @@ def _load_disk_cache(
             snap = ToolSnapshot.from_dict(entry)
         except (TypeError, ValueError, KeyError):
             continue
-        if not _is_cached_snapshot_fresh(snap):
+        if not _is_cached_snapshot_fresh(snap, search_root=search_root):
             logger.debug(
                 "Snapshot for {} invalidated by path/mtime or PATH change",
                 name,
@@ -628,7 +524,7 @@ def _load_disk_cache(
             continue
         snapshots[name.lower()] = snap
 
-    return snapshots if snapshots else None
+    return (snapshots, float(probed_at)) if snapshots else None
 
 
 def _write_disk_cache(
@@ -711,6 +607,7 @@ def _memory_hits_for(
     *,
     cache_file: Path,
     ttl: int,
+    search_root: Path,
 ) -> dict[str, ToolSnapshot] | None:
     """Return memory snapshots when they still cover ``names``.
 
@@ -726,7 +623,10 @@ def _memory_hits_for(
     hits: dict[str, ToolSnapshot] = {}
     for name in names:
         snap = lookup_snapshot(snapshots=_memory_cache, name=name)
-        if snap is None or not _is_cached_snapshot_fresh(snap):
+        if snap is None or not _is_cached_snapshot_fresh(
+            snap,
+            search_root=search_root,
+        ):
             return None
         hits[name] = snap
     return hits
@@ -764,12 +664,11 @@ def probe_all_tools(
     """
     global _memory_cache, _memory_cache_path, _memory_probed_at, _force_fresh
 
-    from lintro.plugins.discovery import discover_all_tools
-    from lintro.plugins.registry import ToolRegistry
+    from lintro.tools import tool_manager
 
-    discover_all_tools()
-    names = tool_names if tool_names is not None else ToolRegistry.get_names()
+    names = tool_names if tool_names is not None else tool_manager.get_tool_names()
     names = [n.lower() for n in names]
+    search_root = (cache_root if cache_root is not None else Path.cwd()).resolve()
     cache_file = _cache_file_path(cache_root=cache_root)
     ttl = get_snapshot_ttl()
 
@@ -788,14 +687,15 @@ def probe_all_tools(
                 names,
                 cache_file=cache_file,
                 ttl=ttl,
+                search_root=search_root,
             )
             if hits is not None:
                 return hits
 
     # Disk I/O outside the lock so slow mounts do not block other callers.
-    disk: dict[str, ToolSnapshot] | None = None
+    disk: tuple[dict[str, ToolSnapshot], float] | None = None
     if not force_effective:
-        disk = _load_disk_cache(cache_file, ttl=ttl)
+        disk = _load_disk_cache(cache_file, ttl=ttl, search_root=search_root)
 
     with _cache_lock:
         # Re-check memory: another thread may have filled the cache.
@@ -804,39 +704,38 @@ def probe_all_tools(
                 names,
                 cache_file=cache_file,
                 ttl=ttl,
+                search_root=search_root,
             )
             if hits is not None:
                 return hits
         if disk is not None:
+            disk_snapshots, disk_probed_at = disk
             disk_hits: dict[str, ToolSnapshot] = {}
             disk_complete = True
             for name in names:
-                snap = lookup_snapshot(snapshots=disk, name=name)
+                snap = lookup_snapshot(snapshots=disk_snapshots, name=name)
                 if snap is None:
                     disk_complete = False
                     break
                 disk_hits[name] = snap
             if disk_complete:
-                _memory_cache = disk
+                _memory_cache = disk_snapshots
                 _memory_cache_path = cache_file
-                _memory_probed_at = time.time()
+                _memory_probed_at = disk_probed_at
                 return disk_hits
 
     fresh = _probe_all_fresh(
         names,
-        search_root=cache_root if cache_root is not None else Path.cwd(),
+        search_root=search_root,
         max_workers=max_workers,
     )
 
     with _cache_lock:
-        if _memory_cache_path != cache_file:
-            _memory_cache = None
-        merged = dict(_memory_cache or {})
-        merged.update(fresh)
-        _memory_cache = merged
+        # A subset refresh must not renew the age of retained older snapshots.
+        _memory_cache = dict(fresh)
         _memory_cache_path = cache_file
         _memory_probed_at = time.time()
-        to_write = dict(merged)
+        to_write = dict(fresh)
 
     _write_disk_cache(cache_file, to_write, ttl=ttl)
     return {n: fresh[n] for n in names if n in fresh}
@@ -883,6 +782,7 @@ def snapshot_to_unavailable_result(
     Returns:
         ToolResult with ``unavailable=True`` and remediation context.
     """
+    from lintro.models.core.tool_outcome import ToolOutcome, Unavailable
     from lintro.models.core.tool_result import ToolResult
 
     strict_missing = is_strict_missing_tools() if strict is None else strict
@@ -892,12 +792,14 @@ def snapshot_to_unavailable_result(
     if hint:
         message = f"{message}. {hint}"
 
-    result: ToolResult = ToolResult(
+    result = ToolResult.from_outcome(
+        ToolOutcome(execution=Unavailable(reason=error, strict=strict_missing)),
         name=snapshot.name,
-        success=not strict_missing,
         output=message,
-        issues_count=0,
-        unavailable=True,
-        skip_reason=error,
     )
     return result
+
+
+# The module itself satisfies the provider protocol; dynamic lookup preserves
+# one cache authority, including scoped test replacements of probe functions.
+register_snapshot_provider(cast(SnapshotProvider, sys.modules[__name__]))

@@ -13,17 +13,86 @@ from __future__ import annotations
 
 import dataclasses
 import warnings
+from collections.abc import Sequence
+from typing import Any
 
 import pytest
 from assertpy import assert_that
 
 from lintro.enums.capability import Cap
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
 from lintro.tools.core.verify_pass import (
     VerifyOutcome,
     VerifyScope,
     fold_verify_results,
 )
+
+
+@pytest.mark.parametrize("field_name", ["issues", "initial_issues", "metadata"])
+def test_collection_defaults_are_empty_containers(field_name: str) -> None:
+    """Default results expose usable collections without normalization.
+
+    Args:
+        field_name: Collection whose default is part of the result contract.
+    """
+    result = ToolResult()
+    expected: object = {} if field_name == "metadata" else ()
+
+    assert_that(getattr(result, field_name)).is_equal_to(expected)
+
+
+@pytest.mark.parametrize("field_name", ["issues", "initial_issues", "metadata"])
+@pytest.mark.parametrize("skipped", [False, True])
+def test_none_collections_are_rejected_at_construction(
+    field_name: str,
+    skipped: bool,
+) -> None:
+    """Unchecked plugin payloads fail at the model boundary, even for skips.
+
+    Args:
+        field_name: Collection incorrectly supplied as None by a plugin.
+        skipped: Whether the plugin reports a skip instead of an execution.
+    """
+    payload: dict[str, Any] = {
+        field_name: None,
+        "skipped": skipped,
+        "skip_reason": "tool unavailable" if skipped else None,
+    }
+
+    with pytest.raises(TypeError, match=rf"ToolResult\.{field_name} must not be None"):
+        ToolResult(**payload)
+
+
+@pytest.mark.parametrize("empty", [(), []], ids=["tuple", "list"])
+def test_explicit_empty_collections_preserve_unknown_counts(
+    empty: Sequence[BaseIssue],
+) -> None:
+    """Empty plugin collections do not manufacture measured fix counts.
+
+    Args:
+        empty: A supported empty sequence supplied explicitly by a plugin.
+    """
+    result = ToolResult(issues=empty, initial_issues=empty, metadata={})
+
+    assert_that(result.issues).is_equal_to(empty)
+    assert_that(result.initial_issues).is_equal_to(empty)
+    assert_that(result.metadata).is_empty()
+    assert_that(result.initial_issues_count).is_none()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.success).is_false()
+
+
+def test_default_metadata_is_owned_by_each_result() -> None:
+    """Attaching metadata to one default result cannot mutate another."""
+    first = ToolResult()
+    second = ToolResult()
+
+    first.metadata["fixed_count"] = 2
+
+    assert_that(first.metadata).is_equal_to({"fixed_count": 2})
+    assert_that(second.metadata).is_empty()
 
 
 def test_metadata_field_is_the_only_metadata_dataclass_field() -> None:
@@ -81,7 +150,13 @@ def test_post_init_still_validates_skip_state() -> None:
         skip_reason="not installed",
     )
 
-    skipped = ToolResult(name="ruff", skipped=True, skip_reason="not installed")
+    skipped = ToolResult(
+        name="ruff",
+        skipped=True,
+        skip_reason="not installed",
+        inspected_files=False,
+        success=True,
+    )
     assert_that(skipped.success).is_true()
 
 
@@ -96,7 +171,7 @@ def test_post_init_still_validates_issue_counts() -> None:
     )
 
 
-def test_no_files_defaults_to_false_and_is_settable() -> None:
+def test_no_files_defaults_to_false_and_is_explicit() -> None:
     """``no_files`` marks "nothing was examined", and defaults to off.
 
     Two consumers read it: ``lintro.tools.core.verify_pass.run_verify_pass``,
@@ -107,6 +182,7 @@ def test_no_files_defaults_to_false_and_is_settable() -> None:
     """
     real = ToolResult(name="ruff", success=True, issues_count=0)
     assert_that(real.no_files).is_false()
+    assert_that(real.inspected_files).is_none()
 
     nothing_examined = ToolResult(
         name="ruff",
@@ -114,11 +190,27 @@ def test_no_files_defaults_to_false_and_is_settable() -> None:
         output="No .py files found to check.",
         issues_count=0,
         no_files=True,
+        inspected_files=False,
     )
     assert_that(nothing_examined.no_files).is_true()
+    assert_that(nothing_examined.inspected_files).is_false()
     # It is a successful non-event, not a skip: the tool stays in reporting.
     assert_that(nothing_examined.success).is_true()
     assert_that(nothing_examined.skipped).is_false()
+
+
+@pytest.mark.parametrize("inspected", [None, False, True])
+def test_inspection_signal_survives_result_copy(inspected: bool | None) -> None:
+    """Legacy unknown, decline and completed inspection remain distinct.
+
+    Args:
+        inspected: Producer's inspection signal.
+    """
+    result = ToolResult(name="plugin", success=True, inspected_files=inspected)
+    copied = dataclasses.replace(result, output="Changed display text")
+
+    assert_that(copied.inspected_files).is_equal_to(inspected)
+    assert_that(copied.no_files).is_false()
 
 
 def test_capability_survives_the_verify_fold() -> None:

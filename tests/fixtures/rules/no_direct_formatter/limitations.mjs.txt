@@ -1,0 +1,8 @@
+/* Generic matching does not parse block comments.
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+execSync('black generated.py');
+*/
+
+// Command-like text inside another string can look like a shell-out.
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+const example = "execSync('black generated.py')";

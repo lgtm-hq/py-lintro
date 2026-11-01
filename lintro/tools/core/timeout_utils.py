@@ -22,6 +22,8 @@ issues" an expressible — and therefore usable — classification downstream.
 """
 
 import subprocess  # nosec B404 - used safely with shell disabled
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -37,20 +39,19 @@ class TimeoutResult:
     issues_count: int
     issues: list[Any] = field(default_factory=list)
     timed_out: bool = True
-    timeout_seconds: int = 0
+    timeout_seconds: float = 0
 
 
-def run_subprocess_with_timeout(
+@contextmanager
+def subprocess_timeout_context(
     tool: Any,
     cmd: list[str],
-    timeout: int | None = None,
-    cwd: str | None = None,
+    timeout: float | None = None,
     tool_name: str | None = None,
-) -> tuple[bool, str]:
-    """Run a subprocess command with timeout handling.
+) -> Iterator[None]:
+    """Add timeout context to either subprocess execution API.
 
-    This is a wrapper around tool._run_subprocess that provides consistent
-    timeout error handling and messaging across different tools.
+    Both subprocess execution APIs use the same timeout diagnostics.
 
     Timeout resolution policy:
         Only ``None`` triggers the fallback to the tool's configured/default
@@ -62,17 +63,14 @@ def run_subprocess_with_timeout(
         ``None`` explicitly.
 
     Args:
-        tool: Tool instance with _run_subprocess method.
+        tool: Tool instance supplying its name and timeout defaults.
         cmd: Command to run.
         timeout: Timeout in seconds. If None, uses tool's configured or default
             timeout. An explicit ``0`` is preserved (not treated as missing).
-        cwd: Working directory for command execution.
         tool_name: Name of the tool for error messages. If None, uses tool.name.
 
-    Returns:
-        tuple[bool, str]: (success, output) where success is True if command
-        succeeded without timeout, and output contains command output or
-        timeout error message.
+    Yields:
+        None: While the caller runs the subprocess.
 
     Raises:
         subprocess.TimeoutExpired: If command times out (re-raised with context).
@@ -80,8 +78,7 @@ def run_subprocess_with_timeout(
     tool_name = tool_name or tool.definition.name
 
     try:
-        success, output = tool._run_subprocess(cmd=cmd, timeout=timeout, cwd=cwd)
-        return bool(success), str(output)
+        yield
     except subprocess.TimeoutExpired as e:
         # Re-raise with more context for the calling tool. Only ``None`` falls
         # back to the configured/default timeout; an explicit ``0`` (or any
@@ -109,6 +106,30 @@ def run_subprocess_with_timeout(
         ) from e
 
 
+def run_subprocess_with_timeout(
+    tool: Any,
+    cmd: list[str],
+    timeout: float | None = None,
+    cwd: str | None = None,
+    tool_name: str | None = None,
+) -> tuple[bool, str]:
+    """Run the legacy subprocess API with shared timeout diagnostics.
+
+    Args:
+        tool: Tool instance with a ``_run_subprocess`` method.
+        cmd: Command to run.
+        timeout: Explicit deadline, or ``None`` for the tool default.
+        cwd: Working directory for command execution.
+        tool_name: Optional name used in timeout messages.
+
+    Returns:
+        The command's success flag and combined output.
+    """
+    with subprocess_timeout_context(tool, cmd, timeout, tool_name):
+        success, output = tool._run_subprocess(cmd=cmd, timeout=timeout, cwd=cwd)
+        return bool(success), str(output)
+
+
 def get_timeout_value(tool: Any, default_timeout: int | None = None) -> int:
     """Get timeout value from tool options with fallback to default.
 
@@ -127,7 +148,7 @@ def get_timeout_value(tool: Any, default_timeout: int | None = None) -> int:
 
 def create_timeout_result(
     tool: Any,
-    timeout: int,
+    timeout: float,
     cmd: list[str] | None = None,
     tool_name: str | None = None,
 ) -> TimeoutResult:

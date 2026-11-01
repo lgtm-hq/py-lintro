@@ -5,20 +5,88 @@
 # necessary. Each entry is time-boxed via ignoreUntil so it cannot silently
 # outlive its rationale.
 
-# --- http-cache-semantics (npm, transitive via astro) ---
-# No patched release: GHSA-ch52-4w7c-c8xp covers <= 4.2.0 (latest) and
-# first_patched_version is null. Track: https://github.com/kornelski/http-cache-semantics/issues/56
+# --- minimatch (npm, transitive via @stoplight/spectral-cli) ---
+# GHSA-g3hv-75wg-m249 (published 2026-10-30) covers the minimatch 9+ preprocessing
+# rewrite; OSV's range starts at 0. 3.1.5 is the latest 3.x and lacks that code.
+# Track: https://github.com/lgtm-hq/py-lintro/issues/3031
+[[IgnoredVulns]]
+id = "GHSA-g3hv-75wg-m249"
+ignoreUntil = 2026-11-30
+reason = "Verified 2026-10-31: minimatch@3.1.5 in the root bun.lock (via @stoplight/spectral-core 1.23.1 ^3.1.4 and glob 7.2.3 ^3.1.1 under pinned @stoplight/spectral-cli 6.17.0). The advisory is globParts amplification in firstPhasePreProcess()/secondPhasePreProcess() at optimizationLevel >= 2; those functions and that option exist only in the minimatch 9+ rewrite and are absent from the published 3.1.5 minimatch.js. OSV lists introduced=0, broader than the affected code. 3.1.5 is the latest 3.x, so no in-range upgrade exists. Exposure would in any case be the one-shot spectral lint process on repository files (DoS of that job only). Applicability exception, not a patched-module claim. Remove when spectral leaves minimatch 3 or OSV narrows the range. Track: https://github.com/lgtm-hq/py-lintro/issues/3031"
+
+# --- markdown-it (npm, transitive via markdownlint-cli2) ---
+# GHSA-r7fv-28h4-cvq7, GHSA-vfgh-jcmw-g37q and GHSA-gfr2-rv44-r23c (all
+# published 2026-10-20) are fixed in markdown-it 15.0.2 / 15.0.3, but
+# markdownlint-cli2 0.23.3 (the latest release, and the version the tools
+# manifest pins) depends on markdown-it==15.0.1 exactly, so the lock cannot
+# move. Drop these entries once a markdownlint-cli2 release moves its pin.
+# Track: https://github.com/DavidAnson/markdownlint-cli2/blob/main/package.json
 
 [[IgnoredVulns]]
-id = "GHSA-ch52-4w7c-c8xp"
-ignoreUntil = 2026-11-02
-reason = "http-cache-semantics@4.2.0: no patched release (advisory first_patched_version = none; 4.2.0 is latest, only 4.2.0-beta prereleases exist). Transitive via astro (root bun.lock dev tooling and apps/site/bun.lock), build-time only: astro imports it solely in dist/assets/build/remote.js to cache remote images during `astro build`. The docs site is static output with no SSR, no shared HTTP cache and no remote image config, so the cross-user max-stale disclosure has no reachable multi-user cache. Not exploitable. Upstream: https://github.com/kornelski/http-cache-semantics/issues/56"
-
-# --- braces (npm, transitive via micromatch) ---
-# No patched release: GHSA-vfj7-8cjw-p6xm covers <= 3.0.3 (latest) and
-# first_patched_version is null. Track: https://github.com/micromatch/braces/issues/70
+id = "GHSA-r7fv-28h4-cvq7"
+ignoreUntil = 2026-11-03
+reason = "markdown-it@15.0.1 in the root bun.lock: markdownlint-cli2 0.23.3 (latest release, pinned by the tools manifest) requires markdown-it==15.0.1 exactly, so no resolvable upgrade exists. The flaw is quadratic-time parsing of unmatched closing quotes in the smartquotes rule. markdownlint-cli2 parses repository Markdown, including files a pull request adds, in a one-shot lint process locally or on a CI runner; it does not serve or parse network input. Worst case is a slow or stuck lint job on a crafted file (DoS of that job only, no confidentiality or integrity impact). Upstream pin: markdownlint-cli2 package.json"
 
 [[IgnoredVulns]]
-id = "GHSA-vfj7-8cjw-p6xm"
-ignoreUntil = 2026-11-02
-reason = "braces@3.0.3: no patched release (advisory first_patched_version = none; 3.0.3 is latest). Dev/lint tooling only (root package.json devDependencies, also bundled in the lintro tools image): reached via micromatch/fast-glob from markdownlint-cli2, stylelint and spectral-cli, plus vite/rollup at build time. Input is glob patterns from the operator's own CLI args and lint configs, never network or end-user input; worst case is a stack-exhaustion crash of a single local lint/build process (DoS only, no confidentiality or integrity impact). Upstream: https://github.com/micromatch/braces/issues/70"
+id = "GHSA-vfgh-jcmw-g37q"
+ignoreUntil = 2026-11-03
+reason = "markdown-it@15.0.1 in the root bun.lock: markdownlint-cli2 0.23.3 (latest release, pinned by the tools manifest) requires markdown-it==15.0.1 exactly, so no resolvable upgrade exists. The flaw is quadratic-time inline HTML parsing. markdownlint-cli2 parses repository Markdown, including files a pull request adds, in a one-shot lint process locally or on a CI runner; it does not serve or parse network input. Worst case is a slow or stuck lint job on a crafted file (DoS of that job only, no confidentiality or integrity impact). Upstream pin: markdownlint-cli2 package.json"
+
+[[IgnoredVulns]]
+id = "GHSA-gfr2-rv44-r23c"
+ignoreUntil = 2026-11-03
+reason = "markdown-it@15.0.1 in the root bun.lock: markdownlint-cli2 0.23.3 (latest release, pinned by the tools manifest) requires markdown-it==15.0.1 exactly, so no resolvable upgrade exists. The flaw is quadratic-time rendering of a multi-line link reference definition. markdownlint-cli2 parses repository Markdown, including files a pull request adds, in a one-shot lint process locally or on a CI runner; it does not serve or parse network input. Worst case is a slow or stuck lint job on a crafted file (DoS of that job only, no confidentiality or integrity impact). Upstream pin: markdownlint-cli2 package.json"
+
+# --- opentelemetry-api (PyPI, isolated Semgrep tool environment) ---
+# Reverified 2026-10-23: current Semgrep 1.179.0 and latest 1.182.1 both
+# require opentelemetry-api~=1.37.0, excluding the fixed release 1.45.1.
+# Remove this temporary ignore when Semgrep permits the fixed telemetry stack.
+# Track: https://github.com/lgtm-hq/py-lintro/issues/2972
+
+[[IgnoredVulns]]
+id = "GHSA-xcq7-p3pf-p88h"
+ignoreUntil = 2026-11-23
+reason = "Reverified 2026-10-23: opentelemetry-api@1.37.0 in requirements-semgrep.txt (CVE-2026-114603) remains constrained by current Semgrep 1.179.0 and latest published Semgrep 1.182.1, which both require opentelemetry-api~=1.37.0 and exclude fixed 1.45.1. No compatible release fixes the isolated Semgrep lock; the separate application uv.lock is patched to opentelemetry-api@1.45.1 and guarded by test_semgrep_telemetry_ignore_cannot_hide_vulnerable_application_lock, because this OSV ignore is advisory-global (also paired with pip-audit's advisory ignore list). Operator-owned one-calendar-month temporary ignore under the unpatched-upstream policy, not an owner waiver or a claim of non-reachability. The flaw is quadratic CPU denial of service in TraceState.from_header on untrusted tracestate input; this dependency is in the isolated one-shot Semgrep CLI environment, not Lintro's application server. Recheck upstream constraints before expiry and remove once a compatible Semgrep release admits the fixed telemetry stack. Track: https://github.com/lgtm-hq/py-lintro/issues/2972"
+
+# --- mcp (PyPI, transitive via semgrep) ---
+# GHSA-84m7-p3x7-pcfv (published 2026-10-15) is fixed in mcp 1.30.0, but the
+# pinned semgrep and every available upgrade through 1.182.1 require
+# mcp==1.29.0 exactly, so the isolated semgrep lock cannot move. Drop this
+# entry once semgrep's pin does.
+# Track: https://github.com/semgrep/semgrep/blob/develop/cli/pyproject.toml
+
+[[IgnoredVulns]]
+id = "GHSA-84m7-p3x7-pcfv"
+ignoreUntil = 2026-11-15
+reason = "mcp@1.29.0 in requirements-semgrep.txt (alias CVE-2026-59951, also ignored by pip-audit through [tool.lintro.pip_audit] ignore_vulns): the pinned semgrep release and every available upgrade through 1.182.1 require mcp==1.29.0 exactly, so no resolvable upgrade exists. The flaw is unbounded session accumulation in mcp's StreamableHTTP server transport, reached only by a long-running MCP server. semgrep bundles mcp for its own `semgrep mcp` server command; lintro runs semgrep as a one-shot CLI linter on local files and never starts that server, in CI, locally or in the tools image, so the vulnerable transport is never opened. Not reachable. Upstream pin: semgrep cli/pyproject.toml"
+
+# --- Additional MCP advisories: isolated Semgrep scan-only use ---
+# Semgrep 1.179.0 and latest 1.182.1 still require mcp==1.29.0.
+# Track removal: https://github.com/lgtm-hq/py-lintro/issues/2981
+# Patched SDKs are 1.30.0 / 2.2.0; overriding Semgrep breaks its declared
+# dependency contract. Lintro invokes only `semgrep scan`; its own MCP SDK
+# is already >=2.2. Remove these exceptions when Semgrep updates its pin.
+
+[[IgnoredVulns]]
+id = "GHSA-5h93-6whr-6q8j"
+ignoreUntil = 2026-11-15
+reason = "Verified 2026-10-29: CVE-2026-116685 affects HTTP MCP client transports and OAuth requests following cross-origin redirects. The only vulnerable SDK is mcp==1.29.0 in isolated requirements-semgrep.txt; both pinned Semgrep 1.179.0 and latest 1.182.1 require that exact version. lintro/tools/semgrep/definition.py invokes semgrep scan, never an MCP client or the semgrep mcp server command. Those transports, tool calls and authentication paths are not used by this scan-only integration. Lintro's own MCP runtime is constrained and locked to >=2.2, guarded by test_mcp_exceptions_do_not_cover_a_vulnerable_lintro_runtime. This is an applicability exception for lintro scans, not clearance for running semgrep mcp or arbitrary MCP clients from the tools image. Remove or reassess before expiry; upstream: https://github.com/semgrep/semgrep/blob/develop/cli/pyproject.toml"
+
+[[IgnoredVulns]]
+id = "GHSA-rwrf-2pqf-9j8j"
+ignoreUntil = 2026-11-15
+reason = "Verified 2026-10-29: CVE-2026-116686 affects MCP clients validating tool-result schemas with external references. The only vulnerable SDK is mcp==1.29.0 in isolated requirements-semgrep.txt; both pinned Semgrep 1.179.0 and latest 1.182.1 require that exact version. lintro/tools/semgrep/definition.py invokes semgrep scan, never an MCP client or the semgrep mcp server command. Those transports, tool calls and authentication paths are not used by this scan-only integration. Lintro's own MCP runtime is constrained and locked to >=2.2, guarded by test_mcp_exceptions_do_not_cover_a_vulnerable_lintro_runtime. This is an applicability exception for lintro scans, not clearance for running semgrep mcp or arbitrary MCP clients from the tools image. Remove or reassess before expiry; upstream: https://github.com/semgrep/semgrep/blob/develop/cli/pyproject.toml"
+
+[[IgnoredVulns]]
+id = "GHSA-w4fh-qvv9-3v23"
+ignoreUntil = 2026-11-15
+reason = "Verified 2026-10-29: CVE-2026-116684 affects MCP HTTP servers using bearer-token authentication without audience validation. The only vulnerable SDK is mcp==1.29.0 in isolated requirements-semgrep.txt; both pinned Semgrep 1.179.0 and latest 1.182.1 require that exact version. lintro/tools/semgrep/definition.py invokes semgrep scan, never an MCP client or the semgrep mcp server command. Those transports, tool calls and authentication paths are not used by this scan-only integration. Lintro's own MCP runtime is constrained and locked to >=2.2, guarded by test_mcp_exceptions_do_not_cover_a_vulnerable_lintro_runtime. This is an applicability exception for lintro scans, not clearance for running semgrep mcp or arbitrary MCP clients from the tools image. Remove or reassess before expiry; upstream: https://github.com/semgrep/semgrep/blob/develop/cli/pyproject.toml"
+
+# --- Gitleaks build-only Go closure: affected packages are absent ---
+# The build checks the real target-specific import graph and fails if OpenPGP
+# enters it. The accompanying regression also requires this to remain the only
+# non-fixture Go module, because OSV advisory ignores are repository-wide.
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+ignoreUntil = 2026-11-25
+reason = "Verified 2026-10-25: this no-fixed-version advisory affects only golang.org/x/crypto/openpgp and its subpackages. Neither Linux amd64 (431 packages) nor arm64 (428 packages) Gitleaks 8.30.1 import closure includes them under the actual CGO_ENABLED=0, gore2regex build configuration. docker/tools.Dockerfile rechecks that exact target-specific closure through scripts/utils/gitleaks/verify_imports.py before every install and fails on any affected package or missing command. tests/scripts/test_gitleaks_import_guard.py guards the exception, its expiry, and the absence of any other non-fixture Go module; new consumers require fresh applicability review. This is not a patched-module or whole-image clearance claim. Remove or reassess before expiry. Advisory: https://pkg.go.dev/vuln/GO-2026-5932; review: https://github.com/lgtm-hq/py-lintro/pull/2977"

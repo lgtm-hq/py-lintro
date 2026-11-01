@@ -56,6 +56,7 @@ def test_build_issues_digest_skipped_results_excluded():
         issues_count=0,
         skipped=True,
         skip_reason="not installed",
+        inspected_files=False,
     )
     digest = _build_issues_digest([result])
     assert_that(digest).is_empty()

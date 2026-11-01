@@ -662,7 +662,7 @@ def test_unusable_stable_rounds_never_converge(stable_rounds: object) -> None:
     decision = evaluate_convergence(
         runs=runs,
         threshold=3.0,
-        stable_rounds=stable_rounds,  # type: ignore[arg-type]
+        stable_rounds=stable_rounds,
     )
 
     assert_that(decision.converged).is_false()

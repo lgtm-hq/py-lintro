@@ -79,7 +79,7 @@ def test_load_config_rejects_non_mapping_deps_in_yaml(tmp_path: Path) -> None:
     config_file = tmp_path / ".lintro-config.yaml"
     config_file.write_text("deps: true\n")
 
-    with pytest.raises(ConfigurationError, match="deps config must be a mapping"):
+    with pytest.raises(ConfigurationError, match="deps must be a mapping"):
         load_config(config_path=config_file, allow_pyproject_fallback=False)
 
 
@@ -97,5 +97,5 @@ def test_load_config_rejects_non_mapping_deps_in_pyproject(
     pyproject.write_text("[tool.lintro]\ndeps = true\n")
     monkeypatch.chdir(tmp_path)
 
-    with pytest.raises(ConfigurationError, match="deps config must be a mapping"):
+    with pytest.raises(ConfigurationError, match="deps must be a mapping"):
         load_config(allow_pyproject_fallback=True)

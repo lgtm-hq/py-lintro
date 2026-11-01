@@ -121,6 +121,10 @@ def _capture_fmt_checkpoint(*, ctx: RunContext, paths: list[str]) -> None:
     Args:
         ctx: The run context for this run.
         paths: Paths the run will format.
+
+    Raises:
+        click.ClickException: When checkpoint enumeration fails, before any
+            formatting runs.
     """
     from lintro.enums.action import Action as _Action
 
@@ -135,13 +139,16 @@ def _capture_fmt_checkpoint(*, ctx: RunContext, paths: list[str]) -> None:
 
     from pathlib import Path
 
-    from lintro.ai.checkpoints import capture_checkpoint
+    from lintro.ai.checkpoints import CheckpointError, capture_checkpoint
 
-    checkpoint = capture_checkpoint(
-        paths,
-        workspace_root=Path.cwd(),
-        keep=ai_config.checkpoint_retention,
-    )
+    try:
+        checkpoint = capture_checkpoint(
+            paths,
+            workspace_root=Path.cwd(),
+            keep=ai_config.checkpoint_retention,
+        )
+    except CheckpointError as exc:
+        raise click.ClickException(f"Failed to capture fmt checkpoint: {exc}") from exc
     if checkpoint is None or ctx.clean_stdout_output:
         return
     ctx.logger.console_output(

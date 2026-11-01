@@ -36,6 +36,7 @@ from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.round_outcome import RoundOutcome
 from lintro.ai.review.models.sticky_plan import StickyPlan
 from lintro.ai.review.models.sticky_request import StickyRequest
+from lintro.ai.review.reuse_gate import inherit_model_evidence
 from lintro.ai.review.run_record_factory import (
     RoundTotals,
     run_record_from_result,
@@ -119,7 +120,38 @@ def _round_outcome(*, request: StickyRequest) -> RoundOutcome:
             convergence_score=score_records(records=match.records),
         ),
     )
-    combined_runs = [*state.runs, current]
+    # The round's final record replaces the checkpoint record a killed
+    # attempt at the same round left behind. The models that attempt
+    # reported or silently requested stay separate when coverage was
+    # inherited. A mismatched attempt was re-reviewed, and its evidence
+    # must not contradict the clean record or bar it from reuse (#2867).
+    checkpoints = [
+        run
+        for run in state.runs
+        if run.coverage.checkpoint and run.identity.round == round_number
+    ]
+    if checkpoints:
+        prior_coverage = set(state.coverage)
+        inherited_rounds = {
+            record.round
+            for record in request.result.coverage_records
+            if record in prior_coverage
+            and record.path not in request.result.metadata.reviewed_paths
+        }
+        for run in checkpoints:
+            current = replace(
+                current,
+                identity=inherit_model_evidence(
+                    earlier=run.identity,
+                    current=current.identity,
+                    inherited=request.result.coverage is None
+                    or run.identity.round in inherited_rounds,
+                ),
+            )
+    combined_runs = [
+        *(run for run in state.runs if run not in checkpoints),
+        current,
+    ]
     return RoundOutcome(
         prior=state,
         round_number=round_number,
@@ -168,6 +200,7 @@ def advance_review_state(*, request: StickyRequest) -> ReviewState:
         truncated=outcome.truncated,
         # Cumulative, so pruning ``runs`` never drops spend (#2796).
         pr_spend_usd=state.review_spend_usd + outcome.run.usage.cost,
+        pr_shadow_usd=state.review_shadow_usd + outcome.run.usage.cost_shadow,
     )
 
 
@@ -196,6 +229,12 @@ def _round_plan(*, request: StickyRequest, outcome: RoundOutcome) -> StickyPlan:
         repo=request.repo,
         pr_number=request.pr_number,
         posting_policy=request.posting_policy,
+        # Cumulative, like the spend the budget line shows (#2868): the
+        # retained runs are capped, the PR's shadow total is not.
+        pr_shadow_usd=(
+            (request.prior_state.review_shadow_usd if request.prior_state else 0.0)
+            + outcome.run.usage.cost_shadow
+        ),
     )
 
 

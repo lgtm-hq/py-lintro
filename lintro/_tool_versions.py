@@ -81,7 +81,7 @@ _MANIFEST_PATH = Path(__file__).parent / "tools" / "manifest.json"
 # ``_generated_versions.py`` (versions).
 TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.ACTIONLINT: "1.7.12",
-    ToolName.BUF: "1.72.0",
+    ToolName.BUF: "1.73.0",
     ToolName.CARGO_AUDIT: "0.22.0",
     ToolName.CARGO_DENY: "0.20.0",
     # checkov is a pypi distribution but deliberately not a pypi *seed*: it
@@ -91,7 +91,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     # repo's own osv-scanner dogfood. install-tools.sh installs this exact pin
     # with ``uv tool install`` into an isolated venv instead. Renovate tracks
     # it against the pypi datasource (see renovate.json).
-    ToolName.CHECKOV: "3.3.16",
+    ToolName.CHECKOV: "3.4.0",
     # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
     ToolName.CLIPPY: "1.98.1",
     # cppcheck ships no portable single binary, so both the tools image and the
@@ -106,18 +106,18 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.CPPCHECK: "2.17.1",
     ToolName.DOTENV_LINTER: "4.0.0",
     ToolName.GITLEAKS: "8.30.1",
-    ToolName.GOLANGCI_LINT: "2.13.2",
+    ToolName.GOLANGCI_LINT: "2.15.0",
     ToolName.HADOLINT: "2.15.1",
-    ToolName.OSV_SCANNER: "2.5.1",
+    ToolName.OSV_SCANNER: "2.7.0",
     ToolName.RUSTC: "1.98.1",
     # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
     ToolName.RUSTFMT: "1.9.0",
     ToolName.SHELLCHECK: "0.11.0",
-    ToolName.SHFMT: "3.14.0",
+    ToolName.SHFMT: "3.14.1",
     ToolName.TAPLO: "0.10.0",
-    ToolName.TRUFFLEHOG: "3.97.3",
+    ToolName.TRUFFLEHOG: "3.99.2",
     ToolName.TYPOS: "1.49.0",
-    ToolName.VALE: "3.20.0",
+    ToolName.VALE: "3.24.0",
 }
 
 _NPM_PACKAGE_TO_TOOL: dict[str, ToolName] = {

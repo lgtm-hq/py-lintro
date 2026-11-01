@@ -21,10 +21,11 @@ from lintro.enums.capability import Cap
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.gitleaks.gitleaks_issue import GitleaksIssue
 from lintro.parsers.gitleaks.gitleaks_parser import parse_gitleaks_output
-from lintro.plugins.base import BaseToolPlugin, ExecutionContext
+from lintro.plugins.base import BaseToolPlugin, PreparedExecution
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.option_validators import (
@@ -189,7 +190,7 @@ class GitleaksPlugin(BaseToolPlugin):
         # rather than raw CLI path arguments. Scan each explicit file when
         # multiple paths are provided so sibling files in the same directory
         # are not included.
-        cwd_path = Path(ctx.cwd) if ctx.cwd else Path.cwd()
+        cwd_path = Path(ctx.cwd)
         scan_explicit_files = bool(paths) and not (
             len(paths) == 1 and paths[0] in {".", "./"}
         )
@@ -214,11 +215,13 @@ class GitleaksPlugin(BaseToolPlugin):
                 return error_result
             all_issues.extend(issues)
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=True, inspected_files=True),
+                issues_count=len(all_issues),
+            ),
             name=self.definition.name,
-            success=True,
             output=None,
-            issues_count=len(all_issues),
             issues=all_issues,
             parse_failures_count=0,
         )
@@ -227,7 +230,7 @@ class GitleaksPlugin(BaseToolPlugin):
         self,
         *,
         source_path: str,
-        ctx: ExecutionContext,
+        ctx: PreparedExecution,
     ) -> tuple[list[GitleaksIssue], ToolResult | None]:
         """Run Gitleaks against a single source path.
 
@@ -274,15 +277,14 @@ class GitleaksPlugin(BaseToolPlugin):
                         proc.returncode,
                         stderr[:500] if stderr else "(no stderr)",
                     )
-                    return [], ToolResult(
+                    return [], ToolResult.from_outcome(
+                        ToolOutcome(execution=Checked(success=False)),
                         name=self.definition.name,
-                        success=False,
                         output=(
                             stderr
                             if stderr
                             else (f"Gitleaks exited with code {proc.returncode}")
                         ),
-                        issues_count=0,
                     )
             except subprocess.TimeoutExpired:
                 timeout_msg = (
@@ -291,12 +293,9 @@ class GitleaksPlugin(BaseToolPlugin):
                     "  - Large codebase taking too long to scan\n"
                     "  - Need to increase timeout via --tool-options gitleaks:timeout=N"
                 )
-                return [], ToolResult(
+                return [], ToolResult.from_outcome(
+                    ToolOutcome(execution=TimedOut(timeout_msg)),
                     name=self.definition.name,
-                    success=False,
-                    output=timeout_msg,
-                    issues_count=0,
-                    timed_out=True,
                 )
             except (OSError, ValueError, RuntimeError, FileNotFoundError) as e:
                 logger.error(f"Failed to run Gitleaks: {e}")
@@ -304,11 +303,10 @@ class GitleaksPlugin(BaseToolPlugin):
                 execution_failure = True
 
             if execution_failure:
-                return [], ToolResult(
+                return [], ToolResult.from_outcome(
+                    ToolOutcome(execution=Checked(success=False)),
                     name=self.definition.name,
-                    success=False,
                     output=output,
-                    issues_count=0,
                 )
 
             issues = parse_gitleaks_output(output=output)
@@ -317,13 +315,12 @@ class GitleaksPlugin(BaseToolPlugin):
             stripped = output.strip()
             if issues_count == 0 and not stripped:
                 logger.error("Gitleaks report file was empty")
-                return [], ToolResult(
+                return [], ToolResult.from_outcome(
+                    ToolOutcome(execution=Checked(success=False)),
                     name=self.definition.name,
-                    success=False,
                     output=(
                         "Gitleaks report file was empty; treating as a parse failure."
                     ),
-                    issues_count=0,
                     parse_failures_count=1,
                 )
 
@@ -332,11 +329,10 @@ class GitleaksPlugin(BaseToolPlugin):
                     data = json.loads(output)
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse gitleaks output: {e}")
-                    return [], ToolResult(
+                    return [], ToolResult.from_outcome(
+                        ToolOutcome(execution=Checked(success=False)),
                         name=self.definition.name,
-                        success=False,
                         output=f"Failed to parse gitleaks output: {e}",
-                        issues_count=0,
                         parse_failures_count=1,
                     )
                 if not isinstance(data, list):
@@ -344,14 +340,13 @@ class GitleaksPlugin(BaseToolPlugin):
                         "Gitleaks output was not a JSON array (got %s).",
                         type(data).__name__,
                     )
-                    return [], ToolResult(
+                    return [], ToolResult.from_outcome(
+                        ToolOutcome(execution=Checked(success=False)),
                         name=self.definition.name,
-                        success=False,
                         output=(
                             "Gitleaks output was not a JSON array; "
                             "treating as a parse failure."
                         ),
-                        issues_count=0,
                         parse_failures_count=1,
                     )
 

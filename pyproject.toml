@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools==84.0.0", "wheel"]
+requires = ["setuptools==84.1.0", "wheel"]
 # In-tree PEP 517 shim: generates the derived version artifacts before
 # delegating to setuptools.build_meta (#2180). lintro_build never ships
 # in the wheel; the sdist carries it via MANIFEST.in.
@@ -8,7 +8,7 @@ backend-path = ["."]
 
 [project]
 name = "lintro"
-version = "0.171.3"
+version = "0.175.2"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
@@ -64,7 +64,7 @@ content-type = "text/markdown"
 typing = ["types-setuptools>=80.9.0.20251223", "types-tabulate>=0.9.0.20241207"]
 full = [
   "ruff>=0.15.9",
-  "black>=26.3.1",
+  "black>=26.10.1",
   "bandit>=1.9.4",
   "import-linter>=2.15",
   "mypy>=1.19.1",
@@ -81,7 +81,7 @@ mcp = ["mcp>=2.2,<3"]
 # Semgrep is intentionally absent: it ships from the isolated lockfile
 # ``requirements-semgrep.txt`` (#2104) so its pins cannot collide with
 # lintro's shared resolver. sqlfluff and pip-audit remain here.
-tools = ["sqlfluff>=4.0.0", "pip-audit>=2.10.1"]
+tools = ["sqlfluff>=4.3.0", "pip-audit>=2.10.1"]
 
 [project.scripts]
 lintro = "lintro.cli:main"
@@ -120,7 +120,7 @@ dev = [
   "assertpy>=1.1",
   "pytest-mock>=3.15.1",
   "bandit>=1.9.4",
-  "black>=26.3.1",
+  "black>=26.10.1",
   "ruff>=0.15.9",
   "yamllint>=1.37.1",
   "pytest-timeout>=2.4.0",
@@ -165,7 +165,7 @@ exclude = [
 namespaces = false
 
 [tool.setuptools.package-data]
-lintro = ["tools/*.json", "py.typed", "ascii-art/*.txt"]
+lintro = ["tools/*.json", "py.typed", "ascii-art/*.txt", "rules/*/*.yaml"]
 "lintro.ai.prompts.templates" = ["**/*.md", "**/*.json"]
 "lintro.ai.review.checklist" = ["corpus/*.yaml"]
 
@@ -397,6 +397,31 @@ exclude = [
   "tests/",
 ]
 
+[tool.lintro.pip_audit]
+# Advisory ids pip-audit ignores on this repository's own requirements.
+# Every id here must also be a time-boxed [[IgnoredVulns]] entry (by id or
+# alias) in .osv-scanner.toml, which carries the reason and the expiry;
+# tests/unit/test_pip_audit_ignores.py fails when one is missing or expired.
+# GHSA-84m7-p3x7-pcfv / CVE-2026-59951: mcp 1.29.0, pinned exactly by semgrep;
+# see the osv entry. Drop both together once semgrep's pin moves.
+# Additional MCP client/server advisories are unreachable in Semgrep scan;
+# their individual OSV rows carry evidence and the 2026-11-15 expiry.
+# GHSA-xcq7-p3pf-p88h / CVE-2026-114603: only Semgrep's telemetry 1.37.0
+# remains blocked; uv.lock is patched to 1.45.1. The paired OSV row carries
+# the 2026-10-23 re-verification and 2026-11-23 expiry (#2972).
+ignore_vulns = [
+  "CVE-2026-59951",
+  "GHSA-84m7-p3x7-pcfv",
+  "CVE-2026-114603",
+  "GHSA-xcq7-p3pf-p88h",
+  "CVE-2026-116685",
+  "GHSA-5h93-6whr-6q8j",
+  "CVE-2026-116686",
+  "GHSA-rwrf-2pqf-9j8j",
+  "CVE-2026-116684",
+  "GHSA-w4fh-qvv9-3v23",
+]
+
 # Duplicate-code ratchet gate (issue #2293). pylint's `duplicate-code` checker
 # runs on the per-tool packages only, so the copy-pasted definition template
 # cannot grow back after #2311 factored it out. `include` lists every
@@ -478,6 +503,10 @@ mypy_path = ["evals/review-efficacy"]
 # .gitignore keeps them untracked either way; this stops them being created.
 cache_dir = "$MYPY_CONFIG_FILE_DIR/.mypy_cache"
 strict = true
+# None-handling audit (#3022, epic #2996); remaining overrides are delete-only.
+strict_equality_for_none = true
+warn_unreachable = true
+enable_error_code = ["redundant-expr", "truthy-bool", "possibly-undefined"]
 ignore_missing_imports = false
 warn_unused_ignores = true
 warn_unused_configs = true
@@ -528,6 +557,133 @@ check_untyped_defs = true
 module = ["scripts", "scripts.*", "scripts.utils", "scripts.utils.*"]
 disallow_untyped_defs = false
 check_untyped_defs = true
+
+# --- None-check baseline (#3022, epic #2996): entries may only be deleted. ---
+# Exact module/code and None-equality identities and ceilings live in
+# tests/unit/test_mypy_none_baseline.py. Keep runtime validation at raw-data
+# boundaries intact while the owning None-audit refactors are reconciled.
+[[tool.mypy.overrides]]
+module = ["lintro._tool_versions"]
+disable_error_code = ["redundant-expr"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.ai.config_overrides"]
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.ai.providers.base"]
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.ai.rate_limit"]
+strict_equality_for_none = false
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.ai.review.exceptions"]
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.ai.review.models.changed_file"]
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.ai.transport"]
+strict_equality_for_none = false
+disable_error_code = ["redundant-expr"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.config.config_loader"]
+strict_equality_for_none = false
+disable_error_code = ["redundant-expr"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.config.tool_config_generator"]
+strict_equality_for_none = false
+
+[[tool.mypy.overrides]]
+module = ["lintro.parsers.bandit.bandit_parser"]
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.parsers.semgrep.semgrep_parser"]
+strict_equality_for_none = false
+disable_error_code = ["redundant-expr", "unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.parsers.streaming"]
+disable_error_code = ["redundant-expr"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.plugins.discovery"]
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.plugins.subprocess_executor"]
+disable_error_code = ["redundant-expr", "unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.tools.core.tool_registry"]
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.tools.pytest.collection"]
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.tools.pytest.coverage_processor"]
+strict_equality_for_none = false
+
+[[tool.mypy.overrides]]
+module = ["lintro.tools.pytest.definition"]
+strict_equality_for_none = false
+disable_error_code = ["redundant-expr"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.tools.pytest.output_parsers"]
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.tools.pytest.test_analytics"]
+disable_error_code = ["redundant-expr"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.utils.async_tool_executor"]
+disable_error_code = ["redundant-expr", "unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.utils.config_priority"]
+disable_error_code = ["redundant-expr"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.utils.config_validation"]
+disable_error_code = ["redundant-expr"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.utils.environment.collectors"]
+disable_error_code = ["possibly-undefined"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.utils.execution.fix_retry"]
+disable_error_code = ["redundant-expr", "unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.utils.execution.result_shaping"]
+strict_equality_for_none = false
+disable_error_code = ["unreachable"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.utils.file_cache"]
+disable_error_code = ["possibly-undefined"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.utils.json_output"]
+disable_error_code = ["redundant-expr"]
+
+[[tool.mypy.overrides]]
+module = ["lintro.utils.native_parsers"]
+strict_equality_for_none = false
+disable_error_code = ["possibly-undefined", "unreachable"]
 
 [tool.uv]
 # pydoclint (the `full` extra) depends on `docstring-parser-fork`; anthropic (the
@@ -621,6 +777,7 @@ source_modules = [
   "lintro.parsers",
   "lintro.plugins",
   "lintro.profiling",
+  "lintro.rules",
   "lintro.tools",
   "lintro.utils",
   "lintro.watch",
@@ -672,7 +829,7 @@ layers = [
   "config",
   "formatters | parsers",
   "utils",
-  "models",
+  "models | rules",
   "enums",
   "exceptions | licenses | deps",
 ]
@@ -688,10 +845,9 @@ ignore_imports = [
   "lintro.cli_utils.commands.mcp -> lintro.mcp.server",      # owned by #1972
   "lintro.cli_utils.commands.test -> lintro.api.core",       # owned by #1972
   "lintro.cli_utils.commands.test -> lintro.api.pipeline",   # owned by #1972
-  # 144 edges owned by #2410
+  # 143 edges owned by #2410
   "lintro.plugins.execution_preparation -> lintro.tools.core.command_builders",     # owned by #2410
   "lintro.plugins.execution_preparation -> lintro.tools.core.config_injection",     # owned by #2410
-  "lintro.plugins.execution_preparation -> lintro.tools.core.version_requirements", # owned by #2410
   "lintro.tools -> lintro.plugins",                                                 # owned by #2410
   "lintro.tools.actionlint.definition -> lintro.plugins.base",                      # owned by #2410
   "lintro.tools.actionlint.definition -> lintro.plugins.protocol",                  # owned by #2410

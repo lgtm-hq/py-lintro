@@ -14,6 +14,7 @@ from lintro.plugins.base import (
     DEFAULT_EXCLUDE_PATTERNS,
     DEFAULT_TIMEOUT,
     ExecutionContext,
+    PreparedExecution,
 )
 from lintro.utils.path_filtering import walk_files_with_excludes
 from lintro.utils.project_detection import _VENDOR_SKIP_DIRS, _iter_project_files
@@ -35,7 +36,7 @@ def test_execution_context_default_values() -> None:
 
     assert_that(ctx.files).is_empty()
     assert_that(ctx.rel_files).is_empty()
-    assert_that(ctx.cwd).is_none()
+    assert_that(ctx.cwd).is_equal_to(str(Path.cwd()))
     assert_that(ctx.early_result).is_none()
     assert_that(ctx.timeout).is_equal_to(DEFAULT_TIMEOUT)
 
@@ -944,7 +945,7 @@ def test_prepare_returns_context_when_files_are_discovered(
     fake_tool_plugin: FakeToolPlugin,
     tmp_path: Path,
 ) -> None:
-    """Verify prepare returns a context whose early_result is unset.
+    """Verify prepare returns frozen, fully resolved execution metadata.
 
     Args:
         fake_tool_plugin: Fixture providing a FakeToolPlugin instance.
@@ -965,10 +966,11 @@ def test_prepare_returns_context_when_files_are_discovered(
     ):
         prepared = fake_tool_plugin.prepare(paths=[str(tmp_path)], options={})
 
-    assert_that(prepared).is_instance_of(ExecutionContext)
-    context = cast("ExecutionContext", prepared)
+    assert_that(prepared).is_instance_of(PreparedExecution)
+    context = cast("PreparedExecution", prepared)
     assert_that(context.files).is_equal_to([str(test_file)])
-    assert_that(context.early_result).is_none()
+    assert_that(context.cwd).is_instance_of(str)
+    assert_that(context.timeout).is_equal_to(30.0)
 
 
 def test_prepare_delegates_to_prepare_execution(
@@ -979,7 +981,12 @@ def test_prepare_delegates_to_prepare_execution(
     Args:
         fake_tool_plugin: Fixture providing a FakeToolPlugin instance.
     """
-    context = ExecutionContext(files=["a.py"], rel_files=["a.py"])
+    context = ExecutionContext(
+        files=["a.py"],
+        rel_files=["a.py"],
+        cwd="/project",
+        timeout=0.5,
+    )
 
     with patch.object(
         type(fake_tool_plugin),
@@ -992,7 +999,9 @@ def test_prepare_delegates_to_prepare_execution(
             no_files_message="No files to format.",
         )
 
-    assert_that(prepared).is_same_as(context)
+    assert_that(cast("PreparedExecution", prepared).files).is_equal_to(["a.py"])
+    assert_that(cast("PreparedExecution", prepared).cwd).is_equal_to("/project")
+    assert_that(cast("PreparedExecution", prepared).timeout).is_equal_to(0.5)
     prepare_execution.assert_called_once_with(
         ["."],
         {"verbose": True},

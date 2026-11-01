@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from lintro.ai.enums import AITransport, ConfigSource
 from lintro.ai.enums.cost_basis import CostBasis
+from lintro.ai.enums.credential_kind import CredentialKind
+from lintro.ai.provenance import auth_mode_for, detect_run_provenance
 from lintro.ai.providers.anthropic.config import anthropic_settings
-from lintro.ai.providers.claude_auth import should_send_bare
+from lintro.ai.providers.anthropic.metadata import ANTHROPIC_METADATA
+from lintro.ai.providers.claude_auth import claude_cli_env, should_send_bare
 from lintro.ai.registry import AIProvider
 from lintro.ai.resolved_ai_config import ResolvedAIConfig
 
@@ -29,7 +34,7 @@ __all__ = [
 DEFAULT_API_TIMEOUT = 60.0
 DEFAULT_CLI_TIMEOUT = 1800.0
 
-AuthMode = Literal["api_key", "subscription", "unknown"]
+AuthMode = Literal["api_key", "subscription", "gateway_token", "unknown"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +81,80 @@ def resolve_cost_basis(*, auth_mode: str, estimated: bool) -> CostBasis | None:
     return None
 
 
+def _auth_mode(*, credential: CredentialKind, bare_billing: bool) -> AuthMode:
+    """Return the auth mode the credential implies, or the policy's label.
+
+    Args:
+        credential: The credential kind present in the environment.
+        bare_billing: Whether the CLI bills an API key under ``--bare``.
+
+    Returns:
+        ``gateway_token`` for a gateway token, otherwise ``api_key`` or
+        ``subscription`` as the credential or, failing that, the policy says.
+    """
+    derived = auth_mode_for(credential)
+    if derived == "gateway_token":
+        return "gateway_token"
+    if derived == "api_key" or (not derived and bare_billing):
+        return "api_key"
+    return "subscription"
+
+
+def cli_runtime_env(ai_config: AIConfig) -> dict[str, str]:
+    """Return the environment the CLI subprocess will run under.
+
+    The claude transport re-exports a renamed ``ai.api_key_env`` as
+    ``ANTHROPIC_API_KEY`` for its child (#2549). Billing and provenance
+    must read that same environment, or a run that bills the re-exported
+    key is reported as subscription spend.
+
+    Args:
+        ai_config: AI configuration.
+
+    Returns:
+        A copy of the process environment with the transport's additions.
+    """
+    env = dict(os.environ)
+    if ai_config.provider is AIProvider.ANTHROPIC:
+        env.update(
+            claude_cli_env(
+                api_key_env=ai_config.api_key_env
+                or ANTHROPIC_METADATA.default_api_key_env,
+                env=env,
+            ),
+        )
+    return env
+
+
+def cli_bare_billing(
+    ai_config: AIConfig,
+    *,
+    cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> bool:
+    """Return whether the ``claude`` CLI will be sent ``--bare`` for *ai_config*.
+
+    Under ``--bare`` the call bills the API key, not the subscription; the
+    provenance, auth mode and cost basis of a CLI run all follow from it.
+
+    Args:
+        ai_config: AI configuration.
+        cwd: Working directory the CLI subprocess runs in, so a project-level
+            ``apiKeyHelper`` is found where the run finds it.
+        env: The environment the subprocess will see;
+            :func:`cli_runtime_env` when ``None``.
+
+    Returns:
+        True for the Anthropic provider when its bare-mode policy resolves to
+        sending the flag; False for every other provider.
+    """
+    return ai_config.provider is AIProvider.ANTHROPIC and should_send_bare(
+        configured=anthropic_settings(ai_config).cli_bare,
+        cwd=cwd,
+        env=cli_runtime_env(ai_config) if env is None else env,
+    )
+
+
 def _profile_max_cost(ai_config: AIConfig) -> float | None:
     """Return the active transport profile's cost cap, if the profile sets one.
 
@@ -97,15 +176,26 @@ def _profile_max_cost(ai_config: AIConfig) -> float | None:
     return profiles.api.max_cost_usd
 
 
-def resolve_transport_settings(ai_config: AIConfig) -> ResolvedTransportSettings:
+def resolve_transport_settings(
+    ai_config: AIConfig,
+    *,
+    cwd: str | None = None,
+) -> ResolvedTransportSettings:
     """Resolve timeout and cost for the config's active transport.
 
     Precedence: transport profile → legacy scalar → built-in default.
+
+    The auth mode and cost basis read the credential and endpoint the run
+    will use (#2867), which means the Claude settings files and the Codex
+    session file on disk: a dry run and CI can therefore resolve differently
+    when their disks differ, and the profile log says which was found.
 
     Args:
         ai_config: AI configuration (transport may be None; defaults to api
             for resolution when unset — callers should still require transport
             for enabled AI features).
+        cwd: Working directory the CLI subprocess runs in, so project-level
+            settings files are read from the same place the run reads them.
 
     Returns:
         Resolved settings for logging, budgets, and provider timeouts.
@@ -128,16 +218,43 @@ def resolve_transport_settings(ai_config: AIConfig) -> ResolvedTransportSettings
         # (CliBareMode.AUTO, #1859): the call then bills the key, not the
         # subscription, so report api_key/estimated instead of claiming
         # subscription/unpriceable (#1923 cost provenance).
-        bare_billing = ai_config.provider is AIProvider.ANTHROPIC and should_send_bare(
-            configured=anthropic_settings(ai_config).cli_bare,
+        # Billing and the credential read the environment the subprocess
+        # will see, re-exported key included (#2549), so a paid call under
+        # a renamed variable is priced and capped as one.
+        env = cli_runtime_env(ai_config)
+        bare_billing = cli_bare_billing(ai_config, cwd=cwd, env=env)
+        # The credential present decides auth_mode, not the --bare policy:
+        # a gateway token must not read as a subscription (#2867). A
+        # subscription run pointed off the provider's host is priced on the
+        # wrong table, so its figures are unknown, not unpriceable.
+        provenance = detect_run_provenance(
+            provider=ai_config.provider,
+            transport=transport,
+            bare=bare_billing,
+            env=env,
+            cwd=cwd,
         )
+        # A metered key bills the API whichever way it reached the CLI: the
+        # Anthropic ``--bare`` policy, ``CODEX_API_KEY``, a codex session
+        # with an embedded key, or ``ANTHROPIC_API_KEY`` under
+        # ``cli_bare: never``. The basis must agree with the auth mode.
+        metered = bare_billing or provenance.credential is CredentialKind.API_KEY
+        if not provenance.first_party:
+            basis = CostBasis.UNKNOWN
+        elif metered:
+            basis = CostBasis.ESTIMATED
+        else:
+            basis = CostBasis.UNPRICEABLE
         return ResolvedTransportSettings(
             transport=transport,
             timeout=timeout,
             max_cost_usd=max_cost,
-            cost_is_advisory=True,
-            auth_mode="api_key" if bare_billing else "subscription",
-            cost_basis=(CostBasis.ESTIMATED if bare_billing else CostBasis.UNPRICEABLE),
+            cost_is_advisory=basis is not CostBasis.UNKNOWN,
+            auth_mode=_auth_mode(
+                credential=provenance.credential,
+                bare_billing=bare_billing,
+            ),
+            cost_basis=basis,
         )
 
     timeout = (
@@ -147,13 +264,23 @@ def resolve_transport_settings(ai_config: AIConfig) -> ResolvedTransportSettings
     )
     profile_cap = _profile_max_cost(ai_config)
     max_cost = profile_cap if profile_cap is not None else ai_config.max_cost_usd
+    # ``ai.api_base_url`` can point an SDK call at a gateway; its figures are
+    # then priced on the wrong table and the key is a gateway token (#2867).
+    api_provenance = detect_run_provenance(
+        provider=ai_config.provider,
+        transport=transport,
+        cwd=cwd,
+        configured_base_url=ai_config.api_base_url,
+    )
     return ResolvedTransportSettings(
         transport=transport,
         timeout=timeout if timeout is not None else DEFAULT_API_TIMEOUT,
         max_cost_usd=max_cost,
         cost_is_advisory=False,
-        auth_mode="api_key",
-        cost_basis=CostBasis.BILLED,
+        auth_mode=_auth_mode(credential=api_provenance.credential, bare_billing=True),
+        cost_basis=(
+            CostBasis.BILLED if api_provenance.first_party else CostBasis.UNKNOWN
+        ),
     )
 
 

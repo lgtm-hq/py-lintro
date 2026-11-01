@@ -141,7 +141,10 @@ def test_a_charged_but_dropped_call_is_recorded_everywhere() -> None:
         result,
         metadata=replace(
             result.metadata,
-            **_pr_budget_fields(result=result, pr_budget=budget),
+            **_pr_budget_fields(
+                cost=result.metadata.cost_estimate_usd,
+                pr_budget=budget,
+            ),
         ),
     )
     persisted = advance_review_state(

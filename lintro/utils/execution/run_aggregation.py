@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from lintro.enums.action import Action
 from lintro.models.core.run_artifact import RunArtifact
+from lintro.models.core.tool_outcome import FixMeasured, FixPartial, FixUnmeasured
 from lintro.utils.execution.exit_codes import (
     DEFAULT_EXIT_CODE_FAILURE,
     aggregate_tool_results,
@@ -20,6 +21,8 @@ from lintro.utils.execution.exit_codes import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from lintro.models.core.tool_result import ToolResult
     from lintro.utils.execution.run_context import RunContext
 
@@ -37,6 +40,8 @@ def finalize_artifact(
     total_issues: int,
     total_fixed: int,
     total_remaining: int,
+    paths: Sequence[str] = (".",),
+    partial_scan: bool = False,
 ) -> RunArtifact:
     """Tally the run and resolve its exit code into a :class:`RunArtifact`.
 
@@ -46,6 +51,8 @@ def finalize_artifact(
         total_issues: Aggregated issue count.
         total_fixed: Aggregated fixed count.
         total_remaining: Aggregated remaining count.
+        paths: Path arguments measured by this run.
+        partial_scan: Whether ``--diff`` or ``--incremental`` was requested.
 
     Returns:
         RunArtifact: The completed artifact for the render phase.
@@ -56,6 +63,7 @@ def finalize_artifact(
     from lintro.utils.severity_baseline import (
         read_severity_baseline,
         resolve_log_root,
+        severity_baseline_scope,
     )
     from lintro.utils.severity_counts import count_severities
 
@@ -83,9 +91,13 @@ def finalize_artifact(
         # without reaching this function. Named anyway so both call sites pass
         # the same arguments and cannot drift apart.
         early_exit=False,
+        partial_scan=partial_scan,
     )
     log_root = resolve_log_root(ctx.output_manager) if eligible else None
-    previous_counts = read_severity_baseline(log_root) if log_root else None
+    previous_counts = None
+    if log_root is not None:
+        scope = severity_baseline_scope(paths=paths, tool_results=all_results)
+        previous_counts = read_severity_baseline(log_root, scope)
 
     return RunArtifact(
         tool_results=all_results,
@@ -98,6 +110,8 @@ def finalize_artifact(
         total_remaining=total_remaining,
         exit_code=exit_code,
         dry_run_preview=ctx.dry_run_preview,
+        paths=tuple(paths),
+        partial_scan=partial_scan,
     )
 
 
@@ -137,6 +151,8 @@ def refresh_artifact(
         total_issues=total_issues,
         total_fixed=total_fixed,
         total_remaining=total_remaining,
+        paths=artifact.paths,
+        partial_scan=artifact.partial_scan,
     )
     if force_failure:
         refreshed.exit_code = DEFAULT_EXIT_CODE_FAILURE
@@ -166,12 +182,17 @@ def sequential_totals(
     total_fixed = 0
     total_remaining = 0
     for result in all_results:
-        total_issues += getattr(result, "issues_count", 0) or 0
+        outcome = result.outcome
+        total_issues += outcome.issues_count
         if action == Action.FIX:
-            if getattr(result, "residual_unknown", False):
-                # Nothing was measured for this tool (#1743); a zero here
-                # would be a measurement the run never took.
-                continue
-            total_fixed += getattr(result, "fixed_issues_count", None) or 0
-            total_remaining += getattr(result, "remaining_issues_count", None) or 0
+            match outcome.accounting:
+                case FixUnmeasured():
+                    # Nothing was measured for this tool (#1743).
+                    continue
+                case FixMeasured(fixed=fixed, remaining=remaining) | FixPartial(
+                    fixed=fixed,
+                    remaining=remaining,
+                ):
+                    total_fixed += fixed if fixed is not None else 0
+                    total_remaining += remaining if remaining is not None else 0
     return total_issues, total_fixed, total_remaining

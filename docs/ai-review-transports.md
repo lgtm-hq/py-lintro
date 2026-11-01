@@ -6,16 +6,16 @@ and reported numbers mean different things. Configure them under `ai.transports.
 
 ## Decision table
 
-| Dimension           | `api`                                       | `cli`                                                                                 |
-| ------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Credential          | the provider's API-key variable             | the provider's CLI login or CLI key (see the matrix below)                            |
-| Billing             | Metered API spend                           | Subscription / OAuth session                                                          |
-| Default timeout     | 60s (stream-sized per call)                 | 1800s (per CLI chunk)                                                                 |
-| Cost cap field      | `ai.transports.api.max_cost_usd` (enforced) | `ai.transports.cli.max_cost_usd_advisory` (advisory)                                  |
-| Legacy fallback     | `ai.api_timeout`, `ai.max_cost_usd`         | `ai.max_cost_usd` for the advisory only                                               |
-| Auth mode recorded  | `api_key`                                   | `subscription`                                                                        |
-| Cost basis recorded | `billed`                                    | `unpriceable`                                                                         |
-| Typical CI failures | `insufficient_credits`, `auth_failed:key`   | `auth_failed:oauth_session`, `cli_version_drift`, `turn_timeout`, `killed_externally` |
+| Dimension           | `api`                                       | `cli`                                                                                                                                                  |
+| ------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Credential          | the provider's API-key variable             | the provider's CLI login or CLI key (see the matrix below)                                                                                             |
+| Billing             | Metered API spend                           | Subscription / OAuth session                                                                                                                           |
+| Default timeout     | 60s (stream-sized per call)                 | 1800s (per CLI chunk)                                                                                                                                  |
+| Cost cap field      | `ai.transports.api.max_cost_usd` (enforced) | `ai.transports.cli.max_cost_usd_advisory` (advisory)                                                                                                   |
+| Legacy fallback     | `ai.api_timeout`, `ai.max_cost_usd`         | `ai.max_cost_usd` for the advisory only                                                                                                                |
+| Auth mode recorded  | `api_key`                                   | `subscription`                                                                                                                                         |
+| Cost basis recorded | `billed`                                    | `unpriceable`                                                                                                                                          |
+| Typical CI failures | `insufficient_credits`, `auth_failed:key`   | `auth_failed:oauth_session` (or `:codex_session` / `:gateway_token` by the bound credential), `cli_version_drift`, `turn_timeout`, `killed_externally` |
 
 The credential row is deliberately generic: each provider declares its own variables,
 and lintro has no default provider. The full `(provider, transport)` matrix is below.
@@ -87,11 +87,15 @@ credential:
 - `cursor` declares `True` and means it — the `agent` CLI reads `CURSOR_API_KEY` itself.
 - `openai` declares `False`: the `codex` CLI always reads `CODEX_API_KEY`, never
   `OPENAI_API_KEY`, so renaming cannot reach it.
-- `anthropic` declares `True`, but the `claude` binary reads only the literal
-  `ANTHROPIC_API_KEY` (`lintro/ai/providers/claude_auth.py`), and lintro does not
-  re-export a renamed variable into it. Doctor therefore reports OK for a credential the
-  CLI cannot see. That mismatch predates the provider refactor and is tracked by #2449;
-  until it lands, rename `ai.api_key_env` for anthropic's `api` transport only.
+- `anthropic` declares `True` and lintro makes it so: the `claude` binary reads only the
+  literal `ANTHROPIC_API_KEY`, so the transport exports the renamed variable's value
+  under that name into the subprocess environment, for that process only
+  (`lintro/ai/providers/claude_auth.py`). When both are set, the renamed variable wins,
+  as it does on the `api` transport. The bare-mode decision reads the same child
+  environment, so a renamed key still selects `--bare` under `auto`. Before this landed
+  a renamed key never reached the binary, so a subscription user who keeps one exported
+  (say for an `api` profile) and runs the `cli` transport now bills that key under
+  `auto`; set `cli_bare: never` or `LINTRO_CLI_BARE=never` to keep the login session.
 
 | Variable / setting                                    | Transport | Role                                                   |
 | ----------------------------------------------------- | --------- | ------------------------------------------------------ |
@@ -101,26 +105,82 @@ credential:
 (#1838/#1859). Dogfood CI pins `LINTRO_CLI_BARE=never` and keeps `ANTHROPIC_API_KEY` out
 of scope so the subscription token is actually used.
 
-The dogfood job can also run two further CLI lanes without an API key (#2472): provider
-`anthropic` against a gateway such as z.ai's GLM Coding Plan by forwarding
-`ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` to the pinned `claude` binary, and
-provider `openai` on a restored `~/.codex/auth.json` subscription session (org secret
-`CODEX_AUTH_JSON`; `CODEX_API_KEY` would bill metered API credits, not the plan) — the
-workflow resolves the Renovate-pinned codex version, installs it and decodes the secret
-into the session file before the review step; with the secret unset the run fails
-visibly at the credential gate.
+Where the dogfood review goes is a named **lane**: a row in the committed manifest
+`scripts/ci/ai_review_lanes.json`, and nowhere else (ADR-0011 decision A, #2869/#2870).
+The repository variable `LINTRO_AI_PROVIDER` selects the row (`anthropic`, `openai`,
+`cursor`, `zai` or `kimi`; unset means the manifest's `chain[0]`; anything else is red
+before a secret exists), and `LINTRO_AI_MODEL` overrides the row's default model. A
+secret-free `lane` job in `ai-review.yml` reads those two variables, resolves the chain
+with `scripts/ci/resolve_review_lanes.py` at `github.workflow_sha` and publishes every
+row; the review job's egress is the union of the chain's hosts, each credential is
+forwarded under its secret name by one literal expression gated on chain membership, and
+`scripts/ci/run-ai-review.sh` binds the attempt through `scripts/ci/review_lane_env.py`:
+provider, transport and model are exported from the row, exactly one credential is in
+scope under the variable its CLI reads (the z.ai and Kimi tokens fill
+`ANTHROPIC_AUTH_TOKEN`; the Codex session is decoded from `CODEX_AUTH_JSON` into
+`~/.codex/auth.json` for the attempt and deleted at its end), the provider's base-URL
+override is exported to the row's endpoint off-host and must be unset on-host, and a
+competing credential, an override naming another host, or an effective `ai.*` config
+that disagrees with the row refuses the run before any provider call. An absent
+credential is red with `status=no-credential`, never a fallback. No variable supplies an
+endpoint, a credential binding or an egress host: a selector can only name a declared
+row. The declared rows and their default models are `anthropic` (`claude-opus-5-5`, the
+default lane), `openai` (the Codex session, `gpt-6.1-sol`), `cursor`
+(`cursor-grok-4.6-high`), `zai` (`glm-5.3-flash`) and `kimi` (`kimi-k3`), the last two
+non-first-party gateways. Switching lanes is a change to the variable and reaches every
+open PR on its next run; a rerun keeps its run's inputs, so after a switch the recovery
+step for a red PR is an `@lintro review` comment, which starts a new run. After a review
+is produced, `scripts/ci/classify_review_outcome.py` reads this round's run record and
+applies ADR-0011 decision C through `scripts/ci/review_lane_verdict.py` (#2871): a
+recorded lane outside the chain or an endpoint off that lane's host is red with
+`status=endpoint-mismatch`; a first-party lane that answered with another model is red
+with `status=model-mismatch`, and one whose transport declares model usage but reported
+none is red with `status=model-unreported`; a review whose run record cannot vouch for
+it (none persisted by this run and attempt, a record missing an endpoint or carrying a
+verification state its lane cannot produce, or a recorded lane with no published
+manifest row) is red with `status=provenance-unrecorded`, except that a partial review
+(incomplete, budget-stopped or degraded) keeps its own red reason and carries the
+missing provenance as a `::warning::`; a fallback lane answering, or a gateway's
+unverifiable model, is a `::warning::` that leaves the verdict alone. An authentication
+failure is labelled by the credential kind the lane bound, so a gateway 401 is never
+blamed on the Claude session.
 
-On that lane lintro sends **no** `--model` unless one is configured (#2537). The two
-codex credentials do not accept the same models: an API key reaches the OpenAI API
-catalogue and still gets the provider default (`gpt-4o`), while a ChatGPT-plan session
-reaches only that plan's models and rejects an API-catalogue name outright — the whole
-call fails with
+The chain is walked (ADR-0011 decision D, #2872). When an attempt exits with the review
+error status and its envelope names `auth_failed`, `insufficient_credits` or
+`quota_exceeded`, its `completed_chunks` is zero (a missing count refuses the walk) and
+no checkpoint part was written during the attempt, the wrapper takes back that lane's
+credential, binds the next lane in `chain` with only its own, and tries again;
+`scripts/ci/review_chain.py` makes that decision from the envelope's kind, never from
+its `provider_unavailable` flag. A rate limit, a server error or a timeout stays with
+the existing retry, and a lane that fails after a chunk completed is never retried
+elsewhere: the partial round is persisted for a same-lane resume and the check is red
+with `status=provider-unavailable`. A fallback round is green; the sticky leads with a
+line naming the dead lane, its error kind and the lane that answered, the job summary
+carries the same as a `::warning::`, and one issue labelled `ai-review-lane-down` is
+opened or updated per dead lane through the App token. When a chain of two or more lanes
+has every lane fail before any chunk completed, the check is red with
+`status=lanes-exhausted`. A fallback lane that cannot be bound (its credential is
+absent, or the gate refuses it) is recorded as `unbound` and the next lane is tried; a
+cancel ends the walk at once. Two edges to know: the walk keys on the envelope's `kind`,
+so a thin envelope the classifier upgrades to `auth_failed` from its prose does not
+walk, and the first attempt's error sticky stays on the PR until the fallback attempt
+replaces it.
+
+The dogfood `openai` lane always sends its row's model (`gpt-6.1-sol`, or the
+`LINTRO_AI_MODEL` override). Outside a lane, on the openai `cli` transport lintro sends
+**no** `--model` unless one is configured (#2537). The two codex credentials do not
+accept the same models: an API key reaches the OpenAI API catalogue and still gets the
+provider default (`gpt-4o`), while a ChatGPT-plan session reaches only that plan's
+models and rejects an API-catalogue name outright — the whole call fails with
 `The 'gpt-4o' model is not supported when using Codex with a ChatGPT account`. The plan
 catalogue is per-account and renames often, so lintro defers to codex's own default
 rather than pinning a slug that would break on the next rename. Set `ai.model` (or
 `LINTRO_AI_MODEL`) to override; an explicit model is always honoured. The credential is
 detected from `$CODEX_HOME/auth.json` — `CODEX_HOME`, not `$HOME`, because CI restores
-the session outside the home directory.
+the session outside the home directory. The run record's `credential` follows the same
+precedence: `CODEX_API_KEY` records `api_key`, a session file carrying an embedded key
+records `api_key`, a plan session records `codex_oauth`, and `OPENAI_API_KEY` alone
+records nothing, because codex never reads it.
 
 ## CI support levels per transport
 
@@ -152,6 +212,23 @@ dropped whole if it echoes the credential and otherwise redacted, so a gateway q
 the key back cannot leak it onto an issue. A row whose credential variable is empty
 reports a pending status and a skip notice, never a pass.
 
+**Every dogfood lane names its smoke row and how far it reaches** (#2873). A row of the
+lanes manifest carries `smoke_row`, the smoke table row that stands for the lane, and
+`smoke_covers`, what that weekly call proves. `route`: the row sends the lane's own
+secret down the lane's own path, so a dead token and a dead path both go red (`zai` via
+`zai-anthropic-api`, not the OpenAI-protocol `zai-api` route that shares its token;
+`kimi`). `host`: the lane's credential is a subscription session the raw API cannot
+take, so the row sends the provider's metered key to the host the CLI calls and proves
+the host answers, not that the session is alive (`anthropic`). `provider`: the session's
+own route is one no API smoke can reach, so the row proves only that the provider's API
+answers (`openai`: the Codex session calls the ChatGPT backend, while `openai-api` calls
+`api.openai.com`). An expired session is reported by the dogfood's own `auth_failed`
+verdict on the next review, never by the smoke. A lane no smoke can reach at all
+(`cursor`, no API protocol lintro implements) carries `smoke_row: null` and a
+`smoke_gap` saying why. `tests/scripts/ci/test_smoke_rows_match_lanes.py` pins the
+metered key and the level each session lane may claim, and fails when the two files
+drift apart.
+
 **Parser drift is caught for free.**
 `tests/fixtures/ai/cli_replay/<cli>/<version>.jsonl` holds one stdout capture per agent
 CLI at the pinned version, and the Tier 1 replay test parses it with the real transport
@@ -164,9 +241,74 @@ rather than proving vendor output. Re-record whenever a pin in
 ## Reported numbers
 
 Per-run sticky state records `transport`, `auth_mode`, and `cost_basis` (`billed` /
-`estimated` / `unpriceable`). Under subscription CLI, any `~$` figure is unpriceable —
-not a bill. Live `api` runs always record `billed` (usage is provider-reported);
-`estimated` appears only for bare-billed CLI runs and for legacy records whose basis is
-derived from `auth_mode` + locally estimated token usage.
+`estimated` / `unpriceable` / `list_price_shadow` / `unknown`). Under subscription CLI a
+`~$` figure is not a bill: it is recorded as `list_price_shadow` when the CLI envelope
+reported a list-price figure for a first-party endpoint, and as `unpriceable` when it
+reported none. A run pointed at a non-first-party endpoint records `unknown`: the
+envelope's figure is priced on the wrong table and is never shown as dollars. On both
+shadow bases the record's `cost` is zero and the figure lives in `cost_shadow`, which
+still settles `ai.max_cost_usd` and the PR budget (ADR-0011, decision B). Live `api`
+runs always record `billed` (usage is provider-reported); `estimated` appears only for
+CLI runs on a metered key (bare-billed, `CODEX_API_KEY`, a codex session with an
+embedded key, or `ANTHROPIC_API_KEY` under `cli_bare: never`) and for legacy records
+whose basis is derived from `auth_mode` + locally estimated token usage.
+
+Every surface that names the model names the endpoint beside it (#2868): the sticky's
+`This run` row, the badges, the run-by-run history, the review body footer and the
+terminal header read ``requested `model` (source) · verified on `host` · lane `x` ``, or
+``answered via `host` (third-party gateway), model unverifiable``; stored history rows
+carry no `(source)`. When the state is `mismatch`, `unverifiable` or `unreported`, a
+line at the top of the sticky, outside every collapsible, names the lane, the endpoint
+and the state; a `legacy` round never tops a board (ADR-0011 C). Every dollar figure
+carries its basis: `unknown` reads `n/a (third-party gateway)`, never a figure and never
+zero; a list-price shadow is labelled a shadow; a round from before ADR-0011 is labelled
+`predates ADR-0011`; and the history heading discloses how many rounds contributed no
+priced cost.
+
+Each run also records where its requests went (#2867): `endpoint` (host only),
+`first_party`, `credential` (`claude_oauth`, `api_key`, `zai_token`, `kimi_token`,
+`codex_oauth`, `cursor_api_key`), `reported_models` (the Claude CLI envelope's
+`modelUsage`), `lane`, and `model_verification` (`verified`, `mismatch`, `unverifiable`,
+`unreported`; a record from before these fields reads as `legacy`). `auth_mode` follows
+`credential`, so a gateway token reads `gateway_token`, not `subscription`. In CI the
+review-lanes wrapper exports the resolved lane row as `LINTRO_REVIEW_LANE`,
+`LINTRO_REVIEW_ENDPOINT` and `LINTRO_REVIEW_FIRST_PARTY`, and those win; no
+allowed-model list travels, so on a lane `model_verification` accepts the requested
+model alone (a first-party call that reports another model is `mismatch` and its
+coverage is not reused). Outside CI the provider's base-URL override
+(`ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, or the Claude settings files' `env` block) and
+the provider's own host decide. The credential kinds add `api_key` (a metered vendor
+key, or the API transport) and `unknown` to the five lane bindings so a local run can be
+described too. The Claude credential follows Claude Code's documented precedence: the
+bearer token, then the API key or helper, then the OAuth token, which bare mode never
+reads. A run off the provider's host prices its shadow figure on
+`LINTRO_REVIEW_SHADOW_PRICE_MODEL`, or on the requested model's own table when no lane
+row names one.
+
+Reuse follows provenance (ADR-0011, decision B): a stored round's coverage is inherited
+only when the round is not `legacy` or `mismatch`, is not `unreported` on a lane whose
+transport reports model usage (`LINTRO_REVIEW_REPORTS_MODEL_USAGE`, defaulting to true
+for the Claude CLI and every API transport), and its `lane`, `endpoint` and, on a
+first-party lane, its reported models still match the current lane. Coverage that no
+stored run record can place on a lane is not inherited. A mid-run checkpoint writes a
+partial run record carrying the round's lane and endpoint, so a round killed after a
+checkpoint leaves coverage the gate can place. Outside a lane row the allowed models are
+the default model, its declared fallbacks and the custom agents' `model` overrides; a
+local Claude CLI run whose envelope names an auxiliary model outside that set reads
+`mismatch`, as the ADR requires.
+
+Silent calls record their requested models separately in `unreported_models`, including
+agent overrides. Checkpoints and their replacements retain those claims when coverage is
+inherited; a verified call on resume cannot promote silent coverage to `verified`. Every
+silent claim must still satisfy the current allowed-model list. Mixed verified and
+unverifiable sources cannot establish a shared verification state, so carried provenance
+fails closed.
+
+Old blank-state artifacts and mixed `unreported` artifacts missing their silent claims
+need one re-review. A complete re-review replaces those old claims with current
+evidence. An omitted `unreported_models` key means an older record: only a purely silent
+record can fall back to its recorded requested model. Explicit null or malformed claims
+stay disallowed instead of disappearing; a mixed record's default model cannot
+reconstruct its missing silent requests.
 
 See also `docs/ai-features.md` and the dogfood workflow helpers under `scripts/ci/`.

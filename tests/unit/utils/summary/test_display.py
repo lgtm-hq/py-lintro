@@ -9,6 +9,7 @@ Tests cover:
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -26,8 +27,6 @@ from lintro.utils.summary_tables import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.unit.utils.conftest import FakeToolResult
-
 
 # =============================================================================
 # Tests for print_summary_table with CHECK action
@@ -36,16 +35,16 @@ if TYPE_CHECKING:
 
 def test_check_success_no_issues(
     console_capture: tuple[Callable[[str], None], list[str]],
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Display passing check with no issues shows PASS status and tool name.
 
     Args:
         console_capture: Mock console output capture.
-        fake_tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
-    result = fake_tool_result_factory(name="ruff", success=True, issues_count=0)
+    result = tool_result_factory(name="ruff", success=True, issues_count=0)
 
     print_summary_table(capture, Action.CHECK, [result])
 
@@ -56,16 +55,16 @@ def test_check_success_no_issues(
 
 def test_check_with_issues(
     console_capture: tuple[Callable[[str], None], list[str]],
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Display failing check with issues shows FAIL status and issue count.
 
     Args:
         console_capture: Mock console output capture.
-        fake_tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
-    result = fake_tool_result_factory(name="ruff", success=True, issues_count=5)
+    result = tool_result_factory(name="ruff", success=True, issues_count=5)
 
     print_summary_table(capture, Action.CHECK, [result])
 
@@ -77,16 +76,16 @@ def test_check_with_issues(
 
 def test_check_execution_failure(
     console_capture: tuple[Callable[[str], None], list[str]],
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Display check with execution failure shows FAIL status.
 
     Args:
         console_capture: Mock console output capture.
-        fake_tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
-    result = fake_tool_result_factory(
+    result = tool_result_factory(
         name="ruff",
         success=False,
         issues_count=0,
@@ -101,26 +100,28 @@ def test_check_execution_failure(
 
 def test_check_skipped_tool(
     console_capture: tuple[Callable[[str], None], list[str]],
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Display skipped status for version check failures.
 
     Args:
         console_capture: Mock console output capture.
-        fake_tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
-    result = fake_tool_result_factory(
+    result = tool_result_factory(
         name="ruff",
-        success=False,
+        success=True,
         issues_count=0,
         output="Skipping ruff: version check failed",
+        skipped=True,
+        skip_reason="version check failed",
     )
 
     print_summary_table(capture, Action.CHECK, [result])
 
     combined = "".join(output)
-    assert_that(combined).contains("SKIPPED")
+    assert_that(combined).contains("SKIP")
 
 
 # =============================================================================
@@ -130,16 +131,16 @@ def test_check_skipped_tool(
 
 def test_fix_with_fixed_count(
     console_capture: tuple[Callable[[str], None], list[str]],
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Display fixed count and remaining for fix action with columns present.
 
     Args:
         console_capture: Mock console output capture.
-        fake_tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
-    result = fake_tool_result_factory(
+    result = tool_result_factory(
         name="black",
         success=True,
         issues_count=0,
@@ -160,16 +161,16 @@ def test_fix_with_fixed_count(
 
 def test_fix_with_remaining_issues(
     console_capture: tuple[Callable[[str], None], list[str]],
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Display remaining issues for fix action when some issues cannot be fixed.
 
     Args:
         console_capture: Mock console output capture.
-        fake_tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
-    result = fake_tool_result_factory(
+    result = tool_result_factory(
         name="black",
         success=True,
         issues_count=0,
@@ -185,7 +186,7 @@ def test_fix_with_remaining_issues(
 
 def test_fix_no_files_shows_zero(
     console_capture: tuple[Callable[[str], None], list[str]],
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Display PASS with 0 fixed/remaining when no files to format.
 
@@ -194,14 +195,15 @@ def test_fix_no_files_shows_zero(
 
     Args:
         console_capture: Mock console output capture.
-        fake_tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
-    result = fake_tool_result_factory(
+    result = tool_result_factory(
         name="black",
         success=True,
         issues_count=0,
         output="No files to format",
+        no_files=True,
     )
 
     print_summary_table(capture, Action.FIX, [result])
@@ -216,7 +218,7 @@ def test_fix_no_files_shows_zero(
 
 def test_fix_never_reads_a_remaining_count_off_prose_output(
     console_capture: tuple[Callable[[str], None], list[str]],
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """The prose fallback is retired: residuals come from the verify pass (#2607).
 
@@ -225,10 +227,10 @@ def test_fix_never_reads_a_remaining_count_off_prose_output(
 
     Args:
         console_capture: Mock console output capture.
-        fake_tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
-    succeeded = fake_tool_result_factory(
+    succeeded = tool_result_factory(
         name="black",
         success=True,
         issues_count=3,
@@ -240,7 +242,7 @@ def test_fix_never_reads_a_remaining_count_off_prose_output(
     assert_that(combined).does_not_contain("?")
 
     output.clear()
-    failed = fake_tool_result_factory(
+    failed = tool_result_factory(
         name="black",
         success=False,
         issues_count=3,
@@ -253,26 +255,29 @@ def test_fix_never_reads_a_remaining_count_off_prose_output(
 
 def test_fix_shows_ai_fixed_count_from_metadata(
     console_capture: tuple[Callable[[str], None], list[str]],
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Display AI columns when AI metadata provides per-tool counts.
 
     Args:
         console_capture: Mock console output capture.
-        fake_tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
-    result = fake_tool_result_factory(
+    result = tool_result_factory(
         name="ruff",
         success=False,
         fixed_issues_count=6,
         remaining_issues_count=5,
     )
-    result.metadata = {
-        "applied_count": 4,
-        "verified_count": 3,
-        "unverified_count": 1,
-    }
+    result = replace(
+        result,
+        metadata={
+            "applied_count": 4,
+            "verified_count": 3,
+            "unverified_count": 1,
+        },
+    )
 
     print_summary_table(capture, Action.FIX, [result])
 
@@ -291,16 +296,16 @@ def test_fix_shows_ai_fixed_count_from_metadata(
 
 def test_pytest_with_summary(
     console_capture: tuple[Callable[[str], None], list[str]],
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Display pytest summary with detailed metrics including all columns.
 
     Args:
         console_capture: Mock console output capture.
-        fake_tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
-    result = fake_tool_result_factory(
+    result = tool_result_factory(
         name="pytest",
         success=True,
         issues_count=0,
@@ -325,7 +330,7 @@ def test_pytest_with_summary(
 
 def test_non_pytest_test_tool(
     console_capture: tuple[Callable[[str], None], list[str]],
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Display basic pass/fail for non-pytest tools in test action.
 
@@ -333,10 +338,10 @@ def test_non_pytest_test_tool(
 
     Args:
         console_capture: Mock console output capture.
-        fake_tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
-    result = fake_tool_result_factory(
+    result = tool_result_factory(
         name="other_test_runner",
         success=True,
         issues_count=0,
@@ -360,19 +365,19 @@ def test_non_pytest_test_tool(
 
 def test_multiple_tools_displayed(
     console_capture: tuple[Callable[[str], None], list[str]],
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Display all tools in the summary table when multiple tools are run.
 
     Args:
         console_capture: Mock console output capture.
-        fake_tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
     results = [
-        fake_tool_result_factory(name="ruff", success=True, issues_count=0),
-        fake_tool_result_factory(name="black", success=True, issues_count=2),
-        fake_tool_result_factory(name="mypy", success=False, issues_count=5),
+        tool_result_factory(name="ruff", success=True, issues_count=0),
+        tool_result_factory(name="black", success=True, issues_count=2),
+        tool_result_factory(name="mypy", success=False, issues_count=5),
     ]
 
     print_summary_table(capture, Action.CHECK, results)
@@ -385,20 +390,20 @@ def test_multiple_tools_displayed(
 
 def test_tools_sorted_alphabetically(
     console_capture: tuple[Callable[[str], None], list[str]],
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Display tools in alphabetical order regardless of input order.
 
     Args:
         console_capture: Mock console output capture.
-        fake_tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
     # Input in non-alphabetical order: ruff, bandit, clippy
     results = [
-        fake_tool_result_factory(name="ruff", success=True, issues_count=0),
-        fake_tool_result_factory(name="bandit", success=True, issues_count=0),
-        fake_tool_result_factory(name="clippy", success=True, issues_count=0),
+        tool_result_factory(name="ruff", success=True, issues_count=0),
+        tool_result_factory(name="bandit", success=True, issues_count=0),
+        tool_result_factory(name="clippy", success=True, issues_count=0),
     ]
 
     print_summary_table(capture, Action.CHECK, results)
@@ -436,7 +441,7 @@ def test_empty_results_list(
 
 def test_unknown_tool_name(
     console_capture: tuple[Callable[[str], None], list[str]],
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Handle unknown tool name gracefully with underscore-to-hyphen conversion.
 
@@ -445,10 +450,10 @@ def test_unknown_tool_name(
 
     Args:
         console_capture: Mock console output capture.
-        fake_tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
-    result = fake_tool_result_factory(
+    result = tool_result_factory(
         name="unknown_tool_xyz",
         success=True,
         issues_count=0,
@@ -477,7 +482,7 @@ def test_default_remaining_count_is_question_mark() -> None:
 
 def test_default_remaining_count_used_in_fix_output(
     console_capture: tuple[Callable[[str], None], list[str]],
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Verify DEFAULT_REMAINING_COUNT is used when remaining count is unknown.
 
@@ -486,10 +491,10 @@ def test_default_remaining_count_used_in_fix_output(
 
     Args:
         console_capture: Mock console output capture.
-        fake_tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
-    result = fake_tool_result_factory(
+    result = tool_result_factory(
         name="ruff",
         success=False,
         issues_count=0,
@@ -512,20 +517,21 @@ def test_default_remaining_count_used_in_fix_output(
 
 def test_check_pass_with_no_files_is_annotated(
     console_capture: tuple[Callable[[str], None], list[str]],
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """A pass over zero files is annotated so it is not read as a clean scan.
 
     Args:
         console_capture: Mock console output capture.
-        fake_tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
-    result = fake_tool_result_factory(
+    result = tool_result_factory(
         name="prettier",
         success=True,
         issues_count=0,
         output="No .md files found to check.",
+        no_files=True,
     )
 
     print_summary_table(capture, Action.CHECK, [result])
@@ -537,16 +543,16 @@ def test_check_pass_with_no_files_is_annotated(
 
 def test_check_pass_over_real_files_has_no_note(
     console_capture: tuple[Callable[[str], None], list[str]],
-    fake_tool_result_factory: Callable[..., FakeToolResult],
+    tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """A genuine clean scan is not annotated with the no-files note.
 
     Args:
         console_capture: Mock console output capture.
-        fake_tool_result_factory: Factory for creating fake tool results.
+        tool_result_factory: Factory for creating ToolResult instances.
     """
     capture, output = console_capture
-    result = fake_tool_result_factory(
+    result = tool_result_factory(
         name="prettier",
         success=True,
         issues_count=0,
@@ -587,13 +593,14 @@ def test_check_pass_over_real_files_has_no_note(
         "templated",
     ],
 )
-def test_is_no_files_result_recognizes_discovery_messages(message: str) -> None:
-    """Every framework no-files message is recognized, with or without a period.
+def test_is_no_files_result_does_not_infer_discovery_from_text(message: str) -> None:
+    """A legacy message alone is not evidence of empty discovery.
 
     Args:
         message: A framework "nothing to do" message.
     """
-    assert_that(_is_no_files_result(message)).is_true()
+    result = ToolResult(output=message)
+    assert_that(_is_no_files_result(result)).is_false()
 
 
 @pytest.mark.parametrize(
@@ -617,23 +624,22 @@ def test_is_no_files_result_recognizes_discovery_messages(message: str) -> None:
         "none",
     ],
 )
-def test_is_no_files_result_ignores_ran_messages(message: object) -> None:
+def test_is_no_files_result_ignores_ran_messages(message: str | None) -> None:
     """A tool that actually ran is never mistaken for a zero-file run.
 
     Args:
         message: A message that must not be treated as a no-files result.
     """
-    assert_that(_is_no_files_result(message)).is_false()
+    result = ToolResult(output=message, inspected_files=True)
+    assert_that(_is_no_files_result(result)).is_false()
 
 
 def test_is_no_files_result_prefers_the_structured_flag() -> None:
-    """``no_files`` is the authority; the prose match is only a fallback.
+    """Only structured inspection and discovery flags establish empty discovery.
 
     ``prepare_execution`` and the tool definitions that build their own
-    "nothing was examined" result stamp ``no_files=True`` (#1743). A message
-    that the suffix list does not recognise — "No Cargo.toml found; skipping
-    clippy." — must still render the note, and a flagged result with no
-    message at all must too.
+    "nothing was examined" result stamp ``no_files=True`` (#1743). Both a
+    flagged result with a message and one without any message render the note.
     """
     flagged = ToolResult(
         name="clippy",
@@ -641,17 +647,19 @@ def test_is_no_files_result_prefers_the_structured_flag() -> None:
         output="No Cargo.toml found; skipping clippy.",
         issues_count=0,
         no_files=True,
+        inspected_files=False,
     )
-    assert_that(_is_no_files_result(flagged.output)).is_false()
-    assert_that(_is_no_files_result(flagged.output, flagged)).is_true()
+    assert_that(_is_no_files_result(ToolResult(output=flagged.output))).is_false()
+    assert_that(_is_no_files_result(flagged)).is_true()
 
     silent = ToolResult(
         name="typos",
         success=True,
         issues_count=0,
         no_files=True,
+        inspected_files=False,
     )
-    assert_that(_is_no_files_result(silent.output, silent)).is_true()
+    assert_that(_is_no_files_result(silent)).is_true()
 
     ran = ToolResult(
         name="ruff",
@@ -659,7 +667,7 @@ def test_is_no_files_result_prefers_the_structured_flag() -> None:
         output="No issues found",
         issues_count=0,
     )
-    assert_that(_is_no_files_result(ran.output, ran)).is_false()
+    assert_that(_is_no_files_result(ran)).is_false()
 
 
 def test_no_files_note_renders_from_the_flag_alone(
@@ -677,6 +685,7 @@ def test_no_files_note_renders_from_the_flag_alone(
         output="No Cargo.toml found; skipping clippy.",
         issues_count=0,
         no_files=True,
+        inspected_files=False,
     )
 
     print_summary_table(capture, Action.CHECK, [result])

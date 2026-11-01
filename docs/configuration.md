@@ -35,6 +35,26 @@ configure specific commands rather than tool resolution.
 3. **`defaults` provide fallbacks** - Only used when a tool has no native config file
 4. **Simple and transparent** - Users know exactly which config is used
 
+### Section Types and Null Values
+
+Omitting a section uses its defaults. When present, each of `enforce`, `execution`,
+`defaults`, `tools`, `ai`, `review`, `output`, `watch`, and `deps` must be a mapping.
+Use an empty mapping such as `ai: {}` for default settings. Explicit nulls (`ai: null`,
+`ai: ~`, or a bare `ai:`), lists, and scalar section values raise `ConfigurationError`.
+This applies to both project and global config, and to `[tool.lintro]` sections in
+`pyproject.toml` (TOML has no null value). Each source is checked before merging, so a
+project mapping cannot hide an invalid global section.
+
+A YAML config document must also be a mapping. A top-level list, scalar, null, or an
+empty or comment-only file raises `ConfigurationError` instead of silently loading
+defaults or falling back to `pyproject.toml`. An empty mapping document (`{}`) retains
+the existing fallback behavior.
+
+**Migration:** Empty and comment-only YAML files that previously loaded defaults now
+raise an error. Remove an unused config file or replace its contents with `{}` to keep
+the fallback behavior. Replace bare section keys such as `ai:` with `ai: {}` when
+default section settings are intended.
+
 ### Tiered Configuration Flow
 
 The configuration system works in a specific order:
@@ -64,14 +84,18 @@ The configuration system works in a specific order:
      `astro-check`). Unset by default, in which case Lintro falls back to container
      auto-detection (enabled inside containers, disabled otherwise)
    - `tool_snapshot_ttl`: Seconds to cache tool capability probes under
-     `.lintro-cache/tool-snapshots.json` (default: `600`). Binary path + mtime changes
-     invalidate immediately. Unavailable (empty-path) entries are re-checked with a
-     `PATH` lookup, so a binary installed inside the TTL window is picked up on the next
-     probe instead of staying cached as missing. Use `lintro check --no-cache` to force
+     `.lintro-cache/tool-snapshots.json` (default: `600`), scoped to the execution
+     directory. Resolved command, binary path and mtime changes invalidate immediately,
+     including a newly preferred project-local binary. Refreshing a watch subset or
+     loading disk entries does not extend the age of older snapshots. Use `lintro check --no-cache` to force
      a fresh probe.
    - `strict_missing_tools`: When `true`, unavailable tools fail the run (exit 1).
      Default `false` — missing tools report `status: unavailable` with a remediation
-     hint and do not count as a lint failure.
+     hint and do not count as a lint failure. Unavailable results carry a frozen
+     `Unavailable(reason, strict)` outcome, retain unknown fix counts, and expose
+     `unavailable_reason` separately from a deliberate skip's `skip_reason`.
+     Runtime capabilities include `supports_stdin`: `true`/`false` when declared
+     by the tool definition, or `null` when unspecified.
 
 2. **Enforce Tier** - Cross-cutting settings injected as CLI flags
    - These settings override native configs via CLI arguments
@@ -126,9 +150,10 @@ sections:
    or `[tool.lintro]` in `pyproject.toml`. Overrides the global config per key.
 
 A value set in the global config survives only where the project config does not
-override that exact key path. An auto-discovered global file that is absent or empty is
-never an error — only an explicit `LINTRO_GLOBAL_CONFIG` path that does not exist is
-(see [below](#user-level-global-config)).
+override that exact key path. An absent auto-discovered global file or one containing an
+empty mapping (`{}`) is never an error. A non-mapping document or an explicit
+`LINTRO_GLOBAL_CONFIG` path that does not exist raises an error (see
+[below](#user-level-global-config)).
 
 In the `tools:` section a scalar entry such as `ruff: false` is a complete statement
 about the tool, so a project scalar replaces the global mapping wholesale. A project
@@ -291,6 +316,20 @@ The comparison baseline is stored as `severity-baseline.json` at the root of the
 directory — `LINTRO_LOG_DIR`, default `.lintro` — rather than inside a `run-*`
 directory, so run pruning never removes it.
 
+Counts are compared only when the normalized path arguments and executed tool set match.
+The file retains at most 32 scopes in last-write order; updating a scope makes it
+newest, while reading it does not. The latest run whose paths resolve to the full
+working directory is protected from eviction, even across many staged-file checks. Older
+scopes are discarded first, and invalid entries are removed on the next write. Older
+files without retention metadata remain readable; a new full-path check establishes the
+protected scope. `--diff` and `--incremental` checks neither compare against nor update
+this file.
+
+Writers use `severity-baseline.json.lock` beside the baseline and wait up to one second
+for contention before skipping the optional update. The lock file remains after the run
+so concurrent writers always coordinate on the same file; include it with the rest of
+`.lintro/` in your ignore rules.
+
 Only a run that actually measured the project reads or writes it, and the same rule
 governs both sides. A run qualifies when it is a `check` (not `format` or `test`, which
 measure something else), is not a `fmt --dry-run` preview (those report as checks but
@@ -337,7 +376,10 @@ A live badge **refuses to publish** rather than assert a quality claim the run d
 support. It exits non-zero, printing no snippet, when the check exited early, when any
 tool timed out, and when nothing actually inspected a file — which covers an empty
 directory, an all-skipped toolset, and a toolset that declined to run for want of
-configuration.
+configuration. Coverage comes from the producer's `ToolResult.inspected_files` signal,
+never its message text. Results that leave this signal as `None` have unknown coverage
+and cannot alone qualify a badge. A severity baseline also rejects mixed runs containing
+both inspected and unknown results, for comparison and storage.
 
 #### JSON output
 
@@ -366,7 +408,8 @@ comparable baseline exists; on a first run the key is absent rather than zero. T
 
 `--output` files and configured JSON artifacts carry the same two severity keys, but the
 rest of their `summary` object differs from the stdout document by design — it adds
-`timestamp` and `tools_run`, and omits `total_remaining`:
+`tools_run` and omits `total_remaining`. `timestamp` and `action` are at the document
+root:
 
 ```json
 {
@@ -634,8 +677,8 @@ export LINTRO_AI_PROVIDERS__CURSOR__TRUST_WORKSPACE=false # one ai.providers.<na
 | `LINTRO_CONFIG`                            | Shown in the `lintro` environment report; informational only                                                                                                                                                                                    | -         |
 | `LINTRO_ENABLE_EXTERNAL_PLUGINS`           | Opt in to loading external (third-party) plugins (`1`/`0`)                                                                                                                                                                                      | `0`       |
 | `LINTRO_NO_CACHE`                          | Force-clear caches each invoke (`1`/`true`/`yes`/`on`)                                                                                                                                                                                          | -         |
-| `LINTRO_AI_PROVIDER`                       | Override `ai.provider` (`anthropic` / `cursor` / `openai`)                                                                                                                                                                                      | -         |
-| `LINTRO_AI_MODEL`                          | Override `ai.model`                                                                                                                                                                                                                             | -         |
+| `LINTRO_AI_PROVIDER`                       | Override `ai.provider` (`anthropic` / `cursor` / `openai`). As a repository Actions variable it instead selects the dogfood review lane by id (`anthropic`, `openai`, `cursor`, `zai`, `kimi`; ADR-0011)                                        | -         |
+| `LINTRO_AI_MODEL`                          | Override `ai.model`. As a repository Actions variable it overrides the selected dogfood lane's default model                                                                                                                                    | -         |
 | `LINTRO_AI_TRANSPORT`                      | Override `ai.transport` (`api` / `cli`)                                                                                                                                                                                                         | -         |
 | `LINTRO_AI_ENABLED`                        | Override `ai.enabled` (`1`/`0`/`true`/`false`)                                                                                                                                                                                                  | -         |
 | `LINTRO_AI_REVIEW`                         | Override `ai.review` (`1`/`0`/`true`/`false`)                                                                                                                                                                                                   | -         |
@@ -701,6 +744,10 @@ Resolution rules:
   of how loading was enabled.
 - With no allowlist configured, enabling loads all discovered `lintro.plugins` entry
   points — use this only in fully trusted environments.
+- A global or project YAML file that cannot be read or parsed, or whose root is not a
+  mapping, disables external plugin loading, even with
+  `LINTRO_ENABLE_EXTERNAL_PLUGINS=1`. This includes empty and comment-only files. An
+  empty mapping (`{}`) is valid.
 
 ### Pre-Execution Summary
 
@@ -1736,6 +1783,21 @@ command line by upstream and are not exposed via lintro.
   (`node_modules`, `.venv`, `venv`, `vendor`, `.git`, `__pycache__`) are skipped. To
   audit a file outside this scope, pass it explicitly on the command line.
 
+**Ignoring an advisory:**
+
+```toml
+# pyproject.toml
+[tool.lintro.pip_audit]
+# Each id is passed to pip-audit as --ignore-vuln. Pair every entry with a
+# time-boxed [[IgnoredVulns]] row in .osv-scanner.toml that names the same id
+# (or lists it as an alias in its reason), so both scanners agree and the
+# ignore carries a reason and an expiry.
+ignore_vulns = ["GHSA-xxxx-xxxx-xxxx"]
+```
+
+The same list can be passed once with `--tool-options "pip_audit:ignore_vulns=ID|ID"`
+(pipes separate ids, since commas separate options).
+
 **Usage Examples:**
 
 ```bash
@@ -2293,6 +2355,11 @@ Lintro prefers the project's own `node_modules/.bin/spectral`, then a binary on 
 then a version-pinned `bunx`/`npx` fetch. See
 [Node.js Tool Resolution](#nodejs-tool-resolution).
 
+**Node runtime requirement:** the pinned Spectral CLI (currently `6.17.0`) declares
+`engines: { "node": "^22.0 || >= 24.0" }`. Any consumer that installs it, or that
+reaches the `bunx`/`npx` fallback, needs a Node runtime satisfying that range — Node 18,
+20, and 21 are not supported. Size your CI matrix accordingly.
+
 **File:** `.spectral.yaml`
 
 ```yaml
@@ -2497,7 +2564,7 @@ runtime. Branches 3 and 4 emit a one-time warning because they require network a
 the npm registry, and a failure on either path is reported with install guidance rather
 than html-validate's raw error.
 
-**Node runtime requirement:** the pinned html-validate (currently `11.11.0`) declares
+**Node runtime requirement:** the pinned html-validate (currently `11.16.2`) declares
 `engines: { "node": "^22.22.0 || >= 24.8.0" }`. Any consumer that installs it, or that
 reaches the `bunx`/`npx` fallback, needs a Node runtime satisfying that range — Node 20,
 21, and 22.0–22.21 are not supported. Size your CI matrix accordingly.
@@ -3938,6 +4005,139 @@ install-tools:
   ]
 }
 ```
+
+## Packaged Semgrep rules
+
+Lintro ships opt-in Semgrep packs, versioned with the Lintro release. List the installed
+packs with `lintro list-tools --rules` (also supports `--json` and `--output`). Enable
+the first pack in `.lintro-config.yaml`:
+
+```yaml
+tools:
+  semgrep:
+    rule_packs: [python/none-coercion]
+```
+
+The equivalent pyproject setting is:
+
+```toml
+[tool.lintro.semgrep]
+rule_packs = ["python/none-coercion"]
+```
+
+Run `lintro check src --tools semgrep` with Semgrep installed. Each pack adds a local
+`--config` path alongside `.semgrep.yaml`, `.semgrep.yml`, or `.semgrep/` in the scan
+project root. With packs enabled, the implicit `auto` registry lookup is replaced by
+these local rules. An explicit Semgrep `config` option, including `config=auto`, is
+preserved alongside the packs. No packs run by default, and unknown pack names raise a
+configuration error with the available names. Nonempty `rule_packs` selections are
+rejected for tools other than Semgrep.
+
+`python/none-coercion` asks whether missing values mean empty or unknown. Its eight INFO
+rule families cover literal-attribute `getattr` defaults, falsey `or` fallbacks,
+concrete exception returns, empty returns after None guards, stringified mapping reads,
+defaults on values decoded with `json.loads`, failed `ToolResult` constructors, and
+empty returns when a capability is unavailable. Findings are review candidates, not
+proven defects. The fixtures document suppressions for known subprocess stdout
+fallbacks, environment reads, ALL_CAPS tables, false-returning `is_*`/`has_*`
+predicates, and true-returning None guards. Other objects with a `stdout` attribute
+remain visible.
+
+Enabling the pack uses the existing Semgrep finding and CLI exit behavior: INFO
+candidates can make `lintro check` exit nonzero. There is no automatic advisory lane,
+precise `ToolResult` gate, or candidate-count ratchet yet. The prerequisite work in
+issues #438 and #3018 must land before precise-rule gating. See
+[ADR-0012](adr/0012-packaged-semgrep-rules.md) for boundaries and the future native
+deterministic AST tool decision.
+
+### Direct formatter invocations in scripts
+
+Enable `scripts/no-direct-formatter` to review scripts that bypass Lintro's formatting
+configuration ([#1610](https://github.com/lgtm-hq/py-lintro/issues/1610)):
+
+```yaml
+tools:
+  semgrep:
+    rule_packs: [scripts/no-direct-formatter]
+```
+
+Or use `rule_packs = ["scripts/no-direct-formatter"]` in `[tool.lintro.semgrep]`. Run
+`lintro check . --tools semgrep`. This pack is **off by default**, including in Lintro's
+own configuration. Findings have WARNING severity and use Semgrep's existing check exit
+behavior; there is no automatic fix.
+
+The pack targets `**/scripts/**`, `**/*.mjs`, and `**/Makefile`, at the project root or
+in nested packages. It covers extensionless files inside `scripts` too. Other Makefile
+names (`GNUmakefile`, `makefile`, and `*.mk`) are outside the shipped scope unless they
+are inside `scripts`. A file such as `src/ordinary.js`, `docs/formatters.md`,
+`descripts/generate.sh`, or a root `format.sh` is outside that scope. Selecting this
+pack expands Lintro's candidate discovery so Semgrep can apply these path filters. Use
+narrower CLI paths or Semgrep's existing `include`/`exclude` options to restrict the
+scan further, for example:
+
+```bash
+lintro check scripts --tools semgrep --tool-options 'semgrep:include=scripts/**'
+```
+
+These filters narrow the shipped scope; they cannot widen it. For a different scope, use
+`lintro/rules/scripts/no-direct-formatter.yaml` as a starting point for a native Semgrep
+configuration and run it with `semgrep scan --config your-rules.yaml`.
+
+The literal command matcher recognizes:
+
+- `black`, `oxfmt`, `rustfmt`, and `shfmt` invocations;
+- `prettier` with `--write` or `-w`;
+- `ruff format`, `buf format`, `cargo fmt`, `taplo fmt`/`format`, and
+  `sqlfluff format`/`fix`;
+- bare shell commands, Make recipes, simple `&&`/`||`/`;` command chains, adjacent shell
+  operators and redirections, and literal command strings passed to `exec`, `execSync`,
+  `execFile`, `execFileSync`, `spawn`, or `spawnSync` (including member calls);
+- command prefixes `bunx`, `npx` (with optional `--yes`), `uv run`, and `python -m`
+  (also `python3` and versioned Python 3 executables).
+
+`lintro format` and `uv run lintro format` delegate to Lintro and are allowed.
+`prettier --check`, `ruff check`, `buf lint`, `taplo check`, and `sqlfluff lint` are
+outside the matched formatting forms. The pure formatter binaries are matched regardless
+of their arguments. Eligible tools follow builtin `FORMAT` capability declarations: a
+test requires the pack's formatter examples to equal those declarations, and real
+matcher tests execute every example. Biome has no builtin `FORMAT` declaration in this
+release and is therefore outside this pack.
+
+Suppress a deliberate exception with Semgrep's rule-specific comment on the invocation
+or the preceding line:
+
+```sh
+bunx oxfmt generated.mjs # nosemgrep: lintro.scripts.no-direct-formatter.native-command
+```
+
+```javascript
+execSync('bunx oxfmt generated.mjs'); // nosemgrep: lintro.scripts.no-direct-formatter.native-command
+```
+
+This is a generic, line-oriented regex heuristic, not a shell or JavaScript parser.
+Fixtures exercise the forms above, clean scripts, comments, suppressions, and excluded
+paths against real Semgrep. It does not resolve aliases, variables, computed commands,
+absolute executable paths, arbitrary runner flags, multiline commands, or subcommands
+split across argument arrays (for example `spawnSync('ruff', ['format', file])`). Bare
+`spawnSync('black', [file])` is covered, as are literal Prettier write flags in the
+command string or its immediate argument array. Flags in later commands or unrelated
+JavaScript arguments do not make a check-only Prettier command match. Chains with quoted
+text before the separator can be missed.
+
+Unsupported forms include formatter commands receiving a pipeline (`cat x | black -`),
+subshells (`x=$(black g.py)`), shell control flow (`if black ...; then`), environment
+prefixes (`FOO=1 black x`), and indirect runners such as `xargs black` or
+`find ... -exec black ...`. Runner forms such as `npx -y prettier --write`,
+`pnpm exec prettier --write`, and `yarn prettier --write` are also unsupported, as are
+Python `subprocess.run`/`os.system` calls, JavaScript `execa` calls, and Bun shell
+templates.
+
+The `scripts/**` glob includes non-shell files: Python assignments such as `black = 1`
+and prose beginning with a formatter name can produce false positives. Command-like text
+in strings, block comments or heredocs can also produce false positives; review the
+reported line before changing a script. This pack reports at most one finding per
+matching line, including when a line contains multiple invocations. It does not prove
+that every native formatter shell-out has been removed.
 
 ## Troubleshooting Configuration
 

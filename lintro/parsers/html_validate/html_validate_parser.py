@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 
+from lintro.parsers.base_parser import extract_optional_str
 from lintro.parsers.html_validate.html_validate_issue import HtmlValidateIssue
 
 # html-validate encodes severity numerically: 2 -> error, 1 -> warning.
@@ -79,7 +80,7 @@ def parse_html_validate_output(output: str | None) -> list[HtmlValidateIssue]:
     for file_result in data:
         if not isinstance(file_result, dict):
             continue
-        file_path = str(file_result.get("filePath", ""))
+        file_path = extract_optional_str(file_result, "filePath")
         messages = file_result.get("messages", [])
         if not isinstance(messages, list):
             continue
@@ -93,18 +94,16 @@ def parse_html_validate_output(output: str | None) -> list[HtmlValidateIssue]:
                 raw_severity if isinstance(raw_severity, int) else -1,
                 "warning",
             )
-            selector = message.get("selector")
-
             issues.append(
                 HtmlValidateIssue(
                     file=file_path,
                     line=_coerce_int(message.get("line")),
                     column=_coerce_int(message.get("column")),
-                    message=str(message.get("message", "")),
-                    code=str(message.get("ruleId", "")),
+                    message=extract_optional_str(message, "message"),
+                    code=extract_optional_str(message, "ruleId"),
                     severity=severity,
-                    selector=str(selector) if selector else "",
-                    doc_url=str(message.get("ruleUrl", "")),
+                    selector=extract_optional_str(message, "selector"),
+                    doc_url=extract_optional_str(message, "ruleUrl"),
                 ),
             )
 

@@ -17,6 +17,7 @@ from lintro.ai.enums.ai_transport import AITransport
 from lintro.ai.exceptions import AITurnLimitError
 from lintro.ai.fallback import complete_with_fallback
 from lintro.ai.json_response import CliSchemaRequest
+from lintro.ai.provenance import record_response, shadow_cost, shadow_priced
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.retry import with_retry
 
@@ -55,7 +56,8 @@ async def call_ai(
         ai_config: AI configuration (retry, timeout, fallback models).
         user_prompt: User-facing prompt text.
         system_prompt: Optional system prompt.
-        budget: Optional session cost budget to record against.
+        budget: Session cost budget to record against. Legacy external
+            callers may pass None to create a fresh unlimited tracker.
         max_tokens: Per-call token cap; defaults to ``ai_config.max_tokens``.
         repo_root: Optional repository root for CLI providers.
         use_one_shot: When True, avoid durable CLI sessions.
@@ -68,6 +70,56 @@ async def call_ai(
             ``ai.transports.cli.max_turns`` overrides it (#2685).
         no_tools: When True the CLI agent gets no tools and answers from the
             prompt alone (#2731). No effect on the API transport.
+
+    Returns:
+        The provider response with usage metadata.
+    """
+    return await _call_ai(
+        provider=provider,
+        ai_config=ai_config,
+        user_prompt=user_prompt,
+        system_prompt=system_prompt,
+        budget=budget if budget is not None else CostBudget(),
+        max_tokens=max_tokens,
+        repo_root=repo_root,
+        use_one_shot=use_one_shot,
+        cli_schema=cli_schema,
+        timeout=timeout,
+        call_kind=call_kind,
+        no_tools=no_tools,
+    )
+
+
+async def _call_ai(
+    *,
+    provider: BaseAIProvider,
+    ai_config: AIConfig,
+    user_prompt: str,
+    system_prompt: str | None,
+    budget: CostBudget,
+    max_tokens: int | None,
+    repo_root: str | None,
+    use_one_shot: bool,
+    cli_schema: CliSchemaRequest | None,
+    timeout: float | None,
+    call_kind: AICallKind,
+    no_tools: bool,
+) -> AIResponse:
+    """Invoke AI with a concrete session budget, including unlimited sessions.
+
+    Args:
+        provider: Configured AI provider instance.
+        ai_config: AI configuration for retry, timeout, and fallback.
+        user_prompt: User-facing prompt text.
+        system_prompt: Optional system prompt.
+        budget: Normalized session cost budget.
+        max_tokens: Optional per-call token cap.
+        repo_root: Optional repository root for CLI providers.
+        use_one_shot: Whether to avoid durable CLI sessions.
+        cli_schema: Optional native CLI JSON schema request.
+        timeout: Optional per-call timeout override in seconds.
+        call_kind: Purpose of the call, determining its CLI turn limit.
+        no_tools: Whether CLI tools are disabled for this call.
 
     Returns:
         The provider response with usage metadata.
@@ -95,7 +147,7 @@ async def call_ai(
             The provider response.
         """
         with bound_cli_call(cli_options):
-            return await complete_with_fallback(
+            response = await complete_with_fallback(
                 provider,
                 user_prompt,
                 fallback_models=list(ai_config.fallback_models),
@@ -106,6 +158,9 @@ async def call_ai(
                 use_one_shot=use_one_shot,
                 cli_schema=cli_schema,
             )
+        # Off the provider's host the figure is repriced on the lane's shadow
+        # model before the budget sees it (#2867, ADR-0011 B).
+        return shadow_priced(response)
 
     async def _budgeted_call() -> AIResponse:
         """Perform one call, recording its cost against the budget.
@@ -118,26 +173,39 @@ async def call_ai(
                 cost is charged to the budget first (#2685).
         """
         try:
-            if budget is not None and budget.max_cost_usd is not None:
+            if budget.max_cost_usd is not None:
                 input_chars = len(user_prompt) + len(system_prompt or "")
                 estimate = estimate_cost_with_floor(
                     provider.model_name,
                     input_tokens=input_chars // _CHARS_PER_TOKEN_ESTIMATE,
                     output_tokens=tokens,
                 )
-                return await budget.execute(
+                response = await budget.execute(
                     _call_once,
                     cost_of=lambda response: response.cost_estimate,
                     estimate=estimate,
                 )
+                # ``execute`` settled the budget; only the ledger is left.
+                record_response(response)
+                return response
             response = await _call_once()
         except AITurnLimitError as exc:
-            # The stopped call still spent its turns; charge them (#2685).
-            if budget is not None and exc.cost_estimate:
+            # The stopped call still spent its turns; charge them (#2685),
+            # priced on the shadow model off-host like a completed call. The
+            # error carries the same figure on, so the budget, the round
+            # record and the PR budget never disagree (#2867).
+            exc.cost_estimate = shadow_cost(
+                input_tokens=exc.input_tokens,
+                output_tokens=exc.output_tokens,
+                reported=exc.cost_estimate,
+            )
+            if exc.cost_estimate:
                 budget.record(exc.cost_estimate)
             raise
-        if budget is not None:
-            budget.record(response.cost_estimate)
+        budget.record(response.cost_estimate)
+        # The one seam every provider call crosses (ADR-0008, invariant 2),
+        # so the run's model ledger sees each completed call once (#2867).
+        record_response(response)
         return response
 
     call_with_retry = with_retry(

@@ -8,10 +8,14 @@ used during the original run without mutating the process-global cwd.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
+
+from lintro.models.core.tool_outcome import FixMeasured, FixPartial, ToolOutcome
+from lintro.tools.core.verify_pass import check_answered
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
@@ -94,26 +98,71 @@ def apply_rerun_results(
     by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]],
     rerun_results: list[ToolResult],
 ) -> None:
-    """Apply fresh rerun issue counts back to original FIX results.
+    """Replace per-tool entries with validated measured rerun results.
+
+    An unanswered check leaves the original counts and failure flags intact.
+    Answered checks replace execution state (including a prior timeout) and the
+    residual, preserving the native fixed count. AI fixes are reported separately
+    through verification metadata. If the counters no longer balance, omit the
+    initial count and retain the native/residual measurements as partial accounting.
+    Incomplete reports cannot gain complete accounting.
 
     Args:
-        by_tool: Dict mapping tool name to (result, issues) pairs.
+        by_tool: Dict mapping tool name to (result, issues) pairs; entries are
+            replaced while existing results and grouped issues are preserved.
         rerun_results: Fresh results from re-running tools.
     """
     rerun_by_name = {result.name: result for result in rerun_results}
 
     for tool_name, (result, _issues) in by_tool.items():
         rerun = rerun_by_name.get(tool_name)
-        if rerun is None:
+        if rerun is None or not check_answered(rerun) or result.parse_failures_count:
             continue
 
-        refreshed_issues = list(rerun.issues) if rerun.issues is not None else []
-        # Preserve native fix counters — only update remaining issues
-        # and issue list. The initial/fixed counts reflect what the native
-        # tool originally reported and should not be zeroed.
-        result.issues = refreshed_issues
-        result.issues_count = len(refreshed_issues)
-        result.remaining_issues_count = len(refreshed_issues)
-        result.success = rerun.success
-        if rerun.output is not None:
-            result.output = rerun.output
+        try:
+            previous = result.outcome.accounting
+        except ValueError:
+            # An untyped legacy plugin can supply invalid original state.
+            # It supplies no trustworthy accounting to refresh.
+            logger.warning(
+                f"AI post-fix rerun skipped for {tool_name}: invalid original",
+            )
+            continue
+
+        refreshed_issues = list(rerun.issues)
+        remaining = len(refreshed_issues)
+        accounting: FixMeasured | FixPartial
+        if (
+            previous.initial is not None
+            and previous.fixed is not None
+            and previous.initial == previous.fixed + remaining
+        ):
+            accounting = FixMeasured(
+                initial=previous.initial,
+                fixed=previous.fixed,
+                remaining=remaining,
+            )
+        else:
+            # Native fixes and a post-AI residual span different phases. Keep
+            # both measurements without claiming a complete before/after set
+            # or counting AI fixes again as native. A missing native count
+            # cannot be reconstructed from the post-AI residual either.
+            accounting = FixPartial(
+                initial=previous.initial if previous.fixed is None else None,
+                fixed=previous.fixed,
+                remaining=remaining,
+            )
+        outcome = ToolOutcome(
+            execution=rerun.outcome.execution,
+            accounting=accounting,
+            issues_count=remaining,
+        )
+        by_tool[tool_name] = (
+            replace(
+                result,
+                **outcome.to_legacy_fields(),
+                issues=refreshed_issues,
+                output=rerun.output if rerun.output is not None else result.output,
+            ),
+            _issues,
+        )

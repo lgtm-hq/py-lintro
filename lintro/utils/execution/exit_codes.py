@@ -9,6 +9,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from lintro.enums.action import Action
+from lintro.models.core.tool_outcome import (
+    FixMeasured,
+    FixPartial,
+    FixUnmeasured,
+    Skipped,
+    Unavailable,
+)
 from lintro.models.core.tool_result import ToolResult
 
 # Constants
@@ -37,13 +44,8 @@ def determine_exit_code(
     exit_code = DEFAULT_EXIT_CODE_SUCCESS
 
     # Check for tool failures first (applies to all actions)
-    # Exclude skipped / unavailable tools — they didn't fail unless strict
-    # mode marked unavailable with success=False.
-    if any(
-        not getattr(r, "success", True)
-        for r in all_results
-        if not getattr(r, "skipped", False)
-    ):
+    # Skipped and no-files outcomes already carry successful non-events.
+    if any(not result.outcome.success for result in all_results):
         exit_code = DEFAULT_EXIT_CODE_FAILURE
 
     # Then check for issues based on action
@@ -85,20 +87,23 @@ def aggregate_tool_results(
     total_remaining = 0
 
     for result in results:
-        # Exclude skipped / unavailable tools from totals
-        if getattr(result, "skipped", False) or getattr(result, "unavailable", False):
+        outcome = result.outcome
+        # Exclude skipped tools from totals
+        if isinstance(outcome.execution, (Skipped, Unavailable)):
             continue
-        total_issues += getattr(result, "issues_count", 0)
+        total_issues += outcome.issues_count
 
         if action == Action.FIX:
-            if getattr(result, "residual_unknown", False):
-                # No measurement exists for this tool. Deliberately not a
-                # zero: the run reports it as unknown instead.
-                continue
-            fixed = getattr(result, "fixed_issues_count", None)
-            total_fixed += fixed if fixed is not None else 0
-            remaining = getattr(result, "remaining_issues_count", None)
-            total_remaining += remaining if remaining is not None else 0
+            match outcome.accounting:
+                case FixUnmeasured():
+                    # No measurement exists; the run reports this tool as unknown.
+                    continue
+                case FixMeasured(fixed=fixed, remaining=remaining) | FixPartial(
+                    fixed=fixed,
+                    remaining=remaining,
+                ):
+                    total_fixed += fixed if fixed is not None else 0
+                    total_remaining += remaining if remaining is not None else 0
 
     # Outside FIX mode nothing is fixed; the remaining count is simply the
     # total issues found. Mirroring it here keeps the check-mode JSON summary
@@ -109,7 +114,7 @@ def aggregate_tool_results(
     return total_issues, total_fixed, total_remaining
 
 
-def unknown_residual_tool_names(results: Sequence[object]) -> list[str]:
+def unknown_residual_tool_names(results: Sequence[ToolResult]) -> list[str]:
     """Return the tools whose residual the verify pass could not measure.
 
     The run totals leave these tools out rather than folding a zero in for
@@ -118,14 +123,13 @@ def unknown_residual_tool_names(results: Sequence[object]) -> list[str]:
     measured "0 remaining" for a tool whose own row says "unknown".
 
     Args:
-        results: Every result in the run, in execution order. Typed loosely
-            because the console layer holds them as opaque objects.
+        results: Every result in the run, in execution order.
 
     Returns:
         list[str]: Names of the tools in the third state, in run order.
     """
     return [
-        str(getattr(result, "name", ""))
+        result.name
         for result in results
-        if getattr(result, "residual_unknown", False)
+        if isinstance(result.outcome.accounting, FixUnmeasured)
     ]

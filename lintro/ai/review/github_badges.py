@@ -11,10 +11,13 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
-from lintro.ai.resolved_ai_config import format_sourced_value
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
-from lintro.ai.review.sanitize import sanitize_comment_text
+from lintro.ai.review.provenance_display import (
+    cost_label,
+    model_label,
+    view_from_metadata,
+)
 
 __all__ = [
     "format_badge_table",
@@ -121,7 +124,8 @@ def run_stats_primary_cells(*, metadata: ReviewMetadata) -> list[tuple[str, str]
 
     Ordering is fixed across surfaces (epic #1905): model, est. cost, tokens
     in, tokens out. ``~`` marks values estimated locally, so a subscription run
-    never presents an estimate as a billed figure.
+    never presents an estimate as a billed figure. The model names the
+    endpoint that answered and the cost names its basis (#2868, ADR-0011 B).
 
     Args:
         metadata: Review run metadata.
@@ -134,14 +138,15 @@ def run_stats_primary_cells(*, metadata: ReviewMetadata) -> list[tuple[str, str]
     prompt_tokens = int(metadata.token_usage.get("prompt", 0))
     completion_tokens = int(metadata.token_usage.get("completion", 0))
     return [
+        ("model", model_label(view_from_metadata(metadata))),
         (
-            "model",
-            format_sourced_value(
-                f"`{sanitize_comment_text(metadata.model, limit=60)}`",
-                metadata.model_source or None,
+            "est. cost",
+            cost_label(
+                cost=metadata.cost_estimate_usd,
+                basis=metadata.cost_basis,
+                estimated=estimated,
             ),
         ),
-        ("est. cost", format_cost(metadata.cost_estimate_usd, estimated=estimated)),
         ("tokens in", f"{tilde}{format_int(prompt_tokens)}"),
         ("tokens out", f"{tilde}{format_int(completion_tokens)}"),
     ]

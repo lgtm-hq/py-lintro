@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.tools.core.verify_pass import check_answered
+
 if TYPE_CHECKING:
     from lintro.ai.models import AIFixSuggestion
     from lintro.models.core.tool_result import ToolResult
@@ -34,7 +36,7 @@ class ValidationResult:
 
     Attributes:
         verified: Number of fixes whose issues no longer appear.
-        unverified: Number of fixes whose issues still appear.
+        unverified: Number of fixes whose issues remain or could not be measured.
         new_issues: Number of remaining issues not matched to any applied fix.
         details: Per-file validation details.
         verified_by_tool: Verified fix counts grouped by tool name.
@@ -57,8 +59,8 @@ def verify_fixes(
     """Unified post-fix verification: re-run tools and validate fixes.
 
     Runs each tool once and uses the results for two purposes:
-    1. Update the original ``ToolResult`` objects with fresh remaining-issue
-       counts (what ``rerun.apply_rerun_results`` previously did).
+    1. Replace entries in ``by_tool`` with fresh remaining-issue counts
+       through ``rerun.apply_rerun_results``.
     2. Check each applied suggestion against the fresh results to determine
        whether the fix was verified (what ``validate_applied_fixes`` does).
 
@@ -88,10 +90,11 @@ def verify_fixes(
     apply_rerun_results(by_tool=by_tool, rerun_results=fresh_results)
 
     # Build a lookup from tool name -> fresh remaining issues for validation.
-    fresh_issues_by_tool: dict[str, list[object]] = {}
+    fresh_issues_by_tool: dict[str, list[object] | None] = {}
     for result in fresh_results:
-        issues: list[object] = list(result.issues) if result.issues is not None else []
-        fresh_issues_by_tool[result.name] = issues
+        fresh_issues_by_tool[result.name] = (
+            list(result.issues) if check_answered(result) else None
+        )
 
     # Step 2: Validate each applied suggestion using the fresh results.
     return _validate_suggestions(applied_suggestions, fresh_issues_by_tool)
@@ -115,7 +118,7 @@ def validate_applied_fixes(
 
     Returns:
         ValidationResult summarizing what was verified, or None if
-        validation could not run (e.g. no tools available).
+        no suggestions identify a tool to check.
     """
     if not applied_suggestions:
         return None
@@ -127,8 +130,7 @@ def validate_applied_fixes(
         by_tool_suggestions[tool].append(s)
 
     # Run each tool and collect fresh issues
-    fresh_issues_by_tool: dict[str, list[object]] = {}
-    any_tool_ran = False
+    fresh_issues_by_tool: dict[str, list[object] | None] = {}
     for tool_name, suggestions in by_tool_suggestions.items():
         if tool_name == "unknown":
             continue
@@ -137,13 +139,11 @@ def validate_applied_fixes(
         remaining_issues = _run_tool_check(tool_name, file_paths)
 
         if remaining_issues is None:
-            logger.debug(f"Validation skipped for {tool_name}: tool check failed")
-            continue
+            logger.debug(f"Validation unmeasured for {tool_name}: tool check failed")
 
-        any_tool_ran = True
         fresh_issues_by_tool[tool_name] = remaining_issues
 
-    if not any_tool_ran:
+    if not fresh_issues_by_tool:
         return None
 
     return _validate_suggestions(applied_suggestions, fresh_issues_by_tool)
@@ -151,14 +151,14 @@ def validate_applied_fixes(
 
 def _validate_suggestions(
     applied_suggestions: Sequence[AIFixSuggestion],
-    fresh_issues_by_tool: dict[str, list[object]],
+    fresh_issues_by_tool: dict[str, list[object] | None],
 ) -> ValidationResult:
     """Core validation logic: compare applied suggestions against fresh issues.
 
     Args:
         applied_suggestions: Suggestions that were applied.
         fresh_issues_by_tool: Mapping of tool name to remaining issues
-            from a fresh tool run.
+            from a fresh tool run, or None for an unmeasured check.
 
     Returns:
         ValidationResult with per-fix verification status.
@@ -177,7 +177,12 @@ def _validate_suggestions(
 
         remaining_issues = fresh_issues_by_tool.get(tool_name)
         if remaining_issues is None:
-            # Tool was not run or check failed -- skip validation
+            result.unverified += len(suggestions)
+            result.unverified_by_tool[tool_name] = len(suggestions)
+            result.details.extend(
+                f"[{s.code}] {Path(s.file).name}:{s.line} — tool check unmeasured"
+                for s in suggestions
+            )
             continue
 
         # Build a multiset for accurate one-to-one matching.
@@ -296,7 +301,7 @@ def _run_tool_check(
 
     Returns:
         List of issues found, or None if the tool is not available
-        or the check failed.
+        or the check did not measure its scope.
     """
     try:
         from lintro.tools import tool_manager
@@ -315,6 +320,6 @@ def _run_tool_check(
         )
         return None
     else:
-        if tool_result.issues is not None:
-            return list(tool_result.issues)
-        return []
+        if not check_answered(tool_result):
+            return None
+        return list(tool_result.issues)

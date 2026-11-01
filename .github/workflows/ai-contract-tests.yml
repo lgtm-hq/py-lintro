@@ -71,9 +71,9 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -102,14 +102,58 @@ jobs:
           TIER: '1'
         run: scripts/ci/run-ai-contract-tests.sh
 
+  lane:
+    name: Resolve review lane
+    # Secret-free. Reads the committed manifest from the dispatched ref and
+    # publishes the chain and the union of every declared row's hosts: Tier 2
+    # drives every lane in one job, so its egress is derived from the
+    # manifest by the same resolver the dogfood review uses (ADR-0011 A).
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # sparse checkout of the manifest and the resolver
+    timeout-minutes: 5
+    outputs:
+      chain: ${{ steps.resolve.outputs.chain }}
+      lane: ${{ steps.resolve.outputs.lane }}
+      egress-all: ${{ steps.resolve.outputs.egress_all }}
+      endpoint: ${{ steps.resolve.outputs.endpoint }}
+      first-party: ${{ steps.resolve.outputs.first_party }}
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        with:
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+
+      - name: Checkout the manifest and the resolver
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/ci/ai_review_lanes.json
+            scripts/ci/resolve_review_lanes.py
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve the chain from the manifest
+        id: resolve
+        # The same two routing variables the dogfood lane job reads.
+        env:
+          LINTRO_AI_PROVIDER: ${{ vars.LINTRO_AI_PROVIDER }}
+          LINTRO_AI_MODEL: ${{ vars.LINTRO_AI_MODEL }}
+        run: python3 -I scripts/ci/resolve_review_lanes.py --format github
+
   tier2-invocation-smoke:
     name: 🔥 AI CLI Invocation Smoke (Tier 2, manual only)
     # Manual only: this tier spends provider quota, and #2600 removed the cron
     # that used to run it unwatched.
     if: github.event_name == 'workflow_dispatch'
     # Gated on the free tier: there is no point spending quota to discover a
-    # problem `--help` already proved.
-    needs: [tier1-flag-surface]
+    # problem `--help` already proved. The lane job supplies the egress.
+    needs: [tier1-flag-surface, lane]
     runs-on: ubuntu-24.04
     permissions:
       contents: read # checkout the contract suite and the image pin
@@ -135,18 +179,17 @@ jobs:
       AI_CONTRACT_SECRETS_ALLOWED: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - name: Harden Runner
-        # Every host any dogfood lane can reach (.github/workflows/ai-review.yml
-        # AI_REVIEW_*_EGRESS). Dogfood allowlists them one provider at a time
-        # because a single run picks one provider; Tier 2 drives all three
-        # lanes in one job, so it allowlists the union — otherwise a lane that
-        # authenticates in dogfood dies here on egress instead. auth.openai.com
-        # and chatgpt.com are the Codex subscription-session hosts; without
-        # them the restored session cannot be exchanged and the codex lane
-        # 401s. Exact hosts only: no wildcards on this job.
+        # Every host any declared lane can reach, derived from the manifest by
+        # the lane job (ADR-0011 A): the dogfood review allowlists its chain's
+        # hosts; Tier 2 drives every lane in one job, so it allowlists the
+        # union over every declared row — otherwise a lane that authenticates
+        # in dogfood dies here on egress instead. The static entries are
+        # GitHub, GHCR and PyPI. Exact hosts only: the resolver refuses a
+        # wildcard host, and this job allows none.
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -156,17 +199,7 @@ jobs:
             pkg-containers.githubusercontent.com:443
             pypi.org:443
             files.pythonhosted.org:443
-            api.anthropic.com:443
-            api.openai.com:443
-            auth.openai.com:443
-            chatgpt.com:443
-            api.cursor.com:443
-            downloads.cursor.com:443
-            api2.cursor.sh:443
-            api3.cursor.sh:443
-            agentn.global.api5.cursor.sh:443
-            repo42.cursor.sh:443
-            api.z.ai:443
+            ${{ needs.lane.outputs.egress-all }}
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -218,42 +251,35 @@ jobs:
           # flip the CLI to bare (API-key) mode. LINTRO_CLI_BARE=never pins
           # the decision regardless (#1838/#1859).
           #
-          # The dogfood review has two anthropic configurations and picks
-          # between them on ZAI_BASE_URL (#2472 lane 2): with the variable
-          # empty the pinned `claude` binary talks to api.anthropic.com on the
-          # subscription token; with it set, the same binary is pointed at the
-          # z.ai gateway and authenticated with ZAI_AUTH_TOKEN instead. The
-          # three expressions below are the dogfood ones with the provider
-          # selection swapped for this job's gate — Tier 2 has no provider
-          # variable, it always drives all three lanes — so whichever
-          # configuration the review is in, Tier 2 proves that credential and
-          # never both at once. tests/unit/test_workflow_wiring.py derives
-          # them from ai-review.yml and fails if the two drift.
+          # The dogfood review's anthropic credential comes from the resolved
+          # lane (ADR-0011 A): the anthropic lane carries the subscription
+          # token against api.anthropic.com; the zai and kimi gateway lanes
+          # carry their secret as ANTHROPIC_AUTH_TOKEN against their own
+          # endpoint. All three key on the ACTIVE lane, so no lane order hands
+          # the claude CLI two credentials, and the gateway endpoint is the
+          # lane row's, not a variable's. Tier 2 has no provider to select —
+          # it always drives every lane — so whichever lane is active, Tier 2
+          # proves that credential.
+          # tests/unit/test_workflow_wiring.py derives them from ai-review.yml
+          # and the manifest and fails if they drift.
           # yamllint disable-line rule:line-length
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ (env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && vars.ZAI_BASE_URL == '') && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ (env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && needs.lane.outputs.lane == 'anthropic') && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
           # yamllint disable-line rule:line-length
-          ANTHROPIC_BASE_URL: ${{ env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && vars.ZAI_BASE_URL || '' }}
+          ANTHROPIC_BASE_URL: ${{ (env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && needs.lane.outputs.first-party == 'false') && needs.lane.outputs.endpoint || '' }}
           # yamllint disable-line rule:line-length
-          ANTHROPIC_AUTH_TOKEN: ${{ env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && vars.ZAI_BASE_URL && secrets.ZAI_AUTH_TOKEN || '' }}
+          ANTHROPIC_AUTH_TOKEN: ${{ (env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && needs.lane.outputs.lane == 'zai') && secrets.ZAI_AUTH_TOKEN || (env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && needs.lane.outputs.lane == 'kimi') && secrets.KIMI_API_KEY || '' }}
           LINTRO_CLI_BARE: 'never'
           # Keep the claude CLI's egress to api.anthropic.com only, and keep
           # the image's pinned CLI pinned — an autoupdate would swap the very
           # binary this tier exists to verify.
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
           DISABLE_AUTOUPDATER: '1'
-          # The dogfood review's model overlay (#2471/#1971), mirrored for
-          # parity so the two jobs read the same variable. One value reaches
-          # every lane: the review runs one provider per run, Tier 2 runs all
-          # three in one job, and there is no per-lane split here because the
-          # container gets a single environment for the whole pytest run. A
-          # provider-specific slug therefore reddens the lanes it does not
-          # belong to — set it only while experimenting with the provider it
-          # names, and expect the other two to fail; otherwise leave it unset.
-          # Unset is the default and the normal state: each lane then resolves
-          # its own default, which for codex means deferring to the CLI under
-          # a subscription session (#2537).
-          # yamllint disable-line rule:line-length
-          LINTRO_AI_MODEL: ${{ env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && vars.LINTRO_AI_MODEL || '' }}
+          # No model overlay: the dogfood review takes its model from the lane
+          # row (every row names one), and one value cannot serve the lanes
+          # this job drives in one container. The contract suite sets no model
+          # either, so each smoke row runs on its provider's or CLI's own
+          # default; this tier proves the credential and the invocation, not
+          # the lane's declared model.
           # cursor: the same API key the dogfood cursor lane uses.
           # yamllint disable-line rule:line-length
           CURSOR_API_KEY: ${{ env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && secrets.CURSOR_API_KEY || '' }}

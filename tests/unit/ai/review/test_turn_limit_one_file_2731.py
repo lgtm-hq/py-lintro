@@ -39,9 +39,10 @@ from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.path_utils import is_context_eligible_path, is_source_code_path
+from lintro.ai.review.progress import NullReviewProgress
 from lintro.ai.review.repo_context import RepoContextSource, build_repo_context
 from lintro.ai.review.response_pipeline import ChunkReviewRequest
-from lintro.ai.review.session import NOTHING_REVIEWED_REASON
+from lintro.ai.review.session import NOTHING_REVIEWED_REASON, ChunkRunPlan
 from lintro.ai.review.synthesis import should_run_synthesis
 from lintro.config.review_config import ReviewSynthesisConfig
 
@@ -342,6 +343,38 @@ async def test_the_schema_reminder_after_a_single_shot_retry_stays_single_shot()
     assert_that(captured[0]["no_tools"]).is_true()
 
 
+def _chunk_plan(*, request: ChunkReviewRequest, depth: int) -> ChunkRunPlan:
+    """Build the normalized plan that direct chunk calls receive in production.
+
+    Direct calls bypass run planning, which supplies a no-op progress callback
+    when the invocation has none. Use the real plan so mypy checks this seam.
+
+    Args:
+        request: Inputs shared with the chunk's main pass.
+        depth: Review depth to exercise.
+
+    Returns:
+        A chunk plan with concrete progress and budget dependencies.
+    """
+    return ChunkRunPlan(
+        context=request.context,
+        provider=request.provider,
+        ai_config=request.ai_config,
+        depth=depth,
+        checklist_items=[],
+        checklist_text=request.checklist_text,
+        classifications=[],
+        lint_results=request.lint_results,
+        budget=CostBudget(max_cost_usd=None),
+        progress=NullReviewProgress(),
+        repo_root=request.repo_root,
+        use_one_shot=request.use_one_shot,
+        tools_disabled=request.tools_disabled,
+        strictness_section=request.strictness_section,
+        diff_budget=request.diff_budget,
+    )
+
+
 async def test_no_depth_3_sweep_over_a_chunk_the_main_pass_never_reviewed() -> None:
     """Two turn-limited attempts end the chunk; no third, tool-enabled call."""
     from lintro.ai.review import chunk_pass
@@ -372,25 +405,7 @@ async def test_no_depth_3_sweep_over_a_chunk_the_main_pass_never_reviewed() -> N
         raise AssertionError("the sweep must not run")
 
     base = _request()
-    plan = MagicMock()
-    plan.depth = 3
-    plan.timings = None
-    plan.progress = None
-    plan.ai_config = base.ai_config
-    plan.classifications = []
-    plan.generated_questions = ""
-    plan.context = base.context
-    plan.provider = MagicMock()
-    plan.checklist_text = ""
-    plan.checklist_items = []
-    plan.lint_results = None
-    plan.strictness_section = ""
-    plan.budget = CostBudget(max_cost_usd=None)
-    plan.repo_root = ""
-    plan.use_one_shot = True
-    plan.diff_budget = 100_000
-    plan.repo_context = None
-    plan.context_budget = None
+    plan = _chunk_plan(request=base, depth=3)
     with (
         patch.object(chunk_pass, "review_chunk_main_pass", _main),
         patch.object(chunk_pass, "run_adversarial_pass", _sweep),
@@ -534,28 +549,10 @@ async def test_a_limited_half_keeps_the_surviving_halves_files() -> None:
         "review_chunk_main_pass",
         AsyncMock(return_value=partial),
     ):
-        base = _request()
-        plan = MagicMock()
-        plan.depth = 1
-        plan.timings = None
-        plan.progress = None
-        plan.ai_config = base.ai_config
-        plan.classifications = []
-        plan.generated_questions = ""
-        plan.context = base.context
-        plan.provider = MagicMock()
-        plan.checklist_text = ""
-        plan.checklist_items = []
-        plan.lint_results = None
-        plan.strictness_section = ""
-        plan.budget = CostBudget(max_cost_usd=None)
-        plan.repo_root = ""
-        plan.use_one_shot = True
-        plan.diff_budget = 100_000
-        plan.repo_context = None
-        plan.context_budget = None
+        base = _two_file_request()
+        plan = _chunk_plan(request=base, depth=1)
         scoped = await chunk_pass.review_chunk(
-            chunk=_two_file_request().chunk,
+            chunk=base.chunk,
             chunk_index=0,
             plan=plan,
         )
@@ -590,6 +587,17 @@ async def test_row_3_on_a_half_makes_no_further_call() -> None:
     assert_that(partial.files).is_equal_to(("docs/other.md",))
     reasons = [d.reason for d in partial.coverage_degradations]
     assert_that(reasons).contains(CoverageDegradationReason.TURN_LIMIT_REACHED)
+    # The limited half's row names that half alone, so a rerun redoes it
+    # and not the half that answered (#2803).
+    limited_rows = [
+        d
+        for d in partial.coverage_degradations
+        if d.reason is CoverageDegradationReason.TURN_LIMIT_REACHED
+    ]
+    assert_that(limited_rows).is_length(1)
+    limited = limited_rows[0]
+    assert_that(limited.paths).is_equal_to(tuple(seen[2].chunk.files))
+    assert_that(limited.paths).does_not_contain("docs/other.md")
 
 
 async def test_row_8_on_a_half_is_lost_not_split_again() -> None:

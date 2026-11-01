@@ -77,6 +77,17 @@
       "output_tokens": 0,
       "cost_estimate": 0.0
     },
+    "endpoint": "",
+    "first_party": true,
+    "credential": "api_key",
+    "reported_models": [],
+    "unreported_models": [],
+    "model_verification": "",
+    "lane": "",
+    "fallback_from": "",
+    "fallback_reason": "",
+    "shadow_price_model": "",
+    "cost_reported": false,
     "lint_facts_note": ""
   },
   "summary": "",

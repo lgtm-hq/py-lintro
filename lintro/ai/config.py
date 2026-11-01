@@ -20,6 +20,7 @@ backends. A knob only one vendor understands lives on that provider's own
 
 from __future__ import annotations
 
+import re
 import warnings
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -33,6 +34,7 @@ from pydantic import (
     Field,
     SerializeAsAny,
     ValidationError,
+    field_validator,
     model_validator,
 )
 
@@ -55,6 +57,11 @@ from lintro.ai.provider_config import (
 from lintro.ai.provider_enum import accepted_provider_values
 from lintro.ai.registry import AIProvider
 from lintro.ai.resolved_ai_config import ResolvedAIConfig
+from lintro.enums.review_category import ReviewCategory
+
+#: What ``ai.api_key_env`` may hold: a variable name, so the reports that
+#: print it can never print a key.
+_ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 __all__ = [
     "AIBudgetConfig",
@@ -219,7 +226,13 @@ class AIConfig(BaseModel):
         ),
     )
     model: str | None = None
-    api_key_env: str | None = None
+    api_key_env: str | None = Field(
+        default=None,
+        description=(
+            "Name of the environment variable holding the API key. A name, "
+            "never the key: the value is reported by `lintro config`."
+        ),
+    )
     api_base_url: str | None = Field(
         default=None,
         description=(
@@ -424,6 +437,19 @@ class AIConfig(BaseModel):
             "a zero-unresolved-threads rule."
         ),
     )
+    review_note_categories: list[str] = Field(
+        default_factory=lambda: [str(ReviewCategory.CODE_SMELL)],
+        description=(
+            "Finding categories whose P3 findings are routed to the sticky "
+            "comment's 'Notes and questions' block instead of its nit list, "
+            "whatever their confidence; a P1 or P2 in a routed category still "
+            "opens a thread. Defaults to ['code-smell']: on the review corpus "
+            "2 of 35 distinct code-smell findings were defects, both P3 "
+            "nits, so the category is routed away, not dropped. Values are "
+            "review categories ('logic-bug', 'test-gap', ...); an empty list "
+            "routes every category by confidence alone."
+        ),
+    )
     review_chunk_diff_tokens: int = Field(
         default=7_000,
         ge=1_000,
@@ -618,6 +644,72 @@ class AIConfig(BaseModel):
                 ) from exc
         migrated["providers"] = blocks
         return migrated
+
+    @field_validator("review_note_categories")
+    @classmethod
+    def _note_categories_are_review_categories(cls, value: list[str]) -> list[str]:
+        """Canonicalize ``review_note_categories`` and refuse unknown labels.
+
+        Spelling is normalized the way the finding parser normalizes a
+        model-reported category (case, whitespace, underscores for hyphens),
+        so ``CODE_SMELL`` and ``code smell`` both route; a label that is not
+        a review category is a typo and is refused rather than silently
+        routing nothing.
+
+        Args:
+            value: The configured category labels.
+
+        Returns:
+            The canonical wire values, in the order given, without repeats.
+
+        Raises:
+            ValueError: When a label is not a review category.
+        """
+        canonical: list[str] = []
+        for raw in value:
+            words = str(raw).lower().replace("_", " ").replace("-", " ").split()
+            text = "-".join(words)
+            try:
+                category = str(ReviewCategory(text))
+            except ValueError:
+                known = ", ".join(str(member) for member in ReviewCategory)
+                msg = (
+                    f"ai.review_note_categories: {raw!r} is not a review "
+                    f"category (one of: {known})"
+                )
+                raise ValueError(msg) from None
+            if category not in canonical:
+                canonical.append(category)
+        return canonical
+
+    @field_validator("api_key_env")
+    @classmethod
+    def _api_key_env_is_a_name(cls, value: str | None) -> str | None:
+        """Refuse an ``api_key_env`` that is not an environment-variable name.
+
+        The field names where the key lives; ``lintro config`` prints it. A
+        key pasted here by mistake would otherwise be printed in clear.
+
+        Args:
+            value: The configured value.
+
+        Returns:
+            The value, when it is a variable name or unset.
+
+        Raises:
+            ValueError: When the value is not a variable name.
+        """
+        if value is None or not value.strip():
+            # An empty value has always meant "the provider's default".
+            return None
+        if _ENV_NAME_RE.fullmatch(value):
+            return value
+        msg = (
+            "ai.api_key_env must be the NAME of an environment variable "
+            "(letters, digits and underscores, not starting with a digit), "
+            "never the key itself"
+        )
+        raise ValueError(msg)
 
     @model_validator(mode="after")
     def _apply_legacy_enabled_default(self) -> AIConfig:

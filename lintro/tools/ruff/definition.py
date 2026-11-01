@@ -65,6 +65,7 @@ class RuffPlugin(BaseToolPlugin):
             name="ruff",
             description="Fast Python linter and formatter replacing multiple tools",
             can_fix=True,
+            supports_stdin=True,
             tool_type=ToolType.LINTER | ToolType.FORMATTER,
             file_patterns=RUFF_FILE_PATTERNS,
             claims=[

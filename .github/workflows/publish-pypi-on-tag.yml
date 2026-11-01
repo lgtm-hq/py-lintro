@@ -66,9 +66,9 @@ jobs:
     steps:
       - name: Harden runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: block
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -94,7 +94,7 @@ jobs:
     name: Generate and verify SBOM
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@22bb159287eb23a812d533090615525eccb839ac # v0.75.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     with:
       target: .
       target-type: dir
@@ -104,8 +104,8 @@ jobs:
       # Remediation landed in #1126; Dependabot shows no open high alerts.
       fail-on-severity: high
       create-attestation: true
-      tooling-ref: '22bb159287eb23a812d533090615525eccb839ac' # v0.75.1
-      egress-policy: block
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: sbom
     permissions:
       # read: SBOM generation, vuln scan and attestation only read the repo.
@@ -127,7 +127,7 @@ jobs:
       github.ref_type == 'tag' &&
       !startsWith(github.ref_name, 'actions-v')
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@22bb159287eb23a812d533090615525eccb839ac # v0.75.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     permissions:
       # read: checkout and build sdist/wheel (reusable-build-python-dist)
       contents: read
@@ -142,8 +142,8 @@ jobs:
       # Policy recovery window (lgtm-hq/lgtm-ci#962): the reusable defaults
       # to 90 already; pinned so a default change upstream cannot shorten it.
       artifact-retention-days: 90
-      tooling-ref: '22bb159287eb23a812d533090615525eccb839ac' # v0.75.1
-      egress-policy: block
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: pypi
       # Full list (v0.50.0+ replace semantics): the reusable passes
       # allowed-endpoints verbatim to step-security/harden-runner, so a
@@ -202,9 +202,9 @@ jobs:
         # Artifact service hops for download/upload-artifact, the GitHub API
         # for the attestations, and the sigstore TUF root gh verifies with.
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: block
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -237,27 +237,27 @@ jobs:
         run: scripts/ci/release-fault.sh fail-build
       - name: Download Python distribution
         # yamllint disable-line rule:line-length
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: python-dist
           path: gate/dist
       - name: Download macOS binaries
         # yamllint disable-line rule:line-length
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: lintro-macos-*
           merge-multiple: true
           path: gate/binaries
       - name: Download Linux binaries
         # yamllint disable-line rule:line-length
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: lintro-linux-*
           merge-multiple: true
           path: gate/binaries
       - name: Download man page
         # yamllint disable-line rule:line-length
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: lintro-man-page
           path: gate/man
@@ -285,7 +285,7 @@ jobs:
         run: python3 scripts/ci/release-gate/write_manifest.py
       - name: Upload release assets
         # yamllint disable-line rule:line-length
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-assets
           path: release-assets/
@@ -295,7 +295,7 @@ jobs:
           retention-days: 90
       - name: Upload release manifest
         # yamllint disable-line rule:line-length
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-manifest
           path: release-manifest.json
@@ -323,9 +323,9 @@ jobs:
     steps:
       - name: Harden runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: block
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           # lgtm-ci workflow-contract.md § PyPI upload (OIDC)
           allowed-endpoints: >
             github.com:443
@@ -348,11 +348,11 @@ jobs:
       - name: Prepare PyPI upload
         id: prepare
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@22bb159287eb23a812d533090615525eccb839ac # v0.75.1
+        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
         with:
           artifact-name: python-dist
           python-version: '3.14'
-          tooling-ref: '22bb159287eb23a812d533090615525eccb839ac' # v0.75.1
+          tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
           require-attestation: 'true'
           # The dist attestation was made inside lgtm-ci's build reusable,
           # which is the signer identity Fulcio recorded.
@@ -362,7 +362,7 @@ jobs:
       # moved to the build stage, where it is a hard failure.
       - name: Upload to PyPI
         # yamllint disable-line rule:line-length
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           repository-url: https://upload.pypi.org/legacy/
           packages-dir: ${{ steps.prepare.outputs.dist-path }}
@@ -372,7 +372,7 @@ jobs:
     needs: [classify-tag, pypi-upload]
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@22bb159287eb23a812d533090615525eccb839ac # v0.75.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     permissions:
       # write: create GitHub Release and upload the gated assets
       contents: write
@@ -391,8 +391,8 @@ jobs:
       # hard-coded false and had to be edited by hand (#2562). Derived from
       # the same classifier that gates Homebrew, npm, Docker and the mirror.
       prerelease: ${{ needs.classify-tag.outputs.is_prerelease == 'true' }}
-      tooling-ref: '22bb159287eb23a812d533090615525eccb839ac' # v0.75.1
-      egress-policy: block
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: github-tooling
       # Full list (v0.50.0+ replace semantics): the reusable passes
       # allowed-endpoints verbatim to step-security/harden-runner, so a
@@ -636,9 +636,9 @@ jobs:
         # same entry release-gate carries; S1 of #2633 (v0.160.3rc1) died in
         # "Verify attestations on the staging digests" without it.
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: block
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -799,7 +799,7 @@ jobs:
       github.ref_type == 'tag' &&
       !startsWith(github.ref_name, 'actions-v')
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-failure-notifier.yml@22bb159287eb23a812d533090615525eccb839ac # v0.75.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-failure-notifier.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     permissions:
       # read: failed-job logs for the infra-signature classifier
       actions: read
@@ -825,7 +825,7 @@ jobs:
         reading ID token
         Get "https://registry-1.docker.io/v2/": context deadline exceeded
         No lint verdict (runner loss); auto-rerun will retry
-      tooling-ref: '22bb159287eb23a812d533090615525eccb839ac' # v0.75.1
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
       # The reusable hardens its own runner first and resolves the
       # github-minimal allowlist itself; the caller passes no endpoints.
-      egress-policy: block
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207

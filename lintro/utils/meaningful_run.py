@@ -4,30 +4,16 @@ Two consumers ask the same question in slightly different ways, and both got
 it wrong independently before this module existed (issue #1739):
 
 * ``lintro badge`` must not publish a public "0 issues" badge for a directory
-  nothing inspected, or for a run whose tools timed out.
+  nothing inspected, or for a run whose tools timed out or failed without
+  reporting findings.
 * The severity baseline must not record — or compare against — a run that did
   not measure the same population as a normal ``check``.
 
-A tool that finds nothing to do often still returns ``skipped=False`` and
-``success=True``. The authoritative signal is now structured:
-``ToolResult.no_files`` is set by every plugin that returns without examining
-a file, and :func:`result_inspected_files` reads it first. That removes the
-ambiguity this module used to document: ``bandit`` deliberately nulls its
-``output`` for the no-files case, so no text heuristic could tell it apart
-from the clean runs that also return empty output (``ruff``, ``pydoclint``,
-``semgrep``, ``gitleaks``). The flag can.
-
-The message heuristic is kept underneath it, not replaced, for results the
-flag cannot speak for: a plugin that has not been converted, an out-of-tree
-plugin, and the "declined to run at all" shape that is not an empty file set —
-"Skipping <tool>: ..." from ``vale`` and ``stylelint``, which do not set
-``skipped`` the way ``spectral`` and ``commitlint`` do. It covers two message
-families: "No <files> to check" for an empty file set and the skipping prefix
-for a wrapper that bailed.
-
-Empty ``output`` with the flag unset still counts as *inspected*: for an
-unconverted producer the opposite reading would make every clean run look
-unmeasured.
+Inspection is a producer-owned, three-state signal: True for inspected files,
+False for no work, and None for legacy results whose coverage is unknown.
+``no_files`` distinguishes empty discovery from a decline such as missing
+configuration. Message text never establishes either state. Only an affirmative
+inspection can qualify a run for publication or baseline comparison.
 """
 
 from __future__ import annotations
@@ -44,86 +30,24 @@ if TYPE_CHECKING:
 __all__ = [
     "baseline_is_eligible",
     "result_inspected_files",
+    "run_has_unreported_failure",
     "run_inspected_files",
 ]
 
-#: Endings of the "nothing to do" messages wrappers emit, checked after the
-#: trailing period is stripped. Deliberately specific: a message like "No
-#: issues found" or "No typos found." means the tool *did* inspect files and
-#: found nothing, so a bare "found" test would misclassify a clean run.
-_NO_WORK_ENDINGS: tuple[str, ...] = (
-    "to check",
-    "to fix",
-    "to format",
-    "to lint",
-    "files found",
-    "include paths",
-)
 
-#: Substring marking a wrapper that bailed out because a prerequisite manifest
-#: was absent, e.g. "No Cargo.lock found; skipping cargo-audit.".
-_SKIPPING_MARKER = "; skipping"
-
-#: Prefix of the whole-output message a wrapper emits when it declines to run
-#: at all — missing configuration, a failed auto-install, an unusable version.
-#: ``vale`` and ``stylelint`` use this shape *without* setting ``skipped=True``,
-#: so it is the only signal that they inspected nothing.
-_SKIPPING_PREFIX = "skipping "
-
-
-def _reports_no_work(text: str) -> bool:
-    """Return whether a result's text says the tool found nothing to do.
-
-    Args:
-        text: The result's combined ``output`` and ``formatted_output``.
-
-    Returns:
-        bool: ``True`` when the message names an empty file/path set, or says
-        the tool declined to run, rather than a clean inspection.
-    """
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    if not lines:
-        return False
-
-    # Matched on the first line only: a "Skipping <tool>: ..." result carries
-    # that message as its entire output, whereas a tool that really ran could
-    # mention "skipping" somewhere inside a findings blob.
-    if lines[0].lower().startswith(_SKIPPING_PREFIX):
-        return True
-
-    for line in lines:
-        stripped = line.rstrip(".").lower()
-        if not stripped.startswith("no "):
-            continue
-        if _SKIPPING_MARKER in stripped or stripped.endswith(_NO_WORK_ENDINGS):
-            return True
-    return False
-
-
-def result_inspected_files(result: ToolResult) -> bool:
-    """Return whether a tool result looks like it actually inspected files.
-
-    Both ``output`` and ``formatted_output`` are searched, because some
-    wrappers put the message in only one of them.
+def result_inspected_files(result: ToolResult) -> bool | None:
+    """Read a producer's inspection signal without interpreting display text.
 
     Args:
         result: One tool's completed result.
 
     Returns:
-        bool: ``True`` when the tool was not skipped, did not time out, did
-        not flag ``no_files``, and did not report an empty file or path set in
-        its message. See the module docstring for why empty output with the
-        flag unset counts as inspected.
+        True for inspection, False for no work, or None for legacy results.
+        Skips, timeouts and empty discovery never qualify as inspections.
     """
-    if result.skipped or result.timed_out:
+    if result.skipped or result.timed_out or result.no_files:
         return False
-    if result.no_files:
-        # The structured signal, set by the plugin that knows: it returned
-        # without examining a file. Read before the text so a producer that
-        # nulls its output (bandit) is classified correctly.
-        return False
-    text = f"{result.output or ''}\n{result.formatted_output or ''}"
-    return not _reports_no_work(text)
+    return result.inspected_files
 
 
 def run_inspected_files(results: Sequence[ToolResult]) -> bool:
@@ -135,7 +59,24 @@ def run_inspected_files(results: Sequence[ToolResult]) -> bool:
     Returns:
         bool: ``True`` when at least one result inspected files.
     """
-    return any(result_inspected_files(result) for result in results)
+    return any(result_inspected_files(result) is True for result in results)
+
+
+def run_has_unreported_failure(results: Sequence[ToolResult]) -> bool:
+    """Return whether a tool failed without reporting any findings.
+
+    Args:
+        results: Every result the run produced, skipped placeholders included.
+
+    Returns:
+        bool: ``True`` when a non-skipped tool failed without parsed findings,
+        even if ``issues_count`` is positive (as for run-level gates).
+        Failures with parsed findings are ordinary lint verdicts.
+    """
+    return any(
+        not result.skipped and not result.success and not result.issues
+        for result in results
+    )
 
 
 def baseline_is_eligible(
@@ -144,12 +85,16 @@ def baseline_is_eligible(
     dry_run_preview: bool,
     tool_results: Sequence[ToolResult],
     early_exit: bool = False,
+    partial_scan: bool = False,
 ) -> bool:
     """Return whether a run may read or write the severity baseline.
 
     The same predicate gates both sides on purpose: a run that must not
     *record* a baseline must not *compare against* one either, or it reports a
     delta between two different populations.
+
+    Baseline storage additionally uses a matching scope fingerprint for
+    comparison and updates only that scope's entry.
 
     A run qualifies only when all of the following hold:
 
@@ -162,17 +107,29 @@ def baseline_is_eligible(
       is not evidence that anything was measured; recording its zero counts
       would make the next real check report every existing issue as newly
       introduced.
+    * Every non-skipped result has known coverage. One inspected tool cannot
+      make an unknown peer's missing findings comparable to a healthy run.
     * It did not exit before running anything.
+    * It did not request ``--diff`` or ``--incremental``. These modes narrow
+      the measured files without changing the path arguments or tool set,
+      and their file population can change even with the same flags.
+    * No tool failed without parsed findings. Such a failure would undercount
+      the population and make the next healthy run report spurious new issues.
 
     Args:
         action: The action the run executed.
         dry_run_preview: Whether this run is a ``fmt --dry-run`` preview.
         tool_results: Every result the run produced.
         early_exit: Whether the run stopped before executing any tool.
+        partial_scan: Whether ``--diff`` or ``--incremental`` was requested.
 
     Returns:
         bool: ``True`` when the run is a comparable measurement.
     """
-    if early_exit or dry_run_preview or action != Action.CHECK:
+    if early_exit or dry_run_preview or partial_scan or action != Action.CHECK:
         return False
-    return run_inspected_files(tool_results)
+    if any(result_inspected_files(result) is None for result in tool_results):
+        return False
+    return not run_has_unreported_failure(tool_results) and run_inspected_files(
+        tool_results,
+    )

@@ -48,6 +48,12 @@ from lintro.ai.provider_enum import (
     provider_required_error,
 )
 from lintro.ai.providers import get_provider
+from lintro.ai.review.already_reviewed import (
+    AlreadyReviewed,
+    evaluate_already_reviewed,
+    force_requested,
+    publication_complete,
+)
 from lintro.ai.review.checklist_display import (
     build_prompt_question_map,
     resolve_checklist_display,
@@ -75,6 +81,7 @@ from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.orchestrator import guard_changed_paths
 from lintro.ai.review.output import (
+    render_already_reviewed_outcome_json,
     render_convergence_outcome_json,
     render_review_output,
 )
@@ -431,7 +438,7 @@ def _advisory_failure_error(results: list[ToolResult]) -> AIError:
         in {ToolRunStatus.ERRORED, ToolRunStatus.TIMED_OUT}
     )
     message = failed.output or f"{failed.name} failed"
-    metadata = failed.metadata or {}
+    metadata = failed.metadata
     if metadata.get(ADVISORY_ERROR_METADATA_KEY) == (ADVISORY_ERROR_PROVIDER_REQUIRED):
         return AIProviderRequiredError(message)
     return AIError(message)
@@ -992,7 +999,10 @@ def _finish_review(
     # its tree), the removal itself when the round never ran (a converged
     # skip, a state-load or provider error).
     with RemoveOnError(prepared.context.head_worktree):
-        resolved_profile = resolve_transport_settings(prepared.ai_config)
+        resolved_profile = resolve_transport_settings(
+            prepared.ai_config,
+            cwd=str(prepared.workspace_root),
+        )
         logger.info(
             "AI review transport profile: {}",
             format_resolved_profile_log(resolved_profile),
@@ -1010,10 +1020,20 @@ def _finish_review(
             repo=targets.effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
             post=options.post,
         )
-        if not options.force_full:
+        # ``--full`` and ``LINTRO_REVIEW_FORCE`` both get past the two
+        # pre-provider skips (#2099, #2338); only ``--full`` also discards
+        # the carried coverage.
+        if not options.force_full and not force_requested():
             _check_convergence(
                 options=options,
                 lintro_config=lintro_config,
+                prior_state=prior_state,
+                targets=targets,
+            )
+            _check_already_reviewed(
+                options=options,
+                prepared=prepared,
+                resolved_ai=resolved_ai,
                 prior_state=prior_state,
                 targets=targets,
             )
@@ -1059,6 +1079,125 @@ def _finish_review(
             targets=targets,
             resolved_profile=resolved_profile,
         )
+
+
+def _check_already_reviewed(
+    *,
+    options: ReviewCommandOptions,
+    prepared: PreparedReview,
+    resolved_ai: ResolvedAIConfig,
+    prior_state: ReviewState,
+    targets: _ReviewTargets,
+) -> None:
+    """Skip the round when the last finished round already covered this head.
+
+    Evaluated after the convergence check and before the provider is
+    constructed, so a skipped round costs nothing (#2338). Under ``--post``
+    the skip also needs publication evidence, because the round's state is
+    persisted before its posting step: a run whose posting failed must post
+    on retry, so it reviews again instead.
+
+    Returns normally when the round must run. When the head is covered,
+    :func:`_finish_already_reviewed` stamps the outcome and raises
+    ``SystemExit``, so this never returns on that path.
+
+    Args:
+        options: The command's Click-populated options.
+        prepared: The prepared review, carrying the context and AI config.
+        resolved_ai: Effective AI configuration, for the provider and model
+            the reuse gate places the stored rounds against.
+        prior_state: State loaded for this invocation.
+        targets: Resolved GitHub target for this run.
+    """
+    from lintro.ai.registry import metadata_for
+    from lintro.ai.review.reuse_gate import reusable_rounds_before_provider
+
+    ai_config = prepared.ai_config
+    provider_name = str(resolved_ai.config.provider or "")
+    model_name = resolved_ai.config.model or (
+        metadata_for(provider_name).default_model if provider_name else ""
+    )
+    decision = evaluate_already_reviewed(
+        context=prepared.context,
+        prior=prior_state,
+        force_full=options.force_full,
+        reusable_rounds=reusable_rounds_before_provider(
+            prior=prior_state,
+            ai_config=ai_config,
+            provider_name=provider_name,
+            model_name=model_name,
+            agent_models=tuple(
+                agent.model for agent in prepared.custom_agents if agent.model
+            ),
+            workspace_root=prepared.workspace_root,
+        ),
+    )
+    if decision is None:
+        return
+    if options.post and targets.resolved_pr is not None and targets.effective_repo:
+        from lintro.ai.integrations.github_pr import GitHubPRReporter
+
+        reporter = GitHubPRReporter(
+            pr_number=targets.resolved_pr,
+            repo=targets.effective_repo,
+        )
+        if not publication_complete(
+            prior=prior_state,
+            policy=PostingPolicy.from_ai_config(ai_config),
+            decision=decision,
+            find_sticky=reporter.find_issue_comment,
+            fetch_diff_lines=reporter.fetch_pr_diff_lines,
+        ):
+            logger.info(
+                "Head {} is covered by round {} but its review is not fully "
+                "posted; reviewing again so it can be",
+                decision.head_sha[:7],
+                decision.round,
+            )
+            return
+    _finish_already_reviewed(
+        decision=decision,
+        output_format=options.output_format,
+        prior_state=prior_state,
+    )
+
+
+def _finish_already_reviewed(
+    *,
+    decision: AlreadyReviewed,
+    output_format: str,
+    prior_state: ReviewState,
+) -> NoReturn:
+    """Stamp an already-reviewed head and exit without calling the provider.
+
+    Nothing is persisted and the sticky is not touched: the last finished
+    round's board, threads and verdict stand as posted. The exit code follows
+    the open records the way the converged skip's does: an open P1 record
+    exits 1, and the CI check greens both alike and names the count.
+
+    Args:
+        decision: The decision that skipped the round.
+        output_format: CLI ``--output`` value (``json`` or ``terminal``).
+        prior_state: State loaded for this invocation.
+
+    Raises:
+        SystemExit: Always. ``0`` for a clean skip; ``1`` when an open P1
+            record is left over.
+    """
+    open_p1 = count_blocking_findings(findings=prior_state.findings)
+    if output_format == "json":
+        click.echo(
+            render_already_reviewed_outcome_json(decision=decision, open_p1=open_p1),
+        )
+    else:
+        click.echo(f"🔁 Review skipped — {decision.describe()}")
+        if open_p1:
+            click.echo(
+                f"   {open_p1} open P1 finding(s) from that round still "
+                "block: exiting 1.",
+            )
+        click.echo("   Re-run with --full or LINTRO_REVIEW_FORCE=1 to force a round.")
+    raise SystemExit(1 if open_p1 else 0)
 
 
 def _check_convergence(
@@ -1217,36 +1356,56 @@ def _stamp_metadata(*, result: ReviewResult, stamp: _MetadataStamp) -> ReviewRes
         ReviewResult: The result with provenance-complete metadata.
     """
     from lintro.ai.enums.cost_basis import CostBasis
+    from lintro.ai.provenance import auth_mode_for, recorded_cost_basis
 
-    effective_basis = stamp.profile.cost_basis
-    if result.metadata.token_usage_estimated and effective_basis is CostBasis.BILLED:
+    metadata = result.metadata
+    # A subscription CLI figure is read by where the run went and whether the
+    # envelope reported one (#2867, ADR-0011 B); the pre-run profile can only
+    # say ``unpriceable``.
+    effective_basis = recorded_cost_basis(
+        configured=stamp.profile.cost_basis,
+        first_party=metadata.first_party is not False,
+        cost_reported=metadata.cost_reported,
+    )
+    if metadata.token_usage_estimated and effective_basis is CostBasis.BILLED:
         effective_basis = CostBasis.ESTIMATED
+    # Off the provider's host every call was already priced on the shadow
+    # model as it returned (the model ledger, ADR-0011 B), and the round's
+    # figure is the larger of those calls' sum and what the budget charged,
+    # dropped partials and turn-limited calls included. The stamp keeps
+    # that one figure rather than repricing the token totals, so the in-run
+    # cap, the record and the PR budget cannot disagree.
+    cost = metadata.cost_estimate_usd
     return replace(
         result,
         metadata=replace(
-            result.metadata,
+            metadata,
+            cost_estimate_usd=cost,
             transport=stamp.profile.transport.value,
-            auth_mode=stamp.profile.auth_mode,
+            # The credential actually forwarded decides the auth mode; the
+            # profile's policy-derived label is the fallback when no call
+            # recorded one (#2867).
+            auth_mode=auth_mode_for(metadata.credential) or stamp.profile.auth_mode,
             cost_basis=effective_basis.value,
             provider_source=stamp.resolved_ai.source_of("provider").value,
             model_source=stamp.resolved_ai.source_of("model").value,
             transport_source=stamp.resolved_ai.source_of("transport").value,
             max_cost_usd=stamp.cap,
             max_cost_usd_source=stamp.cap_source.value,
-            **_pr_budget_fields(result=result, pr_budget=stamp.pr_budget),
+            **_pr_budget_fields(cost=cost, pr_budget=stamp.pr_budget),
         ),
     )
 
 
 def _pr_budget_fields(
     *,
-    result: ReviewResult,
+    cost: float,
     pr_budget: PrBudget | None,
 ) -> dict[str, Any]:
     """Return the PR-budget metadata fields for this round (#2796).
 
     Args:
-        result: The completed review.
+        cost: The figure this round records, as stamped.
         pr_budget: The PR's review budget, or None when unset.
 
     Returns:
@@ -1256,9 +1415,7 @@ def _pr_budget_fields(
         return {}
     return {
         "pr_budget_usd": pr_budget.budget_usd,
-        "pr_budget_spent_usd": (
-            pr_budget.prior_spend_usd + result.metadata.cost_estimate_usd
-        ),
+        "pr_budget_spent_usd": pr_budget.prior_spend_usd + cost,
         "pr_budget_enforced": pr_budget.enforced,
     }
 
@@ -1482,9 +1639,10 @@ def _post_review(
             checklist_display=render.checklist_display,
             question_map=render.question_map,
             transport=resolved_profile.transport.value,
-            auth_mode=resolved_profile.auth_mode,
-            # metadata carries the post-run reconciled basis (estimated when
-            # the provider reported no usage), not the pre-run profile value.
+            # metadata carries the post-run reconciled auth mode and basis
+            # (the credential that was present; estimated when the provider
+            # reported no usage), not the pre-run profile values.
+            auth_mode=result.metadata.auth_mode or resolved_profile.auth_mode,
             cost_basis=result.metadata.cost_basis,
             auto_resolve=lintro_config.review.auto_resolve,
             posting_policy=posting_policy,

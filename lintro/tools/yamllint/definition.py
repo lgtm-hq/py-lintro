@@ -15,12 +15,8 @@ from pathlib import Path
 from typing import Any
 
 import click
+import yaml
 from loguru import logger
-
-try:
-    import yaml
-except ImportError:
-    yaml = None  # type: ignore[assignment]
 
 from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
@@ -30,6 +26,7 @@ from lintro.enums.yamllint_format import (
     normalize_yamllint_format,
 )
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, NoFiles, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.yamllint.yamllint_parser import parse_yamllint_output
 from lintro.plugins.base import BaseToolPlugin
@@ -197,12 +194,6 @@ class YamllintPlugin(BaseToolPlugin):
             return []
 
         ignore_patterns: list[str] = []
-        if yaml is None:
-            logger.debug(
-                "[YamllintPlugin] PyYAML not available, cannot parse ignore patterns",
-            )
-            return ignore_patterns
-
         try:
             with open(config_file, encoding="utf-8") as f:
                 config_data = yaml.safe_load(f)
@@ -272,7 +263,7 @@ class YamllintPlugin(BaseToolPlugin):
     def _process_single_file(
         self,
         file_path: str,
-        timeout: int,
+        timeout: float,
         results: dict[str, Any],
     ) -> None:
         """Process a single YAML file with yamllint.
@@ -428,12 +419,10 @@ class YamllintPlugin(BaseToolPlugin):
                 )
 
         if not yaml_files:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=NoFiles()),
                 name=self.definition.name,
-                success=True,
                 output="No YAML files found to check.",
-                issues_count=0,
-                no_files=True,
             )
 
         # Accumulate results across all files
@@ -490,13 +479,18 @@ class YamllintPlugin(BaseToolPlugin):
                 else failure_msg
             )
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=(
+                    TimedOut(combined_output)
+                    if results["timeout_count"] > 0
+                    else Checked(success=results["all_success"], inspected_files=True)
+                ),
+                issues_count=results["total_issues"],
+            ),
             name=self.definition.name,
-            success=results["all_success"],
             output=combined_output,
-            issues_count=results["total_issues"],
             issues=results["all_issues"],
-            timed_out=results["timeout_count"] > 0,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

@@ -27,6 +27,7 @@ from lintro.enums.capability import Cap
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_parser import strip_ansi_codes
 from lintro.parsers.svelte_check.svelte_check_parser import parse_svelte_check_output
@@ -214,7 +215,7 @@ class SvelteCheckPlugin(BaseToolPlugin):
 
         logger.debug("[svelte-check] Discovered {} Svelte file(s)", len(ctx.files))
 
-        cwd_path = Path(ctx.cwd) if ctx.cwd else Path.cwd()
+        cwd_path = Path(ctx.cwd)
 
         # Warn if no svelte config found, but still proceed with defaults
         svelte_config = self._find_svelte_config(cwd_path)
@@ -236,7 +237,7 @@ class SvelteCheckPlugin(BaseToolPlugin):
         # Build command
         cmd = self._build_command(
             options=merged_options,
-            cwd=Path(ctx.cwd) if ctx.cwd else None,
+            cwd=Path(ctx.cwd),
         )
         logger.debug("[svelte-check] Running with cwd={} and cmd={}", ctx.cwd, cmd)
 
@@ -254,22 +255,20 @@ class SvelteCheckPlugin(BaseToolPlugin):
                 issues=[],
             )
         except FileNotFoundError as e:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=f"svelte-check not found: {e}\n\n"
                 "Please ensure svelte-check is installed:\n"
                 "  - Run 'bun add -D svelte-check' or 'npm install -D svelte-check'\n"
                 "  - Or install globally: 'bun add -g svelte-check'",
-                issues_count=0,
             )
         except OSError as e:
             logger.error("[svelte-check] Failed to run svelte-check: {}", e)
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output="svelte-check execution failed: " + str(e),
-                issues_count=0,
             )
 
         # Parse output
@@ -292,34 +291,36 @@ class SvelteCheckPlugin(BaseToolPlugin):
                     "  - Run 'bun install' or 'npm install' in your project\n"
                     "  - Use '--auto-install' flag to auto-install dependencies"
                 )
-                return ToolResult(
+                return ToolResult.from_outcome(
+                    ToolOutcome(execution=Checked(success=False)),
                     name=self.definition.name,
-                    success=False,
                     output=helpful_output,
-                    issues_count=0,
                 )
 
             # Generic failure
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=normalized_output or "svelte-check execution failed.",
-                issues_count=0,
             )
 
         if not success and issues_count == 0:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output="svelte-check execution failed.",
-                issues_count=0,
             )
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(
+                    success=success and issues_count == 0,
+                    inspected_files=True,
+                ),
+                issues_count=issues_count,
+            ),
             name=self.definition.name,
-            success=success and issues_count == 0,
             output=None,
-            issues_count=issues_count,
             issues=all_issues,
         )
 

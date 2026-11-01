@@ -40,6 +40,14 @@ nothing (#1826). This module is the decision point that fixes that — it maps a
   blocking a merge.
 * **broken** -- lintro itself failed (bad flags, crash, unparseable output). Also
   red; the summary says so rather than blaming the provider.
+* **contradicted** -- a review was produced, but its recorded provenance
+  contradicts the lane the repository declared (ADR-0011 C, #2871): it went
+  to another endpoint, a first-party lane answered with another model or
+  reported none, or no run record was persisted at all. The findings stay
+  posted; the check goes red with ``status=<slug>`` so a review from
+  somewhere undeclared can never be green. The rules live in
+  ``scripts/ci/review_lane_verdict.py`` and apply only when the wrapper
+  exported lane facts.
 
 The "not reviewed" branch is the No-Silent-Skip rule applied to the reviewer
 itself: a check that could not do its job must never read as a pass.
@@ -67,20 +75,56 @@ Usage:
 
 Environment:
     GITHUB_STEP_SUMMARY  When set, the outcome is appended as Markdown.
+    LINTRO_REVIEW_CHAIN, LINTRO_REVIEW_LANES, LANE_CREDENTIAL,
+    LINTRO_REVIEW_STATE_DIR
+                         The lane facts the wrapper exported (#2871); absent
+                         outside a lane run, where no provenance is checked.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
 import sys
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum, auto
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Final
+
+
+def _load_sibling(name: str) -> ModuleType:
+    """Load a stdlib-only sibling script by path.
+
+    The classifier runs as ``python3 scripts/ci/classify_review_outcome.py``
+    and is loaded by its tests through a file spec, so a sibling cannot be a
+    package import; it is loaded the same way the tests load this file.
+
+    Args:
+        name: The sibling's module name (its file name without ``.py``).
+
+    Returns:
+        The loaded module.
+
+    Raises:
+        RuntimeError: When no module spec can be built for the sibling.
+    """
+    path = Path(__file__).resolve().with_name(f"{name}.py")
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:  # pragma: no cover - defensive
+        msg = f"cannot load {path}"
+        raise RuntimeError(msg)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_lanes = _load_sibling("review_lane_verdict")
 
 # Exit statuses `lintro review` uses. Kept in sync with
 # lintro.ai.review.error_contract.REVIEW_ERROR_EXIT_CODE and the
@@ -130,6 +174,13 @@ CONVERGED_ENVELOPE_KEY: Final[str] = "converged"
 # lintro.ai.review.output.CONVERGED_OUTCOME; a contract test pins the pair.
 CONVERGED_OUTCOME: Final[str] = "converged"
 
+# Top-level key and `outcome` discriminator `lintro review` writes when the
+# last finished round already covered this head (#2338). Mirror
+# lintro.ai.review.output.ALREADY_REVIEWED_ENVELOPE_KEY / _OUTCOME; a contract
+# test pins the pairs.
+ALREADY_REVIEWED_ENVELOPE_KEY: Final[str] = "already_reviewed"
+ALREADY_REVIEWED_OUTCOME: Final[str] = "already_reviewed"
+
 # Top-level keys `lintro review` writes for the finding-depth axis (#2003 /
 # #2395). Mirror lintro.ai.review.output.review_result_to_dict; a contract
 # test in tests/scripts/test_classify_review_outcome.py pins the names.
@@ -140,6 +191,31 @@ CONVERGED_OUTCOME: Final[str] = "converged"
 # per-call findings cap exists, so a normal CLI round classifies ``reviewed``.
 DEPTH_COMPLETE_KEY: Final[str] = "findings_coverage_complete"
 DEPTH_DEGRADATIONS_KEY: Final[str] = "coverage_degradations"
+
+# Degradation reasons that never clear ``findings_coverage_complete`` (#2702,
+# #2803). Mirrors lintro.ai.review.enums.coverage_degradation_reason
+# .NARRATIVE_DEGRADATION_REASONS; a contract test pins the pair. A review
+# carrying only these passes the check with a ``::warning::`` per reason
+# group instead of reddening it.
+NARRATIVE_DEGRADATION_REASONS: Final[frozenset[str]] = frozenset(
+    {
+        "synthesis_truncated",
+        "synthesis_failed",
+        "generated_questions_failed",
+        "verification_failed",
+        "delegated_diff_embedded",
+        "no_tree_for_agent",
+    },
+)
+
+# The warning a failed per-PR question pass leaves (#2803). Mirrors
+# lintro.ai.review.coverage_degradation.GENERATED_QUESTIONS_FAILED_NOTE, the note
+# the sticky and the terminal show; a contract test pins the pair.
+GENERATED_QUESTIONS_FAILED_NOTE: Final[str] = (
+    "The per-PR question pass failed, so every chunk was reviewed against "
+    "the rubric alone."
+)
+GENERATED_QUESTIONS_FAILED_REASON: Final[str] = "generated_questions_failed"
 
 # Kind labels refined for the active transport. Shared kinds stay as-is;
 # transport-specific labels make CI summaries self-diagnosing (#1923).
@@ -190,9 +266,14 @@ class ReviewOutcome(StrEnum):
             the envelope's ``findings_coverage_complete`` is false (#2395).
         CONVERGED: The round was deliberately skipped by the convergence stop
             rule before any provider call (#2099).
+        ALREADY_REVIEWED: The round was skipped because the last finished
+            round already covered this head, before any provider call
+            (#2338); that round's review stands as posted.
         NO_CREDENTIAL: No provider credential was available to review with.
         PROVIDER_UNAVAILABLE: The credential, balance, or endpoint failed.
         BROKEN: lintro itself could not complete the review.
+        CONTRADICTED: A review was produced, but its recorded provenance
+            contradicts the declared lane (ADR-0011 C, #2871).
     """
 
     REVIEWED = auto()
@@ -200,9 +281,11 @@ class ReviewOutcome(StrEnum):
     PR_BUDGET = auto()
     DEGRADED = auto()
     CONVERGED = auto()
+    ALREADY_REVIEWED = auto()
     NO_CREDENTIAL = auto()
     PROVIDER_UNAVAILABLE = auto()
     BROKEN = auto()
+    CONTRADICTED = auto()
 
     @property
     def produced_review(self) -> bool:
@@ -244,10 +327,10 @@ class ReviewOutcome(StrEnum):
     def review_unavailable(self) -> bool:
         """Return whether the diff went un-reviewed for a bad reason.
 
-        A skipped-because-converged round produced no review either, but it
-        is a decision rather than a failure: it must not carry the
-        "treat the diff as un-reviewed, fall back to CodeRabbit/Greptile"
-        advice.
+        A skipped-because-converged round, or one skipped because its head
+        was already reviewed, produced no review either, but each is a
+        decision rather than a failure: neither must carry the "treat the
+        diff as un-reviewed, fall back to CodeRabbit/Greptile" advice.
 
         This controls that fallback copy and the ``::error`` annotation only
         — it is not the readiness gate. There is no readiness gate at check
@@ -276,6 +359,14 @@ class OutcomeReport:
         detail: Cause text from the provider, or an empty string.
         exit_code: Exit code the wrapper should terminate with.
         transport: Transport named on every outcome line.
+        status: The ``status=<slug>`` a red lane verdict carries (#2871), or
+            empty.
+        warnings: Lines surfaced as ``::warning::`` annotations beside the
+            outcome: a fallback lane answered, or a gateway's model cannot be
+            verified.
+        notes: Narrative degradations the review recorded (#2803): each is
+            emitted as a ``::warning::`` and a job-summary line, and none
+            changes the exit code.
     """
 
     outcome: ReviewOutcome
@@ -283,6 +374,9 @@ class OutcomeReport:
     detail: str
     exit_code: int
     transport: str = DEFAULT_TRANSPORT
+    status: str = ""
+    warnings: tuple[str, ...] = ()
+    notes: tuple[str, ...] = ()
 
 
 def _payload_has_p1_findings(payload: Mapping[str, Any]) -> bool:
@@ -409,6 +503,47 @@ def _parse_degraded_envelope(*, text: str) -> dict[str, Any] | None:
     return None
 
 
+def _narrative_notes(*, text: str) -> tuple[str, ...]:
+    """Return the warnings for the narrative degradations a review recorded.
+
+    Read from the same envelope as :func:`_parse_degraded_envelope`, but
+    whether or not the finding depth was complete: a narrative reason is
+    reported the same way on a green run and on a red one.
+
+    Args:
+        text: Combined stdout/stderr captured from the review run.
+
+    Returns:
+        The question-pass note when that pass failed, then one line naming
+        any other narrative reasons; empty when there are none.
+    """
+    for payload in _iter_json_objects(text=text):
+        if "readiness_verdict" not in payload:
+            continue
+        raw = payload.get(DEPTH_DEGRADATIONS_KEY)
+        reasons: list[str] = []
+        for item in raw if isinstance(raw, list) else []:
+            reason = (
+                str(item.get("reason") or "").strip()
+                if isinstance(item, Mapping)
+                else ""
+            )
+            if reason in NARRATIVE_DEGRADATION_REASONS and reason not in reasons:
+                reasons.append(reason)
+        notes: list[str] = []
+        if GENERATED_QUESTIONS_FAILED_REASON in reasons:
+            notes.append(GENERATED_QUESTIONS_FAILED_NOTE)
+        others = [
+            reason for reason in reasons if reason != GENERATED_QUESTIONS_FAILED_REASON
+        ]
+        if others:
+            notes.append(
+                f"Recorded without failing this check: {', '.join(others)}.",
+            )
+        return tuple(notes)
+    return ()
+
+
 def _degraded_report(
     *,
     status: int,
@@ -521,6 +656,107 @@ def _parse_converged_envelope(*, text: str) -> dict[str, Any] | None:
     return None
 
 
+def _parse_already_reviewed_envelope(*, text: str) -> dict[str, Any] | None:
+    """Extract the already-reviewed object from captured review output.
+
+    Same discipline as :func:`_parse_converged_envelope`: the ``outcome``
+    discriminator is required next to the mapping, so a nested object that
+    happens to carry the key cannot classify a real review as a skip.
+
+    Args:
+        text: Combined stdout/stderr captured from the review run.
+
+    Returns:
+        The ``already_reviewed`` mapping, or ``None`` when the round ran.
+    """
+    for payload in _iter_json_objects(text=text):
+        if payload.get("outcome") != ALREADY_REVIEWED_OUTCOME:
+            continue
+        skipped = payload.get(ALREADY_REVIEWED_ENVELOPE_KEY)
+        if isinstance(skipped, dict):
+            return {**skipped, "detail": str(payload.get("detail") or "")}
+    return None
+
+
+def _already_reviewed_report(
+    *,
+    skipped: dict[str, Any],
+    transport: str,
+) -> OutcomeReport:
+    """Build the ALREADY_REVIEWED outcome from a parsed envelope.
+
+    Args:
+        skipped: The ``already_reviewed`` mapping from the review envelope.
+        transport: Active transport named on the headline.
+
+    Returns:
+        Green report naming the head and round that stand, and how many
+        open P1 findings that round left behind. An unreadable ``open_p1``
+        fails closed, as the converged branch does.
+    """
+    open_p1 = _converged_open_p1(converged=skipped)
+    if open_p1 is None:
+        return OutcomeReport(
+            outcome=ReviewOutcome.BROKEN,
+            headline=_with_transport(
+                transport=transport,
+                headline=(
+                    "already-reviewed envelope is unreadable — open_p1 is "
+                    f"{skipped.get('open_p1')!r}, not a count"
+                ),
+            ),
+            detail=(
+                "lintro wrote an already-reviewed envelope whose open_p1 "
+                "field is missing or not a non-negative integer, so the "
+                "readiness gate for the skipped round cannot be evaluated."
+            ),
+            exit_code=1,
+            transport=transport,
+        )
+    head = str(skipped.get("head_sha") or "")[:7]
+    round_number = skipped.get("round", 0)
+    noun = "finding" if open_p1 == 1 else "findings"
+    remaining = f"; {open_p1} open P1 {noun} remain" if open_p1 > 0 else ""
+    return OutcomeReport(
+        outcome=ReviewOutcome.ALREADY_REVIEWED,
+        headline=_with_transport(
+            transport=transport,
+            headline=(
+                f"already reviewed — head {head} covered by round "
+                f"{round_number}{remaining}"
+            ),
+        ),
+        detail=str(skipped.get("detail") or ""),
+        # Exit 0 even with open P1s, for the reason the converged branch
+        # gives: the skip must not be stricter than the round that found
+        # them; the count is named in the headline.
+        exit_code=0,
+        transport=transport,
+    )
+
+
+def _skipped_round_report(*, output: str, transport: str) -> OutcomeReport | None:
+    """Report a round lintro deliberately skipped before any provider call.
+
+    Two envelopes share the contract: the convergence stop rule (#2099) and
+    an already-reviewed head (#2338). Each is its own green outcome.
+
+    Args:
+        output: Combined stdout/stderr captured from the run.
+        transport: Active transport named on the headline.
+
+    Returns:
+        The skip's report, or ``None`` when the round ran.
+    """
+    converged = _parse_converged_envelope(text=output)
+    if converged is not None:
+        return _converged_report(converged=converged, transport=transport)
+    skipped = _parse_already_reviewed_envelope(text=output)
+    if skipped is not None:
+        return _already_reviewed_report(skipped=skipped, transport=transport)
+    return None
+
+
 def _converged_open_p1(*, converged: dict[str, Any]) -> int | None:
     """Read the open-P1 count off a converged envelope, or report it unusable.
 
@@ -619,7 +855,15 @@ def _parse_error_envelope(*, text: str) -> dict[str, Any] | None:
     """Extract the ``error`` object from captured review output.
 
     The captured output interleaves lintro's logging with the JSON envelope, so
-    the JSON is located rather than assumed to be the whole payload.
+    the JSON is located rather than assumed to be the whole payload. A logged
+    provider body can carry an ``error`` object of its own (an Anthropic
+    ``{"type":"error","error":{...}}`` or a gateway's ``{"error":{"code":...}}``)
+    ahead of lintro's envelope, so the envelope is the last object whose
+    ``error`` names a string ``kind``: lintro's always does, and it is written
+    after the logging that precedes it. Only when no object names a kind does
+    the first ``error`` object stand in, so a thin envelope can still be
+    refined from its prose. ``scripts/ci/review_chain.py`` applies the same
+    rule; the two must agree on which object is the attempt's.
 
     Args:
         text: Combined stdout/stderr captured from the review run.
@@ -627,11 +871,17 @@ def _parse_error_envelope(*, text: str) -> dict[str, Any] | None:
     Returns:
         The ``error`` mapping, or ``None`` when no envelope is present.
     """
+    first: dict[str, Any] | None = None
+    with_kind: dict[str, Any] | None = None
     for payload in _iter_json_objects(text=text):
         error = payload.get("error")
-        if isinstance(error, dict):
-            return error
-    return None
+        if not isinstance(error, dict):
+            continue
+        if first is None:
+            first = error
+        if isinstance(error.get("kind"), str):
+            with_kind = error
+    return with_kind if with_kind is not None else first
 
 
 def _normalize_transport(transport: str) -> str:
@@ -778,6 +1028,7 @@ def refine_failure_kind(
     kind: str,
     message: str,
     output: str,
+    credential: str = "",
 ) -> str:
     """Map a canonical error kind onto the transport's failure vocabulary.
 
@@ -786,11 +1037,19 @@ def refine_failure_kind(
         kind: Canonical kind from the review error envelope.
         message: Envelope message text.
         output: Full captured output (used when the envelope is thin).
+        credential: The credential kind the lane bound (``LANE_CREDENTIAL``),
+            when the wrapper exported one. An authentication failure is then
+            labelled by it, never by a fixed label (ADR-0011 C): a gateway
+            401 must not be blamed on the Claude session.
 
     Returns:
         A transport-aware kind label for CI summaries.
     """
     haystack = f"{message}\n{output}"
+    bound_label = _lanes.AUTH_LABELS.get(credential)
+    if kind == "auth_failed" and bound_label:
+        # A concrete authentication failure is named by the bound credential.
+        return str(bound_label)
     if transport == "cli":
         # Prose patterns may only classify a *thin* envelope (no concrete
         # kind): a real envelope kind (insufficient_credits, timeout, ...)
@@ -807,8 +1066,15 @@ def refine_failure_kind(
             if _API_KEY_AUTH.search(haystack) and not _OAUTH_AUTH.search(haystack):
                 return "auth_failed:key"
             return "auth_failed:oauth_session"
-        if thin_envelope and _OAUTH_AUTH.search(haystack):
-            return "auth_failed:oauth_session"
+        # A thin envelope whose prose only says "authentication": the bound
+        # credential names it when one is known, after the kill and drift
+        # patterns above, which describe a run that never reached auth.
+        auth_prose = _OAUTH_AUTH.search(haystack) or _API_KEY_AUTH.search(haystack)
+        if thin_envelope and auth_prose:
+            if bound_label:
+                return str(bound_label)
+            if _OAUTH_AUTH.search(haystack):
+                return "auth_failed:oauth_session"
         return _CLI_KIND_LABELS.get(kind, kind)
 
     if kind == "auth_failed":
@@ -822,6 +1088,43 @@ def classify(
     output: str,
     reason: str = "",
     transport: str = DEFAULT_TRANSPORT,
+    env: Mapping[str, str] | None = None,
+) -> OutcomeReport:
+    """Classify a review invocation and attach its narrative notes.
+
+    Args:
+        status: Exit status from ``lintro review``, or one of
+            :data:`NO_CREDENTIAL_STATUS` / :data:`NOT_INVOKED_STATUS` when the
+            review was never reached.
+        output: Combined stdout/stderr captured from the run.
+        reason: Wrapper-supplied explanation for a never-invoked run.
+        transport: Active transport (``api`` or ``cli``); named on every line.
+        env: The environment holding the lane facts the wrapper exported
+            (#2871); the process environment when ``None``.
+
+    Returns:
+        The outcome, the copy to surface, and the exit code to terminate
+        with; a produced review also carries its narrative notes (#2803).
+    """
+    report = _classify(
+        status=status,
+        output=output,
+        reason=reason,
+        transport=transport,
+        env=env,
+    )
+    if not report.outcome.produced_review or status == REVIEW_STATUS_ERROR:
+        return report
+    return replace(report, notes=_narrative_notes(text=output))
+
+
+def _classify(
+    *,
+    status: int,
+    output: str,
+    reason: str = "",
+    transport: str = DEFAULT_TRANSPORT,
+    env: Mapping[str, str] | None = None,
 ) -> OutcomeReport:
     """Classify a review invocation into a CI-facing outcome.
 
@@ -832,9 +1135,109 @@ def classify(
         output: Combined stdout/stderr captured from the run.
         reason: Wrapper-supplied explanation for a never-invoked run.
         transport: Active transport (``api`` or ``cli``); named on every line.
+        env: The environment holding the lane facts the wrapper exported
+            (#2871); the process environment when ``None``.
 
     Returns:
         The outcome, the copy to surface, and the exit code to terminate with.
+    """
+    facts = _lanes.lane_facts(os.environ if env is None else env)
+    report = _classify_run(
+        status=status,
+        output=output,
+        reason=reason,
+        transport=transport,
+        credential=facts.credential if facts is not None else "",
+    )
+    return _apply_lane_verdict(report=report, facts=facts)
+
+
+def _apply_lane_verdict(
+    *,
+    report: OutcomeReport,
+    facts: Any,
+) -> OutcomeReport:
+    """Redden a produced review whose provenance contradicts its lane.
+
+    Args:
+        report: The outcome classified from the exit status and the output.
+        facts: The lane facts (a ``review_lane_verdict.LaneFacts``), or
+            ``None`` outside a lane run.
+
+    Returns:
+        The report unchanged outside a lane run or when no review was
+        produced; otherwise the report with the verdict's warnings, or a
+        :attr:`ReviewOutcome.CONTRADICTED` report carrying its status.
+    """
+    if facts is None:
+        return report
+    if report.outcome is ReviewOutcome.PROVIDER_UNAVAILABLE:
+        exhausted = _lanes.lanes_exhausted(facts)
+        if exhausted:
+            return replace(
+                report,
+                headline=_with_transport(
+                    transport=report.transport,
+                    headline=f"{exhausted} (status={_lanes.STATUS_LANES_EXHAUSTED})",
+                ),
+                status=_lanes.STATUS_LANES_EXHAUSTED,
+            )
+        return report
+    if not report.outcome.produced_review:
+        return report
+    record, missing = _lanes.latest_run_record(
+        facts.state_file,
+        run_id=facts.run_id,
+        run_attempt=facts.run_attempt,
+    )
+    verdict = _lanes.lane_verdict(facts, record, missing=missing)
+    if not verdict.status:
+        return replace(report, warnings=verdict.warnings)
+    if (
+        verdict.status == _lanes.STATUS_PROVENANCE_UNRECORDED
+        and report.outcome.partial_review
+    ):
+        # A partial review is already red with the reason a reader can act
+        # on (resume the files, raise the budget); a round the budget
+        # stopped before any call has no provenance to record, and the
+        # missing record must not bury that reason. It is still said.
+        return replace(
+            report,
+            warnings=(*verdict.warnings, f"provenance not verified: {verdict.reason}"),
+        )
+    return OutcomeReport(
+        outcome=ReviewOutcome.CONTRADICTED,
+        headline=_with_transport(
+            transport=report.transport,
+            headline=f"lane contradicted (status={verdict.status}) — {verdict.reason}",
+        ),
+        detail=f"the review itself: {report.headline}",
+        exit_code=1,
+        transport=report.transport,
+        status=verdict.status,
+        warnings=verdict.warnings,
+    )
+
+
+def _classify_run(
+    *,
+    status: int,
+    output: str,
+    reason: str,
+    transport: str,
+    credential: str,
+) -> OutcomeReport:
+    """Classify the run from its exit status and output alone.
+
+    Args:
+        status: Exit status from ``lintro review`` or a wrapper sentinel.
+        output: Combined stdout/stderr captured from the run.
+        reason: Wrapper-supplied explanation for a never-invoked run.
+        transport: Active transport (``api`` or ``cli``).
+        credential: The credential kind the lane bound, or empty.
+
+    Returns:
+        The outcome before the lane verdict is applied.
     """
     transport = _normalize_transport(transport)
 
@@ -884,9 +1287,9 @@ def classify(
     # pass this module exists to prevent. Let the error branches below own
     # that case.
     if status != REVIEW_STATUS_ERROR:
-        converged = _parse_converged_envelope(text=output)
-        if converged is not None:
-            return _converged_report(converged=converged, transport=transport)
+        skipped = _skipped_round_report(output=output, transport=transport)
+        if skipped is not None:
+            return skipped
 
     # A persist envelope wins over the wrapper exit status. ``wait`` reports
     # 143 when the runner SIGTERMs the step after lintro already wrote
@@ -925,6 +1328,7 @@ def classify(
         kind=kind,
         message=message,
         output=output,
+        credential=credential,
     )
 
     if status != REVIEW_STATUS_ERROR:
@@ -991,6 +1395,52 @@ def classify(
     )
 
 
+#: The paragraph the job summary adds under the headline for outcomes that
+#: need one; the others are explained by the headline alone.
+_OUTCOME_EXPLANATIONS: Final[dict[ReviewOutcome, str]] = {
+    ReviewOutcome.INCOMPLETE: (
+        "A review was produced, but coverage-at-HEAD is not 100%. "
+        "The next round resumes with unreviewed files first. "
+        "P1 findings still pass this check; an unfinished review "
+        "does not."
+    ),
+    ReviewOutcome.PR_BUDGET: (
+        "A review was produced, but the PR's review budget "
+        "(`ai.review_pr_budget_usd`) ran out before every file was "
+        "covered at HEAD. Findings so far are posted and coverage is "
+        "saved. Later rounds stop at the same budget: raise the "
+        "`LINTRO_AI_REVIEW_PR_BUDGET_USD` Actions variable to review "
+        "the rest, or leave the PR as it is."
+    ),
+    ReviewOutcome.DEGRADED: (
+        "Every eligible file was reviewed, but not at full depth: the "
+        "run recorded a coverage degradation, so findings may have "
+        "gone unreported. The review and its findings are posted as "
+        "usual — this check is red because the finding set is not a "
+        "guaranteed complete one."
+    ),
+    ReviewOutcome.CONVERGED: (
+        "No provider call was made: the convergence stop rule found "
+        "the open findings stable below the configured threshold, so "
+        "another round would have re-reported the same set. Re-run "
+        "the review with `--full` to force one."
+    ),
+    ReviewOutcome.ALREADY_REVIEWED: (
+        "No provider call was made: the last finished round already "
+        "covered this head, so its review, threads and verdict stand "
+        "as posted. Re-run with `--full` or `LINTRO_REVIEW_FORCE=1` "
+        "to force a round."
+    ),
+    ReviewOutcome.CONTRADICTED: (
+        "A review was produced and its findings are posted, but the "
+        "run record says it did not come from the lane this "
+        "repository declared (ADR-0011): treat the posted review as "
+        "unverified. The check is red until a run on the declared "
+        "lane reviews the diff."
+    ),
+}
+
+
 def render_summary(*, report: OutcomeReport) -> str:
     """Render the outcome as a Markdown job-summary block.
 
@@ -1002,7 +1452,7 @@ def render_summary(*, report: OutcomeReport) -> str:
     """
     if report.outcome.partial_review:
         icon = "⚠️"
-    elif report.outcome is ReviewOutcome.CONVERGED:
+    elif report.outcome in {ReviewOutcome.CONVERGED, ReviewOutcome.ALREADY_REVIEWED}:
         icon = "🔁"
     elif report.outcome.produced_review:
         icon = "✅"
@@ -1012,51 +1462,13 @@ def render_summary(*, report: OutcomeReport) -> str:
         f"### {icon} AI Review ({report.transport}) — {report.headline}",
         "",
     ]
-    if report.outcome is ReviewOutcome.INCOMPLETE:
-        lines.extend(
-            [
-                "A review was produced, but coverage-at-HEAD is not 100%. "
-                "The next round resumes with unreviewed files first. "
-                "P1 findings still pass this check; an unfinished review "
-                "does not.",
-                "",
-            ],
-        )
-    if report.outcome is ReviewOutcome.PR_BUDGET:
-        lines.extend(
-            [
-                "A review was produced, but the PR's review budget "
-                "(`ai.review_pr_budget_usd`) ran out before every file was "
-                "covered at HEAD. Findings so far are posted and coverage is "
-                "saved. Later rounds stop at the same budget: raise the "
-                "`LINTRO_AI_REVIEW_PR_BUDGET_USD` Actions variable to review "
-                "the rest, or leave the PR as it is.",
-                "",
-            ],
-        )
-    if report.outcome is ReviewOutcome.DEGRADED:
-        lines.extend(
-            [
-                "Every eligible file was reviewed, but not at full depth: the "
-                "run recorded a coverage degradation, so findings may have "
-                "gone unreported. The review and its findings are posted as "
-                "usual — this check is red because the finding set is not a "
-                "guaranteed complete one.",
-                "",
-            ],
-        )
-    if report.outcome is ReviewOutcome.CONVERGED:
-        lines.extend(
-            [
-                "No provider call was made: the convergence stop rule found "
-                "the open findings stable below the configured threshold, so "
-                "another round would have re-reported the same set. Re-run "
-                "the review with `--full` to force one.",
-                "",
-            ],
-        )
+    explanation = _OUTCOME_EXPLANATIONS.get(report.outcome)
+    if explanation:
+        lines.extend([explanation, ""])
     if report.detail:
         lines.extend(["> " + report.detail, ""])
+    for line in (*report.warnings, *report.notes):
+        lines.extend([f"> ⚠️ {line}", ""])
     if report.outcome.review_unavailable:
         lines.extend(
             [
@@ -1070,13 +1482,30 @@ def render_summary(*, report: OutcomeReport) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _command_data(*, text: str) -> str:
+    """Escape text for a workflow-command payload.
+
+    Args:
+        text: The annotation text.
+
+    Returns:
+        The text with `%` and CR percent-encoded, in that order (escaping `%`
+        last would re-escape the escapes), and LF folded to a space so the
+        annotation stays one line.
+    """
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", " ")
+
+
 def _emit(*, report: OutcomeReport) -> None:
     """Write the workflow annotation and job summary for an outcome.
 
     Args:
         report: The classified outcome.
     """
-    if report.outcome.review_unavailable:
+    if (
+        report.outcome.review_unavailable
+        or report.outcome is ReviewOutcome.CONTRADICTED
+    ):
         annotation = "error"
     elif report.outcome is ReviewOutcome.DEGRADED:
         # A warning, not a notice: the review is on the PR, but the check is
@@ -1088,10 +1517,12 @@ def _emit(*, report: OutcomeReport) -> None:
     body = report.headline
     if report.detail:
         body = f"{body}: {report.detail}"
-    # Workflow-command payloads need `%`, CR and LF percent-encoded, in that
-    # order -- escaping `%` last would re-escape the escapes.
-    escaped = body.replace("%", "%25").replace("\r", "%0D").replace("\n", " ")
-    print(f"::{annotation} title={title}::{escaped}")
+    print(f"::{annotation} title={title}::{_command_data(text=body)}")
+    for warning in report.warnings:
+        print(f"::warning title={title}::{_command_data(text=warning)}")
+    for note in report.notes:
+        # A narrative degradation warns without reddening the check (#2803).
+        print(f"::warning title={title}::{_command_data(text=note)}")
 
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_path:

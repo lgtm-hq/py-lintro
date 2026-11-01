@@ -16,9 +16,16 @@ The envelope shape is::
         "status": 401,                        # extracted HTTP status, or null
         "retryable": false,                   # safe to retry unchanged?
         "provider_unavailable": true,         # provider served nothing at all?
-        "message": "..."                      # most specific cause text
+        "message": "...",                     # most specific cause text
+        "completed_chunks": 0                 # chunks reviewed before the
+                                              # failure, or null when unknown
       }
     }
+
+``completed_chunks`` is what a fallback chain keys on (ADR-0011 D): a
+wrapper may restart the review on another lane only when it is ``0``. It is
+``null`` when the failure happened outside the run, where no count exists,
+and the wrapper must then stay on its lane.
 
 ``error.kind`` reuses the canonical :class:`ReviewErrorKind` taxonomy, so the
 set of values is the single source of truth shared with the PR error sticky.
@@ -124,9 +131,12 @@ def build_error_contract(*, provider: str, error: Exception) -> dict[str, Any]:
     Returns:
         A JSON-serializable ``{"error": {...}}`` envelope with a canonical
         ``kind``, the ``provider``, the extracted HTTP ``status`` (or ``None``),
-        ``retryable`` and ``provider_unavailable`` flags, and the most specific
-        cause ``message``.
+        ``retryable`` and ``provider_unavailable`` flags, the most specific
+        cause ``message``, and ``completed_chunks`` (or ``None`` when the
+        failure carries no count).
     """
+    from lintro.ai.review.exceptions import completed_chunks_of
+
     kind = classify_provider_error(provider=provider, error=error)
     message = resolve_cause_text(error=error)
     status = _extract_status(text=message.lower())
@@ -140,6 +150,7 @@ def build_error_contract(*, provider: str, error: Exception) -> dict[str, Any]:
             # produced" without re-implementing the kind taxonomy in shell.
             "provider_unavailable": is_provider_unavailable_kind(kind=kind),
             "message": message,
+            "completed_chunks": completed_chunks_of(error),
         },
     }
 

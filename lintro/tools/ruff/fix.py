@@ -11,6 +11,8 @@ ruff actually fixed. The counts are still filled in for callers that invoke
 ``fix()`` directly, outside the executor.
 """
 
+from __future__ import annotations
+
 import subprocess  # nosec B404 - subprocess used safely to execute ruff commands with controlled input
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -18,11 +20,12 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.models.core.tool_outcome import Checked, FixMeasured, TimedOut, ToolOutcome
 from lintro.parsers.base_issue import BaseIssue
 from lintro.parsers.ruff.ruff_format_issue import RuffFormatIssue
 from lintro.parsers.ruff.ruff_parser import (
     parse_ruff_format_check_output,
-    parse_ruff_output,
+    parse_ruff_output_with_stats,
 )
 from lintro.tools.core.timeout_utils import create_timeout_result
 
@@ -34,6 +37,7 @@ from lintro.tools.ruff.paths import absolute_issue_paths
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
+    from lintro.parsers.ruff.ruff_issue import RuffIssue
     from lintro.tools.ruff.definition import RuffPlugin
 
 __all__ = ["RUFF_DEFAULT_TIMEOUT", "execute_ruff_fix"]
@@ -43,7 +47,7 @@ DEFAULT_REMAINING_ISSUES_DISPLAY: int = 5
 
 @contextmanager
 def _temporary_option(
-    tool: "RuffPlugin",
+    tool: RuffPlugin,
     option_key: str,
     option_value: object,
 ) -> Generator[None]:
@@ -82,9 +86,9 @@ def _temporary_option(
 
 
 def execute_ruff_fix(
-    tool: "RuffPlugin",
+    tool: RuffPlugin,
     paths: list[str],
-) -> "ToolResult":
+) -> ToolResult:
     """Execute ruff fix command and process results.
 
     Args:
@@ -114,6 +118,7 @@ def execute_ruff_fix(
     python_files: list[str] = ctx.files
     timeout: int = int(ctx.timeout)
     overall_success: bool = True
+    parse_failures: int = 0
 
     # Track unsafe fixes for internal decisioning; do not emit as user-facing noise
     unsafe_fixes_enabled: bool = bool(tool.options.get("unsafe_fixes", False))
@@ -137,19 +142,20 @@ def execute_ruff_fix(
             timeout=timeout,
             cmd=cmd_check,
         )
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=TimedOut(timeout_result.output),
+                issues_count=timeout_result.issues_count,
+            ),
             name=tool.definition.name,
-            success=timeout_result.success,
-            timed_out=timeout_result.timed_out,
-            output=timeout_result.output,
-            issues_count=timeout_result.issues_count,
             issues=timeout_result.issues,
-            initial_issues_count=None,
-            fixed_issues_count=None,
-            remaining_issues_count=None,
+            parse_failures_count=parse_failures,
             cwd=ctx.cwd,
         )
-    initial_issues: list[BaseIssue] = list(parse_ruff_output(output=output_check))
+    initial_lint_issues, parse_failures = parse_ruff_output_with_stats(
+        output=output_check,
+    )
+    initial_issues: list[BaseIssue] = list(initial_lint_issues)
     initial_count: int = len(initial_issues)
 
     # Also check formatting issues before fixing
@@ -175,19 +181,22 @@ def execute_ruff_fix(
                 "  - Large codebase taking too long to process\n"
                 "  - Need to increase timeout via --tool-options ruff:timeout=N"
             )
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=TimedOut(timeout_msg),
+                    accounting=FixMeasured(
+                        initial=initial_count,
+                        fixed=0,
+                        remaining=initial_count,
+                    ),
+                    issues_count=initial_count,
+                ),
                 name=tool.definition.name,
-                success=False,
-                output=timeout_msg,
                 # A timeout is an execution failure, not a finding: only
                 # genuine pre-timeout issues are counted.
-                issues_count=initial_count,
                 # Include any lint issues found before timeout
                 issues=initial_issues,
-                initial_issues_count=initial_count,
-                fixed_issues_count=0,
-                remaining_issues_count=initial_count,
-                timed_out=True,
+                parse_failures_count=parse_failures,
                 cwd=ctx.cwd,
             )
         format_files = parse_ruff_format_check_output(output=output_format_check)
@@ -206,7 +215,7 @@ def execute_ruff_fix(
     total_initial_count: int = initial_count + initial_format_count
 
     # Optionally run ruff check --fix (lint fixes)
-    remaining_issues = []
+    remaining_issues: list[RuffIssue] = []
     remaining_count = 0
     success: bool = True  # Default to True when lint_fix is disabled
     if tool.options.get("lint_fix", True):
@@ -225,21 +234,27 @@ def execute_ruff_fix(
                 "  - Large codebase taking too long to process\n"
                 "  - Need to increase timeout via --tool-options ruff:timeout=N"
             )
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=TimedOut(timeout_msg),
+                    accounting=FixMeasured(
+                        initial=total_initial_count,
+                        fixed=0,
+                        remaining=total_initial_count,
+                    ),
+                    issues_count=total_initial_count,
+                ),
                 name=tool.definition.name,
-                success=False,
-                output=timeout_msg,
                 # A timeout is an execution failure, not a finding: only
                 # genuine pre-timeout issues are counted.
-                issues_count=total_initial_count,
                 issues=initial_issues,  # Include initial issues found
-                initial_issues_count=total_initial_count,
-                fixed_issues_count=0,
-                remaining_issues_count=total_initial_count,
-                timed_out=True,
+                parse_failures_count=parse_failures,
                 cwd=ctx.cwd,
             )
-        remaining_issues = parse_ruff_output(output=output)
+        remaining_issues, final_parse_failures = parse_ruff_output_with_stats(
+            output=output,
+        )
+        parse_failures += final_parse_failures
         remaining_count = len(remaining_issues)
 
     # Compute fixed lint issues by diffing initial vs remaining (internal only)
@@ -248,6 +263,11 @@ def execute_ruff_fix(
     # Calculate how many lint issues were actually fixed
     fixed_lint_count: int = max(0, initial_count - remaining_count)
     fixed_count: int = fixed_lint_count
+    # Fixes can expose new lint findings. Widen lint accounting before adding
+    # formatting so later format timeouts also retain the full lint residual.
+    total_initial_count = (
+        max(initial_count, fixed_lint_count + remaining_count) + initial_format_count
+    )
 
     # If there are remaining issues, check if any are fixable with unsafe fixes
     # If unsafe fixes are disabled, check if any remaining issues are
@@ -259,6 +279,7 @@ def execute_ruff_fix(
         remaining_unsafe = remaining_issues
         success_unsafe: bool = False
         output_unsafe: str = ""
+        unsafe_parse_failures: int = 0
         with _temporary_option(tool, "unsafe_fixes", True):
             # Build command with unsafe_fixes temporarily enabled
             cmd_unsafe: list[str] = build_ruff_check_command(
@@ -278,8 +299,11 @@ def execute_ruff_fix(
             # Don't fail the entire operation for this optional check
             pass
         else:
-            remaining_unsafe = parse_ruff_output(output=output_unsafe)
-        if len(remaining_unsafe) < remaining_count:
+            remaining_unsafe, unsafe_parse_failures = parse_ruff_output_with_stats(
+                output=output_unsafe,
+            )
+            parse_failures += unsafe_parse_failures
+        if unsafe_parse_failures == 0 and len(remaining_unsafe) < remaining_count:
             logger.warning(
                 "Some remaining issues could be fixed by enabling unsafe "
                 "fixes (use --tool-options ruff:unsafe_fixes=True)",
@@ -287,7 +311,7 @@ def execute_ruff_fix(
     # Log remaining issues for debugging (if verbose)
     # Note: Issue details are already included in the ToolResult.issues list
 
-    if not (success and remaining_count == 0):
+    if not (success and remaining_count == 0 and parse_failures == 0):
         overall_success = False
 
     # Run ruff format if enabled (default: True)
@@ -315,18 +339,21 @@ def execute_ruff_fix(
                 "  - Large codebase taking too long to process\n"
                 "  - Need to increase timeout via --tool-options ruff:timeout=N"
             )
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=TimedOut(timeout_msg),
+                    accounting=FixMeasured(
+                        initial=total_initial_count,
+                        fixed=fixed_lint_count,
+                        remaining=total_initial_count - fixed_lint_count,
+                    ),
+                    issues_count=total_initial_count - fixed_lint_count,
+                ),
                 name=tool.definition.name,
-                success=False,
-                output=timeout_msg,
                 # A timeout is an execution failure, not a finding: only
                 # genuine pre-timeout issues are counted.
-                issues_count=total_initial_count - fixed_lint_count,
                 issues=remaining_issues,  # Include any issues found before timeout
-                initial_issues_count=total_initial_count,
-                fixed_issues_count=fixed_lint_count,
-                remaining_issues_count=total_initial_count - fixed_lint_count,
-                timed_out=True,
+                parse_failures_count=parse_failures,
                 cwd=ctx.cwd,
             )
         # Formatting fixes are counted separately from lint fixes
@@ -350,21 +377,26 @@ def execute_ruff_fix(
         "\n".join(summary_lines) if summary_lines else "No fixes applied."
     )
 
-    return ToolResult(
+    return ToolResult.from_outcome(
+        ToolOutcome(
+            execution=Checked(success=overall_success, inspected_files=True),
+            accounting=FixMeasured(
+                initial=total_initial_count,
+                fixed=fixed_count,
+                remaining=remaining_count,
+            ),
+            issues_count=remaining_count,
+        ),
         name=tool.definition.name,
-        success=overall_success,
         output=final_output,
         # For fix operations, issues_count represents remaining issues
         # that couldn't be fixed
-        issues_count=remaining_count,
         # Only include remaining issues that couldn't be fixed
         # (not successful format operations)
         issues=remaining_issues,
-        initial_issues_count=total_initial_count,
-        fixed_issues_count=fixed_count,
-        remaining_issues_count=remaining_count,
+        parse_failures_count=parse_failures,
         # Store pre-fix issues so the display layer can show what was fixed
-        initial_issues=initial_issues if initial_issues else None,
+        initial_issues=initial_issues,
         # The run-level verify pass resolves each issue's file against this
         # directory to decide whether the file was rewritten (#1743).
         cwd=ctx.cwd,

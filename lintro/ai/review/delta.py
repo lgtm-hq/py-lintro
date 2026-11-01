@@ -37,6 +37,7 @@ HEAD forces ``INCOMPLETE`` holds on a delta round unchanged.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -79,6 +80,7 @@ def plan_delta(
     context: ReviewContext,
     repo_root: str,
     force_full: bool,
+    reusable_rounds: Collection[int] | None = None,
 ) -> DeltaPlan:
     """Decide whether this round reads the whole diff or the delta.
 
@@ -88,6 +90,10 @@ def plan_delta(
         repo_root: The repository the range is resolved in (the PR head
             worktree on a ``--pr`` run).
         force_full: ``--full``.
+        reusable_rounds: Round numbers whose coverage this round may
+            inherit (ADR-0011 B, #2867); ``None`` trusts every round. A
+            delta is anchored only on a finished round in that set, since
+            the hunks an excluded round read must be read again.
 
     Returns:
         The plan; :attr:`DeltaPlan.is_delta` is True only when the prior head
@@ -98,9 +104,14 @@ def plan_delta(
         return DeltaPlan.full(reason=DeltaReason.EXPLICIT_FULL)
     if context.pr_metadata is None:
         return DeltaPlan.full(reason=DeltaReason.NOT_PR)
-    if prior is None or not prior.runs:
+    finished = (
+        [run for run in prior.runs if not run.coverage.checkpoint] if prior else []
+    )
+    if not finished:
         return DeltaPlan.full(reason=DeltaReason.FIRST_ROUND)
-    last = prior.runs[-1].identity
+    last = finished[-1].identity
+    if reusable_rounds is not None and last.round not in reusable_rounds:
+        return DeltaPlan.full(reason=DeltaReason.PRIOR_NOT_REUSABLE)
     since = last.sha
     if not since:
         return DeltaPlan.full(reason=DeltaReason.NO_PRIOR_HEAD)

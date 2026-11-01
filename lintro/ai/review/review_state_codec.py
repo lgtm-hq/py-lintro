@@ -39,6 +39,7 @@ from lintro.ai.review.github_constants import (
     STATE_VERSION_V2,
     STATE_VERSION_V3,
     STATE_VERSION_V4,
+    STATE_VERSION_V5,
 )
 from lintro.ai.review.models.finding_record import FindingRecord, rebaseline_records
 from lintro.ai.review.models.review_state import ReviewState, spend_from_payload
@@ -206,6 +207,7 @@ def decode_state(*, body: str) -> ReviewState:
         STATE_VERSION_V2,
         STATE_VERSION_V3,
         STATE_VERSION_V4,
+        STATE_VERSION_V5,
         STATE_VERSION,
     ):
         # Two cases, one answer. A v1 or unversioned blob predates round
@@ -228,6 +230,7 @@ def decode_state(*, body: str) -> ReviewState:
         truncated=bool(payload.get("truncated", False)),
         # So the sticky fallback never re-seeds spend from <= 30 runs (#2796).
         pr_spend_usd=spend_from_payload(payload),
+        pr_shadow_usd=spend_from_payload(payload, key="pr_shadow_usd"),
     )
 
 

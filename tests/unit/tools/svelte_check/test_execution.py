@@ -172,7 +172,6 @@ def test_check_with_mocked_subprocess_issues_found(
     assert_that(result.issues_count).is_equal_to(2)
     issues = result.issues
     assert_that(issues).is_not_none()
-    assert issues is not None  # narrow type for mypy
     assert_that(issues).is_length(2)
 
     # Verify first issue

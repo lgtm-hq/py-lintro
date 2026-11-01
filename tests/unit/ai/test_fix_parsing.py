@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.cli_schemas import FIX_BATCH_KEY
+from lintro.ai.enums import ConfidenceLevel, RiskLevel
 from lintro.ai.fix_parsing import (
+    AIFixParseError,
     generate_diff,
     parse_batch_response,
     parse_fix_response,
 )
+from lintro.ai.metadata import suggestion_to_payload
+from lintro.ai.models import AIFixSuggestion
 
 # ---------------------------------------------------------------------------
 # generate_diff
@@ -55,31 +60,25 @@ def test_parse_fix_response_valid_response():
     assert_that(result.diff).is_not_empty()  # type: ignore[union-attr]  # assertpy is_not_none narrows this
 
 
-def test_parse_fix_response_non_object_json():
-    """Non-object JSON (array, string, number) returns None."""
-    for payload in ["[1, 2]", '"just a string"', "42"]:
-        result = parse_fix_response(payload, "main.py", 10, "B101")
-        assert_that(result).is_none()
-
-
-def test_parse_fix_response_non_string_code_fields():
-    """Non-string original_code or suggested_code returns None."""
-    content = json.dumps(
-        {
-            "original_code": 123,
-            "suggested_code": ["not", "a", "string"],
-            "explanation": "Fix",
-            "confidence": "medium",
-        },
-    )
-    result = parse_fix_response(content, "main.py", 10, "B101")
-    assert_that(result).is_none()
-
-
-def test_parse_fix_response_invalid_json():
-    """Verify that invalid JSON content returns None."""
-    result = parse_fix_response("not json", "main.py", 10, "B101")
-    assert_that(result).is_none()
+@pytest.mark.parametrize(
+    "content",
+    [
+        "not json",
+        "[1, 2]",
+        '"just a string"',
+        "42",
+        "null",
+        "{}",
+        '{"original_code": "old"}',
+        '{"original_code": null, "suggested_code": "new"}',
+        '{"original_code": "old", "suggested_code": []}',
+    ],
+)
+def test_parse_fix_response_rejects_malformed_responses(content):
+    """Broken JSON, wrong shapes, and missing or non-string code raise."""
+    with pytest.raises(AIFixParseError) as exc_info:
+        parse_fix_response(content, "main.py", 10, "B101")
+    assert_that(str(exc_info.value)).contains("main.py:10")
 
 
 def test_parse_fix_response_identical_code():
@@ -132,12 +131,12 @@ def test_parse_fix_response_extracts_risk_level():
             "suggested_code": "if not x > 0:\n    raise ValueError",
             "explanation": "Replace assert",
             "confidence": "high",
-            "risk_level": "low",
+            "risk_level": "safe-style",
         },
     )
     result = parse_fix_response(content, "main.py", 10, "B101")
     assert_that(result).is_not_none()
-    assert_that(result.risk_level).is_equal_to("low")  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    assert_that(result.risk_level).is_same_as(RiskLevel.SAFE_STYLE)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
 
 
 def test_parse_fix_response_risk_level_defaults_to_empty():
@@ -169,6 +168,92 @@ def test_parse_fix_response_confidence_defaults_to_medium():
     assert_that(result.confidence).is_equal_to("medium")  # type: ignore[union-attr]  # assertpy is_not_none narrows this
 
 
+@pytest.mark.parametrize("shape", ["single", "batch", "wrapped"])
+@pytest.mark.parametrize("metadata", [None, 42, False, [], {}])
+def test_fix_metadata_defaults_survive_serialization(shape, metadata):
+    """Null and non-string metadata use the same defaults as omitted fields."""
+    entry = {
+        "original_code": "x = 1",
+        "suggested_code": "x = 2",
+        "confidence": metadata,
+        "explanation": metadata,
+        "risk_level": metadata,
+    }
+    suggestions: list[AIFixSuggestion | None] = []
+    if shape == "single":
+        suggestions.append(parse_fix_response(json.dumps(entry), "main.py", 1, "B101"))
+    else:
+        payload = [entry] if shape == "batch" else {FIX_BATCH_KEY: [entry]}
+        suggestions.extend(parse_batch_response(json.dumps(payload), "main.py"))
+
+    assert_that(suggestions).is_length(1)
+    suggestion = suggestions[0]
+    if suggestion is None:
+        pytest.fail("Expected a suggestion for a non-empty patch")
+    assert_that(suggestion.confidence).is_same_as(ConfidenceLevel.MEDIUM)
+    assert_that(suggestion.explanation).is_equal_to("")
+    assert_that(suggestion.risk_level).is_equal_to("")
+    payload = suggestion_to_payload(suggestion).to_dict()
+    assert_that(list(payload.values())).does_not_contain(None)
+    assert_that(json.loads(json.dumps(payload))).contains_entry(
+        {"confidence": "medium"},
+        {"explanation": ""},
+        {"risk_level": ""},
+    )
+
+
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("padded_uppercase", [False, True])
+@pytest.mark.parametrize("confidence", list(ConfidenceLevel))
+@pytest.mark.parametrize("risk", list(RiskLevel))
+def test_fix_metadata_uses_existing_enums(batch, padded_uppercase, confidence, risk):
+    """Recognized labels normalize case and whitespace, preserving explanation."""
+    entry = {
+        "original_code": "x = 1",
+        "suggested_code": "x = 2",
+        "confidence": (
+            f" {confidence.value.upper()} " if padded_uppercase else confidence
+        ),
+        "risk_level": f" {risk.value.upper()} " if padded_uppercase else risk,
+        "explanation": "Change the value",
+    }
+    result: AIFixSuggestion | None
+    if batch:
+        result = parse_batch_response(json.dumps([entry]), "main.py")[0]
+    else:
+        result = parse_fix_response(json.dumps(entry), "main.py", 1, "B101")
+    if result is None:
+        pytest.fail("Expected a suggestion for a non-empty patch")
+    assert_that(result.confidence).is_same_as(confidence)
+    assert_that(result.risk_level).is_same_as(risk)
+    assert_that(result.explanation).is_equal_to("Change the value")
+
+
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("label", ["", "unknown", "garbage", " \t "])
+def test_unknown_metadata_labels_stay_low_confidence_and_unclassified(batch, label):
+    """Unrecognized strings cannot become medium-confidence or safe-risk claims."""
+    entry = {
+        "original_code": "old",
+        "suggested_code": "new",
+        "confidence": label,
+        "risk_level": label,
+    }
+    suggestion: AIFixSuggestion | None
+    if batch:
+        suggestion = parse_batch_response(json.dumps([entry]), "main.py")[0]
+    else:
+        suggestion = parse_fix_response(json.dumps(entry), "main.py", 1, "B101")
+    if suggestion is None:
+        pytest.fail("Expected a suggestion for a non-empty patch")
+    assert_that(suggestion.confidence).is_same_as(ConfidenceLevel.LOW)
+    assert_that(suggestion.risk_level).is_equal_to("")
+    assert_that(suggestion_to_payload(suggestion).to_dict()).contains_entry(
+        {"confidence": "low"},
+        {"risk_level": ""},
+    )
+
+
 # ---------------------------------------------------------------------------
 # parse_batch_response
 # ---------------------------------------------------------------------------
@@ -196,74 +281,62 @@ def test_parse_batch_response_valid():
     assert_that(result[0].risk_level).is_equal_to("safe-style")
 
 
-def test_parse_batch_response_invalid_json():
-    """Invalid JSON returns empty list."""
-    result = parse_batch_response("not json", "test.py")
-    assert_that(result).is_empty()
-
-
-def test_parse_batch_response_not_array():
-    """Non-array JSON returns empty list."""
-    result = parse_batch_response('{"key": "value"}', "test.py")
-    assert_that(result).is_empty()
-
-
-def test_parse_batch_response_mixed_valid_and_invalid():
-    """Only valid items are returned; invalid items are skipped."""
-    content = json.dumps(
-        [
-            # Valid item
-            {
-                "line": 10,
-                "code": "E501",
-                "original_code": "old line",
-                "suggested_code": "new line",
-                "explanation": "Fix",
-                "confidence": "high",
-                "risk_level": "safe-style",
-            },
-            # Non-dict item (string)
-            "not a dict",
-            # Null item
-            None,
-            # Missing suggested_code
-            {
-                "line": 20,
-                "code": "E502",
-                "original_code": "code",
-            },
-            # Identical original and suggested
-            {
-                "line": 30,
-                "code": "E503",
-                "original_code": "same",
-                "suggested_code": "same",
-            },
-            # Non-string code fields
-            {
-                "line": 40,
-                "code": "E504",
-                "original_code": 123,
-                "suggested_code": ["list"],
-            },
-        ],
+@pytest.mark.parametrize(
+    "content",
+    [
+        "not json",
+        '{"key": "value"}',
+        "null",
+        "42",
+        '{"fixes": null}',
+        '{"fixes": {"line": 5}}',
+    ],
+)
+def test_parse_batch_response_rejects_malformed_containers(content):
+    """Malformed containers raise rather than reporting measured absence."""
+    assert_that(parse_batch_response).raises(AIFixParseError).when_called_with(
+        content,
+        "test.py",
     )
-    result = parse_batch_response(content, "test.py")
-    assert_that(result).is_length(1)
-    assert_that(result[0].line).is_equal_to(10)
-    assert_that(result[0].code).is_equal_to("E501")
-    assert_that(result[0].risk_level).is_equal_to("safe-style")
 
 
-def test_parse_batch_response_skips_identical_code():
-    """Items with identical original and suggested code are skipped."""
+@pytest.mark.parametrize(
+    "item",
+    [
+        "not a dict",
+        None,
+        {},
+        {"original_code": "code"},
+        {"original_code": 123, "suggested_code": ["list"]},
+    ],
+)
+def test_parse_batch_response_rejects_malformed_entries(item):
+    """A malformed entry fails even a batch containing another valid fix."""
+    content = json.dumps([_BATCH_ENTRY, item])
+    assert_that(parse_batch_response).raises(AIFixParseError).when_called_with(
+        content,
+        "test.py",
+    )
+
+
+@pytest.mark.parametrize(
+    "original,suggested",
+    [
+        ("same", "same"),
+        ("", "new"),
+        ("old", ""),
+        ("", ""),
+    ],
+)
+def test_parse_batch_response_skips_empty_or_identical_code(original, suggested):
+    """Empty and no-op patches are valid but offer no useful suggestion."""
     content = json.dumps(
         [
             {
                 "line": 1,
                 "code": "E501",
-                "original_code": "same",
-                "suggested_code": "same",
+                "original_code": original,
+                "suggested_code": suggested,
                 "explanation": "No change",
                 "confidence": "high",
             },
@@ -274,7 +347,7 @@ def test_parse_batch_response_skips_identical_code():
 
 
 def test_parse_batch_response_coerces_line_and_code():
-    """Verify line is coerced to int and code to str from non-standard types."""
+    """Coerce numeric codes while defaulting null codes and invalid lines."""
     content = json.dumps(
         [
             {
@@ -298,7 +371,8 @@ def test_parse_batch_response_coerces_line_and_code():
     assert_that(result[0].code).is_equal_to("123")
     # Non-numeric string falls back to 0
     assert_that(result[1].line).is_equal_to(0)
-    assert_that(result[1].code).is_equal_to("None")
+    assert_that(result[1].code).is_equal_to("")
+    assert_that(suggestion_to_payload(result[1]).to_dict()).contains_entry({"code": ""})
 
 
 #: One batch entry in the shape the CLI fix schema requires (#2573).
@@ -339,8 +413,7 @@ def test_parse_batch_response_still_accepts_a_bare_array():
     assert_that(result[0].line).is_equal_to(5)
 
 
-def test_parse_batch_response_rejects_a_wrapper_without_an_array():
-    """A ``fixes`` key holding a non-array yields no suggestions."""
-    content = json.dumps({FIX_BATCH_KEY: {"line": 5}})
-
+@pytest.mark.parametrize("content", ["[]", '{"fixes": []}'])
+def test_parse_batch_response_accepts_empty_arrays(content):
+    """Explicit empty arrays remain a valid measured absence of fixes."""
     assert_that(parse_batch_response(content, "test.py")).is_empty()

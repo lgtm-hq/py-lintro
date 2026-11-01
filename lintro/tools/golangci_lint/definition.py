@@ -14,7 +14,9 @@ v1 ``--out-format`` flag with ``--output.<format>.path`` options.
 
 from __future__ import annotations
 
+import os
 import subprocess  # nosec B404 - used safely with shell disabled
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,7 +27,16 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixMeasured,
+    FixPartial,
+    NoFiles,
+    TimedOut,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
 from lintro.parsers.golangci_lint.golangci_lint_issue import GolangciLintIssue
 from lintro.parsers.golangci_lint.golangci_lint_parser import (
     parse_golangci_lint_output,
@@ -48,6 +59,46 @@ GOLANGCI_LINT_DEFAULT_TIMEOUT: int = 120
 GOLANGCI_LINT_FILE_PATTERNS: list[str] = ["*.go", "go.mod"]
 
 
+def _module_has_go_sources(module_root: Path) -> bool:
+    """Check whether a module owns source selected by Go's ``./...`` pattern.
+
+    Dependency-only build locks are not lintable packages. Nested modules,
+    vendor, testdata, and hidden directories do not belong to this module's
+    recursive package selection.
+
+    Args:
+        module_root: Directory containing the module's go.mod.
+
+    Returns:
+        Whether this module contains at least one eligible Go source file.
+    """
+
+    def fail_discovery(error: OSError) -> None:
+        """Propagate unreadable directories instead of reporting no source.
+
+        Args:
+            error: Filesystem error raised while discovering packages.
+
+        Raises:
+            error: The original filesystem discovery error.
+        """
+        raise error
+
+    for directory, children, files in os.walk(module_root, onerror=fail_discovery):
+        children[:] = [
+            name
+            for name in children
+            if not name.startswith((".", "_"))
+            and name not in {"vendor", "testdata"}
+            and not (Path(directory) / name / "go.mod").is_file()
+        ]
+        if any(
+            name.endswith(".go") and not name.startswith((".", "_")) for name in files
+        ):
+            return True
+    return False
+
+
 def _find_go_module_roots(paths: list[str]) -> list[Path]:
     """Return the distinct ``go.mod`` module roots covering the given paths.
 
@@ -59,7 +110,7 @@ def _find_go_module_roots(paths: list[str]) -> list[Path]:
         paths: List of file paths to search from.
 
     Returns:
-        Sorted list of module root directories (empty when none found).
+        Sorted list of module roots containing Go source (empty when none found).
     """
     roots: list[Path] = []
     for raw_path in paths:
@@ -76,7 +127,7 @@ def _find_go_module_roots(paths: list[str]) -> list[Path]:
 
     # Even when a parent module exists, nested modules are distinct
     # go.mod roots and must each be linted independently.
-    return sorted(set(roots))
+    return sorted(root for root in set(roots) if _module_has_go_sources(root))
 
 
 def _rebase_issue_paths(
@@ -103,6 +154,23 @@ def _rebase_issue_paths(
             issue.file = str(module_root / file_path)
 
 
+def _sum_measured_counts(counts: Iterable[int | None]) -> int | None:
+    """Sum measured counts, preserving an unknown measurement.
+
+    Args:
+        counts: Per-module counts, with None denoting an unmeasured count.
+
+    Returns:
+        Total when every module was measured, otherwise None.
+    """
+    total = 0
+    for count in counts:
+        if count is None:
+            return None
+        total += count
+    return total
+
+
 def _merge_fix_results(*, name: str, results: list[ToolResult]) -> ToolResult:
     """Merge per-module fix results into a single aggregate result.
 
@@ -120,26 +188,45 @@ def _merge_fix_results(*, name: str, results: list[ToolResult]) -> ToolResult:
         Aggregate ToolResult (success only when every module succeeded and no
         module timed out).
     """
-    issues: list[Any] = []
-    initial_issues: list[Any] = []
+    issues: list[BaseIssue] = []
+    initial_issues: list[BaseIssue] = []
     outputs: list[str] = []
     for result in results:
-        issues.extend(result.issues or [])
-        initial_issues.extend(result.initial_issues or [])
+        issues.extend(result.issues)
+        initial_issues.extend(result.initial_issues)
         if result.output:
             outputs.append(result.output)
     any_timed_out = any(r.timed_out for r in results)
-    return ToolResult(
+    coverage = [r.inspected_files for r in results]
+    output = "\n".join(outputs) if outputs else None
+    initial = _sum_measured_counts(r.initial_issues_count for r in results)
+    fixed = _sum_measured_counts(r.fixed_issues_count for r in results)
+    remaining = _sum_measured_counts(r.remaining_issues_count for r in results)
+    return ToolResult.from_outcome(
+        ToolOutcome(
+            execution=(
+                TimedOut(output)
+                if any_timed_out
+                else Checked(
+                    success=all(r.success for r in results),
+                    inspected_files=(
+                        True
+                        if True in coverage
+                        else None if None in coverage else False
+                    ),
+                )
+            ),
+            accounting=(
+                FixMeasured(initial, fixed, remaining)
+                if initial is not None and fixed is not None and remaining is not None
+                else FixPartial(initial, fixed, remaining)
+            ),
+            issues_count=sum(r.issues_count for r in results),
+        ),
         name=name,
-        success=all(r.success for r in results) and not any_timed_out,
-        timed_out=any_timed_out,
-        output="\n".join(outputs) if outputs else None,
-        issues_count=sum(r.issues_count or 0 for r in results),
+        output=output,
         issues=issues,
-        initial_issues_count=sum(r.initial_issues_count or 0 for r in results),
-        fixed_issues_count=sum(r.fixed_issues_count or 0 for r in results),
-        remaining_issues_count=sum(r.remaining_issues_count or 0 for r in results),
-        initial_issues=initial_issues if initial_issues else None,
+        initial_issues=initial_issues,
     )
 
 
@@ -273,12 +360,10 @@ class GolangciLintPlugin(BaseToolPlugin):
 
         module_roots = _find_go_module_roots(ctx.files)
         if not module_roots:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=NoFiles()),
                 name=self.definition.name,
-                success=True,
-                output="No go.mod found; skipping golangci-lint.",
-                issues_count=0,
-                no_files=True,
+                output="No go.mod with Go source found; skipping golangci-lint.",
             )
 
         cmd = _build_golangci_lint_command(fix=False)
@@ -286,6 +371,7 @@ class GolangciLintPlugin(BaseToolPlugin):
         all_issues: list[GolangciLintIssue] = []
         failure_outputs: list[str] = []
         any_timed_out = False
+        any_inspected = False
         overall_success = True
         for module_root in module_roots:
             try:
@@ -311,12 +397,17 @@ class GolangciLintPlugin(BaseToolPlugin):
                 # never inflates issues_count. The tool-level ``timed_out``
                 # flag (plus success=False) is what surfaces it instead.
                 any_timed_out = True
-                all_issues.extend(timeout_result.issues or [])
+                all_issues.extend(timeout_result.issues)
                 if timeout_result.output:
                     failure_outputs.append(timeout_result.output)
                 continue
 
             issues = parse_golangci_lint_output(output=output)
+            any_inspected = (
+                any_inspected
+                or success_cmd
+                or any(i.file != "(module)" for i in issues)
+            )
             _rebase_issue_paths(issues=issues, module_root=module_root)
             all_issues.extend(issues)
             overall_success = overall_success and bool(success_cmd)
@@ -326,13 +417,21 @@ class GolangciLintPlugin(BaseToolPlugin):
             if not success_cmd and not issues:
                 failure_outputs.append(output)
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=(
+                    TimedOut("\n".join(failure_outputs) if failure_outputs else None)
+                    if any_timed_out
+                    else Checked(
+                        success=overall_success,
+                        inspected_files=True if any_inspected else None,
+                    )
+                ),
+                issues_count=len(all_issues),
+            ),
             name=self.definition.name,
-            success=overall_success,
             output="\n".join(failure_outputs) if failure_outputs else None,
-            issues_count=len(all_issues),
             issues=all_issues,
-            timed_out=any_timed_out,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -355,15 +454,13 @@ class GolangciLintPlugin(BaseToolPlugin):
 
         module_roots = _find_go_module_roots(ctx.files)
         if not module_roots:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=NoFiles(),
+                    accounting=FixMeasured(initial=0, fixed=0, remaining=0),
+                ),
                 name=self.definition.name,
-                success=True,
-                output="No go.mod found; skipping golangci-lint.",
-                issues_count=0,
-                initial_issues_count=0,
-                fixed_issues_count=0,
-                remaining_issues_count=0,
-                no_files=True,
+                output="No go.mod with Go source found; skipping golangci-lint.",
             )
 
         results = [
@@ -412,15 +509,14 @@ class GolangciLintPlugin(BaseToolPlugin):
         # errored (config/build failure) rather than reporting a clean baseline.
         # Abort before the mutating --fix phase and surface the diagnostic.
         if not success_check and not initial_issues:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=Checked(success=False),
+                    accounting=FixMeasured(initial=0, fixed=0, remaining=0),
+                ),
                 name=self.definition.name,
-                success=False,
                 output=output_check,
-                issues_count=0,
                 issues=[],
-                initial_issues_count=0,
-                fixed_issues_count=0,
-                remaining_issues_count=0,
             )
         _rebase_issue_paths(issues=initial_issues, module_root=module_root)
         initial_count = len(initial_issues)
@@ -466,6 +562,8 @@ class GolangciLintPlugin(BaseToolPlugin):
         _rebase_issue_paths(issues=remaining_issues, module_root=module_root)
         remaining_count = len(remaining_issues)
         fixed_count = max(0, initial_count - remaining_count)
+        # A module re-check can reveal additional findings after rewrites.
+        initial_count = max(initial_count, fixed_count + remaining_count)
 
         # golangci-lint exits non-zero both when lint issues remain and when the
         # run itself errors (config/build/fixer failure). A failed --fix run must
@@ -483,14 +581,30 @@ class GolangciLintPlugin(BaseToolPlugin):
         else:
             output = None
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(
+                    success=success,
+                    inspected_files=(
+                        True
+                        if success_check
+                        or success_after
+                        or any(
+                            i.file != "(module)"
+                            for i in [*initial_issues, *remaining_issues]
+                        )
+                        else None
+                    ),
+                ),
+                accounting=FixMeasured(
+                    initial=initial_count,
+                    fixed=fixed_count,
+                    remaining=remaining_count,
+                ),
+                issues_count=remaining_count,
+            ),
             name=self.definition.name,
-            success=success,
             output=output,
-            issues_count=remaining_count,
             issues=remaining_issues,
-            initial_issues_count=initial_count,
-            fixed_issues_count=fixed_count,
-            remaining_issues_count=remaining_count,
-            initial_issues=initial_issues if initial_issues else None,
+            initial_issues=initial_issues,
         )

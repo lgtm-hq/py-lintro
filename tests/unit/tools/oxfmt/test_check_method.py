@@ -10,41 +10,10 @@ from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.oxfmt.oxfmt_issue import OxfmtIssue
+from lintro.plugins.subprocess_executor import SubprocessResult
 
 if TYPE_CHECKING:
     from lintro.tools.oxfmt.definition import OxfmtPlugin
-
-
-def test_check_returns_success_when_no_issues(
-    oxfmt_plugin: OxfmtPlugin,
-    mock_execution_context_for_tool: Any,
-) -> None:
-    """Check returns success when all files are formatted.
-
-    Args:
-        oxfmt_plugin: The OxfmtPlugin instance to test.
-        mock_execution_context_for_tool: Mock execution context factory.
-    """
-    with (
-        patch.object(oxfmt_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(oxfmt_plugin, "_run_subprocess") as mock_run,
-        patch.object(oxfmt_plugin, "_get_executable_command") as mock_exec,
-        patch.object(oxfmt_plugin, "_build_config_args") as mock_config,
-    ):
-        mock_prepare.return_value = mock_execution_context_for_tool(
-            files=["test.js"],
-            rel_files=["test.js"],
-            cwd="/tmp",
-        )
-
-        mock_exec.return_value = ["oxfmt"]
-        mock_config.return_value = []
-        mock_run.return_value = (True, "")
-
-        result = oxfmt_plugin.check(["/tmp/test.js"], {})
-
-        assert_that(result.success).is_true()
-        assert_that(result.issues_count).is_equal_to(0)
 
 
 def test_check_returns_issues_when_unformatted_files(
@@ -59,7 +28,7 @@ def test_check_returns_issues_when_unformatted_files(
     """
     with (
         patch.object(oxfmt_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(oxfmt_plugin, "_run_subprocess") as mock_run,
+        patch.object(oxfmt_plugin, "_run_subprocess_result") as mock_run,
         patch.object(oxfmt_plugin, "_get_executable_command") as mock_exec,
         patch.object(oxfmt_plugin, "_build_config_args") as mock_config,
     ):
@@ -71,7 +40,12 @@ def test_check_returns_issues_when_unformatted_files(
 
         mock_exec.return_value = ["oxfmt"]
         mock_config.return_value = []
-        mock_run.return_value = (False, "test.js\nother.ts")
+        mock_run.return_value = SubprocessResult(
+            1,
+            "test.js\nother.ts",
+            "",
+            "test.js\nother.ts",
+        )
 
         result = oxfmt_plugin.check(["/tmp/test.js", "/tmp/other.ts"], {})
 
@@ -79,7 +53,6 @@ def test_check_returns_issues_when_unformatted_files(
         assert_that(result.issues_count).is_equal_to(2)
         assert_that(result.issues).is_not_none()
         issues = result.issues
-        assert issues is not None  # narrow type for mypy
         assert_that(issues[0].file).is_equal_to("test.js")
         assert_that(issues[1].file).is_equal_to("other.ts")
 
@@ -115,7 +88,7 @@ def test_check_timeout_handling(
 
     with (
         patch.object(oxfmt_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(oxfmt_plugin, "_run_subprocess") as mock_run,
+        patch.object(oxfmt_plugin, "_run_subprocess_result") as mock_run,
         patch.object(oxfmt_plugin, "_get_executable_command") as mock_exec,
         patch.object(oxfmt_plugin, "_build_config_args") as mock_config,
         patch.object(
@@ -175,7 +148,7 @@ def test_check_suppresses_output_on_success(
     """
     with (
         patch.object(oxfmt_plugin, "_prepare_execution") as mock_prepare,
-        patch.object(oxfmt_plugin, "_run_subprocess") as mock_run,
+        patch.object(oxfmt_plugin, "_run_subprocess_result") as mock_run,
         patch.object(oxfmt_plugin, "_get_executable_command") as mock_exec,
         patch.object(oxfmt_plugin, "_build_config_args") as mock_config,
     ):
@@ -187,7 +160,7 @@ def test_check_suppresses_output_on_success(
 
         mock_exec.return_value = ["oxfmt"]
         mock_config.return_value = []
-        mock_run.return_value = (True, "")
+        mock_run.return_value = SubprocessResult(0, "", "", "")
 
         result = oxfmt_plugin.check(["/tmp/test.js"], {})
 

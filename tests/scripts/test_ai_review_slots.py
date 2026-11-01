@@ -116,7 +116,7 @@ def test_the_slot_reads_the_same_pr_number_as_the_review() -> None:
     job = _workflow()["jobs"]["ai-review"]
 
     assert_that(job["env"]["AI_REVIEW_PR"]).is_equal_to(f"${{{{ {PR_NUMBER} }}}}")
-    assert_that(job["needs"]).is_equal_to(["request"])
+    assert_that(job["needs"]).is_equal_to(["lane", "request"])
 
 
 @pytest.mark.parametrize(

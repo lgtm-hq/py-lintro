@@ -7,6 +7,7 @@ The execute/render split from issue #1823 keeps execution AI-free while
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action, normalize_action
@@ -278,10 +279,6 @@ def _execute_tools_sequential(
     Returns:
         list[ToolResult]: Results for every tool that ran, including synthetic
         failure results for tools that could not be initialized.
-
-    Raises:
-        TypeError: If a programming error occurs during tool execution.
-        AttributeError: If a programming error occurs during tool execution.
     """
     logger = ctx.logger
     all_results: list[ToolResult] = []
@@ -325,7 +322,11 @@ def _execute_tools_sequential(
                 )
             else:
                 result = tool.check(paths, {})
-            result.duration_seconds = time.monotonic() - started
+            # Untyped third-party results can contradict the outcome contract.
+            # Reject them before any consumer
+            # (including the live callback) can lose the rest of the run.
+            ToolResult.validate_outcome(result)
+            result = replace(result, duration_seconds=time.monotonic() - started)
 
             # Populate doc_url on each issue from the plugin
             _enrich_issues_with_doc_urls(tool, result)
@@ -336,21 +337,11 @@ def _execute_tools_sequential(
             # --fix-able).
             if ctx.dry_run_preview:
                 result = _filter_result_to_fixable(result)
-
-            all_results.append(result)
-
-            if on_tool_result is not None:
-                on_tool_result(result)
-
-        except (TypeError, AttributeError):
-            # Programming errors should be re-raised for debugging
+        except (OSError, ValueError, RuntimeError, TypeError, AttributeError) as e:
             from loguru import logger as loguru_logger
 
-            loguru_logger.exception(f"Programming error running {tool_name}")
-            raise
-        except (OSError, ValueError, RuntimeError) as e:
-            from loguru import logger as loguru_logger
-
+            # Includes invalid plugin result collections and legacy read-only
+            # fixable properties, even if a plugin bypassed API negotiation.
             # Log full exception with traceback to debug.log via loguru
             loguru_logger.exception(f"Error running {tool_name}")
             # Show user-friendly error message on console
@@ -358,15 +349,22 @@ def _execute_tools_sequential(
 
             # Create a failed result for this tool. Duration is recorded so
             # crashed tools still appear in the ``--profile`` table/JSON.
-            all_results.append(
-                ToolResult(
-                    name=tool_name,
-                    success=False,
-                    output=f"Failed to initialize tool: {e}",
-                    issues_count=0,
-                    duration_seconds=time.monotonic() - attempt_started,
+            result = ToolResult(
+                name=tool_name,
+                success=False,
+                output=f"Tool execution failed: {type(e).__name__}: {e}",
+                issues_count=0,
+                residual_unknown=ctx.action == Action.FIX,
+                residual_unknown_reason=(
+                    "tool crashed" if ctx.action == Action.FIX else None
                 ),
+                duration_seconds=time.monotonic() - attempt_started,
             )
+        all_results.append(result)
+        # Report normalized failures too. Caller callbacks remain outside the
+        # plugin exception boundary so renderer errors propagate unchanged.
+        if on_tool_result is not None:
+            on_tool_result(result)
 
     return all_results
 
@@ -541,9 +539,8 @@ def execute_run(
         on_tool_result: Optional callback invoked with each completed tool
             result so it can be displayed live. ``None`` runs silently.
 
-    Programming errors raised while a tool executes (``TypeError``,
-    ``AttributeError``) propagate to the caller rather than being folded into a
-    failed result, so they stay debuggable.
+    Invalid plugin results (including ``TypeError`` and ``AttributeError``)
+    become failed tool results with error details; the other tools still run.
 
     Returns:
         RunArtifact: The results, totals, severity tallies, and exit code for
@@ -587,7 +584,7 @@ def execute_run(
     # Warm the shared capability snapshot cache in parallel so per-tool
     # verify_tool_version calls hit memory/disk instead of re-probing.
     if tools_to_run:
-        from lintro.tools.core.snapshots import probe_all_tools
+        from lintro.utils.tool_snapshots import probe_all_tools
 
         probe_all_tools(tool_names=list(tools_to_run))
 
@@ -599,6 +596,8 @@ def execute_run(
             total_issues=0,
             total_fixed=0,
             total_remaining=0,
+            paths=paths,
+            partial_scan=incremental or diff_base is not None,
         )
 
     if not tools_to_run and skipped_tools:
@@ -716,11 +715,14 @@ def execute_run(
         on_tool_result=on_tool_result,
     )
 
-    for result in all_results:
+    for index, result in enumerate(all_results):
         if result.capability is None and not result.skipped:
-            result.capability = verify_pass.resolve_result_capability(
-                tool_name=result.name,
-                action=ctx.action,
+            all_results[index] = replace(
+                result,
+                capability=verify_pass.resolve_result_capability(
+                    tool_name=result.name,
+                    action=ctx.action,
+                ),
             )
 
     _run_verify_phase(
@@ -753,6 +755,8 @@ def execute_run(
             ToolResult(
                 name=st.name,
                 skipped=True,
+                success=True,
+                inspected_files=False,
                 skip_reason=st.reason,
                 issues_count=0,
             ),
@@ -776,8 +780,7 @@ def execute_run(
     # summary and exit code count only auto-fixable issues.
     if ctx.dry_run_preview:
         all_results[:] = [
-            r if getattr(r, "skipped", False) else _filter_result_to_fixable(r)
-            for r in all_results
+            r if r.skipped else _filter_result_to_fixable(r) for r in all_results
         ]
         total_issues, total_fixed, total_remaining = aggregate_tool_results(
             all_results,
@@ -790,6 +793,8 @@ def execute_run(
         total_issues=total_issues,
         total_fixed=total_fixed,
         total_remaining=total_remaining,
+        paths=paths,
+        partial_scan=incremental or diff_base is not None,
     )
 
 
@@ -865,8 +870,7 @@ def run_lint_tools_simple(
         profile: When True, render a per-tool performance profile after the run
             and include the profile payload in JSON output.
 
-    Programming errors raised while a tool executes (``TypeError``,
-    ``AttributeError``) propagate to the caller.
+    Invalid plugin results become failed tool results with error details.
 
     Returns:
         Exit code (0 for success, 1 for failures).

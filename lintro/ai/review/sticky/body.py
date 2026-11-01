@@ -22,6 +22,12 @@ from lintro.ai.review.github_render import (
 from lintro.ai.review.models.agent_prompt_scope import AgentPromptScope
 from lintro.ai.review.models.sticky_plan import StickyPlan
 from lintro.ai.review.posting_policy import PostingPolicy
+from lintro.ai.review.provenance_display import (
+    fallback_banner,
+    provenance_banner,
+    view_from_identity,
+    view_from_metadata,
+)
 from lintro.ai.review.sticky.cells import _open_prompt_findings
 from lintro.ai.review.sticky.findings import (
     _degraded_details,
@@ -82,6 +88,37 @@ def _history_sections(
     ]
 
 
+def _state_fallback_banner(*, plan: StickyPlan) -> str:
+    """Render the fallback line for a board re-rendered from state alone.
+
+    Args:
+        plan: Resolved inputs, with ``result`` left as ``None``.
+
+    Returns:
+        The banner, or an empty string with no stored round or no fallback.
+    """
+    if not plan.runs:
+        return ""
+    return fallback_banner(view_from_identity(plan.runs[-1].identity))
+
+
+def _state_provenance_banner(*, plan: StickyPlan) -> str:
+    """Render the provenance line for a board re-rendered from state alone.
+
+    The last stored round is the one the board shows, so its endpoint and
+    verification state are the ones named (#2868, ADR-0011 B).
+
+    Args:
+        plan: Resolved inputs, with ``result`` left as ``None``.
+
+    Returns:
+        The banner, or an empty string with no stored round or a verified one.
+    """
+    if not plan.runs:
+        return ""
+    return provenance_banner(view_from_identity(plan.runs[-1].identity))
+
+
 def state_sections(
     *,
     plan: StickyPlan,
@@ -117,6 +154,8 @@ def state_sections(
             ),
         ),
         Section(name="banner", text=banner),
+        Section(name="fallback", text=_state_fallback_banner(plan=plan)),
+        Section(name="provenance", text=_state_provenance_banner(plan=plan)),
         Section(
             name="downgrades",
             text=_state_downgrade_row(records=plan.match.records),
@@ -164,6 +203,16 @@ def round_sections(
                 verdict=plan.verdict,
                 partial=format_partial_review_label(metadata=result.metadata),
             ),
+        ),
+        # Outside every collapsible, directly under the title (ADR-0011 B and
+        # D): a fallback lane is named before the model claim.
+        Section(
+            name="fallback",
+            text=fallback_banner(view_from_metadata(result.metadata)),
+        ),
+        Section(
+            name="provenance",
+            text=provenance_banner(view_from_metadata(result.metadata)),
         ),
         Section(
             name="incomplete_banner",
@@ -226,6 +275,7 @@ def round_sections(
                 result=result,
                 transport=plan.transport,
                 auth_mode=plan.auth_mode,
+                shadow_usd=plan.pr_shadow_usd,
             ),
         ),
         *_history_sections(plan=plan, limits=limits, archive_only=archive_history),

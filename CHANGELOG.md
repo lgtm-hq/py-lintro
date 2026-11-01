@@ -13,13 +13,268 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **BREAKING (core/plugin API)**: freeze `ToolResult` and validate immutable
+  replacements (#3019, stage 4). Plugin API-v2 constructors retain skipped success and
+  unset inactive inspection defaults. Plugins that assign result fields after
+  construction must migrate to `from_outcome`, `with_outcome` or `dataclasses.replace`;
+  see the [guide](docs/plugins.md#immutable-toolresult-migration-api-v2). Mutable
+  payloads such as metadata remain shallowly shared. **Construction now rejects
+  conflicting execution flags and invalid accounting** with `ValueError`, rather than
+  deferring rejection until `.outcome` is read (for example, no-files results with
+  `success=False` or skipped results carrying nonzero counts).
+- **BREAKING (AI API)**: `lintro.ai.pipeline.run_fix_pipeline` now requires the
+  `all_results` keyword argument. Pass the owning run's `list[ToolResult]` so verified
+  replacements reach aggregation, summaries and exit-code calculation.
+
 ### Deprecated
 
 ### Removed
 
 ### Fixed
 
+- **shellcheck**: fail closed on malformed comments, invalid JSON and reports with
+  trailing noise; preserve execution diagnostics (#3025)
+
 ### Security
+
+## [0.175.2] - 2026-11-01
+
+### Fixed
+
+- **ai**: retain silent claims across checkpoint resumes (#3111) (8a61c26)
+
+## [0.175.1] - 2026-11-01
+
+### Changed
+
+- **core**: construct explicit producer outcomes (stage 2) (#3106) (c17358e)
+
+### Fixed
+
+- **ai**: preserve provenance for all-carried reviews (#3105) (398140b)
+
+## [0.175.0] - 2026-11-01
+
+### Added
+
+- **rules**: ship opt-in no-direct-formatter pack (#3096) (43ee07a)
+
+### Changed
+
+- **core**: add frozen ToolResult outcomes (stage 1) (#3097) (b00fee6)
+
+## [0.174.1] - 2026-11-01
+
+### Fixed
+
+- **tests**: remove obsolete optional Semgrep findings guard (#3099) (9c14645)
+
+## [0.174.0] - 2026-10-31
+
+### Added
+
+- **rules**: ship opt-in Semgrep packs and none-coercion advisories (#3092) (1f246ba)
+
+### Changed
+
+- **core**: make result collections non-optional (#3065) (a99381d)
+
+## [0.173.7] - 2026-10-31
+
+### Changed
+
+- **core**: required collaborators instead of optional fields (#3081) (3d34c08)
+- **ai**: null objects for the cost budget and fix progress (#3082) (e732601)
+
+### Fixed
+
+- **parsers**: validate required fields without stringifying null (#3073) (69abd04)
+- **ai**: validate fix-suggestion metadata and parse failures (#3060) (72a9d58)
+- **module-size**: report unreadable files (#3075) (b77ae27)
+- **config**: reject null sections and non-mapping documents (#3074) (c15240c)
+
+## [0.173.6] - 2026-10-31
+
+### Changed
+
+- **mypy**: enable None-related strictness checks (#3064) (63c7f49)
+- **core**: preserve fix-retry payload fields (#1868) (#3069) (8dbc764)
+
+### Fixed
+
+- **core**: record structured tool inspection coverage (#3067) (d2230c6)
+- **ai/review**: preserve unknown fix counts in history expanders (#3078) (b15e73e)
+- **ai**: report unreadable CLI contract versions as unknown (#3077) (2cc45b0)
+- **output**: preserve unknown counts when formatters crash (#3072) (514be2c)
+- **ai/review**: reject null verification when reusing stored rounds (#3063) (1ff0660)
+- **ai/review**: record malformed adversarial sweeps as degraded (#3061) (7be4d3c)
+
+## [0.173.5] - 2026-10-31
+
+### Changed
+
+- **release**: version 0.173.4 (#3051) (37b43f3)
+
+### Fixed
+
+- **ai/review**: reject malformed artifact collections (#3062) (aba3bbf)
+- **reporting**: reject unreported badge failures and scope baselines (#3048) (381ca89)
+- **oxlint**: reject invalid reports and normalize nullable diagnostics (#3005) (#3041)
+  (af235b7)
+- **semgrep**: fail closed on invalid scan reports (#3004) (#3037) (ad45a2f)
+- **black**: surface unmeasured E501 supplements (#3011) (#3044) (20fc4ee)
+- **licenses**: fail checks when npm inventory is uncollected (#3006) (#3053) (d1e6386)
+- **ci**: reject stale release candidates during publication (#3055) (f446566)
+
+## [0.173.4] - 2026-10-31
+
+### Fixed
+
+- **tools**: a failed batch with no parsed issues is never clean (#3000) (#3034)
+  (aca3ec1)
+- **cargo-audit**: reject missing or invalid vulnerability reports (#3003) (#3036)
+  (ab5e202)
+- **ai**: reject unusable custom-agent answers (#3002) (#3040) (b8600dc)
+- **ai**: abort checkpoint capture on enumeration failure (#3001) (#3039) (06188d2)
+- **ai**: keep unmeasured post-fix checks unverified (#2998) (#3038) (aa94677)
+- **cargo-deny**: keep the exit status so a failed run is never clean (#2999) (#3033)
+  (0e772a2)
+
+## [0.173.3] - 2026-10-31
+
+### Changed
+
+- **tools**: add registry-wide failed-run contract (#2997) (#3027) (469606c)
+
+### Fixed
+
+- **security**: time-box GHSA-g3hv-75wg-m249 for minimatch 3.1.5 (#3031) (#3032)
+  (3d73323)
+
+## [0.173.2] - 2026-10-30
+
+### Changed
+
+- **changelog**: record the #2362 and #2427 public-surface removals as breaking (#2920)
+  (47d7632)
+- **deps**: update dependency katex to 0.19.1 (minor) (#2992) (37b5223)
+- **deps**: update dependency golangci/golangci-lint to 2.15.0 (minor) (#2991) (7f5b47f)
+- **deps**: update dependency setuptools to 84.1.0 (minor) [security] (#2974) (a2dc2b5)
+- add all-checks gate workflow (#2959) (c7ca041)
+- **deps**: update dependency svelte to 5.57.3 (patch) (#2990) (c8f0f2a)
+- **deps**: update dependency checkov to 3.4.0 (minor) (#2986) (cd2e260)
+- **deps**: update dependency oven-sh/bun to 1.4.4 (patch) (#2985) (1398929)
+- **deps**: update dependency astral-sh/uv to 0.13.6 (patch) (#2984) (be7a1b8)
+- **deps**: update python:3.14-slim docker digest to cd89c30 (#2983) (4793c24)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 5dd0c01 (#2890)
+  (0c4e538)
+- **deps**: update lgtm-hq/lgtm-ci to v0.78.1 (#2980) (8d7c611)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to 5049c07
+  (#2957) (a8fe26a)
+- **deps**: update test-tools to 5.0.5 (patch) (#2958) (452f28e)
+- **deps**: update dependency golang to 1.27.3 (patch) (#2955) (7b983a2)
+- **deps**: update github-actions (#2956) (3f6bf2b)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to 61db776
+  (#2954) (8261d57)
+- **deps**: update dependency checkov to 3.3.30 (patch) (#2945) (1f507d6)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.78.0 (minor) (#2951) (c4ff6e8)
+- **deps**: update python:3.14-slim docker digest to fbecd46 (#2948) (341e370)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to 0a20c41
+  (#2943) (f9842cf)
+- **deps**: update python:3.14-slim docker digest to 29e1fe7 (#2944) (94c343f)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.173.1 (minor) (#2897)
+  (c533f64)
+- **deps**: update dependency astral-sh/uv to 0.13.4 (minor) (#2904) (5e7e409)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to e235dd0
+  (#2900) (91825d3)
+
+### Fixed
+
+- **ci**: make review error characterization deterministic (#2989) (53dbb5d)
+- **security**: repair dependency locks and images (#2977) (9bf4070)
+- **ci**: temporarily switch harden-runner egress to audit (#2979) (4296843)
+- **ci**: allow artifact results receiver in version hook (#2966) (2b418b2)
+- **ci**: allow artifact results receiver in dogfood gate (#2964) (85d34e0)
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.44.52 (patch) (#2960) (76b1b13)
+- **ci**: drop the certifi .lgtm-ci-tooling grype workaround now on lgtm-ci v0.78.0
+  (#2953) (91d7afe)
+- **ci**: ignore certifi GHSA-6q48-6c7w-9gw2 in the lgtm-ci tooling checkout only
+  (#2950) (9771108)
+- **docker**: retry transient download errors in the tools image build (#2947) (e704fa8)
+- **deps**: resolve the certifi and npm advisories published 2026-10-20 (#2941)
+  (06ce776)
+
+## [0.173.1] - 2026-10-20
+
+### Changed
+
+- **mcp**: invalidate the import caches before the second finder lookup (#2916)
+  (9fc0281)
+
+### Fixed
+
+- **ai/review**: synthesis prompt and note say what the budget cut (#2918) (af70d13)
+
+## [0.173.0] - 2026-10-19
+
+### Added
+
+- **ai/review**: skip a head the last finished round already covered (#2913) (eb7a446)
+
+## [0.172.0] - 2026-10-19
+
+### Added
+
+- **ai/review**: route configured finding categories to the notes block (#2910)
+  (e724bb4)
+- **ci**: walk the declared fallback chain on a dead lane (ADR-0011 D) (#2907) (b85e3c7)
+- **ci**: fail the review check when the run endpoint or model contradicts its lane
+  (#2906) (85ee9bf)
+- **ci**: drive the dogfood review from the lane manifest, selected by repo variable
+  (#2901) (92d99a3)
+- **ci**: add the review-lanes manifest and its resolver, inert (#2899) (a8a62a0)
+- **ai/review**: show the endpoint, model verification and cost basis on the sticky
+  (#2896) (6538bcc)
+- **ai/review**: record endpoint, credential and reported model on each run (#2886)
+  (33790c8)
+
+### Changed
+
+- **adr**: add ADR-0011 dogfood review lanes, provenance and degradation (#2875)
+  (d9e1662)
+- **ci**: name a weekly smoke row for every dogfood lane's real endpoint (ADR-0011 A)
+  (#2908) (b5e322b)
+- **security**: suppress GHSA-84m7-p3x7-pcfv on the semgrep-pinned mcp 1.29.0 (#2905)
+  (1e684c5)
+- **deps**: update test-tools to 5.0.4 (patch) (#2902) (d8447bb)
+- **deps**: update dependency smol-toml to 1.9.1 (patch) (#2892) (dd15914)
+- **deps**: update dependency oven-sh/bun to 1.4.3 (patch) (#2891) (6ef0fc4)
+- **deps**: update dependency svelte to 5.57.2 (patch) (#2894) (22a630c)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to 777fb0a
+  (#2888) (399c065)
+- **deps**: update dependency golang to 1.27.2 (patch) (#2885) (49102fc)
+- **deps**: update dependency golangci/golangci-lint to 2.14.0 (minor) (#2819) (1307233)
+- **deps**: update docker/dockerfile:1 docker digest to 4edf897 (#2879) (24b4968)
+- **deps**: update dependency @types/sanitize-html to 2.16.2 (patch) (#2884) (d94f999)
+- **deps**: update python:3.14-slim docker digest to a2b82f3 (#2883) (f2e0afd)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to f7e3c13
+  (#2881) (38d0f28)
+- **deps**: update dependency google/osv-scanner to 2.7.0 (minor) (#2776) (99514cc)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to 378cdb3
+  (#2717) (fd6e664)
+- **deps**: update github-actions (#2779) (6825b04)
+- **deps**: update dependency checkov to 3.3.29 (patch) (#2769) (3199aa7)
+
+### Fixed
+
+- **ai/providers**: CLI transport correctness (#2911) (64fb262)
+- **ai-review**: keep a rerun's verdict and warn on a failed question pass (#2836)
+  (9517671)
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.44.23 (patch) (#2903) (9281499)
+- **deps**: update linting tools (#2493) (ace4e4e)
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.44.15 (minor) (#2492) (18ad07b)
+- **deps**: update smol-toml to 1.9.0 and patch npm advisories [security] (#2861)
+  (e33f35f)
 
 ## [0.171.3] - 2026-10-04
 
@@ -965,6 +1220,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [0.151.0] - 2026-09-07
 
+### Breaking (recorded retroactively, 2026-10-20)
+
+- **core**: #2427 made tool order derive from declared capabilities. Hard breaks:
+  `list-tools --show-conflicts` is gone (use `lintro check --explain-order`), and the
+  `ToolDefinition.priority` / `conflicts_with` plugin fields are removed.
+- **core**: #2427 also retired the config keys `execution.tool_order`,
+  `execution.tool_order_custom`, `execution.tool_priorities` and
+  `[tool.lintro.post_checks]`. Leftover keys are ignored. Only the flat `[tool.lintro]`
+  form and `[tool.lintro.post_checks]` log an unknown-key warning on a run; a nested
+  `[tool.lintro.execution]` table and `.lintro-config.yaml` drop them silently, so run
+  `lintro config validate` to find them. See
+  `docs/configuration.md#tool-ordering-configuration`.
+
 ### Added
 
 - **core**: make derived DAG ordering authoritative, delete priority scalars (#2427)
@@ -1051,6 +1319,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **golangci-lint**: allow parallel runners so findings never vanish (#2396) (2cb6fcd)
 
 ## [0.147.5] - 2026-09-06
+
+### Breaking (recorded retroactively, 2026-10-20)
+
+- **core**: #2362 removed the `lintro setup` command, the `--score` / `--fail-under`
+  flags, the `score:` config block, the `health_score` key in JSON output and the
+  `score` / `fail_under` parameters of `lintro.api.check`. This shipped as a patch
+  release without a breaking-change marker.
 
 ### Changed
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 
 from lintro.ai.review.errors_taxonomy import (
     KIND_COPY,
@@ -17,6 +18,10 @@ from lintro.ai.review.github_notes import format_run_mechanics
 from lintro.ai.review.github_render import Section, assemble
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.provenance_display import (
+    provenance_banner,
+    view_from_metadata,
+)
 from lintro.ai.review.sticky import render_state_sticky
 
 #: Cap on the provider error text rendered on the error-only sticky. Provider
@@ -84,7 +89,16 @@ def format_error_comment(
     """
     resolved_provider = provider or (metadata.provider if metadata else "") or ""
     kind = classify_provider_error(provider=resolved_provider, error=error)
-    state = prior_state
+    # A checkpoint record is not a finished round to show: the board and its
+    # banner see only the rounds that finished (#2867).
+    state = (
+        replace(
+            prior_state,
+            runs=tuple(run for run in prior_state.runs if not run.coverage.checkpoint),
+        )
+        if prior_state is not None
+        else None
+    )
 
     if state is not None and state.runs:
         return render_state_sticky(
@@ -106,8 +120,12 @@ def format_error_comment(
         cause_limit=ERROR_CAUSE_LIMIT,
     )
     mechanics = ""
+    provenance = ""
     if metadata is not None and metadata.model:
         mechanics = "<sub>" + format_run_mechanics(metadata=metadata) + "</sub>"
+        # This error-only body is the sticky, so a model claim that did not
+        # hold leads it, outside the footer (#2868, ADR-0011 B).
+        provenance = provenance_banner(view_from_metadata(metadata))
     # Assembled through the shared pipeline, so this surface joins and caps its
     # sections exactly the way the sticky board and the review body do: a
     # provider message long enough to overrun the budget is truncated with the
@@ -117,6 +135,7 @@ def format_error_comment(
             # The marker sits on the line directly above the heading, not a
             # blank line above it, so the two are one section rather than two.
             Section(name="header", text=f"{STICKY_MARKER}\n## 🔎 Lintro Review"),
+            Section(name="provenance", text=provenance),
             Section(name="failure", text=f"> {ERROR_ONLY_HEADLINE} — {detail}"),
             Section(name="guidance", text=guidance),
             Section(name="mechanics", text=mechanics),

@@ -22,8 +22,9 @@ tool produces sensible results out of the box.
 
 from __future__ import annotations
 
+import json
 import subprocess  # nosec B404 - used safely with shell disabled
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from loguru import logger
 
@@ -33,6 +34,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.html_validate.html_validate_parser import (
     parse_html_validate_output,
@@ -61,6 +63,31 @@ HTML_VALIDATE_CONFIG_FILENAMES: list[str] = [
 # ``fs.globSync``, which is not implemented on every Bun release and aborts the
 # run before any file is validated (see issue #1727).
 _GLOB_METACHARACTERS: frozenset[str] = frozenset("*?[]{}")
+
+
+def _reported_inspection(output: str) -> bool | None:
+    """Read coverage from JSON file reports, preserving absent evidence.
+
+    Args:
+        output: JSON formatter stdout, separate from stderr diagnostics.
+
+    Returns:
+        True when a file report establishes inspection, otherwise None.
+        An empty diagnostics array alone does not establish file coverage.
+    """
+    try:
+        reports = json.loads(output)
+    except ValueError:
+        return None
+    if isinstance(reports, list) and any(
+        isinstance(report, dict)
+        and isinstance(report.get("filePath"), str)
+        and report["filePath"]
+        and isinstance(report.get("messages"), list)
+        for report in reports
+    ):
+        return True
+    return None
 
 
 def contains_glob_syntax(argument: str) -> bool:
@@ -241,12 +268,14 @@ class HtmlValidatePlugin(BaseToolPlugin):
                 cmd=cmd,
                 cwd=ctx.cwd,
             )
-            timed_out.output = self._append_fallback_guidance(
-                output=timed_out.output,
-                used_registry_fallback=used_registry_fallback,
-                command=fallback_command,
+            return replace(
+                timed_out,
+                output=self._append_fallback_guidance(
+                    output=timed_out.output,
+                    used_registry_fallback=used_registry_fallback,
+                    command=fallback_command,
+                ),
             )
-            return timed_out
 
         # JSON is written to stdout; stderr carries diagnostics only.
         issues = parse_html_validate_output(output=result.stdout)
@@ -267,11 +296,18 @@ class HtmlValidatePlugin(BaseToolPlugin):
                 command=fallback_command,
             )
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(
+                    success=success_flag,
+                    inspected_files=(
+                        True if result.success else _reported_inspection(result.stdout)
+                    ),
+                ),
+                issues_count=issues_count,
+            ),
             name=self.definition.name,
-            success=success_flag,
             output=final_output,
-            issues_count=issues_count,
             issues=issues,
             cwd=ctx.cwd,
         )

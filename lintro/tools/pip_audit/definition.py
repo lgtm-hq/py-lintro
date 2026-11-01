@@ -8,6 +8,7 @@ scanning the dependency surface instead.
 
 from __future__ import annotations
 
+import re
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from fnmatch import fnmatch
@@ -20,6 +21,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.pip_audit.pip_audit_issue import PipAuditIssue
 from lintro.parsers.pip_audit.pip_audit_parser import (
@@ -85,6 +87,43 @@ def _collect_requirements_dir_files(paths: list[str]) -> list[str]:
                 continue
             found.add(str(nested.resolve()))
     return sorted(found)
+
+
+#: An advisory id as pip-audit reports one: ``CVE-2026-59951``,
+#: ``GHSA-84m7-p3x7-pcfv``, ``PYSEC-2019-217``.
+_VULN_ID_RE = re.compile(r"^[A-Z]+-[A-Za-z0-9-]+$")
+
+
+def _normalize_ignored_ids(value: object) -> list[str]:
+    """Return the advisory ids an ``ignore_vulns`` option names.
+
+    Args:
+        value: A list of ids, or one string of ids separated by ``|``
+            (``--tool-options`` splits on commas, so a list travels with
+            pipes), or ``None`` for none.
+
+    Returns:
+        The ids, deduplicated in first-seen order.
+
+    Raises:
+        ValueError: If an entry is not an advisory id.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw: list[object] = list(value.split("|"))
+    elif isinstance(value, (list, tuple)):
+        raw = list(value)
+    else:
+        msg = f"ignore_vulns must be a list of advisory ids, not {value!r}"
+        raise ValueError(msg)
+    ids: dict[str, None] = {}
+    for entry in raw:
+        if not isinstance(entry, str) or not _VULN_ID_RE.fullmatch(entry.strip()):
+            msg = f"ignore_vulns entry {entry!r} is not an advisory id"
+            raise ValueError(msg)
+        ids.setdefault(entry.strip(), None)
+    return list(ids)
 
 
 def _build_targets(files: list[str]) -> list[list[str]]:
@@ -186,10 +225,16 @@ class PipAuditPlugin(BaseToolPlugin):
         """Set tool-specific options.
 
         Args:
-            **kwargs: Options to set, including timeout.
+            **kwargs: Options to set: ``timeout``, and ``ignore_vulns``, the
+                advisory ids pip-audit is told to ignore (``--ignore-vuln``),
+                as a list or a ``|``-separated string from ``--tool-options``.
+                Pair every entry with a time-boxed ``[[IgnoredVulns]]`` row in
+                ``.osv-scanner.toml`` that names the same id, so the two
+                scanners agree and the ignore cannot outlive its reason.
 
         Raises:
-            ValueError: If timeout is negative or not a number.
+            ValueError: If timeout is negative or not a number, or an ignored
+                id is not an advisory id.
         """
         if "timeout" in kwargs:
             timeout = kwargs["timeout"]
@@ -198,6 +243,8 @@ class PipAuditPlugin(BaseToolPlugin):
                     raise ValueError("timeout must be a number")
                 if timeout < 0:
                     raise ValueError("timeout must be non-negative")
+        if "ignore_vulns" in kwargs:
+            kwargs["ignore_vulns"] = _normalize_ignored_ids(kwargs["ignore_vulns"])
         super().set_options(**kwargs)
 
     def _build_command(self) -> list[str]:
@@ -211,7 +258,7 @@ class PipAuditPlugin(BaseToolPlugin):
             requirements it would otherwise skip), so an un-audited dependency
             fails the scan instead of passing as clean.
         """
-        return [
+        command = [
             "pip-audit",
             "--strict",
             "--format",
@@ -219,6 +266,11 @@ class PipAuditPlugin(BaseToolPlugin):
             "--progress-spinner",
             "off",
         ]
+        ignored = self.options.get("ignore_vulns")
+        if isinstance(ignored, list):
+            for vuln_id in ignored:
+                command += ["--ignore-vuln", str(vuln_id)]
+        return command
 
     def doc_url(self, code: str) -> str | None:
         """Return the OSV advisory URL for the given vulnerability ID.
@@ -310,14 +362,13 @@ class PipAuditPlugin(BaseToolPlugin):
             # not a matched-nothing, and must not carry ``no_files``: that
             # flag drives the "no files matched" note, which would blame
             # discovery for a decision pip-audit made about real files.
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=True, inspected_files=False)),
                 name=self.definition.name,
-                success=True,
                 output=(
                     "No auditable requirements or project file among the "
                     "matched paths; skipping pip-audit."
                 ),
-                issues_count=0,
             )
 
         base_cmd = self._build_command()
@@ -379,14 +430,19 @@ class PipAuditPlugin(BaseToolPlugin):
         combined_output = "\n".join(output_chunks)
         should_show_output = bool(issues) or not all_success
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=(
+                    TimedOut(combined_output if should_show_output else None)
+                    if any_timed_out
+                    else Checked(success=overall_success, inspected_files=True)
+                ),
+                issues_count=len(issues),
+            ),
             name=self.definition.name,
-            success=overall_success,
             output=combined_output if should_show_output else None,
-            issues_count=len(issues),
-            issues=issues if issues else None,
+            issues=issues,
             parse_failures_count=parse_failures_count,
-            timed_out=any_timed_out,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

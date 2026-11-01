@@ -28,6 +28,12 @@ from rich.progress import (
 )
 
 from lintro.enums.action import Action
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixPartial,
+    FixUnmeasured,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools import tool_manager
 from lintro.utils.execution.tool_configuration import configure_tool_for_execution
@@ -197,7 +203,13 @@ def run_tools_parallel(
                             auto_install=auto_install,
                             diff_base=diff_base,
                         )
-                    except (OSError, ValueError, RuntimeError) as exc:
+                    except (
+                        OSError,
+                        ValueError,
+                        RuntimeError,
+                        TypeError,
+                        AttributeError,
+                    ) as exc:
                         # Same telemetry the sequential path records: a
                         # console line so the failure is visible, and a
                         # duration so a crashed tool still appears in
@@ -211,11 +223,20 @@ def run_tools_parallel(
                             file=sys.stderr,
                         )
                         all_results.append(
-                            ToolResult(
+                            ToolResult.from_outcome(
+                                ToolOutcome(
+                                    execution=Checked(success=False),
+                                    accounting=(
+                                        FixUnmeasured("tool crashed")
+                                        if action == Action.FIX
+                                        else FixPartial()
+                                    ),
+                                ),
                                 name=tool_name,
-                                success=False,
-                                output=f"Failed to initialize tool: {exc}",
-                                issues_count=0,
+                                output=(
+                                    "Failed to initialize tool: "
+                                    f"{type(exc).__name__}: {exc}"
+                                ),
                                 duration_seconds=time.monotonic() - attempt_started,
                             ),
                         )

@@ -19,7 +19,7 @@ Two blocking issues remain; the session fix landed.
 
 <details><summary>💬 Notes and questions (1)</summary>
 
-<sub>Not posted as threads and not counted in the verdict: findings below the inline confidence floor (medium) and open questions.</sub>
+<sub>Not posted as threads and not counted in the verdict: findings below the inline confidence floor (medium), P3 findings in the code-smell category and open questions.</sub>
 
 - 🟡 P3 · low confidence — **Docstring omits the raised error** · [`src/auth/tokens.py:7`](https://github.com/lgtm-hq/py-lintro/blob/0d15ea5edeadbeef0d15ea5edeadbeef0d15ea5e/src/auth/tokens.py#L7)
   The Raises section is missing.
@@ -61,11 +61,11 @@ Two blocking issues remain; the session fix landed.
 
 | model | transport | est. cost | tokens in / out | depth | files | checks | duration |
 | --- | --- | --- | --- |:-:|:-:|:-:|---|
-| `claude-sonnet-4-20250514` | api · api_key | ~$0.1234 | 12,000 / 2,400 | 2 | 3 | 2 | 42s |
+| `claude-sonnet-4-20250514` · verified on `api.anthropic.com` · lane `anthropic-api` | api · api_key | $0.1234 (billed) | 12,000 / 2,400 | 2 | 3 | 2 | 42s |
 
 ---
 
-### 🕘 History · 2 previous runs · 1 fixed · $0.3485 · 41.2k tokens
+### 🕘 History · 2 previous runs · 1 fixed · ~$0.3485 (estimated) · 41.2k tokens
 
 <details><summary>Run-by-run history</summary>
 
@@ -73,7 +73,7 @@ Two blocking issues remain; the session fix landed.
 |:-:|:-:|:-:|:-:|
 | **1** | **1** | **0** | **1** |
 
-<details><summary><b>Round 2</b> · <code>1111111</code> · ⛔ blocked · 1 fixed, 1 left open · $0.1150 · 40s</summary>
+<details><summary><b>Round 2</b> · <code>1111111</code> · ⛔ blocked · 1 fixed, 1 left open · ~$0.1150 (estimated) · 40s</summary>
 
 **Fixed this round**
 
@@ -83,15 +83,15 @@ Two blocking issues remain; the session fix landed.
 
 | model | transport | est. cost | tokens in / out | depth | files | checks | duration |
 | --- | --- | --- | --- |:-:|:-:|:-:|---|
-| `claude-sonnet-4-20250514` | api · api_key | $0.1150 | 11,500 / 2,200 | 2 | 3 | 2 | 40s |
+| `claude-sonnet-4-20250514` · endpoint not recorded | api · api_key | ~$0.1150 (estimated) | 11,500 / 2,200 | 2 | 3 | 2 | 40s |
 
 </details>
 
-<details><summary><b>Round 1</b> · <code>1111111</code> · ⛔ blocked · 0 fixed, 2 left open · $0.1101 · 38s</summary>
+<details><summary><b>Round 1</b> · <code>1111111</code> · ⛔ blocked · — fixed, 2 left open · ~$0.1101 (estimated) · 38s</summary>
 
 | model | transport | est. cost | tokens in / out | depth | files | checks | duration |
 | --- | --- | --- | --- |:-:|:-:|:-:|---|
-| `claude-sonnet-4-20250514` | api · api_key | $0.1101 | 11,000 / 2,100 | 2 | 3 | 2 | 38s |
+| `claude-sonnet-4-20250514` · predates ADR-0011 | api · api_key | ~$0.1101 (estimated) | 11,000 / 2,100 | 2 | 3 | 2 | 38s |
 
 </details>
 

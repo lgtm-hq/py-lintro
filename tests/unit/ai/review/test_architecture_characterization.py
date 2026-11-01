@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
 
@@ -32,9 +33,13 @@ from lintro.ai.review.error_contract import (
     REVIEW_ERROR_EXIT_CODE,
     build_error_contract,
 )
+from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_identity import RunIdentity
+from lintro.ai.review.models.run_record import RunRecord
 from lintro.cli import cli
 from lintro.config.lintro_config import LintroConfig
 from lintro.mcp.toolkits import review as mcp_review
@@ -454,17 +459,41 @@ def test_review_exit_one_for_successful_review_with_p1() -> None:
     assert_that(result.exception).is_instance_of(SystemExit)
 
 
-def test_review_exit_two_when_orchestrator_raises() -> None:
+@pytest.mark.parametrize(
+    "same_head_prior",
+    [False, True],
+    ids=["first-run", "same-head"],
+)
+def test_review_exit_two_when_orchestrator_raises(same_head_prior: bool) -> None:
     """Provider/execution failure exits 2 so it is never confused with P1.
 
     ``_execute_advisory`` is deliberately left unpatched: ``run_review``
     raises first, and the command's exception handler exits before the
     advisory pass is reached. If that ordering ever changes, this test
     starts exercising the real advisory path and should gain a stub.
+
+    A same-head prior run makes the reuse guard parse the context before
+    execution (#2988). Use a real context so its diff is always a string,
+    and supply prior state explicitly instead of inheriting another test's
+    on-disk history.
+
+    Args:
+        same_head_prior: Whether the reuse guard sees a run at this head.
     """
     runner = CliRunner()
-    mock_context = MagicMock()
-    mock_context.changed_files = []
+    mock_context = ReviewContext(
+        base_ref="base",
+        head_ref="head",
+        changed_files=[],
+        unified_diff="",
+    )
+    prior_state = ReviewState(
+        runs=(
+            (RunRecord(identity=RunIdentity(sha=mock_context.head_ref)),)
+            if same_head_prior
+            else ()
+        ),
+    )
     mock_config = MagicMock(
         ai={"enabled": True, "review": True, "provider": "openai"},
     )
@@ -505,14 +534,21 @@ def test_review_exit_two_when_orchestrator_raises() -> None:
             return_value=MagicMock(model_name="gpt-4o", name="openai"),
         ),
         patch(
+            "lintro.cli_utils.commands.review.load_prior_review_state",
+            return_value=prior_state,
+        ),
+        patch(
             "lintro.ai.review.preparation.run_review",
             side_effect=AIAuthenticationError("401 authentication_error"),
-        ),
+        ) as run_review,
         patch("lintro.cli_utils.commands.review.render_review_error"),
     ):
         result = runner.invoke(cli, ["review"])
 
     assert_that(result.exit_code).is_equal_to(REVIEW_ERROR_EXIT_CODE)
+    run_review.assert_called_once()
+    assert isinstance(result.exception, SystemExit)
+    assert_that(result.exception.__cause__).is_instance_of(AIAuthenticationError)
 
 
 def test_run_review_remains_stable_orchestrator_facade() -> None:

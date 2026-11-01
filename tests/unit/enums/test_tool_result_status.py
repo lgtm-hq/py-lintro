@@ -25,8 +25,7 @@ def test_status_for_tool_result_precedence() -> None:
         name="ghost",
         success=True,
         output="",
-        unavailable=True,
-        skip_reason="not found",
+        unavailable_reason="not found",
     )
     skipped = ToolResult(
         name="ruff",
@@ -94,8 +93,7 @@ def test_serialize_tool_result_status_uses_shared_enum() -> None:
         name="ghost",
         success=True,
         output="ghost unavailable",
-        unavailable=True,
-        skip_reason="not found",
+        unavailable_reason="not found",
     )
     data = serialize_tool_result(result, action=Action.CHECK)
     assert_that(data["status"]).is_equal_to(ToolResultStatus.UNAVAILABLE)

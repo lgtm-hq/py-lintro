@@ -10,6 +10,8 @@ from lintro.ai.enums.ai_transport import AITransport
 from lintro.ai.enums.cli_bare_mode import CliBareMode
 from lintro.ai.enums.config_source import ConfigSource
 from lintro.ai.enums.cost_basis import CostBasis
+from lintro.ai.enums.credential_kind import CredentialKind
+from lintro.ai.enums.model_verification import ModelVerification
 from lintro.ai.enums.sanitize_mode import SanitizeMode
 from lintro.enums.confidence_level import ConfidenceLevel
 from lintro.enums.risk_level import RiskLevel
@@ -21,6 +23,8 @@ __all__ = [
     "ConfidenceLevel",
     "ConfigSource",
     "CostBasis",
+    "CredentialKind",
+    "ModelVerification",
     "RiskLevel",
     "SanitizeMode",
 ]

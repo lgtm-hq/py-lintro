@@ -194,14 +194,14 @@ def finding_from_issue(*, issue: BaseIssue, tool_name: str) -> Finding:
     fixable_attr = issue.DISPLAY_FIELD_MAP.get("fixable", "fixable")
     return Finding(
         tool=tool_name,
-        file=str(getattr(issue, "file", "") or ""),
-        line=int(getattr(issue, "line", 0) or 0),
-        column=int(getattr(issue, "column", 0) or 0),
+        file=str(issue.file or ""),
+        line=int(issue.line or 0),
+        column=int(issue.column or 0),
         rule=str(row.get("code", "") or ""),
         severity=_severity_of(issue=issue),
         message=str(row.get("message", "") or ""),
         fixable=bool(getattr(issue, fixable_attr, False)),
-        doc_url=str(getattr(issue, "doc_url", "") or getattr(issue, "url", "") or ""),
+        doc_url=str(issue.doc_url or getattr(issue, "url", "") or ""),
     )
 
 
@@ -226,7 +226,7 @@ def issues_for_result(
     Returns:
         list[BaseIssue]: Issues attributed to this result.
     """
-    issues = list(result.issues or [])
+    issues = list(result.issues)
     if action != Action.FIX:
         return issues
     if scope == FindingScope.ALL:

@@ -21,6 +21,9 @@ name: Build - Lintro Tools Candidate
       - 'package.json'
       - 'pyproject.toml'
       - 'requirements-semgrep.txt'
+      - 'scripts/utils/gitleaks/go.mod'
+      - 'scripts/utils/gitleaks/go.sum'
+      - 'scripts/utils/gitleaks/verify_imports.py'
 
 permissions: {}
 
@@ -43,9 +46,9 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: block
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -78,7 +81,7 @@ jobs:
       github.actor == 'renovate[bot]' &&
       needs.resolve-pr.result == 'success'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@22bb159287eb23a812d533090615525eccb839ac # v0.75.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     permissions:
       contents: read
       packages: write
@@ -103,8 +106,8 @@ jobs:
       cosign-sign: true
       scan: true
       scan-exit-code: '0'
-      tooling-ref: '22bb159287eb23a812d533090615525eccb839ac' # v0.75.1
-      egress-policy: block
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: docker
       allowed-endpoints-mode: replace
       allowed-endpoints: >
@@ -128,6 +131,9 @@ jobs:
         files.pythonhosted.org:443
         static.rust-lang.org:443
         dl.google.com:443
+        proxy.golang.org:443
+        sum.golang.org:443
+        storage.googleapis.com:443
         bun.sh:443
         astral.sh:443
         releases.astral.sh:443
@@ -160,9 +166,9 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: block
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -190,7 +196,7 @@ jobs:
         if: steps.update.outputs.changed == 'true'
         id: digest-app
         # yamllint disable-line rule:line-length
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.DIGEST_APP_ID }}
           private-key: ${{ secrets.DIGEST_APP_PRIVATE_KEY }}
@@ -202,7 +208,7 @@ jobs:
         # Append mode never moves the ref and fails cleanly if Renovate pushed
         # again after this run started; that newer push starts its own run.
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/create-signed-commit@22bb159287eb23a812d533090615525eccb839ac # v0.75.1
+        uses: lgtm-hq/lgtm-ci/.github/actions/create-signed-commit@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
         with:
           token: ${{ steps.digest-app.outputs.token }}
           branch: ${{ github.ref_name }}

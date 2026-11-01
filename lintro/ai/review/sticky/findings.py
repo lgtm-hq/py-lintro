@@ -39,6 +39,7 @@ from lintro.ai.review.sticky.cells import (
     _sorted_open_records,
 )
 from lintro.ai.review.sticky.constants import _QUESTION_EMOJI, _TITLE_LIMIT
+from lintro.ai.review.sticky.heading import FINDINGS_HEADING_PREFIX
 from lintro.ai.review.sticky.scope import _scope_line
 
 
@@ -99,6 +100,7 @@ def _findings_round_section(*, plan: StickyPlan, limits: RenderLimits) -> str:
     coverage_label = _findings_coverage_label(result=result, verdict=verdict)
     short = _short_sha(sha=head_sha)
     sha_bit = f" · `{short}`" if short else ""
+    # ``parse_findings_heading`` reads this line back; keep the two together.
     open_count = sum(
         1 for record in match.records if record.status is FindingStatus.OPEN
     )
@@ -112,7 +114,7 @@ def _findings_round_section(*, plan: StickyPlan, limits: RenderLimits) -> str:
         f" · {rebaselined} re-baselined (pre-v4 state)" if rebaselined else ""
     )
     heading = (
-        f"### Findings · Round {round_number}{sha_bit} · {coverage_label} · "
+        f"{FINDINGS_HEADING_PREFIX}{round_number}{sha_bit} · {coverage_label} · "
         f"{open_count} open · {fixed_total} fixed this round{rebaselined_bit}"
     )
     note = format_convergence_note(trajectory=score_trajectory(runs=tuple(runs)))

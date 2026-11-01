@@ -18,6 +18,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, NoFiles, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.cargo_audit.cargo_audit_parser import (
     extract_cargo_audit_payload,
@@ -150,12 +151,10 @@ class CargoAuditPlugin(BaseToolPlugin):
         # Find Cargo.lock root from filtered file list
         cargo_root = _find_cargo_root(ctx.files)
         if cargo_root is None:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=NoFiles()),
                 name=self.definition.name,
-                success=True,
                 output="No Cargo.lock found; skipping cargo-audit.",
-                issues_count=0,
-                no_files=True,
             )
 
         cmd = self._build_command()
@@ -166,12 +165,11 @@ class CargoAuditPlugin(BaseToolPlugin):
                 cwd=str(cargo_root),
             )
         except subprocess.TimeoutExpired:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=TimedOut(f"cargo-audit timed out after {ctx.timeout}s"),
+                ),
                 name=self.definition.name,
-                success=False,
-                output=f"cargo-audit timed out after {ctx.timeout}s",
-                issues_count=0,
-                timed_out=True,
             )
 
         success = proc.success
@@ -182,10 +180,9 @@ class CargoAuditPlugin(BaseToolPlugin):
         payload = extract_cargo_audit_payload(proc.stdout)
         issues = parse_cargo_audit_output(proc.stdout, data=payload)
 
-        # Fail closed on unparseable output. cargo-audit is a security scanner,
-        # so a payload we cannot parse (yet non-empty stdout) must never be
-        # reported as a clean pass (see #1044).
-        parse_failure = payload is None and bool(proc.stdout.strip())
+        # A missing or schema-invalid report cannot establish a clean scan,
+        # even when the subprocess succeeds (see #1044 and #3003).
+        parse_failure = payload is None
         if parse_failure:
             success = False
         parse_failures_count = 1 if parse_failure else 0
@@ -200,12 +197,14 @@ class CargoAuditPlugin(BaseToolPlugin):
         # issues (execution error case)
         should_show_output = bool(issues) or not success
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=overall_success, inspected_files=True),
+                issues_count=len(issues),
+            ),
             name=self.definition.name,
-            success=overall_success,
             output=output if should_show_output else None,
-            issues_count=len(issues),
-            issues=issues if issues else None,
+            issues=issues,
             parse_failures_count=parse_failures_count,
         )
 

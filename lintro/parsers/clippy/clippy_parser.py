@@ -7,7 +7,7 @@ from typing import Any
 
 from loguru import logger
 
-from lintro.parsers.base_parser import strip_ansi_codes
+from lintro.parsers.base_parser import extract_optional_str, strip_ansi_codes
 from lintro.parsers.clippy.clippy_issue import ClippyIssue
 
 
@@ -49,7 +49,7 @@ def _parse_issue(item: dict[str, Any]) -> ClippyIssue | None:
         code_obj = message.get("code")
         code: str | None = None
         if isinstance(code_obj, dict):
-            code = code_obj.get("code")
+            code = extract_optional_str(code_obj, "code")
         elif isinstance(code_obj, str):
             code = code_obj
 
@@ -58,7 +58,7 @@ def _parse_issue(item: dict[str, Any]) -> ClippyIssue | None:
             return None
 
         # Extract message text
-        message_text = str(message.get("message", "")).strip()
+        message_text = extract_optional_str(message, "message").strip()
         if not message_text:
             return None
 

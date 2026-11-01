@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.ai.budget import CostBudget
 from lintro.ai.cache import cache_suggestion
 from lintro.ai.cli_schemas import cli_schema_for_fix
 from lintro.ai.config import AIConfig
@@ -31,8 +32,9 @@ from lintro.ai.fix_context import (
     read_file_safely,
     validate_and_read_file,
 )
-from lintro.ai.fix_params import FixGenParams
+from lintro.ai.fix_params import FixGenParams, _no_progress
 from lintro.ai.fix_parsing import (
+    AIFixParseError,
     parse_batch_response,
     parse_fix_response,
 )
@@ -111,7 +113,7 @@ async def _call_fix_ai(
         ai_config=ai_config,
         user_prompt=prompt,
         system_prompt=FIX_SYSTEM,
-        budget=None,
+        budget=CostBudget(),
         max_tokens=max_tokens,
         repo_root=str(workspace_root),
         cli_schema=cli_schema_for_fix(
@@ -176,6 +178,11 @@ async def _call_and_cache_fix(
 
     except (KeyboardInterrupt, SystemExit):
         raise
+    except AIFixParseError as exc:
+        logger.debug(
+            f"AI fix generation failed for {issue.file}:{issue.line}: "
+            f"malformed response ({exc})",
+        )
     except Exception as exc:
         logger.debug(
             f"AI fix generation failed for {issue.file}:{issue.line} "
@@ -305,8 +312,9 @@ async def _generate_batch_fixes(
     """Generate fixes for multiple issues in one file via a batch prompt.
 
     Returns a list of suggestions on success, or None if the batch prompt
-    does not fit within the token budget or the response cannot be parsed
-    (signalling the caller to fall back to single-issue mode).
+    does not fit within the token budget, the response cannot be parsed, or
+    the suggestion count differs from the issue count (signalling the caller
+    to fall back to single-issue mode).
 
     Args:
         file_path: Resolved absolute file path.
@@ -384,13 +392,6 @@ async def _generate_batch_fixes(
             batch=True,
         )
         suggestions = parse_batch_response(response.content, file_path)
-        if not suggestions:
-            logger.debug(
-                f"Batch response parse returned no suggestions for {file_path}, "
-                f"falling back to single-issue mode",
-            )
-            return None
-
         if len(suggestions) != len(file_issues):
             logger.debug(
                 f"Batch response count mismatch for {file_path}: "
@@ -417,6 +418,12 @@ async def _generate_batch_fixes(
 
     except (KeyboardInterrupt, SystemExit):
         raise
+    except AIFixParseError as exc:
+        logger.debug(
+            f"Batch AI fix generation failed for {file_path}: "
+            f"malformed response ({exc}), falling back to single-issue mode",
+        )
+        return None
     except Exception as exc:
         logger.debug(
             f"Batch AI fix generation failed for {file_path} "
@@ -445,7 +452,7 @@ async def generate_fixes(
     backoff_factor: float | None = None,
     enable_cache: bool = False,
     cache_ttl: int = 3600,
-    progress_callback: Callable[[int, int], None] | None = None,
+    progress_callback: Callable[[int, int], None] = _no_progress,
     fallback_models: list[str] | None = None,
     sanitize_mode: SanitizeMode = SanitizeMode.WARN,
     cache_max_entries: int = 1000,
@@ -474,8 +481,8 @@ async def generate_fixes(
         backoff_factor: Retry backoff multiplier (None = use default).
         enable_cache: Whether to use the suggestion deduplication cache.
         cache_ttl: Time-to-live in seconds for cached suggestions.
-        progress_callback: Optional callback invoked after each fix
-            completes with (completed_count, total_count).
+        progress_callback: Callback invoked after each fix completes with
+            (completed_count, total_count); defaults to ignoring updates.
         fallback_models: Ordered list of fallback model identifiers
             to try when the primary model fails with a retryable error.
         sanitize_mode: How to handle prompt injection patterns.
@@ -568,8 +575,7 @@ async def generate_fixes(
         if batch_result is not None:
             suggestions.extend(batch_result)
             completed_count += len(group)
-            if progress_callback is not None:
-                progress_callback(completed_count, total_count)
+            progress_callback(completed_count, total_count)
         else:
             # Fall back to single-issue mode for this file
             single_issues.extend(group)
@@ -604,8 +610,7 @@ async def generate_fixes(
             if result:
                 suggestions.append(result)
             completed_count += 1
-            if progress_callback is not None:
-                progress_callback(completed_count, total_count)
+            progress_callback(completed_count, total_count)
     else:
         # Bounded concurrency on one event loop replaces the former thread
         # pool: provider calls are I/O-bound, so tasks + a semaphore give the
@@ -653,14 +658,12 @@ async def generate_fixes(
                         exc_info=True,
                     )
                     completed_count += 1
-                    if progress_callback is not None:
-                        progress_callback(completed_count, total_count)
+                    progress_callback(completed_count, total_count)
                     continue
                 if result:
                     suggestions.append(result)
                 completed_count += 1
-                if progress_callback is not None:
-                    progress_callback(completed_count, total_count)
+                progress_callback(completed_count, total_count)
         finally:
             for task in tasks:
                 if not task.done():

@@ -23,7 +23,10 @@ from lintro.ai.review.custom_agent_runner import (
     CustomAgentPassRequest,
     run_custom_agent_passes,
 )
-from lintro.ai.review.exceptions import ReviewExecutionError
+from lintro.ai.review.exceptions import (
+    ReviewExecutionError,
+    annotate_completed_chunks,
+)
 from lintro.ai.review.incremental_coverage import checkpoint_writer
 from lintro.ai.review.interrupt import install_review_interrupt
 from lintro.ai.review.pr_budget import cost_stop_reason, round_cap
@@ -37,6 +40,7 @@ from lintro.ai.review.run_finalize import (
     gate_built_in_findings,
     merge_partials,
 )
+from lintro.ai.review.run_provenance import checkpoint_stamp
 from lintro.ai.review.session import (
     ChunkRunPlan,
     is_cost_cap_stop,
@@ -45,6 +49,7 @@ from lintro.ai.review.session import (
     timeout_reason,
 )
 from lintro.ai.review.timings import ReviewPhase
+from lintro.ai.transport import resolve_transport_settings
 
 if TYPE_CHECKING:
     from lintro.ai.review.custom_agent_runner import CustomAgentPassResult
@@ -183,6 +188,17 @@ async def run_passes(
                 policy=plan.policy,
                 round_spend=lambda: plan.budget.spent,
                 state_pr=options.state_pr,
+                stamp=checkpoint_stamp(
+                    options=options,
+                    cost_basis=resolve_transport_settings(
+                        options.ai_config,
+                        cwd=(
+                            str(options.workspace_root)
+                            if options.workspace_root is not None
+                            else None
+                        ),
+                    ).cost_basis.value,
+                ),
             ),
         )
     if plan.resume.queue:
@@ -341,6 +357,11 @@ async def execute_run(
         elif is_timeout_stop(exc=exc):
             stopped_reason = timeout_reason(exc=exc)
         else:
+            # The error envelope reports this so a CI wrapper never restarts
+            # a review that had produced something on another lane
+            # (ADR-0011 D); a checkpoint part is best-effort and cannot be
+            # the only evidence.
+            annotate_completed_chunks(exc, completed=len(progress.collected))
             raise
         outcome = finalize_stopped_run(
             plan=plan,

@@ -26,6 +26,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.checkov.checkov_parser import parse_checkov_output
 from lintro.plugins.base import BaseToolPlugin
@@ -269,25 +270,23 @@ class CheckovPlugin(BaseToolPlugin):
                 success=BatchSuccess.EXIT_AND_ISSUES,
                 output=BatchOutput.ON_EXIT_FAILURE_WITHOUT_ISSUES,
             ),
-            on_error=lambda exc: ToolResult(
+            on_error=lambda exc: ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=f"Checkov failed: {exc}",
-                issues_count=0,
             ),
         )
         if unparseable and result.success:
             # Exit zero with no report is the fail-open case: a soft-fail
             # config, or checkov dying before it wrote one. Reporting a pass
             # there would claim the files were scanned when they were not.
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=(
                     unparseable[0].strip()
                     or "Checkov produced no JSON report; the scan did not run."
                 ),
-                issues_count=0,
                 parse_failures_count=1,
             )
         return result

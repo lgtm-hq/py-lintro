@@ -18,6 +18,7 @@ from lintro.enums.action import Action
 from lintro.enums.tool_result_status import ToolResultStatus
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.registry import ToolRegistry
+from lintro.rules import available_rule_packs
 from lintro.tools import tool_manager
 from lintro.tools.core.scheduler import derive_execution_order
 from lintro.utils.console import get_tool_emoji
@@ -66,6 +67,11 @@ def _tool_capabilities(
 
 @click.command("list-tools")
 @click.option(
+    "--rules",
+    is_flag=True,
+    help="List packaged Semgrep rule packs (opt-in advisory rules)",
+)
+@click.option(
     "--output",
     type=click.Path(),
     help="Output file path for writing results",
@@ -86,6 +92,7 @@ def list_tools_command(
     output: str | None,
     json_output: bool,
     verbose: bool,
+    rules: bool = False,
 ) -> None:
     """List all available tools and their configurations.
 
@@ -95,7 +102,11 @@ def list_tools_command(
         output: Path to output file for writing results.
         json_output: Output tool list as JSON.
         verbose: Show verbose output including file extensions and patterns.
+        rules: List packaged rules instead of tools.
     """
+    if rules:
+        _list_rule_packs(output=output, json_output=json_output)
+        return
     list_tools(
         output=output,
         json_output=json_output,
@@ -137,6 +148,29 @@ def _snapshot_status_display(snap: ToolSnapshot | None) -> str:
     if status is ToolResultStatus.OK and snap is not None:
         return f"ok ({snap.version})"
     return str(status)
+
+
+def _list_rule_packs(output: str | None, json_output: bool) -> None:
+    """Render discoverable opt-in packs without needing their engine installed.
+
+    Args:
+        output: Optional path for a copy of the rendered output.
+        json_output: Render machine-readable metadata instead of plain text.
+    """
+    packs = available_rule_packs()
+    rendered = (
+        json_lib.dumps(
+            {name: {"engine": "semgrep", "advisory": True} for name in packs},
+            indent=2,
+        )
+        if json_output
+        else "Packaged rule packs (versioned with Lintro):\n"
+        + "\n".join(f"{name}  semgrep  advisory (opt-in)" for name in packs)
+    )
+    click.echo(rendered)
+    if output:
+        with click.open_file(output, "w", encoding="utf-8") as stream:
+            stream.write(rendered + "\n")
 
 
 def list_tools(

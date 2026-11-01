@@ -12,8 +12,8 @@ requires the table to list the current ``major.minor.x`` line — fails the
 unattended release PR (#1372). Patch bumps never hit this because the
 ``major.minor`` line is unchanged.
 
-This module rewrites the two support rows of every ``SECURITY.md`` in the
-repository (root and ``.github/`` if both exist) to the current release line:
+This module rewrites the two support rows of the repository root
+``SECURITY.md`` to the current release line:
 
 * the ``major.minor.x`` row → the current ``major.minor``;
 * the ``< major.minor`` row → the current ``major.minor``.
@@ -21,9 +21,14 @@ repository (root and ``.github/`` if both exist) to the current release line:
 The rewrite is idempotent: on a patch bump the table already carries the current
 line, so the file is left byte-for-byte unchanged (a no-op). Only the version
 text inside each row's first cell is rewritten; the support marks
-(``✅``/``❌`` in the root file, ``:white_check_mark:``/``:x:`` in
-``.github/SECURITY.md``) and the surrounding column alignment are preserved, so
-the output stays ``prettier``/``markdownlint`` compliant without a reflow pass.
+(``✅``/``❌``, or GitHub's ``:white_check_mark:``/``:x:`` shortcodes) and the
+surrounding column alignment are preserved, so the output stays
+``prettier``/``markdownlint`` compliant without a reflow pass.
+
+``.github/SECURITY.md`` is deliberately not stamped: since lgtm-ci v0.76.0
+(#849) the version-update hook's diff is rejected when it touches anything
+under ``.github/``, so that copy carries a version-agnostic support table that
+points at the root file instead.
 
 It is wired into ``.github/workflows/release-version-pr.yml`` via the reusable
 workflow's ``version-update-script`` orchestrator, which runs after the version
@@ -173,15 +178,19 @@ def update_security_support(text: str, major: int, minor: int) -> str:
 
 
 def _security_files(repo_root: Path) -> list[Path]:
-    """Return the ``SECURITY.md`` files present in the repository.
+    """Return the ``SECURITY.md`` files the version-update hook may stamp.
+
+    Only the root file: lgtm-ci's version-update hook rejects any diff under
+    ``.github/`` (lgtm-ci #849, v0.76.0+), so ``.github/SECURITY.md`` keeps a
+    version-agnostic table and is never rewritten here.
 
     Args:
         repo_root: Repository root directory.
 
     Returns:
-        list[Path]: Existing ``SECURITY.md`` paths (root then ``.github/``).
+        list[Path]: The root ``SECURITY.md`` when it exists, otherwise empty.
     """
-    candidates = [repo_root / "SECURITY.md", repo_root / ".github" / "SECURITY.md"]
+    candidates = [repo_root / "SECURITY.md"]
     return [path for path in candidates if path.is_file()]
 
 

@@ -26,6 +26,7 @@ from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, NoFiles, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.pylint.pylint_parser import parse_pylint_output
 from lintro.plugins.base import BaseToolPlugin
@@ -417,11 +418,10 @@ class PylintPlugin(BaseToolPlugin):
             prefixes=self._include_prefixes(),
         )
         if not files:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=NoFiles()),
                 name=self.definition.name,
-                success=True,
                 output=PYLINT_NO_INCLUDED_FILES,
-                issues_count=0,
             )
 
         config_path = find_pylint_config(paths)
@@ -437,15 +437,14 @@ class PylintPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             )
         except subprocess.TimeoutExpired:
-            return ToolResult(
-                name=self.definition.name,
-                success=False,
-                output=(
-                    f"pylint timed out after {ctx.timeout}s. Raise it with "
-                    "--tool-options pylint:timeout=N."
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=TimedOut(
+                        f"pylint timed out after {ctx.timeout}s. "
+                        "Raise it with --tool-options pylint:timeout=N.",
+                    ),
                 ),
-                issues_count=0,
-                timed_out=True,
+                name=self.definition.name,
             )
 
         stdout = (result.stdout or "").strip()
@@ -464,25 +463,22 @@ class PylintPlugin(BaseToolPlugin):
                 # check is confined to the no-report branch: a json2 report
                 # can carry the same phrase inside an ``R0801`` body.
                 logger.debug("[pylint] Nothing left to lint; treating as a clean pass")
-                return ToolResult(
+                return ToolResult.from_outcome(
+                    ToolOutcome(execution=NoFiles()),
                     name=self.definition.name,
-                    success=True,
                     output=None,
-                    issues_count=0,
                 )
             if result.returncode != 0:
-                return ToolResult(
+                return ToolResult.from_outcome(
+                    ToolOutcome(execution=Checked(success=False)),
                     name=self.definition.name,
-                    success=False,
                     output=stderr or stdout or "pylint failed with no output",
-                    issues_count=0,
                 )
             logger.debug(f"[pylint] Non-report output treated as clean: {stdout!r}")
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=True, inspected_files=True)),
                 name=self.definition.name,
-                success=True,
                 output=None,
-                issues_count=0,
             )
 
         try:
@@ -490,20 +486,38 @@ class PylintPlugin(BaseToolPlugin):
         except json.JSONDecodeError as exc:
             # Unreadable output must never be reported as a clean pass.
             logger.error(f"Failed to parse pylint output: {exc}")
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=stdout,
-                issues_count=0,
                 parse_failures_count=1,
             )
 
-        return ToolResult(
+        # Honour pylint's native verdict, including fail-under. A failed score
+        # uses msg_status or 1 in current pylint, not a dedicated status bit;
+        # status 16 is also used for convention messages. Let pylint resolve
+        # its own gate/configuration rather than guessing the cause from bits.
+        output = None
+        if result.returncode != 0 and not issues:
+            output = (
+                f"pylint exited with status {result.returncode} without reporting "
+                "any issues. Check the native pylint configuration "
+                "(including fail-under)."
+            )
+            if stderr:
+                output += f"\n{stderr}"
+
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(
+                    success=result.returncode == 0 and (not issues),
+                    inspected_files=True,
+                ),
+                issues_count=len(issues),
+            ),
             name=self.definition.name,
-            success=not issues,
-            output=None,
-            issues_count=len(issues),
-            issues=issues if issues else None,
+            output=output,
+            issues=issues,
             metadata={PYLINT_ANALYSED_METADATA_KEY: True},
         )
 

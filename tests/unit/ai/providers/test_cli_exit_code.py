@@ -46,15 +46,17 @@ _CLAUDE_SESSION_LIMIT_NO_RESET_STDOUT = (
 class _FakeTransport(CliTransport):
     """Minimal concrete transport for exercising exit-code mapping."""
 
-    def parse_stdout(self, stdout: str) -> str:
+    def parse_stdout(self, stdout: str, *, model: str) -> str:
         """Return stdout unchanged.
 
         Args:
             stdout: Raw stdout from the CLI.
+            model: Ignored; the stub attributes nothing.
 
         Returns:
             The unmodified stdout.
         """
+        del model
         return stdout
 
 

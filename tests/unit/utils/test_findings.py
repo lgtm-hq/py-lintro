@@ -228,8 +228,14 @@ def test_tool_summary_reports_passed_skipped_timed_out_and_errored() -> None:
     """Each ToolResult failure shape collapses to its own status."""
     results = [
         ToolResult(name="clean", success=True),
-        ToolResult(name="absent", skipped=True, skip_reason="binary not installed"),
-        ToolResult(name="slow", success=False, timed_out=True),
+        ToolResult(
+            name="absent",
+            skipped=True,
+            skip_reason="binary not installed",
+            inspected_files=False,
+            success=True,
+        ),
+        ToolResult(name="slow", success=False, timed_out=True, inspected_files=False),
         ToolResult(name="broken", success=False, output="crashed"),
     ]
 

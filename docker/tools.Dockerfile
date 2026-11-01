@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 # =============================================================================
 # Lintro Tools Base Image
 # =============================================================================
@@ -20,11 +20,12 @@
 # root Dockerfile until the FROM flip lands (see issue #1360).
 # =============================================================================
 
-FROM python:3.14-slim@sha256:caaf356f40667c496d405780745b9ac25771c189a51dfcc42430d531ea09f8a2 AS tools
+FROM python:3.14-slim@sha256:cd89c30eda26ee911a4611b18680086e0ea42e6f5f8cbe653d07fa7958c9cec8 AS tools
 
-ARG BUN_VERSION=1.4.2
-ARG UV_VERSION=0.12.19
-ARG GO_VERSION=1.27.1
+ARG BUN_VERSION=1.4.4
+ARG UV_VERSION=0.13.6
+ARG PIP_VERSION=26.2.2
+ARG GO_VERSION=1.27.3
 
 LABEL maintainer="lgtm-hq"
 LABEL org.opencontainers.image.source="https://github.com/lgtm-hq/py-lintro"
@@ -50,12 +51,15 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 WORKDIR /app
 
+# The Debian trixie backport fixes CVE-2026-111497 without changing SONAME.
+# Refresh an inherited libbrotli1 and fail closed if the mirror lacks the fix.
 # hadolint ignore=DL3008
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
+    libbrotli1 \
     build-essential \
     cppcheck \
     git \
@@ -63,9 +67,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     pkg-config \
     unzip \
     jq && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libbrotli1)" ge '1.1.0-2+deb13u1' && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+# Release downloads retry transient transport errors (e.g. curl 92, an HTTP/2
+# stream reset): one dropped connection on a single platform otherwise fails the
+# whole multi-arch candidate build and leaves a merged PR without a candidate
+# (#2946). Checksum verification still guards every artifact.
 # hadolint ignore=DL3003,SC2086
 RUN --mount=type=cache,target=/root/.cache/bun,sharing=locked \
     ARCH=$(uname -m) && \
@@ -75,8 +84,8 @@ RUN --mount=type=cache,target=/root/.cache/bun,sharing=locked \
     BUN_ZIP="bun-linux-${BUN_ARCH}.zip" && \
     BUN_URL="https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/${BUN_ZIP}" && \
     CHECKSUM_URL="https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/SHASUMS256.txt" && \
-    curl -fsSL "$BUN_URL" -o "/tmp/${BUN_ZIP}" && \
-    curl -fsSL "$CHECKSUM_URL" -o /tmp/SHASUMS256.txt && \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 "$BUN_URL" -o "/tmp/${BUN_ZIP}" && \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 "$CHECKSUM_URL" -o /tmp/SHASUMS256.txt && \
     cd /tmp && grep "${BUN_ZIP}" SHASUMS256.txt | sha256sum -c - && \
     unzip -q "${BUN_ZIP}" && \
     mv "bun-linux-${BUN_ARCH}/bun" /usr/local/bin/bun && \
@@ -93,13 +102,25 @@ RUN ARCH=$(uname -m) && \
     UV_TAR="uv-${UV_ARCH}-unknown-linux-gnu.tar.gz" && \
     UV_URL="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${UV_TAR}" && \
     CHECKSUM_URL="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${UV_TAR}.sha256" && \
-    curl -fsSL "$UV_URL" -o "/tmp/${UV_TAR}" && \
-    curl -fsSL "$CHECKSUM_URL" -o "/tmp/${UV_TAR}.sha256" && \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 "$UV_URL" -o "/tmp/${UV_TAR}" && \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 "$CHECKSUM_URL" -o "/tmp/${UV_TAR}.sha256" && \
     cd /tmp && sha256sum -c "${UV_TAR}.sha256" && \
     tar -xzf "${UV_TAR}" && \
     mv "uv-${UV_ARCH}-unknown-linux-gnu/uv" /usr/local/bin/uv && \
     chmod +x /usr/local/bin/uv && \
     rm -rf /tmp/uv*
+
+# The Python base ships pip's private CA bundle. Updating the application
+# trust store does not replace that copy; pip 26.2.2 removes the compromised root.
+RUN uv pip install --system --no-deps "pip==${PIP_VERSION}"
+
+# The system pip above never reaches a fresh venv: `python -m venv` seeds pip
+# from CPython's bundled ensurepip wheel, which carries its own private CA
+# bundle. Prove the base image seeds a patched pip (>= 26.2.2) by probing a
+# throwaway venv from its own interpreter.
+RUN python3 -m venv /tmp/lintro-seed-check && \
+    /tmp/lintro-seed-check/bin/python -c 'import pip; from pip._vendor.packaging.version import Version; assert Version(pip.__version__) >= Version("26.2.2"), pip.__version__' && \
+    rm -rf /tmp/lintro-seed-check
 
 # Bundle a pinned Go toolchain so Go-based linters (e.g. golangci-lint) have a
 # working compiler. GOTOOLCHAIN=local (set above) keeps this toolchain
@@ -114,8 +135,8 @@ RUN ARCH=$(uname -m) && \
     else echo "Unsupported arch: $ARCH" && exit 1; fi && \
     GO_TAR="go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" && \
     GO_URL="https://dl.google.com/go/${GO_TAR}" && \
-    curl -fsSL "$GO_URL" -o "/tmp/${GO_TAR}" && \
-    curl -fsSL "${GO_URL}.sha256" -o "/tmp/${GO_TAR}.sha256" && \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 "$GO_URL" -o "/tmp/${GO_TAR}" && \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 "${GO_URL}.sha256" -o "/tmp/${GO_TAR}.sha256" && \
     echo "$(cat /tmp/${GO_TAR}.sha256)  /tmp/${GO_TAR}" | sha256sum -c - && \
     tar -C /usr/local -xzf "/tmp/${GO_TAR}" && \
     rm -rf /tmp/go*
@@ -134,6 +155,29 @@ COPY requirements-semgrep.txt /app/requirements-semgrep.txt
 # they stop being committed (epic #2176 phase 4).
 RUN python3 scripts/ci/generate-tool-versions.py && \
     python3 scripts/ci/generate-builtin-tool-index.py
+
+# The upstream Gitleaks release embeds Go 1.24.11 and vulnerable archive/crypto
+# dependencies. Build its unchanged, checksum-verified module through our locked
+# security closure using the pinned compiler and upstream regex/version flags.
+# Fail closed if the canonical tool pin and reviewed closure diverge. Dependency
+# updates belong in the committed go.mod/go.sum, never a floating build-time get.
+# Install before install-tools.sh so its existing-binary path retains this copy.
+# DL3062 cannot see the exact versions and checksums in our readonly module lock.
+# hadolint ignore=DL3062
+RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
+    --mount=type=cache,target=/root/go/pkg/mod,sharing=locked \
+    GITLEAKS_VERSION=$(python3 -c "import runpy; m = runpy.run_path('lintro/_tool_versions.py'); print(m['get_tool_version']('gitleaks'))") && \
+    export GOTOOLCHAIN=local CGO_ENABLED=0 GOSUMDB=sum.golang.org \
+    GOPROXY=https://proxy.golang.org GOBIN=/usr/local/bin GOWORK=off \
+    GONOSUMDB='' GONOPROXY='' GOPRIVATE='' && \
+    test "$(go -C /app/scripts/utils/gitleaks list -mod=readonly -m -f '{{.Version}}' github.com/zricethezav/gitleaks/v8)" = "v${GITLEAKS_VERSION}" && \
+    go -C /app/scripts/utils/gitleaks list -mod=readonly -deps -tags gore2regex \
+    github.com/zricethezav/gitleaks/v8 | python3 scripts/utils/gitleaks/verify_imports.py && \
+    go -C /app/scripts/utils/gitleaks install -mod=readonly -trimpath -tags gore2regex \
+    -ldflags "-s -w -X=github.com/zricethezav/gitleaks/v8/version.Version=${GITLEAKS_VERSION}" \
+    github.com/zricethezav/gitleaks/v8 && \
+    go version -m /usr/local/bin/gitleaks | grep -Fx "/usr/local/bin/gitleaks: go${GO_VERSION}" && \
+    test "$(gitleaks version)" = "${GITLEAKS_VERSION}"
 
 RUN groupadd -r tools && \
     mkdir -p /opt/bun /opt/cargo /opt/rustup /opt/uv-tools

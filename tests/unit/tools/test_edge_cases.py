@@ -229,7 +229,7 @@ def test_unicode_in_tool_output(unicode_text: str, category: str) -> None:
         success=True,
         issues_count=0,
         output=f"Message: {unicode_text}",
-        issues=None,
+        issues=(),
     )
 
     assert_that(result.output).contains(unicode_text)
@@ -295,7 +295,7 @@ def test_concurrent_tool_result_creation() -> None:
             success=index % 2 == 0,
             issues_count=index,
             output=f"Output {index}",
-            issues=None,
+            issues=(),
         )
 
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -347,7 +347,7 @@ def test_empty_file_list_handling() -> None:
             success=True,
             issues_count=0,
             output="",
-            issues=None,
+            issues=(),
         )
         mock_prepare.return_value = mock_ctx
 

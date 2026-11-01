@@ -15,6 +15,7 @@ from dataclasses import replace
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.providers.reported_model import ReportedModel
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.run_coverage import RunCoverage
@@ -71,6 +72,12 @@ _OPTIONAL_KEYS = (
     "generated_questions",
     "questions_diff_trimmed",
     "cost_basis",
+    "lane",
+    "endpoint",
+    "credential",
+    "reported_models",
+    "model_verification",
+    "first_party",
     "resolved",
     "open_after",
     "narrative",
@@ -95,6 +102,18 @@ def _full_record() -> RunRecord:
             auth_mode="subscription",
             depth=2,
             strictness="balanced",
+            endpoint="api.anthropic.com",
+            first_party=True,
+            credential="claude_oauth",
+            reported_models=(
+                ReportedModel(
+                    model="claude-sonnet-4-20250514",
+                    canonical="claude-sonnet-4-20250514",
+                    provider="firstParty",
+                ),
+            ),
+            lane="anthropic",
+            model_verification="verified",
         ),
         coverage=RunCoverage(
             files_reviewed=3,

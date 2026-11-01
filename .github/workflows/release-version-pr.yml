@@ -12,12 +12,18 @@ run-name: >-
 'on':
   push:
     branches: [main]
+  # A main push can be deferred by the publish gate. Completion starts a new
+  # run with default-branch github.sha, not the publication's old head_sha.
+  # No branches filter: tag publications carry the tag as head_branch.
+  workflow_run:
+    workflows: [Publish - PyPI Production]
+    types: [completed]
   workflow_dispatch:
     inputs:
       force:
         description: >-
-          Open the version PR even when the last tag publish failed (use for
-          the first release after fixing the publish pipeline)
+          Override a completed tag publish startup failure (never an unfinished
+          publish; use for the first release after fixing the publish pipeline)
         required: false
         default: false
         type: boolean
@@ -32,8 +38,8 @@ jobs:
   # Publish gate (#2516). A broken tag publish used to mint one dead version
   # per merge to main — eleven versions, v0.151.2 to v0.152.6, were burned that
   # way while PyPI stayed on v0.151.1. This job reads the last version-tag run
-  # of publish-pypi-on-tag.yml and skips the version PR while it is red. The
-  # gate never fails: it reports green on its own errors (see the script's
+  # of publish-pypi-on-tag.yml and skips the version PR while it is unfinished
+  # or failed at startup. The gate reports green on its own errors (see the script's
   # module docstring), so an API hiccup cannot freeze the release train.
   publish-gate:
     name: 🚦 Publish Gate
@@ -46,9 +52,9 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: block
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           # The gate script itself talks to api.github.com only; the remaining
           # hosts are what actions/checkout needs to fetch the script.
           allowed-endpoints: >
@@ -79,10 +85,17 @@ jobs:
     # itself dies (harden-runner, checkout, a runner loss) the output is empty,
     # and gating on `== 'true'` would silently freeze every release until
     # somebody noticed. The gate is a skip, not an error (#2516): only an
-    # explicit `false` — a publish that really did fail — stops the version PR.
-    if: always() && needs.publish-gate.outputs.publish_green != 'false'
+    # explicit `false` stops the version PR. The tokenless version-update hook
+    # also rejects candidates already present on live main or tagged (#3054).
+    # Check workflow_run provenance here as well: even a missing gate verdict
+    # must never admit a foreign run or a manual publication dispatch.
+    if: >-
+      always() && needs.publish-gate.outputs.publish_green != 'false' &&
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@22bb159287eb23a812d533090615525eccb839ac # v0.75.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
     with:
       ecosystems: python
       # Never armed: a version PR is merged deliberately after its generated
@@ -93,12 +106,15 @@ jobs:
       # Finalize the generated version PR before it is committed: reflow
       # CHANGELOG.md to lintro's 88-column markdown budget so release PRs pass
       # dogfooding-lint without CHANGELOG.md being ignored (#1117), and stamp
-      # every SECURITY.md supported-versions table to the current major.minor
-      # line so minor/major bumps do not go stale and block the unattended
-      # release PR (#1372). Logic lives in dedicated scripts, not inline runs.
+      # the root SECURITY.md supported-versions table to the current
+      # major.minor line so minor/major bumps do not go stale and block the
+      # unattended release PR (#1372). The hook runs without a token and
+      # lgtm-ci (v0.76+) rejects its diff if it touches .github/**, so
+      # .github/SECURITY.md keeps a version-agnostic table. Logic lives in
+      # dedicated scripts, not inline runs.
       version-update-script: scripts/ci/finalize-version-pr.py
-      tooling-ref: '22bb159287eb23a812d533090615525eccb839ac' # v0.75.1
-      egress-policy: block
+      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       # Paired with release-auto-tag.yml (egress-preset: github-tooling).
       # Guarded by test_release_workflows_use_paired_egress_presets.
       egress-preset: pypi
@@ -106,7 +122,8 @@ jobs:
       # preset resolution, so the preset's extra hosts never reach it and
       # pip is blocked from PyPI (#1287, lgtm-hq/lgtm-ci#512). Pass the
       # complete list explicitly; harden-runner splits on spaces, so keep
-      # the folded scalar.
+      # the folded scalar. Include the results service for the isolated
+      # version hook's release metadata download (#2965).
       allowed-endpoints: >-
         github.com:443
         api.github.com:443
@@ -115,6 +132,7 @@ jobs:
         raw.githubusercontent.com:443
         uploads.github.com:443
         pipelines.actions.githubusercontent.com:443
+        results-receiver.actions.githubusercontent.com:443
         pypi.org:443
         files.pythonhosted.org:443
     secrets:

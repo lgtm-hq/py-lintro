@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from pathlib import Path
 
 from loguru import logger
@@ -38,6 +39,8 @@ __all__ = [
     "BARE_MODE_ENV",
     "CLAUDE_API_KEY_ENV",
     "claude_api_key_available",
+    "claude_cli_env",
+    "claude_settings_env_value",
     "resolve_bare_mode",
     "should_send_bare",
 ]
@@ -47,10 +50,10 @@ __all__ = [
 BARE_MODE_ENV = "LINTRO_CLI_BARE"
 
 #: The only API-key variable the ``claude`` binary itself reads. A custom
-#: ``ai.api_key_env`` renames the variable lintro's *API* transport reads and is
-#: deliberately not consulted here: the CLI subprocess would never look at it,
-#: so treating it as proof of an API key would send ``--bare`` into a CLI that
-#: cannot authenticate.
+#: ``ai.api_key_env`` renames the variable lintro reads; the CLI transport
+#: re-exports its value under this name into the subprocess environment
+#: (:func:`claude_cli_env`, #2549), so the binary sees it, and the bare-mode
+#: decision is taken against that same child environment.
 CLAUDE_API_KEY_ENV = "ANTHROPIC_API_KEY"
 
 #: Truthy/falsey spellings accepted by ``LINTRO_CLI_BARE`` in addition to the
@@ -73,7 +76,11 @@ _BOOLEAN_ALIASES: dict[str, CliBareMode] = {
 _MAX_SETTINGS_BYTES = 256 * 1024
 
 
-def _settings_candidates(*, cwd: str | None) -> tuple[Path, ...]:
+def _settings_candidates(
+    *,
+    cwd: str | None,
+    env: Mapping[str, str] | None = None,
+) -> tuple[Path, ...]:
     """Return the Claude Code settings files that may declare ``apiKeyHelper``.
 
     Mirrors Claude Code's own settings hierarchy closely enough for a
@@ -84,16 +91,18 @@ def _settings_candidates(*, cwd: str | None) -> tuple[Path, ...]:
     Args:
         cwd: Working directory the CLI subprocess runs in, or ``None`` for the
             current process directory.
+        env: Environment to read; the process environment when ``None``.
 
     Returns:
         Candidate settings paths, in no particular precedence order — any one
         of them declaring a helper is enough.
     """
-    config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    environment: Mapping[str, str] = os.environ if env is None else env
+    config_dir = environment.get("CLAUDE_CONFIG_DIR", "").strip()
     user_dir = Path(config_dir) if config_dir else Path.home() / ".claude"
     project_dir = Path(cwd) if cwd else Path.cwd()
     managed = managed_settings_path(
-        override=os.environ.get(ANTHROPIC_MANAGED_SETTINGS_ENV),
+        override=environment.get(ANTHROPIC_MANAGED_SETTINGS_ENV),
     )
     return (
         *((managed,) if managed is not None else ()),
@@ -154,23 +163,76 @@ def _declares_api_key_helper(path: Path) -> bool:
     return isinstance(helper, str) and bool(helper.strip())
 
 
-def claude_api_key_available(*, cwd: str | None = None) -> bool:
+def claude_api_key_available(
+    *,
+    cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> bool:
     """Return whether the ``claude`` CLI can authenticate from an API key.
 
     Args:
         cwd: Working directory the CLI subprocess runs in, used to locate
             project-level settings. Defaults to the current directory.
+        env: Environment to read; the process environment when ``None``.
 
     Returns:
         True when ``ANTHROPIC_API_KEY`` is set to a non-empty value, or when a
         reachable Claude Code settings file declares an ``apiKeyHelper``.
     """
-    if os.environ.get(CLAUDE_API_KEY_ENV, "").strip():
+    environment: Mapping[str, str] = os.environ if env is None else env
+    if environment.get(CLAUDE_API_KEY_ENV, "").strip():
         return True
     return any(
         _declares_api_key_helper(candidate)
-        for candidate in _settings_candidates(cwd=cwd)
+        for candidate in _settings_candidates(cwd=cwd, env=environment)
     )
+
+
+def claude_settings_env_value(
+    name: str,
+    *,
+    cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> str | None:
+    """Return a variable the Claude Code settings files export to the CLI.
+
+    A settings file's ``env`` block is applied to the ``claude`` process, so a
+    base URL set there routes a run exactly as the environment variable would
+    (#2867). The highest-precedence file declaring *name* wins: managed,
+    then project-local, project, user.
+
+    Args:
+        name: The variable name to look up in the ``env`` blocks.
+        cwd: Working directory the CLI subprocess runs in.
+        env: Environment used to locate the settings files.
+
+    Returns:
+        The non-empty string value, or ``None`` when no file sets it.
+    """
+    environment: Mapping[str, str] = os.environ if env is None else env
+    candidates = _settings_candidates(cwd=cwd, env=environment)
+    # Claude Code's effective precedence: the managed file, then the
+    # project-local file, the project file and the user file. The
+    # candidates tuple ends with user, project, local, in that order.
+    ordered = (*candidates[:-3], *reversed(candidates[-3:]))
+    for candidate in ordered:
+        text = _read_settings(candidate)
+        if text is None:
+            continue
+        try:
+            data = json.loads(text)
+        except (ValueError, RecursionError):
+            # A broken or hostile settings file must not fail a review.
+            continue
+        if not isinstance(data, dict):
+            continue
+        block = data.get("env")
+        if not isinstance(block, dict):
+            continue
+        value = block.get(name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 def resolve_bare_mode(configured: CliBareMode = CliBareMode.AUTO) -> CliBareMode:
@@ -211,12 +273,16 @@ def should_send_bare(
     *,
     configured: CliBareMode = CliBareMode.AUTO,
     cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> bool:
     """Decide whether this ``claude`` invocation may carry ``--bare``.
 
     Args:
         configured: The mode set in ``ai.providers.anthropic.cli_bare``.
         cwd: Working directory the CLI subprocess runs in.
+        env: The environment the subprocess will see; the process
+            environment when ``None``. The caller passes the child
+            environment so a re-exported key (#2549) counts.
 
     Returns:
         True when ``--bare`` should be appended to the command line.
@@ -226,4 +292,37 @@ def should_send_bare(
         return True
     if mode is CliBareMode.NEVER:
         return False
-    return claude_api_key_available(cwd=cwd)
+    return claude_api_key_available(cwd=cwd, env=env)
+
+
+def claude_cli_env(
+    *,
+    api_key_env: str,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Return the variables to add to the ``claude`` subprocess environment.
+
+    ``ai.api_key_env`` renames the variable lintro reads its API key from,
+    and the ``api`` transport honours it. The ``claude`` binary reads only
+    ``ANTHROPIC_API_KEY``, so the renamed variable's value is exported under
+    that name for the child process (#2549). The configured name wins: when
+    both the renamed variable and a literal ``ANTHROPIC_API_KEY`` are set,
+    the child sees the configured one, because a user who renamed the
+    variable asked for that credential and the ``api`` transport would use
+    the same one. The parent environment is never written.
+
+    Args:
+        api_key_env: The resolved ``ai.api_key_env`` for the provider.
+        env: Environment to read; the process environment when ``None``.
+
+    Returns:
+        ``{"ANTHROPIC_API_KEY": value}`` when the variable is renamed and set
+        to a non-blank value, else an empty mapping.
+    """
+    if api_key_env == CLAUDE_API_KEY_ENV:
+        return {}
+    environment: Mapping[str, str] = os.environ if env is None else env
+    value = environment.get(api_key_env, "")
+    if not value.strip():
+        return {}
+    return {CLAUDE_API_KEY_ENV: value}

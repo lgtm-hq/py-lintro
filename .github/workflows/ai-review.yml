@@ -5,38 +5,48 @@ name: AI Review - Dogfood
 
 # Dogfood `lintro review` on py-lintro's own pull requests.
 #
-# Trusted install: lintro is installed from the PR's BASE ref (main), never the
-# PR head, so PR-controlled code never executes with the CLAUDE_CODE_OAUTH_TOKEN
-# in scope. The PR is still reviewed — `lintro review --pr <N>` fetches the diff
-# through `gh` (GitHub API), so the PR's lintro/** changes are reviewed as data,
-# never run with the token. See the security note on the job below.
+# Trusted install: lintro is installed from the base-branch commit that
+# supplied this workflow definition (github.workflow_sha: the tip of the PR's
+# base branch, main for every dogfood PR, or the default branch on a
+# comment-triggered run), never the PR head,
+# so PR-controlled code never executes with a provider credential in scope.
+# The PR is still reviewed — `lintro review --pr <N>` fetches the diff through
+# `gh` (GitHub API), so the PR's lintro/** changes are reviewed as data, never
+# run with the token. See the security note on the job below.
 #
-# TRANSPORT (#1894/#1971): the review runs on the `cli` transport. Repo Actions
-# variables pick the provider (`LINTRO_AI_PROVIDER`, default anthropic). Anthropic
-# uses the pinned `claude` binary and CLAUDE_CODE_OAUTH_TOKEN; Cursor uses the
-# pinned `agent` binary and CURSOR_API_KEY. The ANTHROPIC_API_KEY account's
-# balance is depleted, which is what turned this check red on every PR after
-# #1826 made a credential failure visible. The CLI is *not* sent `--bare`
-# (LINTRO_CLI_BARE: never): bare mode disables OAuth session login and
-# authenticates only against an API key, which is precisely the credential that
-# does not work for the Anthropic dogfood (#1838).
-#
-# FALLBACK LANES (#2472): two further credential pools, both on this same
-# transport:
-#   - openai: the pinned `codex` binary on a ChatGPT-plan subscription. The
-#     credential is the ~/.codex/auth.json session (org secret CODEX_AUTH_JSON,
-#     decoded by a dedicated step) — Codex has no OAuth-token env var, and
-#     CODEX_API_KEY would bill metered API credits instead of the subscription.
-#     The runner steps resolve the Renovate-pinned version
-#     (scripts/ci/ai_tools_arg_pin.py), install it
-#     (scripts/ci/install-codex-cli.sh) and restore the session
-#     (scripts/ci/restore-codex-session.sh); with provider=openai and the
-#     secret unset the run fails visibly at the credential gate.
-#   - anthropic + gateway: when the repo variable ZAI_BASE_URL is set (e.g.
-#     z.ai's GLM Coding Plan endpoint), the same pinned `claude` binary is
-#     pointed at the gateway via ANTHROPIC_BASE_URL and authenticated with
-#     ANTHROPIC_AUTH_TOKEN (org secret ZAI_AUTH_TOKEN). The CLI transport
-#     forwards os.environ to the subprocess, so no product change is involved.
+# REVIEW LANES (ADR-0011, #2869/#2870): where the review goes is a named row
+# in the committed manifest scripts/ci/ai_review_lanes.json, and nowhere
+# else. Which row runs is selected by the repository variable
+# LINTRO_AI_PROVIDER (a declared lane id: anthropic, openai, cursor, zai or
+# kimi; unset means the manifest's chain[0]; anything else is red before a
+# secret exists) and LINTRO_AI_MODEL overrides that row's default model.
+# Both are read by the secret-free `lane` job only. It checks out
+# github.workflow_sha, runs scripts/ci/resolve_review_lanes.py, and
+# publishes the resolved `chain` (chain[0] is the active lane; the rest is
+# the fallback order of ADR-0011 decision D, walked by the wrapper, #2872) and every
+# chain row as job outputs.
+# The review job consumes only those outputs: its harden-runner egress is the
+# union of the chain's hosts plus the static GitHub and toolchain hosts; each
+# credential is forwarded by one literal `secrets.<NAME>` expression gated on
+# membership of the chain, never indexed dynamically; the pinned CLI installs
+# are gated on the lane's provider; and scripts/ci/run-ai-review.sh binds the
+# attempt to its row — provider, transport, model and the base-URL override
+# come from the row, exactly one credential is in scope, and a competing
+# credential or a config that disagrees with the row refuses the run.
+# No variable supplies an endpoint, a credential binding or an egress host:
+# a selector can only name a declared row, so the worst an inherited value
+# can do is pick another declared lane, and the sticky prints which. The
+# other `vars.*` reads here are budget overlays, and a structural test pins
+# the set. The default lane is `anthropic` (the pinned `claude` binary on the
+# CLAUDE_CODE_OAUTH_TOKEN subscription session, LINTRO_CLI_BARE=never so the
+# OAuth session is used, #1838); `openai` (the pinned `codex` binary on the
+# CODEX_AUTH_JSON session, materialised by the wrapper for the attempt),
+# `cursor` (CURSOR_API_KEY), `zai` (ZAI_AUTH_TOKEN) and `kimi` (KIMI_API_KEY),
+# the last two non-first-party gateways, are the other declared rows.
+# Switching lanes is a change to the repository variable; it reaches every
+# open PR on the next run. A rerun keeps its run's inputs, so after a switch
+# the recovery step for a red PR is an `@lintro review` comment, which
+# starts a new run.
 #
 # Spend ceiling: committed YAML leaves `ai.max_cost_usd` unset (#2156
 # rollout). The `LINTRO_AI_MAX_COST_USD` Actions variable is the operator
@@ -44,7 +54,8 @@ name: AI Review - Dogfood
 # rejected as ambiguous. YAML `0` is still a literal $0 cap. Under the CLI
 # transport the figure is a runtime bound, not marginal dollars (#1923).
 # The `LINTRO_AI_REVIEW_PR_BUDGET_USD` variable is the same kind of overlay
-# for the per-PR review budget, `ai.review_pr_budget_usd` (#2796).
+# for the per-PR review budget, `ai.review_pr_budget_usd` (#2796). Budget
+# overlays shape spend, not routing, which is why they stay variables.
 # Historical note: #2018 / 9f43a98a briefly shipped 0.50; #2025 restored 2.00
 # as the interim committed cap; this rollout removes that committed cap.
 #
@@ -62,31 +73,31 @@ name: AI Review - Dogfood
 # Since the check is not required, a billing condition is loud but never blocks a
 # merge. P1 findings still pass: the review ran, and its findings are advisory.
 #
-# ACTIVATION PRECONDITION (audited #1317, follow-up to #1072/#1074):
-# Safe to expose the provider credential to this job only when all of the
+# ACTIVATION PRECONDITION (audited #1317, follow-up to #1072/#1074; ADR-0011):
+# Safe to expose a provider credential to this job only when all of the
 # following hold (structurally asserted in tests/scripts/test_run_ai_review.py):
 #   1. Job if-guard: non-draft, same-repository PRs only (fork PRs never run).
-#   2. Trusted install: checkout ref is pull_request.base.sha, never PR head.
+#   2. Trusted install: the checkout ref is github.workflow_sha, the
+#      base-branch commit that supplied this definition and the manifest,
+#      never the PR head and never older than the manifest it is handed.
 #   3. Secret ordering: provider credentials (CLAUDE_CODE_OAUTH_TOKEN,
-#      CURSOR_API_KEY, ZAI_AUTH_TOKEN, and CODEX_AUTH_JSON) are injected
-#      only into the review step / codex-session-restore step env, after
-#      the trusted base-ref checkout, the pinned CLI installs, and uv sync.
-# No GitHub Environment gate is required once (1–3) hold; the trusted-install
+#      CURSOR_API_KEY, ZAI_AUTH_TOKEN, KIMI_API_KEY and CODEX_AUTH_JSON) are
+#      injected only into the review step env, after the trusted checkout,
+#      the pinned CLI
+#      installs, and uv sync.
+#   4. Credentials are selected by the resolved lane id, never by a
+#      variable's presence: each is one literal expression gated on
+#      membership of the chain the secret-free lane job published.
+# No GitHub Environment gate is required once (1–4) hold; the trusted-install
 # mechanism from #1074 is the primary control. Re-audit if the checkout ref,
 # job guard, or secret injection site changes.
 #
-# TWO-PR BOOTSTRAP (#2025, rationale corrected #2158): this job checks
-# out only the trusted base ref. Since 8 Dec 2025, GitHub evaluates
-# pull_request_target workflow YAML and GITHUB_SHA from the repository
-# default branch, not from the pull request (changelog 2025-11-07).
-# Combined with the base-sha checkout, a new workflow step cannot see a
-# brand-new script until that script is already on the default branch.
-# Convention: PR 1 lands the script inert (no workflow step calls it
-# yet); PR 2, after PR 1 is on main, adds the step that invokes it.
-# Never land a new script and its first workflow invocation in the same
-# PR. Extending an already-invoked script (run-ai-review.sh) is the
-# allowed same-PR path. A second `actions/checkout` (any `path:`) fails
-# the audit in tests/scripts/test_run_ai_review.py.
+# SAME-COMMIT SCRIPTS (ADR-0011 A; retires the two-PR bootstrap of #2025):
+# since both the lane job and the review job check out github.workflow_sha,
+# the commit that supplied this YAML also supplies every script it invokes,
+# so a script and its first workflow invocation may land together. A second
+# `actions/checkout` (any `path:`) still fails the audit in
+# tests/scripts/test_run_ai_review.py.
 
 # No paths filter: every PR gets the dogfood review (#1902). The lintro/**
 # filter dated from API-metered billing; under subscription billing the CI and
@@ -103,8 +114,8 @@ name: AI Review - Dogfood
 # text only ever reaches the request step through `env:`, never a `run:` line.
 # For issue_comment GitHub takes this file and GITHUB_SHA from the default
 # branch, and there is no pull_request.base.sha: the review job's checkout
-# falls back to github.workflow_sha, the protected default-branch commit that
-# supplied this definition. issue_comment is not affected by the 2026-11-02
+# is github.workflow_sha on every event, which on a comment run is that
+# default-branch commit. issue_comment is not affected by the 2026-11-02
 # pull_request_target restriction (#2793).
 'on':
   pull_request_target:
@@ -132,6 +143,67 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lane:
+    name: Resolve review lane
+    # Secret-free. Reads the committed manifest at the base-branch commit
+    # that supplied this workflow (github.workflow_sha), applies the
+    # LINTRO_AI_PROVIDER lane selector and the LINTRO_AI_MODEL override, and
+    # publishes the chain and every chain row; the review job consumes only
+    # these outputs (ADR-0011 A). Runs on pull-request events and on comments
+    # that could be a review request (the request job's own prefilter), so a
+    # comment that
+    # is not one spends no runner; the request job's refusals then leave this
+    # job's result unused.
+    if: >-
+      github.event_name == 'pull_request_target'
+      || (github.event_name == 'issue_comment'
+        && github.event.issue.pull_request
+        && startsWith(github.event.comment.body, '@lintro review'))
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # sparse checkout of the manifest and the resolver
+    timeout-minutes: 5
+    outputs:
+      chain: ${{ steps.resolve.outputs.chain }}
+      lane: ${{ steps.resolve.outputs.lane }}
+      egress: ${{ steps.resolve.outputs.egress }}
+      lanes: ${{ steps.resolve.outputs.lanes }}
+      provider: ${{ steps.resolve.outputs.provider }}
+      transport: ${{ steps.resolve.outputs.transport }}
+      endpoint: ${{ steps.resolve.outputs.endpoint }}
+      first-party: ${{ steps.resolve.outputs.first_party }}
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        with:
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+
+      - name: Checkout the manifest and the resolver
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The base-branch commit that supplied this workflow definition.
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/ci/ai_review_lanes.json
+            scripts/ci/resolve_review_lanes.py
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve the chain from the manifest
+        id: resolve
+        # Fails closed, naming the declared lanes, before any secret exists.
+        # The two routing variables are read here and nowhere else: the
+        # resolver accepts only a declared lane id and a model id.
+        env:
+          LINTRO_AI_PROVIDER: ${{ vars.LINTRO_AI_PROVIDER }}
+          LINTRO_AI_MODEL: ${{ vars.LINTRO_AI_MODEL }}
+        run: python3 -I scripts/ci/resolve_review_lanes.py --format github
+
   request:
     name: Resolve review request
     # Comments on pull requests that start with the command word only. The
@@ -157,9 +229,9 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -167,7 +239,7 @@ jobs:
       - name: Checkout the trusted gate script
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The default-branch commit that supplied this workflow definition.
+          # The base-branch commit that supplied this workflow definition.
           ref: ${{ github.workflow_sha }}
           fetch-depth: 1
           persist-credentials: false
@@ -200,16 +272,16 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             api.github.com:443
 
       - name: Mint lintro-review App token
         id: lintro-review-app
         # yamllint disable-line rule:line-length
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.LINTRO_REVIEW_APP_ID }}
           private-key: ${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}
@@ -255,7 +327,7 @@ jobs:
 
   ai-review:
     name: AI Review
-    needs: [request]
+    needs: [lane, request]
     runs-on: ubuntu-24.04
     # No job-level continue-on-error: that rewrites the conclusion to
     # `success`, which is precisely how a review that never ran kept
@@ -268,15 +340,14 @@ jobs:
     # secrets, but requiring head.repo == the base repo makes it explicit that
     # the keyed job only runs for same-repository pull requests.
     #
-    # SECURITY: lintro is installed from the PR's trusted BASE ref
-    # (pull_request.base.sha, i.e. main), never the PR head, so the code that
-    # runs with the provider credential is always trusted — a PR cannot
-    # substitute its own lintro/** to exfiltrate the token. Agent CLI versions
-    # are pinned in the base ref's Dockerfile for the same reason. Cursor
-    # install is gated on `vars.LINTRO_AI_PROVIDER == 'cursor'` and runs
-    # `scripts/ci/install-cursor-agent.sh` from this trusted checkout — never
-    # a PR-head side-checkout. New installer scripts follow the two-PR
-    # bootstrap convention in the file header. The PR is reviewed as data:
+    # SECURITY: lintro is installed from github.workflow_sha, the trusted
+    # base-branch commit that supplied this definition and the manifest,
+    # never the PR head, so the code that runs with the provider credential
+    # is always trusted — a PR cannot substitute its own lintro/** to
+    # exfiltrate the token. Agent CLI versions are pinned in that commit's
+    # Dockerfile for the same reason. Each CLI install is gated on the
+    # resolved lane's provider and runs its installer from this trusted
+    # checkout — never a PR-head side-checkout. The PR is reviewed as data:
     # `lintro review --pr <N>` fetches the diff via `gh` (GitHub API), it
     # does not execute the PR's working tree.
     # Trade-off: a PR that breaks the review code itself won't be caught by this
@@ -288,13 +359,14 @@ jobs:
     # lets it run on pull-request events, where the request job is skipped.
     if: >-
       !cancelled()
+      && needs.lane.result == 'success'
       && ((github.event_name == 'pull_request_target'
           && github.event.pull_request.draft == false
           && github.event.pull_request.head.repo.full_name == github.repository)
         || (github.event_name == 'issue_comment'
           && needs.request.outputs.run == 'true'))
     permissions:
-      # actions/checkout reads the trusted base ref with the workflow token.
+      # actions/checkout reads the trusted workflow_sha with the workflow token.
       contents: read
       # `--post` writes as lintro-review[bot] via the App token (#2050).
       # The workflow GITHUB_TOKEN is only used by `gh` to fetch the PR
@@ -381,33 +453,24 @@ jobs:
         '8')) && 'even' || 'odd' }}
       cancel-in-progress: false
       queue: max
-    # Cursor shards are appended only when the dogfood provider is Cursor.
-    # They stay out of the anthropic path so that job cannot reach Cursor
-    # hosts. A rotated shard (e.g. repo43.cursor.sh) is named in the
-    # harden-runner summary of the failed run; fix is a one-line allowlist
-    # PR on AI_REVIEW_CURSOR_EGRESS. No wildcards on this job.
-    # The OpenAI (#2472 lane 1) and z.ai (#2472 lane 2) hosts follow the same
-    # provider-gated pattern: they are allowlisted only for their lane, so the
-    # other providers' jobs never reach those hosts.
+    # Provider hosts come from the resolved chain (ADR-0011 A): the lane job
+    # publishes the union of the chain's egress lists, and nothing here names
+    # a provider host. A rotated shard is named in the harden-runner summary
+    # of the failed run; the fix is a one-line manifest diff. No wildcards on
+    # this job; the resolver refuses a wildcard host before any secret exists.
     env:
       # The reviewed PR: the event's on pull-request events, the request job's
       # validated number on an on-request review.
       # yamllint disable-line rule:line-length
       AI_REVIEW_PR: ${{ github.event.pull_request.number || needs.request.outputs.pr-number }}
-      # yamllint disable-line rule:line-length
-      AI_REVIEW_CURSOR_EGRESS: ${{ vars.LINTRO_AI_PROVIDER == 'cursor' && 'downloads.cursor.com:443 api2.cursor.sh:443 api3.cursor.sh:443 agentn.global.api5.cursor.sh:443 repo42.cursor.sh:443' || '' }}
-      # yamllint disable-line rule:line-length
-      AI_REVIEW_OPENAI_EGRESS: ${{ vars.LINTRO_AI_PROVIDER == 'openai' && 'api.openai.com:443 auth.openai.com:443 chatgpt.com:443' || '' }}
-      # yamllint disable-line rule:line-length
-      AI_REVIEW_ZAI_EGRESS: ${{ (vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic' && vars.ZAI_BASE_URL != '' && 'api.z.ai:443' || '' }}
+      # The chain's provider hosts, from the manifest via the lane job.
+      AI_REVIEW_LANE_EGRESS: ${{ needs.lane.outputs.egress }}
 
     steps:
       - name: Harden Runner
-        # Cursor shards observed on live dogfood (runs 31779466126 /
-        # 31782811574): downloads.cursor.com, api2.cursor.sh, api3.cursor.sh,
-        # agentn.global.api5.cursor.sh, repo42.cursor.sh. Gated via
-        # AI_REVIEW_CURSOR_EGRESS so the anthropic path never allowlists
-        # them. release-assets.githubusercontent.com is setup-node's
+        # Provider hosts are the resolved chain's, from the manifest (the
+        # AI_REVIEW_LANE_EGRESS line below); the static entries are GitHub
+        # and the toolchain. release-assets.githubusercontent.com is setup-node's
         # GitHub releases CDN; those runs blocked it and the action fell
         # back to nodejs.org — allowlisted so Node install is not a silent
         # fallback.
@@ -421,9 +484,9 @@ jobs:
         # here: harden-runner v2.21.1 allows them from GitHub meta (#2352,
         # #2488). This job allows no wildcard endpoints at all.
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
-          egress-policy: 'block'
+          egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -433,29 +496,26 @@ jobs:
             release-assets.githubusercontent.com:443
             pipelines.actions.githubusercontent.com:443
             results-receiver.actions.githubusercontent.com:443
-            api.anthropic.com:443
             astral.sh:443
             releases.astral.sh:443
             pypi.org:443
             files.pythonhosted.org:443
             nodejs.org:443
             registry.npmjs.org:443
-            ${{ env.AI_REVIEW_CURSOR_EGRESS }}
-            ${{ env.AI_REVIEW_OPENAI_EGRESS }}
-            ${{ env.AI_REVIEW_ZAI_EGRESS }}
+            ${{ env.AI_REVIEW_LANE_EGRESS }}
 
-      - name: Checkout base ref (trusted lintro install)
-        # Install lintro from the PR's BASE ref (main), NOT the PR head. The
-        # code that runs with the credential must be trusted; the PR diff is
-        # fetched separately via `gh` in the review step. base.sha is the exact
-        # commit the PR targets and is already merged into main, so it is safe.
-        # On an on-request review (issue_comment) there is no base.sha; the
-        # fallback is github.workflow_sha, the protected default-branch commit
-        # that supplied this workflow definition, trusted for the same reason.
-        # It is the only fallback (audited in test_run_ai_review.py).
+      - name: Checkout workflow_sha (trusted lintro install)
+        # Install lintro from github.workflow_sha, the protected base-branch
+        # commit that supplied this workflow definition and the manifest the
+        # lane job read, NOT the PR head and NOT pull_request.base.sha, which
+        # is the base as of the PR's last sync and can lag main (ADR-0011 A).
+        # The code that runs with the credential must be trusted and never
+        # older than the manifest it is handed; the PR diff is fetched
+        # separately via `gh` in the review step. It is the only ref (audited
+        # in test_run_ai_review.py).
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.sha || github.workflow_sha }}
+          ref: ${{ github.workflow_sha }}
           fetch-depth: 1
           # Nothing after this step talks to git over the network — `gh` uses
           # GH_TOKEN — so leaving the token in .git/config would only widen
@@ -467,9 +527,8 @@ jobs:
         # run-ai-review.sh so this is not a new script invocation (#2158).
         # Empty run-id is the no-op: first review on a PR, or no valid prior.
         # continue-on-error keeps a locator failure from skipping the
-        # review. The file-existence guard covers already-open PRs whose
-        # base.sha still has the pre-plumbing run-ai-review.sh (that
-        # older script treats --locate-prior-state as a PR number).
+        # review. The file-existence guard is kept for symmetry with the
+        # script's own fail-safe locate mode.
         id: prior-state
         continue-on-error: true
         env:
@@ -493,7 +552,7 @@ jobs:
         if: steps.prior-state.outputs.run-id != ''
         continue-on-error: true
         # yamllint disable-line rule:line-length
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           run-id: ${{ steps.prior-state.outputs.run-id }}
           pattern: lintro-review-state-pr-${{ env.AI_REVIEW_PR }}-*
@@ -512,7 +571,7 @@ jobs:
 
       - name: Resolve pinned cursor agent version
         id: cursor-pins
-        if: ${{ vars.LINTRO_AI_PROVIDER == 'cursor' }}
+        if: ${{ needs.lane.outputs.provider == 'cursor' }}
         # Calendar build id is not semver, so this resolves without --exact.
         # Gated so the anthropic path never touches the Cursor tarball pins.
         run: |
@@ -521,7 +580,7 @@ jobs:
 
       - name: Resolve pinned codex version
         id: codex-pins
-        if: ${{ vars.LINTRO_AI_PROVIDER == 'openai' }}
+        if: ${{ needs.lane.outputs.provider == 'openai' }}
         # Same single pin site as the other lanes: the codex CLI this job
         # drives is the one the released ai image ships and the contract
         # tests verify. --exact: the installer rejects npm ranges/aliases.
@@ -530,17 +589,18 @@ jobs:
             --exact --format github >>"$GITHUB_OUTPUT"
 
       - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ steps.pins.outputs.node-version }}
 
       - name: Install pinned claude CLI
+        if: ${{ needs.lane.outputs.provider == 'anthropic' }}
         env:
           CLAUDE_CODE_VERSION: ${{ steps.pins.outputs.claude-code-version }}
         run: scripts/ci/install-claude-cli.sh
 
       - name: Install pinned cursor agent CLI
-        if: ${{ vars.LINTRO_AI_PROVIDER == 'cursor' }}
+        if: ${{ needs.lane.outputs.provider == 'cursor' }}
         env:
           CURSOR_AGENT_VERSION: ${{ steps.cursor-pins.outputs.cursor-agent-version }}
           # yamllint disable-line rule:line-length
@@ -548,19 +608,19 @@ jobs:
         run: scripts/ci/install-cursor-agent.sh
 
       - name: Install pinned codex CLI
-        if: ${{ vars.LINTRO_AI_PROVIDER == 'openai' }}
+        if: ${{ needs.lane.outputs.provider == 'openai' }}
         env:
           # yamllint disable-line rule:line-length
           CODEX_VERSION: ${{ steps.codex-pins.outputs.codex-version }}
         run: scripts/ci/install-codex-cli.sh
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.14'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: 'latest'
 
@@ -585,19 +645,6 @@ jobs:
             core.setOutput('runtime-token', token)
             core.setOutput('results-url', results)
 
-      - name: Restore Codex subscription session
-        # The openai lane's credential (#2472): decode the CODEX_AUTH_JSON
-        # org secret into $HOME/.codex/auth.json for the pinned codex CLI.
-        # Sits after the trusted base-ref checkout, the pinned installs and
-        # uv sync, and ahead of the App-token mint so the mint stays
-        # immediately before the review step (#2050 invariant). An unset
-        # secret warns and exits 0 — the wrapper's credential gate owns the
-        # visible failure (no-silent-skip, #1826).
-        if: ${{ vars.LINTRO_AI_PROVIDER == 'openai' }}
-        env:
-          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
-        run: scripts/ci/restore-codex-session.sh
-
       - name: Mint lintro-review App token
         id: lintro-review-app
         # Repo-scoped installation token (#2050). Default current-repo scope —
@@ -607,7 +654,7 @@ jobs:
         # `permission-contents: read` 422s the whole mint when Contents is
         # not on the install; compare then degrades instead of posting nothing.
         # yamllint disable-line rule:line-length
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.LINTRO_REVIEW_APP_ID }}
           private-key: ${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}
@@ -624,28 +671,41 @@ jobs:
           REVIEW_REQUEST_PATHS: ${{ needs.request.outputs.paths }}
           REVIEW_REQUESTER: ${{ needs.request.outputs.requester }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          # The guarded credential. ANTHROPIC_API_KEY is deliberately absent:
-          # its account has no balance, and its mere presence would make
-          # lintro's bare-mode detection think a bare `claude` call could
-          # authenticate (LINTRO_CLI_BARE pins the decision regardless).
-          # Only the non-gateway anthropic lane carries the subscription
-          # token (#2473 review): gateway mode empties it so the session and
-          # the gateway token are never both in play, and the openai/cursor
-          # lanes don't receive a Claude credential they cannot use. The
+          # The chain's credentials (ADR-0011 A): one literal expression per
+          # credential, under its SECRET name, gated on membership of the
+          # chain the secret-free lane job published. Never indexed
+          # dynamically, never selected by a variable's presence. The
+          # wrapper captures them, unsets them, and re-arms only the active
+          # lane's under the variable its CLI reads (the z.ai and Kimi tokens
+          # fill ANTHROPIC_AUTH_TOKEN; CODEX_AUTH_JSON is decoded into the codex
+          # session for the attempt). ANTHROPIC_API_KEY is deliberately
+          # absent: its account has no balance, and its mere presence would
+          # make lintro's bare-mode detection think a bare `claude` call could
+          # authenticate (LINTRO_CLI_BARE pins the decision regardless). The
           # condition is inverted (secret in the TRUE branch) because
           # `cond && '' || secret` can never yield '': GHA's `||` falls
           # through on the falsy ''.
           # yamllint disable-line rule:line-length
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ ((vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic' && vars.ZAI_BASE_URL == '') && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
-          # Cursor CLI auth when LINTRO_AI_PROVIDER=cursor. Empty when the
-          # org/repo secret is unset — the wrapper then fails visibly rather
-          # than posting nothing.
-          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ contains(fromJSON(needs.lane.outputs.chain), 'anthropic') && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          # yamllint disable-line rule:line-length
+          CODEX_AUTH_JSON: ${{ contains(fromJSON(needs.lane.outputs.chain), 'openai') && secrets.CODEX_AUTH_JSON || '' }}
+          # yamllint disable-line rule:line-length
+          CURSOR_API_KEY: ${{ contains(fromJSON(needs.lane.outputs.chain), 'cursor') && secrets.CURSOR_API_KEY || '' }}
+          # yamllint disable-line rule:line-length
+          ZAI_AUTH_TOKEN: ${{ contains(fromJSON(needs.lane.outputs.chain), 'zai') && secrets.ZAI_AUTH_TOKEN || '' }}
+          # yamllint disable-line rule:line-length
+          KIMI_API_KEY: ${{ contains(fromJSON(needs.lane.outputs.chain), 'kimi') && secrets.KIMI_API_KEY || '' }}
+          # The resolved chain and its rows. The wrapper binds the attempt:
+          # LINTRO_REVIEW_* facts for the run record (#2867), the LINTRO_AI_*
+          # overlays from the row, and the base-URL override to the row's
+          # endpoint off-host only. Nothing else routes the run.
+          LINTRO_REVIEW_CHAIN: ${{ needs.lane.outputs.chain }}
+          LINTRO_REVIEW_LANES: ${{ needs.lane.outputs.lanes }}
           # `never` == do not send `--bare`, so the CLI uses its OAuth session
           # (#1838/#1859). AUTO would resolve the same way with no API key in
           # scope; pinning it keeps CI deterministic if that ever changes.
           LINTRO_CLI_BARE: 'never'
-          # Keep the CLI's egress to api.anthropic.com only, and keep the
+          # Keep the CLI's egress to the lane endpoint only, and keep the
           # pinned version pinned — an autoupdate would silently swap the
           # binary the contract tests verified.
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
@@ -658,32 +718,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # `--post` writes as lintro-review[bot] via the App token (#2050).
           GITHUB_TOKEN: ${{ steps.lintro-review-app.outputs.token }}
-          # Repo Actions variables named identically to the env vars they feed
-          # (#1971). Unset variables keep today's pinned CI defaults (cli /
-          # anthropic); a set variable is the experiment loop (`gh variable set`
-          # → next run → `gh variable delete`). Empty MODEL falls through to
-          # the provider/config default. LINTRO_AI_ENABLED is hardcoded: CI
-          # always turns the master switch on; the committed YAML stays
-          # `enabled: false` for local checkouts.
+          # LINTRO_AI_ENABLED is hardcoded: CI always turns the master switch
+          # on; the committed YAML stays `enabled: false` for local checkouts.
+          # Provider, transport and model are NOT variables: the wrapper
+          # exports them from the lane row (ADR-0011 A).
           LINTRO_AI_ENABLED: '1'
-          LINTRO_AI_TRANSPORT: ${{ vars.LINTRO_AI_TRANSPORT || 'cli' }}
-          LINTRO_AI_PROVIDER: ${{ vars.LINTRO_AI_PROVIDER || 'anthropic' }}
-          LINTRO_AI_MODEL: ${{ vars.LINTRO_AI_MODEL }}
-          # z.ai GLM gateway lane (#2472 lane 2). With provider anthropic
-          # (explicit or via the same default the review step applies) and
-          # ZAI_BASE_URL set, the pinned `claude` binary is pointed at the
-          # gateway (z.ai's documented Anthropic-compatible endpoint) and
-          # ANTHROPIC_AUTH_TOKEN authenticates it — the GLM Coding Plan
-          # subscription, not api.anthropic.com. Empty in every other mode:
-          # both keys resolve to '' so the claude-subscription and Codex
-          # lanes are untouched. The CLI transport forwards os.environ to
-          # the subprocess, and LINTRO_CLI_BARE=never keeps gateway auth
-          # intact. A non-default gateway host (e.g. open.bigmodel.cn) needs
-          # a matching AI_REVIEW_ZAI_EGRESS allowlist edit.
-          # yamllint disable-line rule:line-length
-          ANTHROPIC_BASE_URL: ${{ (vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic' && vars.ZAI_BASE_URL || '' }}
-          # yamllint disable-line rule:line-length
-          ANTHROPIC_AUTH_TOKEN: ${{ (vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic' && vars.ZAI_BASE_URL && secrets.ZAI_AUTH_TOKEN || '' }}
           # Spend ceiling overlay (#2024 / #2154 / #2156). Unset falls
           # through to committed YAML (now unset = no cap). Overlay
           # `uncapped` is the explicit lift; overlay `0` is rejected as
@@ -711,7 +750,7 @@ jobs:
         # if-no-files-found: ignore so pre-feature runs no-op.
         if: always()
         # yamllint disable-line rule:line-length
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # yamllint disable-line rule:line-length
           name: lintro-review-state-pr-${{ env.AI_REVIEW_PR }}-attempt-${{ github.run_attempt }}-final

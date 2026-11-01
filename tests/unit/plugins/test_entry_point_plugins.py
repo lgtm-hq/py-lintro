@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import BaseToolPlugin
@@ -27,6 +28,7 @@ from lintro.plugins.discovery import (
 from lintro.plugins.protocol import (
     LINTRO_PLUGIN_API_VERSION,
     ToolDefinition,
+    is_compatible_api_version,
 )
 from lintro.plugins.registry import ToolRegistry
 
@@ -139,11 +141,16 @@ def _make_versioned_plugin(*, tool_name: str, api_version: object) -> type:
     return _VersionedPlugin
 
 
-def _make_raising_plugin(*, tool_name: str) -> type:
+def _make_raising_plugin(
+    *,
+    tool_name: str,
+    api_version: object = LINTRO_PLUGIN_API_VERSION,
+) -> type:
     """Build a plugin class that raises when instantiated.
 
     Args:
         tool_name: Name reported by the (unreachable) definition.
+        api_version: Declared plugin contract version.
 
     Returns:
         A ``BaseToolPlugin`` subclass whose ``definition`` raises, so
@@ -152,6 +159,8 @@ def _make_raising_plugin(*, tool_name: str) -> type:
 
     @dataclass
     class _RaisingPlugin(BaseToolPlugin):
+        LINTRO_PLUGIN_API_VERSION = api_version
+
         @property
         def definition(self) -> ToolDefinition:
             raise RuntimeError("boom during construction")
@@ -315,6 +324,46 @@ def test_list_tools_shows_origin_for_builtin_and_external() -> None:
 # =============================================================================
 # Failure isolation
 # =============================================================================
+
+
+@pytest.mark.parametrize("declared", [1, None, True, "2", 3])
+def test_legacy_plugin_is_rejected_before_instantiation(declared: object) -> None:
+    """Reject old and undeclared contracts before any plugin lifecycle runs.
+
+    Args:
+        declared: Incompatible version, or None for an absent declaration.
+    """
+    plugin = _make_raising_plugin(tool_name="ext-legacy", api_version=declared)
+    if declared is None:
+        delattr(plugin, "LINTRO_PLUGIN_API_VERSION")
+    ep = _FakeEntryPoint(name="ext-legacy", loaded=plugin)
+    good = _FakeEntryPoint(
+        name="ext-current",
+        loaded=_make_good_plugin(tool_name="ext-current"),
+    )
+    messages: list[str] = []
+    handler_id = logger.add(lambda message: messages.append(str(message)))
+    try:
+        with _patch_entry_points([ep, good]):
+            loaded = discover_external_plugins()
+    finally:
+        logger.remove(handler_id)
+
+    assert_that(LINTRO_PLUGIN_API_VERSION).is_equal_to(2)
+    assert_that(is_compatible_api_version(declared)).is_false()
+    assert_that(loaded).is_equal_to(1)
+    assert_that(ToolRegistry.is_registered("ext-legacy")).is_false()
+    assert_that(ToolRegistry.get("ext-current").check([], {}).success).is_true()
+    output = "".join(messages)
+    assert_that(output).contains(
+        "ext-legacy",
+        f"version {declared!r}",
+        "skipping before instantiation",
+        "Upgrade the plugin",
+        "LINTRO_PLUGIN_API_VERSION = 2",
+        "docs/plugins.md#migrating-from-plugin-api-v1-to-v2",
+    )
+    assert_that(output).does_not_contain("boom during construction")
 
 
 def test_incompatible_api_version_is_skipped_not_raised() -> None:

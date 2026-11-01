@@ -30,8 +30,10 @@ from lintro.ai.exceptions import AICostBudgetExceededError, AIProviderError
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.registry import AIProvider
 from lintro.ai.review.coverage_degradation import (
+    GENERATED_QUESTIONS_FAILED_NOTE,
     PARTIAL_REVIEW_LABEL,
     describe_coverage_degradations,
+    format_narrative_note,
 )
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
@@ -267,6 +269,66 @@ async def test_adversarial_timeout_is_recorded_as_a_degraded_pass(
     assert_that(result.metadata.findings_coverage_complete).is_false()
 
 
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param('{"findings": null}', id="null-findings"),
+        pytest.param("{}", id="missing-findings"),
+        pytest.param('{"findings": {}}', id="object-findings"),
+        pytest.param('{"findings": ""}', id="string-findings"),
+        pytest.param('{"findings": false}', id="boolean-findings"),
+        pytest.param('{"findings": 0}', id="number-findings"),
+        pytest.param("[]", id="list-payload"),
+        pytest.param("null", id="null-payload"),
+        pytest.param("not JSON", id="invalid-json"),
+    ],
+)
+async def test_malformed_adversarial_answer_degrades_coverage(
+    tmp_path: Path,
+    content: str,
+) -> None:
+    """An unusable sweep keeps main findings without claiming full coverage.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        content: Malformed sweep answer returned by the provider.
+    """
+    result = await _run(
+        tmp_path=tmp_path,
+        depth=3,
+        call_ai=AsyncMock(
+            side_effect=[
+                _questions_response(),
+                _main_pass_response(),
+                replace(
+                    _response(content=content),
+                    input_tokens=101,
+                    output_tokens=37,
+                    cost_estimate=0.07,
+                ),
+            ],
+        ),
+    )
+    envelope = review_result_to_dict(result=result)
+
+    assert_that(envelope["coverage_degradations"]).is_equal_to(
+        [{"reason": "adversarial_sweep_failed", "chunk_index": 0}],
+    )
+    assert_that(envelope["findings_coverage_complete"]).is_false()
+    assert_that(result.metadata.coverage_degradations[0].paths).is_equal_to(
+        ("src/a.py",),
+    )
+    assert_that([finding.title for finding in result.findings]).is_equal_to(
+        ["Main-pass finding"],
+    )
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(1)
+    assert_that(result.metadata.partial).is_false()
+    assert_that(result.metadata.token_usage).is_equal_to(
+        {"prompt": 121, "completion": 77, "total": 198, "context": 0},
+    )
+    assert_that(result.metadata.cost_estimate_usd).is_close_to(0.09, 1e-9)
+
+
 async def test_degraded_sweep_warns_on_every_surface(
     tmp_path: Path,
 ) -> None:
@@ -344,10 +406,17 @@ async def test_both_depth_passes_failing_still_keeps_the_main_pass(
 
     note = describe_coverage_degradations(metadata=result.metadata)
 
-    assert_that(note).contains(
-        "the per-PR question pass failed, so every chunk was reviewed against "
-        "the rubric alone",
+    # The failed question pass is a narrative note of its own since #2803,
+    # never a clause of the coverage-limited warning.
+    assert_that(format_narrative_note(metadata=result.metadata)).is_equal_to(
+        GENERATED_QUESTIONS_FAILED_NOTE,
     )
+    # The wording itself is pinned, not only the constant.
+    assert_that(GENERATED_QUESTIONS_FAILED_NOTE).is_equal_to(
+        "The per-PR question pass failed, so every chunk was reviewed against "
+        "the rubric alone.",
+    )
+    assert_that(note).does_not_contain("question pass")
     assert_that(note).contains(
         "1 chunk kept only the main pass after the depth-3 adversarial sweep failed",
     )
@@ -474,10 +543,10 @@ async def test_cost_budget_exceeded_in_the_sweep_still_aborts(
     ).is_empty()
 
 
-async def test_a_clean_depth_three_run_records_no_degradation(
+async def test_valid_empty_adversarial_answer_completes_sweep_and_keeps_usage(
     tmp_path: Path,
 ) -> None:
-    """A run whose extra passes all succeed is unchanged by #2395.
+    """An explicit empty findings array completes the sweep and keeps its usage.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
@@ -506,7 +575,16 @@ async def test_a_clean_depth_three_run_records_no_degradation(
     )
 
     assert_that(result.metadata.findings_coverage_complete).is_true()
+    assert_that(result.metadata.coverage_degradations).is_empty()
     assert_that(result.metadata.partial).is_false()
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(1)
+    assert_that([finding.title for finding in result.findings]).is_equal_to(
+        ["Main-pass finding"],
+    )
+    assert_that(result.metadata.token_usage).is_equal_to(
+        {"prompt": 30, "completion": 60, "total": 90, "context": 0},
+    )
+    assert_that(result.metadata.cost_estimate_usd).is_close_to(0.03, 1e-9)
 
 
 def _classifier() -> ModuleType:
