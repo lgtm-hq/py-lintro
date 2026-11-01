@@ -266,3 +266,53 @@ def test_ruff_format_coverage_requires_a_complete_format_check(
     assert format_covered is (covered and trace_complete)
     if format_covered:
         assert result.inspected_paths == frozenset({str(file)})
+
+
+@pytest.mark.parametrize("stage", ["discovery", "format"])
+@pytest.mark.parametrize("report", ["foreign", "duplicate", "relative", "valid"])
+def test_ruff_coverage_authenticates_each_native_command(
+    workspace: Path,
+    stage: str,
+    report: str,
+) -> None:
+    """Both native commands must bind coverage to their actual invocation inputs."""
+    file = workspace / "example.py"
+    file.write_text("x = 1\n", encoding="utf-8")
+    foreign = workspace / "victim.py"
+    foreign.write_text("import os\n", encoding="utf-8")
+    paths = {
+        "foreign": [str(foreign)],
+        "duplicate": [str(file), str(file)],
+        "relative": [file.name],
+        "valid": [str(file)],
+    }[report]
+    plugin = RuffPlugin()
+    plugin.set_options(format_check=stage == "format", _baseline_coverage=True)
+
+    def execute(cmd: list[str], **_kwargs: object) -> SubprocessResult:
+        if "--show-files" in cmd:
+            stdout = "\n".join(paths if stage == "discovery" else [str(file)])
+            return SubprocessResult(0, stdout, "", stdout)
+        if "format" in cmd:
+            trace = "".join(
+                f"[ruff::commands::format][DEBUG] format_path; path={path}\n"
+                for path in paths
+            )
+            trace += (
+                f"[ruff::commands::format][DEBUG] Formatted {len(paths)} files in 1ms\n"
+            )
+            stdout = f"{len(paths)} files already formatted\n"
+            return SubprocessResult(0, stdout, trace, stdout + trace)
+        return SubprocessResult(0, "[]", "", "[]")
+
+    with patch.object(plugin, "_run_subprocess_result", side_effect=execute):
+        result = plugin.check([str(file)], {})
+
+    assert result.success and result.findings_complete
+    if stage == "discovery":
+        assert result.inspected_paths == (
+            frozenset({str(file)}) if report == "valid" else None
+        )
+    else:
+        assert result.inspected_paths == frozenset({str(file)})
+        assert ("FORMAT" in result.uninspected_codes) is (report != "valid")

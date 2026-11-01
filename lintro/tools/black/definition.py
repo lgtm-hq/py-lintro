@@ -350,7 +350,9 @@ class BlackPlugin(BaseToolPlugin):
                     TimedOut(result_output)
                     if supplement.timed_out
                     else Checked(
-                        success=process.success and count == 0 and not supplement.failed,
+                        success=process.success
+                        and count == 0
+                        and not supplement.failed,
                         inspected_files=True,
                     )
                 ),

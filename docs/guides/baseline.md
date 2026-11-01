@@ -105,10 +105,16 @@ The boolean `inspected_files` proves that some work happened, not which files we
 examined. Until #2609 supplies coverage throughout the tool registry, pruning must not
 infer it from requested directories or the paths in diagnostics. The additive
 `ToolResult.inspected_paths` contract names exact files a producer successfully
-examined. The shared per-file check runner supplies completed file coverage; baseline
-management additionally asks Ruff for its native `--show-files` list, respecting native
-exclusions. Ruff's lint discovery alone does not prove formatter coverage. When the
-format check completes, management also requires the formatter's verbose per-file
+examined. The shared per-file check runner leaves exact coverage unknown: native
+exclusions in tools such as pydoclint, sqlfluff, and dotenv-linter can skip even explicit
+file arguments and exit successfully. These tools can acknowledge observed findings,
+but cannot remove old entries until they supply affirmative per-file inspection proof.
+Baseline management asks Ruff for its native `--show-files` list, respecting native
+exclusions. Both Ruff discovery and formatter reports must match actual invocation
+identities, without duplicate identities. Multiline names, terminal control characters,
+and ambiguous resolved names make coverage unknown for the invocation. Ruff's lint
+discovery alone does not prove formatter coverage. When the format check completes,
+management also requires the formatter's verbose per-file
 execution records and matching completion counts. Coverage is the intersection of the
 lint and formatter file sets. Disabled format checks, formatter exclusions, unknown
 trace formats, and incomplete reports cannot remove `FORMAT` acknowledgements.

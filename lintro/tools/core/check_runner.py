@@ -23,9 +23,7 @@ from __future__ import annotations
 
 import subprocess  # nosec B404 - commands are built by callers, shell disabled
 from collections.abc import Callable, Sequence
-from contextlib import suppress
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lintro.models.core.tool_outcome import Checked, TimedOut, ToolOutcome
@@ -134,8 +132,8 @@ def check_one_file(
         success=success and not (issues_imply_failure and issues),
         output=output,
         issues=issues,
-        # Successful execution over the selected file also proves a clean
-        # inspection. Failed invocations without findings remain unknown.
+        # This is aggregate execution evidence, not exact file coverage:
+        # native exclusions can skip even explicitly requested files.
         inspected_files=True,
         findings_complete=True,
     )
@@ -162,7 +160,6 @@ def run_per_file_check(
     Returns:
         ToolResult carrying every issue found across the prepared files.
     """
-    inspected_paths: set[str] = set()
 
     def process(file_path: str) -> FileProcessingResult:
         """Check one file.
@@ -173,7 +170,7 @@ def run_per_file_check(
         Returns:
             FileProcessingResult for the aggregator.
         """
-        checked = check_one_file(
+        return check_one_file(
             plugin=plugin,
             cmd=command(file_path),
             parse=parse,
@@ -182,16 +179,6 @@ def run_per_file_check(
             issues_imply_failure=policy.issues_imply_failure,
             findings_exit_codes=policy.findings_exit_codes,
         )
-        if (
-            checked.inspected_files is True
-            and not checked.error
-            and not checked.skipped
-            and not checked.timed_out
-        ):
-            # Unknown canonical coverage cannot authorize pruning.
-            with suppress(OSError, RuntimeError):
-                inspected_paths.add(str(Path(file_path).resolve()))
-        return checked
 
     result = plugin._process_files_with_progress(
         files=ctx.files,
@@ -214,7 +201,9 @@ def run_per_file_check(
             issues_count=result.total_issues,
         ),
         name=plugin.definition.name,
-        inspected_paths=frozenset(inspected_paths),
+        # A clean per-file exit is not affirmative proof of inspection.
+        # Producers need native per-file evidence before they can prune debt.
+        inspected_paths=None,
         execution_failed=bool(result.execution_failures),
         findings_complete=result.findings_complete and not result.execution_failures,
         output=output,

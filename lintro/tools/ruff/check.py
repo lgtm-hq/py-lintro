@@ -5,7 +5,6 @@ Functions for running ruff check commands and processing results.
 
 import json
 import subprocess  # nosec B404 - subprocess used safely to execute ruff commands with controlled input
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -14,6 +13,7 @@ from lintro.models.core.tool_outcome import Checked, TimedOut, ToolOutcome
 from lintro.parsers.ruff.ruff_format_coverage import (
     format_inspected_paths,
     format_report_parse_failures,
+    reported_inspected_paths,
 )
 from lintro.parsers.ruff.ruff_format_issue import RuffFormatIssue
 from lintro.parsers.ruff.ruff_issue import RuffIssue
@@ -66,6 +66,7 @@ def _baseline_coverage(
     tool: "RuffPlugin",
     *,
     cmd: list[str],
+    files: list[str],
     cwd: str | None,
     timeout: int,
 ) -> frozenset[str] | None:
@@ -74,6 +75,7 @@ def _baseline_coverage(
     Args:
         tool: Configured Ruff plugin.
         cmd: Original check command with identical configuration and inputs.
+        files: Exact file arguments passed to the original check command.
         cwd: Original working directory.
         timeout: Subprocess deadline.
 
@@ -93,14 +95,7 @@ def _baseline_coverage(
         return None
     if not process.success:
         return None
-    try:
-        output = process.stdout
-        paths = [Path(line) for line in output.splitlines() if line.strip()]
-        if any(not path.is_absolute() or not path.is_file() for path in paths):
-            return None
-        return frozenset(str(path.resolve()) for path in paths)
-    except (OSError, RuntimeError):
-        return None
+    return reported_inspected_paths(process.stdout.splitlines(), files=files, cwd=cwd)
 
 
 def execute_ruff_check(
@@ -241,7 +236,11 @@ def execute_ruff_check(
             success_format or (format_process.returncode == 1 and bool(format_files))
         )
         if format_complete and tool.options.get("_baseline_coverage", False):
-            format_coverage = format_inspected_paths(output_format)
+            format_coverage = format_inspected_paths(
+                output_format,
+                files=rel_files,
+                cwd=cwd,
+            )
         # Normalize files to absolute paths to keep behavior consistent with
         # direct CLI calls and stabilize tests that compare exact paths. The
         # fix flow canonicalises the same way through the same helper, so a
@@ -275,7 +274,7 @@ def execute_ruff_check(
     all_issues = lint_issues + format_issues
 
     coverage = (
-        _baseline_coverage(tool, cmd=cmd, cwd=cwd, timeout=timeout)
+        _baseline_coverage(tool, cmd=cmd, files=rel_files, cwd=cwd, timeout=timeout)
         if complete
         else None
     )
@@ -286,7 +285,10 @@ def execute_ruff_check(
 
     return ToolResult.from_outcome(
         ToolOutcome(
-            execution=Checked(success=success, inspected_files=True if complete else None),
+            execution=Checked(
+                success=success,
+                inspected_files=True if complete else None,
+            ),
             issues_count=issues_count,
         ),
         name=tool.definition.name,

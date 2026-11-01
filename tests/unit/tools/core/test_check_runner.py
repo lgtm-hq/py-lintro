@@ -89,6 +89,7 @@ def test_a_clean_run_reports_success_and_no_issues(shell_script: Path) -> None:
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.inspected_paths).is_none()
     # The command builder must still receive the file: an argv that lost the
     # path would check the whole tree and still report a clean ToolResult.
     cmd = run_subprocess.call_args.kwargs["cmd"]
