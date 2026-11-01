@@ -44,6 +44,17 @@ _IDENTITY_REGEXP = (
     r"reusable-docker-(build|multiplatform)\.yml)@"
 )
 _ISSUER = "https://token.actions.githubusercontent.com"
+_WORKFLOW_REF = (
+    "lgtm-hq/py-lintro/.github/workflows/publish-pypi-on-tag.yml@refs/tags/v0.175.4"
+)
+_WORKFLOW_IDENTITY = f"https://github.com/{_WORKFLOW_REF}"
+_BUILD_IDENTITY = (
+    "https://github.com/lgtm-hq/lgtm-ci/.github/workflows/"
+    "reusable-docker-multiplatform.yml@refs/tags/v0.78.1"
+)
+_DOCKER_WORKFLOW_REF = (
+    "lgtm-hq/py-lintro/.github/workflows/docker-ci.yml@refs/heads/main"
+)
 
 
 def _write_fake_cosign(bin_dir: Path, mode: str, *, fail_until: int = 0) -> Path:
@@ -108,6 +119,8 @@ def _write_rekor_cosign(
     *,
     error: str = _REKOR_CONFLICT,
     verification: str = "success",
+    signature_identity: str = _WORKFLOW_IDENTITY,
+    oidc_first: bool = False,
 ) -> None:
     """Fake a signing conflict and require the full verification policy.
 
@@ -115,6 +128,8 @@ def _write_rekor_cosign(
         bin_dir: Directory placed at the front of PATH.
         error: Signing failure text, returned with exit status 17.
         verification: Verification result to simulate after checking arguments.
+        signature_identity: Identity on the existing signature.
+        oidc_first: Fail the first signing attempt with an OIDC flake.
     """
     script = textwrap.dedent(
         f"""\
@@ -124,19 +139,36 @@ def _write_rekor_cosign(
         case "$1" in
           sign)
             if [[ "${{@: -1}}" != {shlex.quote(_DIGEST)} ]]; then exit 0; fi
+            if [[ {int(oidc_first)} -eq 1 &&
+                  $(grep -c '^sign ' {shlex.quote(str(bin_dir / 'cosign.args'))}) -eq 1 ]]; then
+              printf '%s\\n' {shlex.quote(_OIDC_MESSAGE % 'REF')} >&2
+              exit 1
+            fi
             printf '%s\\n' {shlex.quote(error)} >&2
             exit 17
             ;;
           verify)
             if [[ $# -ne 7 || "$2" != --new-bundle-format ||
                   "$3" != {shlex.quote(_DIGEST)} ||
-                  "$4" != --certificate-identity-regexp ||
-                  "$5" != {shlex.quote(_IDENTITY_REGEXP)} ||
                   "$6" != --certificate-oidc-issuer ||
                   "$7" != {shlex.quote(_ISSUER)} ]]; then
               echo 'verification policy mismatch' >&2
               exit 99
             fi
+            identity={shlex.quote(signature_identity)}
+            case "$4" in
+              --certificate-identity-regexp)
+                if [[ "$5" != {shlex.quote(_IDENTITY_REGEXP)} ]]; then exit 99; fi
+                if ! [[ "$identity" =~ $5 ]]; then exit 23; fi
+                ;;
+              --certificate-identity)
+                if [[ "$5" != "$identity" ]]; then
+                  echo 'certificate identity does not match current workflow' >&2
+                  exit 23
+                fi
+                ;;
+              *) exit 99 ;;
+            esac
             if [[ {shlex.quote(verification)} != success ]]; then
               printf '%s\\n' {shlex.quote(verification)} >&2
               exit 23
@@ -158,6 +190,7 @@ def _run(
     images: str,
     max_attempts: str = "4",
     max_delay: str = "30",
+    workflow_ref: str | None = _WORKFLOW_REF,
 ) -> subprocess.CompletedProcess[str]:
     """Run the signing script with the stub PATH and no backoff wait.
 
@@ -166,6 +199,7 @@ def _run(
         images: Value for the IMAGES environment variable.
         max_attempts: Value for COSIGN_SIGN_MAX_ATTEMPTS.
         max_delay: Value for COSIGN_SIGN_MAX_DELAY.
+        workflow_ref: Current workflow identity, or None to omit it.
 
     Returns:
         subprocess.CompletedProcess: The completed run.
@@ -178,6 +212,9 @@ def _run(
         "COSIGN_SIGN_BASE_DELAY": "0",
         "COSIGN_SIGN_MAX_DELAY": max_delay,
     }
+    env.pop("GITHUB_WORKFLOW_REF", None)
+    if workflow_ref is not None:
+        env["GITHUB_WORKFLOW_REF"] = workflow_ref
     return subprocess.run(  # nosec B603 - fixed argv, controlled env, shell=False
         [str(_SCRIPT)],
         capture_output=True,
@@ -226,6 +263,7 @@ def test_help_flag_exits_zero() -> None:
     )
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("Usage:")
+    assert_that(result.stdout).contains("Bash 4 or newer", "GITHUB_WORKFLOW_REF")
 
 
 def test_missing_images_is_fatal(tmp_path: Path) -> None:
@@ -302,28 +340,107 @@ def test_same_digest_in_different_repositories_is_signed_in_each(
     )
 
 
+@pytest.mark.parametrize(
+    "workflow_ref",
+    [
+        _WORKFLOW_REF,
+        _WORKFLOW_REF.replace("refs/tags/v0.175.4", "refs/heads/main"),
+        _DOCKER_WORKFLOW_REF,
+    ],
+)
 def test_equivalent_rekor_entry_requires_trusted_digest_verification(
     tmp_path: Path,
+    workflow_ref: str,
 ) -> None:
-    """Only a verified existing signature can recover the recorded conflict."""
-    _write_rekor_cosign(tmp_path)
-    result = _run(tmp_path, images=f"{_DIGEST}\n{_DIGEST_TWO}")
+    """Both callers recover only with their own exact workflow signature."""
+    identity = f"https://github.com/{workflow_ref}"
+    _write_rekor_cosign(tmp_path, signature_identity=identity)
+    result = _run(
+        tmp_path,
+        images=f"{_DIGEST}\n{_DIGEST_TWO}",
+        workflow_ref=workflow_ref,
+    )
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("Verified trusted signature for exact digest")
     assert_that(_signed_refs(tmp_path)).is_equal_to(
         [
             f"sign --yes {_DIGEST}",
-            f"verify --new-bundle-format {_DIGEST} --certificate-identity-regexp "
-            f"{_IDENTITY_REGEXP} --certificate-oidc-issuer {_ISSUER}",
+            f"verify --new-bundle-format {_DIGEST} --certificate-identity "
+            f"{identity} --certificate-oidc-issuer {_ISSUER}",
             f"sign --yes {_DIGEST_TWO}",
         ],
     )
     # Recovery must keep using the published trust policy.
+    assert_that(_SCRIPT.read_text()).contains(f"'{_IDENTITY_REGEXP}'")
     for doc in ("docker.md", "release-validation.md"):
         assert_that((_REPO_ROOT / "docs" / doc).read_text()).contains(
             f"--certificate-identity-regexp '{_IDENTITY_REGEXP}'",
             f"--certificate-oidc-issuer {_ISSUER}",
         )
+
+
+@pytest.mark.parametrize(
+    "signature_identity",
+    [
+        _BUILD_IDENTITY,
+        f"https://github.com/{_DOCKER_WORKFLOW_REF}",
+        _WORKFLOW_IDENTITY.replace("v0.175.4", "v0.175.3"),
+    ],
+)
+def test_rekor_conflict_cannot_recover_with_another_trusted_workflow(
+    tmp_path: Path,
+    signature_identity: str,
+) -> None:
+    """Other workflows or refs cannot prove this caller stored its signature."""
+    _write_rekor_cosign(tmp_path, signature_identity=signature_identity)
+    result = _run(tmp_path, images=_DIGEST)
+    assert_that(result.returncode).is_equal_to(17)
+    assert_that(result.stdout).does_not_contain("Signed 1 image(s)")
+    assert_that(result.stderr).contains("certificate identity does not match")
+
+
+def test_oidc_flake_then_rekor_conflict_verifies_current_workflow(
+    tmp_path: Path,
+) -> None:
+    """A later 409 verifies the caller after the permitted OIDC retry."""
+    _write_rekor_cosign(tmp_path, oidc_first=True)
+    result = _run(tmp_path, images=_DIGEST)
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stderr).contains("retrying in 0s")
+    assert_that(result.stdout).contains("Signed 1 image(s)")
+    assert_that(_signed_refs(tmp_path)).is_equal_to(
+        [
+            f"sign --yes {_DIGEST}",
+            f"sign --yes {_DIGEST}",
+            f"verify --new-bundle-format {_DIGEST} --certificate-identity "
+            f"{_WORKFLOW_IDENTITY} --certificate-oidc-issuer {_ISSUER}",
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    "workflow_ref",
+    [
+        None,
+        "",
+        _WORKFLOW_REF.replace("lgtm-hq/", "attacker/"),
+        _WORKFLOW_REF.replace("publish-pypi-on-tag.yml", "untrusted.yml"),
+        _WORKFLOW_REF.replace(".yml@", ".yml.evil@"),
+        _WORKFLOW_REF.replace("refs/tags/v0.175.4", ""),
+        _WORKFLOW_REF.replace("refs/tags/v0.175.4", "refs/heads/invalid..ref"),
+        _WORKFLOW_REF + "\nextra",
+    ],
+)
+def test_rekor_recovery_requires_a_valid_trusted_workflow_ref(
+    tmp_path: Path,
+    workflow_ref: str | None,
+) -> None:
+    """Missing, malformed or untrusted caller identities cannot recover."""
+    _write_rekor_cosign(tmp_path)
+    result = _run(tmp_path, images=_DIGEST, workflow_ref=workflow_ref)
+    assert_that(result.returncode).is_equal_to(17)
+    assert_that(result.stderr).contains("GITHUB_WORKFLOW_REF")
+    assert_that(_signed_refs(tmp_path)).is_equal_to([f"sign --yes {_DIGEST}"])
 
 
 @pytest.mark.parametrize(
