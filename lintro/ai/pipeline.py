@@ -405,8 +405,8 @@ async def run_fix_pipeline(
     logger: ThreadSafeConsoleLogger,
     output_format: str,
     workspace_root: Path,
+    all_results: list[ToolResult],
     budget: CostBudget | None = None,
-    all_results: list[ToolResult] | None = None,
 ) -> tuple[int, int, list[AIFixSuggestion]]:
     """Generate and optionally apply AI fix suggestions across all tools.
 
@@ -425,9 +425,9 @@ async def run_fix_pipeline(
         logger: Console logger for output.
         output_format: Output format string.
         workspace_root: Workspace root path.
+        all_results: Required owning run list receiving validated rerun replacements.
         budget: Session cost budget tracker. Omission creates a fresh
             unlimited tracker for this pipeline run.
-        all_results: Owning run list whose entries receive validated rerun replacements.
 
     Returns:
         Tuple of (fixes_applied, fixes_failed).
@@ -440,6 +440,7 @@ async def run_fix_pipeline(
         if result.name not in by_tool:
             by_tool[result.name] = (result, [])
         by_tool[result.name][1].append(issue)
+    original_by_tool = {name: result for name, (result, _) in by_tool.items()}
 
     is_json = output_format.lower() == OutputFormat.JSON
 
@@ -516,7 +517,13 @@ async def run_fix_pipeline(
             budget,
         )
 
-    _publish_verified_results(all_results, by_tool, applied_suggestions, validation)
+    _publish_verified_results(
+        all_results,
+        by_tool,
+        original_by_tool,
+        applied_suggestions,
+        validation,
+    )
 
     # Generate post-fix summary — only when validation confirms outcomes
     if (applied > 0 or rejected > 0) and not is_json and validation is not None:
@@ -577,23 +584,24 @@ async def run_fix_pipeline(
 
 
 def _publish_verified_results(
-    results: list[ToolResult] | None,
+    results: list[ToolResult],
     by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]],
+    original_by_tool: dict[str, ToolResult],
     applied_suggestions: list[AIFixSuggestion],
     validation: ValidationResult | None,
 ) -> None:
     """Publish validated rerun replacements and their separate AI fix counts.
 
     Args:
-        results: Owning run list, when supplied by the orchestrator.
+        results: Owning run list supplied by the orchestrator.
         by_tool: Current per-tool results after verification.
+        original_by_tool: Original result identities selected for each tool.
         applied_suggestions: Successfully applied AI suggestions.
         validation: Verification counts, when a check could run.
     """
-    if results is not None:
-        for index, result in enumerate(results):
-            if result.name in by_tool:
-                results[index] = by_tool[result.name][0]
+    for index, result in enumerate(results):
+        if result is original_by_tool.get(result.name):
+            results[index] = by_tool[result.name][0]
     applied_by_tool: dict[str, int] = {}
     for suggestion in applied_suggestions:
         if not suggestion.tool_name:

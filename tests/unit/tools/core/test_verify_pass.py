@@ -2265,3 +2265,30 @@ def test_invalid_plugin_result_is_an_unanswered_verify(
     assert_that(outcomes[0].status).is_equal_to(VerifyStatus.UNKNOWN)
     assert_that(outcomes[0].result).is_none()
     assert_that(outcomes[0].unknown_reason).contains("ValueError")
+
+
+def test_non_tool_result_cannot_crash_or_verify_a_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A duck-typed return violates the plugin contract even with valid fields.
+
+    Args:
+        monkeypatch: Fixture isolating the plugin registry.
+    """
+    tool = _FakeTool(
+        definition=_FakeDefinition(
+            claims=[Claim(patterns=["*.py"], capabilities={Cap.FIX, Cap.CHECK})],
+        ),
+        result=legacy_result(name="ruff", success=True),
+    )
+    _register(monkeypatch, {"ruff": tool})
+
+    outcomes = run_verify_pass(
+        tools_to_run=["ruff"],
+        scope=VerifyScope(files=("/repo/a.py",), narrowed=True),
+        configure=lambda *, tool_name: tool,
+    )
+
+    assert_that(outcomes[0].status).is_equal_to(VerifyStatus.UNKNOWN)
+    assert_that(outcomes[0].result).is_none()
+    assert_that(outcomes[0].unknown_reason).contains("must return ToolResult")

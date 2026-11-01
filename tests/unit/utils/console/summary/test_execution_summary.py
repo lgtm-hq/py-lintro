@@ -17,13 +17,13 @@ from assertpy import assert_that
 
 from lintro.enums.action import Action
 from lintro.utils.console.logger import ThreadSafeConsoleLogger
+from tests.unit.tool_result_helpers import legacy_result
 from tests.unit.utils.console.conftest import patch_tty_streams
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from lintro.models.core.tool_result import ToolResult
-from tests.unit.tool_result_helpers import legacy_result
 
 # Braille block used by the decorative ASCII art (U+2800..U+28FF).
 _BRAILLE_RE = re.compile(r"[\u2800-\u28ff]")

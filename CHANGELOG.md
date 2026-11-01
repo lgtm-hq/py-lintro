@@ -13,12 +13,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- **core**: freeze `ToolResult`; rebuild and validate state updates with
-  `dataclasses.replace` (#3019).
-- **core**: sequential JSONL output includes failed rows for crashed tools. Checks with
-  parse failures cannot verify fixes, even when usable findings remain.
-- **ai**: JSONL omits a stale `initial_issues_count` after an AI rerun when native fixes
-  and the fresh residual no longer reconcile with that initial count.
+- **core**: freeze `ToolResult` and validate immutable replacements (#3019, stage 4).
+  Plugin API-v2 constructors retain skipped success and unset inactive inspection
+  defaults. **Breaking for plugins that assign result fields after construction**:
+  migrate to `from_outcome`, `with_outcome` or `dataclasses.replace`; see the
+  [plugin migration guide](docs/plugins.md#immutable-toolresult-migration-api-v2).
+  Mutable payloads such as metadata remain shallowly shared.
 
 ### Deprecated
 

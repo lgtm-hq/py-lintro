@@ -219,6 +219,7 @@ async def test_budget_tracking_across_multiple_tools(
 
     await run_fix_pipeline(
         fix_issues=fix_issues,
+        all_results=[result for result, _ in fix_issues],
         provider=MockAIProvider(),
         ai_config=_default_ai_config(max_fix_attempts=3),
         logger=RecordingConsoleLogger(),
@@ -260,6 +261,7 @@ async def test_safe_vs_risky_suggestion_splitting(
 
     await run_fix_pipeline(
         fix_issues=fix_issues,
+        all_results=[result for result, _ in fix_issues],
         provider=MockAIProvider(),
         ai_config=_default_ai_config(auto_apply_safe_fixes=True),
         logger=RecordingConsoleLogger(),
@@ -296,6 +298,7 @@ async def test_auto_apply_fast_path_json_mode(
 
     applied_count, failed_count, suggestions = await run_fix_pipeline(
         fix_issues=fix_issues,
+        all_results=[result for result, _ in fix_issues],
         provider=MockAIProvider(),
         ai_config=_default_ai_config(auto_apply_safe_fixes=True, auto_apply=False),
         logger=RecordingConsoleLogger(),
@@ -336,6 +339,7 @@ async def test_interactive_review_path(
 
     applied_count, _failed, _suggestions = await run_fix_pipeline(
         fix_issues=fix_issues,
+        all_results=[result for result, _ in fix_issues],
         provider=MockAIProvider(),
         ai_config=_default_ai_config(auto_apply=False, auto_apply_safe_fixes=False),
         logger=RecordingConsoleLogger(),
@@ -405,6 +409,7 @@ async def test_no_suggestions_returns_early(
 
     applied, failed, suggestions = await run_fix_pipeline(
         fix_issues=fix_issues,
+        all_results=[result for result, _ in fix_issues],
         provider=MockAIProvider(),
         ai_config=_default_ai_config(),
         logger=RecordingConsoleLogger(),
@@ -446,6 +451,7 @@ async def test_post_fix_summary_generation(
 
     applied_count, _failed, _suggestions = await run_fix_pipeline(
         fix_issues=fix_issues,
+        all_results=[result for result, _ in fix_issues],
         provider=MockAIProvider(),
         ai_config=_default_ai_config(auto_apply=True),
         logger=RecordingConsoleLogger(),
@@ -490,6 +496,7 @@ async def test_verify_fixes_flow(
 
     await run_fix_pipeline(
         fix_issues=fix_issues,
+        all_results=[result for result, _ in fix_issues],
         provider=MockAIProvider(),
         ai_config=_default_ai_config(auto_apply=True),
         logger=RecordingConsoleLogger(),

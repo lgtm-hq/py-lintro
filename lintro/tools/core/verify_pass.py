@@ -708,6 +708,7 @@ def run_verify_pass(
         try:
             tool = configure(tool_name=name)
             result = tool.check(files, {})
+            ToolResult.validate_outcome(result)
             execution = result.outcome.execution
         except (TypeError, AttributeError):
             # Programming errors propagate, exactly as they do out of the

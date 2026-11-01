@@ -310,7 +310,7 @@ def test_run_ai_enhancement_json_publishes_fresh_rerun_results(
     mock_generate_fixes.return_value = [suggestion]
     mock_apply_fixes.return_value = [suggestion]
     mock_rerun_tools.return_value = [ToolResult(name="ruff", success=True)]
-    peer = ToolResult(name="peer", success=False, output="preserve peer failure")
+    peer = ToolResult(name="ruff", success=False, output="preserve peer failure")
     all_results = [result, peer]
 
     ai_result = run_ai_enhancement(
@@ -335,6 +335,8 @@ def test_run_ai_enhancement_json_publishes_fresh_rerun_results(
     assert_that(ai_result.fixes_applied).is_equal_to(1)
     assert_that(result.remaining_issues_count).is_equal_to(1)
     assert_that(result.success).is_false()
+    assert_that(result.metadata).is_same_as(updated.metadata)
+    assert_that(result.metadata["fixed_count"]).is_equal_to(1)
     assert_that(all_results[1]).is_same_as(peer)
     assert_that(peer.output).is_equal_to("preserve peer failure")
 

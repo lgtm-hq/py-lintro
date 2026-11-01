@@ -54,9 +54,9 @@ class ToolResult:
     ``with_outcome`` preserves the rest of an existing envelope. ``outcome`` is
     a computed view, not a stored second source of truth. Collection payloads
     remain shallowly shared, as with other frozen dataclasses; replacing state
-    never requires changing an existing result. Inactive outcomes require explicit
-    ``inspected_files=False`` and the corresponding verdict; ``from_outcome``
-    supplies these fields without normalizing contradictory inputs.
+    never requires changing an existing result. Legacy inactive constructors default
+    unknown inspection to False, and skips normalize success to True as before.
+    Explicit inspection claims and contradictory outcomes are rejected.
     """
 
     name: str = field(default="")
@@ -192,18 +192,10 @@ class ToolResult:
         return outcome_from_result(self)
 
     def validate_outcome(self) -> None:
-        """Validate a result before handing it to consumers, deliberately raise-only.
-
-        This boundary also protects callers receiving untyped legacy plugin results.
-
-        Raises:
-            ValueError: If fields contradict the outcome contract.
-        """
-        try:
-            outcome_from_result(self)
-        except ValueError:
-            # Keep this raise-only boundary explicit, including for doc validation.
-            raise
+        """Validate the outcome, raising ValueError for contradictory evidence."""
+        if not isinstance(self, ToolResult):
+            raise ValueError("plugin check()/fix() must return ToolResult")
+        outcome_from_result(self)
 
     def with_outcome(self, outcome: ToolOutcome) -> ToolResult:
         """Return a result with state derived from an explicit outcome.
@@ -233,6 +225,16 @@ class ToolResult:
         for field_name, value in collection_fields:
             if value is None:
                 raise TypeError(f"ToolResult.{field_name} must not be None")
+
+        # Preserve API-v2 constructor defaults only at the construction boundary.
+        # False is also the historical default for success, so a skip normalizes
+        # it to True. Explicit affirmative inspection is never normalized away.
+        if (self.no_files or self.skipped or self.timed_out) and (
+            self.inspected_files is None
+        ):
+            object.__setattr__(self, "inspected_files", False)
+        if self.skipped and self.success is False:
+            object.__setattr__(self, "success", True)
 
         if self.skipped and not self.skip_reason:
             raise ValueError(

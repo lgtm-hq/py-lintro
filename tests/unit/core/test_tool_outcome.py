@@ -369,6 +369,9 @@ def test_timeout_output_is_owned_by_outcome_at_construction() -> None:
 @pytest.mark.parametrize(
     "legacy",
     [
+        {"skipped": True, "skip_reason": "missing", "inspected_files": True},
+        {"no_files": True, "success": True, "inspected_files": True},
+        {"timed_out": True, "inspected_files": True},
         {"no_files": True, "inspected_files": False},
         {"timed_out": True, "success": True, "inspected_files": False},
         {
@@ -571,7 +574,8 @@ def test_invalid_explicit_outcomes_cannot_be_constructed(
     [
         {"skipped": True, "success": True},
         {"skip_reason": "orphan reason"},
-        {"skipped": True, "skip_reason": "missing", "success": False},
+        {"skipped": True, "skip_reason": "missing", "inspected_files": True},
+        {"no_files": True, "success": True, "inspected_files": True},
         {"no_files": True, "success": True, "timed_out": True},
         {"no_files": True, "success": False},
         {"timed_out": True, "success": True},
@@ -708,3 +712,51 @@ def test_atomic_replacement_validates_counts_and_preserves_envelope() -> None:
     assert_that(original.outcome).is_equal_to(
         ToolOutcome(Checked(False), FixMeasured(3, 1, 2), issues_count=2),
     )
+
+
+@pytest.mark.parametrize(
+    ("payload", "execution"),
+    [
+        ({"skipped": True, "skip_reason": "not installed"}, Skipped("not installed")),
+        (
+            {"skipped": True, "skip_reason": "not installed", "success": False},
+            Skipped("not installed"),
+        ),
+        ({"no_files": True, "success": True}, NoFiles()),
+        ({"timed_out": True, "success": False}, TimedOut("plugin output")),
+    ],
+)
+def test_api_v2_inactive_constructor_defaults_survive_replacement(
+    payload: dict[str, Any],
+    execution: Skipped | NoFiles | TimedOut,
+) -> None:
+    """Legacy constructor defaults remain usable by plugins and immutable updates.
+
+    Args:
+        payload: Common API-v2 plugin constructor arguments.
+        execution: Expected normalized execution evidence.
+    """
+    result = ToolResult(name="plugin", output="plugin output", **payload)
+    updated = replace(result, duration_seconds=1.25)
+
+    assert_that(updated.outcome.execution).is_equal_to(execution)
+    assert_that(updated.inspected_files).is_false()
+    assert_that(updated.success).is_equal_to(not isinstance(execution, TimedOut))
+    assert_that(updated.output).is_equal_to("plugin output")
+    assert_that(updated.duration_seconds).is_equal_to(1.25)
+    assert_that(result.duration_seconds).is_none()
+
+
+def test_replacement_shares_mutable_metadata_without_changing_frozen_state() -> None:
+    """AI metadata updates remain visible through both shallowly shared envelopes."""
+    original = ToolResult(name="plugin", metadata={"suppressions": []})
+    updated = original.with_outcome(ToolOutcome(Checked(True)))
+    updated.metadata["fixed_count"] = 2
+    updated.metadata["suppressions"].append({"code": "IGNORED"})
+
+    assert_that(original.metadata).is_same_as(updated.metadata)
+    assert_that(original.metadata).is_equal_to(
+        {"fixed_count": 2, "suppressions": [{"code": "IGNORED"}]},
+    )
+    assert_that(original.success).is_false()
+    assert_that(updated.success).is_true()
