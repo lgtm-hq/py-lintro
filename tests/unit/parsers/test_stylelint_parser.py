@@ -8,11 +8,16 @@ stdout before parsing).
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from assertpy import assert_that
 
 from lintro.parsers.stylelint.stylelint_issue import StylelintIssue
-from lintro.parsers.stylelint.stylelint_parser import parse_stylelint_output
+from lintro.parsers.stylelint.stylelint_parser import (
+    parse_stylelint_output,
+    parse_stylelint_output_with_stats,
+)
 
 # Real capture: one CSS file, single color-hex-length violation.
 SINGLE_WARNING = (
@@ -85,9 +90,10 @@ def test_parse_invalid_input(output: str) -> None:
     assert_that(parse_stylelint_output(output)).is_empty()
 
 
-def test_parse_clean_output() -> None:
-    """A clean file with no warnings yields no issues."""
-    assert_that(parse_stylelint_output(CLEAN)).is_empty()
+@pytest.mark.parametrize("output", [CLEAN, "[]", "notice\n[]\n[Warning] done"])
+def test_parse_clean_output(output: str) -> None:
+    """A complete clean report remains valid with surrounding logging."""
+    assert_that(parse_stylelint_output_with_stats(output)).is_equal_to(([], 0))
 
 
 def test_parse_single_warning_fields() -> None:
@@ -136,13 +142,56 @@ def test_parse_ignores_surrounding_noise() -> None:
     assert_that(issues[0].code).is_equal_to("color-hex-length")
 
 
-def test_parse_warning_missing_text_is_skipped() -> None:
-    """Warnings without message text are ignored."""
+def test_parse_warning_missing_text_is_counted() -> None:
+    """Warnings without message text are unusable records, not a clean report."""
     output = (
         '[{"source":"/tmp/x.css","warnings":['
         '{"line":1,"column":1,"rule":"color-hex-length","severity":"error"}]}]'
     )
-    assert_that(parse_stylelint_output(output)).is_empty()
+    assert_that(parse_stylelint_output_with_stats(output)).is_equal_to(([], 1))
+
+
+@pytest.mark.parametrize("field", ["warnings", "parseErrors", "invalidOptionWarnings"])
+def test_invalid_warning_records_preserve_usable_neighbors(field: str) -> None:
+    """Every malformed record counts without discarding the valid warning."""
+    result: dict[str, object] = {"source": "a.css", "warnings": []}
+    result[field] = [None, {"line": 1}, {"text": "kept"}]
+    issues, failures = parse_stylelint_output_with_stats(json.dumps([result]))
+
+    assert_that(failures).is_equal_to(2)
+    assert_that(issues).extracting("message").is_equal_to(["kept"])
+
+
+@pytest.mark.parametrize("prefix", ["Plugins: []\n", "[]\n", "[runner] []\n"])
+def test_leading_empty_array_does_not_hide_report(prefix: str) -> None:
+    """Prefer an actual source report to empty arrays embedded in logging."""
+    issues, failures = parse_stylelint_output_with_stats(prefix + SINGLE_WARNING)
+
+    assert_that(failures).is_zero()
+    assert_that(issues).extracting("code").is_equal_to(["color-hex-length"])
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "Plugins: []",
+        'notice\n[{"source":"a.css","warnings":[]',
+        '[]\nnotice\n[{"source":"a.css","warnings":[]',
+        'notice\n{"other":{"warnings":[]}}',
+    ],
+)
+def test_noise_or_truncated_report_cannot_expose_empty_arrays(output: str) -> None:
+    """Only a complete outer report can establish a clean result."""
+    assert_that(parse_stylelint_output_with_stats(output)).is_equal_to(([], 1))
+
+
+def test_noisy_report_preserves_malformed_source_accounting() -> None:
+    """A usable sibling enables extraction while the malformed entry counts."""
+    output = 'notice\n[1, {"source":"a.css","warnings":[{"text":"kept"}]}]'
+    issues, failures = parse_stylelint_output_with_stats(output)
+
+    assert_that(failures).is_equal_to(1)
+    assert_that(issues).extracting("message").is_equal_to(["kept"])
 
 
 def test_parse_multiple_sources() -> None:

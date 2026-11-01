@@ -6,12 +6,14 @@ captured from a Go module fixture.
 
 from __future__ import annotations
 
+import pytest
 from assertpy import assert_that
 
 from lintro.enums.severity_level import SeverityLevel
 from lintro.parsers.golangci_lint.golangci_lint_issue import GolangciLintIssue
 from lintro.parsers.golangci_lint.golangci_lint_parser import (
     parse_golangci_lint_output,
+    parse_golangci_lint_output_with_stats,
 )
 
 # Real captured output: two findings (errcheck + ineffassign), empty Severity.
@@ -116,9 +118,41 @@ def test_no_issues_returns_empty() -> None:
 
 
 def test_null_issues_returns_empty() -> None:
-    """golangci-lint emits ``"Issues":null`` for a clean run in some versions."""
+    """The legacy list API omits failure accounting for an invalid nil slice."""
     output = '{"Issues":null,"Report":{"Linters":[]}}'
     assert_that(parse_golangci_lint_output(output)).is_empty()
+
+
+@pytest.mark.parametrize("output", [None, "", " \n\t ", "\x1b[33m\x1b[0m"])
+def test_absent_report_counts_as_a_failure(output: str | None) -> None:
+    """No output cannot stand in for the v2 printer's explicit empty Issues."""
+    assert_that(parse_golangci_lint_output_with_stats(output)).is_equal_to(([], 1))
+
+
+@pytest.mark.parametrize("prefix", ["[runner] loading\n", "[runner] loading "])
+def test_bracketed_log_prefix_preserves_report(prefix: str) -> None:
+    """A bracketed log label is distinct from a JSON array envelope."""
+    issues, failures = parse_golangci_lint_output_with_stats(prefix + _TWO_ISSUES)
+
+    assert_that(failures).is_zero()
+    assert_that(issues).extracting("code").is_equal_to(["errcheck", "ineffassign"])
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        '[{"Issues": []}]',
+        '[{"Issues": []}',
+        '[runner] [{"Issues": []}]',
+        '[null]\n{"Issues": []}',
+        '[true]\n{"Issues": []}',
+        '[false]\n{"Issues": []}',
+        'notice\n[{"Issues": []}]',
+    ],
+)
+def test_array_envelope_cannot_expose_a_nested_report(output: str) -> None:
+    """Even a truncated array must not masquerade as a top-level object."""
+    assert_that(parse_golangci_lint_output_with_stats(output)).is_equal_to(([], 1))
 
 
 def test_trailing_stats_footer_is_ignored() -> None:

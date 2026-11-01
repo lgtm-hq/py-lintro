@@ -22,19 +22,21 @@ from tests.unit.tools.golangci_lint.conftest import (
 
 
 @pytest.mark.parametrize("stage", [0, 1, 2], ids=["initial", "fix", "recheck"])
-def test_null_issues_cannot_verify_a_go_fix(
+@pytest.mark.parametrize("report", ['{"Issues": null}', "", " \n\t "])
+def test_invalid_report_cannot_verify_a_go_fix(
     golangci_lint_plugin: GolangciLintPlugin,
     tmp_path: Path,
     stage: int,
+    report: str,
 ) -> None:
-    """A null Issues report never verifies a fix, even when every exit is zero."""
+    """A null or absent report never verifies a fix, even on exit zero."""
     _make_go_module(tmp_path)
     outputs = [
         (False, GOLANGCI_JSON_ONE_ISSUE),
         (True, GOLANGCI_JSON_NO_ISSUES),
         (True, GOLANGCI_JSON_NO_ISSUES),
     ]
-    outputs[stage] = (True, '{"Issues": null}')
+    outputs[stage] = (True, report)
     with patch.object(golangci_lint_plugin, "_run_subprocess", side_effect=outputs):
         result = golangci_lint_plugin.fix([str(tmp_path)], {})
 
@@ -58,7 +60,7 @@ def test_fix_retains_findings_newly_reported_by_module_recheck(
         "_run_subprocess",
         side_effect=[
             (False, GOLANGCI_JSON_ONE_ISSUE),
-            (True, ""),
+            (True, GOLANGCI_JSON_NO_ISSUES),
             (False, GOLANGCI_JSON_TWO_ISSUES),
         ],
     ):
@@ -221,7 +223,7 @@ def test_fix_counts_fixed_issues(
     # Sequence: initial check (2 issues), fix run, re-check (0 issues).
     outputs = [
         (False, GOLANGCI_JSON_TWO_ISSUES),
-        (True, ""),
+        (True, GOLANGCI_JSON_NO_ISSUES),
         (True, GOLANGCI_JSON_NO_ISSUES),
     ]
 
@@ -267,7 +269,9 @@ def test_fix_failure_is_not_masked_as_success(
         result = golangci_lint_plugin.fix([str(tmp_path)], {})
 
     assert_that(result.success).is_false()
-    assert_that(result.remaining_issues_count).is_equal_to(0)
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.parse_failures_count).is_equal_to(2)
     assert_that(result.output).contains("build error")
 
 

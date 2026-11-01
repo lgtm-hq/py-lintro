@@ -223,6 +223,32 @@ class SqlfluffPlugin(BaseToolPlugin):
             return DocUrlTemplate.SQLFLUFF.format(code=code)
         return None
 
+    def _run_subprocess(
+        self,
+        cmd: list[str],
+        timeout: int | float | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        stdin: int | None = None,
+    ) -> tuple[bool, str]:
+        """Keep lint JSON separate from diagnostics for the per-file runners.
+
+        Args:
+            cmd: Command and arguments to run.
+            timeout: Timeout in seconds.
+            cwd: Working directory for the subprocess.
+            env: Environment variables for the subprocess.
+            stdin: Optional stdin handle.
+
+        Returns:
+            Success and lint stdout, or the display output for fix commands
+            and invocations that did not emit a report.
+        """
+        result = self._run_subprocess_result(cmd, timeout, cwd, env, stdin)
+        if cmd[1:2] == ["lint"] and result.stdout.strip():
+            return result.success, result.stdout
+        return result.as_tuple()
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with SQLFluff.
 

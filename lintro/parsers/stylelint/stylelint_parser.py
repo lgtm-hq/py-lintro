@@ -9,6 +9,7 @@ emits a JSON array with one object per linted source file, each carrying a
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from typing import Any
 
 from loguru import logger
@@ -23,17 +24,51 @@ def _looks_like_stylelint_payload(data: Any) -> bool:
         data: A decoded JSON value.
 
     Returns:
-        True if ``data`` is a list of objects that look like Stylelint file
-        results (``source`` / ``warnings`` / ``parseErrors`` keys).
+        True if ``data`` contains Stylelint file results. Invalid siblings are
+        left for the parser to count, preserving usable findings.
     """
     if not isinstance(data, list):
         return False
-    if not data:
-        return True
     stylelint_keys = {"source", "warnings", "parseErrors", "invalidOptionWarnings"}
     return any(
         isinstance(item, dict) and stylelint_keys.intersection(item) for item in data
     )
+
+
+def _outer_json_spans(output: str) -> Iterator[tuple[int, int | None]]:
+    """Locate balanced outer values in one pass, respecting JSON strings.
+
+    Args:
+        output: Mixed formatter output and log text.
+
+    Yields:
+        tuple[int, int | None]: Start and end offsets of outer arrays or
+        objects. An unfinished trailing container has no end offset.
+    """
+    depth = 0
+    start = 0
+    in_string = False
+    escaped = False
+    for index, char in enumerate(output):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"' and depth:
+            in_string = True
+        elif char in "[{":
+            if not depth:
+                start = index
+            depth += 1
+        elif char in "]}" and depth:
+            depth -= 1
+            if not depth:
+                yield start, index + 1
+    if depth:
+        yield start, None
 
 
 def _extract_json_array(output: str) -> str | None:
@@ -41,7 +76,8 @@ def _extract_json_array(output: str) -> str | None:
 
     Stylelint writes its JSON payload to stderr, which lintro combines with
     stdout. Skip non-Stylelint JSON arrays (e.g. ``["warning"]`` noise) and
-    bracketed log lines so the real payload is selected.
+    bracketed log lines so the real payload is selected. Only decode balanced
+    outer values, avoiding repeated scans of nested or truncated JSON.
 
     Args:
         output: The combined stdout/stderr from stylelint.
@@ -50,22 +86,29 @@ def _extract_json_array(output: str) -> str | None:
         The JSON array substring, or None if no Stylelint array is found.
     """
     decoder = json.JSONDecoder()
-    idx = 0
-    while idx < len(output):
-        if output[idx] not in "[{":
-            idx += 1
-            continue
+    # Find standalone [] lines once, rather than rescanning a long log line
+    # for every empty array it contains.
+    empty_starts = set()
+    offset = 0
+    for line in output.splitlines(keepends=True):
+        if line.strip() == "[]":
+            empty_starts.add(offset + line.index("["))
+        offset += len(line)
+    empty_report = None
+    for start, end in _outer_json_spans(output):
+        if end is None:
+            return None
         try:
-            data, end = decoder.raw_decode(output, idx)
+            data = decoder.decode(output[start:end])
         except (json.JSONDecodeError, ValueError):
-            idx += 1
             continue
         if _looks_like_stylelint_payload(data):
-            return output[idx:end]
-        # Skip the whole unrelated value so an inner [] cannot masquerade
-        # as the formatter's primary report container.
-        idx = end
-    return None
+            return output[start:end]
+        if data == [] and start in empty_starts:
+            # An empty report must occupy its own line. Logging like
+            # "Plugins: []" is not a report, and must not hide a later one.
+            empty_report = output[start:end]
+    return empty_report
 
 
 def parse_stylelint_output(output: str | None) -> list[StylelintIssue]:
@@ -114,10 +157,10 @@ def parse_stylelint_output_with_stats(
         if not isinstance(source_result, dict):
             failures += 1
             continue
-        if not isinstance(source_result.get("warnings"), list):
-            failures += 1
         source = str(source_result.get("source", "") or "")
-        issues.extend(_parse_source_result(source_result, source))
+        source_issues, source_failures = _parse_source_result(source_result, source)
+        issues.extend(source_issues)
+        failures += source_failures
 
     return issues, failures
 
@@ -125,7 +168,7 @@ def parse_stylelint_output_with_stats(
 def _parse_source_result(
     source_result: dict[str, Any],
     source: str,
-) -> list[StylelintIssue]:
+) -> tuple[list[StylelintIssue], int]:
     """Parse a single per-file result object into issues.
 
     Args:
@@ -133,38 +176,27 @@ def _parse_source_result(
         source: Resolved source file path for the entry.
 
     Returns:
-        List of StylelintIssue objects for this source file.
+        Usable issues and the count of malformed containers or records.
     """
     issues: list[StylelintIssue] = []
-
-    warnings = source_result.get("warnings", [])
-    if isinstance(warnings, list):
-        for warning in warnings:
-            issue = _parse_warning(warning, source)
-            if issue is not None:
+    failures = 0
+    for key, default_rule in (
+        ("warnings", ""),
+        ("parseErrors", "parseError"),
+        ("invalidOptionWarnings", "invalidOption"),
+    ):
+        # warnings is required; the two metadata arrays are optional.
+        records = source_result.get(key, None if key == "warnings" else [])
+        if not isinstance(records, list):
+            failures += 1
+            continue
+        for record in records:
+            issue = _parse_warning(record, source, default_rule)
+            if issue is None:
+                failures += 1
+            else:
                 issues.append(issue)
-
-    parse_errors = source_result.get("parseErrors", [])
-    if isinstance(parse_errors, list):
-        for parse_error in parse_errors:
-            issue = _parse_warning(parse_error, source, default_rule="parseError")
-            if issue is not None:
-                issues.append(issue)
-
-    # Invalid rule options are configuration errors stylelint reports per
-    # file; dropping them would silently skip the affected rules.
-    invalid_options = source_result.get("invalidOptionWarnings", [])
-    if isinstance(invalid_options, list):
-        for invalid_option in invalid_options:
-            issue = _parse_warning(
-                invalid_option,
-                source,
-                default_rule="invalidOption",
-            )
-            if issue is not None:
-                issues.append(issue)
-
-    return issues
+    return issues, failures
 
 
 def _parse_warning(

@@ -489,6 +489,10 @@ def test_clean_run_is_a_clean_success(
 
 INVALID_PRIMARY_REPORTS = {
     "checkov": [
+        "[]",
+        '{"check_type": "terraform", "results": {"passed_checks": [], '
+        '"failed_checks": [{"check_id": "CKV_AWS_1",',
+        "WARNING skip_checks resolved to []",
         "null",
         "{}",
         '{"results": null}',
@@ -497,7 +501,7 @@ INVALID_PRIMARY_REPORTS = {
         '{"results": {"failed_checks": null}}',
         '{"results": {"failed_checks": {}}}',
     ],
-    "golangci_lint": ["null", "{}", '{"Issues": null}', '{"Issues": {}}'],
+    "golangci_lint": ["", " \n\t ", "null", "{}", '{"Issues": null}', '{"Issues": {}}'],
     "html_validate": ["null", "{}", "false", '[{"filePath":"a.html"}]'],
     "ruff": ["null", "{}", "false", '"wrong"'],
     "sqlfluff": ["null", "{}", "false", '[{"filepath":"a.sql"}]'],

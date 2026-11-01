@@ -65,13 +65,13 @@ def report_case(request: pytest.FixtureRequest) -> ReportCase:
     name: str = request.param
     invalid: list[object] = [None, False, 42, "invalid"]
     if name == "checkov":
-        invalid += [{}]
+        invalid += [[], {}]
         invalid += [{"results": value} for value in INVALID_RESULT_CONTAINERS]
         invalid += [{"results": {}}]
         invalid += [
             {"results": {"failed_checks": value}} for value in INVALID_LIST_CONTAINERS
         ]
-        empty: list[object] = [[], {"results": {"failed_checks": []}}]
+        empty: list[object] = [{"results": {"failed_checks": []}}]
         checks = [
             {"check_id": f"CKV_{i}", "file_path": "a.tf", "check_name": message}
             for i, message in enumerate(("first", "second"))

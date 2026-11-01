@@ -26,6 +26,7 @@ autofix metadata). See ``docs/tool-analysis/golangci-lint-analysis.md``.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from loguru import logger
@@ -114,22 +115,34 @@ def parse_golangci_lint_output_with_stats(
     Returns:
         Usable findings and the count of invalid report containers or records.
         v2's printer normalizes a nil issue slice to ``Issues: []``. Exit 3
-        remains an execution failure handled by the plugin, not a parse error.
+        with a valid JSON report remains an execution failure handled by the
+        plugin. An absent report always counts as a parse failure.
     """
     if not output or not output.strip():
-        return [], 0
+        return [], 1
 
     # Strip ANSI codes for consistent parsing across environments.
     text = strip_ansi_codes(output).strip()
+    decoder = json.JSONDecoder()
+
+    if text.startswith("["):
+        try:
+            decoder.raw_decode(text)
+        except json.JSONDecodeError:
+            # Only an invalid JSON prefix can be a bracketed log label.
+            # In particular, [null] and [true] are arrays, not log labels.
+            text = re.sub(r"^\[[A-Za-z][\w.-]*\][^\n{\[]*", "", text, count=1).lstrip()
+        else:
+            return [], 1
 
     # golangci-lint may append a human-readable stats footer after the JSON
     # document. Decode the leading JSON object and ignore any trailing text.
     start = text.find("{")
-    if start == -1 or text.startswith("["):
+    if start == -1 or "[" in text[:start]:
         return [], 1
 
     try:
-        data, _ = json.JSONDecoder().raw_decode(text[start:])
+        data, _ = decoder.raw_decode(text, start)
     except json.JSONDecodeError as e:
         logger.debug(f"Failed to decode golangci-lint output: {e}")
         return [], 1

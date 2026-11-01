@@ -82,6 +82,8 @@ def parse_checkov_output_with_stats(
             return [], 0
         blocks = [data]
     elif isinstance(data, list):
+        if not data:
+            return [], 1
         blocks = data
     else:
         return [], 1
