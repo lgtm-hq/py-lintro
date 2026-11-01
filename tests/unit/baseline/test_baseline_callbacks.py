@@ -29,6 +29,7 @@ def runner_artifact(
     monkeypatch: pytest.MonkeyPatch,
 ) -> RunArtifact:
     """Wire the simple runner to an execution double that honors its callback."""
+    monkeypatch.chdir(tmp_path)
     baseline = snapshot([dirty_result], root=tmp_path)
     change_baseline(tmp_path / "baseline.json", lambda _: baseline, create=True)
     result = replace(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import stat
@@ -141,7 +142,21 @@ def change_baseline(
             if create:
                 # An unrelated writer need not honor our sibling lock. Link
                 # atomically without overwriting a newly created destination.
-                os.link(temporary, path)
+                try:
+                    os.link(temporary, path)
+                except OSError as exc:
+                    if exc.errno not in {
+                        errno.ENOSYS,
+                        errno.EOPNOTSUPP,
+                        errno.EPERM,
+                        errno.EXDEV,
+                    }:
+                        raise
+                    raise ValueError(
+                        f"Cannot atomically create baseline {path}: {exc}. "
+                        "Choose a --baseline path on a filesystem that supports "
+                        "hard links.",
+                    ) from exc
             else:
                 os.replace(temporary, path)
         finally:
@@ -198,6 +213,33 @@ def load_run_baseline(
     if path is None:
         return None
     try:
+        require_baseline_root(path, config)
         return read_baseline(path)
     except (OSError, ValueError) as exc:
         raise ConfigurationError(f"Cannot load fingerprint baseline: {exc}") from exc
+
+
+def require_baseline_root(path: Path, config: Any) -> Path:
+    """Pin version-one path identities to a stable root before tools run.
+
+    Version one stores no root. Refuse other invocation directories rather
+    than interpreting the same relative entry as a different file.
+
+    Args:
+        path: Resolved baseline destination, including explicit CLI paths.
+        config: Loaded configuration with an optional project config path.
+
+    Returns:
+        The project config directory, or the baseline directory without one.
+
+    Raises:
+        ValueError: If the invocation directory differs from the expected root.
+    """
+    config_path = getattr(config, "config_path", None)
+    root = Path(config_path).resolve().parent if config_path else path.resolve().parent
+    if Path.cwd().resolve() != root:
+        raise ValueError(
+            f"Fingerprint baselines require running from the project root: {root}. "
+            "Change to that directory and retry, adjusting path arguments as needed.",
+        )
+    return root

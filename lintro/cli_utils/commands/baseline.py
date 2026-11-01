@@ -17,6 +17,7 @@ from lintro.utils.fingerprint_baseline import (
 from lintro.utils.fingerprint_baseline_file import (
     change_baseline,
     read_baseline,
+    require_baseline_root,
     resolve_baseline_path,
 )
 from lintro.utils.tool_executor import build_run_context, execute_run
@@ -143,9 +144,11 @@ def _manage(
         ValueError: If creation would overwrite an existing file (wrapped below).
     """
     try:
-        path = resolve_baseline_path(baseline, get_config(), default=True)
+        config = get_config()
+        path = resolve_baseline_path(baseline, config, default=True)
         if path is None:
             raise ValueError("baseline path could not be resolved")
+        root = require_baseline_root(path, config)
         if mode == "create":
             if path.exists() or path.is_symlink():
                 raise ValueError(f"baseline already exists: {path}")
@@ -157,7 +160,7 @@ def _manage(
             tool_options=tool_options,
             exclude=exclude,
         )
-        current = snapshot(artifact.tool_results, root=artifact.workspace_root)
+        current = snapshot(artifact.tool_results, root=root)
 
         def transform(previous: FingerprintBaseline | None) -> FingerprintBaseline:
             """Merge against the latest file while holding the writer lock."""
@@ -167,7 +170,7 @@ def _manage(
                 previous,
                 current,
                 results=artifact.tool_results,
-                root=artifact.workspace_root,
+                root=root,
                 prune=mode == "prune",
             )
 

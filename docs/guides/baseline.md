@@ -16,10 +16,22 @@ lintro baseline show
 Use `--baseline PATH` on these commands to choose a different file. Alternatively, set
 `baseline: .lintro-baseline.json` in `.lintro-config.yaml` (or
 `baseline = ".lintro-baseline.json"` under `[tool.lintro]`). CLI paths are relative to
-the invocation directory; configured paths are relative to the project config. Run from
-the project root: finding paths in the baseline are relative to that root. Commit the
-baseline alongside the code. Creation refuses to overwrite a file. `show` reads
-statistics without executing tools.
+the invocation directory; configured paths are relative to the project config. This also
+applies to a `baseline` value inherited from global user config: it resolves at the
+project config directory, or at cwd when there is no project config, rather than at the
+global config directory.
+
+Filtering and `create`, `update`, and `prune` require running from the project config
+directory. Without a project config, they require running from the resolved baseline
+file's directory, including when using an explicit `--baseline` path. Other invocation
+directories fail before tools run, with the required root in the error. This prevents an
+acknowledgement for root `a.py` from hiding a new finding in `pkg/a.py` when invoked
+from `pkg`. To check a subdirectory, run from the root and pass `pkg` as the scan path.
+With a project config, baseline files may live in a separate directory without changing
+the root. Finding paths are relative to this root and case-sensitive on every platform;
+case-only renames change their identity. Commit the baseline alongside the code.
+Creation refuses to overwrite a file. `show` reads statistics without executing tools
+and can run from any directory.
 
 Treat the baseline as a reviewed suppression policy. Review additions, changed
 fingerprints, and increased occurrence counts alongside code changes: `update` can

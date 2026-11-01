@@ -1,5 +1,6 @@
 """Untrusted baseline validation and atomic persistence."""
 
+import errno
 import json
 import os
 import stat
@@ -258,3 +259,27 @@ def test_oversized_input_is_rejected_before_decoding(
     path.write_bytes(b"x" * 5)
     with pytest.raises(ValueError, match="exceeds"):
         read_baseline(path)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [errno.ENOSYS, errno.EOPNOTSUPP, errno.EPERM, errno.EXDEV],
+)
+def test_unsupported_hardlinks_report_a_remedy_and_leave_no_files(
+    tmp_path: Path,
+    dirty_result: ToolResult,
+    monkeypatch: pytest.MonkeyPatch,
+    error: int,
+) -> None:
+    """Unsupported atomic creation fails with a usable remedy and cleans up."""
+    baseline = snapshot([dirty_result], root=tmp_path)
+    path = tmp_path / "baseline.json"
+
+    def unsupported(*args: object) -> None:
+        raise OSError(error, "hard links unavailable")
+
+    monkeypatch.setattr("lintro.utils.fingerprint_baseline_file.os.link", unsupported)
+    with pytest.raises(ValueError, match="Cannot atomically create baseline") as caught:
+        change_baseline(path, lambda _: baseline, create=True)
+    assert_that(str(caught.value)).contains("--baseline", "filesystem", "hard links")
+    assert_that(list(tmp_path.iterdir())).is_empty()
