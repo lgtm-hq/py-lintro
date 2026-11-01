@@ -1055,6 +1055,14 @@ def _fold_one(
         # Keep outcome readable: a failed or answered verify supersedes empty
         # discovery, and NoFiles cannot carry success=False.
         mutation.no_files = False
+    if (
+        answered
+        and verify is not None
+        and isinstance(mutation_outcome.execution, NoFiles)
+    ):
+        # Replace stale discovery evidence with the check's evidence, keeping
+        # unknown inspection unknown for legacy plugins.
+        mutation.inspected_files = verify.inspected_files
     return mutation
 
 

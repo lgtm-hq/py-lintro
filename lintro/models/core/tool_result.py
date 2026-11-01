@@ -193,6 +193,13 @@ class ToolResult:
         """
         return outcome_from_result(self)
 
+    def validate_outcome(self) -> None:
+        """Reject contradictory mutable state before handing it to consumers.
+
+        The adapter raises ValueError if the current fields are contradictory.
+        """
+        outcome_from_result(self)
+
     def with_outcome(self, outcome: ToolOutcome) -> ToolResult:
         """Return a result with state derived from an explicit outcome.
 

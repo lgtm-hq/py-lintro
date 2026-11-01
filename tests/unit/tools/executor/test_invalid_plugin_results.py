@@ -19,8 +19,9 @@ from lintro.enums.action import Action
 from lintro.enums.capability import Cap
 from lintro.models.core.claim import Claim
 from lintro.models.core.run_artifact import RunArtifact
-from lintro.models.core.tool_outcome import Checked, FixUnmeasured
+from lintro.models.core.tool_outcome import Checked, FixUnmeasured, TimedOut
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import ToolRegistry
@@ -112,6 +113,7 @@ def run_plugins(
         parallel: bool,
         action: Action,
         callback: Callable[[ToolResult], None],
+        dry_run: bool = False,
     ) -> RunArtifact:
         peer = ToolResult(
             name="peer",
@@ -134,8 +136,8 @@ def run_plugins(
         config.execution.auto_install_deps = False
         ctx = RunContext(
             action=action,
-            selection_action=action,
-            dry_run_preview=False,
+            selection_action=Action.FIX if dry_run else action,
+            dry_run_preview=dry_run,
             output_manager=SimpleNamespace(run_dir=tmp_path, base_dir=tmp_path),
             logger=ThreadSafeConsoleLogger(art_enabled=False),
             lintro_config=config,
@@ -156,6 +158,82 @@ def run_plugins(
         )
 
     return run
+
+
+@pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
+@pytest.mark.parametrize("fixable", [False, True], ids=["unfixable", "fixable"])
+def test_dry_run_timeout_retains_failure_and_peer_output(
+    run_plugins: Callable[..., RunArtifact],
+    tmp_path: Path,
+    parallel: bool,
+    fixable: bool,
+) -> None:
+    """Partial timeout findings cannot turn a format preview into a clean run.
+
+    Args:
+        run_plugins: Execute registered plugins in an isolated workspace.
+        tmp_path: Directory for streamed output.
+        parallel: Whether to dispatch concurrently.
+        fixable: Whether the partial diagnostic belongs in the preview.
+    """
+    issue = RuffIssue(file="target.py", message="partial finding", fixable=fixable)
+    bad = ToolResult(
+        name="bad",
+        success=False,
+        timed_out=True,
+        output="deadline exceeded after partial findings",
+        issues=[issue],
+        issues_count=1,
+    )
+    target = tmp_path / "preview.jsonl"
+    with StreamingResultHandler("jsonl", Action.CHECK, str(target)) as handler:
+        artifact = run_plugins(
+            bad,
+            parallel,
+            Action.CHECK,
+            handler.handle_result,
+            dry_run=True,
+        )
+
+    results = {result.name: result for result in artifact.tool_results}
+    assert_that(results["bad"].outcome.execution).is_equal_to(TimedOut(bad.output))
+    assert_that(results["bad"].issues_count).is_equal_to(int(fixable))
+    assert_that(results["bad"].issues).is_equal_to([issue] if fixable else [])
+    assert_that(results["bad"].success).is_false()
+    assert_that(artifact.exit_code).is_equal_to(1)
+    assert_that(handler.get_exit_code()).is_equal_to(1)
+    assert_that(handler.get_totals()).contains_entry(
+        {"tools_run": 2},
+        {"tools_failed": 1},
+    )
+    assert_that(artifact.total_issues).is_equal_to(int(fixable))
+    streamed = {
+        row["tool"]: row for row in map(json.loads, target.read_text().splitlines())
+    }
+    assert_that(streamed["bad"]).contains_entry(
+        {"success": False},
+        {"issues_count": int(fixable)},
+        {"output": bad.output},
+    )
+    assert_that(streamed["peer"]["output"]).is_equal_to("peer output survives")
+    wire = create_json_output(
+        artifact.action,
+        artifact.tool_results,
+        artifact.total_issues,
+        artifact.total_fixed,
+        artifact.total_remaining,
+        artifact.exit_code,
+    )
+    rendered = {row["tool"]: row for row in wire["results"]}
+    assert_that(rendered["bad"]).contains_entry(
+        {"success": False},
+        {"timed_out": True},
+        {"output": bad.output},
+    )
+    assert_that(rendered["peer"]["output"]).is_equal_to("peer output survives")
+    console = ThreadSafeConsoleLogger(art_enabled=False)
+    console.print_execution_summary(artifact.action, artifact.tool_results)
+    assert_that(console.get_buffer()).contains("bad", "peer", "FAIL", "PASS")
 
 
 @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])

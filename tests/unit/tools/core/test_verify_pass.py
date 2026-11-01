@@ -26,6 +26,7 @@ from lintro.models.core.claim import Claim
 from lintro.models.core.tool_outcome import (
     Checked,
     ExecutionOutcome,
+    FixMeasured,
     FixPartial,
     FixUnmeasured,
     NoFiles,
@@ -2123,6 +2124,43 @@ def test_verify_consumes_execution_variants_without_promoting_inactive_results(
     assert_that(outcomes[0].result).is_equal_to(
         result if status is VerifyStatus.VERIFIED else None,
     )
+
+
+@pytest.mark.parametrize("inspected_files", [True, None])
+@pytest.mark.parametrize("has_findings", [False, True])
+def test_answered_verify_replaces_no_files_inspection_evidence(
+    inspected_files: bool | None,
+    has_findings: bool,
+) -> None:
+    """An answered check supersedes empty discovery without inventing evidence.
+
+    Args:
+        inspected_files: Explicit inspection evidence or an unknown legacy value.
+        has_findings: Whether verification found a residual diagnostic.
+    """
+    mutation = ToolResult.from_outcome(ToolOutcome(NoFiles()), name="ruff")
+    verify = ToolResult.from_outcome(
+        ToolOutcome(
+            Checked(not has_findings, inspected_files),
+            issues_count=int(has_findings),
+        ),
+        name="ruff",
+        issues=[_issue("/repo/a.py")] if has_findings else [],
+    )
+
+    fold_verify_results(
+        mutation_results=[mutation],
+        verify_results=[VerifyOutcome(tool="ruff", result=verify)],
+        scope=VerifyScope(files=("/repo/a.py",), narrowed=True),
+    )
+
+    assert_that(mutation.no_files).is_false()
+    assert_that(mutation.inspected_files).is_equal_to(inspected_files)
+    assert_that(mutation.outcome.execution).is_equal_to(verify.outcome.execution)
+    assert_that(mutation.outcome.accounting).is_equal_to(
+        FixMeasured(int(has_findings), 0, int(has_findings)),
+    )
+    assert_that(mutation.issues).is_equal_to(verify.issues)
 
 
 def test_verify_fold_preserves_unavailable_initial_measurement_on_parse_failure() -> (
