@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.174.0] - 2026-10-31
+
+### Added
+
+- **rules**: ship opt-in Semgrep packs and none-coercion advisories (#3092) (1f246ba)
+
+### Changed
+
+- **core**: make result collections non-optional (#3065) (a99381d)
+
 ## [0.173.7] - 2026-10-31
 
 ### Changed
