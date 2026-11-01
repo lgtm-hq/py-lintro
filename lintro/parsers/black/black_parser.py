@@ -42,6 +42,15 @@ _SUMMARY_REFORMATTED = re.compile(
     r"(?:, \d+ files? failed to reformat)?\.?[ \t]*\r?$",
     re.IGNORECASE | re.MULTILINE,
 )
+_VERBOSE_METADATA = re.compile(
+    r"^(?:Identified `.+` as project root containing a .+\."
+    r"|Using configuration (?:from .+|in .+)\."
+    r"|[a-z_]+: .*"
+    r'|Found input source: ".+"'
+    r"|.+ ignored: .+"
+    r"|(?:All done!|Oh no!).*"
+    r"|\d+ files? would be left unchanged\.?)$",
+)
 
 
 def black_report_parse_failures(output: str, issues: list[BlackIssue]) -> int:
@@ -61,31 +70,53 @@ def black_report_parse_failures(output: str, issues: list[BlackIssue]) -> int:
     return abs(expected - identified)
 
 
-def black_inspected_paths(output: str, *, cwd: str | None) -> frozenset[str] | None:
+def black_inspected_paths(
+    output: str,
+    *,
+    files: list[str],
+    cwd: str | None,
+) -> frozenset[str] | None:
     """Read affirmative per-file confirmations from a completed verbose check.
 
     Discovery, exclusion messages and summary counts do not prove inspection.
     Cached unchanged confirmations are Black's native verdict for that file.
+    Only invocation identities with unambiguous single-line reports grant coverage.
 
     Args:
         output: Complete native verbose check report.
+        files: Exact file arguments passed to Black, relative to cwd.
         cwd: Working directory used by Black.
 
     Returns:
-        Exact confirmed files, or None if a confirmation cannot be resolved.
+        Exact confirmed files, or None for ambiguous or unresolvable reports.
     """
     paths: set[str] = set()
     try:
+        base = Path(cwd or Path.cwd())
+        expected: set[Path] = set()
+        for file in files:
+            path = base / file
+            resolved = path.resolve()
+            # splitlines also recognizes CR and Unicode line separators. Check
+            # both spellings because Black may resolve symlink input paths.
+            if any(
+                name.splitlines() != [name] or strip_ansi_codes(name) != name
+                for name in (str(path), str(resolved))
+            ):
+                return None
+            expected.add(resolved)
         for line in strip_ansi_codes(output).splitlines():
             match = _WOULD_REFORMAT.fullmatch(line) or _UNCHANGED.fullmatch(line)
             if match is None:
+                if line.strip() and not (
+                    _VERBOSE_METADATA.fullmatch(line) or _SUMMARY_WOULD.fullmatch(line)
+                ):
+                    return None
                 continue
-            path = Path(match.group("file"))
-            if not path.is_absolute():
-                path = Path(cwd or Path.cwd()) / path
-            if not path.is_file():
+            path = (base / match.group("file")).resolve()
+            if path not in expected or str(path) in paths or not path.is_file():
                 return None
-            paths.add(str(path.resolve()))
+            paths.add(str(path))
     except (OSError, ValueError, RuntimeError):
         return None
     return frozenset(paths)

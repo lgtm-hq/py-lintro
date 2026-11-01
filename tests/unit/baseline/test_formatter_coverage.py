@@ -82,6 +82,97 @@ def test_native_formatter_exclusion_retains_acknowledgement(
     assert baseline.read_bytes() == before
 
 
+@pytest.mark.parametrize("mode", ["update", "prune"])
+@pytest.mark.parametrize("separator", ["\n", "\r"])
+def test_black_multiline_filename_cannot_prune_excluded_victim(
+    workspace: Path,
+    mode: str,
+    separator: str,
+) -> None:
+    """A native confirmation's filename suffix cannot erase excluded format debt."""
+    victim = workspace / "victim.py"
+    victim.write_text("x=1\n", encoding="utf-8")
+    runner = CliRunner()
+    created = runner.invoke(
+        cli,
+        ["baseline", "create", victim.name, "--tools", "black"],
+    )
+    assert created.exit_code == 0, created.output
+    baseline = workspace / ".lintro-baseline.json"
+    assert len(read_baseline(baseline).entries) == 1
+    before = baseline.read_bytes()
+    (workspace / "pyproject.toml").write_text(
+        '[tool.black]\nforce-exclude = "/victim[.]py$"\n',
+        encoding="utf-8",
+    )
+    # Black excludes victim.py, but prints this clean file's name verbatim.
+    (workspace / f"prefix{separator}victim.py").write_text("x = 1\n", encoding="utf-8")
+
+    maintained = runner.invoke(cli, ["baseline", mode, ".", "--tools", "black"])
+
+    assert maintained.exit_code == 0, maintained.output
+    assert baseline.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("report", "returncode", "covered"),
+    [
+        ("victim.py already well formatted, good job.\n", 0, False),
+        ("would reformat victim.py\n1 file would be reformatted.\n", 1, False),
+        ("prefix\nexample.py already well formatted, good job.\n", 0, False),
+        (
+            "example.py already well formatted, good job.\n"
+            "example.py wasn't modified on disk since last run.\n",
+            0,
+            False,
+        ),
+        (
+            "Identified `.` as project root containing a pyproject.toml.\n"
+            "Using configuration from project root.\nline_length: 88\n"
+            'Found input source: "example.py"\n'
+            "example.py already well formatted, good job.\n\n"
+            "All done! ✨ 🍰 ✨\n1 file would be left unchanged.\n",
+            0,
+            True,
+        ),
+        ("would reformat ./example.py\n1 file would be reformatted.\n", 1, True),
+    ],
+    ids=[
+        "foreign-clean",
+        "foreign-changed",
+        "fragment",
+        "duplicate",
+        "clean",
+        "changed",
+    ],
+)
+def test_black_coverage_validates_invocation_and_report(
+    workspace: Path,
+    report: str,
+    returncode: int,
+    covered: bool,
+) -> None:
+    """Existing files alone cannot authenticate native inspection confirmations."""
+    file = workspace / "example.py"
+    file.write_text("x = 1\n", encoding="utf-8")
+    (workspace / "victim.py").write_text("x=1\n", encoding="utf-8")
+    plugin = BlackPlugin()
+    plugin.set_options(_baseline_coverage=True)
+    with (
+        patch.object(
+            plugin,
+            "_run_subprocess_result",
+            return_value=SubprocessResult(returncode, "", report, report),
+        ),
+        patch.object(plugin, "_check_line_length_violations", return_value=[]),
+    ):
+        result = plugin.check([str(file)], {})
+
+    assert result.findings_complete is True
+    assert result.issues_count == returncode
+    assert result.inspected_paths == (frozenset({str(file)}) if covered else None)
+
+
 @pytest.mark.parametrize(
     ("report", "returncode", "covered"),
     [
