@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.175.1] - 2026-11-01
+
+### Changed
+
+- **core**: construct explicit producer outcomes (stage 2) (#3106) (c17358e)
+
+### Fixed
+
+- **ai**: preserve provenance for all-carried reviews (#3105) (398140b)
+
 ## [0.175.0] - 2026-11-01
 
 ### Added
