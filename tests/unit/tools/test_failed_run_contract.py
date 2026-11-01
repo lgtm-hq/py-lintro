@@ -155,14 +155,6 @@ KNOWN_FAIL_OPEN: dict[tuple[str, str], KnownFailOpen] = {
     ("golangci_lint", "case2-rc0"): KnownFailOpen("#3026 null Issues read as clean"),
     ("html_validate", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
     ("ruff", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
-    ("shellcheck", "case2-rc0"): KnownFailOpen(
-        "#3025 null comments crash the parser",
-        TypeError,
-    ),
-    ("shellcheck", "case2-rc1"): KnownFailOpen(
-        "#3025 null comments crash the parser",
-        TypeError,
-    ),
     ("sqlfluff", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
     ("stylelint", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
     ("vale", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
