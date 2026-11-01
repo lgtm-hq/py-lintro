@@ -81,6 +81,7 @@ def _scan(
                     (
                         tool_options,
                         "ruff:_baseline_coverage=true",
+                        "black:_baseline_coverage=true",
                     ),
                 ),
             ),
@@ -110,7 +111,7 @@ def _scan(
             + ". Use --tools to select supported tools; see 'lintro baseline --help'.",
         )
     # Exact file discovery does not prove that user overrides ran every rule.
-    # Only original user options count; our internal Ruff discovery flag does not.
+    # Only original user options count; our internal coverage flags do not.
     overridden_tools = parse_tool_options(tool_options)
     for result in artifact.tool_results:
         if result.name.lower() in overridden_tools:

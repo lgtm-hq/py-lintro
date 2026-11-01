@@ -8,7 +8,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from lintro.exceptions.errors import ConfigurationError
 from lintro.models.core.fingerprint_baseline import FingerprintBaseline
@@ -161,13 +161,13 @@ def resolve_baseline_path(
 
 
 def load_run_baseline(
-    explicit: str | None,
+    explicit: str | Literal[False] | None,
     config: Any,
 ) -> FingerprintBaseline | None:
     """Validate an opted-in baseline before any tool or AI execution.
 
     Args:
-        explicit: CLI override path.
+        explicit: Override path, ``None`` to use config, or ``False`` to disable.
         config: Loaded project configuration.
 
     Returns:
@@ -176,6 +176,8 @@ def load_run_baseline(
     Raises:
         ConfigurationError: If an opted-in baseline cannot be loaded.
     """
+    if explicit is False:
+        return None
     path = resolve_baseline_path(explicit, config)
     if path is None:
         return None

@@ -10,6 +10,7 @@ Supports both batch and streaming parsing modes.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Generator, Iterable
 
 from loguru import logger
@@ -188,6 +189,17 @@ def parse_ruff_format_check_output(output: str) -> list[str]:
             files.append(line[len("Would reformat: ") :])
         elif line.startswith("Would reformat "):
             files.append(line[len("Would reformat ") :])
+    # Ruff 0.16's default full report identifies each unformatted file in a
+    # diagnostic location instead of a "Would reformat" line.
+    files.extend(
+        match[1]
+        for match in re.finditer(
+            r"^unformatted: File would be reformatted\r?\n"
+            r"[ \t]*--> (.+):\d+:\d+\r?$",
+            strip_ansi_codes(output),
+            re.MULTILINE,
+        )
+    )
     return files
 
 

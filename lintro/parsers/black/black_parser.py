@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from pathlib import Path
 
 from loguru import logger
 
@@ -24,6 +25,10 @@ from lintro.parsers.black.black_issue import BlackIssue
 
 _WOULD_REFORMAT = re.compile(r"^would reformat\s+(?P<file>.+)$", re.IGNORECASE)
 _REFORMATTED = re.compile(r"^reformatted\s+(?P<file>.+)$", re.IGNORECASE)
+_UNCHANGED = re.compile(
+    r"^(?P<file>.+) (?:already well formatted, good job\."
+    r"|wasn't modified on disk since last run\.)$",
+)
 # Native summaries occupy a whole line; filenames can contain the same words.
 _SUMMARY_WOULD = re.compile(
     r"^[ \t]*(?P<count>\d+) files? would be reformatted"
@@ -54,6 +59,36 @@ def black_report_parse_failures(output: str, issues: list[BlackIssue]) -> int:
     expected = int(summary.group("count")) if summary else len(issues)
     identified = sum(issue.file != "<unknown>" for issue in issues)
     return abs(expected - identified)
+
+
+def black_inspected_paths(output: str, *, cwd: str | None) -> frozenset[str] | None:
+    """Read affirmative per-file confirmations from a completed verbose check.
+
+    Discovery, exclusion messages and summary counts do not prove inspection.
+    Cached unchanged confirmations are Black's native verdict for that file.
+
+    Args:
+        output: Complete native verbose check report.
+        cwd: Working directory used by Black.
+
+    Returns:
+        Exact confirmed files, or None if a confirmation cannot be resolved.
+    """
+    paths: set[str] = set()
+    try:
+        for line in strip_ansi_codes(output).splitlines():
+            match = _WOULD_REFORMAT.fullmatch(line) or _UNCHANGED.fullmatch(line)
+            if match is None:
+                continue
+            path = Path(match.group("file"))
+            if not path.is_absolute():
+                path = Path(cwd or Path.cwd()) / path
+            if not path.is_file():
+                return None
+            paths.add(str(path.resolve()))
+    except (OSError, ValueError, RuntimeError):
+        return None
+    return frozenset(paths)
 
 
 def _iter_issue_lines(lines: Iterable[str]) -> Iterable[str]:

@@ -19,7 +19,7 @@ not (issue #724). The three optional AI callables the executor used to accept
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import click
 
@@ -186,7 +186,7 @@ def run_lint_artifact(
     no_art: bool = False,
     profile: bool = False,
     ai_enabled: bool = True,
-    baseline: str | None = None,
+    baseline: str | Literal[False] | None = None,
 ) -> RunArtifact:
     """Execute a run, apply AI enhancement, render it, and return the artifact.
 
@@ -225,7 +225,8 @@ def run_lint_artifact(
             only; the AI status rows of the configuration summary and any SARIF
             enrichment are still produced, exactly as they were before the
             executor's AI seams were removed.
-        baseline: Optional fingerprint baseline path overriding project config.
+        baseline: Fingerprint baseline path; ``None`` uses project config,
+            while ``False`` explicitly disables filtering.
 
     Returns:
         RunArtifact: The rendered run's results, totals, severity tallies, and
@@ -354,7 +355,7 @@ def run_lint_with_ai(
     no_art: bool = False,
     profile: bool = False,
     ai_enabled: bool = True,
-    baseline: str | None = None,
+    baseline: str | Literal[False] | None = None,
 ) -> int:
     """Run the full AI-aware pipeline and return only the process exit code.
 
@@ -391,7 +392,8 @@ def run_lint_with_ai(
             timings; post-checks are omitted. csv/sarif/markdown stdout stay
             unchanged.
         ai_enabled: Whether the post-execution AI enhancement may run.
-        baseline: Optional fingerprint baseline path overriding project config.
+        baseline: Fingerprint baseline path; ``None`` uses project config,
+            while ``False`` explicitly disables filtering.
 
     Returns:
         int: Exit code (0 for success, 1 for failures).

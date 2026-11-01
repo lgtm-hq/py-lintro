@@ -159,7 +159,7 @@ def resolve_severity_counts(
 
     When ``override`` is set, those counts are returned directly (useful for
     tests and CI snippets). Otherwise a check is run via :func:`api.check_run`
-    and the counts are read from the
+    with fingerprint filtering disabled, and the counts are read from the
     :class:`~lintro.models.core.run_artifact.RunArtifact` (issue #1823) rather
     than re-parsing stdout.
 
@@ -184,6 +184,7 @@ def resolve_severity_counts(
             paths=list(paths) if paths else None,
             no_log=True,
             ai_enabled=False,
+            baseline=False,
         )
     if not _live_counts_are_usable(artifact):
         raise click.ClickException(

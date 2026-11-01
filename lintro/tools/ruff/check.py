@@ -10,6 +10,10 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.parsers.ruff.ruff_format_coverage import (
+    format_inspected_paths,
+    format_report_parse_failures,
+)
 from lintro.parsers.ruff.ruff_format_issue import RuffFormatIssue
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.parsers.ruff.ruff_parser import (
@@ -187,6 +191,7 @@ def execute_ruff_check(
     format_issues: list[RuffFormatIssue] = []
     success_format: bool = True  # Default to True when format check is skipped
     format_complete = True
+    format_coverage: frozenset[str] | None = None
     output_format = ""
     if tool.options.get("format_check", False):
         format_cmd: list[str] = build_ruff_format_command(
@@ -194,6 +199,8 @@ def execute_ruff_check(
             files=rel_files,
             check_only=True,
         )
+        if tool.options.get("_baseline_coverage", False):
+            format_cmd.append("--verbose")
         try:
             format_process = run_subprocess_result_with_timeout(
                 tool=tool,
@@ -227,9 +234,13 @@ def execute_ruff_check(
             logger.debug(f"[ruff] format check full output:\n{output_format}")
 
         format_files = parse_ruff_format_check_output(output=output_format)
-        format_complete = success_format or (
-            format_process.returncode == 1 and bool(format_files)
+        format_failures = format_report_parse_failures(output_format, format_files)
+        parse_failures += format_failures
+        format_complete = not format_failures and (
+            success_format or (format_process.returncode == 1 and bool(format_files))
         )
+        if format_complete and tool.options.get("_baseline_coverage", False):
+            format_coverage = format_inspected_paths(output_format)
         # Normalize files to absolute paths to keep behavior consistent with
         # direct CLI calls and stabilize tests that compare exact paths. The
         # fix flow canonicalises the same way through the same helper, so a
@@ -262,18 +273,26 @@ def execute_ruff_check(
     # Combine linting and formatting issues for the formatters
     all_issues = lint_issues + format_issues
 
+    coverage = (
+        _baseline_coverage(tool, cmd=cmd, cwd=cwd, timeout=timeout)
+        if complete
+        else None
+    )
+    if coverage is not None and format_coverage is not None:
+        # A single file set can certify both capabilities only over their
+        # intersection. Each native command can have different exclusions.
+        coverage &= format_coverage
+
     return ToolResult(
         name=tool.definition.name,
         inspected_files=True if complete else None,
         findings_complete=complete,
         execution_failed=not complete,
         parse_failures_count=parse_failures,
-        inspected_paths=(
-            _baseline_coverage(tool, cmd=cmd, cwd=cwd, timeout=timeout)
-            if complete
-            else None
+        inspected_paths=coverage,
+        uninspected_codes=(
+            frozenset({"FORMAT"}) if format_coverage is None else frozenset()
         ),
-        uninspected_codes=frozenset({"FORMAT"}),
         success=success,
         output=output_summary,
         issues_count=issues_count,

@@ -57,6 +57,15 @@ individual findings and is not a suppression list. The new explicit
 `.lintro-baseline.json` is separate. Fingerprint-filtered runs do not compare or record
 severity history, so raw and filtered populations are never mixed.
 
+`lintro badge` always reports unfiltered severity counts. A configured fingerprint
+baseline does not change this public quality claim, and a missing or invalid baseline
+file does not prevent a badge scan. The Python API's `check`, `check_run`, `format`
+(`fmt`), and `format_run` (`fmt_run`) accept `baseline=False` to explicitly disable
+filtering, including loading the configured file. Omission or `baseline=None` uses the
+project configuration; a string path overrides it. An unconfigured baseline file is
+never loaded just because it exists. Callers publishing quality counts should opt out
+explicitly, as the badge does.
+
 Version 1 matches the tuple `(tool, relative file, rule code, SHA-256(message))`. Line
 and column are excluded from identity; the stored line is only a hint. Messages
 normalize CRLF to LF but preserve all other content, including numbers: removing
@@ -98,13 +107,23 @@ infer it from requested directories or the paths in diagnostics. The additive
 `ToolResult.inspected_paths` contract names exact files a producer successfully
 examined. The shared per-file check runner supplies completed file coverage; baseline
 management additionally asks Ruff for its native `--show-files` list, respecting native
-exclusions. Other producers retain entries until they supply exact coverage. Ruff's lint
-discovery does not prove formatter coverage: its `FORMAT` entries are retained even when
-lint coverage is exact. Producers may list such uncovered codes in `uninspected_codes`
-to narrow their coverage claim. A completed lint verdict with findings can remove other
-fixed entries within its exact coverage; an execution failure cannot. Occurrence budgets
-shrink only over that same coverage. Deleted files are retained because their absence
-alone is not a successful inspection.
+exclusions. Ruff's lint discovery alone does not prove formatter coverage. When the
+format check completes, management also requires the formatter's verbose per-file
+execution records and matching completion counts. Coverage is the intersection of the
+lint and formatter file sets. Disabled format checks, formatter exclusions, unknown
+trace formats, and incomplete reports cannot remove `FORMAT` acknowledgements.
+
+Black management scans request verbose output and use only affirmative per-file native
+verdicts: would reformat, already formatted, or unchanged according to Black's cache.
+Requested inputs, discovery messages, exclusion messages, and summary counts alone do
+not authorize pruning. Black's separate E501 supplement does not yet supply exact file
+coverage, so E501 entries are retained. Other producers retain entries until they supply
+exact coverage. Producers list uncovered codes in `uninspected_codes` to narrow their
+coverage claim. After a completed inspection proves a formatting finding fixed,
+`update` and `prune` remove its acknowledgement; a later regression fails the check.
+An execution failure cannot remove entries. Occurrence budgets shrink only over the
+same coverage. Deleted files are retained because their absence alone is not a
+successful inspection.
 
 Baseline JSON is untrusted input. Unknown schema versions, unexpected or duplicate JSON
 members, repeated entries, non-canonical paths, parent traversal, absolute paths,

@@ -19,6 +19,7 @@ from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.black.black_issue import BlackIssue
 from lintro.parsers.black.black_parser import (
+    black_inspected_paths,
     black_report_parse_failures,
     parse_black_output,
 )
@@ -306,6 +307,8 @@ class BlackPlugin(BaseToolPlugin):
             return ctx
 
         cmd: list[str] = self._get_executable_command(tool_name="black") + ["--check"]
+        if self.options.get("_baseline_coverage", False):
+            cmd.append("--verbose")
         cmd.extend(self._build_common_args())
         cmd.extend(ctx.rel_files)
 
@@ -346,6 +349,14 @@ class BlackPlugin(BaseToolPlugin):
             ),
             execution_failed=execution_failed or supplement.failed,
             parse_failures_count=parse_failures,
+            inspected_paths=(
+                black_inspected_paths(output, cwd=ctx.cwd)
+                if self.options.get("_baseline_coverage", False)
+                and not (execution_failed or parse_failures or supplement.failed)
+                else None
+            ),
+            # The separate E501 subprocess has its own native exclusions.
+            uninspected_codes=frozenset({"E501"}),
             success=(process.success and count == 0 and not supplement.failed),
             output=result_output,
             issues_count=count,
