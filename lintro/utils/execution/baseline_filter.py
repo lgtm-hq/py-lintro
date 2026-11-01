@@ -30,18 +30,20 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    from lintro.models.core.fingerprint_baseline import FingerprintBaseline
+    from lintro.models.core.fingerprint_baseline import (
+        BaselineFinding,
+        FingerprintBaseline,
+    )
     from lintro.models.core.run_artifact import RunArtifact
     from lintro.models.core.tool_result import ToolResult
-    from lintro.parsers.base_issue import BaseIssue
     from lintro.utils.fingerprint_baseline import Fingerprint
 
 
 def _filter_fix_accounting(
     result: ToolResult,
     root: Path,
-    detected: Sequence[BaseIssue],
-    retained: Sequence[BaseIssue],
+    detected: Sequence[BaselineFinding],
+    retained: Sequence[BaselineFinding],
 ) -> FixMeasured | FixUnmeasured:
     """Match filtered finding occurrences without assuming a residual subset.
 
