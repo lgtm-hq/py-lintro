@@ -25,6 +25,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - **core**: fail closed on empty Ruff reports and unexplained nonzero per-file check
   exits, including runs without fingerprint baselines (#438).
+- **shellcheck**: fail closed on malformed comments, invalid JSON and reports with
+  trailing noise; preserve execution diagnostics (#3025)
 
 ### Security
 
