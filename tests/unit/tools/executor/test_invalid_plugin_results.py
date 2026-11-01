@@ -370,20 +370,31 @@ def test_invalid_plugin_result_fails_closed_without_losing_peer_output(
 
 
 @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
+@pytest.mark.parametrize("action", [Action.CHECK, Action.FIX])
 def test_duck_typed_plugin_validator_cannot_bypass_type_guard(
     run_plugins: Callable[..., RunArtifact],
     parallel: bool,
+    action: Action,
 ) -> None:
     """Reject a non-ToolResult before invoking its validator or reporting it.
 
     Args:
         run_plugins: Execute registered plugins in an isolated workspace.
         parallel: Whether to dispatch concurrently.
+        action: Check or fix execution.
     """
-    bad = cast(ToolResult, SimpleNamespace(name="bad", validate_outcome=lambda: None))
+    bad = cast(
+        ToolResult,
+        SimpleNamespace(
+            name="bad",
+            validate_outcome=lambda: None,
+            parse_failures_count=1,
+            residual_unknown_reason=None,
+        ),
+    )
     observed: list[ToolResult] = []
 
-    artifact = run_plugins(bad, parallel, Action.CHECK, observed.append)
+    artifact = run_plugins(bad, parallel, action, observed.append)
 
     results = {row.name: row for row in artifact.tool_results}
     assert_that(results["bad"].outcome.execution).is_equal_to(Checked(False))

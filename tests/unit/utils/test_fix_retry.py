@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -183,6 +184,45 @@ def test_fix_retry_merges_results_correctly() -> None:
     # fixed = initial - remaining = 3 - 0 = 3
     assert_that(result.fixed_issues_count).is_equal_to(3)
     assert_that(tool._call_count).is_equal_to(3)
+
+
+@pytest.mark.parametrize("failure_pass", [1, 2])
+@pytest.mark.parametrize("parse_failures_count", [0, 1])
+def test_fix_retry_rejects_non_tool_results_before_normalizing_or_merging(
+    failure_pass: int,
+    parse_failures_count: int,
+) -> None:
+    """Invalid returns raise the plugin contract error on any fix pass.
+
+    Args:
+        failure_pass: Pass returning an object outside the ToolResult contract.
+        parse_failures_count: Whether parse normalization would replace it.
+    """
+    measured = ToolResult(
+        name="formatter",
+        issues_count=1,
+        initial_issues_count=3,
+        fixed_issues_count=2,
+        remaining_issues_count=1,
+    )
+    invalid = SimpleNamespace(
+        parse_failures_count=parse_failures_count,
+        residual_unknown=False,
+        residual_unknown_reason=None,
+        initial_issues_count=3,
+        initial_issues=[],
+        remaining_issues_count=1,
+        issues_count=1,
+        validate_outcome=lambda: None,
+    )
+    tool = MagicMock()
+    tool.fix.side_effect = [measured] * (failure_pass - 1) + [invalid, measured]
+
+    with pytest.raises(
+        ValueError,
+        match=r"plugin check\(\)/fix\(\) must return ToolResult",
+    ):
+        run_fix_with_retry(tool, ["."], {}, max_retries=2)
 
 
 @pytest.mark.parametrize("initial_count", [None, 4])
@@ -399,6 +439,8 @@ def test_incomplete_fix_pass_is_preserved_without_more_retries(
     result = run_fix_with_retry(tool, ["."], {}, max_retries=3)
 
     assert_that(incomplete.residual_unknown).is_equal_to(failure_kind == "unknown")
+    # A first-pass unknown result already has its final accounting. Parse
+    # normalization and later-pass baseline merging need immutable replacements.
     if failure_pass == 1 and failure_kind == "unknown":
         assert_that(result).is_same_as(incomplete)
     else:

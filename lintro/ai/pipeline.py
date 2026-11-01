@@ -533,10 +533,9 @@ async def run_fix_pipeline(
         if validation.verified or validation.unverified:
             applied_for_summary = validation.verified
 
-        # When fixes were applied, by_tool already holds de-duplicated
-        # per-tool results (one ToolResult per tool).  When no fixes were
-        # applied, we derive unique results from the original fix_issues
-        # because by_tool may be empty or stale.
+        # Applied fixes use the de-duplicated replacements in by_tool.
+        # Without applied suggestions, verification/refinement did not run,
+        # so fix_issues still holds current results with no rerun replacements.
         if applied_suggestions:
             unique_results: list[ToolResult] | None = [
                 result for result, _ in by_tool.values()

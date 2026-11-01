@@ -65,7 +65,9 @@ def run_fix_with_retry(
     """
     from loguru import logger
 
-    result = _mark_parse_failure_unknown(tool.fix(paths, options))
+    result = tool.fix(paths, options)
+    ToolResult.validate_outcome(result)
+    result = _mark_parse_failure_unknown(result)
 
     # An incomplete first pass has no complete baseline to merge or retry.
     if max_retries <= 1 or result.residual_unknown or result.parse_failures_count:
@@ -88,7 +90,9 @@ def run_fix_with_retry(
             f"{getattr(getattr(tool, 'definition', None), 'name', 'unknown')} "
             f"({remaining} remaining issues)",
         )
-        result = _mark_parse_failure_unknown(tool.fix(paths, options))
+        result = tool.fix(paths, options)
+        ToolResult.validate_outcome(result)
+        result = _mark_parse_failure_unknown(result)
         remaining = get_remaining_count(result)
 
     # Merge: keep initial_issues_count and initial_issues from first pass,

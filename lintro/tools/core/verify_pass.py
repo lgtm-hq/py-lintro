@@ -1086,6 +1086,8 @@ def fold_verify_results(
     rule for no user-visible gain.
 
     A third-party tool with no ``CHECK`` capability keeps its own numbers.
+    The former built-in ``FORMAT``-only tools (prettier, oxfmt, rustfmt and
+    shfmt) gained ``CHECK`` in #2607 and therefore use this fold.
 
     For a project-scoped ``CHECK`` (``partitionable=False``), an answered
     verdict is authoritative over the tool's whole footprint, so the fold
