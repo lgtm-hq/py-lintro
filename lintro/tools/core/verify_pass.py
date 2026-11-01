@@ -73,7 +73,7 @@ from __future__ import annotations
 
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
 from loguru import logger
@@ -777,8 +777,11 @@ def run_verify_pass(
                 ),
             )
             continue
-        result.capability = Cap.CHECK
-        result.duration_seconds = time.monotonic() - started
+        result = replace(
+            result,
+            capability=Cap.CHECK,
+            duration_seconds=time.monotonic() - started,
+        )
         outcomes.append(
             VerifyOutcome(
                 tool=name,
@@ -876,23 +879,25 @@ def _fold_unknown(
         )
     output = mutation.output or ""
     accounting = mutation.outcome.accounting
-    mutation.output = f"{output}\n{note}" if output.strip() else note
-    mutation.issues = detected
-    mutation.issues_count = len(detected)
-    if accounting.initial is None and not mutation.parse_failures_count:
-        mutation.initial_issues_count = len(detected)
-    # No after-count exists, so none is reported. Consumers key off
-    # ``residual_unknown`` and render "unknown" rather than filling the gap
-    # with a zero or with the pre-fix number.
-    mutation.fixed_issues_count = None
-    mutation.remaining_issues_count = None
-    mutation.residual_unknown = True
-    mutation.residual_unknown_reason = outcome.unknown_reason
-    # This folded row now records a failed verification, even if mutation
-    # discovery originally found no files.
-    mutation.no_files = False
-    mutation.success = False
-    return mutation
+    # No after-count exists. Build the failed verification and unknown
+    # accounting together so validation never sees a contradictory intermediate.
+    return replace(
+        mutation,
+        output=f"{output}\n{note}" if output.strip() else note,
+        issues=detected,
+        issues_count=len(detected),
+        initial_issues_count=(
+            len(detected)
+            if accounting.initial is None and not mutation.parse_failures_count
+            else accounting.initial
+        ),
+        fixed_issues_count=None,
+        remaining_issues_count=None,
+        residual_unknown=True,
+        residual_unknown_reason=outcome.unknown_reason,
+        no_files=False,
+        success=False,
+    )
 
 
 def check_answered(result: ToolResult | None) -> bool:
@@ -904,7 +909,8 @@ def check_answered(result: ToolResult | None) -> bool:
     Returns:
         True for a completed clean check or one reporting real findings.
         Skips, empty scopes, timeouts (even with partial findings), and
-        execution failures without findings do not answer the check.
+        execution failures without findings do not answer the check. Reports
+        with parse failures never answer, even when they retain usable findings.
     """
     if result is None or result.parse_failures_count:
         return False
@@ -953,8 +959,10 @@ def _fold_one(
     accounting = mutation_outcome.accounting
     verify = outcome.result
     if verify and verify.parse_failures_count:
-        mutation.parse_failures_count = (mutation.parse_failures_count or 0) + (
-            verify.parse_failures_count
+        mutation = replace(
+            mutation,
+            parse_failures_count=(mutation.parse_failures_count or 0)
+            + verify.parse_failures_count,
         )
     if mutation.parse_failures_count:
         mutation_reason = (
@@ -1031,39 +1039,35 @@ def _fold_one(
         note = VERIFY_NOTE_TEMPLATE.format(residual=residual, previous=previous)
         output = f"{output}\n{note}" if output.strip() else note
 
-    mutation.issues = survivors
-    mutation.issues_count = residual
-    mutation.initial_issues_count = fixed + residual
-    mutation.fixed_issues_count = fixed
-    mutation.remaining_issues_count = residual
-    mutation.residual_unknown = False
-    mutation.residual_unknown_reason = None
-    mutation.output = output
-    # ``success`` follows the authoritative residual, not the fix pass's
-    # opinion of itself: a leftover on a file the pass did not need to verify
-    # is still a leftover. The mutation phase's own flag is still ANDed in so
-    # an execution failure that produced no issues stays a failure, and so is
-    # the verify's, so a broken check cannot read as clean.
-    mutation.success = mutation_outcome.success and residual == 0
+    # Retain execution failures even when verification measures zero survivors.
+    success = mutation_outcome.success and residual == 0
+    duration = mutation.duration_seconds
     if verify is not None:
-        mutation.success = mutation.success and answered and verify.outcome.success
+        success = success and answered and verify.outcome.success
         if verify.duration_seconds is not None:
-            mutation.duration_seconds = (
-                mutation.duration_seconds or 0.0
-            ) + verify.duration_seconds
-    if answered or not mutation.success:
-        # Keep outcome readable: a failed or answered verify supersedes empty
-        # discovery, and NoFiles cannot carry success=False.
-        mutation.no_files = False
-    if (
-        answered
-        and verify is not None
-        and isinstance(mutation_outcome.execution, NoFiles)
-    ):
-        # Replace stale discovery evidence with the check's evidence, keeping
-        # unknown inspection unknown for legacy plugins.
-        mutation.inspected_files = verify.inspected_files
-    return mutation
+            duration = (duration or 0.0) + verify.duration_seconds
+    return replace(
+        mutation,
+        issues=survivors,
+        issues_count=residual,
+        initial_issues_count=fixed + residual,
+        fixed_issues_count=fixed,
+        remaining_issues_count=residual,
+        residual_unknown=False,
+        residual_unknown_reason=None,
+        output=output,
+        success=success,
+        duration_seconds=duration,
+        # An answered or failed verify supersedes empty discovery.
+        no_files=mutation.no_files and not answered and success,
+        inspected_files=(
+            verify.inspected_files
+            if answered
+            and verify is not None
+            and isinstance(mutation_outcome.execution, NoFiles)
+            else mutation.inspected_files
+        ),
+    )
 
 
 def fold_verify_results(
@@ -1072,7 +1076,7 @@ def fold_verify_results(
     verify_results: Sequence[VerifyOutcome],
     scope: VerifyScope,
 ) -> None:
-    """Fold each verify outcome into its tool's mutation result, in place.
+    """Replace each list entry with its tool's folded verification result.
 
     Display rolls up to the tool, so the run keeps exactly one result per
     tool: the mutation result carries the net resolved figure and, after this
@@ -1080,10 +1084,7 @@ def fold_verify_results(
     output formatter, SARIF writer and AI summary responsible for a grouping
     rule for no user-visible gain.
 
-    A tool with no outcome at all declares no ``CHECK`` capability — prettier,
-    oxfmt, rustfmt and shfmt are ``FORMAT``-only — and keeps its own numbers,
-    including any post-format checking it does for itself, until #2607 makes
-    every mutator declare ``CHECK``.
+    A third-party tool with no ``CHECK`` capability keeps its own numbers.
 
     For a project-scoped ``CHECK`` (``partitionable=False``), an answered
     verdict is authoritative over the tool's whole footprint, so the fold
@@ -1091,7 +1092,7 @@ def fold_verify_results(
     files the scope named.
 
     Args:
-        mutation_results: Results from the mutation phase, mutated in place.
+        mutation_results: Results from the mutation phase; list entries are replaced.
         verify_results: Outcomes from the verify pass.
         scope: The file set the verify pass covered.
     """

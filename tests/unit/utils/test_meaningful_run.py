@@ -54,7 +54,13 @@ def test_result_inspected_files_rejects_empty_file_sets(output: str) -> None:
     Args:
         output: A real "nothing to check" message from a wrapped tool.
     """
-    result = ToolResult(name="ruff", success=True, output=output, no_files=True)
+    result = ToolResult(
+        name="ruff",
+        success=True,
+        output=output,
+        no_files=True,
+        inspected_files=False,
+    )
 
     assert_that(result_inspected_files(result)).is_false()
 
@@ -66,6 +72,7 @@ def test_result_inspected_files_rejects_a_skipped_tool() -> None:
         success=True,
         skipped=True,
         skip_reason="hadolint not found",
+        inspected_files=False,
     )
 
     assert_that(result_inspected_files(result)).is_false()
@@ -79,6 +86,7 @@ def test_result_inspected_files_rejects_a_timed_out_tool() -> None:
         skipped=False,
         timed_out=True,
         output="timed out after 300s",
+        inspected_files=False,
     )
 
     assert_that(result_inspected_files(result)).is_false()
@@ -97,6 +105,7 @@ def test_run_inspected_files_needs_only_one_real_tool() -> None:
             success=True,
             skipped=True,
             skip_reason="hadolint not found",
+            inspected_files=False,
         ),
         _real_result(),
     ]
@@ -112,7 +121,7 @@ def test_run_inspected_files_needs_only_one_real_tool() -> None:
         (False, 1, True, False, False),
         (False, 0, True, False, False),
         (True, 0, False, False, False),
-        (False, 0, False, True, False),
+        (True, 0, False, True, False),
     ],
     ids=[
         "unreported-failure",
@@ -150,7 +159,7 @@ def test_run_has_unreported_failure(
         ),
         skipped=skipped,
         skip_reason="not installed" if skipped else None,
-        inspected_files=True,
+        inspected_files=not skipped,
     )
 
     assert_that(run_has_unreported_failure([_real_result(), result])).is_equal_to(
@@ -178,6 +187,7 @@ def test_run_inspected_files_rejects_an_all_skipped_run() -> None:
             success=True,
             skipped=True,
             skip_reason="hadolint not found",
+            inspected_files=False,
         ),
     ]
 
@@ -233,6 +243,7 @@ def test_mixed_baseline_requires_known_coverage(coverage: bool | None) -> None:
                     success=True,
                     skipped=True,
                     skip_reason="hadolint not found",
+                    inspected_files=False,
                 ),
             ],
             False,
@@ -380,8 +391,12 @@ def test_legacy_results_remain_unknown(
         output: A message from an unconverted producer.
         message_field: The display field carrying the message.
     """
-    result = ToolResult(name="legacy", success=True)
-    setattr(result, message_field, output)
+    result = ToolResult(
+        name="legacy",
+        success=True,
+        output=output if message_field == "output" else None,
+        formatted_output=output if message_field == "formatted_output" else None,
+    )
 
     assert_that(result_inspected_files(result)).is_none()
     assert_that(run_inspected_files([result])).is_false()
@@ -409,6 +424,7 @@ def test_the_no_files_flag_beats_an_output_no_heuristic_can_read() -> None:
         output=None,
         issues_count=0,
         no_files=True,
+        inspected_files=False,
     )
 
     assert_that(result_inspected_files(bandit)).is_false()
@@ -436,6 +452,7 @@ def test_a_flagged_result_is_rejected_even_with_a_clean_looking_message() -> Non
         output="No issues found.",
         issues_count=0,
         no_files=True,
+        inspected_files=False,
     )
 
     assert_that(result_inspected_files(result)).is_false()

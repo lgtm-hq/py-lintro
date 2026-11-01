@@ -58,7 +58,14 @@ def test_aggregate_excludes_skipped_tools() -> None:
     """Skipped tools contribute nothing to any total."""
     results = [
         ToolResult(name="ruff", success=False, issues_count=4),
-        ToolResult(name="black", skipped=True, skip_reason="missing", issues_count=0),
+        ToolResult(
+            name="black",
+            skipped=True,
+            skip_reason="missing",
+            issues_count=0,
+            inspected_files=False,
+            success=True,
+        ),
     ]
 
     total_issues, _total_fixed, total_remaining = aggregate_tool_results(

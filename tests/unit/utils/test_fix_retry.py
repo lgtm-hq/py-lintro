@@ -326,6 +326,7 @@ def test_fix_retry_merge_preserves_last_pass_payload(
         parse_failures_count=0,
         pytest_summary={"passed": 2, "failed": 1},
         timed_out=timed_out,
+        inspected_files=False if timed_out else None,
     )
     tool = MagicMock()
     tool.fix.side_effect = [first, last]
@@ -380,6 +381,7 @@ def test_incomplete_fix_pass_is_preserved_without_more_retries(
         duration_seconds=1.5,
         metadata={"stage": "incomplete"},
         pytest_summary={"passed": 1, "errors": 1},
+        inspected_files=False,
     )
     measured = ToolResult(
         name="formatter",
@@ -396,8 +398,9 @@ def test_incomplete_fix_pass_is_preserved_without_more_retries(
 
     result = run_fix_with_retry(tool, ["."], {}, max_retries=3)
 
+    assert_that(incomplete.residual_unknown).is_equal_to(failure_kind == "unknown")
     if failure_pass == 1:
-        assert_that(result).is_same_as(incomplete)
+        assert_that(result is incomplete).is_equal_to(failure_kind == "unknown")
         assert_that(result.initial_issues_count).is_equal_to(initial_count)
         assert_that(result.initial_issues).is_equal_to(detected[-1:])
     else:

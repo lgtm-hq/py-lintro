@@ -19,20 +19,28 @@ if TYPE_CHECKING:
 __all__ = ["run_fix_with_retry"]
 
 
-def _mark_parse_failure_unknown(result: ToolResult) -> None:
+def _mark_parse_failure_unknown(result: ToolResult) -> ToolResult:
     """Ensure an incomplete report carries explicit unknown fix accounting.
 
     Args:
         result: Fix result to normalize before returning or merging it.
+
+    Returns:
+        A validated replacement for incomplete reports, otherwise the input.
     """
     if result.parse_failures_count:
-        result.success = False
-        result.fixed_issues_count = None
-        result.remaining_issues_count = None
-        result.residual_unknown = True
-        result.residual_unknown_reason = (
-            result.residual_unknown_reason or "tool output could not be fully parsed"
+        return replace(
+            result,
+            success=False,
+            fixed_issues_count=None,
+            remaining_issues_count=None,
+            residual_unknown=True,
+            residual_unknown_reason=(
+                result.residual_unknown_reason
+                or "tool output could not be fully parsed"
+            ),
         )
+    return result
 
 
 def run_fix_with_retry(
@@ -57,8 +65,7 @@ def run_fix_with_retry(
     """
     from loguru import logger
 
-    result = tool.fix(paths, options)
-    _mark_parse_failure_unknown(result)
+    result = _mark_parse_failure_unknown(tool.fix(paths, options))
 
     # An incomplete first pass has no complete baseline to merge or retry.
     if max_retries <= 1 or result.residual_unknown or result.parse_failures_count:
@@ -81,8 +88,7 @@ def run_fix_with_retry(
             f"{getattr(getattr(tool, 'definition', None), 'name', 'unknown')} "
             f"({remaining} remaining issues)",
         )
-        result = tool.fix(paths, options)
-        _mark_parse_failure_unknown(result)
+        result = _mark_parse_failure_unknown(tool.fix(paths, options))
         remaining = get_remaining_count(result)
 
     # Merge: keep initial_issues_count and initial_issues from first pass,

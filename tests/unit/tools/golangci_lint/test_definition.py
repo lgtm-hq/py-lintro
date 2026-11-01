@@ -44,6 +44,7 @@ def _module_result(
         initial_issues_count=initial,
         fixed_issues_count=fixed,
         remaining_issues_count=remaining,
+        inspected_files=False if timed_out else None,
     )
 
 

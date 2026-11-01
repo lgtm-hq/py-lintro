@@ -13,6 +13,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **core**: freeze `ToolResult`; rebuild and validate state updates with
+  `dataclasses.replace` (#3019).
+- **core**: sequential JSONL output includes failed rows for crashed tools. Checks with
+  parse failures cannot verify fixes, even when usable findings remain.
+- **ai**: JSONL omits a stale `initial_issues_count` after an AI rerun when native fixes
+  and the fresh residual no longer reconcile with that initial count.
+
 ### Deprecated
 
 ### Removed

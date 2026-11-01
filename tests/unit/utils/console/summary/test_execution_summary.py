@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from lintro.models.core.tool_result import ToolResult
+from tests.unit.tool_result_helpers import legacy_result
 
 # Braille block used by the decorative ASCII art (U+2800..U+28FF).
 _BRAILLE_RE = re.compile(r"[\u2800-\u28ff]")
@@ -465,3 +466,13 @@ def test_execution_summary_fix_various_counts(
     rows = _totals_row(output=capsys.readouterr().out)
     assert_that(rows).contains_entry({"Net Resolved (Native)": fixed})
     assert_that(rows).contains_entry({"Remaining Issues": expected_remaining})
+
+
+def test_execution_summary_rejects_legacy_non_numeric_remaining_sentinel() -> None:
+    """An untyped legacy sentinel cannot silently contribute zero to a summary."""
+    result = legacy_result(name="legacy", remaining_issues_count="N/A")
+    logger = ThreadSafeConsoleLogger(art_enabled=False)
+    assert_that(logger.print_execution_summary).raises(ValueError).when_called_with(
+        Action.FIX,
+        [result],
+    )

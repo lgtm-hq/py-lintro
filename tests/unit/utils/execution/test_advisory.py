@@ -168,7 +168,9 @@ def test_advisory_findings_count_ignores_skipped_results() -> None:
             name="a",
             skipped=True,
             skip_reason="opt-in required",
-            issues_count=5,
+            issues_count=0,
+            inspected_files=False,
+            success=True,
         ),
         ToolResult(name="b", success=False, issues_count=2),
     ]
@@ -183,6 +185,8 @@ def test_advisory_tools_errored_ignores_findings_and_skips() -> None:
         name="a",
         skipped=True,
         skip_reason="opt-in required",
+        inspected_files=False,
+        success=True,
     )
     failed = ToolResult(
         name="idiom-review",
@@ -202,6 +206,8 @@ def test_render_advisory_results_reports_skip_reason() -> None:
                 name="idiom-review",
                 skipped=True,
                 skip_reason="opt-in required",
+                inspected_files=False,
+                success=True,
             ),
         ],
     )

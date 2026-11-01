@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -328,9 +329,10 @@ def test_failed_writes_keep_unknown_accounting_until_measured(
     assert_that(result.residual_unknown).is_true()
     assert_that(result.fixed_issues_count).is_none()
     assert_that(result.remaining_issues_count).is_none()
-    result.capability = Cap.FIX
+    result = replace(result, capability=Cap.FIX)
+    folded_results = [result]
     fold_verify_results(
-        mutation_results=[result],
+        mutation_results=folded_results,
         verify_results=[
             VerifyOutcome(
                 tool="oxlint",
@@ -347,6 +349,7 @@ def test_failed_writes_keep_unknown_accounting_until_measured(
             narrowed=True,
         ),
     )
+    result = folded_results[0]
     payload = serialize_tool_result(result, action=Action.FIX)
     assert_that(result.success).is_false()
     assert_that(result.output).contains("crashed")

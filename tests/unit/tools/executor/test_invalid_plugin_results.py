@@ -30,6 +30,7 @@ from lintro.utils.execution.run_context import RunContext
 from lintro.utils.execution.tool_configuration import ToolsToRunResult
 from lintro.utils.json_output import create_json_output
 from lintro.utils.streaming_output import StreamingResultHandler
+from tests.unit.tool_result_helpers import legacy_result
 
 
 @dataclass
@@ -184,6 +185,7 @@ def test_dry_run_timeout_retains_failure_and_peer_output(
         output="deadline exceeded after partial findings",
         issues=[issue],
         issues_count=1,
+        inspected_files=False,
     )
     target = tmp_path / "preview.jsonl"
     with StreamingResultHandler("jsonl", Action.CHECK, str(target)) as handler:
@@ -267,7 +269,7 @@ def test_invalid_plugin_result_fails_closed_without_losing_peer_output(
         action: Check or fix execution.
         fields: Contradictory legacy fields accepted by ToolResult construction.
     """
-    bad = ToolResult(name="bad", **fields)
+    bad = legacy_result(name="bad", **fields)
     with pytest.raises(ValueError):
         _ = bad.outcome
     target = tmp_path / "results.jsonl"

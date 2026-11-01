@@ -145,6 +145,7 @@ class _MutatingTool:
                 initial_issues_count=len(detected),
                 fixed_issues_count=0,
                 remaining_issues_count=len(detected),
+                inspected_files=False,
             )
         if self.fix_calls < self._converge_after:
             # Not converged yet: the retry loop re-invokes ``fix``, which

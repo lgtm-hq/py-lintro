@@ -150,7 +150,13 @@ def test_post_init_still_validates_skip_state() -> None:
         skip_reason="not installed",
     )
 
-    skipped = ToolResult(name="ruff", skipped=True, skip_reason="not installed")
+    skipped = ToolResult(
+        name="ruff",
+        skipped=True,
+        skip_reason="not installed",
+        inspected_files=False,
+        success=True,
+    )
     assert_that(skipped.success).is_true()
 
 
@@ -165,7 +171,7 @@ def test_post_init_still_validates_issue_counts() -> None:
     )
 
 
-def test_no_files_defaults_to_false_and_is_settable() -> None:
+def test_no_files_defaults_to_false_and_is_explicit() -> None:
     """``no_files`` marks "nothing was examined", and defaults to off.
 
     Two consumers read it: ``lintro.tools.core.verify_pass.run_verify_pass``,
@@ -184,6 +190,7 @@ def test_no_files_defaults_to_false_and_is_settable() -> None:
         output="No .py files found to check.",
         issues_count=0,
         no_files=True,
+        inspected_files=False,
     )
     assert_that(nothing_examined.no_files).is_true()
     assert_that(nothing_examined.inspected_files).is_false()

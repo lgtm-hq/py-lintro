@@ -111,8 +111,12 @@ def test_count_below_baseline_passes_and_strips_findings() -> None:
     """Fewer clones than the baseline pass, and pylint stops reporting them."""
     result = _pylint_result(_duplicate_issue(1), _duplicate_issue(2))
 
-    verdict = apply_duplicate_code_baseline(results=[result], baseline=3)
+    results = [result]
+    verdict = apply_duplicate_code_baseline(results=results, baseline=3)
 
+    original = result
+    result = results[0]
+    assert_that(original.issues_count).is_equal_to(2)
     assert verdict is not None  # narrow type for mypy
     assert_that(verdict.count).is_equal_to(2)
     assert_that(verdict.exceeded).is_false()
@@ -126,8 +130,12 @@ def test_count_equal_to_baseline_passes() -> None:
     """A run sitting exactly on the baseline is green."""
     result = _pylint_result(_duplicate_issue(1), _duplicate_issue(2))
 
-    verdict = apply_duplicate_code_baseline(results=[result], baseline=2)
+    results = [result]
+    verdict = apply_duplicate_code_baseline(results=results, baseline=2)
 
+    original = result
+    result = results[0]
+    assert_that(original.issues_count).is_equal_to(2)
     assert verdict is not None  # narrow type for mypy
     assert_that(verdict.exceeded).is_false()
     assert_that(result.success).is_true()
@@ -137,8 +145,12 @@ def test_count_above_baseline_is_a_failure() -> None:
     """One clone set more than the baseline fails with the ratchet message."""
     result = _pylint_result(_duplicate_issue(1), _duplicate_issue(2))
 
-    verdict = apply_duplicate_code_baseline(results=[result], baseline=1)
+    results = [result]
+    verdict = apply_duplicate_code_baseline(results=results, baseline=1)
 
+    original = result
+    result = results[0]
+    assert_that(original.issues_count).is_equal_to(2)
     assert verdict is not None  # narrow type for mypy
     assert_that(verdict.count).is_equal_to(2)
     assert_that(verdict.exceeded).is_true()
@@ -151,8 +163,12 @@ def test_non_duplicate_findings_are_left_alone() -> None:
     """Other pylint messages keep failing the run on their own terms."""
     result = _pylint_result(_duplicate_issue(1), _other_issue())
 
-    verdict = apply_duplicate_code_baseline(results=[result], baseline=5)
+    results = [result]
+    verdict = apply_duplicate_code_baseline(results=results, baseline=5)
 
+    original = result
+    result = results[0]
+    assert_that(original.issues_count).is_equal_to(2)
     assert verdict is not None  # narrow type for mypy
     assert_that(verdict.count).is_equal_to(1)
     assert_that(result.issues_count).is_equal_to(1)
@@ -176,6 +192,8 @@ def test_skipped_pylint_result_yields_no_verdict() -> None:
         skipped=True,
         skip_reason="pylint is not installed",
         issues_count=0,
+        inspected_files=False,
+        success=True,
     )
 
     assert_that(

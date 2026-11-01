@@ -15,7 +15,7 @@ Example:
 from __future__ import annotations
 
 import subprocess  # nosec B404 - used safely with shell disabled
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -239,7 +239,7 @@ class AstroCheckPlugin(BaseToolPlugin):
             # patterns; detect and normalize robustly.
             output_lower = (ctx.output or "").lower()
             if "no" in output_lower and "astro" in output_lower:
-                ctx.output = self._NO_FILES_MESSAGE
+                return replace(ctx, output=self._NO_FILES_MESSAGE)
             return ctx
 
         logger.debug("[astro-check] Discovered {} Astro file(s)", len(ctx.files))

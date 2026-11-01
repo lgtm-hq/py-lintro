@@ -136,7 +136,12 @@ def test_no_files_processed_warning(
         tool_name="ruff",
         output=output_text,
         issues_count=0,
-        result=ToolResult(name="ruff", success=True, no_files=no_files),
+        result=ToolResult(
+            name="ruff",
+            success=True,
+            no_files=no_files,
+            inspected_files=False if no_files else None,
+        ),
     )
 
     texts = [t for t, _ in console_output]

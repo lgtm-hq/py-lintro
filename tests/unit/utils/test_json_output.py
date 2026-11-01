@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -303,31 +303,34 @@ def test_the_summary_carries_net_resolved_and_its_deprecated_alias(
 def test_create_json_output_includes_summary_and_fix_suggestions_together() -> None:
     """Verify JSON output includes both AI summary and fix suggestions."""
     result = ToolResult(name="ruff", success=False, issues_count=1)
-    result.metadata = {
-        "summary": {
-            "overview": "Summary text",
-            "key_patterns": [],
-            "priority_actions": [],
-            "triage_suggestions": [],
-            "estimated_effort": "10 minutes",
-            "input_tokens": 10,
-            "output_tokens": 5,
-            "cost_estimate": 0.001,
-        },
-        "fix_suggestions": [
-            {
-                "file": "src/main.py",
-                "line": 1,
-                "code": "B101",
-                "explanation": "Replace assert",
-                "confidence": "high",
-                "diff": "--- a/src/main.py",
-                "input_tokens": 5,
-                "output_tokens": 4,
+    result = replace(
+        result,
+        metadata={
+            "summary": {
+                "overview": "Summary text",
+                "key_patterns": [],
+                "priority_actions": [],
+                "triage_suggestions": [],
+                "estimated_effort": "10 minutes",
+                "input_tokens": 10,
+                "output_tokens": 5,
                 "cost_estimate": 0.001,
             },
-        ],
-    }
+            "fix_suggestions": [
+                {
+                    "file": "src/main.py",
+                    "line": 1,
+                    "code": "B101",
+                    "explanation": "Replace assert",
+                    "confidence": "high",
+                    "diff": "--- a/src/main.py",
+                    "input_tokens": 5,
+                    "output_tokens": 4,
+                    "cost_estimate": 0.001,
+                },
+            ],
+        },
+    )
 
     data = create_json_output(
         action=Action.CHECK,
@@ -349,11 +352,14 @@ def test_create_json_output_includes_summary_and_fix_suggestions_together() -> N
 def test_create_json_output_normalizes_legacy_suggestions_key() -> None:
     """Test that legacy suggestions key is normalized correctly."""
     result = ToolResult(name="ruff", success=False, issues_count=1)
-    result.metadata = {
-        "summary": {"overview": "Legacy"},
-        "suggestions": [{"file": "a.py", "line": 1}],
-        "type": "fix_suggestions",
-    }
+    result = replace(
+        result,
+        metadata={
+            "summary": {"overview": "Legacy"},
+            "suggestions": [{"file": "a.py", "line": 1}],
+            "type": "fix_suggestions",
+        },
+    )
 
     data = create_json_output(
         action=Action.CHECK,
@@ -375,11 +381,14 @@ def test_create_json_output_normalizes_legacy_suggestions_key() -> None:
 def test_create_json_output_includes_ai_count_fields() -> None:
     """Verify AI count fields are serialized into JSON output."""
     result = ToolResult(name="ruff", success=False, issues_count=3)
-    result.metadata = {
-        "fixed_count": 2,
-        "verified_count": 1,
-        "unverified_count": 1,
-    }
+    result = replace(
+        result,
+        metadata={
+            "fixed_count": 2,
+            "verified_count": 1,
+            "unverified_count": 1,
+        },
+    )
 
     data = create_json_output(
         action=Action.CHECK,
@@ -400,14 +409,17 @@ def test_create_json_output_includes_ai_count_fields() -> None:
 def test_create_json_output_includes_ai_metrics() -> None:
     """Verify AI telemetry metrics are preserved through normalization."""
     result = ToolResult(name="ruff", success=False, issues_count=1)
-    result.metadata = {
-        "ai_metrics": {
-            "total_api_calls": 5,
-            "total_input_tokens": 1000,
-            "total_output_tokens": 500,
-            "total_cost_usd": 0.01,
+    result = replace(
+        result,
+        metadata={
+            "ai_metrics": {
+                "total_api_calls": 5,
+                "total_input_tokens": 1000,
+                "total_output_tokens": 500,
+                "total_cost_usd": 0.01,
+            },
         },
-    }
+    )
 
     data = create_json_output(
         action=Action.CHECK,
@@ -427,18 +439,21 @@ def test_create_json_output_includes_ai_metrics() -> None:
 def test_create_json_output_counts_survive_legacy_normalization() -> None:
     """Verify counts and metrics survive alongside legacy key normalization."""
     result = ToolResult(name="ruff", success=False, issues_count=1)
-    result.metadata = {
-        "summary": {"overview": "Legacy with counts"},
-        "suggestions": [{"file": "a.py", "line": 1}],
-        "type": "fix_suggestions",
-        "fixed_count": 1,
-        "verified_count": 1,
-        "unverified_count": 0,
-        "ai_metrics": {
-            "total_api_calls": 2,
-            "total_cost_usd": 0.005,
+    result = replace(
+        result,
+        metadata={
+            "summary": {"overview": "Legacy with counts"},
+            "suggestions": [{"file": "a.py", "line": 1}],
+            "type": "fix_suggestions",
+            "fixed_count": 1,
+            "verified_count": 1,
+            "unverified_count": 0,
+            "ai_metrics": {
+                "total_api_calls": 2,
+                "total_cost_usd": 0.005,
+            },
         },
-    }
+    )
 
     data = create_json_output(
         action=Action.CHECK,

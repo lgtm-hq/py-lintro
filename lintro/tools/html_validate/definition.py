@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import subprocess  # nosec B404 - used safely with shell disabled
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from loguru import logger
 
@@ -268,12 +268,14 @@ class HtmlValidatePlugin(BaseToolPlugin):
                 cmd=cmd,
                 cwd=ctx.cwd,
             )
-            timed_out.output = self._append_fallback_guidance(
-                output=timed_out.output,
-                used_registry_fallback=used_registry_fallback,
-                command=fallback_command,
+            return replace(
+                timed_out,
+                output=self._append_fallback_guidance(
+                    output=timed_out.output,
+                    used_registry_fallback=used_registry_fallback,
+                    command=fallback_command,
+                ),
             )
-            return timed_out
 
         # JSON is written to stdout; stderr carries diagnostics only.
         issues = parse_html_validate_output(output=result.stdout)

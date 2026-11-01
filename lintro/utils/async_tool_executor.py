@@ -11,7 +11,7 @@ import os
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -126,9 +126,8 @@ class AsyncToolExecutor:
                 opts,
             )
         logger.debug(f"Completed async execution of {tool.definition.name}")
-        result.duration_seconds = time.monotonic() - started
-
-        return result
+        result.validate_outcome()
+        return replace(result, duration_seconds=time.monotonic() - started)
 
     async def run_tools_parallel(
         self,

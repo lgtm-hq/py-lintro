@@ -1025,6 +1025,7 @@ def _unmeasured_artifacts() -> list[tuple[str, RunArtifact]]:
                 success=True,
                 skipped=True,
                 skip_reason="hadolint not found",
+                inspected_files=False,
             ),
         ],
     )
@@ -1037,6 +1038,7 @@ def _unmeasured_artifacts() -> list[tuple[str, RunArtifact]]:
                 skipped=False,
                 output="No .py/.pyi files found to check.",
                 no_files=True,
+                inspected_files=False,
             ),
         ],
     )
@@ -1055,6 +1057,7 @@ def _unmeasured_artifacts() -> list[tuple[str, RunArtifact]]:
                 skipped=False,
                 timed_out=True,
                 output="timed out after 300s",
+                inspected_files=False,
             ),
         ],
     )
