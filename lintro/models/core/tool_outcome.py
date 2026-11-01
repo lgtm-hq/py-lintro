@@ -89,6 +89,22 @@ class Skipped:
 
 
 @dataclass(frozen=True)
+class Unavailable:
+    """A capability probe could not establish a runnable tool.
+
+    Strict policy fails the run without turning unavailable tools into findings.
+    """
+
+    reason: str
+    strict: bool = False
+
+    def __post_init__(self) -> None:
+        """Validate the probe evidence and missing-tool policy."""
+        _validate_reason(self.reason)
+        _validate_boolean(self.strict)
+
+
+@dataclass(frozen=True)
 class NoFiles:
     """File discovery found nothing; no files received a clean verdict."""
 
@@ -109,7 +125,7 @@ class TimedOut:
             raise ValueError("timeout output must be text or None")
 
 
-ExecutionOutcome: TypeAlias = Checked | Skipped | NoFiles | TimedOut
+ExecutionOutcome: TypeAlias = Checked | Skipped | Unavailable | NoFiles | TimedOut
 
 
 @dataclass(frozen=True)
@@ -216,20 +232,23 @@ class ToolOutcome:
             TypeError: If either state is not a supported frozen variant.
             ValueError: If counts or the combined execution/accounting are invalid.
         """
-        if not isinstance(self.execution, (Checked, Skipped, NoFiles, TimedOut)):
+        if not isinstance(
+            self.execution,
+            (Checked, Skipped, Unavailable, NoFiles, TimedOut),
+        ):
             raise TypeError("execution must be an execution outcome variant")
         if not isinstance(self.accounting, (FixMeasured, FixUnmeasured, FixPartial)):
             raise TypeError("accounting must be a fix accounting variant")
         _validate_counts(self.issues_count, allow_unknown=False)
         if isinstance(self.accounting, FixUnmeasured) and self.success:
             raise ValueError("unmeasured fix accounting cannot report success")
-        if isinstance(self.execution, (Skipped, NoFiles)):
+        if isinstance(self.execution, (Skipped, Unavailable, NoFiles)):
             counts = self.accounting
             if self.issues_count or any(
                 value not in (None, 0)
                 for value in (counts.initial, counts.fixed, counts.remaining)
             ):
-                raise ValueError("skipped and no-files outcomes cannot carry findings")
+                raise ValueError("inactive outcomes cannot carry findings")
 
     @property
     def success(self) -> bool:
@@ -240,6 +259,8 @@ class ToolOutcome:
         """
         if isinstance(self.execution, Checked):
             return self.execution.success
+        if isinstance(self.execution, Unavailable):
+            return not self.execution.strict
         return isinstance(self.execution, (Skipped, NoFiles))
 
     def to_legacy_fields(self) -> dict[str, Any]:
@@ -257,6 +278,9 @@ class ToolOutcome:
             "issues_count": self.issues_count,
             "skipped": isinstance(execution, Skipped),
             "skip_reason": execution.reason if isinstance(execution, Skipped) else None,
+            "unavailable_reason": (
+                execution.reason if isinstance(execution, Unavailable) else None
+            ),
             "no_files": isinstance(execution, NoFiles),
             "timed_out": isinstance(execution, TimedOut),
             "inspected_files": (
@@ -294,6 +318,12 @@ def _execution_from_result(result: ToolResult) -> ExecutionOutcome:
         raise ValueError("skipped, no_files and timed_out are mutually exclusive")
     if not result.skipped and result.skip_reason is not None:
         raise ValueError("skip_reason requires a skipped outcome")
+    if result.unavailable_reason is not None:
+        if any(inactive) or result.inspected_files is not False:
+            raise ValueError(
+                "unavailable execution cannot claim another outcome or inspection",
+            )
+        return Unavailable(reason=result.unavailable_reason, strict=not result.success)
     if any(inactive):
         if result.success != (not result.timed_out):
             raise ValueError("execution flags contradict success")

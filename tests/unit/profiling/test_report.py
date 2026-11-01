@@ -57,6 +57,12 @@ def sample_results() -> list[ToolResult]:
             inspected_files=False,
             success=True,
         ),
+        ToolResult(
+            name="missing",
+            unavailable_reason="not installed",
+            success=True,
+            duration_seconds=0.5,
+        ),
         # An untimed result (e.g. a post-check) must be excluded.
         ToolResult(
             name="darglint",
@@ -84,6 +90,7 @@ def test_build_timings_excludes_skipped_and_untimed(
 
     assert_that(tools).does_not_contain("bandit")
     assert_that(tools).does_not_contain("darglint")
+    assert_that(tools).does_not_contain("missing")
 
 
 def test_build_timings_includes_timed_failures() -> None:

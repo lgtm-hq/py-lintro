@@ -3,7 +3,11 @@
 This module provides the core logic for the 'list_tools' command.
 """
 
+from __future__ import annotations
+
 import json as json_lib
+from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 import click
 from rich.console import Console
@@ -11,6 +15,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from lintro.enums.action import Action
+from lintro.enums.tool_result_status import ToolResultStatus
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.registry import ToolRegistry
 from lintro.rules import available_rule_packs
@@ -18,6 +23,10 @@ from lintro.tools import tool_manager
 from lintro.tools.core.scheduler import derive_execution_order
 from lintro.utils.console import get_tool_emoji
 from lintro.utils.unified_config import is_tool_injectable
+
+if TYPE_CHECKING:
+    from lintro.tools.core.snapshots import ToolSnapshot
+
 
 #: Capability label reported for advisory AI finders, which run under
 #: ``lintro review`` instead of ``chk``/``fmt`` (#1308).
@@ -105,6 +114,42 @@ def list_tools_command(
     )
 
 
+def _snapshot_result_status(
+    snap: ToolSnapshot | None,
+) -> ToolResultStatus:
+    """Map a capability snapshot to the list-tools status vocabulary.
+
+    Args:
+        snap: Cached probe result, or None when no snapshot exists.
+
+    Returns:
+        ToolResultStatus: ``unknown`` when absent or versionless, else
+        ``ok``/``unavailable``.
+    """
+    if snap is None:
+        return ToolResultStatus.UNKNOWN
+    if not snap.available:
+        return ToolResultStatus.UNAVAILABLE
+    if not snap.version:
+        return ToolResultStatus.UNKNOWN
+    return ToolResultStatus.OK
+
+
+def _snapshot_status_display(snap: ToolSnapshot | None) -> str:
+    """Format the human-readable Status column for one tool.
+
+    Args:
+        snap: Cached probe result, or None when no snapshot exists.
+
+    Returns:
+        str: ``unknown``, ``unavailable``, or ``ok (<version>)``.
+    """
+    status = _snapshot_result_status(snap)
+    if status is ToolResultStatus.OK and snap is not None:
+        return f"ok ({snap.version})"
+    return str(status)
+
+
 def _list_rule_packs(output: str | None, json_output: bool) -> None:
     """Render discoverable opt-in packs without needing their engine installed.
 
@@ -135,11 +180,19 @@ def list_tools(
 ) -> None:
     """List all available tools.
 
+    Table output includes a Status column (``ok (<version>)``, ``unavailable``,
+    or ``unknown``). JSON objects include ``status`` using
+    :class:`~lintro.enums.tool_result_status.ToolResultStatus` when a
+    capability snapshot is present (``ok``, ``unavailable``, or ``unknown``).
+    Missing snapshots omit ``available`` and report ``status: unknown``.
+
     Args:
         output: Output file path.
         json_output: Output tool list as JSON.
         verbose: Show verbose output including file extensions and patterns.
     """
+    from lintro.tools.core.snapshots import lookup_snapshot, probe_all_tools
+
     available_tools = tool_manager.get_all_tools()
     check_tools = tool_manager.get_check_tools()
     fix_tools = tool_manager.get_fix_tools()
@@ -152,6 +205,10 @@ def list_tools(
             start=1,
         )
     }
+    snapshots = probe_all_tools(
+        tool_names=list(available_tools.keys()),
+        for_introspection=True,
+    )
 
     # JSON output mode
     if json_output:
@@ -164,6 +221,7 @@ def list_tools(
                 fix_tools=fix_tools,
             )
 
+            snap = lookup_snapshot(snapshots=snapshots, name=tool_name)
             tool_info: dict[str, object] = {
                 "description": plugin.definition.description,
                 "capabilities": capabilities,
@@ -172,6 +230,16 @@ def list_tools(
                 "syncable": is_tool_injectable(tool_name),
                 "origin": ToolRegistry.get_origin(tool_name),
             }
+            if snap is not None:
+                tool_info["available"] = snap.available
+                tool_info["version"] = snap.version
+                tool_info["probe_error"] = snap.probe_error
+                tool_info["runtime_capabilities"] = snap.capabilities.to_dict()
+                tool_info["status"] = _snapshot_result_status(snap)
+                if not snap.available:
+                    tool_info["remediation_hint"] = snap.remediation_hint
+            else:
+                tool_info["status"] = ToolResultStatus.UNKNOWN
 
             # Only include file_patterns in verbose mode (consistent with table output)
             if verbose:
@@ -196,6 +264,7 @@ def list_tools(
     # Main tools table
     table = Table(title="Tool Details")
     table.add_column("Tool", style="cyan", no_wrap=True)
+    table.add_column("Status", style="yellow")
     table.add_column("Description", style="white", max_width=40)
     table.add_column("Capabilities", style="green")
     table.add_column("Order", justify="center", style="yellow")
@@ -208,6 +277,8 @@ def list_tools(
     for tool_name, plugin in available_tools.items():
         tool_description = plugin.definition.description
         emoji = get_tool_emoji(tool_name)
+        snap = lookup_snapshot(snapshots=snapshots, name=tool_name)
+        status_display = _snapshot_status_display(snap)
 
         # Capabilities
         tool_capabilities = _tool_capabilities(
@@ -227,6 +298,7 @@ def list_tools(
 
         row = [
             f"{emoji} {tool_name}",
+            status_display,
             tool_description,
             caps_display,
             str(position),
@@ -245,6 +317,7 @@ def list_tools(
         table.add_row(*row)
 
     console.print(table)
+    _print_snapshot_diagnostics(console, snapshots)
     console.print()
 
     # Summary table
@@ -256,7 +329,9 @@ def list_tools(
     summary_table.add_column("Metric", style="cyan", width=20)
     summary_table.add_column("Count", style="yellow", justify="right")
 
+    available_count = sum(1 for s in snapshots.values() if s.available)
     summary_table.add_row("📊 Total tools", str(len(available_tools)))
+    summary_table.add_row("✅ Runtime available", str(available_count))
     summary_table.add_row("🔍 Check tools", str(len(check_tools)))
     summary_table.add_row("🔧 Fix tools", str(len(fix_tools)))
 
@@ -270,6 +345,7 @@ def list_tools(
                 available_tools=available_tools,
                 check_tools=check_tools,
                 fix_tools=fix_tools,
+                snapshots=snapshots,
             )
             with open(output, "w", encoding="utf-8") as f:
                 f.write("\n".join(output_lines) + "\n")
@@ -279,10 +355,26 @@ def list_tools(
             console.print(f"[red]Error writing to file {output}: {e}[/red]")
 
 
+def _print_snapshot_diagnostics(
+    console: Console,
+    snapshots: Mapping[str, ToolSnapshot],
+) -> None:
+    """Show per-tool probe errors below the table without truncating the message.
+
+    Args:
+        console: Console used for the tools table.
+        snapshots: Capability snapshots including introspection diagnostics.
+    """
+    for name, snap in snapshots.items():
+        if not snap.available and snap.probe_error:
+            console.print(f"{name}: {snap.probe_error}", markup=False)
+
+
 def _generate_plain_text_output(
     available_tools: dict[str, BaseToolPlugin],
     check_tools: dict[str, BaseToolPlugin],
     fix_tools: dict[str, BaseToolPlugin],
+    snapshots: Mapping[str, ToolSnapshot] | None = None,
 ) -> list[str]:
     """Generate plain text output for file writing.
 
@@ -290,12 +382,16 @@ def _generate_plain_text_output(
         available_tools: Dictionary of available tools.
         check_tools: Dictionary of check-capable tools.
         fix_tools: Dictionary of fix-capable tools.
+        snapshots: Optional capability snapshots keyed by tool name.
 
     Returns:
         List of output lines.
     """
+    from lintro.tools.core.snapshots import lookup_snapshot
+
     output_lines: list[str] = []
     border = "=" * 70
+    snapshots = snapshots or {}
 
     output_lines.append(border)
     output_lines.append("Available Tools")
@@ -314,8 +410,13 @@ def _generate_plain_text_output(
         )
 
         capabilities_display = ", ".join(capabilities) if capabilities else "-"
+        snap = lookup_snapshot(snapshots=snapshots, name=tool_name)
+        runtime_status = _snapshot_status_display(snap)
 
         output_lines.append(f"{emoji} {tool_name}: {tool_description}")
+        output_lines.append(f"  Status: {runtime_status}")
+        if snap is not None and not snap.available and snap.probe_error:
+            output_lines.append(f"  Probe error: {snap.probe_error}")
         output_lines.append(f"  Capabilities: {capabilities_display}")
         output_lines.append(f"  Origin: {ToolRegistry.get_origin(tool_name)}")
 

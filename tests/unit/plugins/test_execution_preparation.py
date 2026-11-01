@@ -21,7 +21,6 @@ from lintro.plugins.execution_preparation import (
     verify_tool_version,
 )
 from lintro.plugins.protocol import ToolDefinition
-from lintro.tools.core.version_parsing import ToolVersionInfo
 
 
 @pytest.mark.parametrize(
@@ -210,25 +209,30 @@ def test_version_rejection_produces_explicit_skip(
         monkeypatch: Restores the version-lag override after forcing enforcement.
     """
     monkeypatch.delenv("LINTRO_ALLOW_VERSION_LAG", raising=False)
-    version = ToolVersionInfo(
+    from lintro.tools.core.snapshots import ToolSnapshot
+
+    version = ToolSnapshot(
         name="ruff",
+        available=True,
+        version="0.13.0",
         min_version="0.14.0",
-        error_message="Ruff is not installed",
-        install_hint="Install Ruff",
+        version_check_passed=False,
+        probe_error="Ruff is below minimum",
+        remediation_hint="Install Ruff",
     )
     with patch(
-        "lintro.tools.core.version_requirements.check_tool_version",
+        "lintro.tools.core.snapshots.get_tool_snapshot",
         return_value=version,
     ):
         result = verify_tool_version(ToolDefinition(name="ruff", description="Test"))
 
     assert result is not None  # narrow the successful version-check alternative
     assert_that(result.outcome).is_equal_to(
-        ToolOutcome(Skipped("Ruff is not installed")),
+        ToolOutcome(Skipped("Ruff is below minimum")),
     )
     assert_that(result.success).is_true()
     assert_that(result.inspected_files).is_false()
-    assert_that(result.output).contains("Ruff is not installed", "Install Ruff")
+    assert_that(result.output).contains("Ruff is below minimum", "Install Ruff")
     assert_that(result.fixed_issues_count).is_none()
     assert_that(result.remaining_issues_count).is_none()
 
@@ -265,48 +269,46 @@ def test_version_lag_disallowed_when_unset(monkeypatch: pytest.MonkeyPatch) -> N
     assert_that(_version_lag_allowed("trufflehog")).is_false()
 
 
-def test_verify_tool_version_resolves_from_the_execution_cwd() -> None:
-    """The version check must resolve the binary the run will actually use.
+def test_verify_tool_version_uses_cached_snapshot() -> None:
+    """Version gates read ToolSnapshot flags, not a live subprocess probe.
 
-    Verification previously resolved from the process working directory while
-    execution resolved from the target project. A missing or outdated
-    process-visible binary could then skip the run even though the target had
-    a valid lockfile-pinned install — and the reverse, passing on a binary
-    that never executes (#1727).
-
+    The snapshot must resolve from the execution directory.
     """
     from unittest.mock import patch
 
     from lintro.plugins.execution_preparation import verify_tool_version
-
-    seen: dict[str, object] = {}
-
-    def _capture(tool_name: str, cwd: object = None) -> list[str]:
-        seen["cwd"] = cwd
-        return ["html-validate"]
+    from lintro.tools.core.snapshots import ToolCapabilities, ToolSnapshot
 
     definition = type("Def", (), {"name": "html_validate"})()
+    snap = ToolSnapshot(
+        name="html_validate",
+        available=True,
+        version="1.0.0",
+        capabilities=ToolCapabilities(),
+        version_check_passed=True,
+        min_version="1.0.0",
+    )
 
-    with (
-        patch(
-            "lintro.plugins.execution_preparation.get_executable_command",
-            side_effect=_capture,
-        ),
-        patch(
-            "lintro.tools.core.version_requirements.check_tool_version",
-        ) as mock_check,
-    ):
-        mock_check.return_value = type(
-            "Info",
-            (),
-            {
-                "version_check_passed": True,
-                "below_recommended": False,
-                "current_version": "1.0.0",
-                "recommended_version": "1.0.0",
-                "min_version": "1.0.0",
-            },
-        )()
-        verify_tool_version(definition, cwd="/tmp/target-project")
+    with patch(
+        "lintro.tools.core.snapshots.get_tool_snapshot",
+        return_value=snap,
+    ) as mock_snap:
+        result = verify_tool_version(definition, cwd="/tmp/target-project")
 
-    assert_that(seen.get("cwd")).is_equal_to("/tmp/target-project")
+    assert_that(result).is_none()
+    mock_snap.assert_called_once_with(
+        "html_validate",
+        force=False,
+        cache_root=Path("/tmp/target-project"),
+    )
+
+
+def test_tool_definition_preserves_positional_constructor() -> None:
+    """The added stdin capability cannot shift the public v2 plugin API."""
+    from lintro.enums.tool_type import ToolType
+
+    definition = ToolDefinition("custom", "formatter", True, ToolType.FORMATTER)
+    assert definition.can_fix is True
+    assert definition.tool_type is ToolType.FORMATTER
+    assert definition.supports_stdin is None
+    assert definition.in_process is None

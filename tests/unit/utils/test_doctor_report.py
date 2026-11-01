@@ -253,7 +253,14 @@ def test_disabled_tools_are_reported_rather_than_dropped(
     monkeypatch.setattr(
         doctor_report,
         "check_tool",
-        lambda *, tool, context: ToolCheckResult(tool=tool, status=ToolStatus.OK),
+        lambda *, tool, context, snapshot=None: ToolCheckResult(
+            tool=tool,
+            status=ToolStatus.OK,
+        ),
+    )
+    monkeypatch.setattr(
+        "lintro.tools.core.snapshots.probe_all_tools",
+        lambda **_kwargs: {},
     )
 
     results = collect_tool_checks(
@@ -282,7 +289,14 @@ def test_named_tools_are_probed_even_when_disabled(
     monkeypatch.setattr(
         doctor_report,
         "check_tool",
-        lambda *, tool, context: ToolCheckResult(tool=tool, status=ToolStatus.OK),
+        lambda *, tool, context, snapshot=None: ToolCheckResult(
+            tool=tool,
+            status=ToolStatus.OK,
+        ),
+    )
+    monkeypatch.setattr(
+        "lintro.tools.core.snapshots.probe_all_tools",
+        lambda **_kwargs: {},
     )
 
     results = collect_tool_checks(
@@ -329,7 +343,7 @@ def test_unloadable_config_is_reported_as_a_check_not_an_exception(
     monkeypatch.setattr(
         doctor_report,
         "collect_tool_checks",
-        lambda **_kwargs: [ToolCheckResult(tool=_make_tool(), status=ToolStatus.OK)],
+        lambda **_kwargs: pytest.fail("invalid config must not enter tool probes"),
     )
 
     report = collect_doctor_report()
@@ -341,6 +355,35 @@ def test_unloadable_config_is_reported_as_a_check_not_an_exception(
     assert_that(checks["config.load"].remediation).is_not_empty()
     # Nothing downstream of the config may claim to have checked anything.
     assert_that(checks["ai.provider"].status).is_equal_to(DoctorCheckStatus.SKIPPED)
+    assert_that(checks["tools.availability"].status).is_equal_to(
+        DoctorCheckStatus.SKIPPED,
+    )
+
+
+@pytest.mark.usefixtures("stub_environment")
+@pytest.mark.parametrize("error_type", [AttributeError, ImportError, RuntimeError])
+def test_internal_probe_failure_degrades_report_without_losing_other_checks(
+    monkeypatch: pytest.MonkeyPatch,
+    error_type: type[Exception],
+) -> None:
+    """Doctor retains diagnostic evidence when a plugin prevents availability checks."""
+
+    def crash(**kwargs: object) -> dict[str, object]:
+        raise error_type("broken plugin probe")
+
+    monkeypatch.setattr("lintro.tools.core.snapshots.probe_all_tools", crash)
+    report = collect_doctor_report()
+    checks = {check.check: check for check in report.checks}
+    failure = checks["tools.availability"]
+    assert report.health is DoctorHealth.DEGRADED
+    assert failure.category is DoctorCheckCategory.TOOLS
+    assert failure.status is DoctorCheckStatus.WARNING
+    assert f"{error_type.__name__}: broken plugin probe" in failure.detail
+    assert "re-run lintro doctor" in failure.remediation
+    assert checks["config.load"].status is DoctorCheckStatus.OK
+    assert "ai.provider" in checks
+    assert "extras.mcp" in checks
+    assert report.to_dict()["health"] == DoctorHealth.DEGRADED.value
 
 
 @pytest.mark.usefixtures("stub_environment")
@@ -748,6 +791,79 @@ def test_check_tool_does_not_treat_bunx_fallback_as_installed() -> None:
     assert_that(result.error).is_equal_to("not_in_path")
 
 
+def test_check_tool_snapshot_unavailable_maps_to_missing() -> None:
+    """An unavailable capability snapshot is reported as MISSING."""
+    from lintro.tools.core.snapshots import ToolCapabilities, ToolSnapshot
+
+    tool = _make_tool(name="rustc", install_type="rustup")
+    snap = ToolSnapshot(
+        name="rustc",
+        available=False,
+        version=None,
+        capabilities=ToolCapabilities(),
+        probe_error="rustc not found in PATH",
+        remediation_hint="rustup toolchain install stable",
+        binary_path="",
+        binary_mtime=0.0,
+        version_check_passed=False,
+        min_version="1.80.0",
+    )
+    result = check_tool(
+        tool=tool,
+        context=_make_context(),
+        snapshot=snap,
+    )
+    assert_that(result.status).is_equal_to(ToolStatus.MISSING)
+    assert_that(result.details).contains("not found")
+    assert_that(result.install_hint).contains("rustup")
+
+
+def test_collect_tool_checks_resolves_hyphenated_snapshot_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Manifest underscore names resolve snapshots keyed by registry hyphens."""
+    from lintro.tools.core.snapshots import ToolCapabilities, ToolSnapshot
+
+    registry = ManifestRegistry(
+        tools={"astro_check": _make_tool("astro_check")},
+        language_map={},
+        profiles={},
+    )
+    snap = ToolSnapshot(
+        name="astro-check",
+        available=False,
+        version=None,
+        capabilities=ToolCapabilities(),
+        probe_error="astro not found in PATH",
+        remediation_hint="npm i -D astro",
+        binary_path="",
+        binary_mtime=0.0,
+        version_check_passed=False,
+        min_version="5.0.0",
+    )
+
+    def _fake_probe(
+        *,
+        tool_names: list[str] | None = None,
+        **_kwargs: object,
+    ) -> dict[str, ToolSnapshot]:
+        assert_that(tool_names).contains("astro_check")
+        return {"astro-check": snap}
+
+    monkeypatch.setattr(
+        "lintro.tools.core.snapshots.probe_all_tools",
+        _fake_probe,
+    )
+    results = collect_tool_checks(
+        registry=registry,
+        context=_make_context(),
+        tool_names=["astro_check"],
+    )
+    assert_that(results).is_length(1)
+    assert_that(results[0].status).is_equal_to(ToolStatus.MISSING)
+    assert_that(results[0].tool.name).is_equal_to("astro_check")
+
+
 # ── optional MCP extra ───────────────────────────────────────────────
 
 
@@ -768,3 +884,100 @@ def test_mcp_extra_status_reports_missing_without_failing() -> None:
 
     assert_that(info["status"]).is_equal_to(ToolStatus.DISABLED.value)
     assert_that(info["hint"]).contains("lintro[mcp]")
+
+
+@pytest.mark.parametrize(
+    ("binary_name", "expected_version", "expected_probes"),
+    [("rustc-native", "99.0.0", "x"), ("rustc", "100.0.0", "xx")],
+)
+def test_manifest_only_tool_cache_respects_wrapper_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    binary_name: str,
+    expected_version: str,
+    expected_probes: str,
+) -> None:
+    """Doctor shares stable binary evidence but rechecks mutable Rust toolchains.
+
+    Args:
+        tmp_path: Isolated executable and cache directory.
+        monkeypatch: Scoped registry and working-directory overrides.
+        binary_name: Stable executable or Rust proxy to probe.
+        expected_version: Version doctor should observe after the package changes.
+        expected_probes: Probe markers expected from the real executable.
+    """
+    from lintro.tools.core.snapshots import get_tool_snapshot
+
+    binary = tmp_path / binary_name
+    binary.write_text(
+        "#!/bin/sh\n"
+        'test "$#" -eq 1 && test "$1" = --version || exit 1\n'
+        'printf x >> "$0.probed"\n'
+        'cat "$0.version"\n',
+    )
+    binary.chmod(0o755)
+    original_mtime = binary.stat().st_mtime_ns
+    version_file = Path(str(binary) + ".version")
+    version_file.write_text("99.0.0\n")
+    tool = _make_tool(
+        "rustc",
+        version="99.0.0",
+        install_type="rustup",
+        version_command=(str(binary), "--version"),
+    )
+    registry = ManifestRegistry(tools={"rustc": tool}, language_map={}, profiles={})
+    monkeypatch.setattr(ManifestRegistry, "load", lambda: registry)
+    monkeypatch.chdir(tmp_path)
+
+    snapshot = get_tool_snapshot("rustc")
+    version_file.write_text("100.0.0\n")
+    checks = collect_tool_checks(
+        registry=registry,
+        context=_make_context(),
+        tool_names=["rustc"],
+    )
+
+    assert_that(snapshot.available).is_true()
+    assert_that(snapshot.version).is_equal_to("99.0.0")
+    assert_that(checks[0].status).is_equal_to(ToolStatus.OK)
+    assert_that(checks[0].installed_version).is_equal_to(expected_version)
+    assert_that(Path(str(binary) + ".probed").read_text()).is_equal_to(expected_probes)
+    assert binary.stat().st_mtime_ns == original_mtime
+
+
+@pytest.mark.parametrize("snapshot_available", [False, True])
+def test_doctor_snapshot_retains_install_discoverability_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    snapshot_available: bool,
+) -> None:
+    """The production snapshot path cannot label a registry fallback installed."""
+    from lintro.models.core.tool_snapshot import ToolSnapshot
+
+    tool = _make_tool("prettier", version="3.9.4", install_type="npm", category="npm")
+    snapshot = ToolSnapshot(
+        name="prettier",
+        available=snapshot_available,
+        version="3.9.4" if snapshot_available else None,
+        binary_path="/usr/bin/bunx",
+        command=("bunx", "prettier@3.9.4"),
+        remediation_hint="generic cache guidance",
+    )
+    monkeypatch.setattr(
+        "lintro.plugins.execution_preparation.get_executable_command",
+        lambda *a, **kw: ["bunx", "prettier@3.9.4"],
+    )
+    monkeypatch.setattr("shutil.which", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "lintro.tools.core.snapshots.probe_all_tools",
+        lambda **kw: {"prettier": snapshot},
+    )
+    registry = ManifestRegistry(tools={"prettier": tool}, language_map={}, profiles={})
+    checks = collect_tool_checks(
+        registry=registry,
+        context=_make_context(),
+        tool_names=["prettier"],
+    )
+    assert len(checks) == 1
+    assert checks[0].status == ToolStatus.MISSING
+    assert checks[0].install_hint != "generic cache guidance"
+    assert checks[0].installed_version is None

@@ -33,6 +33,7 @@ from lintro.models.core.tool_outcome import (
     Skipped,
     TimedOut,
     ToolOutcome,
+    Unavailable,
 )
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
@@ -2092,6 +2093,20 @@ def test_non_oxlint_parse_failures_keep_accounting_unknown_and_retain_reasons(
         (Checked(False, True), True, VerifyStatus.VERIFIED, "", True),
         (Checked(False), False, VerifyStatus.VERIFIED, "", False),
         (Skipped("version gate"), False, VerifyStatus.UNKNOWN, SKIPPED_REASON, False),
+        (
+            Unavailable("tool disappeared", strict=False),
+            False,
+            VerifyStatus.UNKNOWN,
+            "the verify tool is unavailable: tool disappeared",
+            False,
+        ),
+        (
+            Unavailable("minimum version not met", strict=True),
+            False,
+            VerifyStatus.UNKNOWN,
+            "the verify tool is unavailable: minimum version not met",
+            False,
+        ),
         (NoFiles(), False, VerifyStatus.UNCHANGED, "", False),
         (TimedOut("deadline"), False, VerifyStatus.UNKNOWN, TIMED_OUT_REASON, False),
         (

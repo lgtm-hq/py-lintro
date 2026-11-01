@@ -415,7 +415,7 @@ def test_unmeasured_adapter_preserves_null_json_and_failure_exit() -> None:
 
     assert_that(wire).is_equal_to(
         '{"tool": "ruff", "success": false, "issues_count": 1, "skipped": false, '
-        '"skip_reason": null, "timed_out": false, "output": null, '
+        '"skip_reason": null, "timed_out": false, "output": null, "status": "failed", '
         '"net_resolved": null, "fixed": null, "remaining": null, '
         '"residual_unknown": true, "residual_unknown_reason": "verify failed", '
         '"issues": [{"file": "a.py", "line": 1, "code": "", "message": "finding"}]}',

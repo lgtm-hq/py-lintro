@@ -11,7 +11,7 @@ the layering baseline already records for that module.
 
 from lintro.enums.tool_type import ToolType
 from lintro.plugins import LintroPlugin, ToolDefinition, ToolRegistry
-from lintro.tools.core import verify_pass
+from lintro.tools.core import snapshots, verify_pass
 from lintro.tools.core.tool_manager import ToolManager
 
 # Create global tool manager instance
@@ -26,4 +26,5 @@ __all__ = [
     "ToolManager",
     "tool_manager",
     "verify_pass",
+    "snapshots",
 ]

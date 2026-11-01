@@ -56,8 +56,8 @@ def _distinct_issue_files(issues: list[BaseIssue]) -> int:
 def build_timings(results: list[ToolResult]) -> list[ToolTiming]:
     """Build per-tool timing records, sorted slowest first.
 
-    Only tools that were actually measured are included: skipped tools and
-    any result without a captured ``duration`` (e.g. post-checks) are omitted
+    Only tools that were actually measured are included: skipped or unavailable
+    tools and any result without a captured ``duration`` (e.g. post-checks) are omitted
     so the profile never fabricates timing data. Crashed and timed-out tools
     are included when the executor recorded ``duration_seconds``. Ties are
     broken by tool name for deterministic ordering.
@@ -70,7 +70,7 @@ def build_timings(results: list[ToolResult]) -> list[ToolTiming]:
     """
     timings: list[ToolTiming] = []
     for result in results:
-        if result.skipped:
+        if result.skipped or result.unavailable:
             continue
         duration = result.duration_seconds
         if duration is None:

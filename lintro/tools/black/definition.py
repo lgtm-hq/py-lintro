@@ -79,6 +79,7 @@ class BlackPlugin(BaseToolPlugin):
             name="black",
             description="Opinionated Python code formatter",
             can_fix=True,
+            supports_stdin=True,
             tool_type=ToolType.FORMATTER,
             file_patterns=BLACK_FILE_PATTERNS,
             claims=[

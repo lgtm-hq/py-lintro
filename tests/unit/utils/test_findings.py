@@ -277,3 +277,15 @@ def test_tool_summary_reports_net_resolved_for_fix_runs() -> None:
     assert_that(summary.to_dict()["net_resolved"]).is_equal_to(1)
     # Deprecated alias, same value.
     assert_that(summary.to_dict()["fixed_count"]).is_equal_to(1)
+
+
+def test_unavailable_summary_retains_probe_diagnosis() -> None:
+    """MCP summaries expose why the tool could not run."""
+    result = ToolResult(
+        name="ghost",
+        success=True,
+        unavailable_reason="missing executable",
+    )
+    summary = tool_summary_from_result(result=result, action=Action.CHECK)
+    assert summary.status == ToolRunStatus.UNAVAILABLE
+    assert summary.to_dict()["skip_reason"] == "missing executable"

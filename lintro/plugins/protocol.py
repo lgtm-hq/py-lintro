@@ -98,6 +98,9 @@ class ToolDefinition:
         name: Unique identifier for the tool (lowercase, e.g., "hadolint").
         description: Human-readable description of what the tool does.
         can_fix: Whether the tool can auto-fix issues.
+        supports_stdin: Declared stdin support, or None when unspecified.
+        in_process: True for execution without a binary, False for an external
+            executable, or None when the plugin has not declared its mode.
         tool_type: Bitmask of ToolType flags describing capabilities.
         execution_class: Whether the tool is deterministic (runs under ``chk``
             and ``fmt``) or advisory (an AI finder; runs under
@@ -131,6 +134,8 @@ class ToolDefinition:
 
     # Capabilities
     can_fix: bool = False
+    supports_stdin: bool | None = field(default=None, kw_only=True)
+    in_process: bool | None = field(default=None, kw_only=True)
     tool_type: ToolType = ToolType.LINTER
     execution_class: ExecutionClass = ExecutionClass.DETERMINISTIC
 

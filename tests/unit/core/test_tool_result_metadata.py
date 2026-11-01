@@ -415,3 +415,17 @@ def test_an_unknown_residual_with_both_counts_cleared_is_valid() -> None:
     assert_that(result.fixed_issues_count).is_none()
     assert_that(result.remaining_issues_count).is_none()
     assert_that(result.issues_count).is_equal_to(2)
+
+
+def test_unavailability_preserves_legacy_positional_result_fields() -> None:
+    """The new reason must not shift the public timed_out constructor position."""
+    import inspect
+
+    positional = [
+        name
+        for name, param in inspect.signature(ToolResult).parameters.items()
+        if param.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    ]
+    assert positional[positional.index("skip_reason") + 1] == "timed_out"
+    result = ToolResult(name="ghost", success=True, unavailable_reason="missing")
+    assert result.unavailable is True

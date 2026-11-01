@@ -7,7 +7,8 @@ A SKIP is indistinguishable from a PASS in job status, so a wrapped tool can
 be dead for weeks (missing binary) or forever (missing config) without anyone
 noticing. This gate parses lintro's structured JSON output
 (``lintro chk --output-format json``) and exits non-zero when any enabled tool
-reports ``skipped: true`` for a reason that is not covered by the committed
+reports ``skipped: true`` or ``status: unavailable`` / ``unavailable: true``
+for a reason that is not covered by the committed
 allowlist (``scripts/ci/dogfood-skip-allowlist.yaml``).
 
 Skip reasons are classified into one of:
@@ -301,23 +302,33 @@ def _extract_results(payload: Any) -> list[dict[str, Any]]:
 
 
 def evaluate_skips(payload: Any, allowlist: Allowlist) -> list[SkipFinding]:
-    """Evaluate every skipped tool in a lintro report against the allowlist.
+    """Evaluate skipped and unavailable tools against the allowlist.
 
     Args:
         payload: Parsed lintro JSON report.
         allowlist: The parsed allowlist.
 
     Returns:
-        One :class:`SkipFinding` per skipped tool, in report order.
+        One :class:`SkipFinding` per skipped or unavailable tool, in report order.
     """
     findings: list[SkipFinding] = []
     for result in _extract_results(payload):
-        if not result.get("skipped"):
+        unavailable = (
+            result.get("status") == "unavailable" or result.get("unavailable") is True
+        )
+        if not result.get("skipped") and not unavailable:
             continue
         tool = str(result.get("tool") or "unknown")
-        reason = result.get("skip_reason")
+        reason = result.get("unavailable_reason" if unavailable else "skip_reason")
         reason_str = reason if isinstance(reason, str) else ""
-        skip_class = classify_skip_reason(reason_str)
+        # Structured unavailability is an image dependency failure regardless
+        # of the wording; a no-config allowlist must never mask it.
+        skip_class = (
+            SkipClass.BINARY_MISSING
+            if unavailable
+            else classify_skip_reason(reason_str)
+        )
+        state = "unavailable" if unavailable else "skipped"
         entry = allowlist.get(tool)
 
         if entry is None:
@@ -328,7 +339,7 @@ def evaluate_skips(payload: Any, allowlist: Allowlist) -> list[SkipFinding]:
                     skip_class=skip_class,
                     allowed=False,
                     message=(
-                        f"{tool}: skipped ({skip_class.value}) with no allowlist "
+                        f"{tool}: {state} ({skip_class.value}) with no allowlist "
                         f"entry — reason: {reason_str or '<none>'}"
                     ),
                 ),
@@ -343,7 +354,8 @@ def evaluate_skips(payload: Any, allowlist: Allowlist) -> list[SkipFinding]:
                     skip_class=skip_class,
                     allowed=False,
                     message=(
-                        f"{tool}: skipped as {skip_class.value} but allowlisted for "
+                        f"{tool}: {state} as {skip_class.value} "
+                        "but allowlisted for "
                         f"{entry.reason_class.value} — re-triage the skip reason: "
                         f"{reason_str or '<none>'}"
                     ),

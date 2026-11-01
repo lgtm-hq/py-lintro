@@ -14,6 +14,7 @@ from lintro.models.core.tool_outcome import (
     FixPartial,
     FixUnmeasured,
     Skipped,
+    Unavailable,
 )
 from lintro.models.core.tool_result import ToolResult
 
@@ -88,7 +89,7 @@ def aggregate_tool_results(
     for result in results:
         outcome = result.outcome
         # Exclude skipped tools from totals
-        if isinstance(outcome.execution, Skipped):
+        if isinstance(outcome.execution, (Skipped, Unavailable)):
             continue
         total_issues += outcome.issues_count
 

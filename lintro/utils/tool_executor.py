@@ -466,7 +466,10 @@ def _run_verify_phase(
     foldable = [
         name
         for name in tools_to_run
-        if not any(r.name == name and (r.skipped or r.timed_out) for r in all_results)
+        if not any(
+            r.name == name and (r.unavailable or r.skipped or r.timed_out)
+            for r in all_results
+        )
     ]
 
     verify_outcomes = verify_pass.run_verify_pass(
@@ -709,7 +712,7 @@ def execute_run(
     )
 
     for index, result in enumerate(all_results):
-        if result.capability is None and not result.skipped:
+        if result.capability is None and not result.skipped and not result.unavailable:
             all_results[index] = replace(
                 result,
                 capability=verify_pass.resolve_result_capability(

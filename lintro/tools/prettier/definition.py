@@ -103,6 +103,7 @@ class PrettierPlugin(BaseToolPlugin):
                 "and Astro (JS/TS handled by oxfmt for better performance)"
             ),
             can_fix=True,
+            supports_stdin=True,
             tool_type=ToolType.FORMATTER,
             file_patterns=PRETTIER_FILE_PATTERNS,
             claims=[

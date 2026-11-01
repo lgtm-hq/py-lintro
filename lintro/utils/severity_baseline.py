@@ -82,7 +82,13 @@ def severity_baseline_scope(
         return None
     scope = {
         "paths": resolved_paths,
-        "tools": sorted({result.name for result in tool_results if not result.skipped}),
+        "tools": sorted(
+            {
+                result.name
+                for result in tool_results
+                if not result.skipped and not result.unavailable
+            },
+        ),
     }
     return hashlib.sha256(json.dumps(scope, sort_keys=True).encode("utf-8")).hexdigest()
 

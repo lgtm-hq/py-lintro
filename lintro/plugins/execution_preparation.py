@@ -172,6 +172,10 @@ def verify_tool_version(
 ) -> ToolResult | None:
     """Verify that the tool meets minimum version requirements.
 
+    Uses the cached capability snapshot so version data comes from a single
+    probe per binary (path + mtime + TTL). Unavailable tools return an
+    ``unavailable`` result instead of raising mid-run.
+
     When ``LINTRO_ALLOW_VERSION_LAG`` lists the tool (or is ``*``) and the
     binary is present but older than the manifest minimum, proceed with a
     warning instead of skipping. Missing binaries and other hard failures
@@ -187,66 +191,62 @@ def verify_tool_version(
         cwd: Directory the tool will execute in, when known.
 
     Returns:
-        None if version check passes, or a skip result if it fails.
+        None if version check passes, or a skip/unavailable result if it fails.
     """
-    from lintro.tools.core.version_requirements import check_tool_version
+    from lintro.utils.tool_snapshots import (
+        get_tool_snapshot,
+        is_strict_missing_tools,
+        snapshot_to_unavailable_result,
+    )
 
-    command = get_executable_command(definition.name, cwd=cwd)
-    version_info = check_tool_version(definition.name, command)
+    snapshot = get_tool_snapshot(
+        definition.name,
+        cache_root=Path(cwd) if cwd is not None else None,
+    )
 
-    if version_info.version_check_passed:
-        if version_info.below_recommended:
+    if not snapshot.available:
+        return snapshot_to_unavailable_result(
+            snapshot,
+            strict=is_strict_missing_tools(),
+        )
+
+    if snapshot.version_check_passed:
+        if snapshot.below_recommended:
             logger.warning(
                 "{} {} is below recommended version {} (minimum {} met)",
                 definition.name,
-                version_info.current_version,
-                version_info.recommended_version,
-                version_info.min_version,
+                snapshot.version,
+                snapshot.recommended_version,
+                snapshot.min_version,
             )
         return None
 
-    # Binary exists and responded but version could not be parsed — proceed
-    if (
-        version_info.current_version is None
-        and version_info.error_message
-        and "Could not parse version" in version_info.error_message
-    ):
-        import shutil
-
-        main_cmd = command[0] if command else definition.name
-        if shutil.which(main_cmd):
-            logger.debug(
-                "Could not parse version for {}, proceeding anyway",
-                definition.name,
-            )
-            return None
+    # Unparseable versions are encoded as version_check_passed=True with a
+    # live binary (see probe_tool), so they never reach this branch.
 
     # Digest-pinned image lag after a manifest version bump: binary exists and
     # is merely older than min_version. Allowlisted tools keep running so
     # integration coverage is not silently reduced to a skip.
-    if (
-        version_info.current_version is not None
-        and version_info.error_message
-        and "below minimum requirement" in version_info.error_message
-        and _version_lag_allowed(definition.name)
-    ):
+    if snapshot.version is not None and _version_lag_allowed(definition.name):
         logger.warning(
             "{} {} is below minimum {} but allowed via {}; proceeding",
             definition.name,
-            version_info.current_version,
-            version_info.min_version,
+            snapshot.version,
+            snapshot.min_version,
             _ALLOW_VERSION_LAG_ENV,
         )
         return None
 
+    error = snapshot.probe_error or "version check failed"
+    hint = snapshot.remediation_hint or ""
     skip_message = (
-        f"Skipping {definition.name}: {version_info.error_message}. "
-        f"Minimum required: {version_info.min_version}. "
-        f"{version_info.install_hint}"
-    )
+        f"Skipping {definition.name}: {error}. "
+        f"Minimum required: {snapshot.min_version}. "
+        f"{hint}"
+    ).strip()
 
     return ToolResult.from_outcome(
-        ToolOutcome(execution=Skipped(version_info.error_message or skip_message)),
+        ToolOutcome(execution=Skipped(error)),
         name=definition.name,
         output=skip_message,
     )

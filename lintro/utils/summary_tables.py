@@ -10,7 +10,7 @@ from typing import Any
 
 from lintro.enums.action import Action
 from lintro.enums.tool_name import ToolName, normalize_tool_name
-from lintro.models.core.tool_outcome import FixUnmeasured, NoFiles, Skipped
+from lintro.models.core.tool_outcome import FixUnmeasured, NoFiles, Skipped, Unavailable
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.console import (
     get_summary_value,
@@ -119,10 +119,24 @@ def _is_result_skipped(result: ToolResult) -> tuple[bool, str]:
         Tuple of (is_skipped, skip_reason).
     """
     match result.outcome.execution:
-        case Skipped(reason=reason):
+        case Skipped(reason=reason) | Unavailable(reason=reason):
             return True, reason
         case _:
             return False, ""
+
+
+def _non_run_status_label(result: ToolResult) -> str:
+    """Render probe failures distinctly from deliberate skips.
+
+    Args:
+        result: Frozen non-run result.
+
+    Returns:
+        Human-readable summary status.
+    """
+    if isinstance(result.outcome.execution, Unavailable):
+        return f"{_YELLOW}⚠️  UNAVAIL{_RESET}"
+    return f"{_YELLOW}⏭️  SKIP{_RESET}"
 
 
 def count_affected_files(tool_results: Sequence[ToolResult]) -> int:
@@ -213,7 +227,7 @@ def print_summary_table(
                     summary_data.append(
                         [
                             tool_display,
-                            f"{_YELLOW}⏭️  SKIP{_RESET}",
+                            _non_run_status_label(result),
                             "-",
                             "-",
                             "-",
@@ -264,7 +278,7 @@ def print_summary_table(
                     summary_data.append(
                         [
                             tool_display,
-                            f"{_YELLOW}⏭️  SKIP{_RESET}",
+                            _non_run_status_label(result),
                             "-",
                             "-",
                             "-",
@@ -303,7 +317,7 @@ def print_summary_table(
                     summary_data.append(
                         [
                             tool_display,
-                            f"{_YELLOW}⏭️  SKIP{_RESET}",
+                            _non_run_status_label(result),
                             "-",  # Fixed
                             "-",  # AI-Applied
                             "-",  # AI-Resolved
@@ -407,7 +421,7 @@ def print_summary_table(
                     summary_data.append(
                         [
                             tool_display,
-                            f"{_YELLOW}⏭️  SKIP{_RESET}",
+                            _non_run_status_label(result),
                             "-",  # Issues
                             f"{_YELLOW}{skip_reason}{_RESET}" if skip_reason else "",
                         ],

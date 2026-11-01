@@ -106,6 +106,9 @@ class ToolResult:
     skipped: bool = field(default=False)
     skip_reason: str | None = field(default=None)
 
+    # Probe evidence for the frozen Unavailable outcome; success carries policy.
+    unavailable_reason: str | None = field(default=None, kw_only=True)
+
     # Execution-timeout tracking. ``True`` when the tool's subprocess exceeded
     # its deadline and was killed. A timeout is an *execution failure*, not a
     # lint finding: it never contributes to ``issues_count``. Consumers use
@@ -214,6 +217,15 @@ class ToolResult:
         """
         return outcome_from_result(self)
 
+    @property
+    def unavailable(self) -> bool:
+        """Whether a probe prevented execution, independent of strict policy.
+
+        Returns:
+            True when the result carries unavailable evidence.
+        """
+        return self.unavailable_reason is not None
+
     def validate_outcome(self) -> None:
         """Validate the outcome, raising ValueError for contradictory evidence."""
         # Plugin boundaries call this unbound so a duck-typed object's own
@@ -254,9 +266,12 @@ class ToolResult:
         # Preserve API-v2 constructor defaults only at the construction boundary.
         # False is also the historical default for success, so a skip normalizes
         # it to True. Explicit affirmative inspection is never normalized away.
-        if (self.no_files or self.skipped or self.timed_out) and (
-            self.inspected_files is None
-        ):
+        if (
+            self.no_files
+            or self.skipped
+            or self.timed_out
+            or self.unavailable_reason is not None
+        ) and (self.inspected_files is None):
             object.__setattr__(self, "inspected_files", False)
         if self.skipped and self.success is False:
             object.__setattr__(self, "success", True)

@@ -5,6 +5,7 @@ import shutil
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass, field
 from functools import lru_cache
+from pathlib import Path
 
 from loguru import logger
 from packaging.version import InvalidVersion, Version
@@ -133,6 +134,8 @@ class ToolVersionInfo:
     error_message: str | None = field(default=None)
     binary_path: str | None = field(default=None)
     advisory: VersionAdvisory | None = field(default=None)
+    probe_failed: bool = field(default=False, kw_only=True)
+    parse_failed: bool = field(default=False, kw_only=True)
 
 
 def parse_version(version_str: str) -> Version:
@@ -209,14 +212,16 @@ def check_tool_version(
     command: list[str],
     *,
     append_version: bool = True,
+    cwd: str | Path | None = None,
 ) -> ToolVersionInfo:
     """Check if a tool meets minimum version requirements.
 
     Args:
-        tool_name: Name of the tool to check
-        command: Command list to run the tool (e.g., ["python", "-m", "ruff"])
-        append_version: Whether to append --version to command (default True).
+        tool_name: str: Name of the tool to check.
+        command: list[str]: Command prefix for the tool.
+        append_version: bool: Whether to append --version (default True).
             Set to False when command already includes a version subcommand.
+        cwd: str | Path | None: Execution directory for project-local resolution.
 
     Returns:
         ToolVersionInfo: Version check results
@@ -305,9 +310,11 @@ def check_tool_version(
             text=True,
             timeout=VERSION_CHECK_TIMEOUT,  # Configurable version check timeout
             env=run_env,
+            cwd=cwd,
         )
 
         if result.returncode != 0:
+            info.probe_failed = True
             info.error_message = f"Command failed: {' '.join(version_cmd)}"
             logger.debug(
                 f"[VersionCheck] Failed to get version for {tool_name}: "
@@ -323,6 +330,7 @@ def check_tool_version(
         info.current_version = extract_version_from_output(output, parser_tool_name)
 
         if not info.current_version:
+            info.parse_failed = True
             info.error_message = (
                 f"Could not parse version from output: {output.strip()}"
             )
@@ -379,6 +387,7 @@ def check_tool_version(
             )
 
     except (subprocess.TimeoutExpired, OSError) as e:
+        info.probe_failed = True
         info.error_message = f"Failed to run version check: {e}"
         logger.debug(f"[VersionCheck] Exception checking version for {tool_name}: {e}")
 

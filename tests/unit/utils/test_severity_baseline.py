@@ -803,3 +803,26 @@ def test_resolve_log_root_rejects_anything_else(base_dir: object) -> None:
 def test_resolve_log_root_handles_a_manager_without_base_dir() -> None:
     """An object with no ``base_dir`` at all is handled, not probed blindly."""
     assert_that(resolve_log_root(object())).is_none()
+
+
+def test_scope_excludes_unavailable_tools(tmp_path: Path) -> None:
+    """Installing a missing tool must change the measured tool population."""
+    measured = ToolResult(name="ruff", success=True, inspected_files=True)
+    missing = ToolResult(name="mypy", success=True, unavailable_reason="missing")
+    without_missing = severity_baseline_scope(
+        paths=[str(tmp_path)],
+        tool_results=[measured],
+    )
+    with_missing = severity_baseline_scope(
+        paths=[str(tmp_path)],
+        tool_results=[measured, missing],
+    )
+    installed = severity_baseline_scope(
+        paths=[str(tmp_path)],
+        tool_results=[
+            measured,
+            ToolResult(name="mypy", success=True, inspected_files=True),
+        ],
+    )
+    assert with_missing == without_missing
+    assert installed != with_missing

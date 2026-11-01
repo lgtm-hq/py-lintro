@@ -59,6 +59,7 @@ class ToolRunStatus(StrEnum):
         PASSED: The tool ran and reported no issues.
         ISSUES: The tool ran and reported at least one issue.
         SKIPPED: The tool did not run (unavailable, disabled, filtered out).
+        UNAVAILABLE: A capability probe could not establish a runnable tool.
         TIMED_OUT: The tool's subprocess exceeded its deadline and was killed.
         ERRORED: The tool failed for a reason that is not a lint finding.
     """
@@ -66,6 +67,7 @@ class ToolRunStatus(StrEnum):
     PASSED = auto()
     ISSUES = auto()
     SKIPPED = auto()
+    UNAVAILABLE = auto()
     TIMED_OUT = auto()
     ERRORED = auto()
 
@@ -86,6 +88,8 @@ def tool_run_status(*, result: ToolOutcome, issue_count: int) -> ToolRunStatus:
     Returns:
         ToolRunStatus: The collapsed status.
     """
+    if getattr(result, "unavailable", False) is True:
+        return ToolRunStatus.UNAVAILABLE
     if result.skipped:
         return ToolRunStatus.SKIPPED
     if result.timed_out:

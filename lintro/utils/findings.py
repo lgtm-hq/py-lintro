@@ -128,7 +128,7 @@ class ToolRunSummary:
             residual measured after it, or ``None`` for a check run and for
             fix-incapable tools. Not any one tool's reported fix count: a
             finding one tool fixed and another reintroduced nets out (#1743).
-        skip_reason: Why the tool was skipped, or ``None``.
+        skip_reason: Why the tool was skipped or unavailable, or ``None``.
     """
 
     tool: str
@@ -307,7 +307,7 @@ def tool_summary_from_result(
         issue_count=issue_count,
         duration=result.duration_seconds,
         net_resolved=result.fixed_issues_count if action == Action.FIX else None,
-        skip_reason=result.skip_reason,
+        skip_reason=result.unavailable_reason or result.skip_reason,
     )
 
 

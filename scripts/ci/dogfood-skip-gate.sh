@@ -15,8 +15,8 @@ set -euo pipefail
 # gate downloads that artifact and supplies REPORT_JSON, avoiding a second
 # full-repo lint. When REPORT_JSON is unset, this script retains its historical
 # derive-in-container path for changed-files PRs and dogfood-nightly. Only the
-# `skipped` state matters here — real lint issues are gated by the dogfooding
-# job itself, so lintro's own exit code is intentionally ignored.
+# `skipped` / `unavailable` states matter here — real lint issues are gated by
+# the dogfooding job itself, so lintro's own exit code is intentionally ignored.
 #
 # The same report is also classified for tool-execution timeouts (#1653) via
 # scripts/ci/classify-lint-timeout.py, and the verdict is published as the

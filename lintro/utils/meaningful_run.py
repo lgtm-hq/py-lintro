@@ -45,7 +45,7 @@ def result_inspected_files(result: ToolResult) -> bool | None:
         True for inspection, False for no work, or None for legacy results.
         Skips, timeouts and empty discovery never qualify as inspections.
     """
-    if result.skipped or result.timed_out or result.no_files:
+    if result.unavailable or result.skipped or result.timed_out or result.no_files:
         return False
     return result.inspected_files
 
@@ -115,6 +115,8 @@ def baseline_is_eligible(
       and their file population can change even with the same flags.
     * No tool failed without parsed findings. Such a failure would undercount
       the population and make the next healthy run report spurious new issues.
+    * No selected tool was unavailable. Installing it would change the measured
+      population even when non-strict policy lets this run exit successfully.
 
     Args:
         action: The action the run executed.
@@ -127,6 +129,8 @@ def baseline_is_eligible(
         bool: ``True`` when the run is a comparable measurement.
     """
     if early_exit or dry_run_preview or partial_scan or action != Action.CHECK:
+        return False
+    if any(result.unavailable for result in tool_results):
         return False
     if any(result.baselined_count is not None for result in tool_results):
         return False

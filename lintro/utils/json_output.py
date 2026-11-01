@@ -17,6 +17,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action, normalize_action
+from lintro.enums.tool_result_status import ToolResultStatus
 from lintro.formatters.formatter import merge_detected_and_remaining
 from lintro.models.core.severity_counts import SeverityCounts, SeverityDelta
 from lintro.models.core.tool_outcome import (
@@ -25,6 +26,7 @@ from lintro.models.core.tool_outcome import (
     FixUnmeasured,
     Skipped,
     TimedOut,
+    Unavailable,
 )
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.execution.exit_codes import unknown_residual_tool_names
@@ -32,6 +34,35 @@ from lintro.utils.tool_metadata import normalize_tool_metadata
 
 if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
+
+
+def status_for_tool_result(
+    result: ToolResult,
+    *,
+    issue_count: int | None = None,
+) -> ToolResultStatus:
+    """Derive public status from validated execution evidence.
+
+    Args:
+        result: Frozen result to report.
+        issue_count: Optional serialized issue count.
+
+    Returns:
+        Stable JSON status for the execution outcome.
+    """
+    outcome = result.outcome
+    match outcome.execution:
+        case Unavailable():
+            return ToolResultStatus.UNAVAILABLE
+        case Skipped():
+            return ToolResultStatus.SKIPPED
+        case _:
+            count = outcome.issues_count if issue_count is None else issue_count
+            return (
+                ToolResultStatus.OK
+                if outcome.success and not count
+                else ToolResultStatus.FAILED
+            )
 
 
 def serialize_issue(issue: "BaseIssue") -> dict[str, Any]:
@@ -120,7 +151,9 @@ def serialize_tool_result(
         ``issues_count``, ``skipped``, ``skip_reason``, ``timed_out`` and
         ``output``; plus ``parse_failures_count`` when set,
         ``fixed``/``remaining`` in FIX mode, normalized ``metadata`` when
-        present, and ``issues`` when any exist.
+        present, and ``issues`` when any exist. ``status`` names the execution
+        verdict; unavailable results also carry ``unavailable: true`` and
+        ``unavailable_reason`` separately from deliberate skip evidence.
     """
     outcome = result.outcome
     execution = outcome.execution
@@ -137,6 +170,10 @@ def serialize_tool_result(
         "timed_out": isinstance(execution, TimedOut),
         "output": result.output,
     }
+    data["status"] = status_for_tool_result(result)
+    if isinstance(execution, Unavailable):
+        data["unavailable"] = True
+        data["unavailable_reason"] = execution.reason
     if result.parse_failures_count is not None:
         data["parse_failures_count"] = result.parse_failures_count
     if result.baselined_count is not None:
@@ -165,6 +202,8 @@ def serialize_tool_result(
                 data["net_resolved"] = fixed if fixed is not None else 0
                 data["fixed"] = data["net_resolved"]
                 data["remaining"] = remaining if remaining is not None else 0
+    if action == Action.FIX and isinstance(execution, Unavailable):
+        data.update(net_resolved=None, fixed=None, remaining=None)
     metadata = result.metadata
     if metadata:
         normalized_metadata = normalize_tool_metadata(metadata)

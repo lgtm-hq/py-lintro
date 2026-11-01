@@ -27,7 +27,8 @@ def test_default_collections_preserve_empty_result_json(action: Action) -> None:
     """
     expected = (
         '{"tool": "", "success": false, "issues_count": 0, '
-        '"skipped": false, "skip_reason": null, "timed_out": false, "output": null'
+        '"skipped": false, "skip_reason": null, "timed_out": false, "output": null, '
+        '"status": "failed"'
     )
     if action == Action.FIX:
         expected += ', "net_resolved": 0, "fixed": 0, "remaining": 0'

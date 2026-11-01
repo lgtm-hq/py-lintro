@@ -855,3 +855,108 @@ def test_the_retry_loop_snapshots_once_and_verifies_the_final_file(
     assert_that(tool.checked_paths).is_equal_to([str(target)])
     assert_that(artifact.total_remaining).is_equal_to(0)
     assert_that(artifact.exit_code).is_equal_to(0)
+
+
+def test_unavailable_mutation_keeps_unknown_counts_and_skips_verify(
+    monkeypatch: pytest.MonkeyPatch,
+    _executor_doubles: list[dict[str, Any]],
+    tmp_path: Path,
+    fake_logger: FakeLogger,
+) -> None:
+    """A non-strict missing tool gets no capability or redundant CHECK invocation."""
+    workspace = tmp_path / "src"
+    workspace.mkdir()
+    tool = _MutatingTool(target=_seed(workspace / "a.py"), residual=0)
+    monkeypatch.setattr(
+        tool,
+        "fix",
+        lambda *a, **kw: ToolResult(
+            name="ruff",
+            success=True,
+            unavailable_reason="not installed",
+        ),
+    )
+    monkeypatch.setattr(tool_manager, "get_tool", lambda name: tool)
+    artifact = _run_fmt(
+        ctx=_fix_context(tmp_path=tmp_path, fake_logger=fake_logger),
+        workspace=workspace,
+    )
+    assert [call["action"] for call in _executor_doubles] == [Action.FIX]
+    assert tool.checked_paths is None
+    result = artifact.tool_results[0]
+    assert result.unavailable is True
+    assert result.capability is None
+    assert result.fixed_issues_count is None
+    assert result.remaining_issues_count is None
+
+
+def test_internal_probe_crash_fails_executor_run(
+    monkeypatch: pytest.MonkeyPatch,
+    _executor_doubles: list[dict[str, Any]],
+    tmp_path: Path,
+    fake_logger: FakeLogger,
+) -> None:
+    """An internal exception must produce a failing artifact, never UNAVAIL/0."""
+    from lintro.plugins.execution_preparation import verify_tool_version
+    from lintro.plugins.protocol import ToolDefinition
+    from lintro.tools.core import snapshots
+
+    workspace = tmp_path / "src"
+    workspace.mkdir()
+    tool = _MutatingTool(target=_seed(workspace / "a.py"), residual=0)
+
+    def crash(*args: object, **kwargs: object) -> snapshots.ToolSnapshot:
+        raise AttributeError("internal probe crash")
+
+    monkeypatch.setattr(snapshots, "probe_tool", crash)
+    monkeypatch.setattr(
+        tool,
+        "fix",
+        lambda *a, **kw: verify_tool_version(
+            ToolDefinition("ruff", "linter"),
+            cwd=workspace,
+        ),
+    )
+    monkeypatch.setattr(tool_manager, "get_tool", lambda name: tool)
+    artifact = _run_fmt(
+        ctx=_fix_context(tmp_path=tmp_path, fake_logger=fake_logger),
+        workspace=workspace,
+    )
+    assert artifact.exit_code == 1
+    assert any(
+        not result.success and not result.unavailable
+        for result in artifact.tool_results
+    )
+
+
+def test_diff_gate_exits_without_capability_probes(
+    monkeypatch: pytest.MonkeyPatch,
+    _executor_doubles: list[dict[str, Any]],
+    tmp_path: Path,
+    fake_logger: FakeLogger,
+) -> None:
+    """An invalid diff must not warm caches or execute any tool."""
+    from types import SimpleNamespace
+
+    from lintro.tools.core import snapshots
+
+    def unexpected_probe(
+        *args: object,
+        **kwargs: object,
+    ) -> dict[str, snapshots.ToolSnapshot]:
+        raise AssertionError("capability probe before diff gate")
+
+    monkeypatch.setattr(snapshots, "probe_all_tools", unexpected_probe)
+    monkeypatch.setattr(
+        te,
+        "resolve_diff_scope",
+        lambda **kw: SimpleNamespace(failed=True),
+    )
+    artifact = _run_fmt(
+        ctx=_fix_context(tmp_path=tmp_path, fake_logger=fake_logger),
+        workspace=tmp_path,
+    )
+    assert artifact.early_exit is True
+    assert artifact.exit_code == 1
+    assert artifact.tool_results == []
+    assert _executor_doubles == []

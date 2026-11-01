@@ -88,6 +88,7 @@ from lintro.models.core.tool_outcome import (
     NoFiles,
     Skipped,
     TimedOut,
+    Unavailable,
 )
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
@@ -750,7 +751,7 @@ def run_verify_pass(
                 ),
             )
             continue
-        if isinstance(execution, Skipped):
+        if isinstance(execution, (Skipped, Unavailable)):
             # The check returned without executing — a version gate, most
             # often. ``success=True, issues_count=0`` is the shape of a clean
             # verdict, but no file was examined, so trusting it would drop the
@@ -760,7 +761,11 @@ def run_verify_pass(
                     tool=name,
                     result=None,
                     status=VerifyStatus.UNKNOWN,
-                    unknown_reason=SKIPPED_REASON,
+                    unknown_reason=(
+                        f"the verify tool is unavailable: {execution.reason}"
+                        if isinstance(execution, Unavailable)
+                        else SKIPPED_REASON
+                    ),
                 ),
             )
             continue
@@ -926,7 +931,7 @@ def check_answered(result: ToolResult | None) -> bool:
     match execution:
         case Checked(success=success):
             return success or bool(result.issues)
-        case Skipped() | NoFiles() | TimedOut():
+        case Skipped() | Unavailable() | NoFiles() | TimedOut():
             return False
 
 
@@ -1136,7 +1141,7 @@ def fold_verify_results(
     by_name = {outcome.tool: outcome for outcome in verify_results}
     project_checks = frozenset(name for name in by_name if _is_project_check(name))
     for index, mutation in enumerate(mutation_results):
-        if isinstance(mutation.outcome.execution, (Skipped, TimedOut)):
+        if isinstance(mutation.outcome.execution, (Skipped, Unavailable, TimedOut)):
             continue
         outcome = by_name.get(mutation.name)
         if outcome is None:

@@ -8,16 +8,20 @@ name collisions, and per-invocation execution isolation.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
+from click.testing import CliRunner
 from loguru import logger
 
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.discovery import (
     ENTRY_POINT_GROUP,
@@ -98,6 +102,7 @@ def _make_good_plugin(*, tool_name: str) -> type[BaseToolPlugin]:
             return ToolDefinition(
                 name=tool_name,
                 description="A well-formed external tool",
+                in_process=True,
                 file_patterns=["*.fake"],
                 default_options={"flavor": "vanilla"},
             )
@@ -260,6 +265,86 @@ def test_well_formed_plugin_is_discovered_and_registered() -> None:
     assert_that(ToolRegistry.get("ext-good").definition.name).is_equal_to("ext-good")
 
 
+@pytest.mark.parametrize("in_process", [None, True, False])
+@pytest.mark.parametrize("strict", [False, True])
+def test_versionless_api_v2_plugin_requires_execution_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    in_process: bool | None,
+    strict: bool,
+) -> None:
+    """An ambiguous v2 plugin fails visibly; explicit modes execute or degrade."""
+    from lintro.cli import cli
+    from lintro.tools.core import snapshots
+
+    name = "ext-probe-contract"
+
+    class _PreparedPlugin(BaseToolPlugin):
+        LINTRO_PLUGIN_API_VERSION = 2
+
+        @property
+        def definition(self) -> ToolDefinition:
+            return ToolDefinition(
+                name=name,
+                description="API-v2 execution contract fixture",
+                in_process=in_process,
+                file_patterns=["*.fake"],
+            )
+
+        def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
+            prepared = self.prepare(paths, options)
+            if isinstance(prepared, ToolResult):
+                return prepared
+            return ToolResult(
+                name=name,
+                success=False,
+                issues_count=1,
+                issues=[
+                    BaseIssue(file=prepared.files[0], message="in-process finding"),
+                ],
+            )
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "target.fake").write_text("content\n")
+    (tmp_path / ".lintro-config.yaml").write_text(
+        f"execution:\n  strict_missing_tools: {str(strict).lower()}\n",
+    )
+    monkeypatch.setattr(
+        snapshots,
+        "get_executable_command",
+        lambda *a, **kw: [str(tmp_path / "absent-executable")],
+    )
+    ep = _FakeEntryPoint(name=name, loaded=_PreparedPlugin)
+    with _patch_entry_points([ep]):
+        assert_that(discover_external_plugins()).is_equal_to(1)
+        result = CliRunner().invoke(
+            cli,
+            [
+                "chk",
+                "target.fake",
+                "--tools",
+                name,
+                "--output-format",
+                "json",
+                "--output",
+                "report.json",
+            ],
+        )
+    row = json.loads((tmp_path / "report.json").read_text())["results"][0]
+    assert_that(result.exit_code).is_equal_to(
+        1 if in_process is not False else int(strict),
+    )
+    if in_process is None:
+        assert_that(row["status"]).is_equal_to("failed")
+        assert_that(row["output"]).contains("in_process=True", "in_process=False")
+    elif in_process:
+        assert_that(row["issues"][0]["message"]).is_equal_to("in-process finding")
+        assert_that(row["issues_count"]).is_equal_to(1)
+    else:
+        assert_that(row["status"]).is_equal_to("unavailable")
+        assert_that(row["success"]).is_equal_to(not strict)
+
+
 def test_plugin_origin_records_distribution_name() -> None:
     """Discovered plugin origin reflects the distribution package name."""
     ep = _FakeEntryPoint(
@@ -313,7 +398,10 @@ def test_list_tools_shows_origin_for_builtin_and_external() -> None:
     from contextlib import redirect_stdout
 
     buffer = io.StringIO()
-    with redirect_stdout(buffer):
+    with (
+        redirect_stdout(buffer),
+        patch("lintro.tools.core.snapshots.probe_all_tools", return_value={}),
+    ):
         list_tools(output=None, json_output=True)
     data = json.loads(buffer.getvalue())
 
