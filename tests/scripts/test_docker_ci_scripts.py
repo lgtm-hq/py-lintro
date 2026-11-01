@@ -615,8 +615,8 @@ def test_cosign_sign_images_signs_each_digest(tmp_path: Path) -> None:
         bin_dir,
         {
             "IMAGES": (
-                "ghcr.io/example/app@sha256:aaa111\n"
-                "ghcr.io/example/app-base@sha256:bbb222"
+                f"ghcr.io/example/app@sha256:{'a' * 64}\n"
+                f"ghcr.io/example/app-base@sha256:{'b' * 64}"
             ),
             "COSIGN_LOG": str(cosign_log),
         },
@@ -626,8 +626,8 @@ def test_cosign_sign_images_signs_each_digest(tmp_path: Path) -> None:
     lines = cosign_log.read_text().strip().splitlines()
     assert_that(lines).is_equal_to(
         [
-            "sign --yes ghcr.io/example/app@sha256:aaa111",
-            "sign --yes ghcr.io/example/app-base@sha256:bbb222",
+            f"sign --yes ghcr.io/example/app@sha256:{'a' * 64}",
+            f"sign --yes ghcr.io/example/app-base@sha256:{'b' * 64}",
         ],
     )
 

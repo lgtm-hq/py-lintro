@@ -1,16 +1,19 @@
-"""Tests for scripts/ci/cosign-sign-images.sh retry + error classification.
+"""Tests for scripts/ci/cosign-sign-images.sh retry and verified recovery.
 
 These exercise the signing wrapper against a stubbed ``cosign`` on PATH so no
-real Sigstore signing happens. They pin the two behaviours #1646 depends on:
+real Sigstore signing happens. They pin the behaviours #1646 and #3114 need:
 
 * the transient ambient-OIDC token-fetch flake is retried with bounded backoff;
 * a genuine signing rejection (or any non-token-fetch error) stays fatal and is
   never retried away.
+* equivalent-entry conflicts require exact digest, identity and issuer
+  verification; duplicate immutable refs are signed once per repository.
 """
 
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess  # nosec B404 - drives the script under test; shell=False
 import textwrap
 from pathlib import Path
@@ -29,6 +32,18 @@ _OIDC_MESSAGE = (
     "credentials: invalid character 'u' looking for beginning of value"
 )
 _REJECT_MESSAGE = "Error: signing [%s]: signing digest: signature invalid"
+_REKOR_CONFLICT = (
+    "[POST /api/v1/log/entries][409] createLogEntryConflict "
+    '{"code":409,"message":"an equivalent entry already exists in the '
+    "transparency log with UUID 108e9186e8c5677a42ab5396acea2a5a2f3e82c2bfc2ba024"
+    '7614a172096bc2eb41131500e82ea31"}'
+)
+_IDENTITY_REGEXP = (
+    r"^https://github\.com/lgtm-hq/(py-lintro/\.github/workflows/"
+    r"(docker-ci|publish-pypi-on-tag)\.yml|lgtm-ci/\.github/workflows/"
+    r"reusable-docker-(build|multiplatform)\.yml)@"
+)
+_ISSUER = "https://token.actions.githubusercontent.com"
 
 
 def _write_fake_cosign(bin_dir: Path, mode: str, *, fail_until: int = 0) -> Path:
@@ -37,7 +52,7 @@ def _write_fake_cosign(bin_dir: Path, mode: str, *, fail_until: int = 0) -> Path
     Args:
         bin_dir: Directory placed at the front of PATH.
         mode: One of ``success``, ``reject``, ``oidc_always``,
-            ``oidc_then_success``.
+            ``oidc_then_success``, ``duplicate_conflict``.
         fail_until: For ``oidc_then_success``, the number of leading calls that
             fail with the OIDC flake before one succeeds.
 
@@ -48,6 +63,7 @@ def _write_fake_cosign(bin_dir: Path, mode: str, *, fail_until: int = 0) -> Path
     args_log = bin_dir / "cosign.args"
     oidc = _OIDC_MESSAGE % "REF"
     reject = _REJECT_MESSAGE % "REF"
+    conflict = shlex.quote(_REKOR_CONFLICT)
     script = textwrap.dedent(
         f"""\
         #!/usr/bin/env bash
@@ -64,6 +80,12 @@ def _write_fake_cosign(bin_dir: Path, mode: str, *, fail_until: int = 0) -> Path
         case "{mode}" in
           success) exit 0 ;;
           reject) echo "{reject}" >&2; exit 1 ;;
+          duplicate_conflict)
+            if [[ $(grep -cFx -- "$*" "$args_log") -gt 1 ]]; then
+              printf '%s\\n' {conflict} >&2
+              exit 17
+            fi
+            ;;
           oidc_always) echo "{oidc}" >&2; exit 1 ;;
           oidc_then_success)
             if (( n <= {fail_until} )); then
@@ -79,6 +101,55 @@ def _write_fake_cosign(bin_dir: Path, mode: str, *, fail_until: int = 0) -> Path
     cosign.write_text(script)
     cosign.chmod(0o755)
     return counter
+
+
+def _write_rekor_cosign(
+    bin_dir: Path,
+    *,
+    error: str = _REKOR_CONFLICT,
+    verification: str = "success",
+) -> None:
+    """Fake a signing conflict and require the full verification policy.
+
+    Args:
+        bin_dir: Directory placed at the front of PATH.
+        error: Signing failure text, returned with exit status 17.
+        verification: Verification result to simulate after checking arguments.
+    """
+    script = textwrap.dedent(
+        f"""\
+        #!/usr/bin/env bash
+        set -euo pipefail
+        printf '%s\\n' "$*" >>{shlex.quote(str(bin_dir / 'cosign.args'))}
+        case "$1" in
+          sign)
+            if [[ "${{@: -1}}" != {shlex.quote(_DIGEST)} ]]; then exit 0; fi
+            printf '%s\\n' {shlex.quote(error)} >&2
+            exit 17
+            ;;
+          verify)
+            if [[ $# -ne 7 || "$2" != --new-bundle-format ||
+                  "$3" != {shlex.quote(_DIGEST)} ||
+                  "$4" != --certificate-identity-regexp ||
+                  "$5" != {shlex.quote(_IDENTITY_REGEXP)} ||
+                  "$6" != --certificate-oidc-issuer ||
+                  "$7" != {shlex.quote(_ISSUER)} ]]; then
+              echo 'verification policy mismatch' >&2
+              exit 99
+            fi
+            if [[ {shlex.quote(verification)} != success ]]; then
+              printf '%s\\n' {shlex.quote(verification)} >&2
+              exit 23
+            fi
+            echo 'Verified trusted signature for exact digest'
+            ;;
+          *) exit 99 ;;
+        esac
+        """,
+    )
+    cosign = bin_dir / "cosign"
+    cosign.write_text(script)
+    cosign.chmod(0o755)
 
 
 def _run(
@@ -131,13 +202,13 @@ def _calls(counter: Path) -> int:
 
 
 def _signed_refs(bin_dir: Path) -> list[str]:
-    """Return the refs the stub cosign was asked to sign, in order.
+    """Return the signing and verification arguments, in order.
 
     Args:
         bin_dir: Directory holding the stub's ``cosign.args`` log.
 
     Returns:
-        list[str]: One entry per cosign invocation (the ``--yes <ref>`` argv).
+        list[str]: One entry per cosign invocation.
     """
     args_log = bin_dir / "cosign.args"
     if not args_log.exists():
@@ -165,10 +236,20 @@ def test_missing_images_is_fatal(tmp_path: Path) -> None:
     assert_that(_calls(counter)).is_equal_to(0)
 
 
-def test_non_digest_ref_is_fatal_and_not_retried(tmp_path: Path) -> None:
-    """A floating-tag ref is rejected outright and cosign is never called."""
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "ghcr.io/lgtm-hq/py-lintro:latest",
+        "ghcr.io/lgtm-hq/py-lintro@sha256:",
+        "ghcr.io/lgtm-hq/py-lintro@sha256:abc123",
+        _DIGEST + "junk",
+        _DIGEST + "\t" + _DIGEST_TWO,
+    ],
+)
+def test_non_digest_ref_is_fatal_and_not_retried(tmp_path: Path, ref: str) -> None:
+    """Only complete, unambiguous digest refs may reach signing or recovery."""
     counter = _write_fake_cosign(tmp_path, "success")
-    result = _run(tmp_path, images="ghcr.io/lgtm-hq/py-lintro:latest")
+    result = _run(tmp_path, images=f"{_DIGEST}\n{ref}")
     assert_that(result.returncode).is_equal_to(2)
     assert_that(result.stderr).contains("Refusing to sign non-digest ref")
     assert_that(_calls(counter)).is_equal_to(0)
@@ -195,6 +276,103 @@ def test_multiple_digests_each_signed(tmp_path: Path) -> None:
     assert_that(signed).is_length(2)
     assert_that(any(_DIGEST in ref for ref in signed)).is_true()
     assert_that(any(_DIGEST_TWO in ref for ref in signed)).is_true()
+
+
+def test_duplicate_digest_refs_are_signed_once(tmp_path: Path) -> None:
+    """Repeated immutable refs cannot trigger a second signing conflict."""
+    _write_fake_cosign(tmp_path, "duplicate_conflict")
+    result = _run(tmp_path, images=f"{_DIGEST}\n{_DIGEST}\n{_DIGEST_TWO}\n{_DIGEST}")
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(_signed_refs(tmp_path)).is_equal_to(
+        [f"sign --yes {_DIGEST}", f"sign --yes {_DIGEST_TWO}"],
+    )
+    assert_that(result.stdout).contains("Signed 2 image(s)")
+
+
+def test_same_digest_in_different_repositories_is_signed_in_each(
+    tmp_path: Path,
+) -> None:
+    """Signature storage is repository scoped even when digest bytes match."""
+    _write_fake_cosign(tmp_path, "success")
+    other_repo = _DIGEST.replace("/py-lintro@", "/py-lintro-base@")
+    result = _run(tmp_path, images=f"{_DIGEST}\n{other_repo}")
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(_signed_refs(tmp_path)).is_equal_to(
+        [f"sign --yes {_DIGEST}", f"sign --yes {other_repo}"],
+    )
+
+
+def test_equivalent_rekor_entry_requires_trusted_digest_verification(
+    tmp_path: Path,
+) -> None:
+    """Only a verified existing signature can recover the recorded conflict."""
+    _write_rekor_cosign(tmp_path)
+    result = _run(tmp_path, images=f"{_DIGEST}\n{_DIGEST_TWO}")
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("Verified trusted signature for exact digest")
+    assert_that(_signed_refs(tmp_path)).is_equal_to(
+        [
+            f"sign --yes {_DIGEST}",
+            f"verify --new-bundle-format {_DIGEST} --certificate-identity-regexp "
+            f"{_IDENTITY_REGEXP} --certificate-oidc-issuer {_ISSUER}",
+            f"sign --yes {_DIGEST_TWO}",
+        ],
+    )
+    # Recovery must keep using the published trust policy.
+    for doc in ("docker.md", "release-validation.md"):
+        assert_that((_REPO_ROOT / "docs" / doc).read_text()).contains(
+            f"--certificate-identity-regexp '{_IDENTITY_REGEXP}'",
+            f"--certificate-oidc-issuer {_ISSUER}",
+        )
+
+
+@pytest.mark.parametrize(
+    "verification",
+    [
+        "no signatures found",
+        "certificate identity does not match",
+        "certificate OIDC issuer does not match",
+        "signature digest does not match",
+        "invalid signature",
+        "verification registry unavailable",
+    ],
+)
+def test_rekor_conflict_with_failed_verification_stays_fatal(
+    tmp_path: Path,
+    verification: str,
+) -> None:
+    """A conflict is never sufficient when the required verification fails."""
+    _write_rekor_cosign(tmp_path, verification=verification)
+    result = _run(tmp_path, images=f"{_DIGEST}\n{_DIGEST_TWO}")
+    assert_that(result.returncode).is_equal_to(17)
+    assert_that(result.stderr).contains(verification)
+    assert_that(_signed_refs(tmp_path)).is_length(2)
+    assert_that(result.stdout).does_not_contain("Signed 2 image(s)")
+    assert_that(result.stderr).does_not_contain("retrying")
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        "registry returned HTTP 409 Conflict",
+        '[POST /api/v1/log/entries][409] createLogEntryConflict {"code":409}',
+        "an equivalent entry already exists in the transparency log",
+        _REKOR_CONFLICT.replace("[409]", "[500]"),
+        "Rekor returned HTTP 200",
+        "registry authorization denied",
+        "signature invalid",
+    ],
+)
+def test_other_signing_errors_never_try_signature_recovery(
+    tmp_path: Path,
+    error: str,
+) -> None:
+    """Unknown errors fail even when the stub could verify a signature."""
+    _write_rekor_cosign(tmp_path, error=error)
+    result = _run(tmp_path, images=_DIGEST)
+    assert_that(result.returncode).is_equal_to(17)
+    assert_that(_signed_refs(tmp_path)).is_equal_to([f"sign --yes {_DIGEST}"])
+    assert_that(result.stderr).contains("not a transient OIDC token-fetch flake")
 
 
 def test_transient_oidc_flake_is_retried_then_succeeds(tmp_path: Path) -> None:
