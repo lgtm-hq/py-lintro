@@ -26,6 +26,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.cppcheck.cppcheck_parser import parse_cppcheck_output
 from lintro.plugins.base import BaseToolPlugin
@@ -292,11 +293,10 @@ class CppcheckPlugin(BaseToolPlugin):
                 success=BatchSuccess.EXIT_AND_ISSUES,
                 output=BatchOutput.ON_EXIT_FAILURE_WITHOUT_ISSUES,
             ),
-            on_error=lambda exc: ToolResult(
+            on_error=lambda exc: ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=f"Cppcheck failed: {exc}",
-                issues_count=0,
             ),
         )
 

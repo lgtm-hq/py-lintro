@@ -21,6 +21,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.pip_audit.pip_audit_issue import PipAuditIssue
 from lintro.parsers.pip_audit.pip_audit_parser import (
@@ -361,15 +362,13 @@ class PipAuditPlugin(BaseToolPlugin):
             # not a matched-nothing, and must not carry ``no_files``: that
             # flag drives the "no files matched" note, which would blame
             # discovery for a decision pip-audit made about real files.
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=True, inspected_files=False)),
                 name=self.definition.name,
-                success=True,
                 output=(
                     "No auditable requirements or project file among the "
                     "matched paths; skipping pip-audit."
                 ),
-                issues_count=0,
-                inspected_files=False,
             )
 
         base_cmd = self._build_command()
@@ -431,15 +430,19 @@ class PipAuditPlugin(BaseToolPlugin):
         combined_output = "\n".join(output_chunks)
         should_show_output = bool(issues) or not all_success
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=(
+                    TimedOut(combined_output if should_show_output else None)
+                    if any_timed_out
+                    else Checked(success=overall_success, inspected_files=True)
+                ),
+                issues_count=len(issues),
+            ),
             name=self.definition.name,
-            inspected_files=True,
-            success=overall_success,
             output=combined_output if should_show_output else None,
-            issues_count=len(issues),
             issues=issues,
             parse_failures_count=parse_failures_count,
-            timed_out=any_timed_out,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

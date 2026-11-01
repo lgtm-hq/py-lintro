@@ -18,6 +18,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import FixPartial, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.oxlint.oxlint_issue import OxlintIssue
 from lintro.plugins.base import BaseToolPlugin
@@ -232,16 +233,16 @@ class OxlintPlugin(BaseToolPlugin):
             pre_fix_count = len(initial_issues)
         else:
             pre_fix_count = initial_count
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=TimedOut(timeout_msg),
+                accounting=FixPartial(initial=pre_fix_count),
+                issues_count=pre_fix_count,
+            ),
             name=self.definition.name,
-            success=False,
-            output=timeout_msg,
-            issues_count=pre_fix_count,
             issues=list(initial_issues or []),
-            initial_issues_count=pre_fix_count,
             initial_issues=initial_issues if initial_issues is not None else (),
             cwd=cwd,
-            timed_out=True,
         )
 
     def _build_oxlint_args(self, options: dict[str, object]) -> list[str]:

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.models.core.tool_outcome import Checked, TimedOut, ToolOutcome
 from lintro.parsers.ruff.ruff_format_issue import RuffFormatIssue
 from lintro.parsers.ruff.ruff_parser import (
     parse_ruff_format_check_output,
@@ -84,12 +85,12 @@ def execute_ruff_check(
             timeout=timeout,
             cmd=cmd,
         )
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=TimedOut(timeout_result.output),
+                issues_count=timeout_result.issues_count,
+            ),
             name=tool.definition.name,
-            success=timeout_result.success,
-            timed_out=timeout_result.timed_out,
-            output=timeout_result.output,
-            issues_count=timeout_result.issues_count,
             issues=timeout_result.issues,
         )
 
@@ -129,12 +130,12 @@ def execute_ruff_check(
                 timeout=timeout,
                 cmd=format_cmd,
             )
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=TimedOut(timeout_result.output),
+                    issues_count=lint_issues_count + timeout_result.issues_count,
+                ),
                 name=tool.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=timeout_result.output,
-                issues_count=lint_issues_count + timeout_result.issues_count,
                 issues=lint_issues + timeout_result.issues,
                 parse_failures_count=parse_failures,
             )
@@ -179,12 +180,13 @@ def execute_ruff_check(
     # Combine linting and formatting issues for the formatters
     all_issues = lint_issues + format_issues
 
-    return ToolResult(
+    return ToolResult.from_outcome(
+        ToolOutcome(
+            execution=Checked(success=success, inspected_files=True),
+            issues_count=issues_count,
+        ),
         name=tool.definition.name,
-        inspected_files=True,
-        success=success,
         output=output_summary,
-        issues_count=issues_count,
         issues=all_issues,
         parse_failures_count=parse_failures,
     )

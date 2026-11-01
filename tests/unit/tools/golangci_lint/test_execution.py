@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
+from lintro.models.core.tool_outcome import FixPartial
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.golangci_lint.golangci_lint_issue import GolangciLintIssue
 from lintro.tools.golangci_lint.definition import GolangciLintPlugin, _merge_fix_results
@@ -38,6 +39,7 @@ def test_merge_preserves_unmeasured_fix_counts() -> None:
     assert_that(result.remaining_issues_count).is_none()
     assert_that(result.issues).is_empty()
     assert_that(result.initial_issues).is_empty()
+    assert_that(result.outcome.accounting).is_equal_to(FixPartial())
 
 
 def _make_go_module(root: Path) -> None:

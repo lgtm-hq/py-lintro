@@ -34,6 +34,14 @@ from typing import TYPE_CHECKING, TypeVar, assert_never
 
 from loguru import logger
 
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixMeasured,
+    FixUnmeasured,
+    NoFiles,
+    TimedOut,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools.core.timeout_utils import (
     create_timeout_result,
@@ -226,12 +234,12 @@ def batch_timeout_result(
         cmd=cmd,
         tool_name=tool_name,
     )
-    return ToolResult(
+    return ToolResult.from_outcome(
+        ToolOutcome(
+            execution=TimedOut(timeout_result.output),
+            issues_count=timeout_result.issues_count,
+        ),
         name=plugin.definition.name,
-        success=timeout_result.success,
-        timed_out=timeout_result.timed_out,
-        output=timeout_result.output,
-        issues_count=timeout_result.issues_count,
         issues=issues,
         cwd=cwd,
     )
@@ -270,16 +278,18 @@ def batch_fix_timeout_result(
         tool_name=tool_name,
     )
     initial_count = len(initial_issues)
-    return ToolResult(
+    return ToolResult.from_outcome(
+        ToolOutcome(
+            execution=TimedOut(timeout_result.output),
+            accounting=FixMeasured(
+                initial=initial_count,
+                fixed=0,
+                remaining=initial_count,
+            ),
+            issues_count=initial_count,
+        ),
         name=plugin.definition.name,
-        success=timeout_result.success,
-        timed_out=timeout_result.timed_out,
-        output=timeout_result.output,
-        issues_count=initial_count,
         issues=list(initial_issues),
-        initial_issues_count=initial_count,
-        fixed_issues_count=0,
-        remaining_issues_count=initial_count,
         initial_issues=list(initial_issues),
         cwd=cwd,
     )
@@ -366,12 +376,16 @@ def batch_check_result(
         case _:
             assert_never(policy.output)
 
-    return ToolResult(
+    return ToolResult.from_outcome(
+        ToolOutcome(
+            execution=Checked(
+                success=success,
+                inspected_files=True if exit_success or issues else None,
+            ),
+            issues_count=issues_count,
+        ),
         name=plugin.definition.name,
-        inspected_files=True if exit_success or issues else None,
-        success=success,
         output=output if show_output or execution_failed else None,
-        issues_count=issues_count,
         issues=list(issues),
         cwd=cwd,
     )
@@ -438,10 +452,9 @@ def run_batch_check(
                 process.stdout,
                 process.stderr,
             ):
-                return ToolResult(
+                return ToolResult.from_outcome(
+                    ToolOutcome(execution=NoFiles()),
                     name=plugin.definition.name,
-                    success=True,
-                    no_files=True,
                     output=output,
                     issues=[],
                     cwd=result_cwd,
@@ -544,21 +557,22 @@ def _batch_fix_failure_result(
         failure leaves no verified residual or fix count.
     """
     reported_issues = list(initial_issues)
-    return ToolResult(
-        name=plugin.definition.name,
-        success=False,
-        output=output,
-        issues_count=len(reported_issues),
-        issues=reported_issues,
-        initial_issues_count=len(initial_issues),
-        fixed_issues_count=None,
-        remaining_issues_count=None,
-        residual_unknown=True,
-        residual_unknown_reason=(
-            "Batch initial check failed before writes"
-            if initial_check
-            else "Batch execution failed after writes may have begun"
+    return ToolResult.from_outcome(
+        ToolOutcome(
+            execution=Checked(success=False),
+            accounting=FixUnmeasured(
+                (
+                    "Batch initial check failed before writes"
+                    if initial_check
+                    else "Batch execution failed after writes may have begun"
+                ),
+                initial=len(initial_issues),
+            ),
+            issues_count=len(reported_issues),
         ),
+        name=plugin.definition.name,
+        output=output,
+        issues=reported_issues,
         initial_issues=list(initial_issues),
         cwd=cwd,
     )
@@ -661,10 +675,9 @@ def run_batch_fix(
                 process.stderr,
             )
         ):
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=NoFiles()),
                 name=plugin.definition.name,
-                success=True,
-                no_files=True,
                 output=process.output,
                 issues=[],
                 cwd=result_cwd,
@@ -724,23 +737,26 @@ def run_batch_fix(
         f"fixed={fixed_count}, remaining={remaining_count}",
     )
 
-    return ToolResult(
+    return ToolResult.from_outcome(
+        ToolOutcome(
+            execution=Checked(success=remaining_count == 0, inspected_files=True),
+            accounting=FixMeasured(
+                initial=initial_count,
+                fixed=fixed_count,
+                remaining=remaining_count,
+            ),
+            issues_count=remaining_count,
+        ),
         name=plugin.definition.name,
         # Every stage passed the execution-failure gate above. A clean
         # verification over the selected files is an inspection too.
-        inspected_files=True,
-        success=remaining_count == 0,
         output=_build_fix_summary(
             policy=policy,
             fixed_count=fixed_count,
             remaining_issues=remaining_issues,
             fix_output=fix_output[0],
         ),
-        issues_count=remaining_count,
         issues=reported_issues,
-        initial_issues_count=initial_count,
-        fixed_issues_count=fixed_count,
-        remaining_issues_count=remaining_count,
         initial_issues=initial_issues,
         cwd=result_cwd,
     )

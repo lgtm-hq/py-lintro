@@ -26,6 +26,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from lintro.models.core.tool_outcome import Checked, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.file_processor import FileProcessingResult
 
@@ -180,12 +181,20 @@ def run_per_file_check(
         label=policy.label,
     )
 
-    return ToolResult(
+    output = result.build_output(timeout=ctx.timeout)
+    return ToolResult.from_outcome(
+        ToolOutcome(
+            execution=(
+                TimedOut(output)
+                if result.timed_out
+                else Checked(
+                    success=result.all_success and result.total_issues == 0,
+                    inspected_files=result.inspected_files,
+                )
+            ),
+            issues_count=result.total_issues,
+        ),
         name=plugin.definition.name,
-        inspected_files=result.inspected_files,
-        success=result.all_success and result.total_issues == 0,
-        output=result.build_output(timeout=ctx.timeout),
-        issues_count=result.total_issues,
-        timed_out=result.timed_out,
+        output=output,
         issues=result.all_issues,
     )

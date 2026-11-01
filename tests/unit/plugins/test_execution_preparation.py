@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
+from lintro.models.core.tool_outcome import NoFiles, Skipped, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.execution_preparation import (
     PreparedExecution,
@@ -17,8 +18,10 @@ from lintro.plugins.execution_preparation import (
     _parse_allow_version_lag,
     _version_lag_allowed,
     prepare_execution,
+    verify_tool_version,
 )
 from lintro.plugins.protocol import ToolDefinition
+from lintro.tools.core.version_parsing import ToolVersionInfo
 
 
 @pytest.mark.parametrize(
@@ -151,6 +154,10 @@ def test_prepare_execution_no_files_returns_result(
     assert_that(result.no_files).is_true()
     assert_that(result.skipped).is_false()
     assert_that(result.issues_count).is_zero()
+    assert_that(result.outcome).is_equal_to(ToolOutcome(NoFiles()))
+    assert_that(result.inspected_files).is_false()
+    assert_that(result.initial_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
     assert_that(result.output).is_equal_to(
         "Nothing requested." if empty_paths else "No .py files found to check.",
     )
@@ -190,6 +197,38 @@ def test_prepare_execution_preserves_version_skip(tmp_path: Path) -> None:
     assert_that(result).is_same_as(skipped)
     result = cast("ToolResult", result)
     assert_that(result.output).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+
+
+def test_version_rejection_produces_explicit_skip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real version producer preserves its diagnosis and unknown counters.
+
+    Args:
+        monkeypatch: Restores the version-lag override after forcing enforcement.
+    """
+    monkeypatch.delenv("LINTRO_ALLOW_VERSION_LAG", raising=False)
+    version = ToolVersionInfo(
+        name="ruff",
+        min_version="0.14.0",
+        error_message="Ruff is not installed",
+        install_hint="Install Ruff",
+    )
+    with patch(
+        "lintro.tools.core.version_requirements.check_tool_version",
+        return_value=version,
+    ):
+        result = verify_tool_version(ToolDefinition(name="ruff", description="Test"))
+
+    assert result is not None  # narrow the successful version-check alternative
+    assert_that(result.outcome).is_equal_to(
+        ToolOutcome(Skipped("Ruff is not installed")),
+    )
+    assert_that(result.success).is_true()
+    assert_that(result.inspected_files).is_false()
+    assert_that(result.output).contains("Ruff is not installed", "Install Ruff")
+    assert_that(result.fixed_issues_count).is_none()
     assert_that(result.remaining_issues_count).is_none()
 
 

@@ -15,6 +15,7 @@ from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, NoFiles, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.cargo_deny.cargo_deny_parser import (
     parse_cargo_deny_output_with_stats,
@@ -145,12 +146,10 @@ class CargoDenyPlugin(BaseToolPlugin):
         resolved = resolve_cargo_root(ctx.files, tool_label="cargo-deny")
         cargo_root = resolved.root
         if cargo_root is None:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=NoFiles()),
                 name=self.definition.name,
-                success=True,
                 output=resolved.skip_message("cargo-deny"),
-                issues_count=0,
-                no_files=True,
             )
 
         cmd = _build_cargo_deny_command()
@@ -170,12 +169,12 @@ class CargoDenyPlugin(BaseToolPlugin):
                 cmd=cmd,
                 tool_name="cargo-deny",
             )
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=TimedOut(timeout_result.output),
+                    issues_count=timeout_result.issues_count,
+                ),
                 name=self.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=timeout_result.output,
-                issues_count=timeout_result.issues_count,
                 issues=timeout_result.issues,
             )
 
@@ -187,12 +186,18 @@ class CargoDenyPlugin(BaseToolPlugin):
         # A non-zero exit can mean findings or an execution error. Zero parsed
         # findings must never turn a failed invocation into a clean check.
         # Any parsed finding still fails the check, including warnings on exit 0.
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(
+                    success=process_success
+                    and issues_count == 0
+                    and (parse_failures_count == 0),
+                    inspected_files=True,
+                ),
+                issues_count=issues_count,
+            ),
             name=self.definition.name,
-            inspected_files=True,
-            success=process_success and issues_count == 0 and parse_failures_count == 0,
             output=output if preserve_output else None,
-            issues_count=issues_count,
             issues=issues,
             parse_failures_count=parse_failures_count,
         )

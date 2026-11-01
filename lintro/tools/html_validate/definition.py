@@ -34,6 +34,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.html_validate.html_validate_parser import (
     parse_html_validate_output,
@@ -293,14 +294,18 @@ class HtmlValidatePlugin(BaseToolPlugin):
                 command=fallback_command,
             )
 
-        return ToolResult(
-            name=self.definition.name,
-            inspected_files=(
-                True if result.success else _reported_inspection(result.stdout)
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(
+                    success=success_flag,
+                    inspected_files=(
+                        True if result.success else _reported_inspection(result.stdout)
+                    ),
+                ),
+                issues_count=issues_count,
             ),
-            success=success_flag,
+            name=self.definition.name,
             output=final_output,
-            issues_count=issues_count,
             issues=issues,
             cwd=ctx.cwd,
         )

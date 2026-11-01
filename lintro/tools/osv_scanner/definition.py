@@ -22,6 +22,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, NoFiles, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.osv_scanner import (
     OsvScannerIssue,
@@ -328,12 +329,10 @@ class OsvScannerPlugin(BaseToolPlugin):
             ToolResult with scan results.
         """
         if not paths:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=NoFiles()),
                 name=self.definition.name,
-                success=True,
                 output="No paths to check.",
-                issues_count=0,
-                no_files=True,
             )
 
         # Version check
@@ -364,12 +363,11 @@ class OsvScannerPlugin(BaseToolPlugin):
                 cwd=str(scan_root),
             )
         except subprocess.TimeoutExpired:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=TimedOut(f"OSV-Scanner timed out after {timeout}s"),
+                ),
                 name=self.definition.name,
-                success=False,
-                output=f"OSV-Scanner timed out after {timeout}s",
-                issues_count=0,
-                timed_out=True,
             )
 
         success = proc.success
@@ -466,12 +464,16 @@ class OsvScannerPlugin(BaseToolPlugin):
         if no_op_success and parse_failures_count is None:
             parse_failures_count = 0
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(
+                    success=overall_success,
+                    inspected_files=not no_op_success,
+                ),
+                issues_count=len(issues),
+            ),
             name=self.definition.name,
-            inspected_files=not no_op_success,
-            success=overall_success,
             output=output if should_show_output else None,
-            issues_count=len(issues),
             issues=issues,
             metadata=suppression_metadata,
             parse_failures_count=parse_failures_count,

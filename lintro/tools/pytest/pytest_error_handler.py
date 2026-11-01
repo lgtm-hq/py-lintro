@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 
 from loguru import logger
 
+from lintro.models.core.tool_outcome import Checked, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 
 
@@ -62,15 +63,12 @@ class PytestErrorHandler:
             "  5. Debug directly: pytest -v --tb=short <test_file>\n"
         )
         logger.error(error_msg)
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=TimedOut(error_msg), issues_count=initial_count),
             name=self.tool_name,
-            success=False,
             issues=[],
-            output=error_msg,
             # A timeout is an execution failure, not a finding: only genuine
             # pre-timeout issues are counted (see timeout_utils' model).
-            issues_count=initial_count,
-            timed_out=True,
         )
 
     def handle_execution_error(
@@ -122,11 +120,15 @@ class PytestErrorHandler:
             )
 
         logger.error(error_msg)
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=(
+                    TimedOut(error_msg)
+                    if isinstance(error, subprocess.TimeoutExpired)
+                    else Checked(success=False)
+                ),
+            ),
             name=self.tool_name,
-            success=False,
             issues=[],
             output=error_msg,
-            issues_count=0,
-            timed_out=isinstance(error, subprocess.TimeoutExpired),
         )

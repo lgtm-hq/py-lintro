@@ -20,6 +20,7 @@ from lintro.enums.capability import Cap
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, FixMeasured, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.prettier.prettier_issue import PrettierIssue
 from lintro.parsers.prettier.prettier_parser import parse_prettier_output
@@ -244,16 +245,15 @@ class PrettierPlugin(BaseToolPlugin):
         Returns:
             ToolResult: ToolResult instance representing Prettier not found.
         """
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=Checked(success=False)),
             name=self.definition.name,
-            success=False,
             output=(
                 "Prettier not found.\n\n"
                 "Please ensure prettier is installed:\n"
                 "  - Run 'npm install -g prettier' or 'bun add -g prettier'\n"
                 "  - Or install locally: 'npm install prettier'"
             ),
-            issues_count=0,
             cwd=cwd,
         )
 
@@ -276,11 +276,10 @@ class PrettierPlugin(BaseToolPlugin):
         if isinstance(exc, FileNotFoundError):
             return self._create_not_found_result(cwd=cwd)
         logger.error(f"Failed to run prettier: {exc}")
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=Checked(success=False)),
             name=self.definition.name,
-            success=False,
             output=f"Prettier execution failed: {exc}",
-            issues_count=0,
             cwd=cwd,
         )
 
@@ -317,17 +316,19 @@ class PrettierPlugin(BaseToolPlugin):
         detected_issues = list(initial_issues or [])
         remaining_count = len(detected_issues)
         # Maintain invariant: initial = fixed + remaining
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=TimedOut(timeout_msg),
+                accounting=FixMeasured(
+                    initial=remaining_count,
+                    fixed=0,
+                    remaining=remaining_count,
+                ),
+                issues_count=remaining_count,
+            ),
             name=self.definition.name,
-            success=False,
-            output=timeout_msg,
-            issues_count=remaining_count,
             issues=detected_issues,
-            initial_issues_count=remaining_count,
-            fixed_issues_count=0,
-            remaining_issues_count=remaining_count,
             cwd=cwd,
-            timed_out=True,
         )
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:

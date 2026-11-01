@@ -27,6 +27,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, FixMeasured, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.buf.buf_issue import BufIssue
 from lintro.parsers.buf.buf_parser import (
@@ -169,23 +170,25 @@ class BufPlugin(BaseToolPlugin):
         )
         collected = list(initial_issues or [])
         if initial_count is not None:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=TimedOut(timeout_result.output),
+                    accounting=FixMeasured(
+                        initial=initial_count,
+                        fixed=0,
+                        remaining=initial_count,
+                    ),
+                    issues_count=len(collected),
+                ),
                 name=self.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=timeout_result.output,
-                issues_count=len(collected),
                 issues=collected,
-                initial_issues_count=initial_count,
-                fixed_issues_count=0,
-                remaining_issues_count=initial_count,
             )
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=TimedOut(timeout_result.output),
+                issues_count=len(collected),
+            ),
             name=self.definition.name,
-            success=timeout_result.success,
-            timed_out=timeout_result.timed_out,
-            output=timeout_result.output,
-            issues_count=len(collected),
             issues=collected,
         )
 
@@ -214,15 +217,15 @@ class BufPlugin(BaseToolPlugin):
         """
         collected = issues or []
         count = len(collected)
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=False),
+                accounting=FixMeasured(initial=count, fixed=0, remaining=count),
+                issues_count=count,
+            ),
             name=self.definition.name,
-            success=False,
             output=(result.stderr.strip() or result.stdout.strip() or fallback),
-            issues_count=count,
             issues=collected,
-            initial_issues_count=count,
-            fixed_issues_count=0,
-            remaining_issues_count=count,
             cwd=cwd,
         )
 
@@ -284,15 +287,14 @@ class BufPlugin(BaseToolPlugin):
         # JSON) but also for config/module/permission errors written only to
         # stderr. A failing exit with nothing parsed must not read as clean.
         if not lint_result.success and not lint_issues:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=(
                     lint_result.stderr.strip()
                     or lint_result.stdout.strip()
                     or "buf lint exited with an error and no results."
                 ),
-                issues_count=0,
                 cwd=ctx.cwd,
             )
 
@@ -322,15 +324,17 @@ class BufPlugin(BaseToolPlugin):
         # any other failure with no diff is a runtime error (unreadable module
         # root, invalid config) that must not read as clean.
         if not fmt_result.success and not fmt_issues:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=Checked(success=False),
+                    issues_count=len(all_issues),
+                ),
                 name=self.definition.name,
-                success=False,
                 output=(
                     fmt_result.stderr.strip()
                     or fmt_result.stdout.strip()
                     or "buf format exited with an error and no diff."
                 ),
-                issues_count=len(all_issues),
                 issues=all_issues,
                 cwd=ctx.cwd,
             )
@@ -338,12 +342,13 @@ class BufPlugin(BaseToolPlugin):
         count = len(all_issues)
         output = "\n".join(all_outputs) if all_outputs else None
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=count == 0, inspected_files=True),
+                issues_count=count,
+            ),
             name=self.definition.name,
-            inspected_files=True,
-            success=(count == 0),
             output=output if count > 0 else None,
-            issues_count=count,
             issues=all_issues,
             cwd=ctx.cwd,
         )
@@ -447,19 +452,23 @@ class BufPlugin(BaseToolPlugin):
         # silently rechecking would report the write failure only as
         # mysteriously-remaining issues, hiding the actual cause.
         if not write_result.success:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=Checked(success=False),
+                    accounting=FixMeasured(
+                        initial=initial_count,
+                        fixed=0,
+                        remaining=initial_count,
+                    ),
+                    issues_count=initial_count,
+                ),
                 name=self.definition.name,
-                success=False,
                 output=(
                     write_result.stderr.strip()
                     or write_result.stdout.strip()
                     or "buf format --write exited with an error."
                 ),
-                issues_count=initial_count,
                 issues=initial_issues,
-                initial_issues_count=initial_count,
-                fixed_issues_count=0,
-                remaining_issues_count=initial_count,
                 cwd=ctx.cwd,
             )
 
@@ -525,15 +534,19 @@ class BufPlugin(BaseToolPlugin):
             detail = ""
             if remaining_issues:
                 detail = f" Found {count} remaining issue(s)."
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=Checked(success=False),
+                    accounting=FixMeasured(
+                        initial=initial_count,
+                        fixed=max(0, initial_count - count),
+                        remaining=count,
+                    ),
+                    issues_count=count,
+                ),
                 name=self.definition.name,
-                success=False,
                 output=f"{verification_error}{detail}".strip(),
-                issues_count=count,
                 issues=issues,
-                initial_issues_count=initial_count,
-                fixed_issues_count=max(0, initial_count - count),
-                remaining_issues_count=count,
                 cwd=ctx.cwd,
             )
 
@@ -551,16 +564,19 @@ class BufPlugin(BaseToolPlugin):
             summary.append("All issues were successfully auto-fixed")
         final_summary = "\n".join(summary) if summary else "No fixes applied."
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=remaining_count == 0, inspected_files=True),
+                accounting=FixMeasured(
+                    initial=initial_count,
+                    fixed=fixed_count,
+                    remaining=remaining_count,
+                ),
+                issues_count=remaining_count,
+            ),
             name=self.definition.name,
-            inspected_files=True,
-            success=(remaining_count == 0),
             output=final_summary,
-            issues_count=remaining_count,
             issues=remaining_issues,
             initial_issues=initial_issues,
-            initial_issues_count=initial_count,
-            fixed_issues_count=fixed_count,
-            remaining_issues_count=remaining_count,
             cwd=ctx.cwd,
         )

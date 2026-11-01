@@ -23,6 +23,7 @@ from lintro.enums.capability import Cap
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, Skipped, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.vale.vale_parser import parse_vale_output
 from lintro.plugins.base import BaseToolPlugin
@@ -143,16 +144,13 @@ class ValePlugin(BaseToolPlugin):
         Returns:
             ToolResult: Skip result (success=True) with a helpful message.
         """
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=Skipped("No Vale configuration found")),
             name=self.definition.name,
-            success=True,
             output=(
                 "Skipping vale: no Vale configuration found "
                 "(e.g. .vale.ini). Add one to enable prose linting."
             ),
-            issues_count=0,
-            skipped=True,
-            skip_reason="No Vale configuration found",
         )
 
     def _build_command(self) -> list[str]:
@@ -215,23 +213,23 @@ class ValePlugin(BaseToolPlugin):
         # config, missing styles package, bad flag). Surface that as a failure
         # instead of reporting a clean pass from a run that produced nothing.
         if not issues and not _success:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=(output or "Vale exited with an error and produced no results."),
-                issues_count=0,
                 parse_failures_count=1,
             )
 
         issues_count = len(issues)
         success = issues_count == 0
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=success, inspected_files=True),
+                issues_count=issues_count,
+            ),
             name=self.definition.name,
-            inspected_files=True,
-            success=success,
             output=output if not success else None,
-            issues_count=issues_count,
             issues=issues,
         )
 

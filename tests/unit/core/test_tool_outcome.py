@@ -1,4 +1,4 @@
-"""Observable stage-1 outcome adaptation without migrating legacy callers."""
+"""Observable outcome construction and adaptation for legacy consumers."""
 
 from __future__ import annotations
 
@@ -52,6 +52,10 @@ from lintro.utils.json_output import serialize_tool_result
         (
             {"issues_count": 2},
             ToolOutcome(Checked(False), issues_count=2),
+        ),
+        (
+            {"success": True, "issues_count": 2},
+            ToolOutcome(Checked(True), issues_count=2),
         ),
         (
             {"skipped": True, "skip_reason": "not installed"},
@@ -155,8 +159,17 @@ def test_legacy_roundtrip_preserves_payload_and_serialized_bytes(
 
     assert_that(original.outcome).is_equal_to(expected)
     restored = original.with_outcome(original.outcome)
+    constructed = ToolResult.from_outcome(
+        expected,
+        **{
+            name: value
+            for name, value in vars(original).items()
+            if name not in expected.to_legacy_fields()
+        },
+    )
 
     assert_that(asdict(restored)).is_equal_to(before)
+    assert_that(asdict(constructed)).is_equal_to(before)
     assert_that(asdict(original)).is_equal_to(before)
     assert_that(restored.outcome).is_equal_to(expected)
     assert_that(restored.metadata).is_same_as(original.metadata)
@@ -164,6 +177,9 @@ def test_legacy_roundtrip_preserves_payload_and_serialized_bytes(
     assert_that(restored.initial_issues).is_same_as(original.initial_issues)
     assert_that([f.name for f in fields(restored)]).does_not_contain("outcome")
     for action, serialized in wire.items():
+        assert_that(
+            json.dumps(serialize_tool_result(constructed, action=action)),
+        ).is_equal_to(serialized)
         assert_that(
             json.dumps(serialize_tool_result(restored, action=action)),
         ).is_equal_to(
@@ -197,7 +213,7 @@ def test_incomplete_counts_never_become_measured_or_filled(
         remaining_issues_count=counts[2],
     )
     outcome = original.outcome
-    restored = ToolResult().with_outcome(outcome)
+    restored = ToolResult.from_outcome(outcome)
 
     assert_that(outcome.accounting).is_equal_to(FixPartial(*counts))
     assert_that(
@@ -209,6 +225,99 @@ def test_incomplete_counts_never_become_measured_or_filled(
     ).is_equal_to(counts)
     assert_that(restored.residual_unknown).is_false()
     assert_that(restored.inspected_files).is_none()
+
+
+@pytest.mark.parametrize(
+    ("execution", "success"),
+    [
+        (NoFiles(), True),
+        (Skipped("missing dependencies"), True),
+        (TimedOut(None), False),
+    ],
+)
+def test_explicit_inactive_outcomes_derive_verdict_and_no_inspection(
+    execution: NoFiles | Skipped | TimedOut,
+    success: bool,
+) -> None:
+    """Non-execution never inherits the legacy constructor's default verdict.
+
+    Args:
+        execution: Producer evidence of a non-executing result.
+        success: Successful non-event or failed timeout.
+    """
+    outcome = ToolOutcome(execution)
+    result = ToolResult.from_outcome(outcome, name="plugin")
+
+    assert_that(result.outcome).is_equal_to(outcome)
+    assert_that(result.success).is_equal_to(success)
+    assert_that(result.inspected_files).is_false()
+    assert_that(result.initial_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"success": True},
+        {"no_files": True},
+        {"skipped": True, "skip_reason": "missing"},
+        {"timed_out": True},
+        {"issues_count": -1},
+        {"initial_issues_count": 0},
+        {"residual_unknown": True},
+        {"inspected_files": True},
+    ],
+)
+def test_outcome_constructor_rejects_competing_legacy_state(
+    payload: dict[str, Any],
+) -> None:
+    """A caller cannot override the explicit outcome through envelope fields.
+
+    Args:
+        payload: A legacy state override, even if individually valid.
+    """
+    outcome = ToolOutcome(Checked(False))
+    with pytest.raises(TypeError, match="outcome owns state fields"):
+        ToolResult.from_outcome(outcome, **payload)
+    assert_that(outcome.success).is_false()
+
+
+def test_timeout_output_is_owned_by_outcome_at_construction() -> None:
+    """Shared branches may repeat output, but cannot silently overwrite it."""
+    outcome = ToolOutcome(TimedOut("deadline output"))
+    result = ToolResult.from_outcome(outcome, output="deadline output")
+    assert_that(result.output).is_equal_to("deadline output")
+    assert_that(result.outcome).is_equal_to(outcome)
+
+    with pytest.raises(TypeError, match="timeout output must match"):
+        ToolResult.from_outcome(ToolOutcome(TimedOut(None)), output="old output")
+
+
+@pytest.mark.parametrize(
+    "legacy",
+    [
+        {"no_files": True},
+        {"timed_out": True, "success": True},
+        {"no_files": True, "success": True, "issues_count": 1},
+        {"skipped": True, "skip_reason": "missing", "initial_issues_count": 1},
+        {"skip_reason": ""},
+        {"residual_unknown_reason": ""},
+        {"issues_count": -1},
+    ],
+)
+def test_legacy_constructor_compatibility_does_not_weaken_outcome_validation(
+    legacy: dict[str, Any],
+) -> None:
+    """Legacy inputs remain accepted while contradictory evidence fails closed.
+
+    Args:
+        legacy: Constructor inputs tolerated before explicit producer migration.
+    """
+    result = ToolResult(**legacy)
+    before = asdict(result)
+    with pytest.raises(ValueError):
+        _ = result.outcome
+    assert_that(asdict(result)).is_equal_to(before)
 
 
 def test_unmeasured_adapter_preserves_null_json_and_failure_exit() -> None:
@@ -268,6 +377,7 @@ def test_adapter_replaces_state_without_retaining_obsolete_flags() -> None:
     assert_that(recovered.residual_unknown_reason).is_none()
     assert_that(recovered.inspected_files).is_true()
     assert_that(recovered.fixed_issues_count).is_equal_to(2)
+    assert_that(recovered.output).is_equal_to("deadline")
     assert_that(failed.timed_out).is_true()
     assert_that(failed.fixed_issues_count).is_none()
 
