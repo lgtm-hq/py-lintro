@@ -253,6 +253,33 @@ def test_release_workflows_use_paired_egress_presets() -> None:
     )
 
 
+def test_auto_tag_dispatch_passes_an_optional_version_override() -> None:
+    """A missing release tag can be recovered without reparsing its squash title."""
+    workflow = _load_workflow(name="release-auto-tag.yml")
+    version_input = workflow["on"]["workflow_dispatch"]["inputs"]["version"]
+
+    assert_that(version_input["type"]).is_equal_to("string")
+    assert_that(version_input["required"]).is_false()
+    assert_that(version_input["default"]).is_equal_to("")
+    assert_that(workflow["jobs"]["auto-tag"]["with"]["version"]).is_equal_to(
+        "${{ inputs.version || '' }}",
+    )
+
+
+def test_auto_tag_push_preserves_commit_version_detection() -> None:
+    """Main pushes still reach the reusable's default commit-title detection."""
+    workflow = _load_workflow(name="release-auto-tag.yml")
+    auto_tag = workflow["jobs"]["auto-tag"]
+
+    assert_that(workflow["on"]["push"]).is_equal_to({"branches": ["main"]})
+    assert_that(auto_tag).does_not_contain_key("if")
+    assert_that(auto_tag["uses"]).starts_with(
+        "lgtm-hq/lgtm-ci/.github/workflows/reusable-release-auto-tag.yml@",
+    )
+    assert_that(auto_tag["with"].get("version-source", "commit")).is_equal_to("commit")
+    assert_that(auto_tag["with"]["create-release"]).is_false()
+
+
 def test_version_pr_is_gated_on_a_green_tag_publish() -> None:
     """The version PR waits on the publish gate (#2516).
 

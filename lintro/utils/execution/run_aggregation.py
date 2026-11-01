@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from lintro.enums.action import Action
 from lintro.models.core.run_artifact import RunArtifact
+from lintro.models.core.tool_outcome import FixMeasured, FixPartial, FixUnmeasured
 from lintro.utils.execution.exit_codes import (
     DEFAULT_EXIT_CODE_FAILURE,
     aggregate_tool_results,
@@ -182,12 +183,17 @@ def sequential_totals(
     total_fixed = 0
     total_remaining = 0
     for result in all_results:
-        total_issues += result.issues_count
+        outcome = result.outcome
+        total_issues += outcome.issues_count
         if action == Action.FIX:
-            if result.residual_unknown:
-                # Nothing was measured for this tool (#1743); a zero here
-                # would be a measurement the run never took.
-                continue
-            total_fixed += result.fixed_issues_count or 0
-            total_remaining += result.remaining_issues_count or 0
+            match outcome.accounting:
+                case FixUnmeasured():
+                    # Nothing was measured for this tool (#1743).
+                    continue
+                case FixMeasured(fixed=fixed, remaining=remaining) | FixPartial(
+                    fixed=fixed,
+                    remaining=remaining,
+                ):
+                    total_fixed += fixed if fixed is not None else 0
+                    total_remaining += remaining if remaining is not None else 0
     return total_issues, total_fixed, total_remaining

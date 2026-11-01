@@ -129,6 +129,11 @@ def checkpoint_stamp(
             state=state.value if state is not None else "",
             reported_models=ledger.reported_models,
             cost_reported=ledger.cost_reported,
+            unreported_models=tuple(
+                dict.fromkeys(
+                    call.requested for call in ledger.calls if not call.reported
+                ),
+            ),
         )
 
     return CheckpointStamp(
@@ -228,6 +233,7 @@ def _carried_snapshot(
         ModelVerification.VERIFIED.value,
         ModelVerification.UNREPORTED.value,
     }:
+        # Mixed verified/unverifiable sources cannot vouch for one another.
         return None
     # Keep the weakest recorded state. The reuse gate has already excluded
     # missing, legacy and mismatched evidence and re-checked the lane/models.

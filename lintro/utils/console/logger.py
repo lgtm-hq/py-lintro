@@ -18,6 +18,7 @@ from loguru import logger
 
 from lintro.enums.action import Action, normalize_action
 from lintro.enums.tool_name import ToolName
+from lintro.models.core.tool_outcome import FixUnmeasured
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.console.constants import (
     BORDER_LENGTH,
@@ -225,12 +226,13 @@ class ThreadSafeConsoleLogger:
             total_ai_applied: int = 0
             total_ai_verified: int = 0
             for result in tool_results:
-                fixed_std = result.fixed_issues_count
-                remaining_std = result.remaining_issues_count
+                outcome = result.outcome
+                fixed_std = outcome.accounting.fixed
+                remaining_std = outcome.accounting.remaining
                 total_ai_applied += _get_ai_count(result, "applied_count")
                 total_ai_verified += _get_ai_count(result, "verified_count")
 
-                if result.residual_unknown:
+                if isinstance(outcome.accounting, FixUnmeasured):
                     # The verify pass could not measure this tool's residual
                     # (#1743), so it contributes to neither total. The run
                     # already fails on the result's own ``success=False``.
@@ -239,9 +241,9 @@ class ThreadSafeConsoleLogger:
                 if fixed_std is not None:
                     total_fixed += fixed_std
                 else:
-                    total_fixed += result.issues_count
+                    total_fixed += outcome.issues_count
 
-                if isinstance(remaining_std, int):
+                if remaining_std is not None:
                     total_remaining += remaining_std
                 # A result with no structured residual adds nothing: the
                 # prose fallback that read a number off the tool's own text
@@ -265,9 +267,11 @@ class ThreadSafeConsoleLogger:
             )
         else:
             total_issues: int = sum(
-                (result.issues_count for result in tool_results),
+                (result.outcome.issues_count for result in tool_results),
             )
-            any_failed: bool = any(not result.success for result in tool_results)
+            any_failed: bool = any(
+                not result.outcome.success for result in tool_results
+            )
             total_for_art: int = (
                 total_issues if not any_failed else max(1, total_issues)
             )

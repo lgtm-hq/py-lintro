@@ -453,8 +453,26 @@ parallel release paths.
 ### Labels & guards
 
 - Release PRs are labeled `release-bump` to make them easy to target in policies.
-- Tagging is handled by `release-auto-tag.yml`, which only tags commits matching
-  `chore(release): version …` after Release PR merges.
+- Automatic tagging is handled by `release-auto-tag.yml` after Release PR merges. Use
+  the squash title `chore(release): version X (#PR)`, where `X` is the version without a
+  `v` prefix, for example `chore(release): version 0.175.1 (#3110)`.
+
+### Recover a missing release tag
+
+If a release PR was merged with an unsupported squash title and its tag is absent, use
+the auto-tag workflow's optional `version` dispatch input. After the recovery workflow
+change reaches `main`, confirm that main still contains the intended version in its
+version files, then dispatch (for #3052):
+
+```bash
+lgtm-ai gh workflow run release-auto-tag.yml --repo lgtm-hq/py-lintro \
+  --ref main -f version=0.175.1
+```
+
+The override tags the dispatched main snapshot and starts the normal tag publication
+flow. It does not rewrite the release commit. Existing tag collision checks still apply.
+Leave `version` empty for normal commit-title detection; pushes to main also keep that
+default behavior.
 
 ### Security & Pinning
 

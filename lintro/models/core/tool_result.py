@@ -49,14 +49,14 @@ class ToolResult:
     ``issues`` list. Tools append all detected issues in order, so the
     last ``remaining_issues_count`` entries are the ones still unfixed.
 
-    Stages 1 and 2 of #3019 keep these fields writable: verify folding, retries and
+    Stages 1 through 3 of #3019 keep these fields writable: verify folding, retries and
     other existing callers still update them in several steps. ``outcome`` is
     a read-only, validated view computed on each access, not a stored second
     source of truth. Read it after an update is complete; contradictory legacy
     state raises instead of returning an obsolete or normalized outcome.
     Producers use ``from_outcome`` to derive state fields from frozen variants;
-    ``with_outcome`` preserves the rest of an existing envelope. Consumer
-    migration and freezing this dataclass belong to subsequent stages.
+    ``with_outcome`` preserves the rest of an existing envelope. Migrated
+    consumers read the current outcome; freezing this dataclass belongs to stage 4.
     """
 
     name: str = field(default="")
@@ -214,6 +214,13 @@ class ToolResult:
             The current execution and accounting state, without inferred counts.
         """
         return outcome_from_result(self)
+
+    def validate_outcome(self) -> None:
+        """Reject contradictory mutable state before handing it to consumers.
+
+        The adapter raises ValueError if the current fields are contradictory.
+        """
+        outcome_from_result(self)
 
     def with_outcome(self, outcome: ToolOutcome) -> ToolResult:
         """Return a result with state derived from an explicit outcome.
