@@ -1,8 +1,9 @@
 """AI fix undo/rollback via git checkpoints or file snapshots.
 
 Prefer git checkpoint refs (:mod:`lintro.ai.checkpoints`) when available.
-Outside a usable git work tree, fall back to in-memory/on-disk file content
-snapshots (and the legacy reverse patch under ``.lintro-cache/ai``).
+Outside a usable git work tree, or when checkpoint capture fails, fall back
+to file-content snapshots (and the legacy reverse patch under
+``.lintro-cache/ai``).
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from loguru import logger
 from lintro.ai.checkpoints import (
     DEFAULT_CHECKPOINT_RETENTION,
     Checkpoint,
+    CheckpointError,
     capture_checkpoint,
     diff_checkpoint,
     git_checkpoints_available,
@@ -285,8 +287,10 @@ def prepare_fix_batch(
 ) -> UndoState | None:
     """Capture rollback state before an AI fix batch mutates files.
 
-    Prefers a git checkpoint ref. When git checkpoints are unavailable,
-    falls back to a file-content snapshot plus the legacy reverse patch.
+    Prefers a git checkpoint ref. When git checkpoints are unavailable or
+    capture raises :class:`CheckpointError`, falls back to a file-content
+    snapshot plus the legacy reverse patch. A failure to read that snapshot
+    still aborts preparation before the batch can mutate files.
 
     Args:
         suggestions: Fixes about to be applied.
@@ -303,11 +307,15 @@ def prepare_fix_batch(
         return None
 
     if git_checkpoints_available(workspace_root):
-        checkpoint = capture_checkpoint(
-            paths,
-            workspace_root=workspace_root,
-            keep=retention,
-        )
+        try:
+            checkpoint = capture_checkpoint(
+                paths,
+                workspace_root=workspace_root,
+                keep=retention,
+            )
+        except CheckpointError as exc:
+            logger.debug("Git checkpoint capture failed: {}", exc)
+            checkpoint = None
         if checkpoint is not None:
             return UndoState(
                 kind="git",

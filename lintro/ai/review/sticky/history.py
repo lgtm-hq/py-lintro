@@ -281,6 +281,18 @@ def _run_cost_label(*, run: RunRecord) -> str:
     )
 
 
+def _fixed_label(*, resolved: int | None) -> str:
+    """Render an unknown fixed count distinctly from a measured zero.
+
+    Args:
+        resolved: Measured fixed count, or None for an unmeasured round.
+
+    Returns:
+        The count, or an em dash when it was not measured.
+    """
+    return "—" if resolved is None else str(resolved)
+
+
 def _history_row(*, run: RunRecord, latest: bool) -> str:
     """Render one row of the per-run history table.
 
@@ -303,7 +315,7 @@ def _history_row(*, run: RunRecord, latest: bool) -> str:
     prefix = "~" if usage.estimated else ""
     short = _short_sha(sha=identity.sha)
     verdict = verdict_label(verdict=outcome.verdict).lower()
-    fixed = "—" if outcome.resolved is None else str(outcome.resolved)
+    fixed = _fixed_label(resolved=outcome.resolved)
     return (
         f"| {identity.round}{' (latest)' if latest else ''} "
         f"| {f'`{short}`' if short else '—'} "
@@ -338,7 +350,7 @@ def _round_expander(
     outcome = run.outcome
     short = _short_sha(sha=identity.sha)
     sha_bit = f" · <code>{short}</code>" if short else ""
-    fixed = "—" if outcome.resolved is None else str(outcome.resolved)
+    fixed = _fixed_label(resolved=outcome.resolved)
     prefix = "~" if usage.estimated else ""
     # A capped round stays marked in history (#2003) so a later reader can
     # tell a genuinely clean round from one that reported fewer findings.

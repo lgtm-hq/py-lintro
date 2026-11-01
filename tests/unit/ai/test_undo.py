@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.checkpoints import CheckpointError
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.undo import (
     UNDO_DIR,
@@ -15,6 +17,7 @@ from lintro.ai.undo import (
     restore_undo,
     save_undo_patch,
 )
+from tests.unit.conftest import init_git_repo
 
 
 def _make_suggestion(
@@ -137,6 +140,75 @@ def test_file_fallback_restore_preserves_mode(
 
     assert_that(script.read_text(encoding="utf-8")).contains("echo one")
     assert_that(script.stat().st_mode & 0o777).is_equal_to(0o755)
+
+
+@pytest.mark.parametrize(
+    "checkpoint_error",
+    [None, CheckpointError("git ls-files failed: enumeration failed")],
+    ids=["unavailable", "checkpoint-error"],
+)
+def test_checkpoint_failure_falls_back_to_restorable_file_snapshot(
+    tmp_path: Path,
+    checkpoint_error: CheckpointError | None,
+) -> None:
+    """Fallback restores actual pre-batch bytes, modes and missing paths."""
+    repo = init_git_repo(tmp_path, files={"run.sh": "#!/bin/sh\necho committed\n"})
+    script = repo / "run.sh"
+    original = b"#!/bin/sh\r\necho 'unsaved user edit'\r\n"
+    script.write_bytes(original)
+    script.chmod(0o755)
+    created = repo / "created.py"
+    suggestions = [
+        _make_suggestion(file="run.sh", original="stale suggestion\n"),
+        _make_suggestion(file="created.py", original=""),
+    ]
+
+    with patch(
+        "lintro.ai.undo.capture_checkpoint",
+        return_value=None,
+        side_effect=checkpoint_error,
+    ):
+        state = prepare_fix_batch(suggestions, repo)
+
+    assert state is not None
+    assert_that(state.kind).is_equal_to("file")
+    assert_that(state.checkpoint).is_none()
+    assert_that(script.read_bytes()).is_equal_to(original)
+    script.write_bytes(b"#!/bin/sh\necho fixed\n")
+    script.chmod(0o600)
+    created.write_text("created = True\n", encoding="utf-8")
+
+    restore_undo(state)
+
+    assert_that(script.read_bytes()).is_equal_to(original)
+    assert_that(script.stat().st_mode & 0o777).is_equal_to(0o755)
+    assert_that(created.exists()).is_false()
+
+
+def test_checkpoint_error_with_unreadable_snapshot_aborts_prepare(
+    tmp_path: Path,
+) -> None:
+    """A capture error cannot let a batch proceed without a usable snapshot."""
+    repo = init_git_repo(tmp_path, files={"target.py": "original = True\n"})
+    suggestion = _make_suggestion(file="target.py")
+
+    with (
+        patch(
+            "lintro.ai.undo.capture_checkpoint",
+            side_effect=CheckpointError("git checkpoint failed"),
+        ),
+        patch.object(
+            Path,
+            "read_bytes",
+            side_effect=PermissionError("snapshot denied"),
+        ),
+        pytest.raises(PermissionError, match="snapshot denied"),
+    ):
+        prepare_fix_batch([suggestion], repo)
+
+    assert_that((repo / "target.py").read_text(encoding="utf-8")).is_equal_to(
+        "original = True\n",
+    )
 
 
 @pytest.fixture
