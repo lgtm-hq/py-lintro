@@ -86,6 +86,7 @@ def ensure_utf8_stdio() -> None:
 # its :class:`click.Command`.
 _COMMAND_MODULES: dict[str, tuple[str, str]] = {
     "badge": ("lintro.cli_utils.commands.badge", "badge_command"),
+    "baseline": ("lintro.cli_utils.commands.baseline", "baseline_command"),
     "check": ("lintro.cli_utils.commands.check", "check_command"),
     "completions": ("lintro.cli_utils.commands.completions", "completions_command"),
     "config": ("lintro.cli_utils.commands.config", "config_command"),

@@ -19,6 +19,7 @@ from lintro.tools.dotenv_linter.definition import (
     DotenvLinterPlugin,
 )
 from tests.test_samples_helpers import copy_sample
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 # Real ``dotenv-linter check --plain`` output for a file with issues.
 CHECK_OUTPUT_WITH_ISSUES = (
@@ -106,8 +107,11 @@ def test_check_success_on_clean_file(
         ),
         patch.object(
             dotenv_linter_plugin,
-            "_run_subprocess",
-            return_value=(True, "Checking .env\n\nNo problems found\n"),
+            "_run_subprocess_result",
+            return_value=subprocess_result(
+                True,
+                "Checking .env\n\nNo problems found\n",
+            ),
         ),
     ):
         result = dotenv_linter_plugin.check([str(env_file)], {})
@@ -137,8 +141,8 @@ def test_check_reports_issues(
         ),
         patch.object(
             dotenv_linter_plugin,
-            "_run_subprocess",
-            return_value=(False, CHECK_OUTPUT_WITH_ISSUES),
+            "_run_subprocess_result",
+            return_value=subprocess_result(False, CHECK_OUTPUT_WITH_ISSUES),
         ),
     ):
         result = dotenv_linter_plugin.check([str(env_file)], {})
@@ -168,7 +172,7 @@ def test_check_timeout_returns_failure(
         ),
         patch.object(
             dotenv_linter_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=subprocess.TimeoutExpired(cmd=["dotenv-linter"], timeout=30),
         ),
     ):
@@ -198,8 +202,8 @@ def test_check_nonzero_exit_without_issues_is_failure(
         ),
         patch.object(
             dotenv_linter_plugin,
-            "_run_subprocess",
-            return_value=(False, "error: some invocation failure"),
+            "_run_subprocess_result",
+            return_value=subprocess_result(False, "error: some invocation failure"),
         ),
     ):
         result = dotenv_linter_plugin.check([str(env_file)], {})
@@ -224,8 +228,11 @@ def test_fix_preserves_issue_count_invariant(
 
     # First check finds 2 issues; fix succeeds. No re-check (#2607).
     subprocess_returns = [
-        (False, CHECK_OUTPUT_WITH_ISSUES),  # initial check
-        (True, "Fixing .env\nAll warnings are fixed. Total: 2\n"),  # fix
+        subprocess_result(False, CHECK_OUTPUT_WITH_ISSUES),  # initial check
+        subprocess_result(
+            True,
+            "Fixing .env\nAll warnings are fixed. Total: 2\n",
+        ),  # fix
     ]
 
     with (
@@ -235,7 +242,7 @@ def test_fix_preserves_issue_count_invariant(
         ),
         patch.object(
             dotenv_linter_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=subprocess_returns,
         ),
     ):
@@ -270,8 +277,8 @@ def test_fix_makes_no_private_recheck(
         dest_name=".env",
     )
     subprocess_returns = [
-        (False, CHECK_OUTPUT_WITH_ISSUES),  # initial check: 2 issues
-        (True, "Fixing .env\n"),  # fix
+        subprocess_result(False, CHECK_OUTPUT_WITH_ISSUES),  # initial check: 2 issues
+        subprocess_result(True, "Fixing .env\n"),  # fix
     ]
     with (
         patch(
@@ -280,7 +287,7 @@ def test_fix_makes_no_private_recheck(
         ),
         patch.object(
             dotenv_linter_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=subprocess_returns,
         ) as run,
     ):

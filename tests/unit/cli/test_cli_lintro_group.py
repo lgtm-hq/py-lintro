@@ -111,6 +111,7 @@ def test_invoke_with_comma_separated_commands() -> None:
             transport=None,
             no_art=False,
             profile=False,
+            baseline=None,
         )
         mock_fmt.assert_any_call(
             action="fmt",
@@ -133,6 +134,7 @@ def test_invoke_with_comma_separated_commands() -> None:
             dry_run=False,
             no_art=False,
             profile=False,
+            baseline=None,
         )
 
 

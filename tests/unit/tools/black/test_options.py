@@ -9,12 +9,14 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.tools.black.definition import BLACK_DEFAULT_TIMEOUT, BlackPlugin
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 
 def _record_black_argv(
     commands: list[list[str]],
-) -> Callable[..., tuple[bool, str]]:
+) -> Callable[..., SubprocessResult]:
     """Build a plain stand-in for black's subprocess runner.
 
     Args:
@@ -24,7 +26,7 @@ def _record_black_argv(
         A callable recording each invocation and reporting a clean run.
     """
 
-    def fake_run(*, cmd: list[str], **kwargs: object) -> tuple[bool, str]:
+    def fake_run(*, cmd: list[str], **kwargs: object) -> SubprocessResult:
         """Record one black invocation and report success.
 
         Taking ``cmd`` as a typed keyword parameter narrows it for real, where
@@ -39,7 +41,7 @@ def _record_black_argv(
             A successful run with empty output.
         """
         commands.append(list(cmd))
-        return (True, "")
+        return subprocess_result(True, "")
 
     return fake_run
 
@@ -108,7 +110,7 @@ def test_check_passes_line_length_to_black(
         patch.object(black_plugin, "_check_line_length_violations", return_value=[]),
         patch.object(
             black_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=_record_black_argv(commands),
         ),
     ):
@@ -140,7 +142,7 @@ def test_check_passes_fast_to_black(
         patch.object(black_plugin, "_check_line_length_violations", return_value=[]),
         patch.object(
             black_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=_record_black_argv(commands),
         ),
     ):

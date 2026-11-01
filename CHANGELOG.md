@@ -11,6 +11,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **core**: add opt-in finding fingerprint baselines with
+  `baseline create|update|prune`, `--baseline`, and the `baseline:` configuration key
+  (#438).
+
 ### Changed
 
 ### Deprecated
@@ -18,6 +22,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Removed
 
 ### Fixed
+
+- **core**: fail closed on empty Ruff reports and unexplained nonzero per-file check
+  exits, including runs without fingerprint baselines (#438).
 
 ### Security
 

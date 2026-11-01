@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from pathlib import Path
 
 from loguru import logger
 
@@ -24,14 +25,101 @@ from lintro.parsers.black.black_issue import BlackIssue
 
 _WOULD_REFORMAT = re.compile(r"^would reformat\s+(?P<file>.+)$", re.IGNORECASE)
 _REFORMATTED = re.compile(r"^reformatted\s+(?P<file>.+)$", re.IGNORECASE)
+_UNCHANGED = re.compile(
+    r"^(?P<file>.+) (?:already well formatted, good job\."
+    r"|wasn't modified on disk since last run\.)$",
+)
+# Native summaries occupy a whole line; filenames can contain the same words.
 _SUMMARY_WOULD = re.compile(
-    r"(?P<count>\d+)\s+file(?:s)?\s+would\s+be\s+reformatted\.?",
-    re.IGNORECASE,
+    r"^[ \t]*(?P<count>\d+) files? would be reformatted"
+    r"(?:, \d+ files? would be left unchanged)?"
+    r"(?:, \d+ files? would fail to reformat)?\.?[ \t]*\r?$",
+    re.IGNORECASE | re.MULTILINE,
 )
 _SUMMARY_REFORMATTED = re.compile(
-    r"(?P<count>\d+)\s+file(?:s)?\s+reformatted\.?",
-    re.IGNORECASE,
+    r"^[ \t]*(?P<count>\d+) files? reformatted"
+    r"(?:, \d+ files? left unchanged)?"
+    r"(?:, \d+ files? failed to reformat)?\.?[ \t]*\r?$",
+    re.IGNORECASE | re.MULTILINE,
 )
+_VERBOSE_METADATA = re.compile(
+    r"^(?!error:)(?:Identified `.+` as project root containing a .+\."
+    r"|Using configuration (?:from .+|in .+)\."
+    r"|[a-z_]+: .*"
+    r'|Found input source: ".+"'
+    r"|.+ ignored: .+"
+    r"|(?:All done!|Oh no!).*"
+    r"|\d+ files? would be left unchanged\.?)$",
+)
+
+
+def black_report_parse_failures(output: str, issues: list[BlackIssue]) -> int:
+    """Count unaccounted formatting entries in Black's native summary.
+
+    Args:
+        output: Native Black output.
+        issues: Parsed per-file formatting findings.
+
+    Returns:
+        Missing entries, including summary-only findings without file identities.
+    """
+    output = strip_ansi_codes(output)
+    summary = _SUMMARY_WOULD.search(output) or _SUMMARY_REFORMATTED.search(output)
+    expected = int(summary.group("count")) if summary else len(issues)
+    identified = sum(issue.file != "<unknown>" for issue in issues)
+    return abs(expected - identified)
+
+
+def black_inspected_paths(
+    output: str,
+    *,
+    files: list[str],
+    cwd: str | None,
+) -> frozenset[str] | None:
+    """Read affirmative per-file confirmations from a completed verbose check.
+
+    Discovery, exclusion messages and summary counts do not prove inspection.
+    Cached unchanged confirmations are Black's native verdict for that file.
+    Only invocation identities with unambiguous single-line reports grant coverage.
+
+    Args:
+        output: Complete native verbose check report.
+        files: Exact file arguments passed to Black, relative to cwd.
+        cwd: Working directory used by Black.
+
+    Returns:
+        Exact confirmed files, or None for ambiguous or unresolvable reports.
+    """
+    paths: set[str] = set()
+    try:
+        base = Path(cwd or Path.cwd())
+        expected: set[Path] = set()
+        for file in files:
+            path = base / file
+            resolved = path.resolve()
+            # splitlines also recognizes CR and Unicode line separators. Check
+            # both spellings because Black may resolve symlink input paths.
+            if any(
+                name.splitlines() != [name] or strip_ansi_codes(name) != name
+                for name in (str(path), str(resolved))
+            ):
+                return None
+            expected.add(resolved)
+        for line in strip_ansi_codes(output).splitlines():
+            match = _WOULD_REFORMAT.fullmatch(line) or _UNCHANGED.fullmatch(line)
+            if match is None:
+                if line.strip() and not (
+                    _VERBOSE_METADATA.fullmatch(line) or _SUMMARY_WOULD.fullmatch(line)
+                ):
+                    return None
+                continue
+            path = (base / match.group("file")).resolve()
+            if path not in expected or str(path) in paths or not path.is_file():
+                return None
+            paths.add(str(path))
+    except (OSError, ValueError, RuntimeError):
+        return None
+    return frozenset(paths)
 
 
 def _iter_issue_lines(lines: Iterable[str]) -> Iterable[str]:

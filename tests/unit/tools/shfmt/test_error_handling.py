@@ -47,7 +47,7 @@ def test_check_with_timeout(
     ):
         with patch.object(
             shfmt_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=subprocess.TimeoutExpired(cmd=["shfmt"], timeout=30),
         ):
             result = shfmt_plugin.check([str(test_file)], {})
@@ -80,7 +80,7 @@ def test_fix_with_timeout(
     ):
         with patch.object(
             shfmt_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=subprocess.TimeoutExpired(cmd=["shfmt"], timeout=30),
         ):
             result = shfmt_plugin.fix([str(test_file)], {})

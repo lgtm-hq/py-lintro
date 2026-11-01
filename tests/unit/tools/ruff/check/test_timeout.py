@@ -8,10 +8,12 @@ from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
 
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.tools.ruff.check import (
     RUFF_DEFAULT_TIMEOUT,
     execute_ruff_check,
 )
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 
 def test_execute_ruff_check_uses_default_timeout() -> None:
@@ -34,7 +36,7 @@ def test_execute_ruff_check_uses_context_timeout(
     )
     timeouts: list[int] = []
 
-    def fake_run(**kwargs: object) -> tuple[bool, str]:
+    def fake_run(**kwargs: object) -> SubprocessResult:
         """Record the timeout ruff was given and report a clean run.
 
         Args:
@@ -44,11 +46,11 @@ def test_execute_ruff_check_uses_context_timeout(
             A successful run with empty JSON findings.
         """
         timeouts.append(cast("int", kwargs["timeout"]))
-        return (True, "[]")
+        return subprocess_result(True, "[]")
 
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
             side_effect=fake_run,
         ),
         patch(

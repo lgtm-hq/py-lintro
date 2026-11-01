@@ -12,6 +12,11 @@ from lintro.cli import cli
 
 SUBCOMMANDS: tuple[str, ...] = (
     "badge",
+    "baseline",
+    "baseline create",
+    "baseline update",
+    "baseline prune",
+    "baseline show",
     "check",
     "completions",
     "config",
@@ -30,6 +35,11 @@ SUBCOMMANDS: tuple[str, ...] = (
 # Human-facing summary phrases that must survive Click's \\f truncation.
 SUBCOMMAND_SUMMARY_PHRASES: dict[str, str] = {
     "badge": "Generate a shields.io markdown badge for the project's issue counts.",
+    "baseline": "Create, update, prune, or inspect a fingerprint baseline.",
+    "baseline create": "Snapshot findings without overwriting an existing file.",
+    "baseline update": "Acknowledge current findings; remove entries proven fixed.",
+    "baseline prune": "Remove proven fixed entries; add no findings.",
+    "baseline show": "Display per-tool baseline statistics without executing tools.",
     "check": "Check files for issues using the specified tools.",
     "completions": "Print a shell completion script for bash, zsh, or fish.",
     "doctor": "Check tool installation status and version compatibility.",
@@ -74,7 +84,7 @@ def test_subcommand_help_has_no_raw_docstring_sections(subcommand: str) -> None:
         subcommand: Name of the CLI subcommand to inspect.
     """
     runner = CliRunner()
-    result = runner.invoke(cli, [subcommand, "--help"])
+    result = runner.invoke(cli, [*subcommand.split(), "--help"])
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(_DOCSTRING_SECTION_RE.search(result.output)).is_none()
 
@@ -94,7 +104,7 @@ def test_subcommand_help_shows_summary_and_options(
         summary: Expected human-facing summary phrase from the docstring.
     """
     runner = CliRunner()
-    result = runner.invoke(cli, [subcommand, "--help"])
+    result = runner.invoke(cli, [*subcommand.split(), "--help"])
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(result.output).contains("Usage:")
     assert_that(result.output).contains("--help")

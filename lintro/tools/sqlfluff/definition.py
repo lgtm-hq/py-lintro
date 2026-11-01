@@ -15,6 +15,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.sqlfluff.sqlfluff_issue import SqlfluffIssue
 from lintro.parsers.sqlfluff.sqlfluff_parser import parse_sqlfluff_output_with_stats
@@ -225,14 +226,14 @@ class SqlfluffPlugin(BaseToolPlugin):
             return DocUrlTemplate.SQLFLUFF.format(code=code)
         return None
 
-    def _run_subprocess(
+    def _run_subprocess_result(
         self,
         cmd: list[str],
         timeout: int | float | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         stdin: int | None = None,
-    ) -> tuple[bool, str]:
+    ) -> SubprocessResult:
         """Keep lint JSON separate from diagnostics for the per-file runners.
 
         Args:
@@ -243,15 +244,15 @@ class SqlfluffPlugin(BaseToolPlugin):
             stdin: Optional stdin handle.
 
         Returns:
-            Success and lint stdout, or the display output for fix commands
-            and invocations that did not emit a report.
+            Native status and streams with lint stdout as the parser input,
+            or the display output for invocations that did not emit a report.
         """
-        result = self._run_subprocess_result(cmd, timeout, cwd, env, stdin)
+        result = super()._run_subprocess_result(cmd, timeout, cwd, env, stdin)
         if cmd[1:2] == ["lint"] and not result.success and result.stderr.strip():
             self._lint_diagnostics.append(f"{cmd[-1]}:\n{result.stderr}")
         if cmd[1:2] == ["lint"] and result.stdout.strip():
-            return result.success, result.stdout
-        return result.as_tuple()
+            return replace(result, output=result.stdout)
+        return result
 
     def _with_lint_diagnostics(self, result: ToolResult) -> ToolResult:
         """Attach lint diagnostics without feeding them through the JSON parser.

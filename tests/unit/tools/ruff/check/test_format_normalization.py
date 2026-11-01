@@ -10,6 +10,7 @@ from assertpy import assert_that
 
 from lintro.parsers.ruff.ruff_format_issue import RuffFormatIssue
 from lintro.tools.ruff.check import execute_ruff_check
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 
 def test_execute_ruff_check_normalizes_format_paths_to_absolute(
@@ -31,7 +32,7 @@ def test_execute_ruff_check_normalizes_format_paths_to_absolute(
 
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
         ) as mock_subprocess,
         patch(
             "lintro.tools.ruff.check.parse_ruff_output_with_stats",
@@ -45,8 +46,8 @@ def test_execute_ruff_check_normalizes_format_paths_to_absolute(
         patch("os.path.abspath", return_value="/test/project/test.py"),
     ):
         mock_subprocess.side_effect = [
-            (True, "[]"),
-            (False, "Would reformat: test.py"),
+            subprocess_result(True, "[]"),
+            subprocess_result(False, "Would reformat: test.py"),
         ]
 
         result = execute_ruff_check(mock_ruff_tool, ["/test/project"])

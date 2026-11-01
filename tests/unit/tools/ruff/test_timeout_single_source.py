@@ -12,11 +12,13 @@ from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
 
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.tools.ruff.check import (
     RUFF_DEFAULT_TIMEOUT as CHECK_TIMEOUT,
 )
 from lintro.tools.ruff.definition import RUFF_DEFAULT_TIMEOUT as DEFINITION_TIMEOUT
 from lintro.tools.ruff.fix import RUFF_DEFAULT_TIMEOUT as FIX_TIMEOUT
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 
 def _argv_tokens(*, calls: list[dict[str, object]]) -> list[list[str]]:
@@ -80,7 +82,7 @@ def test_ruff_check_routes_through_prepare_execution(
     )
     observed: list[dict[str, object]] = []
 
-    def fake_run(**kwargs: object) -> tuple[bool, str]:
+    def fake_run(**kwargs: object) -> SubprocessResult:
         """Record the subprocess arguments and report a clean run.
 
         Args:
@@ -90,11 +92,11 @@ def test_ruff_check_routes_through_prepare_execution(
             A successful run with empty JSON findings.
         """
         observed.append(kwargs)
-        return (True, "[]")
+        return subprocess_result(True, "[]")
 
     with (
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
             side_effect=fake_run,
         ),
         patch(
@@ -218,7 +220,7 @@ def test_ruff_plugin_check_and_fix_invoke_prepare(
         prepared.append(dict(kwargs))
         return ruff_execution_context(timeout=64)
 
-    def fake_check_run(**kwargs: object) -> tuple[bool, str]:
+    def fake_check_run(**kwargs: object) -> SubprocessResult:
         """Record the check-path timeout and report a clean run.
 
         Args:
@@ -228,7 +230,7 @@ def test_ruff_plugin_check_and_fix_invoke_prepare(
             A successful run with empty JSON findings.
         """
         check_timeouts.append(kwargs["timeout"])
-        return (True, "[]")
+        return subprocess_result(True, "[]")
 
     def fake_fix_run(**kwargs: object) -> tuple[bool, str]:
         """Record the fix-path timeout and report a clean run.
@@ -240,13 +242,13 @@ def test_ruff_plugin_check_and_fix_invoke_prepare(
             A successful run with empty JSON findings.
         """
         fix_timeouts.append(kwargs["timeout"])
-        return (True, "[]")
+        return True, "[]"
 
     with (
         patch.object(plugin, "prepare", side_effect=fake_prepare),
         patch.object(plugin, "_run_subprocess", side_effect=fake_fix_run),
         patch(
-            "lintro.tools.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
             side_effect=fake_check_run,
         ),
     ):

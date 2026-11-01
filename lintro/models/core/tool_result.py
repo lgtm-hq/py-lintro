@@ -152,6 +152,29 @@ class ToolResult:
     # decline (for example missing configuration), skip, or timeout.
     inspected_files: bool | None = field(default=None)
 
+    # Append new fields after the API-v2 positional prefix through inspected_files.
+    # A multi-file check may report real findings alongside a launch/parser
+    # failure on another file. Acknowledging the findings cannot hide that error.
+    execution_failed: bool = field(default=False)
+
+    # Producer-owned proof that every invocation completed with a recognized
+    # lint verdict and its report was fully parsed. Only then can findings
+    # explain success=False. Legacy producers default to unknown, so parsed
+    # findings alone cannot authorize acknowledgements or baseline pruning.
+    findings_complete: bool = field(default=False)
+
+    # Exact canonical files successfully examined by this producer. None is
+    # unknown coverage, not the requested scope. Fingerprint pruning requires
+    # both this evidence and a complete result (#438, #2609). A completed
+    # inspection may have lint findings; failed execution supplies no coverage.
+    inspected_paths: frozenset[str] | None = field(default=None)
+    # Codes outside that exact coverage, e.g. a separate formatter check whose
+    # native file exclusions cannot be enumerated by the lint invocation.
+    uninspected_codes: frozenset[str] = field(default_factory=frozenset)
+
+    # None preserves the original reporting schema when baselining is absent.
+    baselined_count: int | None = field(default=None)
+
     @classmethod
     def from_outcome(cls, outcome: ToolOutcome, **payload: Any) -> ToolResult:
         """Construct legacy-compatible fields from explicit producer evidence.
@@ -237,6 +260,9 @@ class ToolResult:
             object.__setattr__(self, "inspected_files", False)
         if self.skipped and self.success is False:
             object.__setattr__(self, "success", True)
+
+        if self.execution_failed and self.success:
+            raise ValueError("execution_failed cannot report success")
 
         if self.skipped and not self.skip_reason:
             raise ValueError(

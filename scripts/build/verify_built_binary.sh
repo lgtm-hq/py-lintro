@@ -55,6 +55,7 @@ trap 'rm -rf "$HELP_OUTPUT" "$COMMAND_OUTPUT" "$WORKSPACE"' EXIT
 # before this gate existed.
 EXPORTED_COMMANDS=(
 	badge
+	baseline
 	check
 	completions
 	config
@@ -119,6 +120,7 @@ export LINTRO_GLOBAL_CONFIG=off
 command_argv() {
 	case "$1" in
 	badge) printf '%s\n' badge --errors 0 --warnings 0 --info 0 --url ;;
+	baseline) printf '%s\n' baseline --help ;;
 	check) printf '%s\n' check --output-format json --tools ruff . ;;
 	completions) printf '%s\n' completions bash ;;
 	config) printf '%s\n' config --json ;;

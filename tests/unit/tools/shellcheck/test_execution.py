@@ -14,6 +14,7 @@ from lintro.parsers.shellcheck.shellcheck_parser import parse_shellcheck_output
 from lintro.tools.shellcheck.definition import ShellcheckPlugin
 from lintro.utils.json_output import serialize_tool_result
 from tests.test_samples_helpers import copy_sample
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 # Tests for ShellcheckPlugin.check method
 
@@ -40,8 +41,8 @@ def test_check_with_mocked_subprocess_success(
 
     with patch.object(
         shellcheck_plugin,
-        "_run_subprocess",
-        return_value=(True, "[]"),
+        "_run_subprocess_result",
+        return_value=subprocess_result(True, "[]"),
     ):
         result = shellcheck_plugin.check([str(test_file)], {})
 
@@ -83,8 +84,8 @@ def test_check_with_mocked_subprocess_issues(
 
     with patch.object(
         shellcheck_plugin,
-        "_run_subprocess",
-        return_value=(False, shellcheck_output),
+        "_run_subprocess_result",
+        return_value=subprocess_result(False, shellcheck_output),
     ):
         result = shellcheck_plugin.check([str(test_file)], {})
 
@@ -137,8 +138,8 @@ def test_check_report_container_verdict(
     script.write_text("#!/bin/sh\necho hello\n", encoding="utf-8")
     with patch.object(
         shellcheck_plugin,
-        "_run_subprocess",
-        return_value=(returncode == 0, output),
+        "_run_subprocess_result",
+        return_value=subprocess_result(returncode == 0, output),
     ):
         result = shellcheck_plugin.check([str(script)], {})
 
@@ -197,13 +198,13 @@ def test_check_rejected_report_preserves_bounded_diagnostics(
     context: str,
     returncode: int,
 ) -> None:
-    """Rejected reports fail closed with a reason and bounded raw context."""
+    """Rejected reports retain native output and a bounded diagnostic context."""
     script = tmp_path / "script.sh"
     script.write_text("#!/bin/sh\necho hello\n", encoding="utf-8")
     with patch.object(
         shellcheck_plugin,
-        "_run_subprocess",
-        return_value=(returncode == 0, output),
+        "_run_subprocess_result",
+        return_value=subprocess_result(returncode == 0, output),
     ):
         result = shellcheck_plugin.check([str(script)], {})
 
@@ -213,8 +214,12 @@ def test_check_rejected_report_preserves_bounded_diagnostics(
     assert_that(result.outcome.execution).is_equal_to(
         Checked(success=False, inspected_files=None),
     )
-    assert_that(result.output).contains(reason, context)
-    assert_that(result.output).does_not_contain("x" * 201)
+    assert result.output is not None
+    # The shared runner preserves native output after the bounded explanation.
+    assert_that(result.output).contains(output)
+    diagnostic = result.output.partition(f"\n{output}")[0]
+    assert_that(diagnostic).contains(reason, context)
+    assert_that(diagnostic).does_not_contain("x" * 201)
 
 
 @pytest.mark.parametrize("malformed_count", [0, 1, 2])
@@ -232,8 +237,8 @@ def test_check_accumulates_parse_failures_per_run(
     ] * (len(scripts) - malformed_count)
     with patch.object(
         shellcheck_plugin,
-        "_run_subprocess",
-        side_effect=[(True, report) for report in reports],
+        "_run_subprocess_result",
+        side_effect=[subprocess_result(True, report) for report in reports],
     ):
         result = shellcheck_plugin.check([str(script) for script in scripts], {})
 
@@ -242,8 +247,8 @@ def test_check_accumulates_parse_failures_per_run(
     assert_that(result.issues_count).is_zero()
     with patch.object(
         shellcheck_plugin,
-        "_run_subprocess",
-        return_value=(True, '{"comments": []}'),
+        "_run_subprocess_result",
+        return_value=subprocess_result(True, '{"comments": []}'),
     ):
         clean_result = shellcheck_plugin.check([str(scripts[0])], {})
     assert_that(clean_result.parse_failures_count).is_none()

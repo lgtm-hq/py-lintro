@@ -616,7 +616,17 @@ def test_checkov_no_work_summary_is_supported(
                 {"filePath": "b.html", "messages": None},
             ],
         ),
-        ("ruff", [{"filename": "a.py", "message": "kept"}, None]),
+        (
+            "ruff",
+            [
+                {
+                    "filename": "a.py",
+                    "message": "kept",
+                    "location": {"row": 1, "column": 1},
+                },
+                None,
+            ],
+        ),
         (
             "sqlfluff",
             [
