@@ -708,6 +708,7 @@ def run_verify_pass(
         try:
             tool = configure(tool_name=name)
             result = tool.check(files, {})
+            execution = result.outcome.execution
         except (TypeError, AttributeError):
             # Programming errors propagate, exactly as they do out of the
             # mutation phase. Swallowing them here would make a bug in the
@@ -734,7 +735,6 @@ def run_verify_pass(
                 ),
             )
             continue
-        execution = result.outcome.execution
         if isinstance(execution, TimedOut):
             # A timed-out CHECK examined only part of its target set — a
             # multi-root aggregator such as golangci-lint still returns the
@@ -888,6 +888,9 @@ def _fold_unknown(
     mutation.remaining_issues_count = None
     mutation.residual_unknown = True
     mutation.residual_unknown_reason = outcome.unknown_reason
+    # This folded row now records a failed verification, even if mutation
+    # discovery originally found no files.
+    mutation.no_files = False
     mutation.success = False
     return mutation
 
@@ -903,9 +906,17 @@ def check_answered(result: ToolResult | None) -> bool:
         Skips, empty scopes, timeouts (even with partial findings), and
         execution failures without findings do not answer the check.
     """
-    if result is None:
+    if result is None or result.parse_failures_count:
         return False
-    match result.outcome.execution:
+    try:
+        execution = result.outcome.execution
+    except ValueError:
+        # Legacy plugins can return contradictory flags or counts. They do
+        # not establish a verdict; the strict outcome adapter still rejects
+        # them when read directly.
+        logger.opt(exception=True).debug("Invalid check result cannot verify fixes")
+        return False
+    match execution:
         case Checked(success=success):
             return success or bool(result.issues)
         case Skipped() | NoFiles() | TimedOut():
@@ -1035,11 +1046,14 @@ def _fold_one(
     # the verify's, so a broken check cannot read as clean.
     mutation.success = mutation_outcome.success and residual == 0
     if verify is not None:
-        mutation.success = mutation.success and verify.outcome.success
+        mutation.success = mutation.success and answered and verify.outcome.success
         if verify.duration_seconds is not None:
             mutation.duration_seconds = (
                 mutation.duration_seconds or 0.0
             ) + verify.duration_seconds
+    if answered or not mutation.success:
+        # The verify verdict supersedes the mutation's empty discovery.
+        mutation.no_files = False
     return mutation
 
 

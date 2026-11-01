@@ -140,6 +140,9 @@ def serialize_tool_result(
     if result.parse_failures_count is not None:
         data["parse_failures_count"] = result.parse_failures_count
     if action == Action.FIX:
+        # These keys belong to every FIX row, including check-only tools and
+        # legacy results with no fix measurements.
+        data.update(net_resolved=0, fixed=0, remaining=0)
         match outcome.accounting:
             case FixUnmeasured(reason=reason):
                 # No after-count exists. Keep the public nulls and deprecated

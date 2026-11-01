@@ -10,8 +10,9 @@ import re
 import sys
 import threading
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import click
 from loguru import logger
@@ -197,6 +198,18 @@ class ThreadSafeConsoleLogger:
             action: The action being performed.
             tool_results: The list of tool results.
         """
+        if action == Action.FIX:
+            # Older callers use textual residual sentinels. Normalize only
+            # this display view before outcome-based consumers inspect it;
+            # the original result and the strict adapter remain unchanged.
+            tool_results = [
+                (
+                    replace(result, remaining_issues_count=None)
+                    if isinstance(cast(object, result.remaining_issues_count), str)
+                    else result
+                )
+                for result in tool_results
+            ]
         # Add separation before Execution Summary
         self.console_output(text="")
 

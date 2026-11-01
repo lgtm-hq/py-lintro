@@ -9,19 +9,28 @@ from typing import Any
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.rerun import apply_rerun_results
 from lintro.enums.action import Action
+from lintro.enums.capability import Cap
+from lintro.enums.verify_status import VerifyStatus
 from lintro.models.core.tool_outcome import (
     Checked,
     FixAccounting,
     FixMeasured,
     FixPartial,
     FixUnmeasured,
+    NoFiles,
     Skipped,
     TimedOut,
     ToolOutcome,
 )
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
+from lintro.tools.core.verify_pass import (
+    VerifyOutcome,
+    VerifyScope,
+    fold_verify_results,
+)
 from lintro.utils.execution.exit_codes import (
     aggregate_tool_results,
     determine_exit_code,
@@ -32,6 +41,142 @@ from lintro.utils.execution.run_renderer import _display_fix_result
 from lintro.utils.json_output import serialize_tool_result, timed_out_tool_names
 from lintro.utils.streaming_output import StreamingResultHandler
 from lintro.utils.summary_tables import print_summary_table
+
+
+@pytest.mark.parametrize("capability", [None, Cap.CHECK])
+def test_fix_json_keeps_default_keys_for_results_without_fix_accounting(
+    capability: Cap | None,
+) -> None:
+    """Check-only and default legacy results retain unconditional FIX keys."""
+    result = ToolResult(name="mypy", capability=capability)
+
+    wire = serialize_tool_result(result, action=Action.FIX)
+
+    assert_that(wire).contains_entry(
+        {"net_resolved": 0},
+        {"fixed": 0},
+        {"remaining": 0},
+    )
+    assert_that(result.outcome.accounting).is_equal_to(FixPartial())
+    assert_that(
+        serialize_tool_result(result, action=Action.CHECK),
+    ).does_not_contain_key(
+        "net_resolved",
+        "fixed",
+        "remaining",
+    )
+
+
+@pytest.mark.parametrize(
+    ("previous", "remaining", "expected"),
+    [
+        (FixMeasured(3, 2, 1), 0, FixMeasured(3, 3, 0)),
+        (FixMeasured(3, 2, 1), 2, FixMeasured(3, 1, 2)),
+        (FixMeasured(3, 2, 1), 4, FixPartial(initial=3, remaining=4)),
+        (FixUnmeasured("verify failed", initial=3), 0, FixMeasured(3, 3, 0)),
+        (FixUnmeasured("verify failed", initial=3), 1, FixMeasured(3, 2, 1)),
+        (FixUnmeasured("before-count unavailable"), 0, FixPartial(remaining=0)),
+        (FixUnmeasured("before-count unavailable"), 1, FixPartial(remaining=1)),
+        (FixPartial(fixed=2), 1, FixPartial(fixed=2, remaining=1)),
+    ],
+)
+def test_ai_rerun_accounting_survives_totals_json_and_exit(
+    previous: FixAccounting,
+    remaining: int,
+    expected: FixAccounting,
+) -> None:
+    """A measured rerun replaces residual state without inventing before-counts."""
+    original = ToolResult.from_outcome(
+        ToolOutcome(Checked(False), previous),
+        name="ruff",
+    )
+    issues = [BaseIssue(file="a.py", line=line + 1) for line in range(remaining)]
+    rerun = ToolResult.from_outcome(
+        ToolOutcome(Checked(remaining == 0, True), issues_count=remaining),
+        name="ruff",
+        issues=issues,
+    )
+    by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]] = {"ruff": (original, [])}
+
+    apply_rerun_results(by_tool=by_tool, rerun_results=[rerun])
+
+    assert_that(by_tool["ruff"][0]).is_same_as(original)
+    assert_that(original.outcome.accounting).is_equal_to(expected)
+    assert_that(original.residual_unknown).is_false()
+    assert_that(original.residual_unknown_reason).is_none()
+    assert_that(original.issues).is_equal_to(issues)
+    totals = (remaining, expected.fixed or 0, remaining)
+    assert_that(aggregate_tool_results([original], Action.FIX)).is_equal_to(totals)
+    assert_that(sequential_totals([original], Action.FIX)).is_equal_to(totals)
+    wire = serialize_tool_result(original, action=Action.FIX)
+    assert_that(wire).contains_entry(
+        {"net_resolved": expected.fixed or 0},
+        {"fixed": expected.fixed or 0},
+        {"remaining": remaining},
+    )
+    assert_that(wire).does_not_contain_key("residual_unknown_reason")
+    assert_that(
+        determine_exit_code(Action.FIX, [original], remaining, remaining),
+    ).is_equal_to(
+        int(remaining > 0),
+    )
+
+
+@pytest.mark.parametrize(
+    "status",
+    [VerifyStatus.UNKNOWN, VerifyStatus.VERIFIED, VerifyStatus.UNCHANGED],
+)
+def test_no_files_fold_survives_totals_json_and_exit(status: VerifyStatus) -> None:
+    """A failed or answered verification supersedes the empty mutation discovery."""
+    mutation = ToolResult.from_outcome(ToolOutcome(NoFiles()), name="ruff")
+    verify = (
+        ToolResult.from_outcome(
+            ToolOutcome(Checked(False, True), issues_count=1),
+            name="ruff",
+            issues=[BaseIssue(file="/repo/a.py", line=1)],
+        )
+        if status is VerifyStatus.VERIFIED
+        else None
+    )
+    results = [mutation]
+    fold_verify_results(
+        mutation_results=results,
+        verify_results=[
+            VerifyOutcome(
+                tool="ruff",
+                status=status,
+                result=verify,
+                unknown_reason="check failed" if status is VerifyStatus.UNKNOWN else "",
+            ),
+        ],
+        scope=VerifyScope(files=("/repo/a.py",), narrowed=True),
+    )
+
+    folded = results[0]
+    unknown = status is VerifyStatus.UNKNOWN
+    remaining = int(status is VerifyStatus.VERIFIED)
+    assert_that(folded.outcome.success).is_equal_to(status is VerifyStatus.UNCHANGED)
+    assert_that(folded.no_files).is_equal_to(status is VerifyStatus.UNCHANGED)
+    assert_that(aggregate_tool_results(results, Action.FIX)).is_equal_to(
+        (remaining, 0, remaining),
+    )
+    assert_that(sequential_totals(results, Action.FIX)).is_equal_to(
+        (remaining, 0, remaining),
+    )
+    wire = serialize_tool_result(folded, action=Action.FIX)
+    assert_that(wire).contains_entry(
+        {"net_resolved": None if unknown else 0},
+        {"fixed": None if unknown else 0},
+        {"remaining": None if unknown else remaining},
+    )
+    assert_that(unknown_residual_tool_names(results)).is_equal_to(
+        ["ruff"] if unknown else [],
+    )
+    assert_that(
+        determine_exit_code(Action.FIX, results, remaining, remaining),
+    ).is_equal_to(
+        int(status is not VerifyStatus.UNCHANGED),
+    )
 
 
 @pytest.mark.parametrize(

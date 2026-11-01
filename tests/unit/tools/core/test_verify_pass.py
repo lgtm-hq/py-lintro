@@ -2161,3 +2161,38 @@ def test_verify_fold_preserves_unavailable_initial_measurement_on_parse_failure(
     assert_that(results[0].fixed_issues_count).is_none()
     assert_that(results[0].remaining_issues_count).is_none()
     assert_that(results[0].success).is_false()
+
+
+@pytest.mark.parametrize("flag", ["no_files", "skipped", "timed_out"])
+def test_invalid_plugin_result_is_an_unanswered_verify(
+    monkeypatch: pytest.MonkeyPatch,
+    flag: str,
+) -> None:
+    """Malformed plugin evidence fails closed without weakening the adapter."""
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        issues=[_issue("/repo/a.py")],
+        issues_count=1,
+    )
+    setattr(result, flag, True)
+    tool = _FakeTool(
+        definition=_FakeDefinition(
+            claims=[Claim(patterns=["*.py"], capabilities={Cap.FIX, Cap.CHECK})],
+        ),
+        result=result,
+    )
+    _register(monkeypatch, {"ruff": tool})
+
+    assert_that(check_answered(result)).is_false()
+    with pytest.raises(ValueError):
+        _ = result.outcome
+    outcomes = run_verify_pass(
+        tools_to_run=["ruff"],
+        scope=VerifyScope(files=("/repo/a.py",), narrowed=True),
+        configure=lambda *, tool_name: tool,
+    )
+
+    assert_that(outcomes[0].status).is_equal_to(VerifyStatus.UNKNOWN)
+    assert_that(outcomes[0].result).is_none()
+    assert_that(outcomes[0].unknown_reason).contains("ValueError")

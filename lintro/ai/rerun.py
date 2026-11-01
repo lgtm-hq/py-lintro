@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.models.core.tool_outcome import FixMeasured, FixPartial, ToolOutcome
 from lintro.tools.core.verify_pass import check_answered
 
 if TYPE_CHECKING:
@@ -99,6 +100,8 @@ def apply_rerun_results(
     """Apply measured rerun issue counts back to original FIX results.
 
     An unanswered check leaves the original counts and failure flags intact.
+    Answered checks replace the residual and recompute net resolved from the
+    recorded before-count. Incomplete reports cannot gain complete accounting.
 
     Args:
         by_tool: Dict mapping tool name to (result, issues) pairs.
@@ -108,16 +111,37 @@ def apply_rerun_results(
 
     for tool_name, (result, _issues) in by_tool.items():
         rerun = rerun_by_name.get(tool_name)
-        if rerun is None or not check_answered(rerun):
+        if rerun is None or not check_answered(rerun) or result.parse_failures_count:
             continue
 
         refreshed_issues = list(rerun.issues)
-        # Preserve native fix counters — only update remaining issues
-        # and issue list. The initial/fixed counts reflect what the native
-        # tool originally reported and should not be zeroed.
+        remaining = len(refreshed_issues)
+        previous = result.outcome.accounting
+        accounting: FixMeasured | FixPartial
+        if previous.initial is not None and remaining <= previous.initial:
+            accounting = FixMeasured(
+                initial=previous.initial,
+                fixed=previous.initial - remaining,
+                remaining=remaining,
+            )
+        else:
+            # A missing before-count cannot be reconstructed from the rerun.
+            # If findings grew past it, a non-negative net resolved count is
+            # unavailable; retain the before/after evidence as partial.
+            accounting = FixPartial(
+                initial=previous.initial,
+                fixed=previous.fixed if previous.initial is None else None,
+                remaining=remaining,
+            )
+        outcome = ToolOutcome(
+            execution=rerun.outcome.execution,
+            accounting=accounting,
+            issues_count=remaining,
+        )
+        # Keep the shared result envelope writable and update all state fields
+        # together, including stale unknown/skip/no-files/timeout markers.
+        for field, value in outcome.to_legacy_fields().items():
+            setattr(result, field, value)
         result.issues = refreshed_issues
-        result.issues_count = len(refreshed_issues)
-        result.remaining_issues_count = len(refreshed_issues)
-        result.success = rerun.success
         if rerun.output is not None:
             result.output = rerun.output
