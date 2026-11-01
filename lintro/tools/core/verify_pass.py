@@ -1052,7 +1052,8 @@ def _fold_one(
                 mutation.duration_seconds or 0.0
             ) + verify.duration_seconds
     if answered or not mutation.success:
-        # The verify verdict supersedes the mutation's empty discovery.
+        # Keep outcome readable: a failed or answered verify supersedes empty
+        # discovery, and NoFiles cannot carry success=False.
         mutation.no_files = False
     return mutation
 

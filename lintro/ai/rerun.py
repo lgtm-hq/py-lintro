@@ -117,9 +117,18 @@ def apply_rerun_results(
         if rerun is None or not check_answered(rerun) or result.parse_failures_count:
             continue
 
+        try:
+            previous = result.outcome.accounting
+        except ValueError:
+            # A post-hoc legacy mutation may invalidate the original after
+            # execution. It supplies no trustworthy accounting to refresh.
+            logger.warning(
+                f"AI post-fix rerun skipped for {tool_name}: invalid original",
+            )
+            continue
+
         refreshed_issues = list(rerun.issues)
         remaining = len(refreshed_issues)
-        previous = result.outcome.accounting
         accounting: FixMeasured | FixPartial
         if (
             previous.initial is not None

@@ -322,3 +322,33 @@ def test_rerun_cannot_turn_an_incomplete_report_into_measured_accounting(
     assert_that(original).is_equal_to(before)
     assert_that(original.outcome.accounting).is_equal_to(before.outcome.accounting)
     assert_that(original.outcome.success).is_false()
+
+
+@pytest.mark.parametrize("invalid_side", ["original", "rerun"])
+def test_invalid_rerun_state_does_not_discard_other_tool_updates(
+    invalid_side: str,
+) -> None:
+    """Invalid original or rerun state supplies no accounting, and peers refresh."""
+    originals = {
+        name: ToolResult.from_outcome(
+            ToolOutcome(Checked(False), FixUnmeasured("verify failed", initial=3)),
+            name=name,
+        )
+        for name in ("bad", "peer")
+    }
+    reruns = {name: ToolResult(name=name, success=True) for name in originals}
+    invalid = originals["bad"] if invalid_side == "original" else reruns["bad"]
+    invalid.no_files = True
+    invalid.success = False
+    before = deepcopy(originals["bad"])
+
+    apply_rerun_results(
+        by_tool={name: (result, []) for name, result in originals.items()},
+        rerun_results=list(reruns.values()),
+    )
+
+    assert_that(originals["bad"]).is_equal_to(before)
+    assert_that(originals["peer"].outcome.accounting).is_equal_to(
+        FixPartial(initial=3, remaining=0),
+    )
+    assert_that(originals["peer"].outcome.success).is_true()

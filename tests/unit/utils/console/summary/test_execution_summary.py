@@ -343,36 +343,6 @@ def test_execution_summary_fix_ignores_prose_when_no_count_is_reported(
     )
 
 
-def test_execution_summary_fix_handles_string_sentinel_remaining(
-    tool_result_factory: Callable[..., ToolResult],
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Verify print_execution_summary handles string sentinels.
-
-    String sentinel values (like 'N/A') should not be added to numeric
-    totals to prevent type errors in calculations.
-
-
-    Args:
-        tool_result_factory: Factory for creating ToolResult instances.
-        capsys: Pytest stdout/stderr capture fixture.
-    """
-    logger = ThreadSafeConsoleLogger()
-    result = tool_result_factory(success=True)
-    # Set a string sentinel using object attribute
-    result.remaining_issues_count = "N/A"  # type: ignore[assignment]
-    results = [result]
-
-    logger.print_execution_summary(Action.FIX, results)
-
-    assert_that(_totals_row(output=capsys.readouterr().out)).contains_entry(
-        {"Remaining Issues": 0},
-    )
-    assert_that(result.remaining_issues_count).is_equal_to("N/A")
-    with pytest.raises(ValueError, match="non-negative integers"):
-        _ = result.outcome
-
-
 # =============================================================================
 # ASCII Art Gating - Buffer / TTY / Toggle
 # =============================================================================

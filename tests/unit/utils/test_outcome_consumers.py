@@ -353,6 +353,35 @@ def test_fix_accounting_keeps_wire_defaults_distinct_from_measurements(
     assert_that(result.outcome).is_equal_to(before)
 
 
+def test_answered_ai_rerun_replaces_timeout_and_streams_partial_native_accounting(
+    tmp_path: Path,
+) -> None:
+    """A fresh verdict clears timeout and omits an initial total that no longer adds up."""
+    result = ToolResult.from_outcome(
+        ToolOutcome(TimedOut("deadline"), FixMeasured(10, 7, 3), issues_count=3),
+        name="ruff",
+    )
+    issue = BaseIssue(file="a.py", line=1, message="remaining")
+    rerun = ToolResult(name="ruff", success=False, issues_count=1, issues=[issue])
+
+    apply_rerun_results(by_tool={"ruff": (result, [])}, rerun_results=[rerun])
+
+    target = tmp_path / "rerun.jsonl"
+    with StreamingResultHandler("jsonl", Action.FIX, str(target)) as handler:
+        handler.handle_result(result)
+    streamed = json.loads(target.read_text())
+    assert_that(result.outcome.execution).is_equal_to(Checked(False))
+    assert_that(result.outcome.accounting).is_equal_to(FixPartial(fixed=7, remaining=1))
+    assert_that(timed_out_tool_names([result])).is_empty()
+    assert_that(streamed).does_not_contain_key("initial_issues_count")
+    assert_that(streamed).contains_entry(
+        {"net_resolved_count": 7},
+        {"fixed_issues_count": 7},
+        {"remaining_issues_count": 1},
+    )
+    assert_that(handler.get_exit_code()).is_equal_to(1)
+
+
 @pytest.mark.parametrize("execution", [Checked(False), TimedOut("deadline")])
 def test_unmeasured_and_timeout_evidence_survive_all_output_consumers(
     execution: Checked | TimedOut,

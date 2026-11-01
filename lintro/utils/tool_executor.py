@@ -321,6 +321,10 @@ def _execute_tools_sequential(
                 )
             else:
                 result = tool.check(paths, {})
+            # Mutable third-party results can pass construction validation but
+            # contradict the outcome contract. Reject them before any consumer
+            # (including the live callback) can lose the rest of the run.
+            _ = result.outcome
             result.duration_seconds = time.monotonic() - started
 
             # Populate doc_url on each issue from the plugin
@@ -344,24 +348,22 @@ def _execute_tools_sequential(
 
             # Create a failed result for this tool. Duration is recorded so
             # crashed tools still appear in the ``--profile`` table/JSON.
-            all_results.append(
-                ToolResult(
-                    name=tool_name,
-                    success=False,
-                    output=f"Tool execution failed: {type(e).__name__}: {e}",
-                    issues_count=0,
-                    residual_unknown=ctx.action == Action.FIX,
-                    residual_unknown_reason=(
-                        "tool crashed" if ctx.action == Action.FIX else None
-                    ),
-                    duration_seconds=time.monotonic() - attempt_started,
+            result = ToolResult(
+                name=tool_name,
+                success=False,
+                output=f"Tool execution failed: {type(e).__name__}: {e}",
+                issues_count=0,
+                residual_unknown=ctx.action == Action.FIX,
+                residual_unknown_reason=(
+                    "tool crashed" if ctx.action == Action.FIX else None
                 ),
+                duration_seconds=time.monotonic() - attempt_started,
             )
-        else:
-            all_results.append(result)
-            # Caller callbacks are outside the plugin exception boundary.
-            if on_tool_result is not None:
-                on_tool_result(result)
+        all_results.append(result)
+        # Report normalized failures too. Caller callbacks remain outside the
+        # plugin exception boundary so renderer errors propagate unchanged.
+        if on_tool_result is not None:
+            on_tool_result(result)
 
     return all_results
 
