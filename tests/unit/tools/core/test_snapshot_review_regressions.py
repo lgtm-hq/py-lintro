@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -213,11 +214,13 @@ def test_wrapper_without_package_identity_reprobes(
     assert (first.version, second.version) == ("1.0", "2.0")
 
 
-def test_transient_probe_failure_is_memory_only(
+@pytest.mark.parametrize("hydrate", [False, True], ids=["memory", "disk"])
+def test_transient_probe_failure_is_retried(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    hydrate: bool,
 ) -> None:
-    """A present executable gets another chance when the next process starts."""
+    """A present executable gets another chance in this or the next process."""
     calls: list[str] = []
     binary = tmp_path / "ruff"
     binary.write_text("x")
@@ -242,12 +245,225 @@ def test_transient_probe_failure_is_memory_only(
 
     monkeypatch.setattr(snapshots, "probe_tool", probe)
     first = snapshots.get_tool_snapshot("ruff", cache_root=tmp_path)
-    same_process = snapshots.get_tool_snapshot("ruff", cache_root=tmp_path)
-    assert first == same_process
-    snapshots.clear_snapshot_cache(include_disk=False)
-    next_process = snapshots.get_tool_snapshot("ruff", cache_root=tmp_path)
+    if hydrate:
+        snapshots.clear_snapshot_cache(include_disk=False)
+    recovered = snapshots.get_tool_snapshot("ruff", cache_root=tmp_path)
+    cached = snapshots.get_tool_snapshot("ruff", cache_root=tmp_path)
+    assert first.available is False
+    assert recovered.available is True
+    assert recovered.version == "2.0"
+    assert cached == recovered
     assert calls == ["ruff", "ruff"]
-    assert next_process.available is True
+
+
+@pytest.mark.parametrize("hydrate", [False, True], ids=["memory", "disk"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["cargo", "audit"],
+        ["cargo", "deny"],
+        ["rustup", "run", "stable", "rustfmt"],
+        ["rustc"],
+        ["rustfmt"],
+        ["cargo-clippy"],
+        ["custom-rust-proxy"],
+    ],
+)
+def test_rust_wrapper_changes_invalidate_unchanged_executable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hydrate: bool,
+    command: list[str],
+) -> None:
+    """Package upgrades and removal cannot hide behind a stable Rust launcher."""
+    wrapper = tmp_path / command[0]
+    if command[0] == "custom-rust-proxy":
+        rustup = tmp_path / "rustup"
+        rustup.write_text("stable proxy")
+        rustup.chmod(0o755)
+        wrapper.symlink_to(rustup)
+    else:
+        wrapper.write_text("stable launcher")
+        wrapper.chmod(0o755)
+    resolved = [str(wrapper), *command[1:]]
+    original_mtime = wrapper.stat().st_mtime
+    versions = iter(["1.0", "2.0", None])
+
+    def probe(name: str, **kwargs: object) -> snapshots.ToolSnapshot:
+        version = next(versions)
+        return snapshots.ToolSnapshot(
+            name=name,
+            available=version is not None,
+            version=version,
+            version_check_passed=version is not None,
+            binary_path=str(wrapper),
+            binary_mtime=original_mtime,
+            command=tuple(resolved),
+            probe_error=None if version else "toolchain component removed",
+        )
+
+    monkeypatch.setattr(snapshots, "get_executable_command", lambda *a, **kw: resolved)
+    monkeypatch.setattr(snapshots, "probe_tool", probe)
+    first = snapshots.get_tool_snapshot("rustfmt", cache_root=tmp_path)
+    if hydrate:
+        snapshots.clear_snapshot_cache(include_disk=False)
+    upgraded = snapshots.get_tool_snapshot("rustfmt", cache_root=tmp_path)
+    if hydrate:
+        snapshots.clear_snapshot_cache(include_disk=False)
+    removed = snapshots.get_tool_snapshot("rustfmt", cache_root=tmp_path)
+    assert (first.version, upgraded.version) == ("1.0", "2.0")
+    assert removed.available is False
+    assert removed.probe_error == "toolchain component removed"
+    assert wrapper.stat().st_mtime == original_mtime
+
+
+@pytest.mark.parametrize("hydrate", [False, True], ids=["memory", "disk"])
+@pytest.mark.parametrize("first_name", ["example-tool", "example_tool"])
+def test_force_refresh_replaces_every_cached_alias(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hydrate: bool,
+    first_name: str,
+) -> None:
+    """Refreshing either spelling replaces the identity seen by both spellings."""
+    other_name = "example_tool" if first_name == "example-tool" else "example-tool"
+    versions = iter(["old", "new"])
+    binary = tmp_path / "tool-bin"
+    monkeypatch.setattr(
+        snapshots,
+        "get_executable_command",
+        lambda *a, **kw: [str(binary)],
+    )
+    monkeypatch.setattr(
+        snapshots,
+        "probe_tool",
+        lambda name, **kw: replace(
+            _binary_snapshot(tmp_path, "tool-bin", next(versions)),
+            name=name,
+        ),
+    )
+    old = snapshots.get_tool_snapshot(first_name, cache_root=tmp_path)
+    refreshed = snapshots.get_tool_snapshot(other_name, force=True, cache_root=tmp_path)
+    if hydrate:
+        snapshots.clear_snapshot_cache(include_disk=False)
+    reread = snapshots.get_tool_snapshot(first_name, cache_root=tmp_path)
+    assert old.version == "old"
+    assert reread == refreshed
+    assert reread.version == "new"
+    disk = json.loads((tmp_path / snapshots.SNAPSHOT_CACHE_RELPATH).read_text())
+    assert list(disk["snapshots"]) == [other_name]
+
+
+def test_validated_disk_entry_wins_over_expired_memory_during_subset_probe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A peer process's refresh survives merging another newly probed tool."""
+    clock = [1000.0]
+    monkeypatch.setattr(snapshots.time, "time", lambda: clock[0])
+    monkeypatch.setattr(snapshots, "get_snapshot_ttl", lambda: 10)
+    monkeypatch.setattr(
+        snapshots,
+        "get_executable_command",
+        lambda name, **kw: [str(tmp_path / name)],
+    )
+    monkeypatch.setattr(
+        snapshots,
+        "probe_tool",
+        lambda name, *, search_root: _binary_snapshot(search_root, name, "old"),
+    )
+    old = snapshots.get_tool_snapshot("ruff", cache_root=tmp_path)
+    clock[0] += 11
+    disk_refresh = replace(old, version="from-peer-process", probed_at=clock[0])
+    snapshots._write_disk_cache(
+        tmp_path / snapshots.SNAPSHOT_CACHE_RELPATH,
+        {"ruff": disk_refresh},
+        ttl=10,
+    )
+    both = snapshots.probe_all_tools(tool_names=["ruff", "black"], cache_root=tmp_path)
+    assert both["ruff"] == disk_refresh
+    assert both["black"].probed_at == clock[0]
+    assert snapshots.get_tool_snapshot("ruff", cache_root=tmp_path) == disk_refresh
+
+
+def test_subset_merge_preserves_peer_published_during_probe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Discarding rejected candidates must still preserve concurrent updates."""
+    calls: list[str] = []
+
+    def probe(name: str, *, search_root: Path) -> snapshots.ToolSnapshot:
+        calls.append(name)
+        if name == "black":
+            snapshots.get_tool_snapshot("ruff", cache_root=search_root)
+        return _binary_snapshot(search_root, name, "fresh")
+
+    monkeypatch.setattr(snapshots, "probe_tool", probe)
+    monkeypatch.setattr(
+        snapshots,
+        "get_executable_command",
+        lambda name, **kw: [str(tmp_path / name)],
+    )
+    black = snapshots.get_tool_snapshot("black", cache_root=tmp_path)
+    ruff = snapshots.get_tool_snapshot("ruff", cache_root=tmp_path)
+    assert (black.version, ruff.version) == ("fresh", "fresh")
+    assert calls == ["black", "ruff"]
+
+
+def test_subset_merge_cannot_resurrect_alias_replaced_during_probe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A concurrent refresh invalidates aliases retained before probing began."""
+    calls: list[str] = []
+
+    def probe(name: str, *, search_root: Path) -> snapshots.ToolSnapshot:
+        calls.append(name)
+        if name == "black":
+            snapshots.get_tool_snapshot(
+                "example_tool",
+                force=True,
+                cache_root=search_root,
+            )
+        version = "old" if name == "example-tool" else "new"
+        return replace(_binary_snapshot(search_root, "tool-bin", version), name=name)
+
+    monkeypatch.setattr(snapshots, "probe_tool", probe)
+    monkeypatch.setattr(
+        snapshots,
+        "get_executable_command",
+        lambda name, **kw: [str(tmp_path / "tool-bin")],
+    )
+    old = snapshots.get_tool_snapshot("example-tool", cache_root=tmp_path)
+    snapshots.get_tool_snapshot("black", cache_root=tmp_path)
+    refreshed = snapshots.get_tool_snapshot("example-tool", cache_root=tmp_path)
+    assert old.version == "old"
+    assert refreshed.version == "new"
+    assert calls == ["example-tool", "black", "example_tool"]
+
+
+def test_transient_cache_read_error_does_not_delete_valid_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A read failure provides no evidence that an optional cache is corrupt."""
+    cache_file = tmp_path / snapshots.SNAPSHOT_CACHE_RELPATH
+    snapshots._write_disk_cache(
+        cache_file,
+        {"ruff": _binary_snapshot(tmp_path, "ruff", "1.0")},
+        ttl=600,
+    )
+    original = cache_file.read_bytes()
+
+    def fail(*args: object, **kwargs: object) -> str:
+        raise OSError("temporarily unreadable")
+
+    monkeypatch.setattr(Path, "read_text", fail)
+    loaded = snapshots._load_disk_cache(cache_file, ttl=600, search_root=tmp_path)
+    assert loaded == {}
+    assert cache_file.exists()
+    assert cache_file.read_bytes() == original
 
 
 def test_no_cache_bypasses_nested_project_disk_after_another_probe(

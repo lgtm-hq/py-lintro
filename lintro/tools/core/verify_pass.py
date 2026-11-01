@@ -751,7 +751,7 @@ def run_verify_pass(
                 ),
             )
             continue
-        if isinstance(execution, Skipped):
+        if isinstance(execution, (Skipped, Unavailable)):
             # The check returned without executing — a version gate, most
             # often. ``success=True, issues_count=0`` is the shape of a clean
             # verdict, but no file was examined, so trusting it would drop the
@@ -761,7 +761,11 @@ def run_verify_pass(
                     tool=name,
                     result=None,
                     status=VerifyStatus.UNKNOWN,
-                    unknown_reason=SKIPPED_REASON,
+                    unknown_reason=(
+                        f"the verify tool is unavailable: {execution.reason}"
+                        if isinstance(execution, Unavailable)
+                        else SKIPPED_REASON
+                    ),
                 ),
             )
             continue

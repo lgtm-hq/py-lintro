@@ -361,6 +361,32 @@ def test_unloadable_config_is_reported_as_a_check_not_an_exception(
 
 
 @pytest.mark.usefixtures("stub_environment")
+@pytest.mark.parametrize("error_type", [AttributeError, ImportError, RuntimeError])
+def test_internal_probe_failure_degrades_report_without_losing_other_checks(
+    monkeypatch: pytest.MonkeyPatch,
+    error_type: type[Exception],
+) -> None:
+    """Doctor retains diagnostic evidence when a plugin prevents availability checks."""
+
+    def crash(**kwargs: object) -> dict[str, object]:
+        raise error_type("broken plugin probe")
+
+    monkeypatch.setattr("lintro.tools.core.snapshots.probe_all_tools", crash)
+    report = collect_doctor_report()
+    checks = {check.check: check for check in report.checks}
+    failure = checks["tools.availability"]
+    assert report.health is DoctorHealth.DEGRADED
+    assert failure.category is DoctorCheckCategory.TOOLS
+    assert failure.status is DoctorCheckStatus.WARNING
+    assert f"{error_type.__name__}: broken plugin probe" in failure.detail
+    assert "re-run lintro doctor" in failure.remediation
+    assert checks["config.load"].status is DoctorCheckStatus.OK
+    assert "ai.provider" in checks
+    assert "extras.mcp" in checks
+    assert report.to_dict()["health"] == DoctorHealth.DEGRADED.value
+
+
+@pytest.mark.usefixtures("stub_environment")
 def test_missing_binaries_are_folded_into_one_actionable_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -860,26 +886,39 @@ def test_mcp_extra_status_reports_missing_without_failing() -> None:
     assert_that(info["hint"]).contains("lintro[mcp]")
 
 
-def test_manifest_only_tool_shares_one_probe_with_doctor(
+@pytest.mark.parametrize(
+    ("binary_name", "expected_version", "expected_probes"),
+    [("rustc-native", "99.0.0", "x"), ("rustc", "100.0.0", "xx")],
+)
+def test_manifest_only_tool_cache_respects_wrapper_identity(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    binary_name: str,
+    expected_version: str,
+    expected_probes: str,
 ) -> None:
-    """A dev tool without a plugin still uses its complete manifest command.
+    """Doctor shares stable binary evidence but rechecks mutable Rust toolchains.
 
     Args:
         tmp_path: Isolated executable and cache directory.
         monkeypatch: Scoped registry and working-directory overrides.
+        binary_name: Stable executable or Rust proxy to probe.
+        expected_version: Version doctor should observe after the package changes.
+        expected_probes: Probe markers expected from the real executable.
     """
     from lintro.tools.core.snapshots import get_tool_snapshot
 
-    binary = tmp_path / "rustc"
+    binary = tmp_path / binary_name
     binary.write_text(
         "#!/bin/sh\n"
         'test "$#" -eq 1 && test "$1" = --version || exit 1\n'
         'printf x >> "$0.probed"\n'
-        'printf "rustc 99.0.0\\n"\n',
+        'cat "$0.version"\n',
     )
     binary.chmod(0o755)
+    original_mtime = binary.stat().st_mtime_ns
+    version_file = Path(str(binary) + ".version")
+    version_file.write_text("99.0.0\n")
     tool = _make_tool(
         "rustc",
         version="99.0.0",
@@ -891,6 +930,7 @@ def test_manifest_only_tool_shares_one_probe_with_doctor(
     monkeypatch.chdir(tmp_path)
 
     snapshot = get_tool_snapshot("rustc")
+    version_file.write_text("100.0.0\n")
     checks = collect_tool_checks(
         registry=registry,
         context=_make_context(),
@@ -900,8 +940,9 @@ def test_manifest_only_tool_shares_one_probe_with_doctor(
     assert_that(snapshot.available).is_true()
     assert_that(snapshot.version).is_equal_to("99.0.0")
     assert_that(checks[0].status).is_equal_to(ToolStatus.OK)
-    assert_that(checks[0].installed_version).is_equal_to(snapshot.version)
-    assert_that(Path(str(binary) + ".probed").read_text()).is_equal_to("x")
+    assert_that(checks[0].installed_version).is_equal_to(expected_version)
+    assert_that(Path(str(binary) + ".probed").read_text()).is_equal_to(expected_probes)
+    assert binary.stat().st_mtime_ns == original_mtime
 
 
 @pytest.mark.parametrize("snapshot_available", [False, True])

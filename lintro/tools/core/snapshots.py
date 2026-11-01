@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, cast
 from loguru import logger
 
 from lintro import __version__
-from lintro.enums.tool_name import normalize_tool_name
+from lintro.enums.tool_name import normalize_tool_name, tool_name_aliases
 from lintro.models.core.tool_snapshot import ToolCapabilities as ToolCapabilities
 from lintro.models.core.tool_snapshot import ToolSnapshot as ToolSnapshot
 from lintro.tools.core.command_builders import CommandBuilderRegistry
@@ -65,7 +65,6 @@ def _manifest_tool(name: str) -> ManifestTool | None:
     Returns:
         Matching manifest entry, or None when the name is unknown.
     """
-    from lintro.enums.tool_name import tool_name_aliases
     from lintro.tools.core.tool_registry import ManifestRegistry
 
     registry = ManifestRegistry.load()
@@ -128,12 +127,33 @@ def _has_untracked_package(command: list[str]) -> bool:
     """Require fresh probes when only a wrapper's identity is known."""
     if not command:
         return False
-    if Path(command[0]).name in {"bunx", "npx", "bun", "npm"}:
+    if Path(command[0]).name in {
+        "bunx",
+        "npx",
+        "bun",
+        "npm",
+        "cargo",
+        "rustup",
+        "rustc",
+        "rustdoc",
+        "rustfmt",
+        "cargo-fmt",
+        "cargo-clippy",
+        "clippy-driver",
+        "rust-analyzer",
+        "rust-gdb",
+        "rust-gdbgui",
+        "rust-lldb",
+    }:
+        return True
+    binary_path = _resolved_binary(command)
+    if binary_path and Path(binary_path).resolve().name == "rustup":
+        # Proxies can also use an arbitrary symlink name.
         return True
     return (
         len(command) >= 3
         and command[1] == "-m"
-        and (command[0] != sys.executable or not _resolved_binary(command))
+        and (command[0] != sys.executable or not binary_path)
     )
 
 
@@ -148,6 +168,10 @@ def _is_cached_snapshot_fresh(snap: ToolSnapshot, *, search_root: Path) -> bool:
     checks miss tools whose command name differs from the lintro tool name
     (e.g. ``markdownlint-cli2`` for ``markdownlint``).
     """
+    if not snap.available and snap.binary_path:
+        # A resolved executable's probe may have failed transiently. Neither
+        # memory nor disk should suppress a retry after it recovers.
+        return False
     command = get_executable_command(snap.name, cwd=search_root)
     if _has_untracked_package(command):
         return False
@@ -500,7 +524,14 @@ def _load_disk_cache(
     """
     try:
         raw = json.loads(cache_file.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+    except OSError as exc:
+        logger.debug(
+            "Could not read tool snapshot cache {}; re-probing: {}",
+            cache_file,
+            exc,
+        )
+        return {}
+    except ValueError as exc:
         logger.debug("Corrupt tool snapshot cache {}; re-probing: {}", cache_file, exc)
         with contextlib.suppress(OSError):
             cache_file.unlink(missing_ok=True)
@@ -525,9 +556,6 @@ def _load_disk_cache(
         except (TypeError, ValueError, KeyError):
             continue
         if snap.name != name or not _within_ttl(snap, ttl):
-            continue
-        # A present binary may have failed its probe transiently. Retry next run.
-        if not snap.available and snap.binary_path:
             continue
         if not _is_cached_snapshot_fresh(snap, search_root=search_root):
             continue
@@ -642,6 +670,37 @@ def _configured_max_workers() -> int:
     return get_config().execution.max_workers
 
 
+def _merge_cache_entries(
+    cached: dict[str, ToolSnapshot],
+    updates: dict[str, ToolSnapshot],
+    *,
+    prefer_newer: bool = False,
+) -> dict[str, ToolSnapshot]:
+    """Replace snapshot identities together with all their cached aliases.
+
+    Args:
+        cached: Entries already retained for this execution directory.
+        updates: Newly loaded or probed entries to publish.
+        prefer_newer: Preserve newer evidence when merging concurrent peers.
+
+    Returns:
+        Cache map with one spelling per updated tool identity.
+    """
+    merged = dict(cached)
+    for name, snap in updates.items():
+        existing = lookup_snapshot(merged, name)
+        if (
+            prefer_newer
+            and existing is not None
+            and existing.probed_at > snap.probed_at
+        ):
+            continue
+        for alias in tool_name_aliases(name):
+            merged.pop(alias, None)
+        merged[name] = snap
+    return merged
+
+
 def probe_all_tools(
     *,
     force: bool = False,
@@ -685,7 +744,11 @@ def probe_all_tools(
 
     if not missing:
         with _cache_lock:
-            _memory_caches.setdefault(cache_file, {}).update(retained)
+            _memory_caches[cache_file] = _merge_cache_entries(
+                _memory_caches.get(cache_file, {}),
+                retained,
+                prefer_newer=True,
+            )
         return {
             name: snap
             for name in names
@@ -699,7 +762,14 @@ def probe_all_tools(
     )
     with _cache_lock:
         # Preserve peers filled by another tool worker while probing this subset.
-        merged = {**retained, **_memory_caches.get(cache_file, {}), **fresh}
+        # Candidates rejected above must not override validated disk entries.
+        concurrent = {
+            name: snap
+            for name, snap in _memory_caches.get(cache_file, {}).items()
+            if snap is not candidates.get(name)
+        }
+        merged = _merge_cache_entries(retained, concurrent, prefer_newer=True)
+        merged = _merge_cache_entries(merged, fresh)
         _memory_caches[cache_file] = merged
 
     # Filesystem work stays outside the memory lock. Each entry retains its age.

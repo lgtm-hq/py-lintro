@@ -88,7 +88,9 @@ The configuration system works in a specific order:
      directory. Resolved command, binary path and mtime changes invalidate immediately,
      including a newly preferred project-local binary. Refreshing a watch subset or
      loading disk entries does not extend the age of older snapshots. Wrapper commands
-     without reliable package identity are re-probed. Use `lintro check --no-cache`
+     without reliable package identity, including cargo and rustup proxies, are
+     re-probed. Failed probes of resolved executables are retried on the next lookup.
+     Use `lintro check --no-cache`
      to force fresh probes in every execution directory.
    - `strict_missing_tools`: When `true`, unavailable tools fail the run (exit 1).
      Default `false` — missing tools report `status: unavailable` with a remediation

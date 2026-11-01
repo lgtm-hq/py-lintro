@@ -985,7 +985,20 @@ def collect_doctor_report() -> DoctorReport:
             ),
         )
     else:
-        checks.extend(_tool_checks(config=config))
+        try:
+            checks.extend(_tool_checks(config=config))
+        except Exception as exc:
+            # Doctor must still report config, AI and extras health when an
+            # internal probe error prevents an availability verdict.
+            checks.append(
+                DoctorCheck(
+                    category=DoctorCheckCategory.TOOLS,
+                    check="tools.availability",
+                    status=DoctorCheckStatus.WARNING,
+                    detail=f"Tool probes failed: {type(exc).__name__}: {exc}",
+                    remediation="Resolve the probe error, then re-run lintro doctor",
+                ),
+            )
     checks.extend(_ai_checks(config=config))
     checks.extend(_extras_checks())
     return DoctorReport(checks=tuple(checks))
