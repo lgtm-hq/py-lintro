@@ -262,10 +262,10 @@ def test_blank_verification_requires_every_usage_counter_to_be_zero(
 
 
 @pytest.mark.parametrize("explicit_blank", [False, True])
-def test_zero_usage_with_omitted_or_blank_verification_keeps_coverage(
+def test_zero_usage_with_omitted_or_blank_verification_requires_review(
     explicit_blank: bool,
 ) -> None:
-    """A no-call round remains reusable despite time spent on setup (#3010)."""
+    """Zero spend does not supply missing coverage provenance (#3102)."""
     payload = _run(1, state="", reported=()).to_dict()
     if explicit_blank:
         payload["model_verification"] = ""
@@ -279,9 +279,9 @@ def test_zero_usage_with_omitted_or_blank_verification_keeps_coverage(
         reusable_rounds=_rounds(record),
     )
 
-    assert_that(_rounds(record)).is_equal_to(frozenset({1}))
-    assert_that(plan.queue).is_empty()
-    assert_that(plan.coverage).is_equal_to(prior.coverage)
+    assert_that(_rounds(record)).is_empty()
+    assert_that(plan.queue).is_equal_to(("a.py",))
+    assert_that(plan.coverage).is_empty()
 
 
 def test_coverage_from_an_excluded_round_is_queued_again() -> None:

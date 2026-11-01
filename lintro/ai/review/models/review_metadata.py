@@ -135,7 +135,8 @@ class ReviewMetadata:
             reported provider, in first-seen order.
         model_verification (str): The
             :class:`~lintro.ai.enums.model_verification.ModelVerification`
-            state; empty when no call completed.
+            state; on a fully carried no-call round, the weakest state of
+            its covering source rounds. Empty when neither exists.
         lane (str): The review lane the CI wrapper exported, if any.
         fallback_from (str): The lane that failed before any chunk completed
             and handed this round to its lane (ADR-0011 D, #2872), or empty.

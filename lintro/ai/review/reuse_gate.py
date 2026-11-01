@@ -96,7 +96,6 @@ def agent_model_overrides(options: ReviewSessionOptions) -> tuple[str, ...]:
 #: corrupt or newer state means more review, not less.
 _REUSABLE_STATES = frozenset(
     {
-        "",
         ModelVerification.VERIFIED.value,
         ModelVerification.UNVERIFIABLE.value,
         ModelVerification.UNREPORTED.value,
@@ -139,22 +138,18 @@ def _round_is_reusable(
     """Return whether one stored round passes every reuse rule."""
     identity = record.identity
     state = identity.model_verification
+    # No completed call means no evidence to vouch for coverage, even at
+    # zero usage. Re-review rather than promote a blank state (#3102).
     if state not in _REUSABLE_STATES:
         return False
-    # Blank means no completed call. Tokens or charges contradict that claim,
-    # including charges for calls whose results were dropped (#3010).
-    usage = record.usage
-    if state == "" and any(
-        (
-            usage.prompt,
-            usage.completion,
-            usage.total,
-            usage.context,
-            usage.cost,
-            usage.cost_shadow,
-        ),
-    ):
-        return False
+    if provenance.lane:
+        states = (
+            {ModelVerification.VERIFIED.value, ModelVerification.UNREPORTED.value}
+            if provenance.first_party
+            else {ModelVerification.UNVERIFIABLE.value}
+        )
+        if identity.first_party is not provenance.first_party or state not in states:
+            return False
     if state == ModelVerification.UNREPORTED.value and provenance.reports_model_usage:
         return False
     if identity.lane != provenance.lane or identity.endpoint != provenance.endpoint:
