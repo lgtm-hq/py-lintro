@@ -100,11 +100,12 @@ def get_executable_command(
     return CommandBuilderRegistry.get_command(tool_name, normalized, cwd)
 
 
-def _resolved_binary(command: list[str]) -> str:
+def _resolved_binary(command: list[str], *, search_root: Path) -> str:
     """Identify the tool executable behind an interpreter command.
 
     Args:
         command: Resolved execution or version-probe prefix.
+        search_root: Directory in which the command executes.
 
     Returns:
         Executable path whose mtime changes when the tool is upgraded.
@@ -120,10 +121,13 @@ def _resolved_binary(command: list[str]) -> str:
             return module_binary
         # Python's mtime says nothing about the module it launches.
         return ""
-    return shutil.which(command[0]) or ""
+    executable = command[0]
+    if os.path.dirname(executable) and not os.path.isabs(executable):
+        executable = str((search_root / executable).absolute())
+    return shutil.which(executable) or ""
 
 
-def _has_untracked_package(command: list[str]) -> bool:
+def _has_untracked_package(command: list[str], *, search_root: Path) -> bool:
     """Require fresh probes when only a wrapper's identity is known."""
     if not command:
         return False
@@ -146,7 +150,7 @@ def _has_untracked_package(command: list[str]) -> bool:
         "rust-lldb",
     }:
         return True
-    binary_path = _resolved_binary(command)
+    binary_path = _resolved_binary(command, search_root=search_root)
     if binary_path and Path(binary_path).resolve().name == "rustup":
         # Proxies can also use an arbitrary symlink name.
         return True
@@ -173,10 +177,10 @@ def _is_cached_snapshot_fresh(snap: ToolSnapshot, *, search_root: Path) -> bool:
         # memory nor disk should suppress a retry after it recovers.
         return False
     command = get_executable_command(snap.name, cwd=search_root)
-    if _has_untracked_package(command):
+    if _has_untracked_package(command, search_root=search_root):
         return False
     if snap.command:
-        resolved = _resolved_binary(command)
+        resolved = _resolved_binary(command, search_root=search_root)
         if tuple(command) != snap.command or resolved != snap.binary_path:
             return False
     if snap.binary_path:
@@ -193,8 +197,7 @@ def _is_cached_snapshot_fresh(snap: ToolSnapshot, *, search_root: Path) -> bool:
             tool_manager.is_tool_registered(snap.name)
             and tool_manager.get_tool(snap.name).definition.in_process is True
         )
-    main_cmd = command[0] if command else snap.name
-    return shutil.which(main_cmd) is None
+    return not _resolved_binary(command or [snap.name], search_root=search_root)
 
 
 def set_force_fresh_probes(force: bool) -> None:
@@ -350,7 +353,7 @@ def probe_tool(
 
     Args:
         tool_name: Registered tool name (case-insensitive).
-        search_root: Project root for native-config discovery; defaults to cwd.
+        search_root: Execution root for binaries and native configs; defaults to cwd.
 
     Returns:
         Fresh ToolSnapshot (not read from cache).
@@ -370,7 +373,7 @@ def probe_tool(
                 probe_error=f"Tool not registered: {name}",
             )
         command = list(manifest.version_command)
-        binary_path = _resolved_binary(command)
+        binary_path = _resolved_binary(command, search_root=root)
         snapshot = ToolSnapshot(
             name=name,
             binary_path=binary_path,
@@ -429,7 +432,7 @@ def probe_tool(
         )
 
     command = get_executable_command(definition.name, cwd=root)
-    binary_path = _resolved_binary(command)
+    binary_path = _resolved_binary(command, search_root=root)
     binary_mtime = _binary_mtime(binary_path)
 
     if definition.version_command is None and definition.min_version is None:

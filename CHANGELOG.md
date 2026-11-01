@@ -14,8 +14,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Changed
 
 - **tools/JSON**: report missing tools as `status: unavailable` with
-  `unavailable_reason` (#1244). Non-strict unavailable results carry
-  `skipped: false`, `success: true`, and unknown fix counts; strict mode exits 1.
+  `unavailable_reason` (#1244). Non-strict unavailable results carry `skipped: false`,
+  `success: true`, and unknown fix counts; strict mode exits 1.
 
 ### Deprecated
 
