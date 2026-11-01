@@ -414,20 +414,13 @@ class BlackPlugin(BaseToolPlugin):
             initial_issues = initial_issues + initial_supplement.issues
             initial_count = len(initial_issues)
             if initial_supplement.failed:
+                failure_output = "\n".join(
+                    filter(None, (check_output.rstrip(), initial_supplement.note)),
+                )
                 return ToolResult.from_outcome(
                     ToolOutcome(
                         execution=(
-                            TimedOut(
-                                "\n".join(
-                                    filter(
-                                        None,
-                                        (
-                                            check_output.rstrip(),
-                                            initial_supplement.note,
-                                        ),
-                                    ),
-                                ),
-                            )
+                            TimedOut(failure_output)
                             if initial_supplement.timed_out
                             else Checked(success=False)
                         ),
@@ -435,16 +428,13 @@ class BlackPlugin(BaseToolPlugin):
                         issues_count=initial_count,
                     ),
                     name=self.definition.name,
-                    output="\n".join(
-                        filter(None, (check_output.rstrip(), initial_supplement.note)),
-                    ),
+                    output=failure_output,
                     issues=initial_issues,
                     cwd=ctx.cwd,
                 )
 
         # Apply formatting
-        fix_cmd_base: list[str] = self._get_executable_command(tool_name="black")
-        fix_cmd: list[str] = list(fix_cmd_base)
+        fix_cmd: list[str] = list(self._get_executable_command(tool_name="black"))
         if self.options.get("diff"):
             fix_cmd.append("--diff")
         fix_cmd.extend(self._build_common_args())
@@ -534,7 +524,8 @@ class BlackPlugin(BaseToolPlugin):
                     )
                 ),
                 accounting=FixMeasured(
-                    initial=initial_count,
+                    # Include new post-format findings, as the batch runner does.
+                    initial=max(initial_count, fixed_count + remaining_count),
                     fixed=fixed_count,
                     remaining=remaining_count,
                 ),

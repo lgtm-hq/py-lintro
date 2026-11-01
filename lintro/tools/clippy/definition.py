@@ -154,7 +154,6 @@ class ClippyPlugin(BaseToolPlugin):
                 ),
             ),
             name=self.definition.name,
-            # Not an error, just skipping
             output=skip_message,
         )
 
@@ -334,6 +333,8 @@ class ClippyPlugin(BaseToolPlugin):
         remaining_issues = parse_clippy_output(output=output_after)
         remaining_count = len(remaining_issues)
         fixed_count = max(0, initial_count - remaining_count)
+        # Recompiling after fixes can surface additional warnings.
+        initial_count = max(initial_count, fixed_count + remaining_count)
 
         # Preserve output when command fails but no issues were parsed
         # This allows users to see error messages like compilation failures

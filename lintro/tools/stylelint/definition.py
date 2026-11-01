@@ -163,6 +163,7 @@ class StylelintPlugin(BaseToolPlugin):
         Returns:
             ToolResult: Skip result (success=True) with a helpful message.
         """
+        # No configuration means no file was inspected by stylelint.
         return ToolResult.from_outcome(
             ToolOutcome(execution=Skipped("No stylelint configuration found")),
             name=self.definition.name,
@@ -172,8 +173,6 @@ class StylelintPlugin(BaseToolPlugin):
                 '"stylelint" key in package.json). Add one to enable '
                 "CSS/SCSS/Less linting."
             ),
-            # No config means stylelint examined no file, so the run-level
-            # verify pass (#1743) must not read this zero as a clean verdict.
             cwd=cwd,
         )
 
@@ -429,6 +428,8 @@ class StylelintPlugin(BaseToolPlugin):
             )
         remaining_count = len(remaining_issues)
         fixed_count = max(0, initial_count - remaining_count)
+        # Rewrites can expose warnings not reported by the initial check.
+        initial_count = max(initial_count, fixed_count + remaining_count)
 
         output_lines: list[str] = []
         if fixed_count > 0:

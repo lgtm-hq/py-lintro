@@ -27,7 +27,13 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
-from lintro.models.core.tool_outcome import Checked, FixMeasured, TimedOut, ToolOutcome
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixMeasured,
+    FixUnmeasured,
+    TimedOut,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.buf.buf_issue import BufIssue
 from lintro.parsers.buf.buf_parser import (
@@ -507,7 +513,8 @@ class BufPlugin(BaseToolPlugin):
 
         # A failed verification pass (format re-check or lint) that produced
         # nothing parseable must not read as "all fixed" — surface the
-        # stderr-only failure with the initial issues kept as remaining.
+        # stderr-only failure and retain usable findings without claiming a
+        # complete residual or crediting fixes from an incomplete measurement.
         fmt_verification_failed = not final_fmt.success and not final_fmt_issues
         lint_verification_failed = not final_lint.success and not final_lint_issues
         if fmt_verification_failed or lint_verification_failed:
@@ -537,21 +544,23 @@ class BufPlugin(BaseToolPlugin):
             return ToolResult.from_outcome(
                 ToolOutcome(
                     execution=Checked(success=False),
-                    accounting=FixMeasured(
+                    accounting=FixUnmeasured(
+                        reason=verification_error,
                         initial=initial_count,
-                        fixed=max(0, initial_count - count),
-                        remaining=count,
                     ),
                     issues_count=count,
                 ),
                 name=self.definition.name,
                 output=f"{verification_error}{detail}".strip(),
                 issues=issues,
+                initial_issues=initial_issues,
                 cwd=ctx.cwd,
             )
 
         remaining_count = len(remaining_issues)
         fixed_count = max(0, initial_count - remaining_count)
+        # The write can expose lint findings absent from the initial probes.
+        initial_count = max(initial_count, fixed_count + remaining_count)
 
         summary: list[str] = []
         if fixed_count > 0:

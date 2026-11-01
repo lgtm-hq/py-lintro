@@ -35,6 +35,67 @@ from lintro.utils.execution.exit_codes import (
     determine_exit_code,
 )
 from lintro.utils.json_output import serialize_tool_result
+from lintro.utils.result_formatters import print_tool_result
+from lintro.utils.summary_tables import print_summary_table
+
+
+@pytest.mark.parametrize("action", [Action.CHECK, Action.FIX])
+@pytest.mark.parametrize(
+    ("legacy", "execution"),
+    [
+        ({"success": True, "no_files": True}, NoFiles()),
+        (
+            {"skipped": True, "skip_reason": "missing configuration"},
+            Skipped("missing configuration"),
+        ),
+        ({"timed_out": True}, TimedOut(None)),
+        ({"timed_out": True, "inspected_files": True}, TimedOut(None)),
+    ],
+)
+def test_inactive_producers_preserve_legacy_console_rendering(
+    legacy: dict[str, Any],
+    execution: NoFiles | Skipped | TimedOut,
+    action: Action,
+) -> None:
+    """Legacy post-init already clears inspection before either renderer sees it."""
+    original = ToolResult(name="clippy", **legacy)
+    migrated = ToolResult.from_outcome(ToolOutcome(execution), name="clippy")
+
+    def render(result: ToolResult) -> list[dict[str, Any]]:
+        """Capture complete tool and summary output, including color arguments."""
+        events: list[dict[str, Any]] = []
+
+        def emit(**payload: Any) -> None:
+            events.append(payload)
+
+        print_tool_result(
+            console_output_func=emit,
+            success_func=emit,
+            tool_name=result.name,
+            output=result.output or "",
+            issues_count=result.issues_count,
+            action=action,
+            success=result.success,
+            result=result,
+        )
+        print_summary_table(emit, action, [result])
+        return events
+
+    assert_that(original.inspected_files).is_false()
+    assert_that(asdict(migrated)).is_equal_to(asdict(original))
+    output = render(migrated)
+    assert_that(output).is_equal_to(render(original))
+    text = "\n".join(str(event.get("text", "")) for event in output)
+    if isinstance(execution, NoFiles):
+        assert_that(text).contains(
+            "No files processed (excluded by patterns)",
+            "no files matched",
+        )
+    else:
+        assert_that(text).does_not_contain("No files processed", "no files matched")
+        assert_that(text).contains(
+            "missing configuration" if isinstance(execution, Skipped) else "FAIL",
+        )
 
 
 @pytest.mark.parametrize(

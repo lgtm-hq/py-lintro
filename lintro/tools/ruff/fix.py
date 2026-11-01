@@ -263,6 +263,11 @@ def execute_ruff_fix(
     # Calculate how many lint issues were actually fixed
     fixed_lint_count: int = max(0, initial_count - remaining_count)
     fixed_count: int = fixed_lint_count
+    # Fixes can expose new lint findings. Widen lint accounting before adding
+    # formatting so later format timeouts also retain the full lint residual.
+    total_initial_count = (
+        max(initial_count, fixed_lint_count + remaining_count) + initial_format_count
+    )
 
     # If there are remaining issues, check if any are fixable with unsafe fixes
     # If unsafe fixes are disabled, check if any remaining issues are

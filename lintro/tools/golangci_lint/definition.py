@@ -562,6 +562,8 @@ class GolangciLintPlugin(BaseToolPlugin):
         _rebase_issue_paths(issues=remaining_issues, module_root=module_root)
         remaining_count = len(remaining_issues)
         fixed_count = max(0, initial_count - remaining_count)
+        # A module re-check can reveal additional findings after rewrites.
+        initial_count = max(initial_count, fixed_count + remaining_count)
 
         # golangci-lint exits non-zero both when lint issues remain and when the
         # run itself errors (config/build/fixer failure). A failed --fix run must
