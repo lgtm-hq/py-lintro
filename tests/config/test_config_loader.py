@@ -9,6 +9,7 @@ from assertpy import assert_that
 from loguru import logger
 
 from lintro.config.config_loader import (
+    MAPPING_SECTIONS,
     _convert_pyproject_to_config,
     _parse_defaults,
     _parse_enforce_config,
@@ -25,18 +26,6 @@ from lintro.config.enforce_config import EnforceConfig
 from lintro.config.execution_config import ExecutionConfig
 from lintro.config.lintro_config import LintroConfig
 from lintro.exceptions.errors import ConfigurationError
-
-MAPPING_SECTIONS = (
-    "enforce",
-    "execution",
-    "defaults",
-    "tools",
-    "ai",
-    "review",
-    "output",
-    "watch",
-    "deps",
-)
 
 
 def test_empty_data() -> None:
@@ -336,6 +325,33 @@ def test_pyproject_rejects_non_mapping_sections(
 
     assert_that(load_config).raises(ConfigurationError).when_called_with().contains(
         f"{section} must be a mapping",
+    )
+
+
+@pytest.mark.parametrize("table", ["tool", "tools"])
+def test_pyproject_tool_table_error_names_full_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    table: str,
+) -> None:
+    """Invalid per-tool tables identify the full pyproject key in the error.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+        monkeypatch: Pytest monkeypatch fixture.
+        table: Supported spelling of the nested per-tool table.
+    """
+    (tmp_path / "pyproject.toml").write_text(
+        f"[tool.lintro]\n{table} = false\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ConfigurationError) as error:
+        load_config()
+
+    assert_that(str(error.value)).is_equal_to(
+        f"tool.lintro.{table} must be a mapping, got bool",
     )
 
 
