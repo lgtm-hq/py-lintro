@@ -87,6 +87,9 @@ project configuration; a string path overrides it. An unconfigured baseline file
 never loaded just because it exists. Callers publishing quality counts should opt out
 explicitly, as the badge does.
 
+The executor's `run_lint_tools_simple` also uses the configured baseline when its
+`baseline` argument is omitted, including calls from watch mode.
+
 Version 1 matches the tuple `(tool, relative file, rule code, SHA-256(message))`. Line
 and column are excluded from identity; the stored line is only a hint. Messages
 normalize CRLF to LF but preserve all other content, including numbers: removing
@@ -115,6 +118,16 @@ Incomplete results preserve their findings and execution-error output. Live diag
 display is deferred when a baseline is active so final structured findings reflect
 filtering.
 
+Format accounting matches fingerprint occurrences across the filtered initial and
+residual lists, so line shifts do not cancel fix credit. If formatting introduces a new
+residual identity or an extra occurrence, the initial count still describes only the
+actual detected findings. The current result model requires
+`initial = fixed + remaining` and has no introduced-finding counter, so such a result
+uses explicit unknown accounting: `fixed` and `remaining` are null, both finding lists
+are retained, the reason records matched fixes and introduced occurrences, and the run
+fails. Unrepresentable identities also leave accounting unknown. Partial or already
+unknown producer accounting is preserved without baseline suppression.
+
 `update` adds currently observed findings and removes fixed entries only where there is
 affirmative complete, exact file coverage. Unseen tools and files, unknown coverage,
 skipped checks, execution failures, and incomplete reports retain their old entries.
@@ -125,6 +138,10 @@ those tools, `update` can add observations, but neither `update` nor `prune` rem
 entries or reduces occurrence budgets. Other tools retain their coverage claims.
 Management scans ignore the configured fingerprint baseline and do not invoke AI or
 install dependencies.
+
+Native project configuration still determines which rules are observed. Disabling a rule
+there can let `update` or `prune` remove its entries on fully covered files; re-enabling
+the rule then exposes those findings again.
 
 The boolean `inspected_files` proves that some work happened, not which files were
 examined. Until #2609 supplies coverage throughout the tool registry, pruning must not

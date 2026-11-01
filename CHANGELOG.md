@@ -11,6 +11,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **core**: add opt-in finding fingerprint baselines with
+  `baseline create|update|prune`, `--baseline`, and the `baseline:` configuration key
+  (#438).
+
 ### Changed
 
 ### Deprecated

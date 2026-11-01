@@ -2,21 +2,81 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from lintro.enums.action import Action
+from lintro.models.core.tool_outcome import FixMeasured, FixUnmeasured
 from lintro.utils.execution.exit_codes import (
     aggregate_tool_results,
     determine_exit_code,
 )
-from lintro.utils.fingerprint_baseline import baseline_incomplete_reason, filter_issues
+from lintro.utils.fingerprint_baseline import (
+    baseline_incomplete_reason,
+    filter_issues,
+    fingerprint,
+)
 from lintro.utils.severity_counts import count_severities
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from lintro.models.core.fingerprint_baseline import FingerprintBaseline
     from lintro.models.core.run_artifact import RunArtifact
+    from lintro.models.core.tool_result import ToolResult
+    from lintro.utils.fingerprint_baseline import Fingerprint
+
+
+def _filter_fix_accounting(result: ToolResult, root: Path) -> None:
+    """Match filtered finding occurrences without assuming a residual subset.
+
+    Args:
+        result: Complete format result with filtered initial and residual lists.
+        root: Invocation workspace root for canonical finding identities.
+    """
+    initial = len(result.initial_issues)
+    populations: list[Counter[Fingerprint]] = []
+    accounting: FixMeasured | FixUnmeasured
+    for issues in (result.initial_issues, result.issues):
+        entries = [
+            fingerprint(issue, tool=result.name, root=root, cwd=result.cwd)
+            for issue in issues
+        ]
+        if any(entry is None for entry in entries):
+            accounting = FixUnmeasured(
+                initial=initial,
+                reason="filtered finding identities cannot be matched completely",
+            )
+            break
+        populations.append(Counter(entry.key for entry in entries if entry is not None))
+    else:
+        before, after = populations
+        fixed = sum((before - after).values())
+        introduced = sum((after - before).values())
+        # FixMeasured requires initial = fixed + remaining. It has no place
+        # for introduced findings; retain both populations and report unknown
+        # accounting rather than inventing initial findings or netting fixes out.
+        accounting = (
+            FixUnmeasured(
+                initial=initial,
+                reason=(
+                    f"format introduced {introduced} residual finding(s); "
+                    f"{fixed} initial finding(s) resolved, but complete fix "
+                    "accounting is unavailable"
+                ),
+            )
+            if introduced
+            else FixMeasured(initial, fixed, len(result.issues))
+        )
+    result.initial_issues_count = accounting.initial
+    result.fixed_issues_count = accounting.fixed
+    result.remaining_issues_count = accounting.remaining
+    result.residual_unknown = isinstance(accounting, FixUnmeasured)
+    result.residual_unknown_reason = (
+        accounting.reason if isinstance(accounting, FixUnmeasured) else None
+    )
 
 
 def apply_baseline(artifact: RunArtifact, baseline: FingerprintBaseline) -> None:
@@ -47,11 +107,11 @@ def apply_baseline(artifact: RunArtifact, baseline: FingerprintBaseline) -> None
                 logger.warning(f"Baseline not applied to {result.name}: {reason}")
             continue
         if artifact.action == Action.FIX and (
-            result.initial_issues_count is None
+            not isinstance(result.outcome.accounting, FixMeasured)
             or result.initial_issues_count != len(result.initial_issues)
         ):
-            # Empty collection defaults do not prove pre-fix measurement.
-            # Require the detected findings to match the producer's count.
+            # Preserve incomplete accounting. Empty collection defaults do not
+            # prove pre-fix measurement, even beside complete numeric counters.
             continue
         retained, suppressed = filter_issues(
             result.issues or [],
@@ -76,14 +136,11 @@ def apply_baseline(artifact: RunArtifact, baseline: FingerprintBaseline) -> None
         result.output = None
         if artifact.action == Action.FIX:
             result.initial_issues = detected
-            before = len(detected)
-            remaining = len(retained)
-            fixed = max(0, before - remaining)
-            result.initial_issues_count = fixed + remaining
-            result.fixed_issues_count = fixed
-            result.remaining_issues_count = remaining
+            _filter_fix_accounting(result, artifact.workspace_root)
         # Only the producer's completeness proof can explain a failed verdict.
-        result.success = result.success or not retained
+        result.success = (
+            result.success or not retained
+        ) and not result.residual_unknown
     totals = aggregate_tool_results(artifact.tool_results, artifact.action)
     artifact.total_issues, artifact.total_fixed, artifact.total_remaining = totals
     artifact.exit_code = determine_exit_code(

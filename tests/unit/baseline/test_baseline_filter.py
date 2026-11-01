@@ -9,7 +9,7 @@ from assertpy import assert_that
 
 from lintro.enums.action import Action
 from lintro.models.core.run_artifact import RunArtifact
-from lintro.models.core.tool_outcome import Checked
+from lintro.models.core.tool_outcome import Checked, FixMeasured, FixUnmeasured
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.utils.execution.baseline_filter import apply_baseline
@@ -255,6 +255,145 @@ def test_acknowledged_fixed_findings_are_not_reported_as_new_fixes(
     assert_that(artifact.total_fixed).is_zero()
     assert_that(result.initial_issues).is_empty()
     assert_that(artifact.success).is_true()
+
+
+@pytest.mark.parametrize(
+    ("initial_codes", "residual_codes", "expected_fixed", "resolved"),
+    [
+        (("F401",), ("B",), None, 0),
+        (("F401", "A"), ("B",), None, 1),
+        (("F401", "A", "C"), ("A",), 1, None),
+        (("F401", "A", "A"), ("A",), 1, None),
+        (("F401", "A"), ("A", "A"), None, 0),
+        (("F401", "A"), ("X" * 1025,), None, None),
+    ],
+    ids=[
+        "acknowledged-initial-replaced",
+        "retained-initial-replaced",
+        "subset-with-line-shift",
+        "subset-with-duplicate-initial",
+        "introduced-duplicate",
+        "unrepresentable-residual-identity",
+    ],
+)
+def test_format_accounting_matches_finding_occurrences(
+    tmp_path: Path,
+    dirty_result: ToolResult,
+    finding: RuffIssue,
+    initial_codes: tuple[str, ...],
+    residual_codes: tuple[str, ...],
+    expected_fixed: int | None,
+    resolved: int | None,
+) -> None:
+    """Introduced residuals cannot invent initial findings or cancel real fixes."""
+    baseline = snapshot([dirty_result], root=tmp_path)
+    initial = [replace(finding, code=code) for code in initial_codes]
+    residual = [
+        replace(finding, code=code, line=99 + offset)
+        for offset, code in enumerate(residual_codes)
+    ]
+    result = replace(
+        dirty_result,
+        initial_issues=initial,
+        initial_issues_count=len(initial),
+        fixed_issues_count=len(initial) - len(residual),
+        remaining_issues_count=len(residual),
+        issues=residual,
+        issues_count=len(residual),
+    )
+    artifact = RunArtifact(
+        action=Action.FIX,
+        tool_results=[result],
+        workspace_root=tmp_path,
+        total_issues=len(residual),
+        total_fixed=len(initial) - len(residual),
+        total_remaining=len(residual),
+        exit_code=1,
+    )
+
+    apply_baseline(artifact, baseline)
+
+    detected = [issue for issue in initial if issue.code != "F401"]
+    result.__post_init__()
+    assert_that(result.initial_issues).is_equal_to(detected)
+    assert_that(result.initial_issues_count).is_equal_to(len(detected))
+    assert_that(result.issues).is_equal_to(residual)
+    assert_that(result.issues_count).is_equal_to(len(residual))
+    assert_that(artifact.total_issues).is_equal_to(len(residual))
+    assert_that(artifact.exit_code).is_equal_to(1)
+    payload = create_json_output(
+        Action.FIX,
+        [result],
+        artifact.total_issues,
+        artifact.total_fixed,
+        artifact.total_remaining,
+        artifact.exit_code,
+    )
+    row = payload["results"][0]
+    assert_that(
+        [issue["code"] for issue in row["issues"] if issue["line"] >= 99],
+    ).is_equal_to(list(residual_codes))
+    if expected_fixed is None:
+        assert_that(result.outcome.accounting).is_instance_of(FixUnmeasured)
+        assert_that(result.fixed_issues_count).is_none()
+        assert_that(result.remaining_issues_count).is_none()
+        assert_that(result.residual_unknown_reason).is_not_empty()
+        assert_that(row["fixed"]).is_none()
+        assert_that(row["remaining"]).is_none()
+        assert_that(row["residual_unknown"]).is_true()
+        assert_that(payload["summary"]["residual_unknown_tools"]).is_equal_to(["ruff"])
+        if resolved is not None:
+            assert_that(result.residual_unknown_reason).contains(
+                f"{resolved} initial finding(s) resolved",
+            )
+    else:
+        assert_that(result.outcome.accounting).is_equal_to(
+            FixMeasured(len(detected), expected_fixed, len(residual)),
+        )
+        assert_that(row["fixed"]).is_equal_to(expected_fixed)
+        assert_that(row["remaining"]).is_equal_to(len(residual))
+        assert_that(artifact.total_fixed).is_equal_to(expected_fixed)
+        assert_that(artifact.total_remaining).is_equal_to(len(residual))
+
+
+@pytest.mark.parametrize(
+    ("fixed", "remaining"),
+    [(None, None), (0, None), (None, 2)],
+)
+def test_format_partial_accounting_stays_incomplete(
+    tmp_path: Path,
+    dirty_result: ToolResult,
+    finding: RuffIssue,
+    fixed: int | None,
+    remaining: int | None,
+) -> None:
+    """A complete findings list cannot fill missing producer measurements."""
+    baseline = snapshot([dirty_result], root=tmp_path)
+    findings = [finding, replace(finding, code="A")]
+    result = replace(
+        dirty_result,
+        initial_issues=findings,
+        initial_issues_count=2,
+        fixed_issues_count=fixed,
+        remaining_issues_count=remaining,
+        issues=findings,
+        issues_count=2,
+        output="producer's incomplete accounting",
+    )
+    expected = replace(result, baselined_count=0)
+    artifact = RunArtifact(
+        action=Action.FIX,
+        tool_results=[result],
+        workspace_root=tmp_path,
+        total_issues=2,
+        total_remaining=remaining or 0,
+        exit_code=1,
+    )
+
+    apply_baseline(artifact, baseline)
+
+    assert_that(result).is_equal_to(expected)
+    assert_that(artifact.exit_code).is_equal_to(1)
 
 
 @pytest.mark.parametrize("initial_count", [None, 1])
