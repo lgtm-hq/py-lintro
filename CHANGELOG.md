@@ -13,6 +13,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.175.3] - 2026-11-01
+
+### Changed
+
+- **core**: freeze tool outcomes and publish validated replacements (#3118) (4489a4a)
+- **core**: consume explicit ToolResult outcomes (stage 3) (#3109) (521c3ae)
 - **BREAKING (core/plugin API)**: freeze `ToolResult` and validate immutable
   replacements (#3019, stage 4). Plugin API-v2 constructors retain skipped success and
   unset inactive inspection defaults. Plugins that assign result fields after
@@ -26,16 +40,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `all_results` keyword argument. Pass the owning run's `list[ToolResult]` so verified
   replacements reach aggregation, summaries and exit-code calculation.
 
-### Deprecated
-
-### Removed
-
 ### Fixed
 
+- **shellcheck**: fail closed on malformed comments reports (#3121) (64099a6)
+- **bandit**: reject missing or invalid results (#3119) (395d63d)
 - **shellcheck**: fail closed on malformed comments, invalid JSON and reports with
   trailing noise; preserve execution diagnostics (#3025)
-
-### Security
 
 ## [0.175.2] - 2026-11-01
 
