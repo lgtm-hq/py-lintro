@@ -10,6 +10,7 @@ from typing import Any
 
 from lintro.enums.action import Action
 from lintro.enums.tool_name import ToolName, normalize_tool_name
+from lintro.models.core.tool_outcome import FixUnmeasured, NoFiles, Skipped
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.console import (
     get_summary_value,
@@ -105,7 +106,7 @@ def _is_no_files_result(result: ToolResult) -> bool:
         True only for an explicit empty file set. A decline or an unknown
         legacy result must not render as "no files matched".
     """
-    return result.inspected_files is False and result.no_files
+    return isinstance(result.outcome.execution, NoFiles)
 
 
 def _is_result_skipped(result: ToolResult) -> tuple[bool, str]:
@@ -117,9 +118,11 @@ def _is_result_skipped(result: ToolResult) -> tuple[bool, str]:
     Returns:
         Tuple of (is_skipped, skip_reason).
     """
-    if result.skipped:
-        return True, result.skip_reason or ""
-    return False, ""
+    match result.outcome.execution:
+        case Skipped(reason=reason):
+            return True, reason
+        case _:
+            return False, ""
 
 
 def count_affected_files(tool_results: Sequence[ToolResult]) -> int:
@@ -187,9 +190,10 @@ def print_summary_table(
 
         summary_data: list[list[str]] = []
         for result in sorted_results:
+            outcome = result.outcome
             tool_name: str = result.name
-            issues_count: int = result.issues_count
-            success: bool = result.success
+            issues_count: int = outcome.issues_count
+            success: bool = outcome.success
 
             emoji: str = get_tool_emoji(tool_name)
             display_name: str = _format_tool_display_name(tool_name)
@@ -319,11 +323,10 @@ def print_summary_table(
                 result_output = result.output
 
                 # Prefer standardized counts from ToolResult
-                remaining_std = result.remaining_issues_count
-                fixed_std = result.fixed_issues_count
-                residual_unknown = bool(
-                    result.residual_unknown,
-                )
+                accounting = outcome.accounting
+                remaining_std = accounting.remaining
+                fixed_std = accounting.fixed
+                residual_unknown = isinstance(accounting, FixUnmeasured)
 
                 if residual_unknown:
                     # No after-count was taken. Say so rather than falling

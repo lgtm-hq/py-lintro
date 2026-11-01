@@ -228,6 +228,9 @@ class AsyncToolExecutor:
                     tool_opts,
                     max_fix_retries=max_fix_retries,
                 )
+                # Validate inside the per-tool exception boundary, before
+                # progress callbacks or aggregation see a mutable plugin result.
+                result.validate_outcome()
             except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
                 raise
             except BaseException as exc:

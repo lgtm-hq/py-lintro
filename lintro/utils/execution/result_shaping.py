@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from lintro.models.core.tool_outcome import Checked, FixUnmeasured, NoFiles, Skipped
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -112,11 +114,13 @@ def filter_result_to_fixable(result: ToolResult) -> ToolResult:
     A check-mode tool sets ``success=False`` when it merely *finds* issues, but
     in dry-run those diagnostics are informational: the exit code must derive
     purely from the fixable issue count, not from the tool having found
-    (possibly non-fixable) issues. So any result that parsed issues is marked
-    ``success=True`` here — it ran fine. Results without parsed issues are
-    returned unchanged: a genuine execution failure carries no parsed issues
-    and must still fail the run, and dry-run only runs fix-capable tools, so a
-    reported change without structured issues is treated as fixable.
+    (possibly non-fixable) issues. Only a completed check with usable accounting
+    and no parse failures can become ``success=True`` here. A timeout can carry
+    partial findings; filtering those findings must preserve its failed verdict,
+    as well as failures with unmeasured accounting or incomplete parsing.
+    Skipped/no-files results and results without parsed issues stay unchanged.
+    Dry-run only runs fix-capable tools, so a reported change without structured
+    issues is treated as fixable.
 
     Args:
         result: The check-mode result to filter.
@@ -129,10 +133,18 @@ def filter_result_to_fixable(result: ToolResult) -> ToolResult:
 
     if not result.issues:
         return result
+    outcome = result.outcome
+    if isinstance(outcome.execution, (Skipped, NoFiles)):
+        return result
     fixable = [issue for issue in result.issues if issue_would_be_fixed(issue)]
+    completed_check = (
+        isinstance(outcome.execution, Checked)
+        and not isinstance(outcome.accounting, FixUnmeasured)
+        and not result.parse_failures_count
+    )
     return dataclasses.replace(
         result,
         issues=fixable,
         issues_count=len(fixable),
-        success=True,
+        success=outcome.success or completed_check,
     )

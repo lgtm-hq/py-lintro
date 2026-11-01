@@ -82,6 +82,13 @@ from lintro.enums.action import Action
 from lintro.enums.capability import MUTATING_CAPABILITIES, Cap
 from lintro.enums.verify_status import VerifyStatus
 from lintro.formatters.formatter import merge_detected_and_remaining
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixUnmeasured,
+    NoFiles,
+    Skipped,
+    TimedOut,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.file_cache import FingerprintSnapshot, snapshot_fingerprints
@@ -701,6 +708,7 @@ def run_verify_pass(
         try:
             tool = configure(tool_name=name)
             result = tool.check(files, {})
+            execution = result.outcome.execution
         except (TypeError, AttributeError):
             # Programming errors propagate, exactly as they do out of the
             # mutation phase. Swallowing them here would make a bug in the
@@ -727,7 +735,7 @@ def run_verify_pass(
                 ),
             )
             continue
-        if result.timed_out:
+        if isinstance(execution, TimedOut):
             # A timed-out CHECK examined only part of its target set — a
             # multi-root aggregator such as golangci-lint still returns the
             # findings the roots that finished produced — so it is no verdict
@@ -741,7 +749,7 @@ def run_verify_pass(
                 ),
             )
             continue
-        if result.skipped:
+        if isinstance(execution, Skipped):
             # The check returned without executing — a version gate, most
             # often. ``success=True, issues_count=0`` is the shape of a clean
             # verdict, but no file was examined, so trusting it would drop the
@@ -755,7 +763,7 @@ def run_verify_pass(
                 ),
             )
             continue
-        if result.no_files:
+        if isinstance(execution, NoFiles):
             # The tool's own discovery matched none of the scope's files, so
             # it verified nothing. Unlike a skip this is routine — the scope is
             # the union over every mutating tool, so a tool that rewrote
@@ -867,10 +875,11 @@ def _fold_unknown(
             "complete fix accounting is unavailable."
         )
     output = mutation.output or ""
+    accounting = mutation.outcome.accounting
     mutation.output = f"{output}\n{note}" if output.strip() else note
     mutation.issues = detected
     mutation.issues_count = len(detected)
-    if mutation.initial_issues_count is None and not mutation.parse_failures_count:
+    if accounting.initial is None and not mutation.parse_failures_count:
         mutation.initial_issues_count = len(detected)
     # No after-count exists, so none is reported. Consumers key off
     # ``residual_unknown`` and render "unknown" rather than filling the gap
@@ -879,6 +888,9 @@ def _fold_unknown(
     mutation.remaining_issues_count = None
     mutation.residual_unknown = True
     mutation.residual_unknown_reason = outcome.unknown_reason
+    # This folded row now records a failed verification, even if mutation
+    # discovery originally found no files.
+    mutation.no_files = False
     mutation.success = False
     return mutation
 
@@ -894,13 +906,21 @@ def check_answered(result: ToolResult | None) -> bool:
         Skips, empty scopes, timeouts (even with partial findings), and
         execution failures without findings do not answer the check.
     """
-    return (
-        result is not None
-        and not result.skipped
-        and not result.no_files
-        and not result.timed_out
-        and (result.success or bool(result.issues))
-    )
+    if result is None or result.parse_failures_count:
+        return False
+    try:
+        execution = result.outcome.execution
+    except ValueError:
+        # Legacy plugins can return contradictory flags or counts. They do
+        # not establish a verdict; the strict outcome adapter still rejects
+        # them when read directly.
+        logger.opt(exception=True).debug("Invalid check result cannot verify fixes")
+        return False
+    match execution:
+        case Checked(success=success):
+            return success or bool(result.issues)
+        case Skipped() | NoFiles() | TimedOut():
+            return False
 
 
 def _fold_one(
@@ -929,17 +949,20 @@ def _fold_one(
     # A later check cannot reconstruct a report that could not be fully parsed.
     # Execution failures can still gain a measured residual from an answered
     # check below.
+    mutation_outcome = mutation.outcome
+    accounting = mutation_outcome.accounting
     verify = outcome.result
     if verify and verify.parse_failures_count:
         mutation.parse_failures_count = (mutation.parse_failures_count or 0) + (
             verify.parse_failures_count
         )
     if mutation.parse_failures_count:
+        mutation_reason = (
+            accounting.reason if isinstance(accounting, FixUnmeasured) else ""
+        )
         unknown_reason = "; ".join(
             dict.fromkeys(
-                reason
-                for reason in (mutation.residual_unknown_reason, outcome.unknown_reason)
-                if reason
+                reason for reason in (mutation_reason, outcome.unknown_reason) if reason
             ),
         )
         return _fold_unknown(
@@ -965,7 +988,7 @@ def _fold_one(
     # findings the roots that finished produced — and is not one over the
     # scope.
     answered = check_answered(verify)
-    if mutation.residual_unknown and not answered:
+    if isinstance(accounting, FixUnmeasured) and not answered:
         # No check answered, so an execution failure still has no residual.
         return mutation
     verified_paths = _verified_paths(
@@ -995,14 +1018,14 @@ def _fold_one(
         survivors.extend(list(verify.issues))
 
     residual = len(survivors)
-    initial = mutation.initial_issues_count
+    initial = accounting.initial
     if initial is None:
         initial = len(_pre_fix_issues(mutation))
     fixed = max(0, initial - residual)
 
-    previous = mutation.remaining_issues_count
+    previous = accounting.remaining
     if previous is None:
-        previous = mutation.issues_count
+        previous = mutation_outcome.issues_count
     output = mutation.output or ""
     if previous != residual:
         note = VERIFY_NOTE_TEMPLATE.format(residual=residual, previous=previous)
@@ -1021,13 +1044,25 @@ def _fold_one(
     # is still a leftover. The mutation phase's own flag is still ANDed in so
     # an execution failure that produced no issues stays a failure, and so is
     # the verify's, so a broken check cannot read as clean.
-    mutation.success = mutation.success and residual == 0
+    mutation.success = mutation_outcome.success and residual == 0
     if verify is not None:
-        mutation.success = mutation.success and verify.success
+        mutation.success = mutation.success and answered and verify.outcome.success
         if verify.duration_seconds is not None:
             mutation.duration_seconds = (
                 mutation.duration_seconds or 0.0
             ) + verify.duration_seconds
+    if answered or not mutation.success:
+        # Keep outcome readable: a failed or answered verify supersedes empty
+        # discovery, and NoFiles cannot carry success=False.
+        mutation.no_files = False
+    if (
+        answered
+        and verify is not None
+        and isinstance(mutation_outcome.execution, NoFiles)
+    ):
+        # Replace stale discovery evidence with the check's evidence, keeping
+        # unknown inspection unknown for legacy plugins.
+        mutation.inspected_files = verify.inspected_files
     return mutation
 
 
@@ -1063,7 +1098,7 @@ def fold_verify_results(
     by_name = {outcome.tool: outcome for outcome in verify_results}
     project_checks = frozenset(name for name in by_name if _is_project_check(name))
     for index, mutation in enumerate(mutation_results):
-        if mutation.skipped or mutation.timed_out:
+        if isinstance(mutation.outcome.execution, (Skipped, TimedOut)):
             continue
         outcome = by_name.get(mutation.name)
         if outcome is None:

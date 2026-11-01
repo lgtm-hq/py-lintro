@@ -11,11 +11,20 @@ from assertpy import assert_that
 
 from lintro.enums.action import Action
 from lintro.formatters.formatter import format_issues_with_sections
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixUnmeasured,
+    NoFiles,
+    Skipped,
+    TimedOut,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.parsers.clippy.clippy_issue import ClippyIssue
 from lintro.parsers.oxfmt.oxfmt_issue import OxfmtIssue
 from lintro.parsers.prettier.prettier_issue import PrettierIssue
+from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.parsers.sqlfluff.sqlfluff_issue import SqlfluffIssue
 from lintro.parsers.taplo.taplo_parser import parse_taplo_output
 from lintro.utils.console.logger import ThreadSafeConsoleLogger
@@ -24,6 +33,83 @@ from lintro.utils.execution.result_shaping import filter_result_to_fixable
 from lintro.utils.findings import findings_from_results
 from lintro.utils.json_output import serialize_tool_result
 from lintro.utils.summary_tables import count_fixable_issues, print_summary_table
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        ToolOutcome(TimedOut("partial output"), issues_count=1),
+        ToolOutcome(
+            Checked(False),
+            FixUnmeasured("incomplete report", initial=1),
+            issues_count=1,
+        ),
+        ToolOutcome(
+            TimedOut("partial output"),
+            FixUnmeasured("incomplete report", initial=1),
+            issues_count=1,
+        ),
+    ],
+    ids=["timeout", "unmeasured", "timeout-unmeasured"],
+)
+def test_preview_preserves_failure_evidence(outcome: ToolOutcome) -> None:
+    """Filtering findings preserves timeout and unknown-accounting failures.
+
+    Args:
+        outcome: Valid failure state carrying partial findings.
+    """
+    issue = RuffIssue(file="a.py", message="not fixable")
+    result = ToolResult.from_outcome(outcome, name="ruff", issues=[issue])
+
+    preview = filter_result_to_fixable(result)
+
+    assert_that(preview.outcome.execution).is_equal_to(outcome.execution)
+    assert_that(preview.outcome.accounting).is_equal_to(outcome.accounting)
+    assert_that(preview.issues).is_empty()
+    assert_that(preview.issues_count).is_zero()
+    assert_that(determine_exit_code(Action.CHECK, [preview], 0, 0)).is_equal_to(1)
+    assert_that(result.issues).is_equal_to([issue])
+    assert_that(result.outcome).is_equal_to(outcome)
+
+
+def test_preview_keeps_a_partial_parse_failure_failed() -> None:
+    """A parsed diagnostic does not erase an incomplete report's failure."""
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        parse_failures_count=1,
+        issues=[RuffIssue(file="a.py", message="not fixable")],
+        issues_count=1,
+    )
+
+    preview = filter_result_to_fixable(result)
+
+    assert_that(preview.outcome.execution).is_equal_to(Checked(False))
+    assert_that(preview.parse_failures_count).is_equal_to(1)
+    assert_that(preview.issues_count).is_zero()
+    assert_that(determine_exit_code(Action.CHECK, [preview], 0, 0)).is_equal_to(1)
+
+
+@pytest.mark.parametrize("execution", [NoFiles(), Skipped("no configuration")])
+def test_preview_does_not_promote_inactive_payloads(
+    execution: NoFiles | Skipped,
+) -> None:
+    """An uncounted diagnostic payload cannot create findings on inactive tools.
+
+    Args:
+        execution: Successful non-event whose count must remain zero.
+    """
+    outcome = ToolOutcome(execution)
+    result = ToolResult.from_outcome(
+        outcome,
+        name="ruff",
+        issues=[RuffIssue(file="a.py", message="legacy payload", fixable=True)],
+    )
+
+    preview = filter_result_to_fixable(result)
+
+    assert_that(preview.outcome).is_equal_to(outcome)
+    assert_that(determine_exit_code(Action.CHECK, [preview], 0, 0)).is_zero()
 
 
 @pytest.mark.parametrize(
