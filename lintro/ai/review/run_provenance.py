@@ -174,10 +174,7 @@ def stamp_run_provenance(
     if not fields["model_verification"] and resume is not None:
         inherited = _carried_snapshot(result=result, options=options, resume=resume)
         if inherited is not None:
-            fields.update(
-                model_verification=inherited.state,
-                reported_models=inherited.reported_models,
-            )
+            fields.update(inherited)
     return replace(
         result,
         metadata=replace(
@@ -192,7 +189,7 @@ def _carried_snapshot(
     result: ReviewResult,
     options: ReviewSessionOptions,
     resume: ResumePlan,
-) -> LedgerSnapshot | None:
+) -> dict[str, Any] | None:
     """Keep source evidence only when every current file was safely carried.
 
     No provider calls are fabricated and no tokens or charges are inherited.
@@ -220,6 +217,7 @@ def _carried_snapshot(
     identities: dict[int, RunIdentity] = {}
     for item in resume.classified:
         source = own.get((item.path, item.patch_hash)) or newest.get(item.patch_hash)
+        # Defence in depth: the plan already contains only gated coverage.
         if source is None or source.round not in reusable or source.round not in runs:
             return None
         identities[source.round] = runs[source.round]
@@ -243,7 +241,23 @@ def _carried_snapshot(
         for identity in identities.values()
         for model in identity.reported_models
     }
-    return LedgerSnapshot(state=state, reported_models=tuple(reported))
+    unreported = {
+        model: None
+        for identity in identities.values()
+        for model in (
+            identity.unreported_models
+            or (
+                (identity.model,)
+                if identity.model_verification == ModelVerification.UNREPORTED.value
+                else ()
+            )
+        )
+    }
+    return {
+        "model_verification": state,
+        "reported_models": tuple(reported),
+        "unreported_models": tuple(unreported),
+    }
 
 
 def run_provenance_fields(
@@ -277,6 +291,9 @@ def run_provenance_fields(
         "first_party": provenance.first_party,
         "credential": provenance.credential.value,
         "reported_models": ledger.reported_models if ledger is not None else (),
+        "unreported_models": tuple(
+            dict.fromkeys(call.requested for call in calls if not call.reported),
+        ),
         "model_verification": verification.value if verification is not None else "",
         "lane": provenance.lane,
         "fallback_from": provenance.fallback_from,

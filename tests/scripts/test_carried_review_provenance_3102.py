@@ -342,6 +342,66 @@ def test_revalidation_mismatch_cannot_be_hidden_by_good_carried_evidence(
     assert report.status == "model-mismatch"
 
 
+@pytest.mark.parametrize("verification", ["verified", "unreported"])
+def test_carried_checkpoint_revalidates_silent_source_after_policy_narrows(
+    lane_env: dict[str, str],
+    classifier: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    verification: str,
+) -> None:
+    """Replacing a checkpoint must not erase a silent source's requested model."""
+    silent_model = "gpt-6.1-terra"
+    monkeypatch.setenv("LINTRO_REVIEW_ALLOWED_MODELS", f"{_MODEL},{silent_model}")
+    prior = _prior(verification=verification)
+    checkpoint = replace(
+        prior.runs[-1],
+        identity=replace(
+            prior.runs[-1].identity,
+            model=silent_model,
+            model_verification="unreported",
+            reported_models=(),
+        ),
+        coverage=replace(prior.runs[-1].coverage, checkpoint=True),
+    )
+    prior = replace(prior, runs=(prior.runs[0], checkpoint))
+    reported = (_REPORTED,) if verification == "verified" else ()
+    state_file = Path(lane_env["LINTRO_REVIEW_STATE_DIR"]) / "state.json"
+    # Persist and reload twice: the aggregate replaces the checkpoint that
+    # covered b.py, then becomes a source for another no-call round.
+    for _ in range(2):
+        carried = _run(prior)
+        assert carried.metadata.chunks_reviewed == 0
+        assert carried.metadata.model_verification == "unreported"
+        assert carried.metadata.reported_models == reported
+        expected_claims = (
+            {silent_model} if verification == "verified" else {_MODEL, silent_model}
+        )
+        assert set(carried.metadata.unreported_models) == expected_claims
+        assert carried.metadata.token_usage["total"] == 0
+        assert not carried.metadata.cost_reported
+        _persist(carried, prior, lane_env)
+        prior = ReviewState.from_artifact_dict(json.loads(state_file.read_text()))
+        assert prior.runs[1].identity.model == _MODEL
+        assert set(prior.runs[1].identity.unreported_models) == expected_claims
+        assert not prior.runs[1].coverage.checkpoint
+
+    monkeypatch.setenv("LINTRO_REVIEW_ALLOWED_MODELS", _MODEL)
+    revalidated = _run(prior, reported=(_REPORTED,))
+    assert revalidated.metadata.chunks_reviewed > 0
+    assert revalidated.coverage is not None and revalidated.coverage.complete
+    assert revalidated.coverage.reviewed > 0
+    assert revalidated.metadata.model_verification == "verified"
+    assert revalidated.metadata.unreported_models == ()
+    _persist(revalidated, prior, lane_env)
+    report = classifier.classify(
+        status=0,
+        output=review_result_to_json(result=revalidated),
+        env=lane_env,
+    )
+    assert report.exit_code == 0
+    assert report.outcome == classifier.ReviewOutcome.REVIEWED
+
+
 def test_partial_carry_cannot_borrow_verified_evidence_for_unread_files(
     lane_env: dict[str, str],
     classifier: ModuleType,

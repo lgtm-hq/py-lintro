@@ -41,6 +41,8 @@ class RunIdentity:
         reported_models: Every model the transport named as having
             answered, with its canonical name and reported provider, in
             first-seen order.
+        unreported_models: Requested models of silent calls or carried
+            sources, kept separately from transport-reported evidence.
         lane: The review lane the CI wrapper exported, or empty.
         model_verification: The
             :class:`~lintro.ai.enums.model_verification.ModelVerification`
@@ -67,6 +69,7 @@ class RunIdentity:
     first_party: bool | None = None
     credential: str = ""
     reported_models: tuple[ReportedModel, ...] = ()
+    unreported_models: tuple[str, ...] = ()
     lane: str = ""
     model_verification: str = ""
     fallback_from: str = ""

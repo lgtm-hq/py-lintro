@@ -133,6 +133,8 @@ class ReviewMetadata:
         reported_models (tuple[ReportedModel, ...]): Every model the
             transport named as having answered, with its canonical name and
             reported provider, in first-seen order.
+        unreported_models (tuple[str, ...]): Requested models of silent
+            calls or carried sources; these are not reported evidence.
         model_verification (str): The
             :class:`~lintro.ai.enums.model_verification.ModelVerification`
             state; on a fully carried no-call round, the weakest state of
@@ -208,6 +210,7 @@ class ReviewMetadata:
     first_party: bool | None = None
     credential: str = ""
     reported_models: tuple[ReportedModel, ...] = field(default_factory=tuple)
+    unreported_models: tuple[str, ...] = field(default_factory=tuple)
     model_verification: str = ""
     lane: str = ""
     fallback_from: str = ""

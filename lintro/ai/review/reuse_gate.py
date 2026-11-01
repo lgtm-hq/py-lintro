@@ -1,13 +1,17 @@
 """Which stored rounds this run may inherit coverage from (#2867).
 
 ADR-0011 decision B: review-reuse validity includes the lane. A stored round
-is not reused when it predates the ADR (``legacy``), when its model claim
+is not reused when its evidence is blank, when it predates the ADR
+(``legacy``), when its model claim
 was a ``mismatch``, when it is ``unreported`` on a lane whose transport is
 declared to report model usage, or when its lane or endpoint differ from the
-current run's. Before coverage is inherited, every stored round is also
-re-checked against the current lane row: on a first-party row its reported
-models must still be allowed. A round that fails is re-reviewed rather than
-carried into a green check; its history and cost figures are kept.
+current run's, or when its state or first-party flag contradict the lane.
+Before coverage is inherited, every stored round is also re-checked against
+the current lane row: on a first-party row its reported models and silent
+requested-model claims must still be allowed. A mixed unreported record
+without its silent claims cannot vouch for coverage. A round that fails is
+re-reviewed rather than carried into a green check; its history and cost
+figures are kept.
 """
 
 from __future__ import annotations
@@ -155,6 +159,18 @@ def _round_is_reusable(
     if identity.lane != provenance.lane or identity.endpoint != provenance.endpoint:
         return False
     if provenance.first_party:
+        if (
+            state == ModelVerification.UNREPORTED.value
+            and identity.reported_models
+            and not identity.unreported_models
+        ):
+            # Older mixed aggregates lost silent sources' requests (#3102).
+            # Their current identity.model cannot reconstruct those claims.
+            return False
+        if any(
+            _normalize(model) not in allowed for model in identity.unreported_models
+        ):
+            return False
         # A record that reported no models is vouched for by what it asked
         # for, so a row that has since narrowed its list cannot be met
         # vacuously.

@@ -94,7 +94,7 @@ def test_an_unreported_round_is_reused_only_where_the_lane_cannot_report() -> No
         allowed=("claude-opus-5-5",),
     )
     silent_lane = reusable_rounds(
-        prior=ReviewState(runs=(_run(1, state="unreported"),)),
+        prior=ReviewState(runs=(_run(1, state="unreported", reported=()),)),
         provenance=RunProvenance(
             endpoint="api.anthropic.com",
             first_party=True,
@@ -106,6 +106,52 @@ def test_an_unreported_round_is_reused_only_where_the_lane_cannot_report() -> No
 
     assert_that(reporting).is_empty()
     assert_that(silent_lane).is_equal_to(frozenset({1}))
+
+
+@pytest.mark.parametrize(
+    ("claims", "expected"),
+    [
+        ((), frozenset()),
+        ((" CLAUDE-OPUS-5-5 ",), frozenset({1})),
+        (("claude-opus-5-5", "claude-haiku-4-5"), frozenset()),
+        (("",), frozenset()),
+    ],
+)
+def test_mixed_unreported_round_rechecks_silent_claims(
+    claims: tuple[str, ...],
+    expected: frozenset[int],
+) -> None:
+    """Reported A cannot hide disallowed or missing silent source claims."""
+    record = _run(1, state="unreported")
+    record = replace(
+        record,
+        identity=replace(record.identity, unreported_models=claims),
+    )
+    rounds = reusable_rounds(
+        prior=ReviewState(runs=(record,)),
+        provenance=replace(_CURRENT, reports_model_usage=False),
+        allowed=("claude-opus-5-5",),
+    )
+
+    assert_that(rounds).is_equal_to(expected)
+
+
+@pytest.mark.parametrize(
+    ("first_party", "verification"),
+    [(False, "verified"), (None, "verified"), (True, "unverifiable")],
+)
+def test_lane_rejects_inconsistent_first_party_or_verification(
+    first_party: bool | None,
+    verification: str,
+) -> None:
+    """A stored lane name alone does not establish its evidence class."""
+    record = _run(1, state=verification)
+    record = replace(
+        record,
+        identity=replace(record.identity, first_party=first_party),
+    )
+
+    assert_that(_rounds(record)).is_empty()
 
 
 def test_a_round_from_another_lane_or_endpoint_is_not_reused() -> None:
@@ -252,10 +298,10 @@ def test_unverified_stored_usage_is_queued_for_review(verification: object) -> N
         pytest.param(RunUsage(cost_shadow=0.01), id="shadow-cost"),
     ],
 )
-def test_blank_verification_requires_every_usage_counter_to_be_zero(
+def test_blank_verification_is_excluded_at_any_usage(
     usage: RunUsage,
 ) -> None:
-    """Tokens or charges contradict the blank no-call state (#3010)."""
+    """Usage counters never supply missing model evidence (#3102)."""
     record = replace(_run(1, state="", reported=()), usage=usage)
 
     assert_that(_rounds(record, _run(2))).is_equal_to(frozenset({2}))
