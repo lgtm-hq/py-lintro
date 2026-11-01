@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
-import subprocess
+import shutil
+import subprocess  # nosec B404 - version-probe failure fixtures replace subprocess.run
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -50,7 +52,7 @@ def test_subset_lookup_preserves_peers_and_original_expiry(
         counts[name] += 1
         return _binary_snapshot(search_root, name, str(counts[name]))
 
-    monkeypatch.setattr(snapshots.time, "time", lambda: clock[0])
+    monkeypatch.setattr(time, "time", lambda: clock[0])
     monkeypatch.setattr(snapshots, "get_snapshot_ttl", lambda: 10)
     monkeypatch.setattr(snapshots, "probe_tool", probe)
     monkeypatch.setattr(
@@ -255,7 +257,7 @@ def test_wrapper_without_package_identity_reprobes(
     versions = iter(["1.0", "2.0"])
     monkeypatch.setattr(snapshots, "get_executable_command", lambda *a, **kw: command)
     monkeypatch.setattr(
-        snapshots.shutil,
+        shutil,
         "which",
         lambda name, **kw: None if kw else command[0],
     )
@@ -420,7 +422,7 @@ def test_validated_disk_entry_wins_over_expired_memory_during_subset_probe(
 ) -> None:
     """A peer process's refresh survives merging another newly probed tool."""
     clock = [1000.0]
-    monkeypatch.setattr(snapshots.time, "time", lambda: clock[0])
+    monkeypatch.setattr(time, "time", lambda: clock[0])
     monkeypatch.setattr(snapshots, "get_snapshot_ttl", lambda: 10)
     monkeypatch.setattr(
         snapshots,

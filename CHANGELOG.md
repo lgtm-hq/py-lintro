@@ -13,9 +13,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- **tools/JSON**: report missing tools as `status: unavailable` with
-  `unavailable_reason` (#1244). Non-strict unavailable results carry `skipped: false`,
-  `success: true`, and unknown fix counts; strict mode exits 1.
+- **BREAKING (tools/JSON)**: missing tools now report `status: unavailable` with
+  `unavailable_reason` (#1244), replacing their previous `skipped: true` result.
+  Non-strict unavailable results carry `skipped: false`, `success: true`, and unknown
+  fix counts; strict mode exits 1. Consumers must check `status` or `unavailable`
+  instead of treating `skipped: false` or `success: true` as proof a tool ran. See the
+  [JSON migration guide](docs/plugins.md#cached-availability-migration-for-json-consumers).
+- **BREAKING (plugin runtime)**: API-v2 plugins with `in_process=None`, no version
+  metadata, and no resolvable executable now fail `chk`/`fmt` with exit 1 even when
+  `strict_missing_tools` is false. Set `ToolDefinition(in_process=True)` for Python
+  execution, or `in_process=False` for an external tool and install its executable.
+  External tools no longer bypass failed version probes merely because they have no
+  minimum version. `list-tools` preserves healthy rows and reports each ambiguous plugin
+  as unavailable with migration diagnostics. API version 2 and existing positional
+  constructors remain supported; the runtime change requires migration. See the
+  [execution mode guide](docs/plugins.md#execution-mode-and-cached-availability-api-v2).
 
 ### Deprecated
 

@@ -271,6 +271,11 @@ The `ToolDefinition` dataclass defines your tool's metadata:
 
 ### Execution mode and cached availability (API v2)
 
+**Breaking runtime change (#1244):** older versions allowed plugins without version
+requirements to execute without proving availability. Cached capability probing now
+requires execution evidence. This migration applies to existing API-v2 plugins even
+though the API version and positional constructor order remain unchanged.
+
 Declare `in_process=True` when `check()` / `fix()` execute entirely in Python and
 require no external executable. Lintro then permits execution without a binary or
 version probe. Declare `in_process=False` for an external tool, including one with no
@@ -291,7 +296,55 @@ remains **2**: these new fields are keyword-only and preserve the existing posit
 constructor. Ambiguous legacy definitions require the explicit migration above and never
 silently become successful skipped runs.
 
+For example, update an existing definition without changing its positional arguments:
+
+```python
+# Python implementation with no external executable:
+ToolDefinition("custom", "Custom tool", in_process=True)
+
+# External implementation: install the executable before running chk/fmt:
+ToolDefinition("custom", "Custom tool", in_process=False)
+```
+
+`list-tools` reports each ambiguous plugin as `status: unavailable`, with `probe_error`
+and `remediation_hint` in JSON and a diagnostic below the table. Healthy tools remain
+listed. These diagnostics do not permit execution: `chk`/`fmt` still fail until the
+plugin is migrated. Unexpected internal probe errors still fail the command.
+
+External plugins with a version probe that fails (for example, a nonzero exit) are now
+unavailable even without a minimum version requirement. Fix the probe or installation;
+the absence of a minimum version no longer bypasses that failure.
+
 `supports_stdin=None` means unknown; set it to `True` or `False` only when known.
+
+### Cached availability migration for JSON consumers
+
+**Breaking JSON change (#1244):** a missing tool previously reported `skipped: true` and
+placed its explanation in `skip_reason`. Its result now includes:
+
+```json
+{
+  "status": "unavailable",
+  "unavailable": true,
+  "unavailable_reason": "Executable not found in PATH",
+  "skipped": false,
+  "skip_reason": null,
+  "success": true
+}
+```
+
+Update consumers that filter only on `skipped` to handle `status == "unavailable"` or
+`unavailable == true` as a separate outcome. Read `unavailable_reason` for that
+diagnostic; deliberate skips continue to use `skipped` and `skip_reason`.
+`success: true` here means the default non-strict policy permits the run to exit 0. It
+does **not** mean the tool inspected files or passed a check, and unavailable tools must
+not count toward inspection coverage. In format results, `fixed`, `net_resolved` and
+`remaining` are `null`, not measured zeros.
+
+Set `execution.strict_missing_tools: true` to require installed, runnable tools:
+unavailability then sets `success: false` and makes the run exit 1, while retaining
+`status: unavailable` and `skipped: false`. Ambiguous plugin definitions fail with
+`status: failed` and exit 1 regardless of this policy.
 
 ### Claims and capabilities
 

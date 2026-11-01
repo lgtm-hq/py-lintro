@@ -90,17 +90,16 @@ The configuration system works in a specific order:
      loading disk entries does not extend the age of older snapshots. Wrapper commands
      without reliable package identity, including cargo and rustup proxies, are
      re-probed. Failed probes of resolved executables are retried on the next lookup.
-     Use `lintro check --no-cache`
-     to force fresh probes in every execution directory.
+     Use `lintro check --no-cache` to force fresh probes in every execution directory.
    - `strict_missing_tools`: When `true`, unavailable tools fail the run (exit 1).
      Default `false` — missing tools report `status: unavailable` with a remediation
      hint and do not count as a lint failure. Unavailable results carry a frozen
      `Unavailable(reason, strict)` outcome, retain unknown fix counts, and expose
-     `unavailable_reason` separately from a deliberate skip's `skip_reason`.
-     In JSON, a non-strict unavailable result has `skipped: false` and
-     `success: true`; use `status` or `unavailable` to detect that it did not run.
-     Runtime capabilities include `supports_stdin`: `true`/`false` when declared
-     by the tool definition, or `null` when unspecified.
+     `unavailable_reason` separately from a deliberate skip's `skip_reason`. In JSON, a
+     non-strict unavailable result has `skipped: false` and `success: true`; use
+     `status` or `unavailable` to detect that it did not run. Runtime capabilities
+     include `supports_stdin`: `true`/`false` when declared by the tool definition, or
+     `null` when unspecified.
 
 2. **Enforce Tier** - Cross-cutting settings injected as CLI flags
    - These settings override native configs via CLI arguments

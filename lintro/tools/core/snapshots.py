@@ -56,6 +56,25 @@ _force_fresh: bool = False
 _bypass_disk_cache: bool = False
 
 
+class UnspecifiedExecutionModeError(ValueError):
+    """An ungated plugin lacks evidence that execution can start.
+
+    Attributes:
+        snapshot: Diagnostic evidence for introspection, never execution or caching.
+    """
+
+    snapshot: ToolSnapshot
+
+    def __init__(self, snapshot: ToolSnapshot) -> None:
+        """Keep the diagnostic separate from executable availability evidence.
+
+        Args:
+            snapshot: Unavailable snapshot explaining the required plugin migration.
+        """
+        super().__init__(snapshot.probe_error)
+        self.snapshot = snapshot
+
+
 def _manifest_tool(name: str) -> ManifestTool | None:
     """Resolve version-only manifest entries that have no execution plugin.
 
@@ -371,6 +390,9 @@ def probe_tool(
 
     Returns:
         Fresh ToolSnapshot (not read from cache).
+
+    Raises:
+        UnspecifiedExecutionModeError: An ungated plugin has no execution evidence.
     """
     from lintro.tools import tool_manager
     from lintro.tools.core.version_checking import get_install_hints
@@ -451,11 +473,22 @@ def probe_tool(
 
     if definition.version_command is None and definition.min_version is None:
         if not binary_path and definition.in_process is None:
-            raise ValueError(
-                f"{name}: no executable or version metadata; execution mode is "
-                "unspecified. Set ToolDefinition(in_process=True) for an "
+            remediation = (
+                "Set ToolDefinition(in_process=True) for an "
                 "in-process plugin, or in_process=False for an external tool "
-                "and ensure its executable is on PATH.",
+                "and ensure its executable is on PATH."
+            )
+            raise UnspecifiedExecutionModeError(
+                _unavailable_snapshot(
+                    name,
+                    probe_error=(
+                        f"{name}: no executable or version metadata; execution mode is "
+                        f"unspecified. {remediation}"
+                    ),
+                    remediation_hint=remediation,
+                    capabilities=capabilities,
+                    command=tuple(command),
+                ),
             )
         return ToolSnapshot(
             name=name,
@@ -634,20 +667,26 @@ def _probe_all_fresh(
     *,
     search_root: Path,
     max_workers: int,
-) -> dict[str, ToolSnapshot]:
+    for_introspection: bool,
+) -> tuple[dict[str, ToolSnapshot], dict[str, ToolSnapshot]]:
     """Probe tools in parallel and return the snapshot map.
 
     Args:
         tool_names: Tool names to probe.
         search_root: Project root for config discovery.
         max_workers: Thread pool size.
+        for_introspection: Report ambiguous execution modes without permitting them.
 
     Returns:
-        Mapping of tool name → ToolSnapshot.
+        Cacheable snapshots and separate, uncached introspection diagnostics.
+
+    Raises:
+        UnspecifiedExecutionModeError: Execution requires a declared plugin mode.
     """
     results: dict[str, ToolSnapshot] = {}
+    diagnostics: dict[str, ToolSnapshot] = {}
     if not tool_names:
-        return results
+        return results, diagnostics
 
     workers = max(1, min(max_workers, len(tool_names)))
     with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -659,8 +698,13 @@ def _probe_all_fresh(
             name = futures[future]
             # Known subprocess failures are classified by check_tool_version.
             # Internal exceptions must reach the executor's error handling.
-            results[name.lower()] = replace(future.result(), probed_at=time.time())
-    return results
+            try:
+                results[name.lower()] = replace(future.result(), probed_at=time.time())
+            except UnspecifiedExecutionModeError as exc:
+                if not for_introspection:
+                    raise
+                diagnostics[name.lower()] = exc.snapshot
+    return results, diagnostics
 
 
 def _within_ttl(snap: ToolSnapshot, ttl: int) -> bool:
@@ -730,6 +774,7 @@ def probe_all_tools(
     force: bool = False,
     cache_root: Path | None = None,
     tool_names: list[str] | None = None,
+    for_introspection: bool = False,
 ) -> dict[str, ToolSnapshot]:
     """Probe all registered tools (or a subset), using the snapshot cache.
 
@@ -737,6 +782,8 @@ def probe_all_tools(
         force: Bypass cache and re-probe.
         cache_root: Directory for ``.lintro-cache``; defaults to cwd.
         tool_names: Optional subset of tool names; defaults to all registered.
+        for_introspection: Include uncached ambiguous-mode diagnostics for listing.
+            Execution callers must leave this False to fail closed.
 
     Returns:
         Mapping of tool name → ToolSnapshot.
@@ -779,10 +826,11 @@ def probe_all_tools(
             if (snap := lookup_snapshot(retained, name)) is not None
         }
 
-    fresh = _probe_all_fresh(
+    fresh, diagnostics = _probe_all_fresh(
         missing,
         search_root=search_root,
         max_workers=_configured_max_workers(),
+        for_introspection=for_introspection,
     )
     with _cache_lock:
         # Preserve peers filled by another tool worker while probing this subset.
@@ -801,7 +849,7 @@ def probe_all_tools(
         with _cache_lock:
             to_write = dict(_memory_caches.get(cache_file, merged))
         _write_disk_cache(cache_file, to_write, ttl=ttl)
-    return {
+    return diagnostics | {
         name: snap
         for name in names
         if (snap := lookup_snapshot(merged, name)) is not None
@@ -823,6 +871,9 @@ def get_tool_snapshot(
 
     Returns:
         ToolSnapshot for the requested tool.
+
+    Raises:
+        RuntimeError: A probe returned no snapshot for the requested tool.
     """
     name = tool_name.lower()
     snapshots = probe_all_tools(

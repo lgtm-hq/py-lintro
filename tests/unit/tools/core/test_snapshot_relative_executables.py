@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,7 @@ import pytest
 
 from lintro.plugins.protocol import ToolDefinition
 from lintro.tools.core import snapshots
+from lintro.tools.core.command_builders import CommandBuilderRegistry
 
 _COMMAND = "./bin/custom-linter"
 
@@ -34,7 +36,7 @@ def local_command(
     executable_layout: tuple[str, str],
 ) -> str:
     """Provide relative plugin and manifest commands, retaining real subprocesses."""
-    mode = request.param
+    mode = str(request.param)
     executable, _ = executable_layout
     definition = ToolDefinition(
         "ruff",
@@ -56,7 +58,7 @@ def local_command(
         lambda name: SimpleNamespace(version_command=[executable, "--version"]),
     )
     monkeypatch.setattr(
-        snapshots.CommandBuilderRegistry,
+        CommandBuilderRegistry,
         "get_command",
         lambda *args: [executable],
     )
@@ -142,7 +144,7 @@ def test_relative_executable_cache_tracks_each_execution_root(
     _write_linter(tmp_path, "1.0.0", relative_path)
     monkeypatch.chdir(tmp_path)
     clock = [1000.0]
-    monkeypatch.setattr(snapshots.time, "time", lambda: clock[0])
+    monkeypatch.setattr(time, "time", lambda: clock[0])
     initial = [snapshots.get_tool_snapshot("ruff", cache_root=root) for root in roots]
     for binary, result, version in zip(binaries, initial, versions, strict=True):
         assert result.available is True

@@ -205,7 +205,10 @@ def list_tools(
             start=1,
         )
     }
-    snapshots = probe_all_tools(tool_names=list(available_tools.keys()))
+    snapshots = probe_all_tools(
+        tool_names=list(available_tools.keys()),
+        for_introspection=True,
+    )
 
     # JSON output mode
     if json_output:
@@ -314,6 +317,7 @@ def list_tools(
         table.add_row(*row)
 
     console.print(table)
+    _print_snapshot_diagnostics(console, snapshots)
     console.print()
 
     # Summary table
@@ -349,6 +353,21 @@ def list_tools(
             console.print(f"[green]✅ Output written to: {output}[/green]")
         except OSError as e:
             console.print(f"[red]Error writing to file {output}: {e}[/red]")
+
+
+def _print_snapshot_diagnostics(
+    console: Console,
+    snapshots: Mapping[str, ToolSnapshot],
+) -> None:
+    """Show per-tool probe errors below the table without truncating the message.
+
+    Args:
+        console: Console used for the tools table.
+        snapshots: Capability snapshots including introspection diagnostics.
+    """
+    for name, snap in snapshots.items():
+        if not snap.available and snap.probe_error:
+            console.print(f"{name}: {snap.probe_error}", markup=False)
 
 
 def _generate_plain_text_output(
@@ -396,6 +415,8 @@ def _generate_plain_text_output(
 
         output_lines.append(f"{emoji} {tool_name}: {tool_description}")
         output_lines.append(f"  Status: {runtime_status}")
+        if snap is not None and not snap.available and snap.probe_error:
+            output_lines.append(f"  Probe error: {snap.probe_error}")
         output_lines.append(f"  Capabilities: {capabilities_display}")
         output_lines.append(f"  Origin: {ToolRegistry.get_origin(tool_name)}")
 

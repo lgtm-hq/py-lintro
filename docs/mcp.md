@@ -76,9 +76,8 @@ Arguments (all optional):
 ```
 
 `status` is one of `passed`, `issues`, `skipped`, `unavailable`, `timed_out`, `errored`.
-A skipped or unavailable tool also carries `skip_reason` with its skip,
-probe or version-gate diagnostic.
-Findings come from the same serializer that feeds SARIF
+A skipped or unavailable tool also carries `skip_reason` with its skip, probe or
+version-gate diagnostic. Findings come from the same serializer that feeds SARIF
 (`lintro.utils.findings`), so the two never drift apart.
 
 ### `lintro_format`
