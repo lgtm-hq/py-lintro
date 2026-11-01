@@ -54,6 +54,21 @@ def _coerce_int(value: object) -> int:
 
 
 def parse_html_validate_output(output: str | None) -> list[HtmlValidateIssue]:
+    """Return html-validate findings through the legacy list API.
+
+    Args:
+        output: Raw JSON formatter output.
+
+    Returns:
+        All usable findings, omitting parser failure accounting.
+    """
+    issues, _failures = parse_html_validate_output_with_stats(output)
+    return issues
+
+
+def parse_html_validate_output_with_stats(
+    output: str | None,
+) -> tuple[list[HtmlValidateIssue], int]:
     """Parse html-validate JSON output into a list of issues.
 
     Args:
@@ -61,32 +76,35 @@ def parse_html_validate_output(output: str | None) -> list[HtmlValidateIssue]:
             ``None`` or empty when the tool reports no issues.
 
     Returns:
-        List of :class:`HtmlValidateIssue` objects. Returns an empty list for
-        empty, ``None``, or malformed input.
+        Usable findings and the count of invalid report containers or records.
     """
     issues: list[HtmlValidateIssue] = []
 
     if not output or not output.strip():
-        return issues
+        return issues, 0
 
     try:
         data = json.loads(output)
     except (json.JSONDecodeError, ValueError):
-        return issues
+        return issues, 1
 
     if not isinstance(data, list):
-        return issues
+        return issues, 1
 
+    failures = 0
     for file_result in data:
         if not isinstance(file_result, dict):
+            failures += 1
             continue
         file_path = extract_optional_str(file_result, "filePath")
-        messages = file_result.get("messages", [])
+        messages = file_result.get("messages")
         if not isinstance(messages, list):
+            failures += 1
             continue
 
         for message in messages:
             if not isinstance(message, dict):
+                failures += 1
                 continue
 
             raw_severity = message.get("severity")
@@ -107,4 +125,4 @@ def parse_html_validate_output(output: str | None) -> list[HtmlValidateIssue]:
                 ),
             )
 
-    return issues
+    return issues, failures

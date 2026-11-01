@@ -698,12 +698,14 @@ def test_docker_ci_gates_semgrep_lockfile_drift_before_the_builds() -> None:
     # docker-build now depends on a job that is skipped on docs-only and
     # lint-scope=changed PRs, so its `!cancelled()` is load-bearing: without it
     # the required 🐳 Build Docker Images check would be skipped on those PRs
-    # and merges would deadlock. publish must NOT carry it, so a red gate
-    # skips the GHCR promotion.
+    # and merges would deadlock. publish also needs an explicit status check
+    # for skipped transitive lint branches, but must require a successful
+    # semgrep-lock job so a red or skipped drift gate cannot reach GHCR.
     build_condition = _normalize_github_expr(docker_ci["jobs"]["docker-build"]["if"])
     assert_that(build_condition).contains("!cancelled()")
     publish_condition = _normalize_github_expr(docker_ci["jobs"]["publish"]["if"])
-    assert_that(publish_condition).does_not_contain("!cancelled()")
+    assert_that(publish_condition).contains("!cancelled()")
+    assert_that(publish_condition).contains("needs.semgrep-lock.result == 'success'")
     assert_that(publish_condition).does_not_contain("always()")
 
     # The path filter the gate leans on still lists both lockfile paths.
@@ -1077,6 +1079,37 @@ def test_docker_ci_publish_refuses_absorbed_infra_flake() -> None:
     )
     assert_that(publish_if).contains(
         "needs.code-quality-gate.outputs.infra-flake != 'true'",
+    )
+
+
+def test_docker_ci_publish_handles_skipped_transitive_dependencies() -> None:
+    """A successful gate must publish despite an unused lint retry branch."""
+    publish = _load_workflow(name="docker-ci.yml")["jobs"]["publish"]
+    condition = _normalize_github_expr(publish["if"])
+
+    # Override Actions' implicit success() across the mutually exclusive lint
+    # jobs, without allowing any failed or skipped direct prerequisite.
+    assert_that(condition).contains("!cancelled()")
+    for job_id in publish["needs"]:
+        assert_that(condition).contains(f"needs.{job_id}.result == 'success'")
+
+
+@pytest.mark.parametrize("target", ["full", "base"])
+def test_docker_ci_published_image_labels_identify_app_source(target: str) -> None:
+    """Digest promotion cannot replace revision labels inherited from tools.
+
+    Args:
+        target: Published application image build target.
+    """
+    builds = _load_workflow(name="docker-ci.yml")["jobs"]["docker-build"]["steps"]
+    build = next(
+        step["with"]
+        for step in builds
+        if step.get("with", {}).get("target") == target
+        and step.get("with", {}).get("push") is True
+    )
+    assert_that(build.get("labels", "")).contains(
+        "org.opencontainers.image.revision=${{ github.sha }}",
     )
 
 
@@ -8079,6 +8112,12 @@ _EVIDENCE_CALLER_IF_ALLOWLIST: dict[str, str] = {
 _EVIDENCE_JOB_IF_ALLOWLIST: dict[str, str] = {
     "docker-ci.yml::docker-build": "!cancelled()",
     "docker-ci.yml::publish": (
+        "!cancelled() && "
+        "needs.changes.result == 'success' && "
+        "needs.semgrep-lock.result == 'success' && "
+        "needs.code-quality-gate.result == 'success' && "
+        "needs.security-audit.result == 'success' && "
+        "needs.integration-test.result == 'success' && "
         "github.ref == 'refs/heads/main' && "
         "github.event_name == 'push' && "
         "needs.changes.outputs.pipeline != 'false' && "

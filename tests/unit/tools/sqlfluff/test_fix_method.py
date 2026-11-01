@@ -71,6 +71,26 @@ def test_fix_populates_initial_issues(
     assert_that(result.remaining_issues_count).is_equal_to(0)
 
 
+def test_null_sqlfluff_baseline_cannot_report_a_successful_fix(
+    sqlfluff_plugin: SqlfluffPlugin,
+    tmp_path: Path,
+) -> None:
+    """A missing baseline is unknown even when SQLFluff exits zero."""
+    source = tmp_path / "a.sql"
+    source.write_text("SELECT 1;\n")
+    with patch.object(
+        sqlfluff_plugin,
+        "_run_subprocess_result",
+        return_value=subprocess_result(True, "null"),
+    ):
+        result = sqlfluff_plugin.fix([str(source)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.fixed_issues_count).is_none()
+
+
 def test_fix_initial_issues_empty_when_no_issues(
     sqlfluff_plugin: SqlfluffPlugin,
     tmp_path: Path,

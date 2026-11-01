@@ -26,6 +26,7 @@ autofix metadata). See ``docs/tool-analysis/golangci-lint-analysis.md``.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from loguru import logger
@@ -90,6 +91,21 @@ def _parse_issue(item: dict[str, Any]) -> GolangciLintIssue | None:
 
 
 def parse_golangci_lint_output(output: str | None) -> list[GolangciLintIssue]:
+    """Return golangci-lint findings through the legacy list API.
+
+    Args:
+        output: Raw JSON formatter output.
+
+    Returns:
+        All usable findings, omitting parser failure accounting.
+    """
+    issues, _failures = parse_golangci_lint_output_with_stats(output)
+    return issues
+
+
+def parse_golangci_lint_output_with_stats(
+    output: str | None,
+) -> tuple[list[GolangciLintIssue], int]:
     """Parse golangci-lint JSON output into ``GolangciLintIssue`` objects.
 
     Args:
@@ -97,40 +113,56 @@ def parse_golangci_lint_output(output: str | None) -> list[GolangciLintIssue]:
             ``--output.json.path stdout``. May be ``None``.
 
     Returns:
-        A list of ``GolangciLintIssue`` instances. Returns an empty list when
-        there are no issues or the output cannot be decoded.
+        Usable findings and the count of invalid report containers or records.
+        v2's printer normalizes a nil issue slice to ``Issues: []``. Exit 3
+        with a valid JSON report remains an execution failure handled by the
+        plugin. An absent report always counts as a parse failure.
     """
     if not output or not output.strip():
-        return []
+        # JSON output was requested explicitly; only Issues: [] proves clean lint.
+        return [], 1
 
     # Strip ANSI codes for consistent parsing across environments.
     text = strip_ansi_codes(output).strip()
+    decoder = json.JSONDecoder()
 
     # golangci-lint may append a human-readable stats footer after the JSON
     # document. Decode the leading JSON object and ignore any trailing text.
     start = text.find("{")
-    if start == -1:
-        return []
+    # Labels can occur after WARN or inside a quoted log message. Remove only
+    # non-JSON labels: literal arrays and malformed array envelopes must still
+    # prevent a nested object from masquerading as the primary report.
+    prefix = re.sub(
+        r"\[(?!(?:null|true|false)\])[A-Za-z][\w.-]*\]",
+        "",
+        text[:start],
+    )
+    if start == -1 or "[" in prefix:
+        return [], 1
 
     try:
-        data, _ = json.JSONDecoder().raw_decode(text[start:])
+        data, _ = decoder.raw_decode(text, start)
     except json.JSONDecodeError as e:
         logger.debug(f"Failed to decode golangci-lint output: {e}")
-        return []
+        return [], 1
 
     if not isinstance(data, dict):
-        return []
+        return [], 1
 
     raw_issues = data.get("Issues")
     if not isinstance(raw_issues, list):
-        return []
+        return [], 1
 
     issues: list[GolangciLintIssue] = []
+    failures = 0
     for item in raw_issues:
         if not isinstance(item, dict):
+            failures += 1
             continue
         parsed = _parse_issue(item)
         if parsed is not None:
             issues.append(parsed)
+        else:
+            failures += 1
 
-    return issues
+    return issues, failures

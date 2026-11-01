@@ -15,7 +15,7 @@ no ``helpUri``. See ``docs/tool-analysis/checkov-analysis.md``.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from loguru import logger
@@ -28,7 +28,7 @@ from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
 from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
-from lintro.parsers.checkov.checkov_parser import parse_checkov_output
+from lintro.parsers.checkov.checkov_parser import parse_checkov_output_with_stats
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
@@ -233,6 +233,7 @@ class CheckovPlugin(BaseToolPlugin):
         # an unparseable report and a genuinely clean one both parse to zero
         # issues and the policy below cannot tell them apart.
         unparseable: list[str] = []
+        parse_failures = 0
 
         def _parse(output: str) -> list[Any]:
             """Extract and parse checkov's JSON report from combined output.
@@ -243,11 +244,16 @@ class CheckovPlugin(BaseToolPlugin):
             Returns:
                 Parsed failed checks; empty when there was no JSON report.
             """
+            nonlocal parse_failures
             payload = extract_checkov_json(output)
             if payload is None:
                 unparseable.append(output)
+                parse_failures += 1
                 return []
-            issues = parse_checkov_output(payload)
+            issues, failures = parse_checkov_output_with_stats(payload)
+            parse_failures += failures
+            if failures:
+                unparseable.append(output)
             for issue in issues:
                 # ``or`` and not an unconditional assignment: a report that
                 # carried a native ``guideline`` already propagated it into
@@ -276,18 +282,18 @@ class CheckovPlugin(BaseToolPlugin):
                 output=f"Checkov failed: {exc}",
             ),
         )
-        if unparseable and result.success:
+        if parse_failures:
             # Exit zero with no report is the fail-open case: a soft-fail
             # config, or checkov dying before it wrote one. Reporting a pass
             # there would claim the files were scanned when they were not.
-            return ToolResult.from_outcome(
-                ToolOutcome(execution=Checked(success=False)),
-                name=self.definition.name,
+            return replace(
+                result,
+                success=False,
                 output=(
                     unparseable[0].strip()
-                    or "Checkov produced no JSON report; the scan did not run."
+                    or "Checkov produced no valid JSON report; the scan did not run."
                 ),
-                parse_failures_count=1,
+                parse_failures_count=parse_failures,
             )
         return result
 

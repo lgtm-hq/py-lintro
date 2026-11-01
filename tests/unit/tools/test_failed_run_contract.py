@@ -8,6 +8,7 @@ list: remove an entry when its linked defect is fixed.
 from __future__ import annotations
 
 import io
+import json
 import re
 import subprocess  # nosec B404 - process results only; no real subprocesses
 from pathlib import Path
@@ -150,14 +151,7 @@ class KnownFailOpen(NamedTuple):
 
 # Measured from the unmarked first run.
 # Keep exit-code variants separate so a fix cannot hide behind another variant.
-KNOWN_FAIL_OPEN: dict[tuple[str, str], KnownFailOpen] = {
-    ("checkov", "case2-rc0"): KnownFailOpen("#3026 null failed_checks read as clean"),
-    ("golangci_lint", "case2-rc0"): KnownFailOpen("#3026 null Issues read as clean"),
-    ("html_validate", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
-    ("sqlfluff", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
-    ("stylelint", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
-    ("vale", "case2-rc0"): KnownFailOpen("#3026 null report reads as clean"),
-}
+KNOWN_FAIL_OPEN: dict[tuple[str, str], KnownFailOpen] = {}
 
 _CARGO_PROJECT = {
     "Cargo.toml": '[package]\nname = "contract"\nversion = "0.1.0"\n',
@@ -491,3 +485,182 @@ def test_clean_run_is_a_clean_success(
     assert_that(result.success).described_as(str(result)).is_true()
     assert_that(result.issues_count).is_zero()
     assert_that(result.inspected_files).is_true()
+
+
+INVALID_PRIMARY_REPORTS = {
+    "checkov": [
+        "[]",
+        '{"check_type": "terraform", "results": {"passed_checks": [], '
+        '"failed_checks": [{"check_id": "CKV_AWS_1",',
+        "WARNING skip_checks resolved to []",
+        "null",
+        "{}",
+        '{"results": null}',
+        '{"results": []}',
+        '{"results": {}}',
+        '{"results": {"failed_checks": null}}',
+        '{"results": {"failed_checks": {}}}',
+    ],
+    "golangci_lint": ["", " \n\t ", "null", "{}", '{"Issues": null}', '{"Issues": {}}'],
+    "html_validate": ["null", "{}", "false", '[{"filePath":"a.html"}]'],
+    "ruff": ["null", "{}", "false", '"wrong"'],
+    "sqlfluff": ["null", "{}", "false", '[{"filepath":"a.sql"}]'],
+    "stylelint": [
+        "null",
+        "{}",
+        "false",
+        '[{"source":"a.css"}]',
+        "[]\nnotice\n[null]",
+        '[null]\n[{"source":"a.css","warnings":[]}]',
+        '[{"source":"a.css","warnings":[]}]\n[null]',
+        "null\n[]",
+        "[]\nnull",
+        'null\n[{"source":"a.css","warnings":[]}]',
+        '[{"source":"a.css","warnings":[]}]\nnull',
+    ],
+    "vale": ["null", "[]", "false", '{"a.md": null}'],
+}
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "stdout"),
+    [
+        pytest.param(name, report, id=f"{name}-{index}")
+        for name, reports in INVALID_PRIMARY_REPORTS.items()
+        for index, report in enumerate(reports)
+    ],
+)
+def test_invalid_primary_report_surfaces_parse_failure(
+    tool_name: str,
+    stdout: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """An exit-zero invalid report must expose a parser failure to callers."""
+    result, commands = _run_tool(monkeypatch, tmp_path, tool_name, 0, stdout)
+
+    _assert_tool_ran(tool_name, result, commands)
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_positive()
+    assert_that(result.issues_count).is_zero()
+
+
+def test_golangci_concurrency_exit_is_an_execution_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Exit 3 with the supported empty Issues array never means clean lint."""
+    result, commands = _run_tool(
+        monkeypatch,
+        tmp_path,
+        "golangci_lint",
+        3,
+        '{"Issues": [], "Report": {}}\nparallel golangci-lint is running',
+    )
+
+    _assert_tool_ran("golangci_lint", result, commands)
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count or 0).is_zero()
+    assert_that(result.output).contains("parallel golangci-lint is running")
+
+
+def test_checkov_no_work_summary_is_supported(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Checkov emits a flat zero summary when no framework has checks."""
+    summary: dict[str, object] = dict.fromkeys(
+        ["passed", "failed", "skipped", "parsing_errors", "resource_count"],
+        0,
+    )
+    summary["checkov_version"] = "3.3.29"
+    result, commands = _run_tool(
+        monkeypatch,
+        tmp_path,
+        "checkov",
+        0,
+        json.dumps(summary),
+    )
+
+    _assert_tool_ran("checkov", result, commands)
+    assert_that(result.success).is_true()
+    assert_that(result.parse_failures_count or 0).is_zero()
+    assert_that(result.issues).is_empty()
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "report"),
+    [
+        (
+            "checkov",
+            [
+                {
+                    "results": {
+                        "failed_checks": [
+                            {
+                                "check_id": "CKV_TEST",
+                                "file_path": "a.tf",
+                                "check_name": "kept",
+                            },
+                        ],
+                    },
+                },
+                {"results": {"failed_checks": None}},
+            ],
+        ),
+        ("golangci_lint", {"Issues": [{"Text": "kept"}, None]}),
+        (
+            "html_validate",
+            [
+                {"filePath": "a.html", "messages": [{"message": "kept"}]},
+                {"filePath": "b.html", "messages": None},
+            ],
+        ),
+        (
+            "ruff",
+            [
+                {
+                    "filename": "a.py",
+                    "message": "kept",
+                    "location": {"row": 1, "column": 1},
+                },
+                None,
+            ],
+        ),
+        (
+            "sqlfluff",
+            [
+                {"filepath": "a.sql", "violations": [{"description": "kept"}]},
+                {"filepath": "b.sql", "violations": None},
+            ],
+        ),
+        (
+            "stylelint",
+            [
+                {"source": "a.css", "warnings": [{"text": "kept"}]},
+                {"source": "b.css", "warnings": None},
+            ],
+        ),
+        ("vale", {"a.md": [{"Message": "kept"}], "b.md": None}),
+    ],
+)
+def test_incomplete_reports_preserve_plugin_findings(
+    tool_name: str,
+    report: object,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Parser failure accounting reaches the result without dropping usable issues."""
+    result, commands = _run_tool(
+        monkeypatch,
+        tmp_path,
+        tool_name,
+        0,
+        json.dumps(report),
+    )
+
+    _assert_tool_ran(tool_name, result, commands)
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.issues).extracting("message").is_equal_to(["kept"])

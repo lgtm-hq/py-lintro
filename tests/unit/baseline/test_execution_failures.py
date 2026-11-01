@@ -97,7 +97,10 @@ def test_mixed_per_file_payload_cannot_hide_native_failure(
     assert result.issues_count == 1
     assert not result.findings_complete
     # Simulate debt captured by an earlier producer that claimed completeness.
-    baseline = snapshot([replace(result, findings_complete=True)], root=workspace)
+    baseline = snapshot(
+        [replace(result, findings_complete=True, parse_failures_count=0)],
+        root=workspace,
+    )
     assert len(baseline.entries) == 1
     artifact = _artifact(result, workspace)
 

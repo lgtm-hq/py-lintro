@@ -25,7 +25,7 @@ from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
 from lintro.models.core.tool_outcome import Checked, Skipped, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
-from lintro.parsers.vale.vale_parser import parse_vale_output
+from lintro.parsers.vale.vale_parser import parse_vale_output_with_stats
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
@@ -204,7 +204,7 @@ class ValePlugin(BaseToolPlugin):
                 cmd=cmd,
             )
 
-        issues = parse_vale_output(output=output)
+        issues, parse_failures = parse_vale_output_with_stats(output=output)
         if not issues and self._is_no_config_error(output):
             return self._create_no_config_result()
 
@@ -217,11 +217,11 @@ class ValePlugin(BaseToolPlugin):
                 ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
                 output=(output or "Vale exited with an error and produced no results."),
-                parse_failures_count=1,
+                parse_failures_count=max(1, parse_failures),
             )
 
         issues_count = len(issues)
-        success = issues_count == 0
+        success = issues_count == 0 and parse_failures == 0
 
         return ToolResult.from_outcome(
             ToolOutcome(
@@ -231,6 +231,7 @@ class ValePlugin(BaseToolPlugin):
             name=self.definition.name,
             output=output if not success else None,
             issues=issues,
+            parse_failures_count=parse_failures,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

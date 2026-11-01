@@ -49,6 +49,21 @@ def _coerce_int(value: object) -> int:
 
 
 def parse_vale_output(output: str | None) -> list[ValeIssue]:
+    """Return Vale findings through the legacy list API.
+
+    Args:
+        output: Raw JSON formatter output.
+
+    Returns:
+        All usable findings, omitting parser failure accounting.
+    """
+    issues, _failures = parse_vale_output_with_stats(output)
+    return issues
+
+
+def parse_vale_output_with_stats(
+    output: str | None,
+) -> tuple[list[ValeIssue], int]:
     """Parse Vale JSON output into a list of ``ValeIssue`` objects.
 
     Args:
@@ -56,30 +71,32 @@ def parse_vale_output(output: str | None) -> list[ValeIssue]:
             empty when Vale reports no issues.
 
     Returns:
-        A list of ``ValeIssue`` objects. Returns an empty list for empty,
-        null, malformed, or non-mapping payloads (e.g., Vale's ``E100``
-        no-config error object).
+        Usable findings and the count of invalid report containers or records.
+        The plugin handles Vale's no-config error separately.
     """
     if not output or not output.strip():
-        return []
+        return [], 0
 
     try:
         data = json.loads(output)
     except (json.JSONDecodeError, ValueError):
-        return []
+        return [], 1
 
     # Expected shape is an object mapping file paths to alert lists. Vale's
     # runtime-error payload is a single object (not a mapping of lists), which
     # we intentionally ignore here.
     if not isinstance(data, dict):
-        return []
+        return [], 1
 
     issues: list[ValeIssue] = []
+    failures = 0
     for file_path, alerts in data.items():
         if not isinstance(alerts, list):
+            failures += 1
             continue
         for alert in alerts:
             if not isinstance(alert, dict):
+                failures += 1
                 continue
 
             check = str(alert.get("Check", "") or "")
@@ -107,4 +124,4 @@ def parse_vale_output(output: str | None) -> list[ValeIssue]:
                 ),
             )
 
-    return issues
+    return issues, failures
