@@ -1,0 +1,8 @@
+execSync('prettier --check a.css && echo --write');
+execSync('prettier --check a.css || echo --write');
+execSync('prettier --check a.css', { note: '--write' });
+exec('prettier --check a.css', callback, '--write');
+spawnSync('prettier', ['--check', 'a.css'], { note: '--write' });
+execFileSync('prettier', ['--check', 'a.css'], () => '--write');
+spawn('prettier', [], { note: '-w' });
+execFile('prettier', ['--check', 'a.css'], callback, ['--write']);

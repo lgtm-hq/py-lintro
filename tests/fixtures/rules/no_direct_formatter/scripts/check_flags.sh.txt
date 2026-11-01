@@ -1,0 +1,8 @@
+#!/bin/sh
+prettier --check a.css && echo --write
+prettier --check a.css || echo --write
+prettier --check a.css; echo --write
+prettier --check a.css & echo -w
+prettier --check a.css | echo --write
+prettier --check a.css && echo -w
+prettier --check a.css || echo -w

@@ -1,0 +1,18 @@
+import { execSync, spawnSync } from 'node:child_process';
+
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+execSync('bunx oxfmt generated.mjs');
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+execSync('prettier --write generated.css');
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+childProcess.exec('uv run black generated.py', callback);
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+spawnSync('black', ['generated.py']);
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+execFileSync('rustfmt', ['generated.rs']);
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+execSync(`taplo fmt Cargo.toml`);
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+execFile('black', ['generated.py'], callback);
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+spawn('shfmt', ['-w', 'generated.sh']);

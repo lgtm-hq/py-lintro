@@ -1,0 +1,10 @@
+#!/bin/sh
+# Known false positives: generic regex matching does not parse heredocs.
+cat <<'EXAMPLE'
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+black generated.py
+EXAMPLE
+
+# At most one finding per line, even with two native invocations.
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+black generated.py; rustfmt generated.rs
