@@ -9,6 +9,7 @@ from assertpy import assert_that
 
 from lintro.enums.action import Action
 from lintro.models.core.run_artifact import RunArtifact
+from lintro.models.core.tool_outcome import Checked
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.utils.execution.baseline_filter import apply_baseline
@@ -19,12 +20,12 @@ from tests.unit.tools.subprocess_helpers import subprocess_result
 
 
 @pytest.mark.parametrize(
-    ("change", "unacknowledgeable"),
+    ("file", "code", "unacknowledgeable"),
     [
-        ({"file": "a/" * 2046 + "b.py"}, False),
-        ({"file": "a/" * 2047 + "b.py"}, True),
-        ({"code": "X" * 1024}, False),
-        ({"code": "X" * 1025}, True),
+        ("a/" * 2046 + "b.py", "F401", False),
+        ("a/" * 2047 + "b.py", "F401", True),
+        ("src/a.py", "X" * 1024, False),
+        ("src/a.py", "X" * 1025, True),
     ],
     ids=["path-limit", "path-too-long", "code-limit", "code-too-long"],
 )
@@ -32,11 +33,12 @@ def test_fingerprint_limits_keep_unacknowledgeable_findings_failing(
     tmp_path: Path,
     dirty_result: ToolResult,
     finding: RuffIssue,
-    change: dict[str, str],
+    file: str,
+    code: str,
     unacknowledgeable: bool,
 ) -> None:
     """Out-of-schema identities survive filtering alongside an acknowledged peer."""
-    changed = replace(finding, **change)
+    changed = replace(finding, file=file, code=code)
     result = replace(dirty_result, issues=[finding, changed], issues_count=2)
     baseline = snapshot([result], root=tmp_path)
     artifact = RunArtifact(
@@ -461,3 +463,4 @@ def test_verify_fold_preserves_final_findings_and_inspection_for_baselining(
     assert_that(results[0].issues).is_equal_to([new] if inspected else [finding, new])
     assert_that(artifact.total_remaining).is_equal_to(1 if inspected else 2)
     assert_that(results[0].baselined_count).is_equal_to(1 if inspected else 0)
+    assert_that(results[0].outcome.execution).is_equal_to(Checked(False, inspected))

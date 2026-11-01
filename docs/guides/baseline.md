@@ -29,9 +29,11 @@ acknowledgement for root `a.py` from hiding a new finding in `pkg/a.py` when inv
 from `pkg`. To check a subdirectory, run from the root and pass `pkg` as the scan path.
 With a project config, baseline files may live in a separate directory without changing
 the root. Finding paths are relative to this root and case-sensitive on every platform;
-case-only renames change their identity. Commit the baseline alongside the code.
-Creation refuses to overwrite a file. `show` reads statistics without executing tools
-and can run from any directory.
+case-only renames change their identity. Commit the baseline alongside the code. Use one
+baseline per project root: version one does not record its root, so sharing a baseline
+between different project configurations can alias relative file identities. Creation
+refuses to overwrite a file. `show` reads statistics without executing tools and can run
+from any directory.
 
 Treat the baseline as a reviewed suppression policy. Review additions, changed
 fingerprints, and increased occurrence counts alongside code changes: `update` can

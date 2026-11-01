@@ -19,6 +19,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **core**: fail closed on empty Ruff reports and unexplained nonzero per-file check
+  exits, including runs without fingerprint baselines (#438).
+
 ### Security
 
 ## [0.175.2] - 2026-11-01

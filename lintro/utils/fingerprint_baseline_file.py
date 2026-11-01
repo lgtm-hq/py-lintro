@@ -105,6 +105,7 @@ def change_baseline(
 
     Raises:
         ValueError: If the destination or replacement is invalid.
+        OSError: If locking, reading, writing, or committing the file fails.
     """
     with _writer_lock(path):
         if path.is_symlink():

@@ -930,6 +930,8 @@ def _fold_check_verdict(mutation: ToolResult, verify: ToolResult | None) -> None
         mutation: Mutation result that will carry the final residual.
         verify: Final check result, or None for an unchanged scope.
     """
+    # A successful phase needs no proof explaining a failed lint verdict;
+    # failed phases still require the producer's explicit completeness proof.
     mutation.findings_complete = mutation.success or mutation.findings_complete
     if verify is None:
         return
@@ -1068,8 +1070,9 @@ def _fold_one(
         # A pre-mutation inspection cannot prove that an unknown verify
         # inspection measured the final findings. In particular, explicit
         # fingerprint baselines must not turn such a result green (#438).
-        if verify.inspected_files is not True:
-            mutation.inspected_files = None
+        mutation.inspected_files = (
+            mutation.inspected_files if verify.inspected_files is True else None
+        )
         mutation.success = mutation.success and answered and verify.outcome.success
         if verify.duration_seconds is not None:
             mutation.duration_seconds = (
