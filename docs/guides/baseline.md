@@ -54,12 +54,12 @@ findings for baselining. Their findings stay visible and failing under
 inspected result with coherent findings can participate without explaining a failure,
 but a nonzero native exit alone never proves completeness.
 
-The shared per-file runner does not certify reports from sequence-only parsers:
-some parsers discard malformed records without counting them. Surviving findings
-and even a zero report-level failure count cannot prove that no records were lost.
-These findings remain unsuppressed until a complete-report statistics contract is
-available. Rejected ShellCheck reports retain their full native output for diagnosis;
-the additional error explanation includes only a bounded excerpt.
+The shared per-file runner does not certify reports from sequence-only parsers: some
+parsers discard malformed records without counting them. Surviving findings and even a
+zero report-level failure count cannot prove that no records were lost. These findings
+remain unsuppressed until a complete-report statistics contract is available. Rejected
+ShellCheck reports retain their full native output for diagnosis; the additional error
+explanation includes only a bounded excerpt.
 
 Without `--tools`, management commands use the normal configured/default selection. If
 **any active result** is incomplete or cannot certify its findings, `create`, `update`,
