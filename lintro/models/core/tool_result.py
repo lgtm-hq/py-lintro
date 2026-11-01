@@ -114,16 +114,6 @@ class ToolResult:
     # the human-readable ``output`` string.
     timed_out: bool = field(default=False)
 
-    # A multi-file check may report real findings alongside a launch/parser
-    # failure on another file. Acknowledging the findings cannot hide that error.
-    execution_failed: bool = field(default=False)
-
-    # Producer-owned proof that every invocation completed with a recognized
-    # lint verdict and its report was fully parsed. Only then can findings
-    # explain success=False. Legacy producers default to unknown, so parsed
-    # findings alone cannot authorize acknowledgements or baseline pruning.
-    findings_complete: bool = field(default=False)
-
     # Parser failures (items that could not be parsed from tool output).
     # Omitted from JSON output unless the tool sets this explicitly.
     parse_failures_count: int | None = field(default=None)
@@ -161,6 +151,17 @@ class ToolResult:
     # False with no_files=True means empty discovery; False without it means a
     # decline (for example missing configuration), skip, or timeout.
     inspected_files: bool | None = field(default=None)
+
+    # Append new fields after the API-v2 positional prefix through inspected_files.
+    # A multi-file check may report real findings alongside a launch/parser
+    # failure on another file. Acknowledging the findings cannot hide that error.
+    execution_failed: bool = field(default=False)
+
+    # Producer-owned proof that every invocation completed with a recognized
+    # lint verdict and its report was fully parsed. Only then can findings
+    # explain success=False. Legacy producers default to unknown, so parsed
+    # findings alone cannot authorize acknowledgements or baseline pruning.
+    findings_complete: bool = field(default=False)
 
     # Exact canonical files successfully examined by this producer. None is
     # unknown coverage, not the requested scope. Fingerprint pruning requires
