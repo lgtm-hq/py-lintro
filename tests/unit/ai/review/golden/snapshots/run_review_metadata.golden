@@ -80,6 +80,7 @@
   "first_party": true,
   "credential": "api_key",
   "reported_models": [],
+  "unreported_models": [],
   "model_verification": "",
   "lane": "",
   "fallback_from": "",

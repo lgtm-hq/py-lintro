@@ -46,6 +46,7 @@ def test_provenance_fields_round_trip_through_the_flat_payload() -> None:
             first_party=False,
             credential="zai_token",
             reported_models=(_GLM,),
+            unreported_models=("silent-model",),
             lane="zai",
             model_verification="unverifiable",
         ),
@@ -61,6 +62,19 @@ def test_provenance_fields_round_trip_through_the_flat_payload() -> None:
     )
     assert_that(payload["cost_shadow"]).is_equal_to(0.42)
     assert_that(restored).is_equal_to(record)
+
+
+@pytest.mark.parametrize("claims", [None, "silent-model", ["allowed", 3], [" "]])
+def test_malformed_silent_claims_cannot_disappear_on_parse(claims: object) -> None:
+    """Bad claim data retains a disallowed name instead of erasing the claim."""
+    restored = RunRecord.from_dict(
+        {"round": 1, "unreported_models": claims, "model_verification": "unreported"},
+    )
+
+    assert_that(restored.identity.unreported_models).is_not_empty()
+    assert_that(
+        any(not model.strip() for model in restored.identity.unreported_models),
+    ).is_true()
 
 
 def test_a_bare_name_in_a_stored_model_list_still_parses() -> None:
@@ -179,6 +193,7 @@ def test_the_factory_copies_provenance_from_the_metadata(
             first_party=True,
             credential="claude_oauth",
             reported_models=(sonnet,),
+            unreported_models=("silent-model",),
             lane="anthropic",
             model_verification="verified",
         ),
@@ -190,6 +205,7 @@ def test_the_factory_copies_provenance_from_the_metadata(
     assert_that(identity.first_party).is_true()
     assert_that(identity.credential).is_equal_to("claude_oauth")
     assert_that(identity.reported_models).is_equal_to((sonnet,))
+    assert_that(identity.unreported_models).is_equal_to(("silent-model",))
     assert_that(identity.lane).is_equal_to("anthropic")
     assert_that(identity.model_verification).is_equal_to("verified")
 

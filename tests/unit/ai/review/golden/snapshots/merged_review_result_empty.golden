@@ -56,6 +56,7 @@
     "first_party": null,
     "credential": "",
     "reported_models": [],
+    "unreported_models": [],
     "model_verification": "",
     "lane": "",
     "fallback_from": "",

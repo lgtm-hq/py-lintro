@@ -1,13 +1,17 @@
 """Which stored rounds this run may inherit coverage from (#2867).
 
 ADR-0011 decision B: review-reuse validity includes the lane. A stored round
-is not reused when it predates the ADR (``legacy``), when its model claim
+is not reused when its evidence is blank, when it predates the ADR
+(``legacy``), when its model claim
 was a ``mismatch``, when it is ``unreported`` on a lane whose transport is
 declared to report model usage, or when its lane or endpoint differ from the
-current run's. Before coverage is inherited, every stored round is also
-re-checked against the current lane row: on a first-party row its reported
-models must still be allowed. A round that fails is re-reviewed rather than
-carried into a green check; its history and cost figures are kept.
+current run's, or when its state or first-party flag contradict the lane.
+Before coverage is inherited, every stored round is also re-checked against
+the current lane row: on a first-party row its reported models and silent
+requested-model claims must still be allowed. A mixed unreported record
+without its silent claims cannot vouch for coverage. A round that fails is
+re-reviewed rather than carried into a green check; its history and cost
+figures are kept.
 """
 
 from __future__ import annotations
@@ -96,7 +100,6 @@ def agent_model_overrides(options: ReviewSessionOptions) -> tuple[str, ...]:
 #: corrupt or newer state means more review, not less.
 _REUSABLE_STATES = frozenset(
     {
-        "",
         ModelVerification.VERIFIED.value,
         ModelVerification.UNVERIFIABLE.value,
         ModelVerification.UNREPORTED.value,
@@ -139,27 +142,35 @@ def _round_is_reusable(
     """Return whether one stored round passes every reuse rule."""
     identity = record.identity
     state = identity.model_verification
+    # No completed call means no evidence to vouch for coverage, even at
+    # zero usage. Re-review rather than promote a blank state (#3102).
     if state not in _REUSABLE_STATES:
         return False
-    # Blank means no completed call. Tokens or charges contradict that claim,
-    # including charges for calls whose results were dropped (#3010).
-    usage = record.usage
-    if state == "" and any(
-        (
-            usage.prompt,
-            usage.completion,
-            usage.total,
-            usage.context,
-            usage.cost,
-            usage.cost_shadow,
-        ),
-    ):
-        return False
+    if provenance.lane:
+        states = (
+            {ModelVerification.VERIFIED.value, ModelVerification.UNREPORTED.value}
+            if provenance.first_party
+            else {ModelVerification.UNVERIFIABLE.value}
+        )
+        if identity.first_party is not provenance.first_party or state not in states:
+            return False
     if state == ModelVerification.UNREPORTED.value and provenance.reports_model_usage:
         return False
     if identity.lane != provenance.lane or identity.endpoint != provenance.endpoint:
         return False
     if provenance.first_party:
+        if (
+            state == ModelVerification.UNREPORTED.value
+            and identity.reported_models
+            and not identity.unreported_models
+        ):
+            # Older mixed aggregates lost silent sources' requests (#3102).
+            # Their current identity.model cannot reconstruct those claims.
+            return False
+        if any(
+            _normalize(model) not in allowed for model in identity.unreported_models
+        ):
+            return False
         # A record that reported no models is vouched for by what it asked
         # for, so a row that has since narrowed its list cannot be met
         # vacuously.
