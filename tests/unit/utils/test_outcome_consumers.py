@@ -9,6 +9,10 @@ from typing import Any
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.metadata import (
+    attach_fixed_count_metadata,
+    attach_validation_counts_metadata,
+)
 from lintro.ai.rerun import apply_rerun_results
 from lintro.enums.action import Action
 from lintro.enums.capability import Cap
@@ -31,6 +35,7 @@ from lintro.tools.core.verify_pass import (
     VerifyScope,
     fold_verify_results,
 )
+from lintro.utils.console.logger import ThreadSafeConsoleLogger
 from lintro.utils.execution.exit_codes import (
     aggregate_tool_results,
     determine_exit_code,
@@ -38,7 +43,11 @@ from lintro.utils.execution.exit_codes import (
 )
 from lintro.utils.execution.run_aggregation import sequential_totals
 from lintro.utils.execution.run_renderer import _display_fix_result
-from lintro.utils.json_output import serialize_tool_result, timed_out_tool_names
+from lintro.utils.json_output import (
+    create_json_output,
+    serialize_tool_result,
+    timed_out_tool_names,
+)
 from lintro.utils.streaming_output import StreamingResultHandler
 from lintro.utils.summary_tables import print_summary_table
 
@@ -70,11 +79,20 @@ def test_fix_json_keeps_default_keys_for_results_without_fix_accounting(
 @pytest.mark.parametrize(
     ("previous", "remaining", "expected"),
     [
-        (FixMeasured(3, 2, 1), 0, FixMeasured(3, 3, 0)),
-        (FixMeasured(3, 2, 1), 2, FixMeasured(3, 1, 2)),
-        (FixMeasured(3, 2, 1), 4, FixPartial(initial=3, remaining=4)),
-        (FixUnmeasured("verify failed", initial=3), 0, FixMeasured(3, 3, 0)),
-        (FixUnmeasured("verify failed", initial=3), 1, FixMeasured(3, 2, 1)),
+        (FixMeasured(3, 2, 1), 0, FixPartial(fixed=2, remaining=0)),
+        (FixMeasured(3, 2, 1), 1, FixMeasured(3, 2, 1)),
+        (FixMeasured(3, 2, 1), 2, FixPartial(fixed=2, remaining=2)),
+        (FixMeasured(3, 2, 1), 4, FixPartial(fixed=2, remaining=4)),
+        (
+            FixUnmeasured("verify failed", initial=3),
+            0,
+            FixPartial(initial=3, remaining=0),
+        ),
+        (
+            FixUnmeasured("verify failed", initial=3),
+            1,
+            FixPartial(initial=3, remaining=1),
+        ),
         (FixUnmeasured("before-count unavailable"), 0, FixPartial(remaining=0)),
         (FixUnmeasured("before-count unavailable"), 1, FixPartial(remaining=1)),
         (FixPartial(fixed=2), 1, FixPartial(fixed=2, remaining=1)),
@@ -120,6 +138,79 @@ def test_ai_rerun_accounting_survives_totals_json_and_exit(
     ).is_equal_to(
         int(remaining > 0),
     )
+
+
+@pytest.mark.parametrize(("native_fixed", "remaining"), [(7, 2), (2, 0)])
+def test_ai_rerun_then_metadata_counts_each_fix_once_in_totals_and_json(
+    native_fixed: int,
+    remaining: int,
+) -> None:
+    """AI verification is added once, after the native count survives the rerun."""
+    ai_verified = 1
+    initial = native_fixed + ai_verified + remaining
+    detected = [BaseIssue(file="a.py", line=line + 1) for line in range(initial)]
+    original = ToolResult.from_outcome(
+        ToolOutcome(
+            Checked(False, True),
+            FixMeasured(initial, native_fixed, remaining + ai_verified),
+            remaining + ai_verified,
+        ),
+        name="ruff",
+        initial_issues=detected,
+        issues=detected[native_fixed:],
+    )
+    rerun = ToolResult.from_outcome(
+        ToolOutcome(Checked(remaining == 0, True), issues_count=remaining),
+        name="ruff",
+        issues=detected[native_fixed + ai_verified :],
+    )
+
+    apply_rerun_results(
+        by_tool={"ruff": (original, list(original.issues))},
+        rerun_results=[rerun],
+    )
+    # The pipeline attaches these counts only after applying the rerun result.
+    attach_fixed_count_metadata(original, fixed_count=ai_verified)
+    attach_validation_counts_metadata(
+        original,
+        verified_count=ai_verified,
+        unverified_count=0,
+    )
+    console = ThreadSafeConsoleLogger(art_enabled=False)
+    console.print_execution_summary(Action.FIX, [original])
+    rows = {
+        cells[1].strip(): int(cells[2])
+        for line in console.get_buffer().splitlines()
+        if len(cells := line.split("|")) == 4 and cells[2].strip().isdigit()
+    }
+    assert_that(rows).contains_entry(
+        {"Net Resolved (Native)": native_fixed},
+        {"AI Applied Fixes": ai_verified},
+        {"AI Resolved Fixes": ai_verified},
+        {"Total Resolved": native_fixed + ai_verified},
+        {"Remaining Issues": remaining},
+    )
+    assert_that(rows["Total Resolved"] + rows["Remaining Issues"]).is_equal_to(initial)
+    totals = aggregate_tool_results([original], Action.FIX)
+    exit_code = determine_exit_code(Action.FIX, [original], totals[0], totals[2])
+    wire = json.loads(
+        json.dumps(create_json_output(Action.FIX, [original], *totals, exit_code)),
+    )
+    assert_that(wire["results"][0]).contains_entry(
+        {"net_resolved": native_fixed},
+        {"fixed": native_fixed},
+        {"remaining": remaining},
+        {"issues_count": initial},
+    )
+    assert_that(wire["results"][0]["metadata"]).contains_entry(
+        {"verified_count": ai_verified},
+    )
+    assert_that(wire["summary"]).contains_entry(
+        {"total_net_resolved": native_fixed},
+        {"total_fixed": native_fixed},
+        {"total_remaining": remaining},
+    )
+    assert_that(exit_code).is_equal_to(int(remaining > 0))
 
 
 @pytest.mark.parametrize(

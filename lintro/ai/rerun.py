@@ -100,8 +100,11 @@ def apply_rerun_results(
     """Apply measured rerun issue counts back to original FIX results.
 
     An unanswered check leaves the original counts and failure flags intact.
-    Answered checks replace the residual and recompute net resolved from the
-    recorded before-count. Incomplete reports cannot gain complete accounting.
+    Answered checks replace execution state (including a prior timeout) and the
+    residual, preserving the native fixed count. AI fixes are reported separately
+    through verification metadata. If the counters no longer balance, omit the
+    initial count and retain the native/residual measurements as partial accounting.
+    Incomplete reports cannot gain complete accounting.
 
     Args:
         by_tool: Dict mapping tool name to (result, issues) pairs.
@@ -118,19 +121,24 @@ def apply_rerun_results(
         remaining = len(refreshed_issues)
         previous = result.outcome.accounting
         accounting: FixMeasured | FixPartial
-        if previous.initial is not None and remaining <= previous.initial:
+        if (
+            previous.initial is not None
+            and previous.fixed is not None
+            and previous.initial == previous.fixed + remaining
+        ):
             accounting = FixMeasured(
                 initial=previous.initial,
-                fixed=previous.initial - remaining,
+                fixed=previous.fixed,
                 remaining=remaining,
             )
         else:
-            # A missing before-count cannot be reconstructed from the rerun.
-            # If findings grew past it, a non-negative net resolved count is
-            # unavailable; retain the before/after evidence as partial.
+            # Native fixes and a post-AI residual span different phases. Keep
+            # both measurements without claiming a complete before/after set
+            # or counting AI fixes again as native. A missing native count
+            # cannot be reconstructed from the post-AI residual either.
             accounting = FixPartial(
-                initial=previous.initial,
-                fixed=previous.fixed if previous.initial is None else None,
+                initial=previous.initial if previous.fixed is None else None,
+                fixed=previous.fixed,
                 remaining=remaining,
             )
         outcome = ToolOutcome(

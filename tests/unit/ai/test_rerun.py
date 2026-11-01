@@ -16,7 +16,12 @@ from lintro.ai.rerun import (
     apply_rerun_results,
     rerun_tools,
 )
-from lintro.models.core.tool_outcome import Checked, FixUnmeasured, ToolOutcome
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixPartial,
+    FixUnmeasured,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 
@@ -197,8 +202,8 @@ def test_rerun_tools_with_missing_tools() -> None:
 # -- TestApplyRerunResults: Tests for apply_rerun_results. -------------------
 
 
-def test_apply_rerun_results_preserves_initial_and_recomputes_net_resolved() -> None:
-    """The measured before-count survives while net resolved follows the rerun."""
+def test_apply_rerun_results_preserves_native_fixed_count_as_partial() -> None:
+    """The post-AI residual changes without adding AI fixes to native fixes."""
     original_result = ToolResult(
         name="ruff",
         success=False,
@@ -243,9 +248,11 @@ def test_apply_rerun_results_preserves_initial_and_recomputes_net_resolved() -> 
 
     apply_rerun_results(by_tool=by_tool, rerun_results=[rerun_result])
 
-    assert_that(original_result.initial_issues_count).is_equal_to(10)
-    assert_that(original_result.fixed_issues_count).is_equal_to(8)
-    assert_that(original_result.outcome.accounting.remaining).is_equal_to(2)
+    assert_that(original_result.initial_issues_count).is_none()
+    assert_that(original_result.fixed_issues_count).is_equal_to(7)
+    assert_that(original_result.outcome.accounting).is_equal_to(
+        FixPartial(fixed=7, remaining=2),
+    )
 
 
 def test_apply_rerun_results_updates_remaining_issues() -> None:
