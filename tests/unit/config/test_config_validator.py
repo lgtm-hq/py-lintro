@@ -344,25 +344,46 @@ max_fix_retries = "not-an-int"
     assert_that(result.errors[0].message).contains("max_fix_retries")
 
 
-def test_pyproject_nested_execution_fail_fast_valid(
+@pytest.mark.parametrize("explicit_path", [False, True])
+@pytest.mark.parametrize(
+    "settings",
+    [
+        pytest.param("", id="omitted"),
+        pytest.param("execution = {}\nenforce = {}\n", id="empty"),
+        pytest.param(
+            "fail_fast = true\nline_length = 88\n"
+            "execution = { parallel = false }\n"
+            'enforce = { target_python = "py313" }\n',
+            id="nested-and-flat",
+        ),
+    ],
+)
+def test_pyproject_execution_enforce_mappings_validate(
     write_config: Callable[..., Path],
+    monkeypatch: pytest.MonkeyPatch,
+    explicit_path: bool,
+    settings: str,
 ) -> None:
-    """A valid nested ``[tool.lintro.execution] fail_fast`` must validate.
+    """Omitted, empty and populated tables validate without findings.
 
     Args:
         write_config: Fixture writing config content to a temp file.
+        monkeypatch: Pytest monkeypatch fixture.
+        explicit_path: Whether to validate the file explicitly or discover it.
+        settings: Valid execution/enforce configuration to validate.
     """
     path = write_config(
-        """
-[tool.lintro.execution]
-fail_fast = true
-""",
+        f"[tool.lintro]\noutput = {{ art = false }}\n{settings}",
         name="pyproject.toml",
     )
+    monkeypatch.chdir(path.parent)
 
-    result = validate_config_file(path)
+    result = validate_config_file(path if explicit_path else None)
 
     assert_that(result.is_valid).is_true()
+    assert_that(result.config_path).is_equal_to(path)
+    assert_that(result.errors).is_empty()
+    assert_that(result.warnings).is_empty()
 
 
 def test_pyproject_typed_error_is_reported(
@@ -538,28 +559,40 @@ def test_non_string_tool_key_is_error(write_config: Callable[..., Path]) -> None
     assert_that(result.errors[0].message).contains("tool name must be a string")
 
 
-def test_pyproject_scalar_execution_is_error(
+@pytest.mark.parametrize("section", ["execution", "enforce"])
+@pytest.mark.parametrize(
+    ("raw_value", "actual"),
+    [("false", "bool"), ("[]", "list"), ('""', "str"), ("0", "int")],
+)
+def test_pyproject_non_mapping_execution_enforce_is_error(
     write_config: Callable[..., Path],
+    section: str,
+    raw_value: str,
+    actual: str,
 ) -> None:
-    """A scalar ``[tool.lintro] execution = false`` entry is INVALID_TYPE.
+    """Invalid tables retain the validator's code and full key location.
 
     Args:
         write_config: Fixture writing config content to a temp file.
+        section: Nested execution/enforce section to validate.
+        raw_value: TOML spelling of an invalid section value.
+        actual: Type reported in the error.
     """
     path = write_config(
-        """
-[tool.lintro]
-execution = false
-""",
+        f"[tool.lintro]\n{section} = {raw_value}\n",
         name="pyproject.toml",
     )
 
     result = validate_config_file(path)
 
     assert_that(result.is_valid).is_false()
+    assert_that(result.errors).is_length(1)
     assert_that(result.errors[0].code).is_equal_to(ValidationCode.INVALID_TYPE)
-    assert_that(result.errors[0].message).contains("execution")
-    assert_that(result.errors[0].location).is_equal_to("tool.lintro.execution")
+    assert_that(result.errors[0].message).is_equal_to(
+        f"'{section}' must be a mapping, got {actual}.",
+    )
+    assert_that(result.errors[0].location).is_equal_to(f"tool.lintro.{section}")
+    assert_that(result.errors[0].render()).starts_with(f"tool.lintro.{section}:")
 
 
 def test_string_tool_entry_is_error(write_config: Callable[..., Path]) -> None:

@@ -233,16 +233,25 @@ def test_parse_tools_config_rejects_null_entry() -> None:
         _parse_tools_config({"ruff": None})
 
 
-def test_convert_scalar_execution_raises() -> None:
-    """A scalar ``[tool.lintro] execution`` value must raise ValueError."""
-    with pytest.raises(ValueError, match="execution must be a mapping"):
-        _convert_pyproject_to_config({"execution": False})
+@pytest.mark.parametrize("section", ["execution", "enforce"])
+@pytest.mark.parametrize("value", [None, False, [], "", 0])
+def test_convert_non_mapping_execution_enforce_raises(
+    section: str,
+    value: Any,
+) -> None:
+    """Reject invalid tables, including null which TOML cannot represent.
 
+    Args:
+        section: Nested pyproject section that requires a mapping.
+        value: Invalid section value supplied directly to the converter.
+    """
+    with pytest.raises(ValueError) as error:
+        _convert_pyproject_to_config({section: value})
 
-def test_convert_scalar_enforce_raises() -> None:
-    """A scalar ``[tool.lintro] enforce`` value must raise ValueError."""
-    with pytest.raises(ValueError, match="enforce must be a mapping"):
-        _convert_pyproject_to_config({"enforce": 1})
+    actual = "null" if value is None else type(value).__name__
+    assert_that(str(error.value)).is_equal_to(
+        f"tool.lintro.{section} must be a mapping, got {actual}",
+    )
 
 
 @pytest.mark.parametrize(
@@ -328,21 +337,29 @@ def test_pyproject_rejects_non_mapping_sections(
     )
 
 
-@pytest.mark.parametrize("table", ["tool", "tools"])
-def test_pyproject_tool_table_error_names_full_path(
+@pytest.mark.parametrize("table", ["tool", "tools", "execution", "enforce"])
+@pytest.mark.parametrize(
+    ("raw_value", "actual"),
+    [("false", "bool"), ("[]", "list"), ('""', "str"), ("0", "int")],
+)
+def test_pyproject_table_error_names_full_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     table: str,
+    raw_value: str,
+    actual: str,
 ) -> None:
-    """Invalid per-tool tables identify the full pyproject key in the error.
+    """Invalid nested tables identify the full pyproject key in the error.
 
     Args:
         tmp_path: Temporary directory path for test files.
         monkeypatch: Pytest monkeypatch fixture.
-        table: Supported spelling of the nested per-tool table.
+        table: Nested table that must contain a mapping.
+        raw_value: TOML spelling of the invalid value.
+        actual: Type reported in the error.
     """
     (tmp_path / "pyproject.toml").write_text(
-        f"[tool.lintro]\n{table} = false\n",
+        f"[tool.lintro]\n{table} = {raw_value}\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
@@ -351,8 +368,53 @@ def test_pyproject_tool_table_error_names_full_path(
         load_config()
 
     assert_that(str(error.value)).is_equal_to(
-        f"tool.lintro.{table} must be a mapping, got bool",
+        f"tool.lintro.{table} must be a mapping, got {actual}",
     )
+
+
+@pytest.mark.parametrize(
+    ("settings", "expected_execution", "expected_enforce"),
+    [
+        pytest.param("", {}, {}, id="omitted"),
+        pytest.param("execution = {}\nenforce = {}\n", {}, {}, id="empty"),
+        pytest.param(
+            "fail_fast = true\nline_length = 88\n"
+            "execution = { parallel = false }\n"
+            'enforce = { target_python = "py313" }\n',
+            {"fail_fast": True, "parallel": False},
+            {"line_length": 88, "target_python": "py313"},
+            id="nested-and-flat",
+        ),
+    ],
+)
+def test_load_pyproject_execution_enforce_mappings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    settings: str,
+    expected_execution: dict[str, Any],
+    expected_enforce: dict[str, Any],
+) -> None:
+    """Load defaults and merge valid nested tables with flat settings.
+
+    Args:
+        tmp_path: Temporary directory for the pyproject file.
+        monkeypatch: Pytest monkeypatch fixture.
+        settings: Omitted, empty or populated execution/enforce tables.
+        expected_execution: Execution values overriding model defaults.
+        expected_enforce: Enforce values overriding model defaults.
+    """
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        f"[tool.lintro]\noutput = {{ art = false }}\n{settings}",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    config = load_config()
+
+    assert_that(config.config_path).is_equal_to(str(pyproject.resolve()))
+    assert_that(config.execution).is_equal_to(ExecutionConfig(**expected_execution))
+    assert_that(config.enforce).is_equal_to(EnforceConfig(**expected_enforce))
 
 
 @pytest.mark.parametrize("explicit_sections", [False, True])
