@@ -126,20 +126,18 @@ def parse_golangci_lint_output_with_stats(
     text = strip_ansi_codes(output).strip()
     decoder = json.JSONDecoder()
 
-    if text.startswith("["):
-        try:
-            decoder.raw_decode(text)
-        except json.JSONDecodeError:
-            # Only an invalid JSON prefix can be a bracketed log label.
-            # In particular, [null] and [true] are arrays, not log labels.
-            text = re.sub(r"^\[[A-Za-z][\w.-]*\][^\n{\[]*", "", text, count=1).lstrip()
-        else:
-            return [], 1
-
     # golangci-lint may append a human-readable stats footer after the JSON
     # document. Decode the leading JSON object and ignore any trailing text.
     start = text.find("{")
-    if start == -1 or "[" in text[:start]:
+    # Labels can occur after WARN or inside a quoted log message. Remove only
+    # non-JSON labels: literal arrays and malformed array envelopes must still
+    # prevent a nested object from masquerading as the primary report.
+    prefix = re.sub(
+        r"\[(?!(?:null|true|false)\])[A-Za-z][\w.-]*\]",
+        "",
+        text[:start],
+    )
+    if start == -1 or "[" in prefix:
         return [], 1
 
     try:

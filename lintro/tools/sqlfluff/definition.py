@@ -6,7 +6,7 @@ It parses SQL into an AST and performs linting rules on top of it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from lintro._tool_versions import get_min_version
@@ -66,6 +66,8 @@ class SqlfluffPlugin(BaseToolPlugin):
     This plugin integrates SQLFluff with Lintro for linting and formatting
     SQL files.
     """
+
+    _lint_diagnostics: list[str] = field(default_factory=list, init=False, repr=False)
 
     @property
     def definition(self) -> ToolDefinition:
@@ -245,9 +247,25 @@ class SqlfluffPlugin(BaseToolPlugin):
             and invocations that did not emit a report.
         """
         result = self._run_subprocess_result(cmd, timeout, cwd, env, stdin)
+        if cmd[1:2] == ["lint"] and not result.success and result.stderr.strip():
+            self._lint_diagnostics.append(f"{cmd[-1]}:\n{result.stderr}")
         if cmd[1:2] == ["lint"] and result.stdout.strip():
             return result.success, result.stdout
         return result.as_tuple()
+
+    def _with_lint_diagnostics(self, result: ToolResult) -> ToolResult:
+        """Attach lint diagnostics without feeding them through the JSON parser.
+
+        Args:
+            result: Aggregated check or fix outcome.
+
+        Returns:
+            The outcome with diagnostics from every failed lint invocation.
+        """
+        if not self._lint_diagnostics:
+            return result
+        output = "\n".join([result.output or "", *self._lint_diagnostics]).lstrip("\n")
+        return replace(result, output=output)
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with SQLFluff.
@@ -260,6 +278,7 @@ class SqlfluffPlugin(BaseToolPlugin):
             ToolResult with check results.
         """
         # Use shared preparation for version check, path validation, file discovery
+        self._lint_diagnostics.clear()
         ctx = self.prepare(paths, options)
         if isinstance(ctx, ToolResult):
             return ctx
@@ -272,10 +291,12 @@ class SqlfluffPlugin(BaseToolPlugin):
             parse=lambda output: _parse_report(output, failures),
             policy=PerFileCheckPolicy(issues_imply_failure=True),
         )
-        return replace(
-            result,
-            success=result.success and not any(failures),
-            parse_failures_count=sum(failures),
+        return self._with_lint_diagnostics(
+            replace(
+                result,
+                success=result.success and not any(failures),
+                parse_failures_count=sum(failures),
+            ),
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -289,6 +310,7 @@ class SqlfluffPlugin(BaseToolPlugin):
             ToolResult with fix results.
         """
         # Use shared preparation for version check, path validation, file discovery
+        self._lint_diagnostics.clear()
         ctx = self.prepare(paths, options)
         if isinstance(ctx, ToolResult):
             return ctx
@@ -313,7 +335,7 @@ class SqlfluffPlugin(BaseToolPlugin):
             ),
         )
         if any(failures):
-            return replace(
+            result = replace(
                 result,
                 success=False,
                 parse_failures_count=sum(failures),
@@ -322,4 +344,4 @@ class SqlfluffPlugin(BaseToolPlugin):
                 fixed_issues_count=None,
                 remaining_issues_count=None,
             )
-        return result
+        return self._with_lint_diagnostics(result)

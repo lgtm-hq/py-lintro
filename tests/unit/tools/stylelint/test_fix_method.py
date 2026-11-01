@@ -31,7 +31,15 @@ NO_CONFIG = "ConfigurationError: No configuration provided for /tmp/a.css"
 
 
 @pytest.mark.parametrize("stage", [0, 1, 2], ids=["initial", "fix", "verification"])
-@pytest.mark.parametrize("report", ["null", "[]\nnotice\n[null]"])
+@pytest.mark.parametrize(
+    "report",
+    [
+        "null",
+        "[]\nnotice\n[null]",
+        '[null]\n[{"source":"a.css","warnings":[]}]',
+        '[{"source":"a.css","warnings":[]}]\n[null]',
+    ],
+)
 def test_invalid_report_cannot_verify_a_stylelint_fix(
     stylelint_plugin: StylelintPlugin,
     tmp_path: Path,

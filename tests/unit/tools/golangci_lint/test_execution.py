@@ -111,6 +111,28 @@ def _make_go_module(root: Path) -> None:
     (root / "main.go").write_text("package main\n\nfunc main() {}\n")
 
 
+def test_stderr_warning_follows_stdout_report(
+    golangci_lint_plugin: GolangciLintPlugin,
+    tmp_path: Path,
+) -> None:
+    """The non-streaming subprocess boundary appends warnings after JSON."""
+    _make_go_module(tmp_path)
+    with patch(
+        "subprocess.run",
+        return_value=subprocess.CompletedProcess(
+            args=["golangci-lint", "run"],
+            returncode=0,
+            stdout=GOLANGCI_JSON_NO_ISSUES,
+            stderr="WARN [runner] Can't run linter x\n",
+        ),
+    ):
+        result = golangci_lint_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.parse_failures_count or 0).is_zero()
+    assert_that(result.inspected_files).is_true()
+
+
 def test_check_reports_issues(
     golangci_lint_plugin: GolangciLintPlugin,
     tmp_path: Path,

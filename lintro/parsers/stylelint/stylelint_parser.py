@@ -96,8 +96,8 @@ def _outer_json_spans(output: str) -> Iterator[tuple[int, int | None]]:
         yield start, None
 
 
-def _extract_json_array(output: str) -> str | None:
-    """Extract the Stylelint JSON array substring from mixed tool output.
+def _extract_json_array(output: str) -> tuple[list[Any] | None, int]:
+    """Extract usable Stylelint records and count invalid outer siblings.
 
     Stylelint writes its JSON payload to stderr, which lintro combines with
     stdout. Skip non-Stylelint JSON arrays (e.g. ``["warning"]`` noise) and
@@ -108,7 +108,8 @@ def _extract_json_array(output: str) -> str | None:
         output: The combined stdout/stderr from stylelint.
 
     Returns:
-        The JSON array substring, or None if no Stylelint array is found.
+        Decoded source records (or None without a report) and extraction
+        failures. All outer spans are scanned, including after usable reports.
     """
     decoder = json.JSONDecoder()
     # Find standalone [] lines once, rather than rescanning a long log line
@@ -119,27 +120,41 @@ def _extract_json_array(output: str) -> str | None:
         if line.strip() == "[]":
             empty_starts.add(offset + line.index("["))
         offset += len(line)
-    empty_report = None
-    invalid_report = False
+    reports: list[Any] = []
+    empty_report = False
+    failures = 0
+    log_arrays = False
     for start, end in _outer_json_spans(output):
         if end is None:
-            return None
+            failures += 1
+            break
         try:
             data = decoder.decode(output[start:end])
         except (json.JSONDecodeError, ValueError):
-            invalid_report = True
+            failures += 1
             continue
         if _looks_like_stylelint_payload(data):
-            return output[start:end]
-        if data == [] and start in empty_starts:
+            reports.extend(data)
+        elif data == [] and start in empty_starts:
             # An empty report must occupy its own line. Logging like
             # "Plugins: []" is not a report, and must not hide a later one.
-            empty_report = output[start:end]
+            empty_report = True
+        elif (
+            isinstance(data, list)
+            and data
+            and all(
+                isinstance(item, str)
+                or (isinstance(item, dict) and item.get("type") == "warning")
+                for item in data
+            )
+        ):
+            # String and typed warning arrays can be logging, but cannot validate
+            # an empty fallback. Malformed source arrays still count as failures.
+            log_arrays = True
         elif data != []:
-            # Unknown nonempty containers cannot validate an empty fallback.
-            # Keep looking for a usable report rather than silently passing.
-            invalid_report = True
-    return None if invalid_report else empty_report
+            failures += 1
+    failures += int(log_arrays and not reports)
+    return (reports if reports or empty_report else None), failures
 
 
 def parse_stylelint_output(output: str | None) -> list[StylelintIssue]:
@@ -171,19 +186,18 @@ def parse_stylelint_output_with_stats(
     if not output or not output.strip():
         return issues, 0
 
+    failures = 0
     try:
         data: Any = json.loads(output)
     except json.JSONDecodeError:
-        json_content = _extract_json_array(output)
-        if json_content is None:
-            return issues, 1
-        data = json.loads(json_content)
+        data, failures = _extract_json_array(output)
+        if data is None:
+            return issues, max(1, failures)
 
     if not isinstance(data, list):
         logger.debug("Stylelint output is not a JSON array")
         return issues, 1
 
-    failures = 0
     for source_result in data:
         if not isinstance(source_result, dict):
             failures += 1

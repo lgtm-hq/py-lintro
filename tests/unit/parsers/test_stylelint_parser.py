@@ -272,6 +272,38 @@ def test_noisy_report_preserves_malformed_source_accounting() -> None:
     assert_that(issues).extracting("message").is_equal_to(["kept"])
 
 
+@pytest.mark.parametrize(
+    "invalid",
+    ["[null]", "[{}]", "[false]", "[[[]]]", '{"warnings":[]}', "[null}"],
+)
+@pytest.mark.parametrize("invalid_first", [False, True])
+@pytest.mark.parametrize("report", [CLEAN, SINGLE_WARNING])
+def test_invalid_outer_sibling_is_counted_with_usable_report(
+    invalid: str,
+    invalid_first: bool,
+    report: str,
+) -> None:
+    """Recognizable reports retain findings and failures in either order."""
+    reports = [invalid, report] if invalid_first else [report, invalid]
+    issues, failures = parse_stylelint_output_with_stats("\n".join(reports))
+
+    assert_that(failures).is_equal_to(1)
+    assert_that(issues).extracting("code").is_equal_to(
+        ["color-hex-length"] if report == SINGLE_WARNING else [],
+    )
+
+
+def test_later_reports_keep_findings_and_accumulate_failures() -> None:
+    """Every outer sibling contributes even after the first usable report."""
+    output = "\n".join(["[null]", CLEAN, SINGLE_WARNING, "[false]", "[{", ""])
+    issues, failures = parse_stylelint_output_with_stats(output)
+
+    assert_that(failures).is_equal_to(3)
+    assert_that(issues).extracting("file", "code").is_equal_to(
+        [("/tmp/fixme.css", "color-hex-length")],
+    )
+
+
 def test_parse_multiple_sources() -> None:
     """Warnings across multiple source files are all collected."""
     output = "[" + SINGLE_WARNING[1:-1] + "," + MULTI_SCSS[1:-1] + "]"
@@ -343,6 +375,7 @@ def test_unrelated_json_array_before_payload_is_skipped() -> None:
         '[{"source":"/tmp/a.css","warnings":[{"line":1,"column":1,'
         '"rule":"block-no-empty","severity":"error","text":"empty"}]}]'
     )
-    issues = parse_stylelint_output(output=output)
+    issues, failures = parse_stylelint_output_with_stats(output=output)
+    assert_that(failures).is_zero()
     assert_that(issues).is_length(1)
     assert_that(issues[0].code).is_equal_to("block-no-empty")

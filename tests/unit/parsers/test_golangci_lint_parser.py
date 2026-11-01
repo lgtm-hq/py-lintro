@@ -129,13 +129,25 @@ def test_absent_report_counts_as_a_failure(output: str | None) -> None:
     assert_that(parse_golangci_lint_output_with_stats(output)).is_equal_to(([], 1))
 
 
-@pytest.mark.parametrize("prefix", ["[runner] loading\n", "[runner] loading "])
-def test_bracketed_log_prefix_preserves_report(prefix: str) -> None:
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "[runner] loading\n",
+        "[runner] loading ",
+        "WARN [runner] Can't run linter x\n",
+        'level=warning msg="[config] deprecated"\n',
+        "time=1 [x] y\n",
+    ],
+)
+@pytest.mark.parametrize("report", [_TWO_ISSUES, '{"Issues": [], "Report": {}}'])
+def test_bracketed_log_prefix_preserves_report(prefix: str, report: str) -> None:
     """A bracketed log label is distinct from a JSON array envelope."""
-    issues, failures = parse_golangci_lint_output_with_stats(prefix + _TWO_ISSUES)
+    issues, failures = parse_golangci_lint_output_with_stats(prefix + report)
 
     assert_that(failures).is_zero()
-    assert_that(issues).extracting("code").is_equal_to(["errcheck", "ineffassign"])
+    assert_that(issues).extracting("code").is_equal_to(
+        ["errcheck", "ineffassign"] if report == _TWO_ISSUES else [],
+    )
 
 
 @pytest.mark.parametrize(
@@ -148,6 +160,10 @@ def test_bracketed_log_prefix_preserves_report(prefix: str) -> None:
         '[true]\n{"Issues": []}',
         '[false]\n{"Issues": []}',
         'notice\n[{"Issues": []}]',
+        'WARN [runner] loading\n[{"Issues": []}',
+        'notice\n[null]\n{"Issues": []}',
+        'notice\n[true]\n{"Issues": []}',
+        'notice\n[false]\n{"Issues": []}',
     ],
 )
 def test_array_envelope_cannot_expose_a_nested_report(output: str) -> None:
