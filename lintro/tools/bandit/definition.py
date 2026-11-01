@@ -54,17 +54,12 @@ def _extract_bandit_json(raw_text: str) -> dict[str, Any]:
 
     Raises:
         json.JSONDecodeError: If JSON cannot be parsed.
-        ValueError: If no JSON object boundaries are found.
+        ValueError: If no JSON object boundaries or valid results list are found.
     """
     if not raw_text or not raw_text.strip():
         raise json.JSONDecodeError("Empty output", raw_text or "", 0)
 
     text: str = raw_text.strip()
-
-    # Quick path: if the entire text is JSON
-    if text.startswith("{") and text.endswith("}"):
-        result: dict[str, Any] = json.loads(text)
-        return result
 
     start: int = text.find("{")
     end: int = text.rfind("}")
@@ -73,6 +68,8 @@ def _extract_bandit_json(raw_text: str) -> dict[str, Any]:
 
     json_str: str = text[start : end + 1]
     parsed: dict[str, Any] = json.loads(json_str)
+    if not isinstance(parsed.get("results"), list):
+        raise ValueError("Bandit output missing a valid 'results' list")
     return parsed
 
 

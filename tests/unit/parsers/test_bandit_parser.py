@@ -13,6 +13,48 @@ from assertpy import assert_that
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.bandit.bandit_parser import parse_bandit_output
 from lintro.plugins import ToolRegistry
+from lintro.tools.bandit.definition import _extract_bandit_json
+
+
+@pytest.mark.parametrize("prefix", ["", "Working... 100%\n"], ids=["json", "mixed"])
+@pytest.mark.parametrize(
+    "report",
+    [
+        {},
+        {"results": None},
+        {"results": {}},
+        {"results": ""},
+        {"results": "invalid"},
+        {"results": 0},
+        {"results": False},
+    ],
+    ids=["missing", "null", "object", "empty-string", "string", "number", "boolean"],
+)
+def test_extract_bandit_json_rejects_invalid_results(
+    report: dict[str, object],
+    prefix: str,
+) -> None:
+    """Reject invalid primary containers in plain and mixed JSON output.
+
+    Args:
+        report: JSON report with missing or non-list results.
+        prefix: Optional informational text before the JSON report.
+    """
+    assert_that(_extract_bandit_json).raises(ValueError).when_called_with(
+        prefix + json.dumps(report),
+    )
+
+
+@pytest.mark.parametrize("prefix", ["", "Working... 100%\n"], ids=["json", "mixed"])
+def test_extract_bandit_json_accepts_empty_results(prefix: str) -> None:
+    """Preserve a legitimate empty results list through JSON extraction.
+
+    Args:
+        prefix: Optional informational text before the JSON report.
+    """
+    report: dict[str, object] = {"results": [], "errors": []}
+
+    assert_that(_extract_bandit_json(prefix + json.dumps(report))).is_equal_to(report)
 
 
 def test_parse_bandit_valid_output() -> None:
