@@ -18,11 +18,11 @@ concurrency:
 jobs:
   semantic-title:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-semantic-pr-title.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-semantic-pr-title.yml@f63b85534ce3a561f177c4ee3417b17c04f14a8b # v0.83.1
     with:
       # Org ruleset (checks-py-lintro): semantic-title / 📝 Validate PR Title
       job-name: '📝 Validate PR Title'
-      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      tooling-ref: 'f63b85534ce3a561f177c4ee3417b17c04f14a8b' # v0.83.1
       # commitlint on main enforces a 100-character header, and the squash
       # merge appends " (#NNNN)" to the PR title. 90 leaves room for that
       # suffix, so a title that passes here cannot fail post-merge (#2553:
