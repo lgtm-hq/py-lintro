@@ -43,7 +43,7 @@ jobs:
   test-compat:
     if: '!cancelled()'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@f63b85534ce3a561f177c4ee3417b17c04f14a8b # v0.83.1
     with:
       publish-test-summary: false
       python-versions: '3.11,3.12,3.13,3.14'
@@ -63,7 +63,7 @@ jobs:
       # default `python` so stage-coverage-html still finds python-coverage.
       artifact-prefix: python_compat
       runner-image: ubuntu-24.04
-      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      tooling-ref: 'f63b85534ce3a561f177c4ee3417b17c04f14a8b' # v0.83.1
       egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: pypi
       # Full list (v0.50.0+ replace semantics): the reusable passes
@@ -99,7 +99,7 @@ jobs:
   test-coverage:
     if: '!cancelled()'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@f63b85534ce3a561f177c4ee3417b17c04f14a8b # v0.83.1
     with:
       publish-test-summary: true
       python-version: '3.14'
@@ -116,7 +116,7 @@ jobs:
       pipeline-skip: false
       job-name: Python Coverage
       runner-image: ubuntu-24.04
-      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      tooling-ref: 'f63b85534ce3a561f177c4ee3417b17c04f14a8b' # v0.83.1
       egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: pypi
       # Full list (v0.50.0+ replace semantics): the reusable passes
@@ -155,7 +155,7 @@ jobs:
   test-shell:
     if: '!cancelled()'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-shell.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-shell.yml@f63b85534ce3a561f177c4ee3417b17c04f14a8b # v0.83.1
     with:
       job-name: 🐚 Shell Tests
       test-path: tests/bats
@@ -163,7 +163,7 @@ jobs:
       publish-test-summary: false
       draft-pr-skip: true
       runner-image: ubuntu-24.04
-      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      tooling-ref: 'f63b85534ce3a561f177c4ee3417b17c04f14a8b' # v0.83.1
       egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: github-tooling
       # Replace semantics (see test-compat): the github-tooling baseline plus
@@ -226,11 +226,11 @@ jobs:
     needs: [test-gate]
     if: always() && !cancelled()
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@f63b85534ce3a561f177c4ee3417b17c04f14a8b # v0.83.1
     permissions:
       contents: read
     with:
-      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      tooling-ref: 'f63b85534ce3a561f177c4ee3417b17c04f14a8b' # v0.83.1
       job-name: '🧪 Test Suite & Coverage'
       runner-image: ubuntu-24.04
       upstream-result: ${{ needs.test-gate.outputs.result }}
@@ -275,11 +275,11 @@ jobs:
 
       - name: Checkout
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@f63b85534ce3a561f177c4ee3417b17c04f14a8b # v0.83.1
 
       - name: Setup Python and uv
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+        uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@f63b85534ce3a561f177c4ee3417b17c04f14a8b # v0.83.1
         with:
           python-version: '3.14'
           install-dependencies: 'true'
