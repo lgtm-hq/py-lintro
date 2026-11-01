@@ -19,69 +19,110 @@ from lintro.parsers.checkov.checkov_issue import CheckovIssue
 CHECKOV_PARSE_ERROR_CODE: str = "CKV_PARSE_ERROR"
 
 
-def _iter_report_blocks(data: Any) -> list[dict[str, Any]]:
-    """Normalize Checkov JSON into a list of per-framework report blocks.
-
-    Checkov emits a single object when one framework runs and a list of
-    objects when several frameworks (e.g. terraform + secrets) run against the
-    same paths. This helper flattens both shapes into a list of report dicts.
+def _is_empty_summary(data: dict[str, Any]) -> bool:
+    """Recognize Checkov's summary-only output when no framework has checks.
 
     Args:
-        data: Parsed Checkov JSON (object or list of objects).
+        data: Decoded top-level report object.
 
     Returns:
-        list[dict[str, Any]]: Report blocks that carry a ``results`` mapping.
+        Whether the object is the zero summary emitted by runner_registry.
     """
-    if isinstance(data, dict):
-        return [data]
-    if isinstance(data, list):
-        return [block for block in data if isinstance(block, dict)]
-    return []
+    counts = ("passed", "failed", "skipped", "parsing_errors", "resource_count")
+    return (
+        "results" not in data
+        and isinstance(data.get("checkov_version"), str)
+        and bool(data["checkov_version"].strip())
+        and all(type(data.get(key)) is int and data[key] == 0 for key in counts)
+    )
 
 
 def parse_checkov_output(output: str | None) -> list[CheckovIssue]:
+    """Return Checkov findings through the legacy list API.
+
+    Args:
+        output: Raw JSON formatter output.
+
+    Returns:
+        All usable findings, omitting parser failure accounting.
+    """
+    issues, _failures = parse_checkov_output_with_stats(output)
+    return issues
+
+
+def parse_checkov_output_with_stats(
+    output: str | None,
+) -> tuple[list[CheckovIssue], int]:
     """Parse Checkov JSON output into ``CheckovIssue`` objects.
 
     Failed checks and parsing errors are surfaced as issues; passed and
     skipped checks are ignored. The parser is defensive against malformed JSON
-    and unexpected structures, returning an empty list rather than raising.
+    and unexpected structures, counting failures rather than raising.
 
     Args:
         output: Raw JSON string from ``checkov --output json``. May be
             ``None`` or empty.
 
     Returns:
-        list[CheckovIssue]: Parsed failed checks. Empty when there are no
-            failures or the input cannot be parsed.
+        Usable findings and the count of invalid report containers or records.
+        Single-framework objects, multi-framework lists and the explicit
+        zero-check summary are supported.
     """
     if not output or not output.strip():
-        return []
+        return [], 0
 
     try:
         data = json.loads(output)
     except (json.JSONDecodeError, ValueError) as exc:
         logger.warning("Failed to parse checkov JSON output: {}", exc)
-        return []
+        return [], 1
+
+    if isinstance(data, dict):
+        if _is_empty_summary(data):
+            return [], 0
+        blocks = [data]
+    elif isinstance(data, list):
+        if not data:
+            return [], 1
+        blocks = data
+    else:
+        return [], 1
 
     issues: list[CheckovIssue] = []
+    failures = 0
+    for block in blocks:
+        block_issues, block_failures = _parse_report_block(block)
+        issues.extend(block_issues)
+        failures += block_failures
+    return issues, failures
 
-    for block in _iter_report_blocks(data):
-        results = block.get("results")
-        if not isinstance(results, dict):
-            continue
 
-        failed_checks = results.get("failed_checks")
-        if isinstance(failed_checks, list):
-            for check in failed_checks:
-                if not isinstance(check, dict):
-                    continue
-                issue = _parse_failed_check(check)
-                if issue is not None:
-                    issues.append(issue)
+def _parse_report_block(block: Any) -> tuple[list[CheckovIssue], int]:
+    """Validate one framework without discarding usable sibling reports.
 
-        issues.extend(_parse_parsing_errors(results.get("parsing_errors")))
+    Args:
+        block: One framework report from Checkov's object or array envelope.
 
-    return issues
+    Returns:
+        Usable findings and the number of invalid containers or checks.
+    """
+    if not isinstance(block, dict) or not isinstance(block.get("results"), dict):
+        return [], 1
+    results = block["results"]
+    issues: list[CheckovIssue] = []
+    failed_checks = results.get("failed_checks")
+    if not isinstance(failed_checks, list):
+        return _parse_parsing_errors(results.get("parsing_errors")), 1
+
+    failures = 0
+    for check in failed_checks:
+        issue = _parse_failed_check(check) if isinstance(check, dict) else None
+        if issue is None:
+            failures += 1
+        else:
+            issues.append(issue)
+    issues.extend(_parse_parsing_errors(results.get("parsing_errors")))
+    return issues, failures
 
 
 def _parse_parsing_errors(parsing_errors: Any) -> list[CheckovIssue]:

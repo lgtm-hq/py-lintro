@@ -31,7 +31,7 @@ from loguru import logger
 from lintro.parsers.base_parser import (
     extract_int_field,
     extract_str_field,
-    safe_parse_items,
+    safe_parse_items_with_stats,
 )
 from lintro.parsers.sqlfluff.sqlfluff_issue import SqlfluffIssue
 
@@ -71,6 +71,21 @@ def _parse_sqlfluff_violation(
 
 
 def parse_sqlfluff_output(output: str | None) -> list[SqlfluffIssue]:
+    """Return SQLFluff findings through the legacy list API.
+
+    Args:
+        output: Raw JSON formatter output.
+
+    Returns:
+        All usable findings, omitting parser failure accounting.
+    """
+    issues, _failures = parse_sqlfluff_output_with_stats(output)
+    return issues
+
+
+def parse_sqlfluff_output_with_stats(
+    output: str | None,
+) -> tuple[list[SqlfluffIssue], int]:
     """Parse SQLFluff JSON output into SqlfluffIssue objects.
 
     Supports SQLFluff's nested JSON structure where each file entry contains
@@ -80,33 +95,35 @@ def parse_sqlfluff_output(output: str | None) -> list[SqlfluffIssue]:
         output: Raw output from `sqlfluff lint --format=json`.
 
     Returns:
-        list[SqlfluffIssue]: Parsed issues.
+        Usable findings and the count of invalid report containers or records.
     """
-    if not output or output.strip() in ("", "[]", "{}"):
-        return []
+    if not output or not output.strip():
+        return [], 0
 
     try:
         data = json.loads(output)
     except (json.JSONDecodeError, TypeError) as e:
         logger.debug(f"SQLFluff JSON parsing failed: {e}")
-        return []
+        return [], 1
 
     if not isinstance(data, list):
         logger.debug(f"SQLFluff output is not a list: {type(data).__name__}")
-        return []
+        return [], 1
 
     issues: list[SqlfluffIssue] = []
+    failures = 0
 
     for file_entry in data:
         if not isinstance(file_entry, dict):
             logger.debug("Skipping non-dict file entry in SQLFluff output")
+            failures += 1
             continue
 
         filepath = extract_str_field(file_entry, ["filepath", "file"])
         violations = file_entry.get("violations")
 
         if not isinstance(violations, list):
-            # No violations for this file
+            failures += 1
             continue
 
         # Parse violations for this file
@@ -116,11 +133,12 @@ def parse_sqlfluff_output(output: str | None) -> list[SqlfluffIssue]:
         ) -> SqlfluffIssue | None:
             return _parse_sqlfluff_violation(violation=violation, filepath=fp)
 
-        file_issues = safe_parse_items(
+        file_issues, file_failures = safe_parse_items_with_stats(
             items=violations,
             parse_func=parse_with_filepath,
             tool_name="sqlfluff",
         )
         issues.extend(file_issues)
+        failures += file_failures
 
-    return issues
+    return issues, failures

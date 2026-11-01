@@ -23,12 +23,15 @@ from lintro.models.core.claim import Claim
 from lintro.models.core.tool_outcome import (
     Checked,
     FixMeasured,
+    FixUnmeasured,
     Skipped,
     TimedOut,
     ToolOutcome,
 )
 from lintro.models.core.tool_result import ToolResult
-from lintro.parsers.stylelint.stylelint_parser import parse_stylelint_output
+from lintro.parsers.stylelint.stylelint_parser import (
+    parse_stylelint_output_with_stats,
+)
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
@@ -289,7 +292,7 @@ class StylelintPlugin(BaseToolPlugin):
         except subprocess.TimeoutExpired:
             return self._create_timeout_result(timeout_val=ctx.timeout, cwd=ctx.cwd)
 
-        issues = parse_stylelint_output(output=output)
+        issues, parse_failures = parse_stylelint_output_with_stats(output=output)
         if not issues and self._is_no_config_error(output):
             return self._create_no_config_result(cwd=ctx.cwd)
         # Stylelint exits 2 when violations exist (parsed above); any other
@@ -301,9 +304,10 @@ class StylelintPlugin(BaseToolPlugin):
                 name=self.definition.name,
                 output=output or "Stylelint exited with an error and no results.",
                 cwd=ctx.cwd,
+                parse_failures_count=parse_failures,
             )
         issues_count = len(issues)
-        success = issues_count == 0
+        success = issues_count == 0 and parse_failures == 0
 
         return ToolResult.from_outcome(
             ToolOutcome(
@@ -314,6 +318,7 @@ class StylelintPlugin(BaseToolPlugin):
             output=output if not success else None,
             issues=issues,
             cwd=ctx.cwd,
+            parse_failures_count=parse_failures,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -350,20 +355,29 @@ class StylelintPlugin(BaseToolPlugin):
         except subprocess.TimeoutExpired:
             return self._create_timeout_result(timeout_val=ctx.timeout, cwd=ctx.cwd)
 
-        initial_issues = parse_stylelint_output(output=check_output)
+        initial_issues, initial_failures = parse_stylelint_output_with_stats(
+            check_output,
+        )
         initial_count = len(initial_issues)
         if not initial_issues and self._is_no_config_error(check_output):
             return self._create_no_config_result(cwd=ctx.cwd)
         # A failing initial check with nothing parsed is a crash/config
         # error, not a fixable state.
-        if not initial_issues and not initial_success:
+        if initial_failures or (not initial_issues and not initial_success):
             return ToolResult.from_outcome(
-                ToolOutcome(execution=Checked(success=False)),
+                ToolOutcome(
+                    execution=Checked(success=False),
+                    accounting=FixUnmeasured("Invalid Stylelint initial report."),
+                    issues_count=initial_count,
+                ),
                 name=self.definition.name,
                 output=(
                     check_output or "Stylelint exited with an error and no results."
                 ),
                 cwd=ctx.cwd,
+                issues=initial_issues,
+                initial_issues=initial_issues,
+                parse_failures_count=initial_failures,
             )
 
         # Apply fixes.
@@ -380,14 +394,19 @@ class StylelintPlugin(BaseToolPlugin):
 
         # A crashed --fix run (nothing parseable) must surface, not flow into
         # a re-check that would misattribute the failure.
-        if not fix_success and not parse_stylelint_output(output=fix_output):
+        fix_issues, fix_failures = parse_stylelint_output_with_stats(fix_output)
+        if not fix_success and not fix_issues:
             return ToolResult.from_outcome(
                 ToolOutcome(
                     execution=Checked(success=False),
-                    accounting=FixMeasured(
-                        initial=initial_count,
-                        fixed=0,
-                        remaining=initial_count,
+                    accounting=(
+                        FixUnmeasured("Invalid Stylelint fix report.", initial_count)
+                        if fix_failures
+                        else FixMeasured(
+                            initial=initial_count,
+                            fixed=0,
+                            remaining=initial_count,
+                        )
                     ),
                     issues_count=initial_count,
                 ),
@@ -395,6 +414,7 @@ class StylelintPlugin(BaseToolPlugin):
                 output=fix_output or "Stylelint --fix exited with an error.",
                 issues=initial_issues,
                 cwd=ctx.cwd,
+                parse_failures_count=fix_failures,
             )
 
         # Re-check for remaining issues.
@@ -407,10 +427,15 @@ class StylelintPlugin(BaseToolPlugin):
         except subprocess.TimeoutExpired:
             return self._create_timeout_result(timeout_val=ctx.timeout, cwd=ctx.cwd)
 
-        remaining_issues = parse_stylelint_output(output=final_output)
+        remaining_issues, final_failures = parse_stylelint_output_with_stats(
+            final_output,
+        )
+        parse_failures = fix_failures + final_failures
+        if fix_failures:
+            remaining_issues.extend(i for i in fix_issues if i not in remaining_issues)
         # A failed verification with nothing parsed must not read as
         # "all fixed" — keep the initial issues as remaining.
-        if not remaining_issues and not final_success:
+        if not remaining_issues and not final_success and not parse_failures:
             return ToolResult.from_outcome(
                 ToolOutcome(
                     execution=Checked(success=False),
@@ -454,21 +479,33 @@ class StylelintPlugin(BaseToolPlugin):
             output_lines.append(f"Fix output:\n{fix_output}")
 
         final_message = "\n".join(output_lines) if output_lines else None
-        success = remaining_count == 0
+        success = remaining_count == 0 and parse_failures == 0
 
         return ToolResult.from_outcome(
             ToolOutcome(
                 execution=Checked(success=success, inspected_files=True),
-                accounting=FixMeasured(
-                    initial=initial_count,
-                    fixed=fixed_count,
-                    remaining=remaining_count,
+                accounting=(
+                    FixUnmeasured(
+                        "Invalid Stylelint verification report.",
+                        initial_count,
+                    )
+                    if parse_failures
+                    else FixMeasured(
+                        initial=initial_count,
+                        fixed=fixed_count,
+                        remaining=remaining_count,
+                    )
                 ),
                 issues_count=remaining_count,
             ),
             name=self.definition.name,
-            output=final_message,
+            output=(
+                (fix_output if fix_failures else final_output)
+                if parse_failures
+                else final_message
+            ),
             issues=remaining_issues,
             initial_issues=initial_issues,
             cwd=ctx.cwd,
+            parse_failures_count=parse_failures,
         )

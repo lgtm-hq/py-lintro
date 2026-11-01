@@ -129,6 +129,8 @@ def parse_ruff_output_with_stats(output: str) -> tuple[list[RuffIssue], int]:
 
         if isinstance(ruff_data, list):
             return safe_parse_items_with_stats(ruff_data, _parse_ruff_item, "ruff")
+        if not isinstance(ruff_data, dict):
+            return [], 1
     except (json.JSONDecodeError, TypeError) as e:
         # Fall back to JSON Lines parsing below
         array_decode_failed = True
