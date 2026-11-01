@@ -31,12 +31,9 @@ def _looks_like_stylelint_payload(data: Any) -> bool:
     if not data:
         return True
     stylelint_keys = {"source", "warnings", "parseErrors", "invalidOptionWarnings"}
-    for item in data:
-        if not isinstance(item, dict):
-            return False
-        if stylelint_keys.intersection(item.keys()):
-            return True
-    return False
+    return any(
+        isinstance(item, dict) and stylelint_keys.intersection(item) for item in data
+    )
 
 
 def _extract_json_array(output: str) -> str | None:
@@ -53,55 +50,76 @@ def _extract_json_array(output: str) -> str | None:
         The JSON array substring, or None if no Stylelint array is found.
     """
     decoder = json.JSONDecoder()
-    idx = output.find("[")
-    while idx != -1:
+    idx = 0
+    while idx < len(output):
+        if output[idx] not in "[{":
+            idx += 1
+            continue
         try:
             data, end = decoder.raw_decode(output, idx)
         except (json.JSONDecodeError, ValueError):
-            idx = output.find("[", idx + 1)
+            idx += 1
             continue
         if _looks_like_stylelint_payload(data):
             return output[idx:end]
-        idx = output.find("[", idx + 1)
+        # Skip the whole unrelated value so an inner [] cannot masquerade
+        # as the formatter's primary report container.
+        idx = end
     return None
 
 
 def parse_stylelint_output(output: str | None) -> list[StylelintIssue]:
+    """Return Stylelint findings through the legacy list API.
+
+    Args:
+        output: Raw JSON formatter output, possibly surrounded by log text.
+
+    Returns:
+        All usable findings, omitting parser failure accounting.
+    """
+    issues, _failures = parse_stylelint_output_with_stats(output)
+    return issues
+
+
+def parse_stylelint_output_with_stats(
+    output: str | None,
+) -> tuple[list[StylelintIssue], int]:
     """Parse Stylelint JSON output into a list of StylelintIssue objects.
 
     Args:
         output: The raw combined output from stylelint ``--formatter json``.
 
     Returns:
-        List of StylelintIssue objects. Returns an empty list for empty,
-        None, or unparseable input.
+        Usable findings and the count of invalid report containers or records.
     """
     issues: list[StylelintIssue] = []
 
     if not output or not output.strip():
-        return issues
-
-    json_content = _extract_json_array(output)
-    if json_content is None:
-        return issues
+        return issues, 0
 
     try:
-        data: Any = json.loads(json_content)
-    except json.JSONDecodeError as exc:
-        logger.debug(f"Failed to parse Stylelint JSON output: {exc}")
-        return issues
+        data: Any = json.loads(output)
+    except json.JSONDecodeError:
+        json_content = _extract_json_array(output)
+        if json_content is None:
+            return issues, 1
+        data = json.loads(json_content)
 
     if not isinstance(data, list):
         logger.debug("Stylelint output is not a JSON array")
-        return issues
+        return issues, 1
 
+    failures = 0
     for source_result in data:
         if not isinstance(source_result, dict):
+            failures += 1
             continue
+        if not isinstance(source_result.get("warnings"), list):
+            failures += 1
         source = str(source_result.get("source", "") or "")
         issues.extend(_parse_source_result(source_result, source))
 
-    return issues
+    return issues, failures
 
 
 def _parse_source_result(

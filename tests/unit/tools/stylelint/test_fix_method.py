@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.tools.stylelint.definition import StylelintPlugin
@@ -27,6 +28,38 @@ REMAINING_JSON = (
 )
 CLEAN_JSON = '[{"source":"/tmp/a.css","errored":false,"warnings":[]}]'
 NO_CONFIG = "ConfigurationError: No configuration provided for /tmp/a.css"
+
+
+@pytest.mark.parametrize("stage", [0, 1, 2], ids=["initial", "fix", "verification"])
+def test_null_report_cannot_verify_a_stylelint_fix(
+    stylelint_plugin: StylelintPlugin,
+    tmp_path: Path,
+    stage: int,
+) -> None:
+    """An exit-zero null report at any JSON stage makes fix accounting unknown."""
+    outputs = [(False, INITIAL_JSON), (True, CLEAN_JSON), (True, CLEAN_JSON)]
+    outputs[stage] = (True, "null")
+    with (
+        patch.object(
+            stylelint_plugin,
+            "prepare",
+            return_value=make_ctx(tmp_path, ["a.css"]),
+        ),
+        patch.object(
+            stylelint_plugin,
+            "_get_executable_command",
+            return_value=["stylelint"],
+        ),
+        patch.object(stylelint_plugin, "_run_subprocess", side_effect=outputs),
+    ):
+        result = stylelint_plugin.fix([str(tmp_path / "a.css")], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_positive()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    if stage:
+        assert_that(result.initial_issues).is_length(2)
 
 
 def test_fix_preserves_warnings_exposed_by_recheck(

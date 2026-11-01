@@ -6,7 +6,7 @@ It parses SQL into an AST and performs linting rules on top of it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from lintro._tool_versions import get_min_version
@@ -16,7 +16,8 @@ from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
-from lintro.parsers.sqlfluff.sqlfluff_parser import parse_sqlfluff_output
+from lintro.parsers.sqlfluff.sqlfluff_issue import SqlfluffIssue
+from lintro.parsers.sqlfluff.sqlfluff_parser import parse_sqlfluff_output_with_stats
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
@@ -35,6 +36,26 @@ from lintro.tools.core.option_validators import (
 SQLFLUFF_DEFAULT_TIMEOUT: int = 60
 SQLFLUFF_FILE_PATTERNS: list[str] = ["*.sql"]
 SQLFLUFF_DEFAULT_FORMAT: str = "json"
+
+
+def _parse_report(output: str, failures: list[int]) -> list[SqlfluffIssue]:
+    """Keep usable findings while recording incomplete per-file reports.
+
+    Args:
+        output: One file's JSON report.
+        failures: Per-invocation failure counts for the enclosing run.
+
+    Returns:
+        All usable findings in the report.
+
+    Raises:
+        ValueError: When no usable findings survived an invalid report.
+    """
+    issues, count = parse_sqlfluff_output_with_stats(output)
+    failures.append(count)
+    if count and not issues:
+        raise ValueError(f"Malformed SQLFluff JSON report: {output[:500]}")
+    return issues
 
 
 @register_tool
@@ -217,12 +238,18 @@ class SqlfluffPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        return run_per_file_check(
+        failures: list[int] = []
+        result = run_per_file_check(
             ctx,
             plugin=self,
             command=lambda f: self._build_lint_command(files=[str(f)]),
-            parse=lambda output: parse_sqlfluff_output(output=output),
+            parse=lambda output: _parse_report(output, failures),
             policy=PerFileCheckPolicy(issues_imply_failure=True),
+        )
+        return replace(
+            result,
+            success=result.success and not any(failures),
+            parse_failures_count=sum(failures),
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -240,12 +267,13 @@ class SqlfluffPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        return run_per_file_fix(
+        failures: list[int] = []
+        result = run_per_file_fix(
             ctx,
             plugin=self,
             check_command=lambda f: self._build_lint_command(files=[str(f)]),
             fix_command=lambda f: self._build_fix_command(files=[str(f)]),
-            parse=lambda output: parse_sqlfluff_output(output=output),
+            parse=lambda output: _parse_report(output, failures),
             policy=PerFileFixPolicy(
                 check_failure_message="sqlfluff lint failed before fix",
                 # No self-verification. sqlfluff fix can partially apply fixes
@@ -258,3 +286,14 @@ class SqlfluffPlugin(BaseToolPlugin):
                 summarize=False,
             ),
         )
+        if any(failures):
+            return replace(
+                result,
+                success=False,
+                parse_failures_count=sum(failures),
+                residual_unknown=True,
+                residual_unknown_reason="SQLFluff returned an incomplete report.",
+                fixed_issues_count=None,
+                remaining_issues_count=None,
+            )
+        return result

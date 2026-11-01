@@ -37,7 +37,7 @@ from lintro.models.core.claim import Claim
 from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.html_validate.html_validate_parser import (
-    parse_html_validate_output,
+    parse_html_validate_output_with_stats,
 )
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
@@ -278,9 +278,13 @@ class HtmlValidatePlugin(BaseToolPlugin):
             )
 
         # JSON is written to stdout; stderr carries diagnostics only.
-        issues = parse_html_validate_output(output=result.stdout)
+        issues, parse_failures = parse_html_validate_output_with_stats(
+            output=result.stdout,
+        )
         issues_count: int = len(issues)
-        success_flag: bool = result.success and issues_count == 0
+        success_flag: bool = (
+            result.success and issues_count == 0 and parse_failures == 0
+        )
 
         # Suppress output when no issues found; otherwise surface the raw
         # combined output for diagnostics (e.g. a crash producing no JSON).
@@ -310,6 +314,7 @@ class HtmlValidatePlugin(BaseToolPlugin):
             output=final_output,
             issues=issues,
             cwd=ctx.cwd,
+            parse_failures_count=parse_failures,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

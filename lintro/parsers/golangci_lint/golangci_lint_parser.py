@@ -90,6 +90,21 @@ def _parse_issue(item: dict[str, Any]) -> GolangciLintIssue | None:
 
 
 def parse_golangci_lint_output(output: str | None) -> list[GolangciLintIssue]:
+    """Return golangci-lint findings through the legacy list API.
+
+    Args:
+        output: Raw JSON formatter output.
+
+    Returns:
+        All usable findings, omitting parser failure accounting.
+    """
+    issues, _failures = parse_golangci_lint_output_with_stats(output)
+    return issues
+
+
+def parse_golangci_lint_output_with_stats(
+    output: str | None,
+) -> tuple[list[GolangciLintIssue], int]:
     """Parse golangci-lint JSON output into ``GolangciLintIssue`` objects.
 
     Args:
@@ -97,11 +112,12 @@ def parse_golangci_lint_output(output: str | None) -> list[GolangciLintIssue]:
             ``--output.json.path stdout``. May be ``None``.
 
     Returns:
-        A list of ``GolangciLintIssue`` instances. Returns an empty list when
-        there are no issues or the output cannot be decoded.
+        Usable findings and the count of invalid report containers or records.
+        v2's printer normalizes a nil issue slice to ``Issues: []``. Exit 3
+        remains an execution failure handled by the plugin, not a parse error.
     """
     if not output or not output.strip():
-        return []
+        return [], 0
 
     # Strip ANSI codes for consistent parsing across environments.
     text = strip_ansi_codes(output).strip()
@@ -109,28 +125,32 @@ def parse_golangci_lint_output(output: str | None) -> list[GolangciLintIssue]:
     # golangci-lint may append a human-readable stats footer after the JSON
     # document. Decode the leading JSON object and ignore any trailing text.
     start = text.find("{")
-    if start == -1:
-        return []
+    if start == -1 or text.startswith("["):
+        return [], 1
 
     try:
         data, _ = json.JSONDecoder().raw_decode(text[start:])
     except json.JSONDecodeError as e:
         logger.debug(f"Failed to decode golangci-lint output: {e}")
-        return []
+        return [], 1
 
     if not isinstance(data, dict):
-        return []
+        return [], 1
 
     raw_issues = data.get("Issues")
     if not isinstance(raw_issues, list):
-        return []
+        return [], 1
 
     issues: list[GolangciLintIssue] = []
+    failures = 0
     for item in raw_issues:
         if not isinstance(item, dict):
+            failures += 1
             continue
         parsed = _parse_issue(item)
         if parsed is not None:
             issues.append(parsed)
+        else:
+            failures += 1
 
-    return issues
+    return issues, failures
