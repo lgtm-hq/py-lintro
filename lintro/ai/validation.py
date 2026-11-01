@@ -93,7 +93,7 @@ def verify_fixes(
     fresh_issues_by_tool: dict[str, list[object] | None] = {}
     for result in fresh_results:
         fresh_issues_by_tool[result.name] = (
-            list(result.issues or ()) if check_answered(result) else None
+            list(result.issues) if check_answered(result) else None
         )
 
     # Step 2: Validate each applied suggestion using the fresh results.
@@ -322,6 +322,4 @@ def _run_tool_check(
     else:
         if not check_answered(tool_result):
             return None
-        if tool_result.issues is not None:
-            return list(tool_result.issues)
-        return []
+        return list(tool_result.issues)

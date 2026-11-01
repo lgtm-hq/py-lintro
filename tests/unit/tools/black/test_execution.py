@@ -60,7 +60,6 @@ def test_check_needs_reformat(black_plugin: BlackPlugin, tmp_path: Path) -> None
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
     issues = result.issues
-    assert issues is not None  # narrow type for mypy
     first_issue = issues[0]
     assert_that(first_issue.file).ends_with("module.py")
     assert_that(first_issue.message).contains("Would reformat")
@@ -188,7 +187,6 @@ def test_fix_formats_files_despite_ruff_invalid_syntax(
     assert_that(result.output).does_not_contain("E501 supplement failed")
     assert_that(result.timed_out).is_false()
     if include_e501:
-        assert result.issues is not None
         assert_that(result.issues[-1]).has_file(str(long_file)).has_code("E501")
 
 
@@ -480,7 +478,6 @@ def test_fix_retains_e501_when_final_supplement_fails(
     )
     if not black_fixed:
         assert_that(result.output).does_not_contain("Fixed")
-    assert result.issues is not None
     retained = result.issues[-1]
     assert_that(retained).has_file(str(py_file)).has_line(1).has_column(89)
     assert_that(retained).has_code("E501").has_fixable(False)
@@ -528,7 +525,6 @@ def test_fix_initial_supplement_failure_reports_unapplied_changes(
         f"would reformat {py_file}\nE501 supplement failed",
     )
     assert_that(result.output).does_not_contain("Reformatted", "\n\nE501")
-    assert result.issues is not None
     assert_that(result.issues).is_length(1)
     assert_that(result.issues[0].message).is_equal_to("Would reformat file")
     assert_that(py_file.read_text()).is_equal_to("x=1\n")

@@ -143,8 +143,6 @@ def test_plugin_reports_native_commands(
     assert_that(result.inspected_files).is_true()
     assert_that(result.skipped).is_false()
     assert_that(result.issues_count).is_greater_than(0)
-    if result.issues is None:
-        pytest.fail("A successful scan with findings must include issue objects")
     findings = [issue for issue in result.issues if isinstance(issue, SemgrepIssue)]
     assert_that({issue.check_id for issue in findings}).is_equal_to({RULE_ID})
     assert_that({issue.severity for issue in findings}).is_equal_to({"WARNING"})
@@ -179,8 +177,6 @@ def test_every_declared_formatter_example_matches(
     assert_that(result.success).is_true()
     assert_that(result.inspected_files).is_true()
     assert_that(result.issues_count).is_equal_to(len(examples))
-    if result.issues is None:
-        pytest.fail("Every formatter example must produce an issue object")
     actual = {
         Path(issue.file).stem
         for issue in result.issues

@@ -38,11 +38,7 @@ def determine_exit_code(
 
     # Check for tool failures first (applies to all actions)
     # Exclude skipped tools — they didn't fail, they just didn't run
-    if any(
-        not getattr(r, "success", True)
-        for r in all_results
-        if not getattr(r, "skipped", False)
-    ):
+    if any(not r.success for r in all_results if not r.skipped):
         exit_code = DEFAULT_EXIT_CODE_FAILURE
 
     # Then check for issues based on action
@@ -85,18 +81,18 @@ def aggregate_tool_results(
 
     for result in results:
         # Exclude skipped tools from totals
-        if getattr(result, "skipped", False):
+        if result.skipped:
             continue
-        total_issues += getattr(result, "issues_count", 0)
+        total_issues += result.issues_count
 
         if action == Action.FIX:
-            if getattr(result, "residual_unknown", False):
+            if result.residual_unknown:
                 # No measurement exists for this tool. Deliberately not a
                 # zero: the run reports it as unknown instead.
                 continue
-            fixed = getattr(result, "fixed_issues_count", None)
+            fixed = result.fixed_issues_count
             total_fixed += fixed if fixed is not None else 0
-            remaining = getattr(result, "remaining_issues_count", None)
+            remaining = result.remaining_issues_count
             total_remaining += remaining if remaining is not None else 0
 
     # Outside FIX mode nothing is fixed; the remaining count is simply the
@@ -108,7 +104,7 @@ def aggregate_tool_results(
     return total_issues, total_fixed, total_remaining
 
 
-def unknown_residual_tool_names(results: Sequence[object]) -> list[str]:
+def unknown_residual_tool_names(results: Sequence[ToolResult]) -> list[str]:
     """Return the tools whose residual the verify pass could not measure.
 
     The run totals leave these tools out rather than folding a zero in for
@@ -117,14 +113,9 @@ def unknown_residual_tool_names(results: Sequence[object]) -> list[str]:
     measured "0 remaining" for a tool whose own row says "unknown".
 
     Args:
-        results: Every result in the run, in execution order. Typed loosely
-            because the console layer holds them as opaque objects.
+        results: Every result in the run, in execution order.
 
     Returns:
         list[str]: Names of the tools in the third state, in run order.
     """
-    return [
-        str(getattr(result, "name", ""))
-        for result in results
-        if getattr(result, "residual_unknown", False)
-    ]
+    return [result.name for result in results if result.residual_unknown]

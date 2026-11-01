@@ -166,8 +166,6 @@ def test_plugin_runs_pack_and_native_rules_together(
     assert_that(result.success).is_true()
     assert_that(result.inspected_files).is_true()
     assert_that(result.issues_count).is_equal_to(2)
-    if result.issues is None:
-        pytest.fail("A successful scan with findings must include issue objects")
     findings = [issue for issue in result.issues if isinstance(issue, SemgrepIssue)]
     assert_that({issue.check_id for issue in findings}).is_equal_to(
         original_ids | {"lintro.python.none-coercion.or-fallback"},

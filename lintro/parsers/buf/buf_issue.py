@@ -28,6 +28,7 @@ class BufIssue(BaseIssue):
             ``COMPILE``, ``FORMAT``).
         end_line: Line where the violation range ends (0 when unknown).
         end_column: Column where the violation range ends (0 when unknown).
+        fixable: True for formatting differences, False for lint/compile errors.
     """
 
     DISPLAY_FIELD_MAP: ClassVar[dict[str, str]] = {
@@ -40,15 +41,13 @@ class BufIssue(BaseIssue):
     end_line: int = field(default=0)
     end_column: int = field(default=0)
 
-    @property
-    def fixable(self) -> bool:
+    fixable: bool = field(default=False, init=False)
+
+    def __post_init__(self) -> None:
         """Report whether ``lintro fmt`` can resolve this finding.
 
         Only formatting differences are auto-fixable: ``buf format --write``
         rewrites them, while lint rule violations and compile errors require a
         human edit.
-
-        Returns:
-            True when the finding is a ``FORMAT`` difference.
         """
-        return self.code == "FORMAT"
+        self.fixable = self.code == "FORMAT"

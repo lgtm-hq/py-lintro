@@ -474,14 +474,14 @@ def _validate_plugin_class(ep: EntryPoint, plugin_class: object) -> bool:
         logger.warning(
             f"Plugin {ep.name!r} targets plugin API version {declared_version!r}, "
             f"which is incompatible with this lintro "
-            f"(API version {LINTRO_PLUGIN_API_VERSION}); skipping",
+            f"(API version {LINTRO_PLUGIN_API_VERSION}); skipping before "
+            "instantiation. Upgrade the plugin or migrate its result/issue "
+            "models and explicitly declare "
+            f"LINTRO_PLUGIN_API_VERSION = {LINTRO_PLUGIN_API_VERSION}. See "
+            "https://github.com/lgtm-hq/py-lintro/blob/main/docs/plugins.md"
+            "#migrating-from-plugin-api-v1-to-v2",
         )
         return False
-    if declared_version is None:
-        logger.debug(
-            f"Plugin {ep.name!r} does not declare LINTRO_PLUGIN_API_VERSION; "
-            "assuming compatibility. Declaring it is recommended.",
-        )
 
     return True
 

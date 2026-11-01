@@ -35,6 +35,8 @@ class BaseIssue:
             Example: {"severity": "level"} to map self.level to severity output.
         DEFAULT_SEVERITY: Fallback severity when the issue has no native value.
             Override in subclasses (e.g. INFO for pure-formatting tools).
+        PREVIEW_FIXABLE: Include check findings in format previews when the tool
+            lacks a per-issue fix signal. Does not claim public fixability.
         file: File path where the issue was found.
         line: Line number where the issue was found (1-based, 0 means unknown).
         column: Column number where the issue was found (1-based, 0 means unknown).
@@ -42,6 +44,7 @@ class BaseIssue:
         doc_url: URL to the rule's documentation page (empty when unavailable).
         category: Optional concern category (Security, Style, …) used by
             ``--group-by category``; empty until taxonomy enrichment.
+        fixable: Whether the tool can automatically fix the issue.
     """
 
     # Default field mapping - subclasses can override specific keys
@@ -54,6 +57,7 @@ class BaseIssue:
     }
 
     DEFAULT_SEVERITY: ClassVar[SeverityLevel] = SeverityLevel.WARNING
+    PREVIEW_FIXABLE: ClassVar[bool] = False
 
     file: str = field(default="")
     line: int = field(default=0)
@@ -61,6 +65,7 @@ class BaseIssue:
     message: str = field(default="")
     doc_url: str = field(default="", repr=False)
     category: str = field(default="")
+    fixable: bool = field(default=False)
 
     def get_severity(self) -> SeverityLevel:
         """Return the normalized severity for this issue.

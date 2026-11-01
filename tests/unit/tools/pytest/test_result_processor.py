@@ -96,7 +96,6 @@ def test_build_result_filters_skipped(
     # SKIPPED issues should not be in the result.issues
     issues = result.issues
     assert_that(issues).is_not_none()
-    assert issues is not None  # narrow type for mypy
     issue_statuses = {cast(PytestIssue, issue).test_status for issue in issues}
     assert_that(issue_statuses).does_not_contain("SKIPPED")
 

@@ -507,7 +507,7 @@ class TyposPlugin(BaseToolPlugin):
             initial_issues_count=initial_count,
             fixed_issues_count=fixed_count,
             remaining_issues_count=remaining_count,
-            initial_issues=initial_issues or None,
+            initial_issues=initial_issues,
             cwd=ctx.cwd,
         )
 
@@ -545,7 +545,7 @@ class TyposPlugin(BaseToolPlugin):
             initial_issues_count=initial_count,
             fixed_issues_count=0,
             remaining_issues_count=initial_count,
-            initial_issues=initial_issues or None,
+            initial_issues=initial_issues,
             cwd=cwd,
         )
 

@@ -10,13 +10,34 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
+from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.golangci_lint.golangci_lint_issue import GolangciLintIssue
-from lintro.tools.golangci_lint.definition import GolangciLintPlugin
+from lintro.tools.golangci_lint.definition import GolangciLintPlugin, _merge_fix_results
 from tests.unit.tools.golangci_lint.conftest import (
     GOLANGCI_JSON_NO_ISSUES,
     GOLANGCI_JSON_ONE_ISSUE,
     GOLANGCI_JSON_TWO_ISSUES,
 )
+
+
+def test_merge_preserves_unmeasured_fix_counts() -> None:
+    """An unmeasured module must not become a measured zero during aggregation."""
+    measured = ToolResult(
+        name="golangci_lint",
+        initial_issues_count=3,
+        fixed_issues_count=1,
+        remaining_issues_count=2,
+    )
+    unmeasured = ToolResult(name="golangci_lint", issues_count=1)
+
+    result = _merge_fix_results(name="golangci_lint", results=[measured, unmeasured])
+
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.initial_issues_count).is_none()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.issues).is_empty()
+    assert_that(result.initial_issues).is_empty()
 
 
 def _make_go_module(root: Path) -> None:

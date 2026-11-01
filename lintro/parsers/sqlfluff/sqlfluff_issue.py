@@ -14,6 +14,7 @@ class SqlfluffIssue(BaseIssue):
 
     Attributes:
         DISPLAY_FIELD_MAP: Mapping of display field names to attribute names.
+        PREVIEW_FIXABLE: Preserve format previews without claiming lint fixes.
         code: Rule code (e.g., L010, LT01).
         rule_name: Full rule name (e.g., capitalisation.keywords).
         end_line: End line number for multi-line issues.
@@ -24,6 +25,7 @@ class SqlfluffIssue(BaseIssue):
         **BaseIssue.DISPLAY_FIELD_MAP,
         "code": "code",
     }
+    PREVIEW_FIXABLE: ClassVar[bool] = True
 
     code: str = field(default="")
     rule_name: str = field(default="")

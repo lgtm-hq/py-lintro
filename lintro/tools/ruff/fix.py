@@ -384,7 +384,7 @@ def execute_ruff_fix(
         remaining_issues_count=remaining_count,
         parse_failures_count=parse_failures,
         # Store pre-fix issues so the display layer can show what was fixed
-        initial_issues=initial_issues if initial_issues else None,
+        initial_issues=initial_issues,
         # The run-level verify pass resolves each issue's file against this
         # directory to decide whether the file was rewritten (#1743).
         cwd=ctx.cwd,
