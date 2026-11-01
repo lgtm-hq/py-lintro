@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.175.2] - 2026-11-01
+
+### Fixed
+
+- **ai**: retain silent claims across checkpoint resumes (#3111) (8a61c26)
+
 ## [0.175.1] - 2026-11-01
 
 ### Changed
