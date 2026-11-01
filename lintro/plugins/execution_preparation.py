@@ -14,6 +14,7 @@ from pathlib import Path
 from loguru import logger
 
 from lintro.config.lintro_config import LintroConfig
+from lintro.models.core.tool_outcome import NoFiles, Skipped, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.file_discovery import (
     discover_files,
@@ -244,13 +245,10 @@ def verify_tool_version(
         f"{version_info.install_hint}"
     )
 
-    return ToolResult(
+    return ToolResult.from_outcome(
+        ToolOutcome(execution=Skipped(version_info.error_message or skip_message)),
         name=definition.name,
-        success=True,
         output=skip_message,
-        issues_count=0,
-        skipped=True,
-        skip_reason=version_info.error_message,
     )
 
 
@@ -293,12 +291,10 @@ def prepare_execution(
     # Validate paths
     validate_paths(paths)
     if not paths:
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=NoFiles()),
             name=definition.name,
-            success=True,
             output=no_files_message,
-            issues_count=0,
-            no_files=True,
         )
 
     # Discover files matching tool patterns, restricting to the git-diff
@@ -321,12 +317,10 @@ def prepare_execution(
             if extensions:
                 file_type = "/".join(extensions) + " files"
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=NoFiles()),
             name=definition.name,
-            success=True,
             output=f"No {file_type} found to check.",
-            issues_count=0,
-            no_files=True,
         )
 
     logger.debug(f"Files to process: {files}")

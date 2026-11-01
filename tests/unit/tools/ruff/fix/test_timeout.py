@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 from assertpy import assert_that
 
+from lintro.models.core.tool_outcome import FixMeasured, TimedOut, ToolOutcome
 from lintro.tools.ruff.fix import execute_ruff_fix
 
 
@@ -31,6 +32,10 @@ def test_execute_ruff_fix_timeout_on_initial_check(
     # the issue counts; ``timed_out`` carries the signal (#1768).
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.timed_out).is_true()
+    assert_that(result.outcome).is_equal_to(ToolOutcome(TimedOut(result.output)))
+    assert_that(result.initial_issues_count).is_none()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
 
 
 def test_execute_ruff_fix_timeout_on_fix_command(
@@ -61,6 +66,11 @@ def test_execute_ruff_fix_timeout_on_fix_command(
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("timed out")
+
+    assert_that(result.outcome).is_equal_to(
+        ToolOutcome(TimedOut(result.output), FixMeasured(1, 0, 1), issues_count=1),
+    )
+    assert_that(result.inspected_files).is_false()
 
 
 def test_execute_ruff_fix_timeout_on_format_check(

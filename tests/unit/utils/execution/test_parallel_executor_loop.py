@@ -16,6 +16,12 @@ from assertpy import assert_that
 import lintro.utils.async_tool_executor as async_module
 import lintro.utils.execution.parallel_executor as parallel_module
 from lintro.enums.action import Action
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixPartial,
+    FixUnmeasured,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools import tool_manager
 from lintro.utils.execution.parallel_executor import (
@@ -171,8 +177,10 @@ def test_run_coroutine_blocking_inside_running_loop() -> None:
     assert_that(asyncio.run(caller())).is_equal_to("done")
 
 
+@pytest.mark.parametrize("action", [Action.CHECK, Action.FIX])
 def test_parallel_executor_records_a_failed_result_for_an_uninitializable_tool(
     monkeypatch: pytest.MonkeyPatch,
+    action: Action,
 ) -> None:
     """A tool that cannot be configured fails alone; its batch mate still runs.
 
@@ -183,6 +191,7 @@ def test_parallel_executor_records_a_failed_result_for_an_uninitializable_tool(
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
+        action: Whether the initialization failure prevents checks or mutation.
     """
     monkeypatch.setattr(async_module, "AsyncToolExecutor", _FakeExecutor)
     monkeypatch.setattr(
@@ -217,7 +226,7 @@ def test_parallel_executor_records_a_failed_result_for_an_uninitializable_tool(
     results = run_tools_parallel(
         tools_to_run=["ruff", "yamllint"],
         paths=["."],
-        action=Action.CHECK,
+        action=action,
         config_manager=cast(UnifiedConfigManager, object()),
         tool_option_dict={},
         exclude=None,
@@ -230,6 +239,14 @@ def test_parallel_executor_records_a_failed_result_for_an_uninitializable_tool(
     assert_that(sorted(by_name)).is_equal_to(["ruff", "yamllint"])
     assert_that(by_name["ruff"].success).is_false()
     assert_that(by_name["ruff"].output).contains("Failed to initialize tool")
+    assert_that(by_name["ruff"].outcome).is_equal_to(
+        ToolOutcome(
+            Checked(False),
+            FixUnmeasured("tool crashed") if action == Action.FIX else FixPartial(),
+        ),
+    )
+    assert_that(by_name["ruff"].fixed_issues_count).is_none()
+    assert_that(by_name["ruff"].remaining_issues_count).is_none()
     # Stamped so a crashed tool still appears in ``--profile``.
     assert_that(by_name["ruff"].duration_seconds).is_not_none()
     assert_that(by_name["yamllint"].success).is_true()

@@ -65,6 +65,38 @@ def test_check_needs_reformat(black_plugin: BlackPlugin, tmp_path: Path) -> None
     assert_that(first_issue.message).contains("Would reformat")
 
 
+def test_fix_retains_findings_surfaced_by_formatting(
+    black_plugin: BlackPlugin,
+    tmp_path: Path,
+) -> None:
+    """A larger post-format report retains its findings without negative fixes."""
+    files = [tmp_path / name for name in ("module.py", "other.py")]
+    for path in files:
+        path.write_text("x=1\n")
+    with (
+        patch.object(
+            black_plugin,
+            "_run_subprocess",
+            side_effect=[
+                (False, f"would reformat {files[0]}\n"),
+                (True, ""),
+                (False, "".join(f"would reformat {path}\n" for path in files)),
+            ],
+        ),
+        patch.object(black_plugin, "_check_line_length_violations", return_value=[]),
+    ):
+        result = black_plugin.fix([str(path) for path in files], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.initial_issues).is_length(1)
+    assert_that(result.initial_issues_count).is_equal_to(2)
+    assert_that(result.fixed_issues_count).is_zero()
+    assert_that(result.remaining_issues_count).is_equal_to(2)
+    assert_that(result.issues_count).is_equal_to(2)
+    assert_that(result.issues).extracting("file").is_equal_to([str(p) for p in files])
+    assert_that(result.output).contains("Found 2 issue(s)").does_not_contain("Fixed")
+
+
 def test_fix_reformats_and_rechecks(
     black_plugin: BlackPlugin,
     tmp_path: Path,

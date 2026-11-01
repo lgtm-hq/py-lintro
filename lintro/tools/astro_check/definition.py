@@ -27,6 +27,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.astro_check.astro_check_parser import parse_astro_check_output
 from lintro.parsers.base_parser import strip_ansi_codes
@@ -322,22 +323,20 @@ class AstroCheckPlugin(BaseToolPlugin):
                 issues=[],
             )
         except FileNotFoundError as e:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=f"Astro not found: {e}\n\n"
                 "Please ensure astro is installed:\n"
                 "  - Run 'bun add astro' or 'npm install astro'\n"
                 "  - Or install globally: 'bun add -g astro'",
-                issues_count=0,
             )
         except OSError as e:
             logger.error("[astro-check] Failed to run astro check: {}", e)
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output="astro check execution failed: " + str(e),
-                issues_count=0,
             )
 
         # Parse output
@@ -360,35 +359,33 @@ class AstroCheckPlugin(BaseToolPlugin):
                     "  - Run 'bun install' or 'npm install' in your project\n"
                     "  - Use '--auto-install' flag to auto-install dependencies"
                 )
-                return ToolResult(
+                return ToolResult.from_outcome(
+                    ToolOutcome(execution=Checked(success=False)),
                     name=self.definition.name,
-                    success=False,
                     output=helpful_output,
-                    issues_count=0,
                 )
 
             # Generic failure
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=normalized_output or "astro check execution failed.",
-                issues_count=0,
             )
 
         if not success and issues_count == 0:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output="astro check execution failed.",
-                issues_count=0,
             )
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=issues_count == 0, inspected_files=True),
+                issues_count=issues_count,
+            ),
             name=self.definition.name,
-            inspected_files=True,
-            success=issues_count == 0,
             output=None,
-            issues_count=issues_count,
             issues=all_issues,
         )
 

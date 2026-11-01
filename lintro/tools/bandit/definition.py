@@ -24,6 +24,7 @@ from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, NoFiles, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.bandit.bandit_parser import parse_bandit_output
 from lintro.plugins.base import BaseToolPlugin
@@ -412,12 +413,9 @@ class BanditPlugin(BaseToolPlugin):
                 "  - Large codebase taking too long to process\n"
                 "  - Need to increase timeout via --tool-options bandit:timeout=N"
             )
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=TimedOut(timeout_msg)),
                 name=self.definition.name,
-                success=False,
-                output=timeout_msg,
-                issues_count=0,
-                timed_out=True,
             )
         except (OSError, ValueError, RuntimeError) as e:
             logger.error(f"Failed to run Bandit: {e}")
@@ -435,42 +433,36 @@ class BanditPlugin(BaseToolPlugin):
                 # display layer never routes this through the JSON parser and
                 # emits parse-error noise for a clean, zero-issue pass (#1534).
                 logger.debug("[bandit] No .py/.pyi files found to check")
-                return ToolResult(
+                return ToolResult.from_outcome(
+                    ToolOutcome(execution=NoFiles()),
                     name=self.definition.name,
-                    success=True,
                     output=None,
-                    issues_count=0,
-                    no_files=True,
                 )
 
             if ("{" not in output or "}" not in output) and execution_failure:
-                return ToolResult(
+                return ToolResult.from_outcome(
+                    ToolOutcome(execution=Checked(success=False)),
                     name=self.definition.name,
-                    success=False,
                     output=output,
-                    issues_count=0,
                 )
 
             # Handle empty output (no JSON content to parse)
             if not output:
                 # If Bandit exited non-zero with no output, treat as failure
                 if returncode != 0:
-                    return ToolResult(
+                    return ToolResult.from_outcome(
+                        ToolOutcome(execution=Checked(success=False)),
                         name=self.definition.name,
-                        success=False,
                         output=stderr_output or "Bandit failed with non-zero exit code",
-                        issues_count=0,
                     )
                 # Informational, non-JSON output. Keep ``output`` empty so a
                 # clean, zero-issue pass is never routed through the JSON
                 # parser and reported as parse-error noise (#1534).
                 logger.debug("[bandit] Empty output received; treating as clean pass")
-                return ToolResult(
+                return ToolResult.from_outcome(
+                    ToolOutcome(execution=Checked(success=True, inspected_files=True)),
                     name=self.definition.name,
-                    inspected_files=True,
-                    success=True,
                     output=None,
-                    issues_count=0,
                 )
 
             bandit_data = _extract_bandit_json(raw_text=output)
@@ -481,12 +473,13 @@ class BanditPlugin(BaseToolPlugin):
                 len(bandit_data.get("errors", [])) == 0 and not execution_failure
             )
 
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=Checked(success=execution_success, inspected_files=True),
+                    issues_count=issues_count,
+                ),
                 name=self.definition.name,
-                inspected_files=True,
-                success=execution_success,
                 output=output if execution_failure else None,
-                issues_count=issues_count,
                 issues=issues,
                 parse_failures_count=0,
             )
@@ -495,11 +488,10 @@ class BanditPlugin(BaseToolPlugin):
             # Bandit is a security scanner: unparseable output must never be
             # reported as a clean pass (see #1044).
             logger.error(f"Failed to parse bandit output: {e}")
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=(output or f"Failed to parse bandit output: {e!s}"),
-                issues_count=0,
                 parse_failures_count=1,
             )
 

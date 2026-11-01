@@ -19,6 +19,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, NoFiles, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.actionlint.actionlint_parser import parse_actionlint_output
 from lintro.plugins.base import BaseToolPlugin
@@ -167,12 +168,10 @@ class ActionlintPlugin(BaseToolPlugin):
         ]
 
         if not workflow_files:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=NoFiles()),
                 name=self.definition.name,
-                success=True,
                 output="No GitHub workflow files found to check.",
-                issues_count=0,
-                no_files=True,
             )
 
         # Accumulate results across all files
@@ -230,18 +229,25 @@ class ActionlintPlugin(BaseToolPlugin):
                 else failure_msg
             )
 
-        return ToolResult(
-            name=self.definition.name,
-            inspected_files=(
-                True
-                if True in results["coverage"]
-                else None if None in results["coverage"] else False
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=(
+                    TimedOut(combined_output)
+                    if bool(results["timed_out"])
+                    else Checked(
+                        success=results["all_success"],
+                        inspected_files=(
+                            True
+                            if True in results["coverage"]
+                            else None if None in results["coverage"] else False
+                        ),
+                    )
+                ),
+                issues_count=len(results["all_issues"]),
             ),
-            success=results["all_success"],
+            name=self.definition.name,
             output=combined_output,
-            issues_count=len(results["all_issues"]),
             issues=results["all_issues"],
-            timed_out=bool(results["timed_out"]),
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

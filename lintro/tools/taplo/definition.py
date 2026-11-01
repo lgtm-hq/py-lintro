@@ -18,6 +18,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, FixMeasured, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.taplo.taplo_issue import TaploIssue
 from lintro.parsers.taplo.taplo_parser import parse_taplo_output
@@ -181,24 +182,23 @@ class TaploPlugin(BaseToolPlugin):
         )
         if initial_count is not None and initial_count > 0:
             combined_issues = list(initial_issues or [])
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=TimedOut(timeout_msg),
+                    accounting=FixMeasured(
+                        initial=initial_count,
+                        fixed=0,
+                        remaining=initial_count,
+                    ),
+                    issues_count=initial_count,
+                ),
                 name=self.definition.name,
-                success=False,
-                output=timeout_msg,
-                issues_count=initial_count,
                 issues=combined_issues,
-                initial_issues_count=initial_count,
-                fixed_issues_count=0,
-                remaining_issues_count=initial_count,
-                timed_out=True,
             )
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=TimedOut(timeout_msg)),
             name=self.definition.name,
-            success=False,
-            output=timeout_msg,
-            issues_count=0,
             issues=[],
-            timed_out=True,
         )
 
     def doc_url(self, code: str) -> str | None:
@@ -291,12 +291,16 @@ class TaploPlugin(BaseToolPlugin):
         count = len(all_issues)
         output = "\n".join(all_outputs) if all_outputs else None
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(
+                    success=all_success and count == 0,
+                    inspected_files=True,
+                ),
+                issues_count=count,
+            ),
             name=self.definition.name,
-            inspected_files=True,
-            success=(all_success and count == 0),
             output=output if count > 0 else None,
-            issues_count=count,
             issues=all_issues,
             cwd=ctx.cwd,
         )
@@ -393,16 +397,20 @@ class TaploPlugin(BaseToolPlugin):
         # afterwards, so a dropped failure would read as a clean run.
         if not fix_success:
             failure_output = (fix_output or "").strip()
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=Checked(success=False),
+                    accounting=FixMeasured(
+                        initial=initial_count,
+                        fixed=0,
+                        remaining=initial_count,
+                    ),
+                    issues_count=initial_count,
+                ),
                 name=self.definition.name,
-                success=False,
                 output=f"taplo fmt failed.\n{failure_output}".strip(),
-                issues_count=initial_count,
                 issues=list(initial_issues),
                 initial_issues=initial_issues,
-                initial_issues_count=initial_count,
-                fixed_issues_count=0,
-                remaining_issues_count=initial_count,
                 cwd=ctx.cwd,
             )
 
@@ -411,16 +419,18 @@ class TaploPlugin(BaseToolPlugin):
             f"Fixed {fixed_count} issue(s)" if fixed_count else "No fixes applied."
         )
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=True, inspected_files=True),
+                accounting=FixMeasured(
+                    initial=initial_count,
+                    fixed=fixed_count,
+                    remaining=0,
+                ),
+            ),
             name=self.definition.name,
-            inspected_files=True,
-            success=True,
             output=final_summary,
-            issues_count=0,
             issues=[],
             initial_issues=initial_issues,
-            initial_issues_count=initial_count,
-            fixed_issues_count=fixed_count,
-            remaining_issues_count=0,
             cwd=ctx.cwd,
         )

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from lintro.models.core.tool_outcome import Checked, Skipped, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_parser import strip_ansi_codes
 from lintro.plugins.base import PreparedExecution
@@ -78,13 +79,10 @@ def check(
         needs_install = should_install_deps(cwd_path)
     except PermissionError as e:
         logger.warning("[{}] {}", plugin._tool_label, e)
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=Skipped("directory not writable")),
             name=plugin.definition.name,
-            success=True,
             output=f"Skipping {plugin._tool_label}: {e}",
-            issues_count=0,
-            skipped=True,
-            skip_reason="directory not writable",
         )
 
     if needs_install:
@@ -106,28 +104,22 @@ def check(
                     plugin._tool_label,
                     install_output,
                 )
-                return ToolResult(
+                return ToolResult.from_outcome(
+                    ToolOutcome(execution=Skipped("auto-install failed")),
                     name=plugin.definition.name,
-                    success=True,
                     output=(
                         f"Skipping {plugin._tool_label}: auto-install failed.\n"
                         f"{install_output}"
                     ),
-                    issues_count=0,
-                    skipped=True,
-                    skip_reason="auto-install failed",
                 )
         else:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Skipped("node_modules not found")),
                 name=plugin.definition.name,
-                success=True,
                 output=(
                     "node_modules not found. "
                     "Use --auto-install to install dependencies."
                 ),
-                issues_count=0,
-                skipped=True,
-                skip_reason="node_modules not found",
             )
 
     use_project_files = merged_options.get("use_project_files", False)
@@ -247,9 +239,9 @@ def _check_single_project(
         framework_info = plugin._detect_framework_project(detection_dir)
         if framework_info:
             framework_name, recommended_tool = framework_info
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Skipped(f"deferred to {recommended_tool}")),
                 name=plugin.definition.name,
-                success=True,
                 output=(
                     f"SKIPPED: {framework_name} project detected.\n"
                     f"{framework_name} has its own type checker that handles "
@@ -257,9 +249,6 @@ def _check_single_project(
                     f"Use '{recommended_tool}' instead: "
                     f"lintro check . --tools {recommended_tool}"
                 ),
-                issues_count=0,
-                skipped=True,
-                skip_reason=f"deferred to {recommended_tool}",
             )
 
         if use_project_files or explicit_project:
@@ -451,14 +440,18 @@ def _check_multi_project(
         total_issues = len(all_issues)
         output_text = "\n".join(output_sections) if output_sections else None
         success = any_succeeded and not had_subproject_error and total_issues == 0
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=(
+                    TimedOut(output_text)
+                    if any_subproject_timed_out
+                    else Checked(success=success, inspected_files=coverage)
+                ),
+                issues_count=total_issues,
+            ),
             name=plugin.definition.name,
-            inspected_files=coverage,
-            success=success,
             output=output_text,
-            issues_count=total_issues,
             issues=all_issues,
-            timed_out=any_subproject_timed_out,
         )
     finally:
         for temp in temp_files:
@@ -511,21 +504,19 @@ def _run_and_parse(
             timeout=ctx.timeout,
             cmd=cmd,
         )
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=TimedOut(timeout_result.output),
+                issues_count=timeout_result.issues_count,
+            ),
             name=plugin.definition.name,
-            success=timeout_result.success,
-            timed_out=timeout_result.timed_out,
-            output=timeout_result.output,
-            issues_count=timeout_result.issues_count,
             issues=timeout_result.issues,
         )
     except FileNotFoundError as e:
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=Checked(success=False, inspected_files=False)),
             name=plugin.definition.name,
-            success=False,
             output=plugin._not_found_output(e),
-            issues_count=0,
-            inspected_files=False,
         )
     except OSError as e:
         logger.error(
@@ -534,12 +525,10 @@ def _run_and_parse(
             plugin._tool_label,
             e,
         )
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=Checked(success=False, inspected_files=False)),
             name=plugin.definition.name,
-            success=False,
             output=f"{plugin._tool_label} execution failed: " + str(e),
-            issues_count=0,
-            inspected_files=False,
         )
 
     # Parse output (parser handles ANSI stripping internally)
@@ -579,12 +568,13 @@ def _run_and_parse(
             dep_output_lines.insert(0, f"Type errors: {len(type_errors)}")
             dep_output_lines.insert(1, "")
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=False, inspected_files=True),
+                issues_count=issues_count,
+            ),
             name=plugin.definition.name,
-            inspected_files=True,
-            success=False,
             output="\n".join(dep_output_lines),
-            issues_count=issues_count,
             issues=all_issues,
         )
 
@@ -593,34 +583,35 @@ def _run_and_parse(
             "Cannot find type definition file" in normalized_output
             or "Cannot find module" in normalized_output
         ):
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=plugin.definition.name,
-                success=False,
                 output=plugin._config_error_output(normalized_output),
-                issues_count=0,
             )
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=Checked(success=False)),
             name=plugin.definition.name,
-            success=False,
             output=normalized_output or f"{plugin._tool_label} execution failed.",
-            issues_count=0,
         )
 
     if not success and issues_count == 0:
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=Checked(success=False)),
             name=plugin.definition.name,
-            success=False,
             output=f"{plugin._tool_label} execution failed.",
-            issues_count=0,
         )
 
-    return ToolResult(
+    return ToolResult.from_outcome(
+        ToolOutcome(
+            execution=Checked(
+                success=success and issues_count == 0,
+                inspected_files=True,
+            ),
+            issues_count=issues_count,
+        ),
         name=plugin.definition.name,
         # Unsuccessful invocations without findings returned above.
-        inspected_files=True,
-        success=success and issues_count == 0,
         output=None,
-        issues_count=issues_count,
         issues=all_issues,
     )

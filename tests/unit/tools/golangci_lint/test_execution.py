@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
+from lintro.models.core.tool_outcome import FixPartial
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.golangci_lint.golangci_lint_issue import GolangciLintIssue
 from lintro.tools.golangci_lint.definition import GolangciLintPlugin, _merge_fix_results
@@ -18,6 +19,37 @@ from tests.unit.tools.golangci_lint.conftest import (
     GOLANGCI_JSON_ONE_ISSUE,
     GOLANGCI_JSON_TWO_ISSUES,
 )
+
+
+def test_fix_retains_findings_newly_reported_by_module_recheck(
+    golangci_lint_plugin: GolangciLintPlugin,
+    tmp_path: Path,
+) -> None:
+    """Module aggregation retains a larger residual and its rebased issue paths."""
+    _make_go_module(tmp_path)
+    with patch.object(
+        golangci_lint_plugin,
+        "_run_subprocess",
+        side_effect=[
+            (False, GOLANGCI_JSON_ONE_ISSUE),
+            (True, ""),
+            (False, GOLANGCI_JSON_TWO_ISSUES),
+        ],
+    ):
+        result = golangci_lint_plugin.fix([str(tmp_path)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.initial_issues).is_length(1)
+    assert_that(result.initial_issues_count).is_equal_to(2)
+    assert_that(result.fixed_issues_count).is_zero()
+    assert_that(result.remaining_issues_count).is_equal_to(2)
+    assert_that(result.issues_count).is_equal_to(2)
+    assert_that(result.issues).extracting("code").is_equal_to(
+        ["errcheck", "ineffassign"],
+    )
+    assert_that(result.issues).extracting("file").is_equal_to(
+        [str(tmp_path / "main.go")] * 2,
+    )
 
 
 def test_merge_preserves_unmeasured_fix_counts() -> None:
@@ -38,6 +70,7 @@ def test_merge_preserves_unmeasured_fix_counts() -> None:
     assert_that(result.remaining_issues_count).is_none()
     assert_that(result.issues).is_empty()
     assert_that(result.initial_issues).is_empty()
+    assert_that(result.outcome.accounting).is_equal_to(FixPartial())
 
 
 def _make_go_module(root: Path) -> None:

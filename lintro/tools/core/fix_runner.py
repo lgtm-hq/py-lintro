@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.models.core.tool_outcome import Checked, FixMeasured, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.file_processor import FileFixResult, FileProcessingResult
 from lintro.tools.core.check_runner import check_one_file
@@ -488,18 +489,27 @@ def run_per_file_fix(
         f"fixed={tally.fixed_total}, remaining={remaining_count}",
     )
 
-    return ToolResult(
+    return ToolResult.from_outcome(
+        ToolOutcome(
+            execution=(
+                TimedOut(final_output)
+                if result.timed_out
+                else Checked(
+                    success=result.all_success and remaining_count == 0,
+                    inspected_files=result.inspected_files,
+                )
+            ),
+            accounting=FixMeasured(
+                initial=initial_total,
+                fixed=tally.fixed_total,
+                remaining=remaining_count,
+            ),
+            issues_count=remaining_count,
+        ),
         name=plugin.definition.name,
-        inspected_files=result.inspected_files,
-        success=result.all_success and remaining_count == 0,
         output=final_output,
-        issues_count=remaining_count,
         issues=tally.remaining_issues,
-        initial_issues_count=initial_total,
-        fixed_issues_count=tally.fixed_total,
-        remaining_issues_count=remaining_count,
         initial_issues=tally.initial_issues,
-        timed_out=result.timed_out,
         # The project root the per-file paths were resolved from — not the
         # subprocess working directory, which this runner never sets. The
         # run-level verify pass anchors a relative ``issue.file`` here when it

@@ -27,6 +27,14 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixMeasured,
+    FixPartial,
+    NoFiles,
+    TimedOut,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.parsers.golangci_lint.golangci_lint_issue import GolangciLintIssue
@@ -190,23 +198,34 @@ def _merge_fix_results(*, name: str, results: list[ToolResult]) -> ToolResult:
             outputs.append(result.output)
     any_timed_out = any(r.timed_out for r in results)
     coverage = [r.inspected_files for r in results]
-    return ToolResult(
+    output = "\n".join(outputs) if outputs else None
+    initial = _sum_measured_counts(r.initial_issues_count for r in results)
+    fixed = _sum_measured_counts(r.fixed_issues_count for r in results)
+    remaining = _sum_measured_counts(r.remaining_issues_count for r in results)
+    return ToolResult.from_outcome(
+        ToolOutcome(
+            execution=(
+                TimedOut(output)
+                if any_timed_out
+                else Checked(
+                    success=all(r.success for r in results),
+                    inspected_files=(
+                        True
+                        if True in coverage
+                        else None if None in coverage else False
+                    ),
+                )
+            ),
+            accounting=(
+                FixMeasured(initial, fixed, remaining)
+                if initial is not None and fixed is not None and remaining is not None
+                else FixPartial(initial, fixed, remaining)
+            ),
+            issues_count=sum(r.issues_count for r in results),
+        ),
         name=name,
-        inspected_files=(
-            True if True in coverage else None if None in coverage else False
-        ),
-        success=all(r.success for r in results) and not any_timed_out,
-        timed_out=any_timed_out,
-        output="\n".join(outputs) if outputs else None,
-        issues_count=sum(r.issues_count for r in results),
+        output=output,
         issues=issues,
-        initial_issues_count=_sum_measured_counts(
-            r.initial_issues_count for r in results
-        ),
-        fixed_issues_count=_sum_measured_counts(r.fixed_issues_count for r in results),
-        remaining_issues_count=_sum_measured_counts(
-            r.remaining_issues_count for r in results
-        ),
         initial_issues=initial_issues,
     )
 
@@ -341,12 +360,10 @@ class GolangciLintPlugin(BaseToolPlugin):
 
         module_roots = _find_go_module_roots(ctx.files)
         if not module_roots:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=NoFiles()),
                 name=self.definition.name,
-                success=True,
                 output="No go.mod with Go source found; skipping golangci-lint.",
-                issues_count=0,
-                no_files=True,
             )
 
         cmd = _build_golangci_lint_command(fix=False)
@@ -400,14 +417,21 @@ class GolangciLintPlugin(BaseToolPlugin):
             if not success_cmd and not issues:
                 failure_outputs.append(output)
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=(
+                    TimedOut("\n".join(failure_outputs) if failure_outputs else None)
+                    if any_timed_out
+                    else Checked(
+                        success=overall_success,
+                        inspected_files=True if any_inspected else None,
+                    )
+                ),
+                issues_count=len(all_issues),
+            ),
             name=self.definition.name,
-            inspected_files=True if any_inspected else None,
-            success=overall_success,
             output="\n".join(failure_outputs) if failure_outputs else None,
-            issues_count=len(all_issues),
             issues=all_issues,
-            timed_out=any_timed_out,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -430,15 +454,13 @@ class GolangciLintPlugin(BaseToolPlugin):
 
         module_roots = _find_go_module_roots(ctx.files)
         if not module_roots:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=NoFiles(),
+                    accounting=FixMeasured(initial=0, fixed=0, remaining=0),
+                ),
                 name=self.definition.name,
-                success=True,
                 output="No go.mod with Go source found; skipping golangci-lint.",
-                issues_count=0,
-                initial_issues_count=0,
-                fixed_issues_count=0,
-                remaining_issues_count=0,
-                no_files=True,
             )
 
         results = [
@@ -487,15 +509,14 @@ class GolangciLintPlugin(BaseToolPlugin):
         # errored (config/build failure) rather than reporting a clean baseline.
         # Abort before the mutating --fix phase and surface the diagnostic.
         if not success_check and not initial_issues:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=Checked(success=False),
+                    accounting=FixMeasured(initial=0, fixed=0, remaining=0),
+                ),
                 name=self.definition.name,
-                success=False,
                 output=output_check,
-                issues_count=0,
                 issues=[],
-                initial_issues_count=0,
-                fixed_issues_count=0,
-                remaining_issues_count=0,
             )
         _rebase_issue_paths(issues=initial_issues, module_root=module_root)
         initial_count = len(initial_issues)
@@ -541,6 +562,8 @@ class GolangciLintPlugin(BaseToolPlugin):
         _rebase_issue_paths(issues=remaining_issues, module_root=module_root)
         remaining_count = len(remaining_issues)
         fixed_count = max(0, initial_count - remaining_count)
+        # A module re-check can reveal additional findings after rewrites.
+        initial_count = max(initial_count, fixed_count + remaining_count)
 
         # golangci-lint exits non-zero both when lint issues remain and when the
         # run itself errors (config/build/fixer failure). A failed --fix run must
@@ -558,23 +581,30 @@ class GolangciLintPlugin(BaseToolPlugin):
         else:
             output = None
 
-        return ToolResult(
-            name=self.definition.name,
-            inspected_files=(
-                True
-                if success_check
-                or success_after
-                or any(
-                    i.file != "(module)" for i in [*initial_issues, *remaining_issues]
-                )
-                else None
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(
+                    success=success,
+                    inspected_files=(
+                        True
+                        if success_check
+                        or success_after
+                        or any(
+                            i.file != "(module)"
+                            for i in [*initial_issues, *remaining_issues]
+                        )
+                        else None
+                    ),
+                ),
+                accounting=FixMeasured(
+                    initial=initial_count,
+                    fixed=fixed_count,
+                    remaining=remaining_count,
+                ),
+                issues_count=remaining_count,
             ),
-            success=success,
+            name=self.definition.name,
             output=output,
-            issues_count=remaining_count,
             issues=remaining_issues,
-            initial_issues_count=initial_count,
-            fixed_issues_count=fixed_count,
-            remaining_issues_count=remaining_count,
             initial_issues=initial_issues,
         )

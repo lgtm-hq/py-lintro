@@ -20,6 +20,13 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixMeasured,
+    Skipped,
+    TimedOut,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.stylelint.stylelint_parser import parse_stylelint_output
 from lintro.plugins.base import BaseToolPlugin
@@ -156,20 +163,16 @@ class StylelintPlugin(BaseToolPlugin):
         Returns:
             ToolResult: Skip result (success=True) with a helpful message.
         """
-        return ToolResult(
+        # No configuration means no file was inspected by stylelint.
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=Skipped("No stylelint configuration found")),
             name=self.definition.name,
-            success=True,
             output=(
                 "Skipping stylelint: no stylelint configuration found "
                 "(e.g. .stylelintrc.json, stylelint.config.js, or a "
                 '"stylelint" key in package.json). Add one to enable '
                 "CSS/SCSS/Less linting."
             ),
-            issues_count=0,
-            # No config means stylelint examined no file, so the run-level
-            # verify pass (#1743) must not read this zero as a clean verdict.
-            skipped=True,
-            skip_reason="No stylelint configuration found",
             cwd=cwd,
         )
 
@@ -199,14 +202,11 @@ class StylelintPlugin(BaseToolPlugin):
             "  - Large codebase taking too long to process\n"
             "  - Need to increase timeout via --tool-options stylelint:timeout=N"
         )
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=TimedOut(timeout_msg)),
             name=self.definition.name,
-            success=False,
-            output=timeout_msg,
-            issues_count=0,
             issues=[],
             cwd=cwd,
-            timed_out=True,
         )
 
     def doc_url(self, code: str) -> str | None:
@@ -296,22 +296,22 @@ class StylelintPlugin(BaseToolPlugin):
         # failure with nothing parsed (crash, invalid flag or config) must
         # not read as a clean run.
         if not issues and not run_success:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=output or "Stylelint exited with an error and no results.",
-                issues_count=0,
                 cwd=ctx.cwd,
             )
         issues_count = len(issues)
         success = issues_count == 0
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=success, inspected_files=True),
+                issues_count=issues_count,
+            ),
             name=self.definition.name,
-            inspected_files=True,
-            success=success,
             output=output if not success else None,
-            issues_count=issues_count,
             issues=issues,
             cwd=ctx.cwd,
         )
@@ -357,13 +357,12 @@ class StylelintPlugin(BaseToolPlugin):
         # A failing initial check with nothing parsed is a crash/config
         # error, not a fixable state.
         if not initial_issues and not initial_success:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=(
                     check_output or "Stylelint exited with an error and no results."
                 ),
-                issues_count=0,
                 cwd=ctx.cwd,
             )
 
@@ -382,15 +381,19 @@ class StylelintPlugin(BaseToolPlugin):
         # A crashed --fix run (nothing parseable) must surface, not flow into
         # a re-check that would misattribute the failure.
         if not fix_success and not parse_stylelint_output(output=fix_output):
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=Checked(success=False),
+                    accounting=FixMeasured(
+                        initial=initial_count,
+                        fixed=0,
+                        remaining=initial_count,
+                    ),
+                    issues_count=initial_count,
+                ),
                 name=self.definition.name,
-                success=False,
                 output=fix_output or "Stylelint --fix exited with an error.",
-                issues_count=initial_count,
                 issues=initial_issues,
-                initial_issues_count=initial_count,
-                fixed_issues_count=0,
-                remaining_issues_count=initial_count,
                 cwd=ctx.cwd,
             )
 
@@ -408,19 +411,25 @@ class StylelintPlugin(BaseToolPlugin):
         # A failed verification with nothing parsed must not read as
         # "all fixed" — keep the initial issues as remaining.
         if not remaining_issues and not final_success:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=Checked(success=False),
+                    accounting=FixMeasured(
+                        initial=initial_count,
+                        fixed=0,
+                        remaining=initial_count,
+                    ),
+                    issues_count=initial_count,
+                ),
                 name=self.definition.name,
-                success=False,
                 output=(final_output or "Stylelint re-check exited with an error."),
-                issues_count=initial_count,
                 issues=initial_issues,
-                initial_issues_count=initial_count,
-                fixed_issues_count=0,
-                remaining_issues_count=initial_count,
                 cwd=ctx.cwd,
             )
         remaining_count = len(remaining_issues)
         fixed_count = max(0, initial_count - remaining_count)
+        # Rewrites can expose warnings not reported by the initial check.
+        initial_count = max(initial_count, fixed_count + remaining_count)
 
         output_lines: list[str] = []
         if fixed_count > 0:
@@ -447,16 +456,19 @@ class StylelintPlugin(BaseToolPlugin):
         final_message = "\n".join(output_lines) if output_lines else None
         success = remaining_count == 0
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=success, inspected_files=True),
+                accounting=FixMeasured(
+                    initial=initial_count,
+                    fixed=fixed_count,
+                    remaining=remaining_count,
+                ),
+                issues_count=remaining_count,
+            ),
             name=self.definition.name,
-            inspected_files=True,
-            success=success,
             output=final_message,
-            issues_count=remaining_count,
             issues=remaining_issues,
-            initial_issues_count=initial_count,
-            fixed_issues_count=fixed_count,
-            remaining_issues_count=remaining_count,
             initial_issues=initial_issues,
             cwd=ctx.cwd,
         )

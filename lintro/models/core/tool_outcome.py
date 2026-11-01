@@ -169,12 +169,13 @@ class FixUnmeasured:
 
 @dataclass(frozen=True)
 class FixPartial:
-    """Legacy counters without complete fix accounting, including all unknown.
+    """Counters without complete fix accounting, including all unknown.
 
     This compatibility state preserves each supplied count exactly. It must
     never be treated as a complete measurement or filled from issue-list lengths.
-    Producers will migrate in stage 2; missing counters are not necessarily a
-    failed verification and cannot acquire a residual_unknown reason here.
+    Checks and producers with partial accounting use this state. Missing counters
+    are not necessarily a failed verification and cannot acquire a
+    residual_unknown reason here.
     """
 
     initial: int | None = None

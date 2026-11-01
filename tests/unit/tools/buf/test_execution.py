@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
+import pytest
 from assertpy import assert_that
 
+from lintro.models.core.tool_outcome import FixUnmeasured
 from lintro.parsers.buf.buf_issue import BufIssue
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.buf.definition import BufPlugin
@@ -250,6 +252,54 @@ def test_check_no_proto_files(buf_plugin: BufPlugin, tmp_path: Path) -> None:
         result = buf_plugin.check([str(other)], {})
 
     assert_that(result.success).is_true()
+
+
+@pytest.mark.parametrize("verification_error", [False, True])
+def test_fix_retains_new_lint_findings_after_write(
+    buf_plugin: BufPlugin,
+    tmp_path: Path,
+    verification_error: bool,
+) -> None:
+    """Growing lint reports survive both complete and failed format verification."""
+    proto = tmp_path / "a.proto"
+    proto.write_text('syntax = "proto3";\npackage a;\n')
+    new_issue = _LINT_ISSUE.replace('"start_line":2', '"start_line":3').replace(
+        '"end_line":2',
+        '"end_line":3',
+    )
+    final_lint = "\n".join((_LINT_ISSUE, new_issue))
+    with patch.object(
+        buf_plugin,
+        "_run_subprocess_result",
+        side_effect=[
+            _result(0),
+            _result(100, _LINT_ISSUE),
+            _result(0),
+            (
+                _err_result(2, "format verification failed")
+                if verification_error
+                else _result(0)
+            ),
+            _result(100, final_lint),
+        ],
+    ):
+        result = buf_plugin.fix([str(proto)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(2)
+    assert_that(result.issues).extracting("line").is_equal_to([2, 3])
+    if verification_error:
+        assert_that(result.outcome.accounting).is_equal_to(
+            FixUnmeasured("format verification failed", initial=1),
+        )
+        assert_that(result.fixed_issues_count).is_none()
+        assert_that(result.remaining_issues_count).is_none()
+        assert_that(result.output).contains("format verification failed", "2 remaining")
+    else:
+        assert_that(result.initial_issues).is_length(1)
+        assert_that(result.initial_issues_count).is_equal_to(2)
+        assert_that(result.fixed_issues_count).is_zero()
+        assert_that(result.remaining_issues_count).is_equal_to(2)
 
 
 def test_fix_formats_and_reports_remaining(
@@ -567,7 +617,10 @@ def test_fix_reports_format_error_when_lint_has_remaining_issues(
     assert_that(result.success).is_false()
     assert_that(result.output).contains("format verify blew up")
     assert_that(result.output).does_not_contain("warning: noisy")
-    assert_that(result.remaining_issues_count).is_equal_to(1)
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.outcome.accounting).is_equal_to(
+        FixUnmeasured("Failure: format verify blew up", initial=2),
+    )
 
 
 def test_fix_reports_both_verification_errors(

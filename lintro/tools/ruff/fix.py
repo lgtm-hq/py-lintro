@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.models.core.tool_outcome import Checked, FixMeasured, TimedOut, ToolOutcome
 from lintro.parsers.base_issue import BaseIssue
 from lintro.parsers.ruff.ruff_format_issue import RuffFormatIssue
 from lintro.parsers.ruff.ruff_parser import (
@@ -141,16 +142,13 @@ def execute_ruff_fix(
             timeout=timeout,
             cmd=cmd_check,
         )
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=TimedOut(timeout_result.output),
+                issues_count=timeout_result.issues_count,
+            ),
             name=tool.definition.name,
-            success=timeout_result.success,
-            timed_out=timeout_result.timed_out,
-            output=timeout_result.output,
-            issues_count=timeout_result.issues_count,
             issues=timeout_result.issues,
-            initial_issues_count=None,
-            fixed_issues_count=None,
-            remaining_issues_count=None,
             parse_failures_count=parse_failures,
             cwd=ctx.cwd,
         )
@@ -183,19 +181,21 @@ def execute_ruff_fix(
                 "  - Large codebase taking too long to process\n"
                 "  - Need to increase timeout via --tool-options ruff:timeout=N"
             )
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=TimedOut(timeout_msg),
+                    accounting=FixMeasured(
+                        initial=initial_count,
+                        fixed=0,
+                        remaining=initial_count,
+                    ),
+                    issues_count=initial_count,
+                ),
                 name=tool.definition.name,
-                success=False,
-                output=timeout_msg,
                 # A timeout is an execution failure, not a finding: only
                 # genuine pre-timeout issues are counted.
-                issues_count=initial_count,
                 # Include any lint issues found before timeout
                 issues=initial_issues,
-                initial_issues_count=initial_count,
-                fixed_issues_count=0,
-                remaining_issues_count=initial_count,
-                timed_out=True,
                 parse_failures_count=parse_failures,
                 cwd=ctx.cwd,
             )
@@ -234,18 +234,20 @@ def execute_ruff_fix(
                 "  - Large codebase taking too long to process\n"
                 "  - Need to increase timeout via --tool-options ruff:timeout=N"
             )
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=TimedOut(timeout_msg),
+                    accounting=FixMeasured(
+                        initial=total_initial_count,
+                        fixed=0,
+                        remaining=total_initial_count,
+                    ),
+                    issues_count=total_initial_count,
+                ),
                 name=tool.definition.name,
-                success=False,
-                output=timeout_msg,
                 # A timeout is an execution failure, not a finding: only
                 # genuine pre-timeout issues are counted.
-                issues_count=total_initial_count,
                 issues=initial_issues,  # Include initial issues found
-                initial_issues_count=total_initial_count,
-                fixed_issues_count=0,
-                remaining_issues_count=total_initial_count,
-                timed_out=True,
                 parse_failures_count=parse_failures,
                 cwd=ctx.cwd,
             )
@@ -261,6 +263,11 @@ def execute_ruff_fix(
     # Calculate how many lint issues were actually fixed
     fixed_lint_count: int = max(0, initial_count - remaining_count)
     fixed_count: int = fixed_lint_count
+    # Fixes can expose new lint findings. Widen lint accounting before adding
+    # formatting so later format timeouts also retain the full lint residual.
+    total_initial_count = (
+        max(initial_count, fixed_lint_count + remaining_count) + initial_format_count
+    )
 
     # If there are remaining issues, check if any are fixable with unsafe fixes
     # If unsafe fixes are disabled, check if any remaining issues are
@@ -332,18 +339,20 @@ def execute_ruff_fix(
                 "  - Large codebase taking too long to process\n"
                 "  - Need to increase timeout via --tool-options ruff:timeout=N"
             )
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=TimedOut(timeout_msg),
+                    accounting=FixMeasured(
+                        initial=total_initial_count,
+                        fixed=fixed_lint_count,
+                        remaining=total_initial_count - fixed_lint_count,
+                    ),
+                    issues_count=total_initial_count - fixed_lint_count,
+                ),
                 name=tool.definition.name,
-                success=False,
-                output=timeout_msg,
                 # A timeout is an execution failure, not a finding: only
                 # genuine pre-timeout issues are counted.
-                issues_count=total_initial_count - fixed_lint_count,
                 issues=remaining_issues,  # Include any issues found before timeout
-                initial_issues_count=total_initial_count,
-                fixed_issues_count=fixed_lint_count,
-                remaining_issues_count=total_initial_count - fixed_lint_count,
-                timed_out=True,
                 parse_failures_count=parse_failures,
                 cwd=ctx.cwd,
             )
@@ -368,20 +377,23 @@ def execute_ruff_fix(
         "\n".join(summary_lines) if summary_lines else "No fixes applied."
     )
 
-    return ToolResult(
+    return ToolResult.from_outcome(
+        ToolOutcome(
+            execution=Checked(success=overall_success, inspected_files=True),
+            accounting=FixMeasured(
+                initial=total_initial_count,
+                fixed=fixed_count,
+                remaining=remaining_count,
+            ),
+            issues_count=remaining_count,
+        ),
         name=tool.definition.name,
-        inspected_files=True,
-        success=overall_success,
         output=final_output,
         # For fix operations, issues_count represents remaining issues
         # that couldn't be fixed
-        issues_count=remaining_count,
         # Only include remaining issues that couldn't be fixed
         # (not successful format operations)
         issues=remaining_issues,
-        initial_issues_count=total_initial_count,
-        fixed_issues_count=fixed_count,
-        remaining_issues_count=remaining_count,
         parse_failures_count=parse_failures,
         # Store pre-fix issues so the display layer can show what was fixed
         initial_issues=initial_issues,

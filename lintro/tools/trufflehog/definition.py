@@ -28,6 +28,7 @@ from lintro.enums.capability import Cap
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, NoFiles, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.trufflehog.trufflehog_errors import (
     extract_trufflehog_scan_errors,
@@ -258,12 +259,10 @@ class TrufflehogPlugin(BaseToolPlugin):
         # deterministic.
         source_paths = sorted(str(Path(f).resolve()) for f in ctx.files)
         if not source_paths:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=NoFiles()),
                 name=self.definition.name,
-                success=True,
                 output="No files to check.",
-                issues_count=0,
-                no_files=True,
             )
         # Resolution can turn a discovered entry into a path that does not
         # exist — a dangling symlink resolves to its absent target (#1716,
@@ -282,15 +281,14 @@ class TrufflehogPlugin(BaseToolPlugin):
             if not present_scan_paths:
                 # Every target vanished: there is nothing left to scan, so a
                 # clean pass would be a lie. Fail closed (#1044).
-                return ToolResult(
+                return ToolResult.from_outcome(
+                    ToolOutcome(execution=Checked(success=False)),
                     name=self.definition.name,
-                    success=False,
                     output=(
                         "TruffleHog scan incomplete: resolved scan target(s) "
                         "disappeared before execution.\n"
                         f"{missing_list}"
                     ),
-                    issues_count=0,
                     parse_failures_count=1,
                 )
             logger.warning(
@@ -306,11 +304,10 @@ class TrufflehogPlugin(BaseToolPlugin):
             fixed_args = self._build_check_command(source_paths=[])
         except (OSError, ValueError, RuntimeError) as e:
             logger.error(f"Failed to prepare TruffleHog command: {e}")
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=f"TruffleHog failed: {e}",
-                issues_count=0,
             )
         # TruffleHog's ``filesystem`` mode takes explicit file paths in argv, so
         # the resolved list must be split into ARG_MAX-safe batches (shared with
@@ -332,24 +329,27 @@ class TrufflehogPlugin(BaseToolPlugin):
 
         if failures:
             combined = "\n".join(f.output for f in failures if f.output)
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=Checked(success=False),
+                    issues_count=len(all_issues),
+                ),
                 name=self.definition.name,
-                success=False,
                 output=combined or "TruffleHog failed with a non-zero exit code.",
                 issues=all_issues,
-                issues_count=len(all_issues),
                 parse_failures_count=sum(
                     (f.parse_failures_count or 0) for f in failures
                 ),
             )
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=True, inspected_files=True),
+                issues_count=len(all_issues),
+            ),
             name=self.definition.name,
-            inspected_files=True,
-            success=True,
             output=None,
             issues=all_issues,
-            issues_count=len(all_issues),
             parse_failures_count=0,
         )
 
@@ -389,20 +389,16 @@ class TrufflehogPlugin(BaseToolPlugin):
                 "  - Need to increase timeout via "
                 "--tool-options trufflehog:timeout=N"
             )
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=TimedOut(timeout_msg)),
                 name=self.definition.name,
-                success=False,
-                output=timeout_msg,
-                issues_count=0,
-                timed_out=True,
             )
         except (OSError, ValueError, RuntimeError) as e:
             logger.error(f"Failed to run TruffleHog: {e}")
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=f"TruffleHog failed: {e}",
-                issues_count=0,
             )
 
         stdout = (result.stdout or "").strip()
@@ -417,12 +413,14 @@ class TrufflehogPlugin(BaseToolPlugin):
         # must not read as a completed check. Parsed findings are preserved.
         if result.returncode != 0:
             partial = parse_trufflehog_output(output=stdout) if stdout else []
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=Checked(success=False),
+                    issues_count=len(partial),
+                ),
                 name=self.definition.name,
-                success=False,
                 output=stderr or "TruffleHog failed with a non-zero exit code.",
                 issues=partial,
-                issues_count=len(partial),
                 parse_failures_count=1,
             )
 
@@ -443,15 +441,17 @@ class TrufflehogPlugin(BaseToolPlugin):
             else:
                 logger.error(f"TruffleHog reported scan errors: {stderr[:500]}")
                 partial = parse_trufflehog_output(output=stdout) if stdout else []
-                return ToolResult(
+                return ToolResult.from_outcome(
+                    ToolOutcome(
+                        execution=Checked(success=False),
+                        issues_count=len(partial),
+                    ),
                     name=self.definition.name,
-                    success=False,
                     output=(
                         "TruffleHog encountered errors during the scan; "
                         "treating as a failure rather than a clean pass."
                     ),
                     issues=partial,
-                    issues_count=len(partial),
                     parse_failures_count=1,
                 )
 
@@ -463,23 +463,23 @@ class TrufflehogPlugin(BaseToolPlugin):
         # unparseable content as a failure (mirrors gitleaks; see #1044).
         if issues_count == 0 and stdout:
             logger.error("TruffleHog produced output that yielded no findings")
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=(
                     "TruffleHog produced unparseable output; "
                     "treating as a parse failure."
                 ),
-                issues_count=0,
                 parse_failures_count=1,
             )
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=True, inspected_files=True),
+                issues_count=issues_count,
+            ),
             name=self.definition.name,
-            inspected_files=True,
-            success=True,
             output=None,
-            issues_count=issues_count,
             issues=issues,
             parse_failures_count=0,
         )

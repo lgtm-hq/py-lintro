@@ -23,6 +23,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.markdownlint.markdownlint_parser import parse_markdownlint_output
 from lintro.plugins.base import BaseToolPlugin
@@ -288,12 +289,13 @@ class MarkdownlintPlugin(BaseToolPlugin):
         if success_flag:
             final_output = None
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=success_flag, inspected_files=True),
+                issues_count=issues_count,
+            ),
             name=self.definition.name,
-            inspected_files=True,
-            success=success_flag,
             output=final_output,
-            issues_count=issues_count,
             issues=issues,
         )
 

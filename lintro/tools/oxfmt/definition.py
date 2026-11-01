@@ -16,6 +16,7 @@ from lintro.enums.capability import Cap
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import FixMeasured, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.oxfmt.oxfmt_issue import OxfmtIssue
 from lintro.parsers.oxfmt.oxfmt_parser import parse_oxfmt_output
@@ -191,17 +192,19 @@ class OxfmtPlugin(BaseToolPlugin):
         )
         combined_issues = list(initial_issues or [])
         combined_count = len(combined_issues)
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=TimedOut(timeout_msg),
+                accounting=FixMeasured(
+                    initial=combined_count,
+                    fixed=0,
+                    remaining=combined_count,
+                ),
+                issues_count=combined_count,
+            ),
             name=self.definition.name,
-            success=False,
-            output=timeout_msg,
-            issues_count=combined_count,
             issues=combined_issues,
-            initial_issues_count=combined_count,
-            fixed_issues_count=0,
-            remaining_issues_count=combined_count,
             cwd=cwd,
-            timed_out=True,
         )
 
     def _build_oxfmt_args(self, options: dict[str, object]) -> list[str]:
