@@ -32,7 +32,7 @@ from lintro.ai.review.models.run_outcome import RunOutcome
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.run_usage import RunUsage
 from lintro.ai.review.resume import records_for_reviewed
-from lintro.ai.review.reuse_gate import evidence_carries_over
+from lintro.ai.review.reuse_gate import inherit_model_evidence
 from lintro.ai.review.sensitivity import filter_findings_by_policy
 from lintro.ai.review.severity_gate import apply_severity_gates
 from lintro.ai.review.state_store import state_dir, write_state_part
@@ -69,7 +69,7 @@ class CheckpointStamp:
         shadow_price_model: The model whose list table priced the shadow;
             recorded for the reader, it drives no arithmetic here.
         verify: Reads what the calls completed so far established: the
-            verification state, the reported models and whether a cost
+            verification state, reported models, silent requests and whether a cost
             figure was reported, so the partial record carries them and a
             subscription figure is booked as the shadow it is; ``None``
             records none of it.
@@ -92,11 +92,13 @@ class LedgerSnapshot:
             empty when none completed.
         reported_models: The models those calls reported.
         cost_reported: Whether any of them reported a cost figure.
+        unreported_models: The requested models of calls that reported none.
     """
 
     state: str = ""
     reported_models: tuple[ReportedModel, ...] = ()
     cost_reported: bool = False
+    unreported_models: tuple[str, ...] = ()
 
 
 _NO_STAMP = CheckpointStamp()
@@ -198,6 +200,11 @@ def write_incremental_coverage_part(
         stamp=stamp,
         snapshot=snapshot,
         round_number=round_number,
+        inherited_rounds=(
+            frozenset(record.round for record in resume.coverage)
+            if not force_full
+            else frozenset()
+        ),
         basis=basis,
         degradations=tuple(
             DegradationRecord.from_degradation(
@@ -208,7 +215,6 @@ def write_incremental_coverage_part(
             for item in partial.coverage_degradations
         ),
         round_figure=round_figure,
-        shadow_basis=shadow_basis,
     )
     write_state_part(
         state=replace(
@@ -271,9 +277,9 @@ def _runs_with_checkpoint(
     stamp: CheckpointStamp,
     snapshot: LedgerSnapshot,
     round_number: int,
+    inherited_rounds: frozenset[int],
     basis: str,
     round_figure: float,
-    shadow_basis: bool,
     degradations: tuple[DegradationRecord, ...] = (),
 ) -> tuple[tuple[RunRecord, ...], bool]:
     """Return the stored history plus this round's checkpoint record, when stamped.
@@ -283,9 +289,9 @@ def _runs_with_checkpoint(
         stamp: The checkpoint stamp; ``identity`` may be ``None``.
         snapshot: What the open ledger established so far.
         round_number: The round being checkpointed.
+        inherited_rounds: Rounds whose gated coverage this attempt may retain.
         basis: The basis the partial record carries.
         round_figure: What the round has spent, or its shadow, so far.
-        shadow_basis: Whether the round's figure is a shadow.
         degradations: What the chunks finished so far degraded (#2803), so
             a resume after runner loss sees a redo that failed again rather
             than crediting its coverage as a success.
@@ -299,22 +305,23 @@ def _runs_with_checkpoint(
         return history, False
     # An earlier attempt at this round whose coverage this one may have
     # inherited keeps its model evidence on the record (#2867).
-    seen = {model.name: model for model in snapshot.reported_models}
+    identity = replace(
+        stamp.identity,
+        round=round_number,
+        model_verification=snapshot.state,
+        reported_models=snapshot.reported_models,
+        unreported_models=snapshot.unreported_models,
+    )
     for run in history:
-        if (
-            run.coverage.checkpoint
-            and run.identity.round == round_number
-            and evidence_carries_over(earlier=run.identity, current=stamp.identity)
-        ):
-            for model in run.identity.reported_models:
-                seen.setdefault(model.name, model)
+        if run.coverage.checkpoint and run.identity.round == round_number:
+            identity = inherit_model_evidence(
+                earlier=run.identity,
+                current=identity,
+                inherited=run.identity.round in inherited_rounds,
+            )
+    shadow_basis = basis in {value.value for value in SHADOW_COST_BASES}
     partial = RunRecord(
-        identity=replace(
-            stamp.identity,
-            round=round_number,
-            model_verification=snapshot.state,
-            reported_models=tuple(seen.values()),
-        ),
+        identity=identity,
         coverage=RunCoverage(
             partial=True,
             checkpoint=True,

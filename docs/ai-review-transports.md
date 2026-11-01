@@ -295,7 +295,20 @@ partial run record carrying the round's lane and endpoint, so a round killed aft
 checkpoint leaves coverage the gate can place. Outside a lane row the allowed models are
 the default model, its declared fallbacks and the custom agents' `model` overrides; a
 local Claude CLI run whose envelope names an auxiliary model outside that set reads
-`mismatch`, as the ADR requires. The first run after this lands therefore re-reviews
-each open PR once.
+`mismatch`, as the ADR requires.
+
+Silent calls record their requested models separately in `unreported_models`, including
+agent overrides. Checkpoints and their replacements retain those claims when coverage is
+inherited; a verified call on resume cannot promote silent coverage to `verified`. Every
+silent claim must still satisfy the current allowed-model list. Mixed verified and
+unverifiable sources cannot establish a shared verification state, so carried provenance
+fails closed.
+
+Old blank-state artifacts and mixed `unreported` artifacts missing their silent claims
+need one re-review. A complete re-review replaces those old claims with current
+evidence. An omitted `unreported_models` key means an older record: only a purely silent
+record can fall back to its recorded requested model. Explicit null or malformed claims
+stay disallowed instead of disappearing; a mixed record's default model cannot
+reconstruct its missing silent requests.
 
 See also `docs/ai-features.md` and the dogfood workflow helpers under `scripts/ci/`.
