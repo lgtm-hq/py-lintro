@@ -31,22 +31,65 @@ def _coverage(
 
 
 @pytest.mark.parametrize("working_directory", [None, "explicit"])
+@pytest.mark.parametrize("argument", ["relative", "dot", "absolute", "symlink"])
 def test_coverage_accepts_only_the_reported_invocation_subset(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     working_directory: str | None,
+    argument: str,
 ) -> None:
     """A native exclusion may omit an input while another earns exact coverage."""
     monkeypatch.chdir(tmp_path)
     file = tmp_path / "space name.py"
     file.touch()
     (tmp_path / "excluded.py").touch()
+    alias = tmp_path / "alias.py"
+    alias.symlink_to(file)
+    invoked = {
+        "relative": file.name,
+        "dot": f"./{file.name}",
+        "absolute": str(file),
+        "symlink": alias.name,
+    }[argument]
     cwd = str(tmp_path) if working_directory else None
 
-    covered = _coverage([str(file)], files=[file.name, "excluded.py"], cwd=cwd)
+    covered = _coverage([str(file)], files=[invoked, "excluded.py"], cwd=cwd)
 
     assert covered == (frozenset({str(file)}),) * 2
-    assert _coverage([], files=[file.name], cwd=cwd) == (frozenset(),) * 2
+    assert _coverage([], files=[invoked], cwd=cwd) == (frozenset(),) * 2
+
+
+@pytest.mark.parametrize("duplicate", ["exact", "dot", "absolute", "symlink"])
+@pytest.mark.parametrize("reported", ["deduplicated", "peer", "empty"])
+def test_duplicate_invocation_identities_invalidate_deduplicated_reports(
+    tmp_path: Path,
+    duplicate: str,
+    reported: str,
+) -> None:
+    """Native deduplication or exclusion cannot hide ambiguous invocation inputs."""
+    file = tmp_path / "actual.py"
+    file.touch()
+    peer = tmp_path / "peer.py"
+    peer.touch()
+    alias = tmp_path / "alias.py"
+    alias.symlink_to(file)
+    repeated = {
+        "exact": file.name,
+        "dot": f"./{file.name}",
+        "absolute": str(file),
+        "symlink": alias.name,
+    }[duplicate]
+    paths = {
+        "deduplicated": [str(file)],
+        "peer": [str(peer)],
+        "empty": [],
+    }[reported]
+
+    assert _coverage(
+        paths,
+        files=[file.name, repeated, peer.name],
+        cwd=str(tmp_path),
+    ) == (None, None)
 
 
 @pytest.mark.parametrize(

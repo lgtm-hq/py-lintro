@@ -36,9 +36,14 @@ def reported_inspected_paths(
     try:
         base = Path(cwd or Path.cwd())
         expected: dict[str, str] = {}
+        invoked: set[str] = set()
         for file in files:
             path = (base / file).absolute()
             resolved = str(path.resolve())
+            # Native deduplication cannot disambiguate repeated file arguments.
+            if resolved in invoked:
+                return None
+            invoked.add(resolved)
             # Validate both spellings before splitting any native report. A
             # symlink can introduce separators absent from its invocation name.
             for name in (str(path), resolved):

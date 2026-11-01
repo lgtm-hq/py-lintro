@@ -2,13 +2,46 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from assertpy import assert_that
 
 from lintro.parsers.black.black_parser import (
+    black_inspected_paths,
     black_report_parse_failures,
     parse_black_output,
 )
+
+
+@pytest.mark.parametrize("metadata_first", [True, False])
+@pytest.mark.parametrize(
+    ("metadata", "covered"),
+    [
+        ("line_length: 88", True),
+        ("target_version: ['py311']", True),
+        ("error: cannot format broken.py: Cannot parse: 1:0: invalid", False),
+    ],
+)
+def test_black_coverage_distinguishes_configuration_metadata_from_errors(
+    tmp_path: Path,
+    metadata_first: bool,
+    metadata: str,
+    covered: bool,
+) -> None:
+    """Error lines invalidate coverage even beside a valid per-file confirmation."""
+    file = tmp_path / "example.py"
+    file.touch()
+    confirmation = f"{file.name} already well formatted, good job."
+    lines = [metadata, confirmation] if metadata_first else [confirmation, metadata]
+
+    inspected = black_inspected_paths(
+        "\n".join(lines),
+        files=[file.name],
+        cwd=str(tmp_path),
+    )
+
+    assert inspected == (frozenset({str(file)}) if covered else None)
 
 
 def test_parse_black_output_would_reformat_single_file() -> None:

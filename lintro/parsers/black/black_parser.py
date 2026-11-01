@@ -43,7 +43,7 @@ _SUMMARY_REFORMATTED = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 _VERBOSE_METADATA = re.compile(
-    r"^(?:Identified `.+` as project root containing a .+\."
+    r"^(?!error:)(?:Identified `.+` as project root containing a .+\."
     r"|Using configuration (?:from .+|in .+)\."
     r"|[a-z_]+: .*"
     r'|Found input source: ".+"'
