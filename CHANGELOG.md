@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.175.4] - 2026-11-01
+
+### Fixed
+
+- **ci**: restore source-labelled main image publication (#2995) (d879af3)
+
 ## [0.175.3] - 2026-11-01
 
 ### Changed
