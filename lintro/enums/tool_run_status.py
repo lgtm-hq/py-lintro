@@ -88,7 +88,7 @@ def tool_run_status(*, result: ToolOutcome, issue_count: int) -> ToolRunStatus:
     Returns:
         ToolRunStatus: The collapsed status.
     """
-    if getattr(result, "unavailable", False):
+    if getattr(result, "unavailable", False) is True:
         return ToolRunStatus.UNAVAILABLE
     if result.skipped:
         return ToolRunStatus.SKIPPED

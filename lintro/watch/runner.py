@@ -176,7 +176,9 @@ class WatchRunner:
             if result.duration_seconds is not None
             else ""
         )
-        if result.skipped:
+        if result.unavailable:
+            status = f"⚠️ UNAVAIL: {result.unavailable_reason}"
+        elif result.skipped:
             status = f"⏭️ skipped: {result.skip_reason}"
         elif result.issues_count:
             noun = "issue" if result.issues_count == 1 else "issues"

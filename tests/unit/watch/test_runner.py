@@ -435,3 +435,20 @@ def test_run_batch_contains_unexpected_executor_error(
 
     assert_that(runner.run_batch({str(target)})).is_equal_to(1)
     assert_that(lines).contains("  Error: RuntimeError: backend unavailable")
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_unavailable_tool_renders_diagnosis_in_watch(strict: bool) -> None:
+    """Watch output must show UNAVAIL even when missing tools are non-strict."""
+    lines: list[str] = []
+    runner = WatchRunner(emit=lines.append)
+    runner._render_tool_result(
+        ToolResult(
+            name="mypy",
+            success=not strict,
+            unavailable_reason="binary missing",
+        ),
+    )
+    assert len(lines) == 1
+    assert "UNAVAIL: binary missing" in lines[0]
+    assert "passed" not in lines[0]

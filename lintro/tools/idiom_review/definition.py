@@ -90,6 +90,7 @@ class IdiomReviewPlugin(BaseToolPlugin):
                 "duplicate logic (no external binary; uses the AI provider)"
             ),
             can_fix=False,
+            in_process=True,
             tool_type=ToolType.LINTER,
             # Advisory: nondeterministic AI findings never run under ``chk``
             # and never feed its issue counts (#1308).

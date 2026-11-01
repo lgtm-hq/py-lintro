@@ -49,7 +49,7 @@ def _fake_snapshot(
     binary_mtime: float = 100.0,
     probe_error: str | None = None,
 ) -> ToolSnapshot:
-    """Build a ToolSnapshot for tests."""
+    """Build evidence; unavailable snapshots always have empty binary fields."""
     return ToolSnapshot(
         name=name,
         available=available,
@@ -110,8 +110,6 @@ def test_cache_hit_within_ttl_skips_reprobe(tmp_path: Path) -> None:
 
 def test_mtime_bump_invalidates_cache(tmp_path: Path) -> None:
     """Changing binary mtime invalidates the cached snapshot for that tool."""
-    from lintro import __version__ as lintro_version
-
     binary = tmp_path / "ruff.bin"
     binary.write_text("v1")
     snap = _fake_snapshot(
@@ -119,19 +117,7 @@ def test_mtime_bump_invalidates_cache(tmp_path: Path) -> None:
         binary_path=str(binary),
         binary_mtime=binary.stat().st_mtime,
     )
-    cache_file = tmp_path / ".lintro-cache" / "tool-snapshots.json"
-    cache_file.parent.mkdir(parents=True)
-    cache_file.write_text(
-        json.dumps(
-            {
-                "lintro_version": lintro_version,
-                "probed_at": time.time(),
-                "ttl_seconds": DEFAULT_SNAPSHOT_TTL_SECONDS,
-                "snapshots": {"ruff": snap.to_dict()},
-            },
-        ),
-        encoding="utf-8",
-    )
+    _write_snapshot_cache(tmp_path, snap)
 
     # Bump mtime so the cache key no longer matches.
     binary.write_text("v2")
@@ -176,6 +162,7 @@ def test_missing_binary_yields_unavailable_snapshot() -> None:
     plugin.definition = definition
 
     with (
+        patch("lintro.tools.tool_manager.is_tool_registered", return_value=True),
         patch("lintro.plugins.registry.ToolRegistry.get", return_value=plugin),
         patch(
             "lintro.tools.core.snapshots.get_executable_command",
@@ -423,7 +410,11 @@ def _write_snapshot_cache(
     snap: ToolSnapshot,
 ) -> Path:
     """Write a one-entry on-disk snapshot cache for tests."""
+    from dataclasses import replace
+
     from lintro import __version__ as lintro_version
+
+    snap = replace(snap, probed_at=time.time())
 
     cache_file = tmp_path / ".lintro-cache" / "tool-snapshots.json"
     cache_file.parent.mkdir(parents=True, exist_ok=True)
@@ -459,6 +450,10 @@ def test_unavailable_disk_cache_kept_while_binary_missing(tmp_path: Path) -> Non
         return snap
 
     with (
+        patch(
+            "lintro.tools.core.snapshots.get_executable_command",
+            return_value=["ruff"],
+        ),
         patch("lintro.tools.core.snapshots.shutil.which", return_value=None),
         patch("lintro.tools.core.snapshots.probe_tool", side_effect=fake_probe),
         patch("lintro.plugins.discovery.discover_all_tools", return_value=None),

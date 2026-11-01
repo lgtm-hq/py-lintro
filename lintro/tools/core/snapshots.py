@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import math
 import os
 import shutil
 import sys
@@ -49,10 +50,10 @@ DEFAULT_SNAPSHOT_TTL_SECONDS: int = 600
 SNAPSHOT_CACHE_RELPATH: str = ".lintro-cache/tool-snapshots.json"
 
 _cache_lock = threading.Lock()
-_memory_cache: dict[str, ToolSnapshot] | None = None
-_memory_cache_path: Path | None = None
-_memory_probed_at: float | None = None
+_disk_write_lock = threading.Lock()
+_memory_caches: dict[Path, dict[str, ToolSnapshot]] = {}
 _force_fresh: bool = False
+_bypass_disk_cache: bool = False
 
 
 def _manifest_tool(name: str) -> ManifestTool | None:
@@ -118,7 +119,22 @@ def _resolved_binary(command: list[str]) -> str:
         )
         if module_binary:
             return module_binary
+        # Python's mtime says nothing about the module it launches.
+        return ""
     return shutil.which(command[0]) or ""
+
+
+def _has_untracked_package(command: list[str]) -> bool:
+    """Require fresh probes when only a wrapper's identity is known."""
+    if not command:
+        return False
+    if Path(command[0]).name in {"bunx", "npx", "bun", "npm"}:
+        return True
+    return (
+        len(command) >= 3
+        and command[1] == "-m"
+        and (command[0] != sys.executable or not _resolved_binary(command))
+    )
 
 
 def _is_cached_snapshot_fresh(snap: ToolSnapshot, *, search_root: Path) -> bool:
@@ -133,6 +149,8 @@ def _is_cached_snapshot_fresh(snap: ToolSnapshot, *, search_root: Path) -> bool:
     (e.g. ``markdownlint-cli2`` for ``markdownlint``).
     """
     command = get_executable_command(snap.name, cwd=search_root)
+    if _has_untracked_package(command):
+        return False
     if snap.command:
         resolved = _resolved_binary(command)
         if tuple(command) != snap.command or resolved != snap.binary_path:
@@ -145,20 +163,26 @@ def _is_cached_snapshot_fresh(snap: ToolSnapshot, *, search_root: Path) -> bool:
             binary_mtime=_binary_mtime(snap.binary_path),
         )
     if snap.available:
-        return True
+        from lintro.tools import tool_manager
+
+        return (
+            tool_manager.is_tool_registered(snap.name)
+            and tool_manager.get_tool(snap.name).definition.in_process is True
+        )
     main_cmd = command[0] if command else snap.name
     return shutil.which(main_cmd) is None
 
 
 def set_force_fresh_probes(force: bool) -> None:
-    """Force the next probe cycle to ignore on-disk and memory caches.
+    """Invalidate memory on the next cycle and bypass disk caches for this run.
 
     Args:
         force: When True, probes re-run even if a valid cache exists.
     """
-    global _force_fresh
+    global _force_fresh, _bypass_disk_cache
     with _cache_lock:
         _force_fresh = force
+        _bypass_disk_cache = force
 
 
 def clear_snapshot_cache(
@@ -172,41 +196,26 @@ def clear_snapshot_cache(
         cache_root: Directory containing ``.lintro-cache``; defaults to cwd.
         include_disk: When False, only the in-process memory cache is reset.
     """
-    global _memory_cache, _memory_cache_path, _memory_probed_at
     with _cache_lock:
-        _memory_cache = None
-        _memory_cache_path = None
-        _memory_probed_at = None
-        if not include_disk:
-            return
-        cache_file = _cache_file_path(cache_root=cache_root)
-        if cache_file.exists():
-            try:
-                cache_file.unlink()
-                logger.debug("Deleted tool snapshot cache: {}", cache_file)
-            except OSError as exc:
-                logger.warning(
-                    "Could not delete snapshot cache {}: {}",
-                    cache_file,
-                    exc,
-                )
+        _memory_caches.clear()
+    if not include_disk:
+        return
+    cache_file = _cache_file_path(cache_root=cache_root)
+    try:
+        cache_file.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("Could not delete snapshot cache {}: {}", cache_file, exc)
 
 
 def get_snapshot_ttl() -> int:
     """Return the configured snapshot TTL in seconds.
 
     Returns:
-        TTL from execution config, or the default when config is unavailable.
+        TTL from the validated execution config.
     """
-    try:
-        from lintro.config.config_loader import get_config
+    from lintro.config.config_loader import get_config
 
-        ttl = get_config().execution.tool_snapshot_ttl
-        if ttl >= 1:
-            return ttl
-    except (ImportError, OSError, ValueError, AttributeError, RuntimeError):
-        pass
-    return DEFAULT_SNAPSHOT_TTL_SECONDS
+    return get_config().execution.tool_snapshot_ttl
 
 
 def is_strict_missing_tools() -> bool:
@@ -215,12 +224,9 @@ def is_strict_missing_tools() -> bool:
     Returns:
         True when ``execution.strict_missing_tools`` is enabled.
     """
-    try:
-        from lintro.config.config_loader import get_config
+    from lintro.config.config_loader import get_config
 
-        return bool(get_config().execution.strict_missing_tools)
-    except (ImportError, OSError, ValueError, AttributeError, RuntimeError):
-        return False
+    return get_config().execution.strict_missing_tools
 
 
 def _cache_file_path(*, cache_root: Path | None = None) -> Path:
@@ -332,15 +338,12 @@ def probe_tool(
     root = search_root if search_root is not None else Path.cwd()
     name = tool_name.lower()
 
-    try:
-        plugin = tool_manager.get_tool(name)
-        definition = plugin.definition
-    except (KeyError, ValueError) as exc:
+    if not tool_manager.is_tool_registered(name):
         manifest = _manifest_tool(name)
         if manifest is None or not manifest.version_command:
             return _unavailable_snapshot(
                 name,
-                probe_error=f"Tool not registered: {exc}",
+                probe_error=f"Tool not registered: {name}",
             )
         command = list(manifest.version_command)
         binary_path = _resolved_binary(command)
@@ -362,6 +365,7 @@ def probe_tool(
             get_install_hints().get(name, f"Install {name} and ensure it is on PATH"),
         )
 
+    definition = tool_manager.get_tool(name).definition
     can_fix = bool(definition.can_fix)
     supports_stdin = definition.supports_stdin
     if not isinstance(supports_stdin, bool):
@@ -384,7 +388,7 @@ def probe_tool(
 
     # In-process tools (e.g. idiom-review) have no external binary and no
     # version gate — treat them as available without a PATH probe.
-    if definition.version_command is None and definition.min_version is None:
+    if definition.in_process is True:
         return ToolSnapshot(
             name=name,
             available=True,
@@ -403,6 +407,19 @@ def probe_tool(
     command = get_executable_command(definition.name, cwd=root)
     binary_path = _resolved_binary(command)
     binary_mtime = _binary_mtime(binary_path)
+
+    if definition.version_command is None and definition.min_version is None:
+        return ToolSnapshot(
+            name=name,
+            available=bool(binary_path),
+            capabilities=capabilities,
+            binary_path=binary_path,
+            binary_mtime=binary_mtime,
+            command=tuple(command),
+            version_check_passed=bool(binary_path),
+            probe_error=None if binary_path else "Executable not found in PATH",
+            remediation_hint=remediation,
+        )
 
     # Always run the version probe — do not gate on shutil.which alone.
     # Wrappers (bunx/npx/python -m) and test mocks of subprocess.run can
@@ -439,14 +456,14 @@ def _snapshot_from_version(
         Available, below-minimum or degraded snapshot without re-probing.
     """
     error = version_info.error_message or ""
-    unparseable = bool(snapshot.binary_path and "Could not parse version" in error)
-    failed_probe = version_info.current_version is None and any(
-        text in error.lower()
-        for text in ("failed to run version check", "command failed", "not found")
+    unparseable = bool(snapshot.binary_path and version_info.parse_failed)
+    passed = (
+        version_info.version_check_passed
+        and not version_info.probe_failed
+        and not version_info.parse_failed
     )
-    passed = version_info.version_check_passed and not failed_probe
     below_minimum = (
-        version_info.current_version is not None and "below minimum" in error
+        version_info.current_version is not None and not version_info.probe_failed
     )
     available = passed or unparseable or below_minimum
     if not available and not snapshot.binary_path:
@@ -470,7 +487,7 @@ def _load_disk_cache(
     *,
     ttl: int,
     search_root: Path,
-) -> tuple[dict[str, ToolSnapshot], float] | None:
+) -> dict[str, ToolSnapshot]:
     """Load snapshots from disk when the cache file is valid.
 
     Args:
@@ -479,52 +496,44 @@ def _load_disk_cache(
         search_root: Directory used to resolve current commands.
 
     Returns:
-        Snapshot map, or None when missing / corrupt / expired / version mismatch.
+        Fresh entries, or an empty map when missing or corrupt.
     """
-    if not cache_file.exists():
-        return None
     try:
         raw = json.loads(cache_file.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         logger.debug("Corrupt tool snapshot cache {}; re-probing: {}", cache_file, exc)
         with contextlib.suppress(OSError):
             cache_file.unlink(missing_ok=True)
-        return None
+        return {}
 
-    if not isinstance(raw, dict):
-        return None
-    if raw.get("lintro_version") != __version__:
+    if not isinstance(raw, dict) or raw.get("lintro_version") != __version__:
         logger.debug("Snapshot cache lintro version mismatch; re-probing")
-        return None
-    probed_at = raw.get("probed_at")
-    if not isinstance(probed_at, (int, float)):
-        return None
-    age = time.time() - float(probed_at)
-    if not 0 <= age <= ttl:
-        logger.debug("Snapshot cache TTL expired; re-probing")
-        return None
+        return {}
 
     snapshots_raw = raw.get("snapshots")
     if not isinstance(snapshots_raw, dict):
-        return None
+        return {}
 
     snapshots: dict[str, ToolSnapshot] = {}
     for name, entry in snapshots_raw.items():
         if not isinstance(entry, dict):
             continue
+        # Read old cache files without restarting their TTL on hydration.
+        entry = {"probed_at": raw.get("probed_at"), **entry}
         try:
             snap = ToolSnapshot.from_dict(entry)
         except (TypeError, ValueError, KeyError):
             continue
+        if snap.name != name or not _within_ttl(snap, ttl):
+            continue
+        # A present binary may have failed its probe transiently. Retry next run.
+        if not snap.available and snap.binary_path:
+            continue
         if not _is_cached_snapshot_fresh(snap, search_root=search_root):
-            logger.debug(
-                "Snapshot for {} invalidated by path/mtime or PATH change",
-                name,
-            )
             continue
         snapshots[name.lower()] = snap
 
-    return (snapshots, float(probed_at)) if snapshots else None
+    return snapshots
 
 
 def _write_disk_cache(
@@ -546,6 +555,7 @@ def _write_disk_cache(
         "ttl_seconds": ttl,
         "snapshots": {name: snap.to_dict() for name, snap in snapshots.items()},
     }
+    tmp_path: Path | None = None
     try:
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
@@ -556,11 +566,15 @@ def _write_disk_cache(
             prefix=f"{cache_file.stem}.",
             suffix=".tmp",
         ) as handle:
-            handle.write(json.dumps(payload, indent=2, sort_keys=True))
             tmp_path = Path(handle.name)
+            handle.write(json.dumps(payload, indent=2, sort_keys=True))
         tmp_path.replace(cache_file)
     except OSError as exc:
         logger.debug("Failed to write tool snapshot cache {}: {}", cache_file, exc)
+    finally:
+        if tmp_path is not None:
+            with contextlib.suppress(OSError):
+                tmp_path.unlink(missing_ok=True)
 
 
 def _probe_all_fresh(
@@ -591,59 +605,41 @@ def _probe_all_fresh(
         }
         for future in as_completed(futures):
             name = futures[future]
-            try:
-                results[name.lower()] = future.result()
-            except Exception as exc:
-                logger.debug("Probe failed for {}: {}", name, exc)
-                results[name.lower()] = _unavailable_snapshot(
-                    name.lower(),
-                    probe_error=f"Probe failed: {exc}",
-                )
+            # Known subprocess failures are classified by check_tool_version.
+            # Internal exceptions must reach the executor's error handling.
+            results[name.lower()] = replace(future.result(), probed_at=time.time())
     return results
 
 
-def _memory_hits_for(
-    names: list[str],
+def _within_ttl(snap: ToolSnapshot, ttl: int) -> bool:
+    """Check an entry's original age, including backwards clock changes."""
+    return math.isfinite(snap.probed_at) and 0 <= time.time() - snap.probed_at <= ttl
+
+
+def _fresh_entries(
+    candidates: dict[str, ToolSnapshot],
     *,
-    cache_file: Path,
     ttl: int,
     search_root: Path,
-) -> dict[str, ToolSnapshot] | None:
-    """Return memory snapshots when they still cover ``names``.
-
-    Must be called while holding ``_cache_lock``.
-    """
-    if (
-        _memory_cache is None
-        or _memory_cache_path != cache_file
-        or _memory_probed_at is None
-        or time.time() - _memory_probed_at > ttl
-    ):
-        return None
-    hits: dict[str, ToolSnapshot] = {}
-    for name in names:
-        snap = lookup_snapshot(snapshots=_memory_cache, name=name)
-        if snap is None or not _is_cached_snapshot_fresh(
-            snap,
-            search_root=search_root,
-        ):
-            return None
-        hits[name] = snap
-    return hits
+) -> dict[str, ToolSnapshot]:
+    """Validate copied cache candidates without holding the memory lock."""
+    return {
+        name: snap
+        for name, snap in candidates.items()
+        if _within_ttl(snap, ttl)
+        and _is_cached_snapshot_fresh(snap, search_root=search_root)
+    }
 
 
 def _configured_max_workers() -> int:
     """Return the configured probe parallelism.
 
     Returns:
-        ``execution.max_workers`` from config, or 8 when config is unavailable.
+        ``execution.max_workers`` from the validated config.
     """
-    try:
-        from lintro.config.config_loader import get_config
+    from lintro.config.config_loader import get_config
 
-        return get_config().execution.max_workers
-    except (ImportError, OSError, ValueError, AttributeError, RuntimeError):
-        return 8
+    return get_config().execution.max_workers
 
 
 def probe_all_tools(
@@ -662,83 +658,60 @@ def probe_all_tools(
     Returns:
         Mapping of tool name → ToolSnapshot.
     """
-    global _memory_cache, _memory_cache_path, _memory_probed_at, _force_fresh
+    global _force_fresh
 
     from lintro.tools import tool_manager
 
     names = tool_names if tool_names is not None else tool_manager.get_tool_names()
-    names = [n.lower() for n in names]
+    names = list(dict.fromkeys(n.lower() for n in names))
     search_root = (cache_root if cache_root is not None else Path.cwd()).resolve()
     cache_file = _cache_file_path(cache_root=cache_root)
     ttl = get_snapshot_ttl()
 
-    max_workers = _configured_max_workers()
-
-    force_effective = False
     with _cache_lock:
-        force_effective = force or _force_fresh
         if _force_fresh:
-            # Consume the flag at cycle start so a later set during the
-            # probe is not wiped when this cycle used force=True from the
-            # caller.
+            _memory_caches.clear()
             _force_fresh = False
-        if not force_effective:
-            hits = _memory_hits_for(
-                names,
-                cache_file=cache_file,
-                ttl=ttl,
-                search_root=search_root,
-            )
-            if hits is not None:
-                return hits
+        candidates = dict(_memory_caches.get(cache_file, {}))
+        bypass_disk = _bypass_disk_cache
 
-    # Disk I/O outside the lock so slow mounts do not block other callers.
-    disk: tuple[dict[str, ToolSnapshot], float] | None = None
-    if not force_effective:
+    retained = _fresh_entries(candidates, ttl=ttl, search_root=search_root)
+    hits = {name: lookup_snapshot(retained, name) for name in names}
+    missing = [name for name, snap in hits.items() if force or snap is None]
+    if missing and not force and not bypass_disk:
         disk = _load_disk_cache(cache_file, ttl=ttl, search_root=search_root)
+        retained = {**disk, **retained}
+        missing = [name for name in missing if lookup_snapshot(retained, name) is None]
 
-    with _cache_lock:
-        # Re-check memory: another thread may have filled the cache.
-        if not force_effective:
-            hits = _memory_hits_for(
-                names,
-                cache_file=cache_file,
-                ttl=ttl,
-                search_root=search_root,
-            )
-            if hits is not None:
-                return hits
-        if disk is not None:
-            disk_snapshots, disk_probed_at = disk
-            disk_hits: dict[str, ToolSnapshot] = {}
-            disk_complete = True
-            for name in names:
-                snap = lookup_snapshot(snapshots=disk_snapshots, name=name)
-                if snap is None:
-                    disk_complete = False
-                    break
-                disk_hits[name] = snap
-            if disk_complete:
-                _memory_cache = disk_snapshots
-                _memory_cache_path = cache_file
-                _memory_probed_at = disk_probed_at
-                return disk_hits
+    if not missing:
+        with _cache_lock:
+            _memory_caches.setdefault(cache_file, {}).update(retained)
+        return {
+            name: snap
+            for name in names
+            if (snap := lookup_snapshot(retained, name)) is not None
+        }
 
     fresh = _probe_all_fresh(
-        names,
+        missing,
         search_root=search_root,
-        max_workers=max_workers,
+        max_workers=_configured_max_workers(),
     )
-
     with _cache_lock:
-        # A subset refresh must not renew the age of retained older snapshots.
-        _memory_cache = dict(fresh)
-        _memory_cache_path = cache_file
-        _memory_probed_at = time.time()
-        to_write = dict(fresh)
+        # Preserve peers filled by another tool worker while probing this subset.
+        merged = {**retained, **_memory_caches.get(cache_file, {}), **fresh}
+        _memory_caches[cache_file] = merged
 
-    _write_disk_cache(cache_file, to_write, ttl=ttl)
-    return {n: fresh[n] for n in names if n in fresh}
+    # Filesystem work stays outside the memory lock. Each entry retains its age.
+    with _disk_write_lock:
+        with _cache_lock:
+            to_write = dict(_memory_caches.get(cache_file, merged))
+        _write_disk_cache(cache_file, to_write, ttl=ttl)
+    return {
+        name: snap
+        for name in names
+        if (snap := lookup_snapshot(merged, name)) is not None
+    }
 
 
 def get_tool_snapshot(
@@ -751,7 +724,7 @@ def get_tool_snapshot(
 
     Args:
         tool_name: Tool name (case-insensitive).
-        force: Bypass cache for this tool (re-probes all when cache cold).
+        force: Bypass cache for this tool.
         cache_root: Optional cache root directory.
 
     Returns:
@@ -765,7 +738,7 @@ def get_tool_snapshot(
     )
     if name in snapshots:
         return snapshots[name]
-    return _unavailable_snapshot(name, probe_error="Probe returned no snapshot")
+    raise RuntimeError(f"Probe returned no snapshot for {name}")
 
 
 def snapshot_to_unavailable_result(

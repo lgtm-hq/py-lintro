@@ -134,6 +134,8 @@ class ToolVersionInfo:
     error_message: str | None = field(default=None)
     binary_path: str | None = field(default=None)
     advisory: VersionAdvisory | None = field(default=None)
+    probe_failed: bool = field(default=False, kw_only=True)
+    parse_failed: bool = field(default=False, kw_only=True)
 
 
 def parse_version(version_str: str) -> Version:
@@ -312,6 +314,7 @@ def check_tool_version(
         )
 
         if result.returncode != 0:
+            info.probe_failed = True
             info.error_message = f"Command failed: {' '.join(version_cmd)}"
             logger.debug(
                 f"[VersionCheck] Failed to get version for {tool_name}: "
@@ -327,6 +330,7 @@ def check_tool_version(
         info.current_version = extract_version_from_output(output, parser_tool_name)
 
         if not info.current_version:
+            info.parse_failed = True
             info.error_message = (
                 f"Could not parse version from output: {output.strip()}"
             )
@@ -383,6 +387,7 @@ def check_tool_version(
             )
 
     except (subprocess.TimeoutExpired, OSError) as e:
+        info.probe_failed = True
         info.error_message = f"Failed to run version check: {e}"
         logger.debug(f"[VersionCheck] Exception checking version for {tool_name}: {e}")
 

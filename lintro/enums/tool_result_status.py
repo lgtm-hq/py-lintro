@@ -11,7 +11,7 @@ class ToolResultStatus(StrEnum):
     Attributes:
         OK: The tool ran and succeeded (or is runtime-available with a version).
         FAILED: The tool ran and failed, timed out, or reported issues.
-        SKIPPED: The tool was skipped (version gate, no files, disabled).
+        SKIPPED: The tool was skipped (version gate, disabled, filtered out).
         UNAVAILABLE: The tool binary could not be probed or is missing.
         UNKNOWN: Capability could not be determined (no snapshot or no version).
     """

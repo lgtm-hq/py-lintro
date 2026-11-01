@@ -70,7 +70,7 @@ class SnapshotProvider(Protocol):
         ...
 
     def set_force_fresh_probes(self, force: bool) -> None:
-        """Choose whether the next probe must bypass its cache.
+        """Invalidate memory once and bypass disk caches until reset.
 
         Args:
             force: Whether to force a fresh probe cycle.
@@ -214,7 +214,7 @@ def clear_snapshot_cache(
 
 
 def set_force_fresh_probes(force: bool) -> None:
-    """Control the next registered probe cycle.
+    """Invalidate memory once and bypass disk caches until reset.
 
     Args:
         force: Whether the next cycle must ignore cached entries.

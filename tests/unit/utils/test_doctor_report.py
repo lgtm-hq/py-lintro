@@ -343,7 +343,7 @@ def test_unloadable_config_is_reported_as_a_check_not_an_exception(
     monkeypatch.setattr(
         doctor_report,
         "collect_tool_checks",
-        lambda **_kwargs: [ToolCheckResult(tool=_make_tool(), status=ToolStatus.OK)],
+        lambda **_kwargs: pytest.fail("invalid config must not enter tool probes"),
     )
 
     report = collect_doctor_report()
@@ -355,6 +355,9 @@ def test_unloadable_config_is_reported_as_a_check_not_an_exception(
     assert_that(checks["config.load"].remediation).is_not_empty()
     # Nothing downstream of the config may claim to have checked anything.
     assert_that(checks["ai.provider"].status).is_equal_to(DoctorCheckStatus.SKIPPED)
+    assert_that(checks["tools.availability"].status).is_equal_to(
+        DoctorCheckStatus.SKIPPED,
+    )
 
 
 @pytest.mark.usefixtures("stub_environment")
@@ -899,3 +902,41 @@ def test_manifest_only_tool_shares_one_probe_with_doctor(
     assert_that(checks[0].status).is_equal_to(ToolStatus.OK)
     assert_that(checks[0].installed_version).is_equal_to(snapshot.version)
     assert_that(Path(str(binary) + ".probed").read_text()).is_equal_to("x")
+
+
+@pytest.mark.parametrize("snapshot_available", [False, True])
+def test_doctor_snapshot_retains_install_discoverability_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    snapshot_available: bool,
+) -> None:
+    """The production snapshot path cannot label a registry fallback installed."""
+    from lintro.models.core.tool_snapshot import ToolSnapshot
+
+    tool = _make_tool("prettier", version="3.9.4", install_type="npm", category="npm")
+    snapshot = ToolSnapshot(
+        name="prettier",
+        available=snapshot_available,
+        version="3.9.4" if snapshot_available else None,
+        binary_path="/usr/bin/bunx",
+        command=("bunx", "prettier@3.9.4"),
+        remediation_hint="generic cache guidance",
+    )
+    monkeypatch.setattr(
+        "lintro.plugins.execution_preparation.get_executable_command",
+        lambda *a, **kw: ["bunx", "prettier@3.9.4"],
+    )
+    monkeypatch.setattr("shutil.which", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "lintro.tools.core.snapshots.probe_all_tools",
+        lambda **kw: {"prettier": snapshot},
+    )
+    registry = ManifestRegistry(tools={"prettier": tool}, language_map={}, profiles={})
+    checks = collect_tool_checks(
+        registry=registry,
+        context=_make_context(),
+        tool_names=["prettier"],
+    )
+    assert len(checks) == 1
+    assert checks[0].status == ToolStatus.MISSING
+    assert checks[0].install_hint != "generic cache guidance"
+    assert checks[0].installed_version is None

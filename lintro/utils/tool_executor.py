@@ -466,7 +466,10 @@ def _run_verify_phase(
     foldable = [
         name
         for name in tools_to_run
-        if not any(r.name == name and (r.skipped or r.timed_out) for r in all_results)
+        if not any(
+            r.name == name and (r.unavailable or r.skipped or r.timed_out)
+            for r in all_results
+        )
     ]
 
     verify_outcomes = verify_pass.run_verify_pass(
@@ -580,13 +583,6 @@ def execute_run(
             ),
             color="cyan",
         )
-
-    # Warm the shared capability snapshot cache in parallel so per-tool
-    # verify_tool_version calls hit memory/disk instead of re-probing.
-    if tools_to_run:
-        from lintro.utils.tool_snapshots import probe_all_tools
-
-        probe_all_tools(tool_names=list(tools_to_run))
 
     if not tools_to_run and not skipped_tools:
         logger.console_output("No tools to run.")
@@ -716,7 +712,7 @@ def execute_run(
     )
 
     for index, result in enumerate(all_results):
-        if result.capability is None and not result.skipped:
+        if result.capability is None and not result.skipped and not result.unavailable:
             all_results[index] = replace(
                 result,
                 capability=verify_pass.resolve_result_capability(

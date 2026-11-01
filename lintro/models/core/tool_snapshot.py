@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -77,6 +78,7 @@ class ToolSnapshot:
         recommended_version: Recommended version from requirements, if any.
         below_recommended: True when installed version is below recommended.
         command: Executable command resolved from the probe directory.
+        probed_at: Original probe time, preserved across subset cache writes.
     """
 
     name: str
@@ -92,6 +94,7 @@ class ToolSnapshot:
     recommended_version: str = ""
     below_recommended: bool = False
     command: tuple[str, ...] = ()
+    probed_at: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the snapshot for JSON cache / API output.
@@ -113,6 +116,7 @@ class ToolSnapshot:
             "recommended_version": self.recommended_version,
             "below_recommended": self.below_recommended,
             "command": list(self.command),
+            "probed_at": self.probed_at,
         }
 
     @classmethod
@@ -124,21 +128,49 @@ class ToolSnapshot:
 
         Returns:
             ToolSnapshot instance.
+
+        Raises:
+            ValueError: If any cached field has an invalid type or value.
         """
+        defaults = cls(name="").to_dict()
+        values = {key: data.get(key, default) for key, default in defaults.items()}
+        for key in ("available", "version_check_passed", "below_recommended"):
+            if not isinstance(values[key], bool):
+                raise ValueError(f"{key} must be a boolean")
+        for key in ("version", "probe_error", "remediation_hint"):
+            if values[key] is not None and not isinstance(values[key], str):
+                raise ValueError(f"{key} must be a string or null")
+        for key in ("name", "binary_path", "min_version", "recommended_version"):
+            if not isinstance(values[key], str):
+                raise ValueError(f"{key} must be a string")
+        for key in ("binary_mtime", "probed_at"):
+            value = values[key]
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not 0 <= value <= sys.float_info.max
+            ):
+                raise ValueError(f"{key} must be a finite nonnegative number")
+        command = values["command"]
+        if not isinstance(command, (list, tuple)) or any(
+            not isinstance(part, str) for part in command
+        ):
+            raise ValueError("command must be a list of strings")
         return cls(
-            name=str(data.get("name", "")),
-            available=bool(data.get("available", False)),
-            version=data.get("version"),
+            name=values["name"],
+            available=values["available"],
+            version=values["version"],
             capabilities=ToolCapabilities.from_dict(data.get("capabilities")),
-            probe_error=data.get("probe_error"),
-            remediation_hint=data.get("remediation_hint"),
-            binary_path=str(data.get("binary_path", "") or ""),
-            binary_mtime=float(data.get("binary_mtime", 0.0) or 0.0),
-            version_check_passed=bool(data.get("version_check_passed", False)),
-            min_version=str(data.get("min_version", "") or ""),
-            recommended_version=str(data.get("recommended_version", "") or ""),
-            below_recommended=bool(data.get("below_recommended", False)),
-            command=tuple(data.get("command", ())),
+            probe_error=values["probe_error"],
+            remediation_hint=values["remediation_hint"],
+            binary_path=values["binary_path"],
+            binary_mtime=float(values["binary_mtime"]),
+            version_check_passed=values["version_check_passed"],
+            min_version=values["min_version"],
+            recommended_version=values["recommended_version"],
+            below_recommended=values["below_recommended"],
+            command=tuple(command),
+            probed_at=float(values["probed_at"]),
         )
 
     def cache_key_matches(

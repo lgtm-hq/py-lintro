@@ -167,7 +167,6 @@ def _check_tool_from_snapshot(
     version = snapshot.version
     binary_path = snapshot.binary_path or None
     probe_error = snapshot.probe_error
-    remediation = snapshot.remediation_hint or hint
     if not available:
         return ToolCheckResult(
             tool=tool,
@@ -175,7 +174,7 @@ def _check_tool_from_snapshot(
             error="probe_failed",
             details=probe_error or "unavailable",
             path=binary_path,
-            install_hint=remediation,
+            install_hint=hint,
             upgrade_hint=upgrade_hint,
         )
     if not version:
@@ -261,7 +260,7 @@ def check_tool(
         hint = f"Install {tool.name} manually"
         upgrade_hint = f"Upgrade {tool.name} manually"
 
-    if snapshot is not None:
+    if snapshot is not None and not snapshot.available:
         return _check_tool_from_snapshot(
             tool=tool,
             snapshot=snapshot,
@@ -314,6 +313,14 @@ def check_tool(
                 install_hint=hint,
                 upgrade_hint=upgrade_hint,
             )
+
+    if snapshot is not None:
+        return _check_tool_from_snapshot(
+            tool=tool,
+            snapshot=snapshot,
+            hint=hint,
+            upgrade_hint=upgrade_hint,
+        )
 
     channel_path = resolve_channel_binary_path(
         tool_name=tool.name,
@@ -968,7 +975,17 @@ def collect_doctor_report() -> DoctorReport:
         DoctorReport: Config, tool, AI, and extras checks.
     """
     config, checks = _config_checks()
-    checks.extend(_tool_checks(config=config))
+    if config is None:
+        checks.append(
+            DoctorCheck(
+                category=DoctorCheckCategory.TOOLS,
+                check="tools.availability",
+                status=DoctorCheckStatus.SKIPPED,
+                detail="Tool probes require a valid execution configuration",
+            ),
+        )
+    else:
+        checks.extend(_tool_checks(config=config))
     checks.extend(_ai_checks(config=config))
     checks.extend(_extras_checks())
     return DoctorReport(checks=tuple(checks))

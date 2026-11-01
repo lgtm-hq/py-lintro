@@ -301,3 +301,14 @@ def test_verify_tool_version_uses_cached_snapshot() -> None:
         force=False,
         cache_root=Path("/tmp/target-project"),
     )
+
+
+def test_tool_definition_preserves_positional_constructor() -> None:
+    """The added stdin capability cannot shift the public v2 plugin API."""
+    from lintro.enums.tool_type import ToolType
+
+    definition = ToolDefinition("custom", "formatter", True, ToolType.FORMATTER)
+    assert definition.can_fix is True
+    assert definition.tool_type is ToolType.FORMATTER
+    assert definition.supports_stdin is None
+    assert definition.in_process is False

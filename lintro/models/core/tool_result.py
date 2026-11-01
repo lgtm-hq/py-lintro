@@ -107,7 +107,7 @@ class ToolResult:
     skip_reason: str | None = field(default=None)
 
     # Probe evidence for the frozen Unavailable outcome; success carries policy.
-    unavailable_reason: str | None = field(default=None)
+    unavailable_reason: str | None = field(default=None, kw_only=True)
 
     # Execution-timeout tracking. ``True`` when the tool's subprocess exceeded
     # its deadline and was killed. A timeout is an *execution failure*, not a

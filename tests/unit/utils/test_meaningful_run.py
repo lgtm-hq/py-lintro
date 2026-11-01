@@ -473,3 +473,18 @@ def test_result_inspected_files_keeps_findings_mentioning_skipping() -> None:
     )
 
     assert_that(result_inspected_files(result)).is_true()
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_unavailable_peer_disqualifies_severity_baseline(strict: bool) -> None:
+    """Missing tools cannot seed a zero baseline for their later installation."""
+    missing = ToolResult(name="mypy", success=not strict, unavailable_reason="missing")
+    assert result_inspected_files(missing) is False
+    assert (
+        baseline_is_eligible(
+            action=Action.CHECK,
+            dry_run_preview=False,
+            tool_results=[_real_result(), missing],
+        )
+        is False
+    )
