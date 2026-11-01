@@ -124,7 +124,12 @@ def _resolved_binary(command: list[str], *, search_root: Path) -> str:
     executable = command[0]
     if os.path.dirname(executable) and not os.path.isabs(executable):
         executable = str((search_root / executable).absolute())
-    return shutil.which(executable) or ""
+    # Match subprocess cwd for relative PATH entries, including empty entries.
+    search_path = os.pathsep.join(
+        entry if os.path.isabs(entry) else str((search_root / entry).absolute())
+        for entry in os.get_exec_path()
+    )
+    return shutil.which(executable, path=search_path) or ""
 
 
 def _has_untracked_package(command: list[str], *, search_root: Path) -> bool:
