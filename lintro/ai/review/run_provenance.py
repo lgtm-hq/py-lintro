@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
+from lintro.ai.enums.model_verification import ModelVerification
 from lintro.ai.provenance import (
     ModelLedger,
     RunProvenance,
@@ -18,13 +19,19 @@ from lintro.ai.provenance import (
     detect_run_provenance,
     verify_models,
 )
+from lintro.ai.review.coverage_rounds import newest_records_by_hash, own_records_at_hash
 from lintro.ai.review.incremental_coverage import CheckpointStamp, LedgerSnapshot
 from lintro.ai.review.models.run_identity import RunIdentity
-from lintro.ai.review.reuse_gate import agent_model_overrides, allowed_models_for
+from lintro.ai.review.reuse_gate import (
+    agent_model_overrides,
+    allowed_models_for,
+    reusable_rounds_for,
+)
 from lintro.ai.transport import cli_bare_billing, cli_runtime_env
 
 if TYPE_CHECKING:
     from lintro.ai.review.models.review_result import ReviewResult
+    from lintro.ai.review.resume import ResumePlan
     from lintro.ai.review.session import ReviewSessionOptions
 
 __all__ = [
@@ -148,6 +155,7 @@ def stamp_run_provenance(
     result: ReviewResult,
     options: ReviewSessionOptions,
     ledger: ModelLedger | None,
+    resume: ResumePlan | None = None,
 ) -> ReviewResult:
     """Return *result* with the round's provenance on its metadata.
 
@@ -156,17 +164,100 @@ def stamp_run_provenance(
         options: Session options naming the provider and transport.
         ledger: What the run's provider calls reported, or ``None`` when no
             ledger was open.
+        resume: Gated coverage plan. A fully carried, no-call result keeps
+            the actual evidence of the rounds covering its current hashes.
 
     Returns:
         The result, its metadata carrying the decision-B fields.
     """
+    fields = run_provenance_fields(options=options, ledger=ledger)
+    if not fields["model_verification"] and resume is not None:
+        inherited = _carried_snapshot(result=result, options=options, resume=resume)
+        if inherited is not None:
+            fields.update(inherited)
     return replace(
         result,
         metadata=replace(
             result.metadata,
-            **run_provenance_fields(options=options, ledger=ledger),
+            **fields,
         ),
     )
+
+
+def _carried_snapshot(
+    *,
+    result: ReviewResult,
+    options: ReviewSessionOptions,
+    resume: ResumePlan,
+) -> dict[str, Any] | None:
+    """Keep source evidence only when every current file was safely carried.
+
+    No provider calls are fabricated and no tokens or charges are inherited.
+    In particular ``unreported`` stays unreported on a silent transport; a
+    configured model is never used to manufacture ``verified`` evidence.
+    """
+    prior = options.prior_state
+    coverage = result.coverage
+    if (
+        prior is None
+        or options.force_full
+        or result.metadata.partial
+        or coverage is None
+        or not coverage.complete
+        or not coverage.eligible
+        or coverage.carried != coverage.eligible
+        or coverage.reviewed
+        or resume.queue
+    ):
+        return None
+    reusable = reusable_rounds_for(options=options) or frozenset()
+    runs = {run.identity.round: run.identity for run in prior.runs}
+    own = own_records_at_hash(resume.coverage)
+    newest = newest_records_by_hash(resume.coverage)
+    identities: dict[int, RunIdentity] = {}
+    for item in resume.classified:
+        source = own.get((item.path, item.patch_hash)) or newest.get(item.patch_hash)
+        # Defence in depth: the plan already contains only gated coverage.
+        if source is None or source.round not in reusable or source.round not in runs:
+            return None
+        identities[source.round] = runs[source.round]
+    if not identities:
+        return None
+    states = {identity.model_verification for identity in identities.values()}
+    if len(states) > 1 and not states <= {
+        ModelVerification.VERIFIED.value,
+        ModelVerification.UNREPORTED.value,
+    }:
+        return None
+    # Keep the weakest recorded state. The reuse gate has already excluded
+    # missing, legacy and mismatched evidence and re-checked the lane/models.
+    state = (
+        ModelVerification.UNREPORTED.value
+        if ModelVerification.UNREPORTED.value in states
+        else next(iter(states))
+    )
+    reported = {
+        model: None
+        for identity in identities.values()
+        for model in identity.reported_models
+    }
+    unreported = {
+        model: None
+        for identity in identities.values()
+        for model in (
+            identity.unreported_models
+            or (
+                (identity.model,)
+                if identity.model_verification == ModelVerification.UNREPORTED.value
+                else ()
+            )
+        )
+    }
+    return {
+        "model_verification": state,
+        "reported_models": tuple(reported),
+        "unreported_models": tuple(unreported),
+    }
 
 
 def run_provenance_fields(
@@ -200,6 +291,9 @@ def run_provenance_fields(
         "first_party": provenance.first_party,
         "credential": provenance.credential.value,
         "reported_models": ledger.reported_models if ledger is not None else (),
+        "unreported_models": tuple(
+            dict.fromkeys(call.requested for call in calls if not call.reported),
+        ),
         "model_verification": verification.value if verification is not None else "",
         "lane": provenance.lane,
         "fallback_from": provenance.fallback_from,

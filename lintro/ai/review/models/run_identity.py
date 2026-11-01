@@ -41,11 +41,15 @@ class RunIdentity:
         reported_models: Every model the transport named as having
             answered, with its canonical name and reported provider, in
             first-seen order.
+        unreported_models: Requested models of silent calls or carried
+            sources, kept separately from transport-reported evidence.
         lane: The review lane the CI wrapper exported, or empty.
         model_verification: The
             :class:`~lintro.ai.enums.model_verification.ModelVerification`
             state. ``legacy`` is assigned only when a stored record carries
-            none of these fields; a live run never writes it.
+            none of these fields; a live run never writes it. A fully
+            carried no-call round retains its source rounds' weakest state
+            and their reported models, without inheriting usage or charges.
         fallback_from: The lane that failed before any chunk completed and
             handed this round to its lane (ADR-0011 D), or empty.
         fallback_reason: The error kind that lane failed with, or empty.
@@ -65,6 +69,7 @@ class RunIdentity:
     first_party: bool | None = None
     credential: str = ""
     reported_models: tuple[ReportedModel, ...] = ()
+    unreported_models: tuple[str, ...] = ()
     lane: str = ""
     model_verification: str = ""
     fallback_from: str = ""

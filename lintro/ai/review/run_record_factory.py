@@ -124,6 +124,7 @@ def _identity(
         first_party=metadata.first_party,
         credential=metadata.credential,
         reported_models=tuple(metadata.reported_models),
+        unreported_models=tuple(metadata.unreported_models),
         lane=metadata.lane,
         model_verification=metadata.model_verification,
         fallback_from=metadata.fallback_from,

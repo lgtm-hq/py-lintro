@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.175.0] - 2026-11-01
+
+### Added
+
+- **rules**: ship opt-in no-direct-formatter pack (#3096) (43ee07a)
+
+### Changed
+
+- **core**: add frozen ToolResult outcomes (stage 1) (#3097) (b00fee6)
+
 ## [0.174.1] - 2026-11-01
 
 ### Fixed

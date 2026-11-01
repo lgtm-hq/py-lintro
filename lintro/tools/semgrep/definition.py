@@ -23,6 +23,7 @@ from lintro.enums.semgrep_enums import SemgrepSeverity, normalize_semgrep_severi
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.semgrep.semgrep_parser import parse_semgrep_output
 from lintro.plugins.base import BaseToolPlugin
@@ -451,12 +452,9 @@ class SemgrepPlugin(BaseToolPlugin):
                 "  - Large codebase taking too long to process\n"
                 "  - Need to increase timeout via --tool-options semgrep:timeout=N"
             )
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=TimedOut(timeout_msg)),
                 name=self.definition.name,
-                success=False,
-                output=timeout_msg,
-                issues_count=0,
-                timed_out=True,
             )
         except (OSError, ValueError, RuntimeError) as e:
             logger.error(f"Failed to run Semgrep: {e}")
@@ -466,11 +464,10 @@ class SemgrepPlugin(BaseToolPlugin):
         # Parse the JSON output
         try:
             if ("{" not in output or "}" not in output) and execution_failure:
-                return ToolResult(
+                return ToolResult.from_outcome(
+                    ToolOutcome(execution=Checked(success=False)),
                     name=self.definition.name,
-                    success=False,
                     output=output,
-                    issues_count=0,
                 )
 
             semgrep_data = _extract_semgrep_json(raw_text=output)
@@ -537,23 +534,26 @@ class SemgrepPlugin(BaseToolPlugin):
                 else True if issues else None
             )
 
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=Checked(
+                        success=execution_success,
+                        inspected_files=inspected_files,
+                    ),
+                    issues_count=issues_count,
+                ),
                 name=self.definition.name,
-                inspected_files=inspected_files,
-                success=execution_success,
                 output=output if not execution_success else None,
-                issues_count=issues_count,
                 issues=issues,
                 parse_failures_count=parse_failures_count or None,
             )
 
         except (json.JSONDecodeError, ValueError) as e:
             logger.error(f"Failed to parse semgrep output: {e}")
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=(output or f"Failed to parse semgrep output: {str(e)}"),
-                issues_count=0,
                 parse_failures_count=1,
             )
 

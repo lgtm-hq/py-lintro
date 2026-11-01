@@ -20,6 +20,7 @@ from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, NoFiles, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.mypy.mypy_parser import parse_mypy_output
 from lintro.plugins.base import BaseToolPlugin
@@ -495,21 +496,19 @@ class MypyPlugin(BaseToolPlugin):
                 issues=[],
             )
         except FileNotFoundError as e:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=f"mypy not found: {e}\n\n"
                 "Please ensure mypy is installed:\n"
                 "  - Run 'pip install mypy' or 'uv pip install mypy'",
-                issues_count=0,
             )
         except (OSError, ValueError, RuntimeError) as e:
             logger.error("Failed to run mypy: {}", e)
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=f"mypy execution failed: {e}",
-                issues_count=0,
             )
 
         issues = parse_mypy_output(output=output)
@@ -525,33 +524,31 @@ class MypyPlugin(BaseToolPlugin):
         # reports type errors and mentions the marker still surfaces the errors.
         if issues_count == 0 and _has_no_python_files_error(output):
             logger.debug("[mypy] No .py/.pyi files in scope; skipping cleanly")
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=NoFiles()),
                 name=self.definition.name,
-                success=True,
                 output="No .py/.pyi files found to check.",
-                issues_count=0,
-                no_files=True,
             )
 
         if not success and issues_count == 0:
             # Execution failed but no structured issues were parsed; surface diagnostics
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
                 name=self.definition.name,
-                success=False,
                 output=output
                 or (
                     "mypy execution failed with no output.\n"
                     "Re-run with LINTRO_LOG_LEVEL=DEBUG for subprocess details."
                 ),
-                issues_count=0,
             )
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=issues_count == 0, inspected_files=True),
+                issues_count=issues_count,
+            ),
             name=self.definition.name,
-            inspected_files=True,
-            success=issues_count == 0,
             output=None,
-            issues_count=issues_count,
             issues=issues,
         )
 

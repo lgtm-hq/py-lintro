@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.models.core.tool_outcome import Checked, TimedOut, ToolOutcome
 from lintro.parsers.ruff.ruff_format_coverage import (
     format_inspected_paths,
     format_report_parse_failures,
@@ -155,12 +156,12 @@ def execute_ruff_check(
             timeout=timeout,
             cmd=cmd,
         )
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=TimedOut(timeout_result.output),
+                issues_count=timeout_result.issues_count,
+            ),
             name=tool.definition.name,
-            success=timeout_result.success,
-            timed_out=timeout_result.timed_out,
-            output=timeout_result.output,
-            issues_count=timeout_result.issues_count,
             issues=timeout_result.issues,
         )
 
@@ -214,12 +215,12 @@ def execute_ruff_check(
                 timeout=timeout,
                 cmd=format_cmd,
             )
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=TimedOut(timeout_result.output),
+                    issues_count=lint_issues_count + timeout_result.issues_count,
+                ),
                 name=tool.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=timeout_result.output,
-                issues_count=lint_issues_count + timeout_result.issues_count,
                 issues=lint_issues + timeout_result.issues,
                 parse_failures_count=parse_failures,
             )
@@ -283,9 +284,12 @@ def execute_ruff_check(
         # intersection. Each native command can have different exclusions.
         coverage &= format_coverage
 
-    return ToolResult(
+    return ToolResult.from_outcome(
+        ToolOutcome(
+            execution=Checked(success=success, inspected_files=True if complete else None),
+            issues_count=issues_count,
+        ),
         name=tool.definition.name,
-        inspected_files=True if complete else None,
         findings_complete=complete,
         execution_failed=not complete,
         parse_failures_count=parse_failures,
@@ -293,9 +297,7 @@ def execute_ruff_check(
         uninspected_codes=(
             frozenset({"FORMAT"}) if format_coverage is None else frozenset()
         ),
-        success=success,
         output=output_summary,
-        issues_count=issues_count,
         issues=all_issues,
         cwd=cwd,
     )

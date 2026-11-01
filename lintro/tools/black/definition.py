@@ -16,6 +16,13 @@ from loguru import logger
 from lintro.enums.capability import Cap
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixMeasured,
+    FixPartial,
+    TimedOut,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.black.black_issue import BlackIssue
 from lintro.parsers.black.black_parser import (
@@ -267,24 +274,20 @@ class BlackPlugin(BaseToolPlugin):
             "  - Need to increase timeout via --tool-options black:timeout=N"
         )
         if initial_count is not None:
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=TimedOut(timeout_msg),
+                    accounting=FixPartial(initial=initial_count),
+                ),
                 name=self.definition.name,
-                success=False,
-                output=timeout_msg,
-                issues_count=0,
                 issues=[],
-                initial_issues_count=initial_count,
                 cwd=cwd,
-                timed_out=True,
             )
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=TimedOut(timeout_msg)),
             name=self.definition.name,
-            success=False,
-            output=timeout_msg,
-            issues_count=0,
             issues=[],
             cwd=cwd,
-            timed_out=True,
         )
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -341,9 +344,19 @@ class BlackPlugin(BaseToolPlugin):
         if supplement.note:
             result_output = "\n".join(filter(None, (output.rstrip(), supplement.note)))
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=(
+                    TimedOut(result_output)
+                    if supplement.timed_out
+                    else Checked(
+                        success=process.success and count == 0 and not supplement.failed,
+                        inspected_files=True,
+                    )
+                ),
+                issues_count=count,
+            ),
             name=self.definition.name,
-            inspected_files=True,
             findings_complete=not (
                 execution_failed or parse_failures or supplement.failed
             ),
@@ -357,12 +370,9 @@ class BlackPlugin(BaseToolPlugin):
             ),
             # The separate E501 subprocess has its own native exclusions.
             uninspected_codes=frozenset({"E501"}),
-            success=(process.success and count == 0 and not supplement.failed),
             output=result_output,
-            issues_count=count,
             issues=all_issues,
             cwd=ctx.cwd,
-            timed_out=supplement.timed_out,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -428,22 +438,27 @@ class BlackPlugin(BaseToolPlugin):
             initial_issues = initial_issues + initial_supplement.issues
             initial_count = len(initial_issues)
             if initial_supplement.failed:
-                return ToolResult(
-                    name=self.definition.name,
-                    success=False,
-                    output="\n".join(
-                        filter(None, (check_output.rstrip(), initial_supplement.note)),
+                failure_output = "\n".join(
+                    filter(None, (check_output.rstrip(), initial_supplement.note)),
+                )
+                return ToolResult.from_outcome(
+                    ToolOutcome(
+                        execution=(
+                            TimedOut(failure_output)
+                            if initial_supplement.timed_out
+                            else Checked(success=False)
+                        ),
+                        accounting=FixPartial(initial=initial_count),
+                        issues_count=initial_count,
                     ),
-                    issues_count=initial_count,
+                    name=self.definition.name,
+                    output=failure_output,
                     issues=initial_issues,
-                    initial_issues_count=initial_count,
                     cwd=ctx.cwd,
-                    timed_out=initial_supplement.timed_out,
                 )
 
         # Apply formatting
-        fix_cmd_base: list[str] = self._get_executable_command(tool_name="black")
-        fix_cmd: list[str] = list(fix_cmd_base)
+        fix_cmd: list[str] = list(self._get_executable_command(tool_name="black"))
         if self.options.get("diff"):
             fix_cmd.append("--diff")
         fix_cmd.extend(self._build_common_args())
@@ -522,17 +537,27 @@ class BlackPlugin(BaseToolPlugin):
 
         all_issues = (fixed_issues_parsed or []) + all_remaining_issues
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=(
+                    TimedOut(final_summary)
+                    if supplement.timed_out
+                    else Checked(
+                        success=remaining_count == 0 and (not supplement.failed),
+                        inspected_files=True,
+                    )
+                ),
+                accounting=FixMeasured(
+                    # Include new post-format findings, as the batch runner does.
+                    initial=max(initial_count, fixed_count + remaining_count),
+                    fixed=fixed_count,
+                    remaining=remaining_count,
+                ),
+                issues_count=remaining_count,
+            ),
             name=self.definition.name,
-            inspected_files=True,
-            success=(remaining_count == 0 and not supplement.failed),
             output=final_summary,
-            issues_count=remaining_count,
             issues=all_issues,
-            initial_issues_count=initial_count,
-            fixed_issues_count=fixed_count,
-            remaining_issues_count=remaining_count,
             initial_issues=initial_issues,
             cwd=ctx.cwd,
-            timed_out=supplement.timed_out,
         )

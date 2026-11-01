@@ -142,6 +142,7 @@ class RunRecord:
                 "reported_models",
                 [_reported_model_payload(model) for model in identity.reported_models],
             ),
+            ("unreported_models", list(identity.unreported_models)),
             ("model_verification", identity.model_verification),
             ("fallback_from", identity.fallback_from),
             ("fallback_reason", identity.fallback_reason),
@@ -220,6 +221,7 @@ def _identity_from_payload(*, payload: dict[str, Any]) -> RunIdentity:
         first_party=_optional_bool(payload.get("first_party")),
         credential=str(payload.get("credential", "") or ""),
         reported_models=_reported_models(payload.get("reported_models")),
+        unreported_models=_unreported_models(payload.get("unreported_models", [])),
         lane=str(payload.get("lane", "") or ""),
         model_verification=_parse_verification(payload=payload),
         fallback_from=str(payload.get("fallback_from", "") or ""),
@@ -237,6 +239,7 @@ _PROVENANCE_KEYS = (
     "first_party",
     "credential",
     "reported_models",
+    "unreported_models",
     "lane",
     "model_verification",
 )
@@ -251,7 +254,7 @@ def _parse_verification(*, payload: dict[str, Any]) -> str:
     Returns:
         The canonical state value; ``legacy`` for a pre-ADR-0011 record;
         empty for omitted or blank state on a provenance-bearing record,
-        which the reuse gate accepts only with zero model usage. Explicit
+        which the reuse gate excludes even with zero model usage. Explicit
         null reads as ``unreported``. An unrecognised value is kept in a
         bounded form rather than blanked, so a corrupt or newer value cannot
         be mistaken for a round that completed no call.
@@ -310,6 +313,13 @@ def _reported_models(value: Any) -> tuple[ReportedModel, ...]:
                 ),
             )
     return tuple(parsed)
+
+
+def _unreported_models(value: Any) -> tuple[str, ...]:
+    """Keep silent requests; malformed claims stay disallowed, never disappear."""
+    if not isinstance(value, list):
+        return ("",)
+    return tuple(item if isinstance(item, str) else "" for item in value)
 
 
 def _coverage_from_payload(*, payload: dict[str, Any]) -> RunCoverage:

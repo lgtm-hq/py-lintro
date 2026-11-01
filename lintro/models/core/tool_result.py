@@ -49,14 +49,14 @@ class ToolResult:
     ``issues`` list. Tools append all detected issues in order, so the
     last ``remaining_issues_count`` entries are the ones still unfixed.
 
-    Stage 1 of #3019 keeps these fields writable: verify folding, retries and
+    Stages 1 and 2 of #3019 keep these fields writable: verify folding, retries and
     other existing callers still update them in several steps. ``outcome`` is
     a read-only, validated view computed on each access, not a stored second
     source of truth. Read it after an update is complete; contradictory legacy
     state raises instead of returning an obsolete or normalized outcome.
-    ``with_outcome`` derives state fields from frozen variants and preserves
-    the rest of the envelope. Producer/consumer migration and freezing this
-    dataclass belong to subsequent stages.
+    Producers use ``from_outcome`` to derive state fields from frozen variants;
+    ``with_outcome`` preserves the rest of an existing envelope. Consumer
+    migration and freezing this dataclass belong to subsequent stages.
     """
 
     name: str = field(default="")
@@ -173,6 +173,36 @@ class ToolResult:
 
     # None preserves the original reporting schema when baselining is absent.
     baselined_count: int | None = field(default=None)
+
+    @classmethod
+    def from_outcome(cls, outcome: ToolOutcome, **payload: Any) -> ToolResult:
+        """Construct legacy-compatible fields from explicit producer evidence.
+
+        Args:
+            outcome: Validated execution and accounting state.
+            **payload: Non-state envelope fields, such as name, issues and metadata.
+                TimedOut owns its output; a shared check/timeout branch may also
+                supply envelope output, but it must match the timeout payload.
+
+        Returns:
+            A mutable result compatible with consumers awaiting migration.
+
+        Raises:
+            TypeError: If payload supplies state fields or conflicting timeout text.
+        """
+        state = outcome.to_legacy_fields()
+        conflicts = (payload.keys() & state.keys()) - {"output"}
+        if conflicts:
+            raise TypeError(
+                f"outcome owns state fields: {', '.join(sorted(conflicts))}",
+            )
+        if (
+            "output" in state
+            and "output" in payload
+            and payload["output"] != state["output"]
+        ):
+            raise TypeError("timeout output must match the outcome")
+        return cls(**(payload | state))
 
     @property
     def outcome(self) -> ToolOutcome:

@@ -212,4 +212,9 @@ async def _run_review_steps(
         plan=plan,
         outcome=outcome,
     )
-    return stamp_run_provenance(result=result, options=options, ledger=ledger)
+    return stamp_run_provenance(
+        result=result,
+        options=options,
+        ledger=ledger,
+        resume=plan.resume,
+    )

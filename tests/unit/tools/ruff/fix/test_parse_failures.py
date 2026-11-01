@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess  # nosec B404 - constructs process results and timeout exceptions only
 from typing import TYPE_CHECKING
 from unittest.mock import patch
@@ -15,6 +16,53 @@ if TYPE_CHECKING:
 
 _SYNTAX_ERROR = '{"file": "syntax.py", "message": "Expected expression", "code": null}'
 _MIXED_REPORT = f"[{{}}, {_SYNTAX_ERROR}]"
+
+
+@pytest.mark.parametrize("format_stage", ["disabled", "complete", "timeout"])
+def test_fix_retains_larger_lint_report_through_formatting(
+    ruff_plugin: RuffPlugin,
+    temp_python_file: str,
+    format_stage: str,
+) -> None:
+    """New lint findings remain counted even if a later format invocation times out."""
+    initial = json.loads(_SYNTAX_ERROR)
+    later = {**initial, "message": "Expected statement"}
+    reports: list[tuple[bool, str] | subprocess.TimeoutExpired] = [
+        (False, json.dumps([initial])),
+    ]
+    if format_stage != "disabled":
+        reports.append((False, f"Would reformat: {temp_python_file}\n"))
+    reports.append((False, json.dumps([initial, later])))
+    if format_stage == "complete":
+        reports.append((True, ""))
+    elif format_stage == "timeout":
+        reports.append(subprocess.TimeoutExpired(cmd=["ruff", "format"], timeout=30))
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(ruff_plugin, "_run_subprocess", side_effect=reports),
+    ):
+        result = ruff_plugin.fix(
+            [temp_python_file],
+            {"format": format_stage != "disabled", "unsafe_fixes": True},
+        )
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues).extracting("message").is_equal_to(
+        ["Expected expression", "Expected statement"],
+    )
+    assert_that(result.timed_out).is_equal_to(format_stage == "timeout")
+    assert_that(result.initial_issues_count).is_equal_to(
+        2 if format_stage == "disabled" else 3,
+    )
+    assert_that(result.fixed_issues_count).is_equal_to(int(format_stage == "complete"))
+    assert_that(result.remaining_issues_count).is_equal_to(
+        3 if format_stage == "timeout" else 2,
+    )
+    assert_that(result.issues_count).is_equal_to(result.remaining_issues_count)
+    assert_that(result.parse_failures_count).is_zero()
 
 
 @pytest.mark.parametrize("stage", ["initial", "final", "both", "lint-disabled"])

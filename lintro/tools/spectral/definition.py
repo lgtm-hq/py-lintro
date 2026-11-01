@@ -22,6 +22,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.tool_outcome import Checked, Skipped, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.spectral.spectral_issue import SpectralIssue
 from lintro.parsers.spectral.spectral_parser import (
@@ -298,16 +299,13 @@ class SpectralPlugin(BaseToolPlugin):
                 "[SpectralPlugin] No ruleset found; skipping. Add a "
                 ".spectral.yaml to enable Spectral.",
             )
-            return ToolResult(
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Skipped("no ruleset found")),
                 name=self.definition.name,
-                success=True,
                 output=(
                     "Skipping spectral: no ruleset found. Add one of "
                     f"{ruleset_names} to enable API linting."
                 ),
-                issues_count=0,
-                skipped=True,
-                skip_reason="no ruleset found",
             )
 
         logger.debug(
@@ -354,12 +352,11 @@ class SpectralPlugin(BaseToolPlugin):
             # Spectral exits 1 when findings exist. Any other failed process
             # with nothing parsed is a runtime failure, never a clean pass.
             if not process.success and not issues:
-                return ToolResult(
+                return ToolResult.from_outcome(
+                    ToolOutcome(execution=Checked(success=False)),
                     name=self.definition.name,
-                    success=False,
                     output=process.output
                     or "Spectral exited with an error and no results.",
-                    issues_count=0,
                     cwd=ctx.cwd,
                 )
             # Successful output must contain either findings or a decoded empty
@@ -369,11 +366,10 @@ class SpectralPlugin(BaseToolPlugin):
                 and not issues
                 and not has_spectral_json_payload(process.stdout)
             ):
-                return ToolResult(
+                return ToolResult.from_outcome(
+                    ToolOutcome(execution=Checked(success=False)),
                     name=self.definition.name,
-                    success=False,
                     output=process.output or "Spectral output could not be parsed.",
-                    issues_count=0,
                     cwd=ctx.cwd,
                 )
             all_issues.extend(issues)
@@ -386,12 +382,13 @@ class SpectralPlugin(BaseToolPlugin):
         success_flag: bool = issues_count == 0
         final_output = "\n".join(finding_outputs) or None
 
-        return ToolResult(
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=success_flag, inspected_files=True),
+                issues_count=issues_count,
+            ),
             name=self.definition.name,
-            inspected_files=True,
-            success=success_flag,
             output=final_output,
-            issues_count=issues_count,
             issues=all_issues,
             cwd=ctx.cwd,
         )

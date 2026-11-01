@@ -29,6 +29,7 @@ from lintro.config.config_loader import get_config
 from lintro.enums.action import Action
 from lintro.enums.advisory_tools_value import AdvisoryToolsValue
 from lintro.enums.tool_run_status import ToolRunStatus, tool_run_status
+from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools import tool_manager
 from lintro.utils.execution.tool_configuration import (
@@ -230,9 +231,9 @@ def run_advisory_tools(
         except Exception as exc:
             logger.warning("[{}] advisory tool failed: {}", tool_name, exc)
             results.append(
-                ToolResult(
+                ToolResult.from_outcome(
+                    ToolOutcome(execution=Checked(success=False)),
                     name=tool_name,
-                    success=False,
                     output=f"{tool_name} failed: {exc}",
                 ),
             )
