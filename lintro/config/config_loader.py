@@ -1163,9 +1163,10 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             # ``[tool.lintro.tools.trufflehog]``. Without this the whole table
             # was dropped, so ``enabled = false`` silently did nothing and the
             # tool kept running (#1716).
+            table_path = f"tool.lintro.{key_lower}"
             nested_tools = _require_mapping_section(
-                data={key_lower: value},
-                section=key_lower,
+                data={table_path: value},
+                section=table_path,
             )
             for nested_key, nested_value in nested_tools.items():
                 nested_lower = str(nested_key).lower()

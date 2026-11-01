@@ -50,10 +50,10 @@ empty or comment-only file raises `ConfigurationError` instead of silently loadi
 defaults or falling back to `pyproject.toml`. An empty mapping document (`{}`) retains
 the existing fallback behavior.
 
-**Migration:** Empty and comment-only YAML files that previously loaded defaults now
-raise an error. Remove an unused config file or replace its contents with `{}` to keep
-the fallback behavior. Replace bare section keys such as `ai:` with `ai: {}` when
-default section settings are intended.
+**Migration:** Empty and comment-only project or global YAML files that previously
+loaded defaults now raise an error. Remove an unused config file or replace its contents
+with `{}` to keep the fallback behavior. Replace bare section keys such as `ai:` with
+`ai: {}` when default section settings are intended.
 
 ### Tiered Configuration Flow
 
@@ -155,9 +155,9 @@ sections:
 
 A value set in the global config survives only where the project config does not
 override that exact key path. An absent auto-discovered global file or one containing an
-empty mapping (`{}`) is never an error. A non-mapping document or an explicit
-`LINTRO_GLOBAL_CONFIG` path that does not exist raises an error (see
-[below](#user-level-global-config)).
+empty mapping (`{}`) is never an error. An empty or comment-only auto-discovered global
+file, any other non-mapping document, or an explicit `LINTRO_GLOBAL_CONFIG` path that
+does not exist raises an error (see [below](#user-level-global-config)).
 
 In the `tools:` section a scalar entry such as `ruff: false` is a complete statement
 about the tool, so a project scalar replaces the global mapping wholesale. A project

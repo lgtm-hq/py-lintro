@@ -26,21 +26,13 @@ from assertpy import assert_that
 from click.testing import CliRunner
 
 from lintro.cli import cli
-from lintro.config.config_loader import clear_config_cache, load_config
+from lintro.config.config_loader import (
+    MAPPING_SECTIONS,
+    clear_config_cache,
+    load_config,
+)
 from lintro.config.lintro_config import LintroConfig
 from lintro.exceptions.errors import ConfigurationError
-
-MAPPING_SECTIONS = (
-    "enforce",
-    "execution",
-    "defaults",
-    "tools",
-    "ai",
-    "review",
-    "output",
-    "watch",
-    "deps",
-)
 
 
 @pytest.fixture

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
+from lintro.config.config_loader import MAPPING_SECTIONS
 from lintro.config.config_validator import (
     KNOWN_TOP_LEVEL_KEYS,
     ValidationMessage,
@@ -667,17 +668,7 @@ def test_deprecated_keys_warn_with_replacement(
 
 @pytest.mark.parametrize(
     "section",
-    [
-        "enforce",
-        "execution",
-        "tools",
-        "defaults",
-        "ai",
-        "review",
-        "output",
-        "watch",
-        "deps",
-    ],
+    MAPPING_SECTIONS,
 )
 def test_null_section_is_error_not_crash(
     write_config: Callable[..., Path],
