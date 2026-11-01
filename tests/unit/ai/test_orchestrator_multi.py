@@ -260,20 +260,22 @@ def test_run_ai_enhancement_fix_action_json_auto_applies_safe_style_suggestions(
 @patch("lintro.ai.orchestrator.get_provider")
 @patch("lintro.ai.pipeline.generate_fixes_from_params")
 @patch("lintro.ai.pipeline.apply_fixes")
-@patch("lintro.ai.pipeline.verify_fixes")
+@patch("lintro.ai.rerun.rerun_tools")
 @patch(
     "lintro.ai.orchestrator._resolve_issue_path",
     side_effect=lambda *, file, workspace_root, cwd: Path(file),
 )
-def test_run_ai_enhancement_fix_action_json_uses_fresh_rerun_results(
-    _mock_normalize,
-    mock_verify_fixes,
-    mock_apply_fixes,
-    mock_generate_fixes,
-    mock_get_provider,
-    _mock_require_ai,
-):
-    """Verify JSON fix action updates result counts via verify_fixes."""
+@pytest.mark.parametrize("action", [Action.CHECK, Action.FIX])
+def test_run_ai_enhancement_json_publishes_fresh_rerun_results(
+    _mock_normalize: MagicMock,
+    mock_rerun_tools: MagicMock,
+    mock_apply_fixes: MagicMock,
+    mock_generate_fixes: MagicMock,
+    mock_get_provider: MagicMock,
+    _mock_require_ai: MagicMock,
+    action: Action,
+) -> None:
+    """Answered AI reruns replace owning run entries for both check and fix actions."""
     result = ToolResult(
         name="ruff",
         success=False,
@@ -307,31 +309,36 @@ def test_run_ai_enhancement_fix_action_json_uses_fresh_rerun_results(
     mock_get_provider.return_value = MockAIProvider()
     mock_generate_fixes.return_value = [suggestion]
     mock_apply_fixes.return_value = [suggestion]
-    mock_verify_fixes.return_value = ValidationResult(
-        verified=1,
-        unverified=0,
-        verified_by_tool={"ruff": 1},
-        unverified_by_tool={"ruff": 0},
-    )
+    mock_rerun_tools.return_value = [ToolResult(name="ruff", success=True)]
+    peer = ToolResult(name="ruff", success=False, output="preserve peer failure")
+    all_results = [result, peer]
 
     ai_result = run_ai_enhancement(
-        action=Action.FIX,
-        all_results=[result],
+        action=action,
+        ai_fix=True,
+        all_results=all_results,
         lintro_config=config,
         logger=logger,
         output_format="json",
     )
 
-    # `fixed_count` is stamped from the applied suggestions, not from the
-    # verification pass: pipeline.py builds `applied_by_tool` off
-    # `applied_suggestions` and hands that to `attach_fixed_count_metadata`,
-    # while the ValidationResult only feeds the separate verified/unverified
-    # counts. The stubbed verification above is what keeps this rerun path
-    # deterministic, not what produces the number asserted below.
+    updated = all_results[0]
+    assert_that(updated).is_not_same_as(result)
+    assert_that(updated.remaining_issues_count).is_zero()
+    assert_that(updated.success).is_true()
+    assert_that(updated.issues).is_empty()
+    assert_that(updated.metadata).contains_entry(
+        {"fixed_count": 1},
+        {"verified_count": 1},
+        {"unverified_count": 0},
+    )
     assert_that(ai_result.fixes_applied).is_equal_to(1)
-    assert_that(result.metadata).is_not_none()
-    assert_that(result.metadata).contains_key("fixed_count")
+    assert_that(result.remaining_issues_count).is_equal_to(1)
+    assert_that(result.success).is_false()
+    assert_that(result.metadata).is_same_as(updated.metadata)
     assert_that(result.metadata["fixed_count"]).is_equal_to(1)
+    assert_that(all_results[1]).is_same_as(peer)
+    assert_that(peer.output).is_equal_to("preserve peer failure")
 
 
 # ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from assertpy import assert_that
@@ -19,7 +19,7 @@ from lintro.enums.action import Action
 from lintro.enums.capability import Cap
 from lintro.models.core.claim import Claim
 from lintro.models.core.run_artifact import RunArtifact
-from lintro.models.core.tool_outcome import Checked, FixUnmeasured, TimedOut
+from lintro.models.core.tool_outcome import Checked, FixUnmeasured, Skipped, TimedOut
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.plugins.base import BaseToolPlugin
@@ -30,6 +30,7 @@ from lintro.utils.execution.run_context import RunContext
 from lintro.utils.execution.tool_configuration import ToolsToRunResult
 from lintro.utils.json_output import create_json_output
 from lintro.utils.streaming_output import StreamingResultHandler
+from tests.unit.tool_result_helpers import legacy_result
 
 
 @dataclass
@@ -37,6 +38,7 @@ class _ResultPlugin(BaseToolPlugin):
     """Registered plugin returning a legacy result without outcome validation."""
 
     result: ToolResult
+    LINTRO_PLUGIN_API_VERSION = 2
 
     @property
     def definition(self) -> ToolDefinition:
@@ -161,6 +163,51 @@ def run_plugins(
 
 
 @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
+@pytest.mark.parametrize("action", [Action.CHECK, Action.FIX])
+@pytest.mark.parametrize("timed_out", [False, True], ids=["skip", "partial-timeout"])
+def test_api_v2_skip_and_timeout_keep_exit_status_and_payload(
+    run_plugins: Callable[..., RunArtifact],
+    parallel: bool,
+    action: Action,
+    timed_out: bool,
+) -> None:
+    """Common plugin constructors retain their verdict, partial findings and output.
+
+    Args:
+        run_plugins: Execute registered API-v2 plugins through the real executor.
+        parallel: Whether to dispatch concurrently.
+        action: Check or fix execution.
+        timed_out: Whether the plugin timed out after finding a diagnostic.
+    """
+    issue = RuffIssue(file="target.py", message="partial finding", fixable=True)
+    result = ToolResult(
+        name="bad",
+        skipped=not timed_out,
+        skip_reason=None if timed_out else "plugin unavailable",
+        timed_out=timed_out,
+        output="partial output" if timed_out else "plugin unavailable",
+        issues=[issue] if timed_out else [],
+        issues_count=int(timed_out),
+    )
+    observed: list[ToolResult] = []
+
+    artifact = run_plugins(result, parallel, action, observed.append)
+
+    results = {row.name: row for row in artifact.tool_results}
+    returned = results["bad"]
+    assert_that(returned.outcome.execution).is_equal_to(
+        TimedOut(result.output) if timed_out else Skipped("plugin unavailable"),
+    )
+    assert_that(returned.inspected_files).is_false()
+    assert_that(returned.issues).is_equal_to([issue] if timed_out else [])
+    assert_that(returned.issues_count).is_equal_to(int(timed_out))
+    assert_that(returned.output).is_equal_to(result.output)
+    assert_that(artifact.exit_code).is_equal_to(int(timed_out))
+    assert_that(observed).is_length(2)
+    assert_that(results["peer"].output).is_equal_to("peer output survives")
+
+
+@pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
 @pytest.mark.parametrize("fixable", [False, True], ids=["unfixable", "fixable"])
 def test_dry_run_timeout_retains_failure_and_peer_output(
     run_plugins: Callable[..., RunArtifact],
@@ -184,6 +231,7 @@ def test_dry_run_timeout_retains_failure_and_peer_output(
         output="deadline exceeded after partial findings",
         issues=[issue],
         issues_count=1,
+        inspected_files=False,
     )
     target = tmp_path / "preview.jsonl"
     with StreamingResultHandler("jsonl", Action.CHECK, str(target)) as handler:
@@ -267,7 +315,7 @@ def test_invalid_plugin_result_fails_closed_without_losing_peer_output(
         action: Check or fix execution.
         fields: Contradictory legacy fields accepted by ToolResult construction.
     """
-    bad = ToolResult(name="bad", **fields)
+    bad = legacy_result(name="bad", **fields)
     with pytest.raises(ValueError):
         _ = bad.outcome
     target = tmp_path / "results.jsonl"
@@ -319,6 +367,45 @@ def test_invalid_plugin_result_fails_closed_without_losing_peer_output(
         assert_that((artifact.total_fixed, artifact.total_remaining)).is_equal_to(
             (2, 0),
         )
+
+
+@pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
+@pytest.mark.parametrize("action", [Action.CHECK, Action.FIX])
+def test_duck_typed_plugin_validator_cannot_bypass_type_guard(
+    run_plugins: Callable[..., RunArtifact],
+    parallel: bool,
+    action: Action,
+) -> None:
+    """Reject a non-ToolResult before invoking its validator or reporting it.
+
+    Args:
+        run_plugins: Execute registered plugins in an isolated workspace.
+        parallel: Whether to dispatch concurrently.
+        action: Check or fix execution.
+    """
+    bad = cast(
+        ToolResult,
+        SimpleNamespace(
+            name="bad",
+            validate_outcome=lambda: None,
+            parse_failures_count=1,
+            residual_unknown_reason=None,
+        ),
+    )
+    observed: list[ToolResult] = []
+
+    artifact = run_plugins(bad, parallel, action, observed.append)
+
+    results = {row.name: row for row in artifact.tool_results}
+    assert_that(results["bad"].outcome.execution).is_equal_to(Checked(False))
+    assert_that(results["bad"].output).contains(
+        "ValueError",
+        "plugin check()/fix() must return ToolResult",
+    )
+    assert_that(artifact.exit_code).is_equal_to(1)
+    assert_that(results["peer"].output).is_equal_to("peer output survives")
+    assert_that(observed).is_length(2)
+    assert_that(all(isinstance(row, ToolResult) for row in observed)).is_true()
 
 
 @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])

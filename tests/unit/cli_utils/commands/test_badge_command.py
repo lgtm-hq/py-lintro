@@ -259,7 +259,13 @@ def test_badge_publishes_a_clean_live_run(with_skipped_tool: bool) -> None:
     results = [ToolResult(name="ruff", success=True, issues=[], inspected_files=True)]
     if with_skipped_tool:
         results.append(
-            ToolResult(name="pylint", skipped=True, skip_reason="not installed"),
+            ToolResult(
+                name="pylint",
+                skipped=True,
+                skip_reason="not installed",
+                inspected_files=False,
+                success=True,
+            ),
         )
     artifact = RunArtifact(
         tool_results=results,
@@ -328,6 +334,7 @@ def test_resolve_severity_counts_rejects_all_skipped_run() -> None:
                 success=True,
                 skipped=True,
                 skip_reason="no files matched",
+                inspected_files=False,
             ),
         ],
     )
@@ -350,6 +357,7 @@ def test_resolve_severity_counts_rejects_no_files_found_run() -> None:
             skipped=False,
             output="No .py/.pyi files found to check.",
             no_files=True,
+            inspected_files=False,
         ),
         ToolResult(
             name="cargo_audit",
@@ -357,6 +365,7 @@ def test_resolve_severity_counts_rejects_no_files_found_run() -> None:
             skipped=False,
             output="No files found to check.",
             no_files=True,
+            inspected_files=False,
         ),
         ToolResult(
             name="astro-check",
@@ -364,6 +373,7 @@ def test_resolve_severity_counts_rejects_no_files_found_run() -> None:
             skipped=False,
             output="No Astro files to check.",
             no_files=True,
+            inspected_files=False,
         ),
     ]
 
@@ -386,6 +396,7 @@ def test_badge_live_no_files_found_prints_no_badge() -> None:
             skipped=False,
             output="No .py/.pyi files found to check.\nNo issues found.",
             no_files=True,
+            inspected_files=False,
         ),
     ]
 
@@ -422,6 +433,7 @@ def test_resolve_severity_counts_rejects_all_timeout_run() -> None:
             skipped=False,
             timed_out=True,
             output="timed out after 30s",
+            inspected_files=False,
         ),
     ]
 
@@ -444,6 +456,7 @@ def test_badge_live_all_skipped_prints_no_badge() -> None:
                 success=True,
                 skipped=True,
                 skip_reason="no files matched",
+                inspected_files=False,
             ),
         ],
     )
@@ -527,6 +540,7 @@ def test_resolve_severity_counts_rejects_a_partial_timeout_run() -> None:
             skipped=False,
             timed_out=True,
             output="timed out after 30s",
+            inspected_files=False,
         ),
     ]
 
@@ -557,6 +571,7 @@ def test_badge_live_partial_timeout_prints_no_badge() -> None:
             skipped=False,
             timed_out=True,
             output="timed out after 30s",
+            inspected_files=False,
         ),
     ]
 

@@ -9,6 +9,7 @@ whatever comes back. These tests drive that hand-off through
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from assertpy import assert_that
@@ -152,11 +153,14 @@ def _fix_results_in_place(all_results: list[ToolResult]) -> None:
     Args:
         all_results: Results mutated in place.
     """
-    for result in all_results:
-        result.success = True
-        result.fixed_issues_count = result.issues_count
-        result.remaining_issues_count = 0
-        result.issues_count = 0
+    for index, result in enumerate(all_results):
+        all_results[index] = replace(
+            result,
+            success=True,
+            fixed_issues_count=result.issues_count,
+            remaining_issues_count=0,
+            issues_count=0,
+        )
 
 
 def _run_pipeline(**kwargs: Any) -> int:

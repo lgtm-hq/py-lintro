@@ -165,6 +165,7 @@ async def test_context_lines_flows_to_generate_fixes(
 
     await run_fix_pipeline(
         fix_issues=fix_issues,
+        all_results=[result for result, _ in fix_issues],
         provider=MockAIProvider(),
         ai_config=ai_config,
         logger=RecordingConsoleLogger(),
@@ -203,6 +204,7 @@ async def test_fix_search_radius_flows_to_apply_fixes(
 
     await run_fix_pipeline(
         fix_issues=fix_issues,
+        all_results=[result for result, _ in fix_issues],
         provider=MockAIProvider(),
         ai_config=ai_config,
         logger=RecordingConsoleLogger(),
@@ -239,6 +241,7 @@ async def test_retry_delays_flow_to_generate_fixes(
 
     await run_fix_pipeline(
         fix_issues=fix_issues,
+        all_results=[result for result, _ in fix_issues],
         provider=MockAIProvider(),
         ai_config=ai_config,
         logger=RecordingConsoleLogger(),
@@ -289,6 +292,7 @@ async def test_timeout_and_retries_flow_to_post_fix_summary(
 
     await run_fix_pipeline(
         fix_issues=fix_issues,
+        all_results=[result for result, _ in fix_issues],
         provider=MockAIProvider(),
         ai_config=ai_config,
         logger=RecordingConsoleLogger(),

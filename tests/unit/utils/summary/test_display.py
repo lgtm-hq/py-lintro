@@ -9,6 +9,7 @@ Tests cover:
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -110,7 +111,7 @@ def test_check_skipped_tool(
     capture, output = console_capture
     result = tool_result_factory(
         name="ruff",
-        success=False,
+        success=True,
         issues_count=0,
         output="Skipping ruff: version check failed",
         skipped=True,
@@ -269,11 +270,14 @@ def test_fix_shows_ai_fixed_count_from_metadata(
         fixed_issues_count=6,
         remaining_issues_count=5,
     )
-    result.metadata = {
-        "applied_count": 4,
-        "verified_count": 3,
-        "unverified_count": 1,
-    }
+    result = replace(
+        result,
+        metadata={
+            "applied_count": 4,
+            "verified_count": 3,
+            "unverified_count": 1,
+        },
+    )
 
     print_summary_table(capture, Action.FIX, [result])
 
@@ -643,6 +647,7 @@ def test_is_no_files_result_prefers_the_structured_flag() -> None:
         output="No Cargo.toml found; skipping clippy.",
         issues_count=0,
         no_files=True,
+        inspected_files=False,
     )
     assert_that(_is_no_files_result(ToolResult(output=flagged.output))).is_false()
     assert_that(_is_no_files_result(flagged)).is_true()
@@ -652,6 +657,7 @@ def test_is_no_files_result_prefers_the_structured_flag() -> None:
         success=True,
         issues_count=0,
         no_files=True,
+        inspected_files=False,
     )
     assert_that(_is_no_files_result(silent)).is_true()
 
@@ -679,6 +685,7 @@ def test_no_files_note_renders_from_the_flag_alone(
         output="No Cargo.toml found; skipping clippy.",
         issues_count=0,
         no_files=True,
+        inspected_files=False,
     )
 
     print_summary_table(capture, Action.CHECK, [result])

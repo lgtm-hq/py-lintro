@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -185,6 +186,45 @@ def test_fix_retry_merges_results_correctly() -> None:
     assert_that(tool._call_count).is_equal_to(3)
 
 
+@pytest.mark.parametrize("failure_pass", [1, 2])
+@pytest.mark.parametrize("parse_failures_count", [0, 1])
+def test_fix_retry_rejects_non_tool_results_before_normalizing_or_merging(
+    failure_pass: int,
+    parse_failures_count: int,
+) -> None:
+    """Invalid returns raise the plugin contract error on any fix pass.
+
+    Args:
+        failure_pass: Pass returning an object outside the ToolResult contract.
+        parse_failures_count: Whether parse normalization would replace it.
+    """
+    measured = ToolResult(
+        name="formatter",
+        issues_count=1,
+        initial_issues_count=3,
+        fixed_issues_count=2,
+        remaining_issues_count=1,
+    )
+    invalid = SimpleNamespace(
+        parse_failures_count=parse_failures_count,
+        residual_unknown=False,
+        residual_unknown_reason=None,
+        initial_issues_count=3,
+        initial_issues=[],
+        remaining_issues_count=1,
+        issues_count=1,
+        validate_outcome=lambda: None,
+    )
+    tool = MagicMock()
+    tool.fix.side_effect = [measured] * (failure_pass - 1) + [invalid, measured]
+
+    with pytest.raises(
+        ValueError,
+        match=r"plugin check\(\)/fix\(\) must return ToolResult",
+    ):
+        run_fix_with_retry(tool, ["."], {}, max_retries=2)
+
+
 @pytest.mark.parametrize("initial_count", [None, 4])
 @pytest.mark.parametrize("failure_kind", ["parse", "unknown"])
 @pytest.mark.parametrize("parsed_count", [0, 1])
@@ -326,6 +366,7 @@ def test_fix_retry_merge_preserves_last_pass_payload(
         parse_failures_count=0,
         pytest_summary={"passed": 2, "failed": 1},
         timed_out=timed_out,
+        inspected_files=False if timed_out else None,
     )
     tool = MagicMock()
     tool.fix.side_effect = [first, last]
@@ -380,6 +421,7 @@ def test_incomplete_fix_pass_is_preserved_without_more_retries(
         duration_seconds=1.5,
         metadata={"stage": "incomplete"},
         pytest_summary={"passed": 1, "errors": 1},
+        inspected_files=False,
     )
     measured = ToolResult(
         name="formatter",
@@ -396,8 +438,14 @@ def test_incomplete_fix_pass_is_preserved_without_more_retries(
 
     result = run_fix_with_retry(tool, ["."], {}, max_retries=3)
 
-    if failure_pass == 1:
+    assert_that(incomplete.residual_unknown).is_equal_to(failure_kind == "unknown")
+    # A first-pass unknown result already has its final accounting. Parse
+    # normalization and later-pass baseline merging need immutable replacements.
+    if failure_pass == 1 and failure_kind == "unknown":
         assert_that(result).is_same_as(incomplete)
+    else:
+        assert_that(result).is_not_same_as(incomplete)
+    if failure_pass == 1:
         assert_that(result.initial_issues_count).is_equal_to(initial_count)
         assert_that(result.initial_issues).is_equal_to(detected[-1:])
     else:

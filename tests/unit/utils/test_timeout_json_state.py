@@ -197,6 +197,7 @@ def test_serialize_tool_result_reports_timed_out_true() -> None:
         success=False,
         issues_count=0,
         timed_out=True,
+        inspected_files=False,
     )
 
     data = serialize_tool_result(result, action=Action.CHECK)
@@ -389,10 +390,28 @@ def test_timeout_still_fails_the_run_despite_zero_issues(
 def test_timed_out_tool_names_preserves_order_and_deduplicates() -> None:
     """Timed-out tool names are listed once each, in execution order."""
     results = [
-        ToolResult(name="mypy", success=False, issues_count=0, timed_out=True),
+        ToolResult(
+            name="mypy",
+            success=False,
+            issues_count=0,
+            timed_out=True,
+            inspected_files=False,
+        ),
         ToolResult(name="ruff", success=True, issues_count=0),
-        ToolResult(name="mypy", success=False, issues_count=0, timed_out=True),
-        ToolResult(name="prettier", success=False, issues_count=0, timed_out=True),
+        ToolResult(
+            name="mypy",
+            success=False,
+            issues_count=0,
+            timed_out=True,
+            inspected_files=False,
+        ),
+        ToolResult(
+            name="prettier",
+            success=False,
+            issues_count=0,
+            timed_out=True,
+            inspected_files=False,
+        ),
     ]
 
     assert_that(timed_out_tool_names(results)).is_equal_to(["mypy", "prettier"])
@@ -417,7 +436,13 @@ def test_json_artifact_auto_emits_in_github_actions(
     monkeypatch.chdir(tmp_path)
 
     results = [
-        ToolResult(name="mypy", success=False, issues_count=0, timed_out=True),
+        ToolResult(
+            name="mypy",
+            success=False,
+            issues_count=0,
+            timed_out=True,
+            inspected_files=False,
+        ),
         ToolResult(name="ruff", success=True, issues_count=0),
     ]
     _write_artifacts(
@@ -523,6 +548,7 @@ def _timing_out_fix_tool(initial_issues_count: int) -> Any:
         fixed_issues_count=0,
         remaining_issues_count=initial_issues_count,
         timed_out=True,
+        inspected_files=False,
     )
     return tool
 

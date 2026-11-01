@@ -24,6 +24,7 @@ from lintro.models.core.tool_outcome import (
 )
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
+from tests.unit.tool_result_helpers import legacy_result
 
 from .conftest import MockIssue
 
@@ -247,10 +248,12 @@ def test_apply_rerun_results_preserves_native_fixed_count_as_partial() -> None:
     )
 
     apply_rerun_results(by_tool=by_tool, rerun_results=[rerun_result])
+    updated = by_tool["ruff"][0]
+    assert_that(updated).is_not_same_as(original_result)
 
-    assert_that(original_result.initial_issues_count).is_none()
-    assert_that(original_result.fixed_issues_count).is_equal_to(7)
-    assert_that(original_result.outcome.accounting).is_equal_to(
+    assert_that(updated.initial_issues_count).is_none()
+    assert_that(updated.fixed_issues_count).is_equal_to(7)
+    assert_that(updated.outcome.accounting).is_equal_to(
         FixPartial(fixed=7, remaining=2),
     )
 
@@ -291,13 +294,15 @@ def test_apply_rerun_results_updates_remaining_issues() -> None:
     )
 
     apply_rerun_results(by_tool=by_tool, rerun_results=[rerun_result])
+    updated = by_tool["ruff"][0]
+    assert_that(updated).is_not_same_as(original_result)
 
-    assert_that(original_result.remaining_issues_count).is_equal_to(1)
-    assert_that(original_result.issues_count).is_equal_to(1)
-    assert_that(original_result.issues).is_length(1)
-    assert_that(original_result.issues).is_not_none()
-    assert_that(original_result.issues[0].message).is_equal_to("remaining issue")
-    assert_that(original_result.success).is_true()
+    assert_that(updated.remaining_issues_count).is_equal_to(1)
+    assert_that(updated.issues_count).is_equal_to(1)
+    assert_that(updated.issues).is_length(1)
+    assert_that(updated.issues).is_not_none()
+    assert_that(updated.issues[0].message).is_equal_to("remaining issue")
+    assert_that(updated.success).is_true()
 
 
 @pytest.mark.parametrize("incomplete_report", ["original", "rerun"])
@@ -338,17 +343,18 @@ def test_invalid_rerun_state_does_not_discard_other_tool_updates(
     }
     reruns = {name: ToolResult(name=name, success=True) for name in originals}
     invalid = originals["bad"] if invalid_side == "original" else reruns["bad"]
-    invalid.no_files = True
-    invalid.success = False
+    invalid = legacy_result(**(vars(invalid) | {"no_files": True, "success": False}))
+    (originals if invalid_side == "original" else reruns)["bad"] = invalid
     before = deepcopy(originals["bad"])
 
+    by_tool: _ByTool = {name: (result, []) for name, result in originals.items()}
     apply_rerun_results(
-        by_tool={name: (result, []) for name, result in originals.items()},
+        by_tool=by_tool,
         rerun_results=list(reruns.values()),
     )
 
     assert_that(originals["bad"]).is_equal_to(before)
-    assert_that(originals["peer"].outcome.accounting).is_equal_to(
+    assert_that(by_tool["peer"][0].outcome.accounting).is_equal_to(
         FixPartial(initial=3, remaining=0),
     )
-    assert_that(originals["peer"].outcome.success).is_true()
+    assert_that(by_tool["peer"][0].outcome.success).is_true()

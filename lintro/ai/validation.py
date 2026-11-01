@@ -59,8 +59,8 @@ def verify_fixes(
     """Unified post-fix verification: re-run tools and validate fixes.
 
     Runs each tool once and uses the results for two purposes:
-    1. Update the original ``ToolResult`` objects with fresh remaining-issue
-       counts (what ``rerun.apply_rerun_results`` previously did).
+    1. Replace entries in ``by_tool`` with fresh remaining-issue counts
+       through ``rerun.apply_rerun_results``.
     2. Check each applied suggestion against the fresh results to determine
        whether the fix was verified (what ``validate_applied_fixes`` does).
 

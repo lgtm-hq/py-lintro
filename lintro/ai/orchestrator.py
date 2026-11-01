@@ -303,6 +303,7 @@ async def _run_ai_check(
 
     return await _collect_and_fix(
         fix_issues=all_fix_issues,
+        all_results=all_results,
         provider=provider,
         ai_config=ai_config,
         logger=logger,
@@ -364,6 +365,7 @@ async def _run_ai_fix(
 
     return await _collect_and_fix(
         fix_issues=all_fix_issues,
+        all_results=all_results,
         provider=provider,
         ai_config=ai_config,
         logger=logger,
@@ -376,6 +378,7 @@ async def _run_ai_fix(
 async def _collect_and_fix(
     *,
     fix_issues: list[tuple[ToolResult, BaseIssue]],
+    all_results: list[ToolResult],
     provider: BaseAIProvider,
     ai_config: AIConfig,
     logger: ThreadSafeConsoleLogger,
@@ -389,6 +392,7 @@ async def _collect_and_fix(
 
     Args:
         fix_issues: Issues to attempt fixing, paired with their tool result.
+        all_results: Owning run list for validated result replacements.
         provider: AI provider instance.
         ai_config: AI configuration.
         logger: Thread-safe console logger.
@@ -405,6 +409,7 @@ async def _collect_and_fix(
     if fix_issues:
         fixes_applied, fixes_failed, fix_suggestions = await run_fix_pipeline(
             fix_issues=fix_issues,
+            all_results=all_results,
             provider=provider,
             ai_config=ai_config,
             logger=logger,
