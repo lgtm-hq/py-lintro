@@ -7,6 +7,7 @@ The execute/render split from issue #1823 keeps execution AI-free while
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action, normalize_action
@@ -321,11 +322,11 @@ def _execute_tools_sequential(
                 )
             else:
                 result = tool.check(paths, {})
-            # Mutable third-party results can pass construction validation but
-            # contradict the outcome contract. Reject them before any consumer
+            # Untyped third-party results can contradict the outcome contract.
+            # Reject them before any consumer
             # (including the live callback) can lose the rest of the run.
-            result.validate_outcome()
-            result.duration_seconds = time.monotonic() - started
+            ToolResult.validate_outcome(result)
+            result = replace(result, duration_seconds=time.monotonic() - started)
 
             # Populate doc_url on each issue from the plugin
             _enrich_issues_with_doc_urls(tool, result)
@@ -707,11 +708,14 @@ def execute_run(
         on_tool_result=on_tool_result,
     )
 
-    for result in all_results:
+    for index, result in enumerate(all_results):
         if result.capability is None and not result.skipped:
-            result.capability = verify_pass.resolve_result_capability(
-                tool_name=result.name,
-                action=ctx.action,
+            all_results[index] = replace(
+                result,
+                capability=verify_pass.resolve_result_capability(
+                    tool_name=result.name,
+                    action=ctx.action,
+                ),
             )
 
     _run_verify_phase(
@@ -744,6 +748,8 @@ def execute_run(
             ToolResult(
                 name=st.name,
                 skipped=True,
+                success=True,
+                inspected_files=False,
                 skip_reason=st.reason,
                 issues_count=0,
             ),

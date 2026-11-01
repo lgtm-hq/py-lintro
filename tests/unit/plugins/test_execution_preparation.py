@@ -176,6 +176,7 @@ def test_prepare_execution_preserves_version_skip(tmp_path: Path) -> None:
         success=True,
         skipped=True,
         skip_reason="Unavailable",
+        inspected_files=False,
     )
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",

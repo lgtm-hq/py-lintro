@@ -9,6 +9,7 @@ import pytest
 
 from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.tool_result import ToolResult
+from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.black.definition import BlackPlugin
 from lintro.tools.core.verify_pass import (
@@ -16,8 +17,12 @@ from lintro.tools.core.verify_pass import (
     VerifyScope,
     fold_verify_results,
 )
+from lintro.tools.dotenv_linter.definition import DotenvLinterPlugin
+from lintro.tools.hadolint.definition import HadolintPlugin
+from lintro.tools.pydoclint.definition import PydoclintPlugin
 from lintro.tools.ruff.definition import RuffPlugin
 from lintro.tools.shellcheck.definition import ShellcheckPlugin
+from lintro.tools.sqlfluff.definition import SqlfluffPlugin
 from lintro.utils.execution.baseline_filter import apply_baseline
 from lintro.utils.fingerprint_baseline import maintain_baseline, snapshot
 from tests.unit.tools.subprocess_helpers import subprocess_result
@@ -31,6 +36,80 @@ def _artifact(result: ToolResult, root: Path) -> RunArtifact:
         total_issues=result.issues_count,
         exit_code=1,
     )
+
+
+@pytest.mark.parametrize(
+    ("plugin_type", "filename", "payload"),
+    [
+        (
+            ShellcheckPlugin,
+            "script.sh",
+            '{"comments": [{"file": "FILE", "line": 2, "column": 6, '
+            '"code": 2086, "message": "Quote variable"}, null]}',
+        ),
+        (
+            SqlfluffPlugin,
+            "query.sql",
+            '[{"filepath": "FILE", "violations": [{"start_line_no": 1, '
+            '"code": "CP01", "description": "Uppercase keyword"}, null]}]',
+        ),
+        (
+            HadolintPlugin,
+            "Dockerfile",
+            "FILE:1 DL3006 warning: Pin image\nFILE:broken DL3009 warning: Lost\n",
+        ),
+        (
+            DotenvLinterPlugin,
+            ".env",
+            "FILE:1 LowercaseKey: Uppercase key\nFILE:broken DuplicateKey: Lost\n",
+        ),
+        (
+            PydoclintPlugin,
+            "module.py",
+            "FILE\n    1: DOC101: Missing argument\n    broken: DOC102: Lost\n",
+        ),
+    ],
+    ids=["shellcheck", "sqlfluff", "hadolint", "dotenv-linter", "pydoclint"],
+)
+def test_mixed_per_file_payload_cannot_hide_native_failure(
+    workspace: Path,
+    plugin_type: type[BaseToolPlugin],
+    filename: str,
+    payload: str,
+) -> None:
+    """An imported acknowledgement cannot hide records silently lost by a parser."""
+    file = workspace / filename
+    file.write_text("# fixture\n", encoding="utf-8")
+    output = payload.replace("FILE", str(file))
+    plugin = plugin_type()
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
+            plugin,
+            "_run_subprocess_result",
+            return_value=subprocess_result(False, output),
+        ),
+    ):
+        result = plugin.check([str(file)], {})
+    assert result.issues_count == 1
+    assert not result.findings_complete
+    # Simulate debt captured by an earlier producer that claimed completeness.
+    baseline = snapshot([replace(result, findings_complete=True)], root=workspace)
+    assert len(baseline.entries) == 1
+    artifact = _artifact(result, workspace)
+
+    apply_baseline(artifact, baseline)
+
+    filtered = artifact.tool_results[0]
+    assert filtered.issues == result.issues
+    assert filtered.baselined_count == 0
+    assert filtered.output == output
+    assert not filtered.success
+    assert artifact.total_issues == 1
+    assert artifact.exit_code == 1
 
 
 @pytest.mark.parametrize("syntax_error", [False, True])
@@ -54,6 +133,7 @@ def test_real_black_mixed_verdict_keeps_native_error(
     artifact = _artifact(result, workspace)
 
     apply_baseline(artifact, baseline)
+    result = artifact.tool_results[0]
 
     assert artifact.exit_code == int(syntax_error)
     assert result.success is not syntax_error
@@ -98,7 +178,10 @@ def test_per_file_failure_survives_acknowledged_peer(
             return_value=subprocess_result(False, output),
         ),
     ):
-        baseline = snapshot([plugin.check([str(files[1])], {})], root=workspace)
+        baseline = snapshot(
+            [replace(plugin.check([str(files[1])], {}), findings_complete=True)],
+            root=workspace,
+        )
     assert len(baseline.entries) == 1
     with (
         patch(
@@ -122,15 +205,17 @@ def test_per_file_failure_survives_acknowledged_peer(
     artifact = _artifact(result, workspace)
 
     apply_baseline(artifact, baseline)
+    result = artifact.tool_results[0]
 
-    assert artifact.exit_code == int(failure is not None)
+    assert artifact.exit_code == 1
+    assert result.findings_complete is False
     assert result.execution_failed is (failure is not None)
     if failure is not None:
         assert result.output
         assert failure in result.output
         assert result.baselined_count == 0
     else:
-        assert result.baselined_count == 1
+        assert result.baselined_count == 0
 
 
 def test_findings_alone_cannot_certify_a_failed_producer(
@@ -150,6 +235,7 @@ def test_findings_alone_cannot_certify_a_failed_producer(
     artifact = _artifact(result, tmp_path)
 
     apply_baseline(artifact, baseline)
+    result = artifact.tool_results[0]
 
     assert artifact.exit_code == 1
     assert result.output == "unclassified execution error"
@@ -211,6 +297,7 @@ def test_ruff_native_error_cannot_authorize_filtering_or_pruning(
         prune=True,
     )
     apply_baseline(artifact, baseline)
+    result = artifact.tool_results[0]
 
     assert maintained.entries == previous.entries
     assert artifact.exit_code == 1
@@ -237,6 +324,7 @@ def test_black_supplement_failure_is_not_explained_by_format_findings(
         result = plugin.check([str(file)], {})
     artifact = _artifact(result, workspace)
     apply_baseline(artifact, baseline)
+    result = artifact.tool_results[0]
     assert artifact.exit_code == 1
     assert result.output and "invalid report" in result.output
 
@@ -268,12 +356,13 @@ def test_black_requires_native_verdict_and_complete_parsing(
     artifact = _artifact(result, workspace)
 
     apply_baseline(artifact, baseline)
+    result = artifact.tool_results[0]
 
     assert artifact.exit_code == 1
     assert result.output == output
     assert result.baselined_count == 0
     assert result.execution_failed is (returncode == 123)
-    assert result.parse_failures_count == int(returncode == 1)
+    assert result.parse_failures_count == (1 if returncode == 1 else None)
 
 
 @pytest.mark.parametrize("suffix", [", {}]", "] trailing error"])
@@ -303,6 +392,7 @@ def test_ruff_partial_report_cannot_certify_coverage(
     artifact = _artifact(result, workspace)
 
     apply_baseline(artifact, baseline)
+    result = artifact.tool_results[0]
 
     assert artifact.exit_code == 1
     assert result.output == output
@@ -311,10 +401,12 @@ def test_ruff_partial_report_cannot_certify_coverage(
 
 
 @pytest.mark.parametrize("verdict", ["complete", "unknown", "execution_failed"])
+@pytest.mark.parametrize("empty_mutation", [False, True])
 def test_verify_preserves_completeness_proof_and_error_output(
     tmp_path: Path,
     dirty_result: ToolResult,
     verdict: str,
+    empty_mutation: bool,
 ) -> None:
     """A final verify error survives folding and acknowledgement of its findings."""
     baseline = snapshot([dirty_result], root=tmp_path)
@@ -328,6 +420,8 @@ def test_verify_preserves_completeness_proof_and_error_output(
         fixed_issues_count=1,
         remaining_issues_count=0,
     )
+    if empty_mutation:
+        mutation = ToolResult(name="ruff", success=True, no_files=True)
     verified = replace(
         dirty_result,
         findings_complete=verdict == "complete",
@@ -343,8 +437,9 @@ def test_verify_preserves_completeness_proof_and_error_output(
     artifact = _artifact(results[0], tmp_path)
 
     apply_baseline(artifact, baseline)
+    filtered = artifact.tool_results[0]
 
     assert artifact.exit_code == int(verdict != "complete")
-    assert results[0].baselined_count == int(verdict == "complete")
+    assert filtered.baselined_count == int(verdict == "complete")
     if verdict != "complete":
-        assert results[0].output and "native error" in results[0].output
+        assert filtered.output and "native error" in filtered.output

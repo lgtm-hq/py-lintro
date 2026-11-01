@@ -405,6 +405,7 @@ async def run_fix_pipeline(
     logger: ThreadSafeConsoleLogger,
     output_format: str,
     workspace_root: Path,
+    all_results: list[ToolResult],
     budget: CostBudget | None = None,
 ) -> tuple[int, int, list[AIFixSuggestion]]:
     """Generate and optionally apply AI fix suggestions across all tools.
@@ -424,6 +425,7 @@ async def run_fix_pipeline(
         logger: Console logger for output.
         output_format: Output format string.
         workspace_root: Workspace root path.
+        all_results: Required owning run list receiving validated rerun replacements.
         budget: Session cost budget tracker. Omission creates a fresh
             unlimited tracker for this pipeline run.
 
@@ -438,6 +440,7 @@ async def run_fix_pipeline(
         if result.name not in by_tool:
             by_tool[result.name] = (result, [])
         by_tool[result.name][1].append(issue)
+    original_by_tool = {name: result for name, (result, _) in by_tool.items()}
 
     is_json = output_format.lower() == OutputFormat.JSON
 
@@ -514,28 +517,15 @@ async def run_fix_pipeline(
             budget,
         )
 
-    # Attach metadata to tool results
-    applied_by_tool: dict[str, int] = {}
-    for suggestion in applied_suggestions:
-        if not suggestion.tool_name:
-            continue
-        applied_by_tool[suggestion.tool_name] = (
-            applied_by_tool.get(suggestion.tool_name, 0) + 1
-        )
-    for tool_name, (result, _issues) in by_tool.items():
-        attach_fixed_count_metadata(
-            result=result,
-            fixed_count=applied_by_tool.get(tool_name, 0),
-        )
-        attach_validation_counts_metadata(
-            result,
-            verified_count=(
-                validation.verified_by_tool.get(tool_name, 0) if validation else 0
-            ),
-            unverified_count=(
-                validation.unverified_by_tool.get(tool_name, 0) if validation else 0
-            ),
-        )
+    # Publish after verification/refinement returns normally. An earlier exception
+    # leaves the owning list's original result envelopes in place.
+    _publish_verified_results(
+        all_results,
+        by_tool,
+        original_by_tool,
+        applied_suggestions,
+        validation,
+    )
 
     # Generate post-fix summary — only when validation confirms outcomes
     if (applied > 0 or rejected > 0) and not is_json and validation is not None:
@@ -543,10 +533,9 @@ async def run_fix_pipeline(
         if validation.verified or validation.unverified:
             applied_for_summary = validation.verified
 
-        # When fixes were applied, by_tool already holds de-duplicated
-        # per-tool results (one ToolResult per tool).  When no fixes were
-        # applied, we derive unique results from the original fix_issues
-        # because by_tool may be empty or stale.
+        # Applied fixes use the de-duplicated replacements in by_tool.
+        # Without applied suggestions, verification/refinement did not run,
+        # so fix_issues still holds current results with no rerun replacements.
         if applied_suggestions:
             unique_results: list[ToolResult] | None = [
                 result for result, _ in by_tool.values()
@@ -593,6 +582,48 @@ async def run_fix_pipeline(
     )
 
     return (applied, len(all_suggestions) - applied, applied_suggestions)
+
+
+def _publish_verified_results(
+    results: list[ToolResult],
+    by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]],
+    original_by_tool: dict[str, ToolResult],
+    applied_suggestions: list[AIFixSuggestion],
+    validation: ValidationResult | None,
+) -> None:
+    """Publish validated rerun replacements and their separate AI fix counts.
+
+    Args:
+        results: Owning run list supplied by the orchestrator.
+        by_tool: Current per-tool results after verification.
+        original_by_tool: Original result identities selected for each tool.
+        applied_suggestions: Successfully applied AI suggestions.
+        validation: Verification counts, when a check could run.
+    """
+    for index, result in enumerate(results):
+        if result is original_by_tool.get(result.name):
+            results[index] = by_tool[result.name][0]
+    applied_by_tool: dict[str, int] = {}
+    for suggestion in applied_suggestions:
+        if not suggestion.tool_name:
+            continue
+        applied_by_tool[suggestion.tool_name] = (
+            applied_by_tool.get(suggestion.tool_name, 0) + 1
+        )
+    for tool_name, (result, _issues) in by_tool.items():
+        attach_fixed_count_metadata(
+            result=result,
+            fixed_count=applied_by_tool.get(tool_name, 0),
+        )
+        attach_validation_counts_metadata(
+            result,
+            verified_count=(
+                validation.verified_by_tool.get(tool_name, 0) if validation else 0
+            ),
+            unverified_count=(
+                validation.unverified_by_tool.get(tool_name, 0) if validation else 0
+            ),
+        )
 
 
 def _unique_results_from_fix_issues(

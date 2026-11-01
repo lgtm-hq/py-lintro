@@ -106,9 +106,7 @@ class PytestResultProcessor:
             name=self.tool_name,
             issues=failed_issues,
             output=output_text,
+            pytest_summary=summary_data,
         )
-
-        # Store summary data for display in Execution Summary table
-        result.pytest_summary = summary_data
 
         return result

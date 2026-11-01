@@ -259,7 +259,7 @@ def test_configured_baseline_and_cli_override_are_opt_in(workspace: Path) -> Non
     [
         {"inspected_files": None},
         {"inspected_files": False},
-        {"timed_out": True},
+        {"timed_out": True, "inspected_files": False},
         {"parse_failures_count": 1},
         {"success": False, "issues": [], "issues_count": 0},
     ],

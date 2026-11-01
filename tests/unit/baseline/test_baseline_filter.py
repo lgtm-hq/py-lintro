@@ -50,6 +50,7 @@ def test_fingerprint_limits_keep_unacknowledgeable_findings_failing(
     )
 
     apply_baseline(artifact, baseline)
+    result = artifact.tool_results[0]
 
     assert_that(baseline.entries).is_length(1 if unacknowledgeable else 2)
     assert_that(result.issues).is_equal_to([changed] if unacknowledgeable else [])
@@ -80,6 +81,7 @@ def test_check_filters_findings_exit_and_serialized_counts_together(
         exit_code=1,
     )
     apply_baseline(artifact, baseline)
+    result = artifact.tool_results[0]
     payload = create_json_output(
         "check",
         artifact.tool_results,
@@ -120,11 +122,71 @@ def test_all_acknowledged_lint_findings_pass_without_appearing_fixed(
         exit_code=1,
     )
     apply_baseline(artifact, baseline)
+    result = artifact.tool_results[0]
     assert_that(artifact.success).is_true()
     assert_that(artifact.total_issues).is_zero()
     assert_that(artifact.total_fixed).is_zero()
     assert_that(artifact.total_remaining).is_zero()
-    assert_that(dirty_result.baselined_count).is_equal_to(1)
+    assert_that(result.baselined_count).is_equal_to(1)
+    assert_that(result).is_not_same_as(dirty_result)
+    assert_that(dirty_result.baselined_count).is_none()
+    assert_that(dirty_result.success).is_false()
+    assert_that(dirty_result.issues_count).is_equal_to(1)
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "force_failure"),
+    [(0, True), (1, True), (2, False), (5, False), (2, True)],
+)
+def test_independent_failure_preserves_distinct_exit_code(
+    tmp_path: Path,
+    dirty_result: ToolResult,
+    exit_code: int,
+    force_failure: bool,
+) -> None:
+    """Filtering lint findings cannot flatten a separate policy or native status."""
+    baseline = snapshot([dirty_result], root=tmp_path)
+    artifact = RunArtifact(
+        tool_results=[dirty_result],
+        workspace_root=tmp_path,
+        total_issues=1,
+        total_remaining=1,
+        exit_code=exit_code,
+        force_failure=force_failure,
+    )
+
+    apply_baseline(artifact, baseline)
+
+    assert artifact.exit_code == (exit_code or 1)
+    assert artifact.total_issues == 0
+    assert artifact.tool_results[0].baselined_count == 1
+
+
+def test_clean_results_and_gates_do_not_warn_about_baseline(
+    tmp_path: Path,
+    dirty_result: ToolResult,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Only incomplete findings that might need acknowledgement warrant a warning."""
+    from loguru import logger
+
+    baseline = snapshot([dirty_result], root=tmp_path)
+    clean = ToolResult(name="mypy", success=True)
+    gate = ToolResult(name="policy", success=False, output="policy denied")
+    artifact = RunArtifact(
+        tool_results=[clean, gate],
+        workspace_root=tmp_path,
+        exit_code=1,
+    )
+    sink = logger.add(lambda message: print(message, end=""), level="WARNING")
+    try:
+        apply_baseline(artifact, baseline)
+    finally:
+        logger.remove(sink)
+
+    assert "Baseline not applied" not in capsys.readouterr().out
+    assert artifact.exit_code == 1
+    assert artifact.tool_results[1].output == "policy denied"
 
 
 @pytest.mark.parametrize(
@@ -132,7 +194,7 @@ def test_all_acknowledged_lint_findings_pass_without_appearing_fixed(
     [
         {"inspected_files": None},
         {"parse_failures_count": 1},
-        {"timed_out": True},
+        {"timed_out": True, "inspected_files": False},
         {"residual_unknown": True, "residual_unknown_reason": "incomplete verify"},
         {"execution_failed": True},
         {"findings_complete": False},
@@ -158,6 +220,7 @@ def test_acknowledgements_cannot_hide_incomplete_inspection(
         exit_code=1,
     )
     apply_baseline(artifact, baseline)
+    result = artifact.tool_results[0]
     assert_that(artifact.exit_code).is_equal_to(1)
     assert_that(result.issues).is_length(1)
     assert_that(result.baselined_count).is_zero()
@@ -214,7 +277,7 @@ def test_verified_residual_and_detected_findings_are_filtered_independently(
         exit_code=1,
     )
     apply_baseline(artifact, baseline)
-    result.__post_init__()
+    result = artifact.tool_results[0]
     assert_that(result.initial_issues).is_equal_to([new])
     assert_that(result.issues).is_equal_to([new])
     assert_that(result.initial_issues_count).is_equal_to(1)
@@ -251,7 +314,7 @@ def test_acknowledged_fixed_findings_are_not_reported_as_new_fixes(
         total_fixed=1,
     )
     apply_baseline(artifact, baseline)
-    result.__post_init__()
+    result = artifact.tool_results[0]
     assert_that(artifact.total_fixed).is_zero()
     assert_that(result.initial_issues).is_empty()
     assert_that(artifact.success).is_true()
@@ -312,9 +375,9 @@ def test_format_accounting_matches_finding_occurrences(
     )
 
     apply_baseline(artifact, baseline)
+    result = artifact.tool_results[0]
 
     detected = [issue for issue in initial if issue.code != "F401"]
-    result.__post_init__()
     assert_that(result.initial_issues).is_equal_to(detected)
     assert_that(result.initial_issues_count).is_equal_to(len(detected))
     assert_that(result.issues).is_equal_to(residual)
@@ -391,6 +454,7 @@ def test_format_partial_accounting_stays_incomplete(
     )
 
     apply_baseline(artifact, baseline)
+    result = artifact.tool_results[0]
 
     assert_that(result).is_equal_to(expected)
     assert_that(artifact.exit_code).is_equal_to(1)
@@ -423,6 +487,7 @@ def test_format_without_detected_findings_preserves_residual_accounting(
     )
 
     apply_baseline(artifact, baseline)
+    result = artifact.tool_results[0]
 
     assert_that(result).is_equal_to(expected)
     assert_that(artifact.total_issues).is_equal_to(1)
@@ -464,6 +529,7 @@ def test_unmatched_format_result_preserves_output_and_accounting(
     )
 
     apply_baseline(artifact, baseline)
+    result = artifact.tool_results[0]
 
     assert_that(result).is_equal_to(expected)
     assert_that(artifact.total_fixed).is_equal_to(2 - remaining)
@@ -494,6 +560,7 @@ def test_partial_filtering_preserves_successful_producer_verdict(
     )
 
     apply_baseline(artifact, baseline)
+    result = artifact.tool_results[0]
 
     assert_that(result.success).is_true()
     assert_that(result.issues).is_equal_to([new])
@@ -536,7 +603,10 @@ def test_failed_file_cannot_be_hidden_by_peer_findings_in_the_same_tool(
     assert_that(result.execution_failed).is_true()
     assert_that(result.output).contains("unreadable")
     assert_that(result.issues_count).is_equal_to(1)
-    baseline = snapshot([replace(result, execution_failed=False)], root=workspace)
+    baseline = snapshot(
+        [replace(result, execution_failed=False, findings_complete=True)],
+        root=workspace,
+    )
     artifact = RunArtifact(
         tool_results=[result],
         workspace_root=workspace,
@@ -544,6 +614,7 @@ def test_failed_file_cannot_be_hidden_by_peer_findings_in_the_same_tool(
         exit_code=1,
     )
     apply_baseline(artifact, baseline)
+    result = artifact.tool_results[0]
     assert_that(artifact.success).is_false()
     assert_that(result.baselined_count).is_zero()
     assert_that(result.output).contains("unreadable")
@@ -596,7 +667,6 @@ def test_verify_fold_preserves_final_findings_and_inspection_for_baselining(
         exit_code=1,
     )
     apply_baseline(artifact, baseline)
-    results[0].__post_init__()
     assert_that(artifact.exit_code).is_equal_to(1)
     assert_that(artifact.total_fixed).is_zero()
     assert_that(results[0].issues).is_equal_to([new] if inspected else [finding, new])

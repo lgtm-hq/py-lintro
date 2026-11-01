@@ -20,17 +20,36 @@ class ToolOutcome(Protocol):
     ``lintro.enums`` is the bottom layer, so it must not name
     ``lintro.models.core.ToolResult`` even under ``TYPE_CHECKING``: an
     ``import-linter`` layering contract counts type-checking imports as edges.
-    ``ToolResult`` satisfies this protocol structurally.
-
-    Attributes:
-        success: Whether the tool reported a clean run.
-        skipped: Whether the tool never executed.
-        timed_out: Whether the tool's subprocess exceeded its deadline.
+    Read-only properties let frozen ``ToolResult`` instances and mutable
+    plugin attributes satisfy this protocol structurally.
     """
 
-    success: bool
-    skipped: bool
-    timed_out: bool
+    @property
+    def success(self) -> bool:
+        """Read the tool's verdict.
+
+        Returns:
+            Whether the tool reported a clean run.
+        """
+        ...
+
+    @property
+    def skipped(self) -> bool:
+        """Read whether execution was skipped.
+
+        Returns:
+            Whether the tool never executed.
+        """
+        ...
+
+    @property
+    def timed_out(self) -> bool:
+        """Read whether execution exceeded its deadline.
+
+        Returns:
+            Whether the tool's subprocess timed out.
+        """
+        ...
 
 
 class ToolRunStatus(StrEnum):

@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from lintro.enums.action import Action
-from lintro.models.core.tool_outcome import FixMeasured, FixUnmeasured
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixMeasured,
+    FixUnmeasured,
+    ToolOutcome,
+)
 from lintro.utils.execution.exit_codes import (
     aggregate_tool_results,
     determine_exit_code,
@@ -21,25 +27,37 @@ from lintro.utils.fingerprint_baseline import (
 from lintro.utils.severity_counts import count_severities
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from lintro.models.core.fingerprint_baseline import FingerprintBaseline
     from lintro.models.core.run_artifact import RunArtifact
     from lintro.models.core.tool_result import ToolResult
+    from lintro.parsers.base_issue import BaseIssue
     from lintro.utils.fingerprint_baseline import Fingerprint
 
 
-def _filter_fix_accounting(result: ToolResult, root: Path) -> None:
+def _filter_fix_accounting(
+    result: ToolResult,
+    root: Path,
+    detected: Sequence[BaseIssue],
+    retained: Sequence[BaseIssue],
+) -> FixMeasured | FixUnmeasured:
     """Match filtered finding occurrences without assuming a residual subset.
 
     Args:
         result: Complete format result with filtered initial and residual lists.
         root: Invocation workspace root for canonical finding identities.
+        detected: Filtered pre-fix findings.
+        retained: Filtered residual findings.
+
+    Returns:
+        Measured accounting, or explicit uncertainty for introduced findings.
     """
-    initial = len(result.initial_issues)
+    initial = len(detected)
     populations: list[Counter[Fingerprint]] = []
     accounting: FixMeasured | FixUnmeasured
-    for issues in (result.initial_issues, result.issues):
+    for issues in (detected, retained):
         entries = [
             fingerprint(issue, tool=result.name, root=root, cwd=result.cwd)
             for issue in issues
@@ -68,15 +86,9 @@ def _filter_fix_accounting(result: ToolResult, root: Path) -> None:
                 ),
             )
             if introduced
-            else FixMeasured(initial, fixed, len(result.issues))
+            else FixMeasured(initial, fixed, len(retained))
         )
-    result.initial_issues_count = accounting.initial
-    result.fixed_issues_count = accounting.fixed
-    result.remaining_issues_count = accounting.remaining
-    result.residual_unknown = isinstance(accounting, FixUnmeasured)
-    result.residual_unknown_reason = (
-        accounting.reason if isinstance(accounting, FixUnmeasured) else None
-    )
+    return accounting
 
 
 def apply_baseline(artifact: RunArtifact, baseline: FingerprintBaseline) -> None:
@@ -100,10 +112,12 @@ def apply_baseline(artifact: RunArtifact, baseline: FingerprintBaseline) -> None
             artifact.total_remaining,
         )
     )
-    for result in artifact.tool_results:
-        result.baselined_count = 0
+    independent_exit = artifact.exit_code if forced_failure else 0
+    for index, result in enumerate(artifact.tool_results):
+        result = replace(result, baselined_count=0)
+        artifact.tool_results[index] = result
         if (reason := baseline_incomplete_reason(result)) is not None:
-            if not result.skipped and not result.no_files:
+            if result.issues or result.initial_issues:
                 logger.warning(f"Baseline not applied to {result.name}: {reason}")
             continue
         if artifact.action == Action.FIX and (
@@ -127,20 +141,35 @@ def apply_baseline(artifact: RunArtifact, baseline: FingerprintBaseline) -> None
         )
         if not suppressed and not detected_suppressed:
             continue
-        result.issues = retained
-        result.issues_count = len(retained)
-        result.baselined_count = suppressed
-        # Cached text and native raw output still contain acknowledged findings.
-        # Execution-error output is kept by the completeness guard above.
-        result.formatted_output = None
-        result.output = None
-        if artifact.action == Action.FIX:
-            result.initial_issues = detected
-            _filter_fix_accounting(result, artifact.workspace_root)
+        accounting = (
+            _filter_fix_accounting(result, artifact.workspace_root, detected, retained)
+            if artifact.action == Action.FIX
+            else result.outcome.accounting
+        )
         # Only the producer's completeness proof can explain a failed verdict.
-        result.success = (
-            result.success or not retained
-        ) and not result.residual_unknown
+        outcome = ToolOutcome(
+            execution=Checked(
+                success=(result.success or not retained)
+                and not isinstance(accounting, FixUnmeasured),
+                inspected_files=result.inspected_files,
+            ),
+            accounting=accounting,
+            issues_count=len(retained),
+        )
+        # Replace state and payload together; construction validates every change.
+        # Cached text contains acknowledged findings. Execution-error output is
+        # protected by the completeness guard above.
+        artifact.tool_results[index] = replace(
+            result,
+            **outcome.to_legacy_fields(),
+            issues=retained,
+            initial_issues=(
+                detected if artifact.action == Action.FIX else result.initial_issues
+            ),
+            baselined_count=suppressed,
+            formatted_output=None,
+            output=None,
+        )
     totals = aggregate_tool_results(artifact.tool_results, artifact.action)
     artifact.total_issues, artifact.total_fixed, artifact.total_remaining = totals
     artifact.exit_code = determine_exit_code(
@@ -150,6 +179,6 @@ def apply_baseline(artifact: RunArtifact, baseline: FingerprintBaseline) -> None
         totals[2],
     )
     if forced_failure:
-        artifact.exit_code = 1
+        artifact.exit_code = independent_exit or artifact.exit_code or 1
     artifact.severity_counts = count_severities(artifact.tool_results)
     artifact.previous_severity_counts = None

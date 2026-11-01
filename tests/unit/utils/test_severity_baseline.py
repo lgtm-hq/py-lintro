@@ -679,7 +679,13 @@ def test_scope_normalizes_paths_and_executed_tool_sets(
             pylint,
             ruff,
             ruff,
-            ToolResult(name="hadolint", skipped=True, skip_reason="not installed"),
+            ToolResult(
+                name="hadolint",
+                skipped=True,
+                skip_reason="not installed",
+                inspected_files=False,
+                success=True,
+            ),
         ],
     )
 

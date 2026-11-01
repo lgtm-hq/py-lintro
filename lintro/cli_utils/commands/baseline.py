@@ -28,8 +28,7 @@ if TYPE_CHECKING:
     from lintro.models.core.run_artifact import RunArtifact
 
 BASELINE_SCAN_HELP = (
-    "Certified check findings: ruff, black, shellcheck, hadolint, shfmt, "
-    "dotenv-linter, pydoclint, sqlfluff. Use --tools to select supported tools. "
+    "Certified check findings: ruff, black. Use --tools to select supported tools. "
     "Default or mixed selections abort if any active result is incomplete or "
     "cannot certify its findings; no failing tool is silently omitted."
 )
@@ -114,9 +113,14 @@ def _scan(
     # Exact file discovery does not prove that user overrides ran every rule.
     # Only original user options count; our internal coverage flags do not.
     overridden_tools = parse_tool_options(tool_options)
-    for result in artifact.tool_results:
-        if result.name.lower() in overridden_tools:
-            result.inspected_paths = None
+    artifact.tool_results = [
+        (
+            replace(result, inspected_paths=None)
+            if result.name.lower() in overridden_tools
+            else result
+        )
+        for result in artifact.tool_results
+    ]
     return artifact
 
 

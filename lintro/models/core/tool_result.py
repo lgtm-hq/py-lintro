@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
 
 
-@dataclass
+@dataclass(frozen=True)
 class ToolResult:
     """Result of running a tool.
 
@@ -49,14 +49,14 @@ class ToolResult:
     ``issues`` list. Tools append all detected issues in order, so the
     last ``remaining_issues_count`` entries are the ones still unfixed.
 
-    Stages 1 through 3 of #3019 keep these fields writable: verify folding, retries and
-    other existing callers still update them in several steps. ``outcome`` is
-    a read-only, validated view computed on each access, not a stored second
-    source of truth. Read it after an update is complete; contradictory legacy
-    state raises instead of returning an obsolete or normalized outcome.
+    State is frozen and validated at construction, including dataclasses.replace.
     Producers use ``from_outcome`` to derive state fields from frozen variants;
-    ``with_outcome`` preserves the rest of an existing envelope. Migrated
-    consumers read the current outcome; freezing this dataclass belongs to stage 4.
+    ``with_outcome`` preserves the rest of an existing envelope. ``outcome`` is
+    a computed view, not a stored second source of truth. Collection payloads
+    remain shallowly shared, as with other frozen dataclasses; replacing state
+    never requires changing an existing result. Legacy inactive constructors default
+    unknown inspection to False, and skips normalize success to True as before.
+    Explicit inspection claims and contradictory outcomes are rejected.
     """
 
     name: str = field(default="")
@@ -95,7 +95,7 @@ class ToolResult:
     cwd: str | None = field(default=None)
 
     # True when the tool returned early because file discovery matched
-    # nothing. Deliberately distinct from ``skipped`` (which forces
+    # nothing. Deliberately distinct from ``skipped`` (which requires
     # ``success=True`` and hides the tool from reporting): a no-files result is
     # a successful non-event, but it is not a verdict about any file, so the
     # run-level verify pass (#1743) must not read it as "these files are
@@ -185,7 +185,7 @@ class ToolResult:
                 supply envelope output, but it must match the timeout payload.
 
         Returns:
-            A mutable result compatible with consumers awaiting migration.
+            A frozen, validated result with legacy-compatible fields.
 
         Raises:
             TypeError: If payload supplies state fields or conflicting timeout text.
@@ -206,9 +206,7 @@ class ToolResult:
 
     @property
     def outcome(self) -> ToolOutcome:
-        """Adapt the current mutable fields to a validated frozen outcome.
-
-        Contradictory legacy mutations raise ValueError at the adapter boundary.
+        """Adapt the frozen fields to a validated outcome.
 
         Returns:
             The current execution and accounting state, without inferred counts.
@@ -216,10 +214,11 @@ class ToolResult:
         return outcome_from_result(self)
 
     def validate_outcome(self) -> None:
-        """Reject contradictory mutable state before handing it to consumers.
-
-        The adapter raises ValueError if the current fields are contradictory.
-        """
+        """Validate the outcome, raising ValueError for contradictory evidence."""
+        # Plugin boundaries call this unbound so a duck-typed object's own
+        # validator cannot bypass the ToolResult type guard.
+        if not isinstance(self, ToolResult):
+            raise ValueError("plugin check()/fix() must return ToolResult")
         outcome_from_result(self)
 
     def with_outcome(self, outcome: ToolOutcome) -> ToolResult:
@@ -251,18 +250,23 @@ class ToolResult:
             if value is None:
                 raise TypeError(f"ToolResult.{field_name} must not be None")
 
-        if self.no_files or self.skipped or self.timed_out:
-            self.inspected_files = False
-        if self.execution_failed:
-            self.success = False
+        # Preserve API-v2 constructor defaults only at the construction boundary.
+        # False is also the historical default for success, so a skip normalizes
+        # it to True. Explicit affirmative inspection is never normalized away.
+        if (self.no_files or self.skipped or self.timed_out) and (
+            self.inspected_files is None
+        ):
+            object.__setattr__(self, "inspected_files", False)
+        if self.skipped and self.success is False:
+            object.__setattr__(self, "success", True)
 
-        # Skipped tools are not failures — they just didn't run
-        if self.skipped:
-            self.success = True
-            if not self.skip_reason:
-                raise ValueError(
-                    "skip_reason is required when skipped=True",
-                )
+        if self.execution_failed and self.success:
+            raise ValueError("execution_failed cannot report success")
+
+        if self.skipped and not self.skip_reason:
+            raise ValueError(
+                "skip_reason is required when skipped=True",
+            )
 
         if self.skip_reason and not self.skipped:
             raise ValueError(
@@ -317,3 +321,5 @@ class ToolResult:
                 f"remaining={self.remaining_issues_count}. "
                 f"Expected: initial = fixed + remaining",
             )
+
+        self.validate_outcome()

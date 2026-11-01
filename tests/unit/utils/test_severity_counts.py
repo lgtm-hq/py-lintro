@@ -67,6 +67,7 @@ def test_count_severities_skips_results_without_issues() -> None:
                 success=True,
                 skipped=True,
                 skip_reason="no files matched",
+                inspected_files=False,
             ),
             ToolResult(name="black", success=True, issues=[]),
         ],

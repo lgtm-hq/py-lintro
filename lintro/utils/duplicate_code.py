@@ -23,8 +23,8 @@ run already produced — pylint is never invoked a second time.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -133,58 +133,61 @@ def _was_analysed(*, result: ToolResult) -> bool:
     return bool(metadata.get(PYLINT_ANALYSED_METADATA_KEY, False))
 
 
-def _strip_duplicate_code_issues(*, result: ToolResult) -> int:
-    """Remove duplicate-code findings from a tool result, in place.
+def _strip_duplicate_code_issues(*, result: ToolResult) -> tuple[ToolResult, int]:
+    """Rebuild a tool result without duplicate-code findings.
 
     The gate owns the accounting for ``R0801``, so the findings are taken out
     of the tool result's counts before the run's exit code is derived. A result
     that carries nothing else becomes a pass.
 
     Args:
-        result: Tool result to strip. Mutated in place.
+        result: Tool result to strip without changing it.
 
     Returns:
-        int: Number of duplicate-code findings removed.
+        Replacement result and number of duplicate-code findings removed.
     """
     issues = list(result.issues)
     duplicates = [issue for issue in issues if is_duplicate_code_issue(issue)]
     if not duplicates:
-        return 0
+        return result, 0
 
     remaining = [issue for issue in issues if not is_duplicate_code_issue(issue)]
-    result.issues = remaining
-    result.issues_count = max(result.issues_count - len(duplicates), len(remaining))
-    if result.issues_count == 0:
-        result.success = True
-    return len(duplicates)
+    count = max(result.issues_count - len(duplicates), len(remaining))
+    return replace(
+        result,
+        issues=remaining,
+        issues_count=count,
+        success=True if count == 0 else result.success,
+    ), len(duplicates)
 
 
 def apply_duplicate_code_baseline(
     *,
-    results: Iterable[ToolResult],
+    results: list[ToolResult],
     baseline: int,
 ) -> DuplicateCodeVerdict | None:
     """Strip duplicate-code findings from pylint results and judge the ratchet.
 
     Args:
-        results: Tool results collected during the run.
+        results: Tool results collected during the run; matching entries are replaced.
         baseline: Configured ratchet baseline.
 
     Returns:
         DuplicateCodeVerdict | None: The verdict, or None when pylint did not
         analyse anything (there is nothing to judge, and no verdict to report).
     """
-    pylint_results = [
-        result
-        for result in results
-        if str(result.name).lower() == PYLINT_TOOL_NAME and _was_analysed(result=result)
-    ]
-    if not pylint_results:
+    count = 0
+    analysed = False
+    for index, result in enumerate(results):
+        if str(result.name).lower() != PYLINT_TOOL_NAME or not _was_analysed(
+            result=result,
+        ):
+            continue
+        analysed = True
+        results[index], removed = _strip_duplicate_code_issues(result=result)
+        count += removed
+    if not analysed:
         return None
-
-    count = sum(
-        _strip_duplicate_code_issues(result=result) for result in pylint_results
-    )
     return DuplicateCodeVerdict(
         count=count,
         baseline=baseline,

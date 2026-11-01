@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from copy import deepcopy
-from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,6 +13,7 @@ from lintro.ai.models import AIFixSuggestion
 from lintro.ai.validation import validate_applied_fixes, verify_fixes
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
+from tests.unit.tool_result_helpers import legacy_result
 
 from .conftest import MockIssue
 
@@ -37,15 +37,22 @@ def suggestions(sample_issues: list[MockIssue]) -> list[AIFixSuggestion]:
 
 @pytest.fixture(params=["timed_out", "skipped", "no_files", "execution_failure"])
 def unmeasured_rerun(request: pytest.FixtureRequest) -> ToolResult:
-    """Return each unmeasured shape, including skips that force success True."""
+    """Return each unmeasured shape, including successful skips."""
     return ToolResult(
         name="ruff",
-        success=request.param == "no_files",
+        success=request.param in {"no_files", "skipped"},
         timed_out=request.param == "timed_out",
         skipped=request.param == "skipped",
         skip_reason="Unavailable version" if request.param == "skipped" else None,
         no_files=request.param == "no_files",
         output="No post-fix verdict",
+        inspected_files=(
+            False
+            if request.param == "skipped"
+            or request.param == "no_files"
+            or request.param == "timed_out"
+            else None
+        ),
     )
 
 
@@ -57,7 +64,9 @@ def test_standalone_unmeasured_rerun_cannot_verify(
 ) -> None:
     """Both None and an empty failed result leave every suggestion unverified."""
     # Deliberately inject invalid None to keep the fail-closed regression case.
-    unmeasured_rerun.issues = cast(Sequence[BaseIssue], empty_issues)
+    unmeasured_rerun = legacy_result(
+        **(vars(unmeasured_rerun) | {"issues": empty_issues}),
+    )
     tool = MagicMock()
     tool.check.return_value = unmeasured_rerun
     with patch("lintro.tools.tool_manager.get_tool", return_value=tool):
@@ -85,8 +94,10 @@ def test_unified_unmeasured_rerun_preserves_original_result(
 ) -> None:
     """Unanswered checks cannot rewrite counts, findings, output or failure flags."""
     # Deliberately inject invalid None to keep the fail-closed regression case.
-    unmeasured_rerun.issues = cast(Sequence[BaseIssue], empty_issues)
-    original = ToolResult(
+    unmeasured_rerun = legacy_result(
+        **(vars(unmeasured_rerun) | {"issues": empty_issues}),
+    )
+    original = legacy_result(
         name="ruff",
         success=False,
         issues=sample_issues,
@@ -99,6 +110,13 @@ def test_unified_unmeasured_rerun_preserves_original_result(
         skip_reason="Original skip" if original_flag == "skipped" else None,
         no_files=original_flag == "no_files",
         output="Original findings",
+        inspected_files=(
+            False
+            if original_flag == "skipped"
+            or original_flag == "no_files"
+            or original_flag == "timed_out"
+            else None
+        ),
     )
     before = deepcopy(original)
     tool = MagicMock()
@@ -132,15 +150,20 @@ def test_post_fix_measurement_handles_real_findings(
 ) -> None:
     """Only completed checks can match findings or establish that fixes worked."""
     remaining = [sample_issues[0], MockIssue(file="src/new.py", code="NEW", line=1)]
-    rerun = ToolResult(
+    rerun = legacy_result(
         name="ruff",
-        success=status == "clean",
+        success=status in {"clean", "skipped", "no_files"},
         issues=[] if status == "clean" else remaining,
         issues_count=0 if status == "clean" else len(remaining),
         timed_out=status == "timed_out",
         skipped=status == "skipped",
         skip_reason="Version gate" if status == "skipped" else None,
         no_files=status == "no_files",
+        inspected_files=(
+            False
+            if status == "skipped" or status == "no_files" or status == "timed_out"
+            else None
+        ),
     )
     original = ToolResult(
         name="ruff",
@@ -149,6 +172,9 @@ def test_post_fix_measurement_handles_real_findings(
         issues_count=3,
         remaining_issues_count=3,
     )
+    by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]] = {
+        "ruff": (original, list(sample_issues)),
+    }
     tool = MagicMock()
     tool.check.return_value = rerun
     with patch("lintro.tools.tool_manager.get_tool", return_value=tool):
@@ -157,7 +183,7 @@ def test_post_fix_measurement_handles_real_findings(
         else:
             result = verify_fixes(
                 applied_suggestions=suggestions,
-                by_tool={"ruff": (original, list(sample_issues))},
+                by_tool=by_tool,
             )
 
     assert_that(result).is_not_none()
@@ -168,6 +194,8 @@ def test_post_fix_measurement_handles_real_findings(
         expected,
     )
     if path == "unified":
+        updated = by_tool["ruff"][0]
         expected_remaining = {"clean": 0, "findings": 2}.get(status, 3)
-        assert_that(original.remaining_issues_count).is_equal_to(expected_remaining)
-        assert_that(original.success).is_equal_to(status == "clean")
+        assert_that(updated.remaining_issues_count).is_equal_to(expected_remaining)
+        assert_that(updated.success).is_equal_to(status == "clean")
+        assert_that(original.remaining_issues_count).is_equal_to(3)

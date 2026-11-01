@@ -60,6 +60,7 @@ async def test_pipeline_normalizes_a_fresh_budget_for_each_session(
         )
         applied, failed, suggestions = await pipeline.run_fix_pipeline(
             fix_issues=[(result, issue)],
+            all_results=[result],
             provider=provider,
             ai_config=AIConfig(enabled=True, transport=AITransport.API, dry_run=True),
             logger=RecordingConsoleLogger(),

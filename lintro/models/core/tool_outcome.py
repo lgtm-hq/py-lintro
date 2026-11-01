@@ -3,7 +3,7 @@
 Execution and accounting are independent: a timed-out mutation can retain
 findings and even gain measured counts from a later verify pass. Neither a
 successful command nor an empty issue list proves that files were inspected.
-Issue objects, output and metadata remain on the mutable ToolResult envelope.
+Issue objects, output and metadata remain on the frozen ToolResult envelope.
 """
 
 from __future__ import annotations
@@ -276,10 +276,10 @@ class ToolOutcome:
 
 
 def _execution_from_result(result: ToolResult) -> ExecutionOutcome:
-    """Read execution evidence without silently normalizing mutated flags.
+    """Read execution evidence without silently normalizing contradictory flags.
 
     Args:
-        result: The current mutable legacy result.
+        result: The result to validate, including untyped legacy plugin values.
 
     Returns:
         The corresponding execution variant.
@@ -314,13 +314,13 @@ def outcome_from_result(result: ToolResult) -> ToolOutcome:
     """Validate and adapt the current fields, never a cached construction state.
 
     Args:
-        result: The mutable legacy result at the time of access.
+        result: The result at the boundary, including untyped legacy plugin values.
 
     Returns:
         A frozen value describing the current execution and accounting.
 
     Raises:
-        ValueError: If mutations left contradictory state or invalid counts.
+        ValueError: If fields describe contradictory state or invalid counts.
     """
     _validate_boolean(result.residual_unknown)
     initial = result.initial_issues_count

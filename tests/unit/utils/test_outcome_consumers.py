@@ -118,7 +118,9 @@ def test_ai_rerun_accounting_survives_totals_json_and_exit(
 
     apply_rerun_results(by_tool=by_tool, rerun_results=[rerun])
 
-    assert_that(by_tool["ruff"][0]).is_same_as(original)
+    assert_that(by_tool["ruff"][0]).is_not_same_as(original)
+    assert_that(original.outcome.accounting).is_equal_to(previous)
+    original = by_tool["ruff"][0]
     assert_that(original.outcome.accounting).is_equal_to(expected)
     assert_that(original.residual_unknown).is_false()
     assert_that(original.residual_unknown_reason).is_none()
@@ -165,10 +167,12 @@ def test_ai_rerun_then_metadata_counts_each_fix_once_in_totals_and_json(
         issues=detected[native_fixed + ai_verified :],
     )
 
+    by_tool = {"ruff": (original, list(original.issues))}
     apply_rerun_results(
-        by_tool={"ruff": (original, list(original.issues))},
+        by_tool=by_tool,
         rerun_results=[rerun],
     )
+    original = by_tool["ruff"][0]
     # The pipeline attaches these counts only after applying the rerun result.
     attach_fixed_count_metadata(original, fixed_count=ai_verified)
     attach_validation_counts_metadata(
@@ -364,7 +368,10 @@ def test_answered_ai_rerun_replaces_timeout_and_streams_partial_native_accountin
     issue = BaseIssue(file="a.py", line=1, message="remaining")
     rerun = ToolResult(name="ruff", success=False, issues_count=1, issues=[issue])
 
-    apply_rerun_results(by_tool={"ruff": (result, [])}, rerun_results=[rerun])
+    by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]] = {"ruff": (result, [])}
+    apply_rerun_results(by_tool=by_tool, rerun_results=[rerun])
+    assert_that(result.timed_out).is_true()
+    result = by_tool["ruff"][0]
 
     target = tmp_path / "rerun.jsonl"
     with StreamingResultHandler("jsonl", Action.FIX, str(target)) as handler:
@@ -424,8 +431,8 @@ def test_unmeasured_and_timeout_evidence_survive_all_output_consumers(
     assert_that(determine_exit_code(Action.FIX, [result], 0, 0)).is_equal_to(1)
 
 
-def test_consumers_read_completed_legacy_mutations_without_caching_outcomes() -> None:
-    """A later skip replaces an earlier measured failure on every new read."""
+def test_consumers_read_replaced_outcomes() -> None:
+    """A validated skip replacement supersedes an earlier measured failure."""
     result = ToolResult.from_outcome(
         ToolOutcome(Checked(False, inspected_files=False), FixMeasured(2, 1, 1), 1),
         name="ruff",
@@ -433,14 +440,7 @@ def test_consumers_read_completed_legacy_mutations_without_caching_outcomes() ->
     original = result.outcome
     assert_that(aggregate_tool_results([result], Action.FIX)).is_equal_to((1, 1, 1))
 
-    # Stage 3 still accepts completed updates through the writable legacy fields.
-    result.skipped = True
-    result.skip_reason = "tool removed from PATH"
-    result.success = True
-    result.issues_count = 0
-    result.initial_issues_count = None
-    result.fixed_issues_count = None
-    result.remaining_issues_count = None
+    result = result.with_outcome(ToolOutcome(Skipped("tool removed from PATH")))
     wire = serialize_tool_result(result, action=Action.FIX)
 
     assert_that(result.outcome.execution).is_equal_to(Skipped("tool removed from PATH"))

@@ -100,11 +100,11 @@ def test_snapshot_is_sorted_and_does_not_store_messages(
     [
         {"inspected_files": None},
         {"inspected_files": False},
-        {"timed_out": True},
+        {"timed_out": True, "inspected_files": False, "success": False},
         {"parse_failures_count": 1},
-        {"skipped": True, "skip_reason": "missing"},
+        {"skipped": True, "skip_reason": "missing", "inspected_files": False},
         {"success": False},
-        {"no_files": True},
+        {"no_files": True, "inspected_files": False},
     ],
 )
 def test_uncertain_checks_cannot_remove_entries(
@@ -151,7 +151,7 @@ def test_prune_requires_exact_coverage_and_retains_other_tools(
         prune=True,
     )
     assert_that(unknown.entries).is_equal_to(previous.entries)
-    clean.inspected_paths = frozenset({str(tmp_path / "src/a.py")})
+    clean = replace(clean, inspected_paths=frozenset({str(tmp_path / "src/a.py")}))
     pruned = maintain_baseline(
         previous,
         snapshot([clean], root=tmp_path),

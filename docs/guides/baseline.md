@@ -43,16 +43,23 @@ Keep a separate unfiltered check for tools outside the supported selection.
 
 ## Supported tools and scope
 
-Certified **check** findings currently come from `ruff`, `black`, `shellcheck`,
-`hadolint`, `shfmt`, `dotenv-linter`, `pydoclint`, and `sqlfluff`. These producers
+Certified **check** findings currently come from `ruff` and `black`. These producers
 certify native lint verdicts and complete reports. A supported tool can still fail
 inspection or parsing; those errors cannot be acknowledged.
 
-Other producers, including `mypy`, `pylint`, and `bandit`, do not yet certify failed
+Other producers, including `shellcheck`, `hadolint`, `shfmt`, `dotenv-linter`,
+`pydoclint`, `sqlfluff`, `mypy`, `pylint`, and `bandit`, do not yet certify failed
 findings for baselining. Their findings stay visible and failing under
 `check --baseline`, even if the baseline contains matching entries. A successful, fully
 inspected result with coherent findings can participate without explaining a failure,
 but a nonzero native exit alone never proves completeness.
+
+The shared per-file runner does not certify reports from sequence-only parsers:
+some parsers discard malformed records without counting them. Surviving findings
+and even a zero report-level failure count cannot prove that no records were lost.
+These findings remain unsuppressed until a complete-report statistics contract is
+available. Rejected ShellCheck reports retain their full native output for diagnosis;
+the additional error explanation includes only a bounded excerpt.
 
 Without `--tools`, management commands use the normal configured/default selection. If
 **any active result** is incomplete or cannot certify its findings, `create`, `update`,
@@ -139,9 +146,11 @@ entries or reduces occurrence budgets. Other tools retain their coverage claims.
 Management scans ignore the configured fingerprint baseline and do not invoke AI or
 install dependencies.
 
-Native project configuration still determines which rules are observed. Disabling a rule
-there can let `update` or `prune` remove its entries on fully covered files; re-enabling
-the rule then exposes those findings again.
+Native project configuration and configured tool options (including
+`[tool.lintro.<tool>]`) still determine which rules are observed. Rule coverage is not
+compared with previous scans. Disabling a rule there can let `update` or `prune` remove
+its entries on fully covered files; re-enabling the rule then exposes those findings
+again.
 
 The boolean `inspected_files` proves that some work happened, not which files were
 examined. Until #2609 supplies coverage throughout the tool registry, pruning must not

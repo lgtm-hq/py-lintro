@@ -118,18 +118,6 @@ def baseline_incomplete_reason(result: ToolResult) -> str | None:
     return None
 
 
-def result_is_complete(result: ToolResult) -> bool:
-    """Require affirmative inspection and coherent parsed findings.
-
-    Args:
-        result: Producer's completed result.
-
-    Returns:
-        Whether findings can be acknowledged without hiding execution errors.
-    """
-    return baseline_incomplete_reason(result) is None
-
-
 def snapshot(results: Sequence[ToolResult], *, root: Path) -> FingerprintBaseline:
     """Count observed fingerprints, retaining a deterministic line hint.
 
@@ -142,7 +130,7 @@ def snapshot(results: Sequence[ToolResult], *, root: Path) -> FingerprintBaselin
     """
     entries: dict[Fingerprint, BaselineEntry] = {}
     for result in results:
-        if not result_is_complete(result):
+        if baseline_incomplete_reason(result) is not None:
             continue
         for issue in result.issues or []:
             entry = fingerprint(issue, tool=result.name, root=root, cwd=result.cwd)
@@ -186,7 +174,7 @@ def maintain_baseline(
     """
     coverage: dict[tuple[str, str], frozenset[str]] = {}
     for result in results:
-        if not result_is_complete(result):
+        if baseline_incomplete_reason(result) is not None:
             continue
         for file in result.inspected_paths or ():
             relative = relative_file(file, root=root, cwd=result.cwd)

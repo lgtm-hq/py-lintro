@@ -366,6 +366,7 @@ def test_check_requirements_directory_respects_version_skip(
         issues_count=0,
         skipped=True,
         skip_reason="not installed",
+        inspected_files=False,
     )
 
     with patch(

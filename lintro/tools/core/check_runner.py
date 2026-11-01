@@ -125,8 +125,10 @@ def check_one_file(
             inspected_files=False if isinstance(exc, OSError) else None,
         )
 
-    complete = success or (process.returncode in findings_exit_codes and bool(issues))
-    if not complete:
+    recognized_verdict = success or (
+        process.returncode in findings_exit_codes and bool(issues)
+    )
+    if not recognized_verdict:
         return FileProcessingResult(
             success=False,
             output=output,
@@ -140,7 +142,9 @@ def check_one_file(
         # This is aggregate execution evidence, not exact file coverage:
         # native exclusions can skip even explicitly requested files.
         inspected_files=True,
-        findings_complete=True,
+        # Sequence-only parsers may silently discard malformed records. A native
+        # verdict and surviving findings cannot certify a complete report.
+        findings_complete=False,
     )
 
 

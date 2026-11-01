@@ -130,7 +130,7 @@ def test_check_acknowledges_certified_peer_but_keeps_real_mypy_failure(
     ("state", "reason"),
     [
         ({"inspected_files": None}, "file inspection was not confirmed"),
-        ({"timed_out": True}, "execution timed out"),
+        ({"timed_out": True, "inspected_files": False}, "execution timed out"),
         ({"execution_failed": True}, "tool execution failed"),
         ({"parse_failures_count": 2}, "report has 2 parse failure(s)"),
         ({"issues_count": 2}, "finding count does not match the parsed report"),
@@ -184,7 +184,7 @@ def test_management_help_documents_certified_tools_and_mixed_selection(
 
     assert_that(result.exit_code).is_zero()
     assert_that(text).contains(
-        "ruff, black, shellcheck, hadolint, shfmt, dotenv-linter, pydoclint, sqlfluff",
+        "Certified check findings: ruff, black.",
         "Default or mixed selections abort",
         "no failing tool is silently omitted",
     )

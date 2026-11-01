@@ -8,6 +8,7 @@ used during the original run without mutating the process-global cwd.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -97,7 +98,7 @@ def apply_rerun_results(
     by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]],
     rerun_results: list[ToolResult],
 ) -> None:
-    """Apply measured rerun issue counts back to original FIX results.
+    """Replace per-tool entries with validated measured rerun results.
 
     An unanswered check leaves the original counts and failure flags intact.
     Answered checks replace execution state (including a prior timeout) and the
@@ -107,7 +108,8 @@ def apply_rerun_results(
     Incomplete reports cannot gain complete accounting.
 
     Args:
-        by_tool: Dict mapping tool name to (result, issues) pairs.
+        by_tool: Dict mapping tool name to (result, issues) pairs; entries are
+            replaced while existing results and grouped issues are preserved.
         rerun_results: Fresh results from re-running tools.
     """
     rerun_by_name = {result.name: result for result in rerun_results}
@@ -120,8 +122,8 @@ def apply_rerun_results(
         try:
             previous = result.outcome.accounting
         except ValueError:
-            # A post-hoc legacy mutation may invalidate the original after
-            # execution. It supplies no trustworthy accounting to refresh.
+            # An untyped legacy plugin can supply invalid original state.
+            # It supplies no trustworthy accounting to refresh.
             logger.warning(
                 f"AI post-fix rerun skipped for {tool_name}: invalid original",
             )
@@ -155,10 +157,12 @@ def apply_rerun_results(
             accounting=accounting,
             issues_count=remaining,
         )
-        # Keep the shared result envelope writable and update all state fields
-        # together, including stale unknown/skip/no-files/timeout markers.
-        for field, value in outcome.to_legacy_fields().items():
-            setattr(result, field, value)
-        result.issues = refreshed_issues
-        if rerun.output is not None:
-            result.output = rerun.output
+        by_tool[tool_name] = (
+            replace(
+                result,
+                **outcome.to_legacy_fields(),
+                issues=refreshed_issues,
+                output=rerun.output if rerun.output is not None else result.output,
+            ),
+            _issues,
+        )

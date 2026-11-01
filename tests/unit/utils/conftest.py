@@ -59,6 +59,8 @@ def tool_result_factory() -> Callable[..., ToolResult]:
 
     def _create(**kwargs: Any) -> ToolResult:
         defaults = {"name": "test-tool", "success": True, "output": "", **kwargs}
+        if any(defaults.get(flag) for flag in ("skipped", "timed_out", "no_files")):
+            defaults.setdefault("inspected_files", False)
         return ToolResult(**defaults)
 
     return _create

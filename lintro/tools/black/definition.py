@@ -363,7 +363,7 @@ class BlackPlugin(BaseToolPlugin):
                 execution_failed or parse_failures or supplement.failed
             ),
             execution_failed=execution_failed or supplement.failed,
-            parse_failures_count=parse_failures,
+            parse_failures_count=parse_failures or None,
             inspected_paths=(
                 black_inspected_paths(output, files=ctx.rel_files, cwd=ctx.cwd)
                 if self.options.get("_baseline_coverage", False)

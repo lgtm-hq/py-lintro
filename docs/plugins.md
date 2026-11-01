@@ -321,6 +321,56 @@ for `issues`, `initial_issues` or `metadata` raises a `TypeError` naming the fie
 `fixed_issues_count` and `remaining_issues_count` still accept `None` to mean unknown;
 an empty collection does not establish a measured zero.
 
+#### Immutable ToolResult migration (API v2)
+
+`check()` and `fix()` must return a `ToolResult` instance, as specified by
+`LintroPlugin`; arbitrary objects with similarly named attributes are unsupported.
+`ToolResult` is now frozen. **Plugins that assign or delete result fields after
+construction must migrate**: those operations raise `dataclasses.FrozenInstanceError`.
+This includes assignments to counts, output, duration and metadata itself.
+
+API-v2 constructor arguments and readable fields remain available, so the plugin API
+version stays at **2**. Existing `ToolResult(skipped=True, skip_reason="not installed")`
+and `ToolResult(timed_out=True, success=False, output="partial output")` constructors
+still work. For skipped, no-files and timed-out results, `inspected_files=None` defaults
+to `False`; skipped results retain the historical normalization to `success=True`,
+including when the default `False` is supplied explicitly. Construction now rejects
+explicit `inspected_files=True` on inactive results, conflicting execution flags and
+invalid accounting with `ValueError`, rather than waiting until `.outcome` is read. For
+example, a no-files result requires `success=True`, and a skipped result cannot carry
+nonzero counts. A timeout requires `success=False` and may retain partial findings and
+output.
+
+Construct complete results with `ToolResult.from_outcome()`. Use `with_outcome()` to
+replace execution or fix accounting, and `dataclasses.replace()` to update envelope
+fields. Retain or return the replacement; callers holding the original result keep its
+original state. Constructor normalization and validation also run on every replacement,
+so update related counts and flags together:
+
+```python
+from dataclasses import replace
+
+from lintro.models.core.tool_outcome import Checked, FixMeasured, ToolOutcome
+from lintro.models.core.tool_result import ToolResult
+
+result = ToolResult.from_outcome(
+    ToolOutcome(Checked(False, inspected_files=True), issues_count=2),
+    name="my-tool",
+    issues=issues,
+)
+# Replace result.success = True and individual count assignments with one update.
+result = result.with_outcome(
+    ToolOutcome(Checked(True, inspected_files=True), FixMeasured(2, 2, 0)),
+)
+result = replace(result, issues=(), output="Fixed 2 issues")
+```
+
+Freezing is shallow: issue sequences, issue objects and the metadata dictionary are
+shared with replacements unless you supply new payloads. Incremental metadata updates
+such as `result.metadata["fixed_count"] = 2` remain supported and are visible through
+both envelopes. For independent metadata, pass `metadata=dict(result.metadata)` to
+`replace()`; nested values still share their original objects.
+
 ### BaseToolPlugin Helpers
 
 The `BaseToolPlugin` base class provides useful methods:

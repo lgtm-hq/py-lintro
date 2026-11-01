@@ -2,6 +2,7 @@
 
 import json
 import subprocess  # nosec B404 - real native binaries under test, shell=False
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -12,7 +13,8 @@ from lintro.config.config_loader import clear_config_cache
 from lintro.plugins import ToolRegistry
 from lintro.tools.ruff.definition import RuffPlugin
 from lintro.utils.config import clear_pyproject_cache
-from lintro.utils.fingerprint_baseline_file import read_baseline
+from lintro.utils.fingerprint_baseline import snapshot
+from lintro.utils.fingerprint_baseline_file import change_baseline, read_baseline
 from tests.integration._tools import require_tool
 
 
@@ -70,8 +72,15 @@ def test_native_per_file_exclusion_retains_acknowledgements(
     clear_pyproject_cache()
     runner = CliRunner()
     created = runner.invoke(cli, ["baseline", "create", filename, "--tools", tool])
-    assert created.exit_code == 0, created.output
+    assert created.exit_code == 1, created.output
+    assert "does not certify complete findings" in created.output
     baseline = workspace / ".lintro-baseline.json"
+    assert not baseline.exists()
+    # Import debt from a previous producer; current sequence-only parsers cannot
+    # certify a failed report, and clean native exclusions cannot prune this debt.
+    result = ToolRegistry.get(tool).check([str(file)], {})
+    imported = snapshot([replace(result, findings_complete=True)], root=workspace)
+    change_baseline(baseline, lambda _: imported, create=True)
     assert read_baseline(baseline).entries
     before = baseline.read_bytes()
 
@@ -88,7 +97,7 @@ def test_native_per_file_exclusion_retains_acknowledgements(
     assert baseline.read_bytes() == before
     plugin = ToolRegistry.get(tool)
     result = plugin.check([str(file)], {})
-    assert result.success and result.findings_complete
+    assert result.success and not result.findings_complete
     assert result.issues_count == 0
     assert result.inspected_paths is None
 
