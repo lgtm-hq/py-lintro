@@ -11,10 +11,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- **core**: add opt-in finding fingerprint baselines with
-  `baseline create|update|prune`, `--baseline`, and the `baseline:` configuration key
-  (#438).
-
 ### Changed
 
 ### Deprecated
@@ -23,10 +19,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+### Security
+
+## [0.176.0] - 2026-11-01
+
+### Added
+
+- **core**: add opt-in finding fingerprint baselines with
+  `baseline create|update|prune`, `--baseline`, and the `baseline:` configuration key
+  (#438). (#3084) (0642c0d)
+
+### Fixed
+
+- **release**: verify existing signatures on Rekor conflicts (#3127) (e7d2486)
 - **core**: fail closed on empty Ruff reports and unexplained nonzero per-file check
   exits, including runs without fingerprint baselines (#438).
-
-### Security
 
 ## [0.175.5] - 2026-11-01
 
