@@ -74,6 +74,15 @@ def test_ruff_json_lines_counts_decode_and_field_failures(malformed_line: str) -
         (" \n[null,\n", 1),
         ('[{"filename": "a.py", "message": "broken"}', 1),
         ('[\n{"filename":', 1),
+        ("null", 1),
+        (" \nnull\t", 1),
+        ("0", 1),
+        ("42", 1),
+        ("-3.5", 1),
+        ('""', 1),
+        ('"diagnostics"', 1),
+        ("true", 1),
+        ("false", 1),
         ("", 0),
         (" \n\t", 0),
         ("[]", 0),
@@ -129,6 +138,7 @@ def test_ruff_null_code_keeps_syntax_error_and_file_alias() -> None:
     assert_that((issues[0].file, issues[0].message, issues[0].code)).is_equal_to(
         ("syntax.py", "Expected expression", ""),
     )
+    assert_that(parse_ruff_output_with_stats(output)).is_equal_to((issues, 0))
     assert_that(list(stream_ruff_output(output))).is_equal_to(issues)
 
 
