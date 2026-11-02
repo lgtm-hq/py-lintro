@@ -864,23 +864,18 @@ def _parse_review_checklist_config(data: Any) -> dict[str, Any]:
     return filtered
 
 
-def _parse_review_config(data: Any) -> ReviewConfig:
+def _parse_review_config(data: dict[str, Any]) -> ReviewConfig:
     """Parse review configuration section.
 
+    Raises ``ValueError`` when the review section is not a mapping.
+
     Args:
-        data: Raw ``review`` section from config.
+        data: Raw ``review`` mapping from config.
 
     Returns:
         ReviewConfig: Parsed review configuration.
-
-    Raises:
-        ValueError: When the review section is not a mapping.
     """
-    if data is None:
-        return ReviewConfig()
-    if not isinstance(data, dict):
-        msg = f"review config must be a mapping, got {type(data).__name__}"
-        raise ValueError(msg)
+    data = _require_mapping_section({"review config": data}, "review config")
     if not data:
         return ReviewConfig()
 
@@ -898,11 +893,11 @@ def _parse_review_config(data: Any) -> ReviewConfig:
     return ReviewConfig(**filtered)
 
 
-def _parse_output_config(data: Any) -> OutputConfig:
+def _parse_output_config(data: dict[str, Any]) -> OutputConfig:
     """Parse the console output configuration section.
 
     Args:
-        data: Raw ``output`` section from config.
+        data: Raw ``output`` mapping from config.
 
     Returns:
         OutputConfig: Parsed output configuration.
@@ -911,11 +906,7 @@ def _parse_output_config(data: Any) -> OutputConfig:
         ValueError: When the output section is not a mapping or ``art`` is not
             a boolean.
     """
-    if data is None:
-        return OutputConfig()
-    if not isinstance(data, dict):
-        msg = f"output config must be a mapping, got {type(data).__name__}"
-        raise ValueError(msg)
+    data = _require_mapping_section({"output config": data}, "output config")
     if not data:
         return OutputConfig()
 
@@ -936,11 +927,11 @@ def _parse_output_config(data: Any) -> OutputConfig:
     return OutputConfig(**filtered)
 
 
-def _parse_deps_config(data: Any) -> DepsConfig:
+def _parse_deps_config(data: dict[str, Any]) -> DepsConfig:
     """Parse the ``deps`` configuration section.
 
     Args:
-        data: Raw ``deps`` section from config.
+        data: Raw ``deps`` mapping from config.
 
     Returns:
         DepsConfig: Parsed dependency policy configuration.
@@ -952,11 +943,7 @@ def _parse_deps_config(data: Any) -> DepsConfig:
             loudly rather than silently fall back to the default policy and let
             specs that should fail pass in CI.
     """
-    if data is None:
-        return DepsConfig()
-    if not isinstance(data, dict):
-        msg = f"deps config must be a mapping, got {type(data).__name__}"
-        raise ValueError(msg)
+    data = _require_mapping_section({"deps config": data}, "deps config")
     if not data:
         return DepsConfig()
 
@@ -972,23 +959,18 @@ def _parse_deps_config(data: Any) -> DepsConfig:
     return DepsConfig(**data)
 
 
-def _parse_watch_config(data: Any) -> WatchConfig:
+def _parse_watch_config(data: dict[str, Any]) -> WatchConfig:
     """Parse the ``watch`` configuration section.
 
+    Raises ``ValueError`` when the watch section is not a mapping.
+
     Args:
-        data: Raw ``watch`` section from config.
+        data: Raw ``watch`` mapping from config.
 
     Returns:
         WatchConfig: Parsed watch configuration.
-
-    Raises:
-        ValueError: When the watch section is not a mapping.
     """
-    if data is None:
-        return WatchConfig()
-    if not isinstance(data, dict):
-        msg = f"watch config must be a mapping, got {type(data).__name__}"
-        raise ValueError(msg)
+    data = _require_mapping_section({"watch config": data}, "watch config")
     if not data:
         return WatchConfig()
 

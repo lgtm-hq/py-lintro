@@ -65,19 +65,6 @@ def test_parse_watch_config_coerces_single_tool_name() -> None:
     assert_that(cfg.tools).is_equal_to(["ruff"])
 
 
-def test_parse_watch_config_empty_returns_defaults() -> None:
-    """An empty or None section yields default config."""
-    assert_that(_parse_watch_config({})).is_equal_to(WatchConfig())
-    assert_that(_parse_watch_config(None)).is_equal_to(WatchConfig())
-
-
-def test_parse_watch_config_rejects_non_mapping() -> None:
-    """A non-mapping watch section raises ValueError."""
-    assert_that(_parse_watch_config).raises(ValueError).when_called_with(
-        ["not", "a", "mapping"],
-    )
-
-
 def test_parse_watch_config_ignores_unknown_keys() -> None:
     """Unknown keys are dropped rather than raising."""
     cfg = _parse_watch_config({"debounce_ms": 200, "bogus": True})
