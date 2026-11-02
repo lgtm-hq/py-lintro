@@ -5,8 +5,10 @@ Covers _validate_suggestions, verify_fixes, and render_validation_terminal.
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.display import render_validation_terminal
@@ -63,9 +65,36 @@ def test_render_validation_terminal_renders_unverified_with_details():
     )
     output = render_validation_terminal(result)
     assert_that(output).contains("1 resolved")
-    assert_that(output).contains("2 still present")
+    assert_that(output).contains("2 unverified")
     assert_that(output).contains("B101")
     assert_that(output).contains("E501")
+    assert_that(output).contains("issue still present")
+
+
+@pytest.mark.parametrize("absolute_path", [False, True], ids=["relative", "absolute"])
+@pytest.mark.parametrize("measured", [False, True], ids=["unmeasured", "remaining"])
+def test_render_validation_terminal_preserves_detail_evidence(
+    absolute_path: bool,
+    measured: bool,
+    tmp_path: Path,
+) -> None:
+    """The headline stays neutral while detail paths and evidence agree."""
+    file_path = (tmp_path if absolute_path else Path()) / "src" / "main.py"
+    suggestion = _make_suggestion(file=str(file_path))
+    remaining = MockIssue(file=str(file_path), line=10, code="B101")
+    result = _validate_suggestions(
+        [suggestion],
+        {"ruff": [remaining] if measured else None},
+    )
+
+    status = "issue still present" if measured else "tool check unmeasured"
+    assert_that(result.details).is_equal_to([f"[B101] main.py:10 — {status}"])
+    assert_that((result.verified, result.unverified, result.new_issues)).is_equal_to(
+        (0, 1, 0),
+    )
+    output = render_validation_terminal(result)
+    assert_that(output).contains("1 unverified", f"main.py:10 — {status}")
+    assert_that(output).does_not_contain("1 still present")
 
 
 def test_render_validation_terminal_empty_result_returns_empty():

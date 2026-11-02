@@ -137,6 +137,84 @@ def test_unified_unmeasured_rerun_preserves_original_result(
     assert_that(original).is_equal_to(before)
 
 
+@pytest.mark.parametrize("missing_reason", ["rerun_error", "no_issue_paths"])
+@pytest.mark.parametrize("original_remaining", [None, 3], ids=["unknown", "measured"])
+@pytest.mark.parametrize("peer_remaining", [0, 1], ids=["clean_peer", "remaining_peer"])
+def test_unified_missing_rerun_is_unverified_not_skipped(
+    missing_reason: str,
+    original_remaining: int | None,
+    peer_remaining: int,
+    suggestions: list[AIFixSuggestion],
+    sample_issues: list[MockIssue],
+) -> None:
+    """Omitted reruns retain unknown counts without hiding fixes or measured peers."""
+    original = ToolResult(
+        name="ruff",
+        success=False,
+        issues=sample_issues,
+        issues_count=3,
+        remaining_issues_count=original_remaining,
+        residual_unknown=original_remaining is None,
+        residual_unknown_reason=(
+            "Original measurement unavailable" if original_remaining is None else None
+        ),
+        output="Original findings",
+    )
+    peer_issue = MockIssue(file="src/peer.py", line=4, code="B101")
+    peer_suggestion = AIFixSuggestion(
+        file=peer_issue.file,
+        line=peer_issue.line,
+        code=peer_issue.code,
+        tool_name="bandit",
+        original_code="assert x",
+        suggested_code="if not x: raise ValueError",
+        explanation="Replace assert in peer",
+    )
+    peer = ToolResult(name="bandit", success=False, issues_count=2)
+    by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]] = {
+        "ruff": (
+            original,
+            list(sample_issues) if missing_reason == "rerun_error" else [],
+        ),
+        "bandit": (peer, [peer_issue]),
+    }
+    before = deepcopy(by_tool["ruff"])
+    peer_tool = MagicMock()
+    peer_tool.check.return_value = ToolResult(
+        name="bandit",
+        success=peer_remaining == 0,
+        issues=[peer_issue] if peer_remaining else [],
+        issues_count=peer_remaining,
+    )
+    missing_tool = MagicMock()
+    missing_tool.check.side_effect = RuntimeError("No rerun verdict")
+    with patch(
+        "lintro.tools.tool_manager.get_tool",
+        side_effect={"ruff": missing_tool, "bandit": peer_tool}.__getitem__,
+    ):
+        result = verify_fixes(
+            applied_suggestions=[*suggestions, peer_suggestion],
+            by_tool=by_tool,
+        )
+
+    if result is None:
+        pytest.fail("Missing fresh results must leave suggestions unverified")
+    assert_that((result.verified, result.unverified, result.new_issues)).is_equal_to(
+        (1 - peer_remaining, len(suggestions) + peer_remaining, 0),
+    )
+    assert_that(result.unverified_by_tool.get("ruff")).is_equal_to(len(suggestions))
+    assert_that(result.details).contains(
+        "[B101] main.py:10 — tool check unmeasured",
+        "[B101] utils.py:25 — tool check unmeasured",
+        "[E501] main.py:42 — tool check unmeasured",
+    )
+    assert_that(by_tool["ruff"]).is_equal_to(before)
+    assert_that(by_tool["ruff"][0]).is_same_as(original)
+    assert_that(original.remaining_issues_count).is_equal_to(original_remaining)
+    assert_that(original.skipped).is_false()
+    assert_that(by_tool["bandit"][0].remaining_issues_count).is_equal_to(peer_remaining)
+
+
 @pytest.mark.parametrize("path", ["standalone", "unified"])
 @pytest.mark.parametrize(
     "status",
