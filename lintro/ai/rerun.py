@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from lintro.models.core.tool_outcome import FixMeasured, FixPartial, ToolOutcome
-from lintro.tools.core.verify_pass import check_answered
+from lintro.utils.check_answered import check_answered
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult

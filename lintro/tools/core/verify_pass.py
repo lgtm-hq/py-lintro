@@ -83,7 +83,6 @@ from lintro.enums.capability import MUTATING_CAPABILITIES, Cap
 from lintro.enums.verify_status import VerifyStatus
 from lintro.formatters.formatter import merge_detected_and_remaining
 from lintro.models.core.tool_outcome import (
-    Checked,
     FixUnmeasured,
     NoFiles,
     Skipped,
@@ -92,6 +91,7 @@ from lintro.models.core.tool_outcome import (
 )
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
+from lintro.utils.check_answered import check_answered
 from lintro.utils.file_cache import FingerprintSnapshot, snapshot_fingerprints
 from lintro.utils.path_filtering import (
     setup_exclude_patterns,
@@ -904,35 +904,6 @@ def _fold_unknown(
         no_files=False,
         success=False,
     )
-
-
-def check_answered(result: ToolResult | None) -> bool:
-    """Return whether a check measured its scope, including remaining findings.
-
-    Args:
-        result: The check result, or None when the tool could not run.
-
-    Returns:
-        True for a completed clean check or one reporting real findings.
-        Skips, empty scopes, timeouts (even with partial findings), and
-        execution failures without findings do not answer the check. Reports
-        with parse failures never answer, even when they retain usable findings.
-    """
-    if result is None or result.parse_failures_count:
-        return False
-    try:
-        execution = result.outcome.execution
-    except ValueError:
-        # Legacy plugins can return contradictory flags or counts. They do
-        # not establish a verdict; the strict outcome adapter still rejects
-        # them when read directly.
-        logger.opt(exception=True).debug("Invalid check result cannot verify fixes")
-        return False
-    match execution:
-        case Checked(success=success):
-            return success or bool(result.issues)
-        case Skipped() | Unavailable() | NoFiles() | TimedOut():
-            return False
 
 
 def _fold_check_verdict(mutation: ToolResult, verify: ToolResult | None) -> ToolResult:

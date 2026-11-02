@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.models import AIFixSuggestion
@@ -54,9 +55,10 @@ def test_validate_applied_fixes_verified_when_issue_gone(mock_check):
 
     result = validate_applied_fixes([suggestion])
 
-    assert_that(result).is_not_none()
-    assert_that(result.verified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
-    assert_that(result.unverified).is_equal_to(0)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    if result is None:
+        pytest.fail("Expected a validation result")
+    assert_that(result.verified).is_equal_to(1)
+    assert_that(result.unverified).is_equal_to(0)
 
 
 @patch("lintro.ai.validation._run_tool_check")
@@ -71,10 +73,11 @@ def test_validate_applied_fixes_unverified_when_issue_remains(mock_check):
     suggestion = _make_suggestion()
     result = validate_applied_fixes([suggestion])
 
-    assert_that(result).is_not_none()
-    assert_that(result.verified).is_equal_to(0)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
-    assert_that(result.unverified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
-    assert_that(result.details).is_length(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    if result is None:
+        pytest.fail("Expected a validation result")
+    assert_that(result.verified).is_equal_to(0)
+    assert_that(result.unverified).is_equal_to(1)
+    assert_that(result.details).is_length(1)
 
 
 @patch("lintro.ai.validation._run_tool_check")
@@ -91,11 +94,12 @@ def test_validate_applied_fixes_mixed_verified_and_unverified(mock_check):
 
     result = validate_applied_fixes([s1, s2])
 
-    assert_that(result).is_not_none()
-    assert_that(result.verified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
-    assert_that(result.unverified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
-    assert_that(result.verified_by_tool.get("ruff")).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
-    assert_that(result.unverified_by_tool.get("ruff")).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    if result is None:
+        pytest.fail("Expected a validation result")
+    assert_that(result.verified).is_equal_to(1)
+    assert_that(result.unverified).is_equal_to(1)
+    assert_that(result.verified_by_tool.get("ruff")).is_equal_to(1)
+    assert_that(result.unverified_by_tool.get("ruff")).is_equal_to(1)
 
 
 @patch("lintro.ai.validation._run_tool_check")
@@ -112,11 +116,12 @@ def test_validate_applied_fixes_matches_by_line_before_file_code(mock_check):
 
     result = validate_applied_fixes([resolved, unresolved])
 
-    assert_that(result).is_not_none()
-    assert_that(result.verified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
-    assert_that(result.unverified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
-    assert_that(result.details).is_length(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
-    assert_that(result.details[0]).contains("main.py:20")  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    if result is None:
+        pytest.fail("Expected a validation result")
+    assert_that(result.verified).is_equal_to(1)
+    assert_that(result.unverified).is_equal_to(1)
+    assert_that(result.details).is_length(1)
+    assert_that(result.details[0]).contains("main.py:20")
 
 
 @patch("lintro.ai.validation._run_tool_check")
@@ -133,9 +138,10 @@ def test_validate_applied_fixes_unknown_remaining_line_marks_issue_unverified(
     suggestion = _make_suggestion(code="E501", line=30)
     result = validate_applied_fixes([suggestion])
 
-    assert_that(result).is_not_none()
-    assert_that(result.verified).is_equal_to(0)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
-    assert_that(result.unverified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    if result is None:
+        pytest.fail("Expected a validation result")
+    assert_that(result.verified).is_equal_to(0)
+    assert_that(result.unverified).is_equal_to(1)
 
 
 @patch("lintro.ai.validation._run_tool_check")
@@ -157,9 +163,10 @@ def test_validate_applied_fixes_unverified_when_check_returns_none(mock_check):
 
     result = validate_applied_fixes([suggestion])
 
-    assert_that(result).is_not_none()
-    assert_that(result.verified).is_equal_to(0)  # type: ignore[union-attr]
-    assert_that(result.unverified).is_equal_to(1)  # type: ignore[union-attr]
+    if result is None:
+        pytest.fail("Expected a validation result")
+    assert_that(result.verified).is_equal_to(0)
+    assert_that(result.unverified).is_equal_to(1)
 
 
 @patch("lintro.ai.validation._run_tool_check")
@@ -172,8 +179,9 @@ def test_validate_applied_fixes_groups_by_tool(mock_check):
 
     result = validate_applied_fixes([s1, s2])
 
-    assert_that(result).is_not_none()
-    assert_that(result.verified).is_equal_to(2)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    if result is None:
+        pytest.fail("Expected a validation result")
+    assert_that(result.verified).is_equal_to(2)
     assert_that(mock_check.call_count).is_equal_to(2)
 
 
@@ -198,9 +206,10 @@ def test_validate_applied_fixes_matches_relative_remaining_paths_against_absolut
     suggestion = _make_suggestion(file=str(project_file.resolve()), code="B101")
     result = validate_applied_fixes([suggestion])
 
-    assert_that(result).is_not_none()
-    assert_that(result.unverified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
-    assert_that(result.verified).is_equal_to(0)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    if result is None:
+        pytest.fail("Expected a validation result")
+    assert_that(result.unverified).is_equal_to(1)
+    assert_that(result.verified).is_equal_to(0)
 
 
 @patch("lintro.ai.validation._run_tool_check")
@@ -220,9 +229,10 @@ def test_validate_applied_fixes_tracks_new_issues(mock_check):
     suggestion = _make_suggestion(code="B101", line=10)
     result = validate_applied_fixes([suggestion])
 
-    assert_that(result).is_not_none()
-    assert_that(result.unverified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
-    assert_that(result.new_issues).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    if result is None:
+        pytest.fail("Expected a validation result")
+    assert_that(result.unverified).is_equal_to(1)
+    assert_that(result.new_issues).is_equal_to(1)
 
 
 # -- _run_tool_check ----------------------------------------------------------
