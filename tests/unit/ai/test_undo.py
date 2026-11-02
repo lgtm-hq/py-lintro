@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 - intercept git plumbing failures in regression tests
+import subprocess  # nosec B404 - exercise git plumbing failures in regression tests
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -14,6 +14,7 @@ from assertpy import assert_that
 from lintro.ai.checkpoints import (
     CheckpointError,
     capture_checkpoint,
+    git_checkpoints_available,
     list_checkpoint_refs,
 )
 from lintro.ai.models import AIFixSuggestion
@@ -24,6 +25,7 @@ from lintro.ai.undo import (
     restore_undo,
     save_undo_patch,
 )
+from tests.conftest import run_git
 from tests.unit.conftest import init_git_repo
 
 
@@ -198,7 +200,7 @@ def test_directory_expansion_failure_reaches_file_fallback(
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
 ) -> None:
-    """Real capture rejects a failed git listing; undo keeps restorable bytes."""
+    """Capture rejects subprocess-injected listing failures; undo restores bytes."""
     repo = init_git_repo(
         tmp_path,
         files={"target.py": "committed = True\n", "pkg/other.py": "keep = True\n"},
@@ -247,6 +249,72 @@ def test_directory_expansion_failure_reaches_file_fallback(
     assert_that((repo / "pkg/other.py").read_text(encoding="utf-8")).is_equal_to(
         "keep = True\n",
     )
+
+
+@pytest.mark.parametrize("corrupt_index", [False, True], ids=["valid", "corrupt"])
+def test_real_git_index_controls_checkpoint_fallback(
+    tmp_path: Path,
+    corrupt_index: bool,
+) -> None:
+    """Real ls-files failure selects file rollback; a valid index selects git."""
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    repo = init_git_repo(
+        repo_path,
+        files={"target.py": "committed = True\n", "pkg/other.py": "keep = True\n"},
+    )
+    target = repo / "target.py"
+    original = b"unsaved = True\r\n"
+    target.write_bytes(original)
+    # This index belongs only to the repository created by this test.
+    index = repo / ".git" / "index"
+    if corrupt_index:
+        index.write_bytes(b"invalid git index\n")
+    index_before = index.read_bytes()
+    paths = ["target.py", "pkg"]
+    listing_command = [
+        "git",
+        "ls-files",
+        "-co",
+        "--exclude-standard",
+        "-z",
+        "--",
+        "pkg",
+    ]
+
+    assert_that(git_checkpoints_available(repo)).is_true()
+    if corrupt_index:
+        with pytest.raises(subprocess.CalledProcessError) as failure:
+            run_git(listing_command, cwd=repo)
+        assert_that(failure.value.returncode).is_not_equal_to(0)
+        assert_that(failure.value.stderr).contains("index")
+        with pytest.raises(CheckpointError, match=r"git ls-files .*failed: .*index"):
+            capture_checkpoint(paths, workspace_root=repo)
+    else:
+        listing = run_git(listing_command, cwd=repo)
+        assert_that(listing.returncode).is_equal_to(0)
+        assert_that(listing.stdout).is_equal_to("pkg/other.py\0")
+
+    state = prepare_fix_batch([_make_suggestion(file=path) for path in paths], repo)
+
+    assert state is not None
+    assert_that(state.kind).is_equal_to("file" if corrupt_index else "git")
+    if corrupt_index:
+        assert_that(state.checkpoint).is_none()
+        assert state.file_snapshot is not None
+        assert_that(state.file_snapshot.contents["target.py"]).is_equal_to(original)
+        assert_that(list_checkpoint_refs(workspace_root=repo)).is_empty()
+    else:
+        assert state.checkpoint is not None
+        assert_that(state.checkpoint.paths).contains("target.py", "pkg/other.py")
+    assert_that(target.read_bytes()).is_equal_to(original)
+    target.write_bytes(b"fixed = True\n")
+
+    restore_undo(state)
+
+    assert_that(target.read_bytes()).is_equal_to(original)
+    assert_that(index.read_bytes()).is_equal_to(index_before)
+    assert_that((repo / "pkg/other.py").read_bytes()).is_equal_to(b"keep = True\n")
 
 
 @pytest.mark.parametrize(
@@ -299,10 +367,10 @@ def test_git_index_tempfile_failure_falls_back_to_file_snapshot(
     target.write_bytes(original)
     real_mkstemp = tempfile.mkstemp
 
-    def fail_git_index(**kwargs: Any) -> tuple[int, str]:
+    def fail_git_index(*args: Any, **kwargs: Any) -> tuple[int, str]:
         if kwargs.get("prefix") == "lintro-git-index-":
             raise OSError("checkpoint index denied")
-        return real_mkstemp(**kwargs)
+        return real_mkstemp(*args, **kwargs)
 
     monkeypatch.setattr("lintro.ai.checkpoints.tempfile.mkstemp", fail_git_index)
     state = prepare_fix_batch([_make_suggestion(file="target.py")], repo)
@@ -341,10 +409,10 @@ def test_legacy_patch_tempfile_failure_preserves_rollback(
     target.write_bytes(b"user_edit = True\n")
     real_mkstemp = tempfile.mkstemp
 
-    def fail_legacy_patch(**kwargs: Any) -> tuple[int, str]:
+    def fail_legacy_patch(*args: Any, **kwargs: Any) -> tuple[int, str]:
         if kwargs.get("dir") == workspace / UNDO_DIR:
             raise OSError("legacy patch denied")
-        return real_mkstemp(**kwargs)
+        return real_mkstemp(*args, **kwargs)
 
     monkeypatch.setattr("lintro.ai.undo.tempfile.mkstemp", fail_legacy_patch)
     state = prepare_fix_batch([_make_suggestion(file="target.py")], workspace)
