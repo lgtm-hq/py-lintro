@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.5] - 2026-11-02
+
+### Changed
+
+- **fix-retry**: strengthen payload preservation controls (#3154) (41f3a3d)
+- **ai**: pin shared answer predicate legacy controls (#3151) (fae9572)
+- **config**: pin mapping section inventory contract (#3150) (7db5a79)
+
+### Fixed
+
+- **config**: require mappings in private section parsers (#3153) (ea201bd)
+
 ## [0.177.4] - 2026-11-02
 
 ### Changed
