@@ -13,6 +13,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.177.0] - 2026-11-01
+
+### Changed
+
+- **tools**: cached capability probing and graceful degradation for unavailable tools
+  (#1485) (a894a90)
 - **BREAKING (tools/JSON)**: missing tools now report `status: unavailable` with
   `unavailable_reason` (#1244), replacing their previous `skipped: true` result.
   Non-strict unavailable results carry `skipped: false`, `success: true`, and unknown
@@ -29,13 +43,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   constructors remain supported; the runtime change requires migration. See the
   [execution mode guide](docs/plugins.md#execution-mode-and-cached-availability-api-v2).
 
-### Deprecated
-
-### Removed
-
 ### Fixed
 
-### Security
+- **config**: address focused review followups (#3130) (8886cfd)
+- **ai**: preserve rollback on checkpoint capture errors (#3129) (6be1f1c)
 
 ## [0.176.0] - 2026-11-01
 
