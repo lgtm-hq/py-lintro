@@ -1174,6 +1174,32 @@ def test_dogfood_lint_callers_carry_no_githubapp_grant(job_id: str) -> None:
     )
 
 
+@pytest.mark.parametrize("workflow_name", ["docker-ci.yml", "dogfood-nightly.yml"])
+def test_dogfood_callers_disable_semgrep_version_network_check(
+    workflow_name: str,
+) -> None:
+    """Every reusable lint caller disables the startup update request (#2521)."""
+    workflow = _load_workflow(name=workflow_name)
+    callers = {
+        job_id: job
+        for job_id, job in workflow["jobs"].items()
+        if "reusable-quality-lint.yml@" in str(job.get("uses", ""))
+    }
+    expected = (
+        {"dogfooding-lint", "dogfooding_lint_retry"}
+        if workflow_name == "docker-ci.yml"
+        else {"dogfood-full", "dogfood_full_retry"}
+    )
+    assert_that(set(callers)).is_equal_to(expected)
+    for job_id, job in callers.items():
+        # Reusable jobs accept inputs, not env. The pinned reusable transports
+        # this input through its lint step and docker run -e to Semgrep.
+        assert_that(job["with"].get("semgrep-enable-version-check")).described_as(
+            f"{workflow_name}:{job_id}",
+        ).is_equal_to("0")
+        assert_that(job).does_not_contain_key("env")
+
+
 def test_dogfood_lint_callers_share_one_egress_allowlist() -> None:
     """Both dogfood lint callers must carry the identical allowlist (#2352).
 

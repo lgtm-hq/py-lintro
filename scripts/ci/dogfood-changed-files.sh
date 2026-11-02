@@ -166,10 +166,13 @@ fi
 
 # Same container invocation as lgtm-ci run-lintro-docker.sh (quality lint):
 # host-UID mapping keeps the workspace mount writable on GitHub Actions.
+# Disable only Semgrep's startup update request (#2521). Turning metrics off
+# would break its default --config auto scan.
 declare -a docker_args=(
 	docker run --rm
 	-e HOME=/tmp
 	-e LINTRO_AUTO_INSTALL_DEPS=1
+	-e SEMGREP_ENABLE_VERSION_CHECK=0
 	-v "$(pwd):/code"
 	-w /code
 )
