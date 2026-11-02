@@ -21,6 +21,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.4] - 2026-11-02
+
+### Changed
+
+- **ai**: cover real git-index checkpoint failures (#3144) (07aea20)
+
+### Fixed
+
+- **ci**: park unfunded provider API smoke rows (#3149) (8f4fc30)
+- **licenses**: report configuration failures consistently (#3145) (6703398)
+- **config**: fail closed on invalid license YAML (#3139) (2a850b7)
+- **ai**: preserve rollback after checkpoint capture failures (#3142) (67e31d1)
+
 ## [0.177.3] - 2026-11-02
 
 ### Fixed
