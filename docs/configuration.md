@@ -4034,6 +4034,23 @@ The equivalent pyproject setting is:
 rule_packs = ["python/none-coercion"]
 ```
 
+For a CLI override, `--tool-options` parses pipe-separated values as a list. Keep a
+trailing pipe when selecting just one pack; a pipe alone creates an empty list and
+disables inherited packs for that run:
+
+```bash
+lintro check src --tools semgrep --tool-options 'semgrep:rule_packs=python/none-coercion|'
+lintro check src --tools semgrep --tool-options 'semgrep:rule_packs=|'
+```
+
+Quote the value so the shell passes the pipe literally. A bare pack name or `[]` is
+parsed as a string and rejected by `rule_packs` validation. The CLI list replaces the
+inherited selection; disabling packs leaves Semgrep's normal `config` selection in
+effect.
+
+`list-tools --rules` lists packs instead of the tool inventory: `--json` and `--output`
+apply to that listing, and `--verbose` adds no tool details.
+
 Run `lintro check src --tools semgrep` with Semgrep installed. Each pack adds a local
 `--config` path alongside `.semgrep.yaml`, `.semgrep.yml`, or `.semgrep/` in the scan
 project root. With packs enabled, the implicit `auto` registry lookup is replaced by
