@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess  # nosec B404 - exercise git plumbing failures in regression tests
 import tempfile
 from pathlib import Path
@@ -254,9 +255,16 @@ def test_directory_expansion_failure_reaches_file_fallback(
 @pytest.mark.parametrize("corrupt_index", [False, True], ids=["valid", "corrupt"])
 def test_real_git_index_controls_checkpoint_fallback(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     corrupt_index: bool,
 ) -> None:
     """Real ls-files failure selects file rollback; a valid index selects git."""
+    # Isolate production Git subprocesses as well as the fixture helpers.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    # Keep the corrupt-index diagnostics stable on translated Git builds.
+    monkeypatch.setenv("LC_ALL", "C")
+    monkeypatch.setenv("LANGUAGE", "C")
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
     repo = init_git_repo(

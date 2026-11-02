@@ -299,8 +299,9 @@ def capture_checkpoint(
     any checkpoint refs are pruned or written.
 
     Filesystem errors, including temporary-index allocation, close, and
-    cleanup failures, propagate as :class:`OSError`. Git subprocess errors
-    are wrapped as :class:`CheckpointError` instead. Retention pruning
+    cleanup failures, propagate as :class:`OSError`. Git failures inside the
+    later capture try block return None instead; the earlier directory-listing
+    :class:`CheckpointError` propagates as described above. Retention pruning
     precedes temporary-index allocation and is not rolled back if a later
     operation fails.
 
