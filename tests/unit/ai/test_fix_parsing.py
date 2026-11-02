@@ -486,6 +486,49 @@ def test_batch_structured_codes_and_snippets_reject_every_entry(
     assert_that(str(error.value)).contains("code", "structured.py")
 
 
+@pytest.mark.parametrize("wrapped", [False, True])
+@pytest.mark.parametrize("candidate_first", [False, True])
+@pytest.mark.parametrize("value", [{}, {"text": "same"}, [], ["same"]])
+@pytest.mark.parametrize("pairing", ["empty-original", "empty-suggested", "identical"])
+def test_batch_validates_snippet_types_before_empty_or_noop_filtering(
+    wrapped,
+    candidate_first,
+    value,
+    pairing,
+):
+    """Reject structured absence lookalikes while preserving string controls."""
+    original = "" if pairing == "empty-original" else value
+    suggested = "" if pairing == "empty-suggested" else value
+    candidate = {
+        **_BATCH_ENTRY,
+        "original_code": original,
+        "suggested_code": suggested,
+    }
+    entries = [candidate, _BATCH_ENTRY]
+    if not candidate_first:
+        entries.reverse()
+    payload = {FIX_BATCH_KEY: entries} if wrapped else entries
+
+    with pytest.raises(AIFixParseError) as error:
+        parse_batch_response(json.dumps(payload), "ordering.py")
+
+    assert_that(str(error.value)).contains(
+        "code fields must be strings",
+        "ordering.py:5",
+    )
+
+    # Replace only structured fields: legitimate empty/no-op strings are skipped,
+    # and the neighboring valid fix survives in either position and container.
+    candidate["original_code"] = "" if pairing == "empty-original" else "same"
+    candidate["suggested_code"] = "" if pairing == "empty-suggested" else "same"
+    result = parse_batch_response(json.dumps(payload), "ordering.py")
+
+    assert_that(result).is_length(1)
+    assert_that(result[0].original_code).is_equal_to("old")
+    assert_that(result[0].suggested_code).is_equal_to("new")
+    assert_that(result[0].diff).contains("-old", "+new")
+
+
 def test_parse_batch_response_accepts_the_wrapped_cli_schema_object():
     """The object the CLI schema now requests is unwrapped (#2573).
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 
 import pytest
 from assertpy import assert_that
@@ -13,7 +14,7 @@ from lintro.ai.fix import generate_fixes
 from lintro.ai.providers.base import AIResponse
 from tests.unit.ai.conftest import MockAIProvider, MockIssue
 
-_MALFORMED_BATCH_FIELDS: list[tuple[str, dict[str, object]]] = [
+_MALFORMED_BATCH_FIELDS: list[tuple[str, Mapping[str, object]]] = [
     ("infinite-line", {"line": float("inf")}),
     ("nan-line", {"line": float("nan")}),
     ("mapping-rule-code", {"code": {"rule": "B101"}}),
@@ -22,21 +23,38 @@ _MALFORMED_BATCH_FIELDS: list[tuple[str, dict[str, object]]] = [
     ("list-original", {"original_code": ["y = 2"]}),
     ("mapping-suggested", {"suggested_code": {"text": "y = 9"}}),
     ("list-suggested", {"suggested_code": ["y = 9"]}),
+    *[
+        (
+            f"{name}-{pairing}",
+            {"original_code": original, "suggested_code": suggested},
+        )
+        for name, value in [
+            ("empty-mapping", {}),
+            ("mapping", {"text": "y = 2"}),
+            ("empty-list", []),
+            ("list", ["y = 2"]),
+        ]
+        for pairing, original, suggested in [
+            ("empty-original", "", value),
+            ("empty-suggested", value, ""),
+            ("identical", value, value),
+        ]
+    ],
 ]
 
 
-def _malformed_batch_content(
-    fields: dict[str, object],
+def _batch_content_with_candidate(
+    fields: Mapping[str, object],
     *,
     wrapped: bool,
     invalid_first: bool,
 ) -> str:
-    """Pair a malformed fix with a valid fix that fallback must discard.
+    """Pair a candidate fix with a valid fix that fallback must discard.
 
     Args:
-        fields: Fields that invalidate the second source line's fix.
+        fields: Fields that invalidate or empty the second source line's fix.
         wrapped: Whether to use the CLI schema object instead of a bare array.
-        invalid_first: Whether the malformed fix precedes the valid fix.
+        invalid_first: Whether the candidate fix precedes the valid fix.
 
     Returns:
         The batch response to feed to generation.
@@ -138,7 +156,26 @@ async def test_single_generation_logs_only_malformed_response_as_failure(
         pytest.param("not json", True, id="malformed-json"),
         *[
             pytest.param(
-                _malformed_batch_content(
+                _batch_content_with_candidate(
+                    fields,
+                    wrapped=wrapped,
+                    invalid_first=invalid_first,
+                ),
+                False,
+                id=f"{name}-wrapped={wrapped}-invalid-first={invalid_first}",
+            )
+            for name, fields in [
+                ("empty-original", {"original_code": ""}),
+                ("empty-suggested", {"suggested_code": ""}),
+                ("both-empty", {"original_code": "", "suggested_code": ""}),
+                ("identical-strings", {"suggested_code": "y = 2"}),
+            ]
+            for wrapped in (False, True)
+            for invalid_first in (False, True)
+        ],
+        *[
+            pytest.param(
+                _batch_content_with_candidate(
                     fields,
                     wrapped=wrapped,
                     invalid_first=invalid_first,
