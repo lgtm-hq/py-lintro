@@ -116,14 +116,25 @@ def _load_named_yaml_section(
             missing or the key is absent.
 
     Raises:
-        ConfigurationError: If the document or a present section is not a mapping.
+        ConfigurationError: If the file cannot be read or parsed, or the document
+            or a present section is not a mapping. Parsing includes constructor
+            failures and excessive nesting.
     """
     try:
         import yaml
     except ImportError:
         return None
 
-    data = yaml.safe_load(path.read_text())
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError) as exc:
+        raise ConfigurationError(
+            f"Failed to read YAML config at {path}: {exc}",
+        ) from exc
+    except (yaml.YAMLError, ValueError, RecursionError) as exc:
+        raise ConfigurationError(
+            f"Failed to parse YAML config at {path}: {exc}",
+        ) from exc
     if not isinstance(data, dict):
         actual = "null" if data is None else type(data).__name__
         raise ConfigurationError(
@@ -147,6 +158,10 @@ def _load_yaml_section(start_dir: Path) -> dict[str, Any] | None:
     project config; :func:`load_licenses_config` loads those as the base
     tier separately.
 
+    Helper readers propagate ``ConfigurationError`` for unreadable, malformed,
+    excessively nested or non-mapping YAML, and ``FileNotFoundError`` for an
+    invalid explicit global config path.
+
     Args:
         start_dir: Directory to begin the upward search from.
 
@@ -168,19 +183,48 @@ def _load_yaml_section(start_dir: Path) -> dict[str, Any] | None:
 def _load_pyproject_section(start_dir: Path) -> dict[str, Any] | None:
     """Load ``[tool.lintro.licenses]`` from ``pyproject.toml``.
 
+    File I/O errors propagate to the caller. Parsing failures (including excessive
+    nesting) and decoding errors become path-attributed ``ConfigurationError``
+    exceptions with the original cause.
+
     Args:
         start_dir: Directory to begin the upward search from.
 
     Returns:
         dict[str, Any] | None: The raw licenses section, or None if absent.
+
+    Raises:
+        ConfigurationError: If the file cannot be decoded or parsed (including
+            excessive nesting), or a present table on the license path is not a
+            mapping.
     """
     pyproject = find_file_upward(start_dir.resolve(), ["pyproject.toml"])
     if pyproject is None:
         return None
 
-    data = tomllib.loads(pyproject.read_text())
-    section = data.get("tool", {}).get("lintro", {}).get("licenses")
-    return section if isinstance(section, dict) else None
+    try:
+        section = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except UnicodeError as exc:
+        raise ConfigurationError(
+            f"Failed to read TOML config at {pyproject}: {exc}",
+        ) from exc
+    except (tomllib.TOMLDecodeError, RecursionError) as exc:
+        raise ConfigurationError(
+            f"Failed to parse TOML config at {pyproject}: {exc}",
+        ) from exc
+    table_path: list[str] = []
+    for key in ("tool", "lintro", "licenses"):
+        table_path.append(key)
+        if key not in section:
+            return None
+        value = section[key]
+        if not isinstance(value, dict):
+            raise ConfigurationError(
+                f"{'.'.join(table_path)} in {pyproject} must be a mapping, "
+                f"got {type(value).__name__}",
+            )
+        section = value
+    return section
 
 
 def load_licenses_config(start_dir: Path | None = None) -> LicensesConfig:
@@ -193,8 +237,13 @@ def load_licenses_config(start_dir: Path | None = None) -> LicensesConfig:
     ``pyproject.toml`` is the project overlay. Falls back to permissive defaults
     when neither tier supplies a section.
 
-    Non-mapping YAML documents or explicitly non-mapping licenses sections raise
-    ``ConfigurationError`` before either tier is merged.
+    YAML read/parse failures (including constructor errors and excessive nesting),
+    TOML parse/decode failures, non-mapping documents, and present non-mapping
+    license sections propagate as ``ConfigurationError`` before merging.
+    Invalid explicit global paths propagate ``FileNotFoundError``; TOML I/O
+    errors propagate ``OSError``. Invalid policy fields propagate Pydantic
+    ``ValidationError`` (a ``ValueError``). The CLI renders these failures on
+    stderr and exits with status 1.
 
     Args:
         start_dir: Directory to search from. Defaults to the current directory.

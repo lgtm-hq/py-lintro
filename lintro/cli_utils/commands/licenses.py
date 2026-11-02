@@ -105,11 +105,17 @@ def licenses_command(
         attribution: Emit a Markdown attribution document instead of a report.
 
     Raises:
+        click.ClickException: When the license configuration cannot be loaded.
         SystemExit: When ``check`` is set and violations or collection failures
             are found.
     """
     console = Console()
-    config = load_licenses_config()
+    try:
+        config = load_licenses_config()
+    except (ValueError, OSError) as exc:
+        raise click.ClickException(
+            f"Failed to load license configuration: {exc}",
+        ) from exc
     engine = LicensePolicyEngine(config)
 
     packages, errors = _collect_packages(langs)
