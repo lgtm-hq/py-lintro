@@ -133,10 +133,13 @@ fi
 
 # Same container invocation as the dogfood run (host-UID mapping keeps the
 # workspace mount writable on GitHub Actions).
+# Disable only Semgrep's startup update request (#2521); its default
+# --config auto scan requires metrics to remain enabled/auto.
 declare -a docker_args=(
 	docker run --rm
 	-e HOME=/tmp
 	-e LINTRO_AUTO_INSTALL_DEPS=1
+	-e SEMGREP_ENABLE_VERSION_CHECK=0
 	-v "$(pwd):/code"
 	-w /code
 )

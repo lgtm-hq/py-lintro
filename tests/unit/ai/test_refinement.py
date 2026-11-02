@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.ai.models import AIFixSuggestion
+from lintro.ai.providers.base import AIResponse
 from lintro.ai.refinement import _revert_fix, refine_unverified_fixes
 from lintro.ai.validation import ValidationResult
+from tests.unit.ai.conftest import MockAIProvider
 
 
 def _make_suggestion(**kwargs: object) -> AIFixSuggestion:
@@ -94,6 +99,117 @@ async def test_refine_returns_empty_when_no_unverified_keys(tmp_path: Path) -> N
 
     assert_that(refined).is_empty()
     assert_that(cost).is_equal_to(0.0)
+
+
+@pytest.mark.parametrize(
+    "content,malformed",
+    [
+        pytest.param("not json", True, id="invalid-json"),
+        pytest.param("[]", True, id="wrong-shape"),
+        pytest.param("{}", True, id="missing-snippets"),
+        pytest.param(
+            '{"original_code": "x = 1", "suggested_code": []}',
+            True,
+            id="invalid-snippet",
+        ),
+        *[
+            pytest.param(
+                json.dumps({"original_code": original, "suggested_code": suggested}),
+                False,
+                id=name,
+            )
+            for name, original, suggested in [
+                ("noop", "x = 1", "x = 1"),
+                ("empty-original", "", "x = 3"),
+                ("empty-suggested", "x = 1", ""),
+            ]
+        ],
+    ],
+)
+async def test_refinement_parse_diagnostic_preserves_reverted_file(
+    tmp_path,
+    ai_config,
+    content,
+    malformed,
+):
+    """Bad replies log concise failures; valid absence leaves the reverted file."""
+    source = tmp_path / "test.py"
+    source.write_text("x = 2\n")
+    suggestion = _make_suggestion(line=1)
+    provider = MockAIProvider(
+        responses=[
+            AIResponse(
+                content=content,
+                model="mock",
+                provider="mock",
+                input_tokens=10,
+                output_tokens=10,
+                cost_estimate=0.001,
+            ),
+        ],
+    )
+    diagnostics: list[tuple[str, bool]] = []
+    logger.add(
+        lambda message: diagnostics.append(
+            (
+                message.record["message"],
+                "exc_info" in message.record["extra"]
+                or message.record["exception"] is not None,
+            ),
+        ),
+        level="DEBUG",
+    )
+
+    refined, cost = await refine_unverified_fixes(
+        applied_suggestions=[suggestion],
+        validation=ValidationResult(
+            unverified=1,
+            details=["[E001] test.py:1 — issue still present"],
+        ),
+        provider=provider,
+        ai_config=ai_config,
+        workspace_root=tmp_path,
+    )
+
+    assert_that(refined).is_empty()
+    assert_that(cost).is_equal_to(0.0)
+    assert_that(source.read_text()).is_equal_to("x = 1\n")
+    failures = [
+        (text, noisy) for text, noisy in diagnostics if "Refinement failed" in text
+    ]
+    assert_that(failures).is_length(int(malformed))
+    if malformed:
+        text, noisy = failures[0]
+        assert_that(text).starts_with(
+            "Refinement failed for test.py:1: malformed response (",
+        )
+        assert_that(noisy).is_false()
+
+
+@pytest.mark.parametrize("status", ["fix verified", "tool check unmeasured"])
+async def test_refinement_leaves_verified_or_unmeasured_file_alone(
+    tmp_path,
+    ai_config,
+    status,
+):
+    """Only a measured still-present issue can trigger a revert and refinement."""
+    source = tmp_path / "test.py"
+    source.write_text("x = 2\n")
+
+    refined, cost = await refine_unverified_fixes(
+        applied_suggestions=[_make_suggestion(line=1)],
+        validation=ValidationResult(
+            verified=int(status == "fix verified"),
+            unverified=int(status == "tool check unmeasured"),
+            details=[f"[E001] test.py:1 — {status}"],
+        ),
+        provider=MockAIProvider(),
+        ai_config=ai_config,
+        workspace_root=tmp_path,
+    )
+
+    assert_that((refined, cost)).is_equal_to(([], 0.0))
+    assert_that(source.read_text()).is_equal_to("x = 2\n")
 
 
 async def test_refine_parses_detail_strings_correctly(tmp_path: Path) -> None:

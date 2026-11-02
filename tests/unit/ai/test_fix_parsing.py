@@ -375,6 +375,41 @@ def test_parse_batch_response_coerces_line_and_code():
     assert_that(suggestion_to_payload(result[1]).to_dict()).contains_entry({"code": ""})
 
 
+@pytest.mark.parametrize("wrapped", [False, True])
+@pytest.mark.parametrize("invalid_first", [False, True])
+@pytest.mark.parametrize("number", ["NaN", "Infinity", "-Infinity", "1e309", "-1e309"])
+def test_batch_nonfinite_line_rejects_every_entry(wrapped, invalid_first, number):
+    """Non-finite JSON numbers fail the batch with a contextual parse error."""
+    invalid = json.dumps({**_BATCH_ENTRY, "line": "NONFINITE"}).replace(
+        '"NONFINITE"',
+        number,
+    )
+    entries = [invalid, json.dumps(_BATCH_ENTRY)]
+    if not invalid_first:
+        entries.reverse()
+    content = "[" + ",".join(entries) + "]"
+    if wrapped:
+        content = '{"fixes": ' + content + "}"
+
+    with pytest.raises(AIFixParseError) as error:
+        parse_batch_response(content, "nonfinite.py")
+
+    assert_that(str(error.value)).contains("line", "nonfinite.py")
+
+
+@pytest.mark.parametrize("code", [{}, {"rule": "E501"}, [], ["E501"]])
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_batch_structured_rule_code_is_rejected(code, wrapped):
+    """A structured rule code cannot become a fabricated string identifier."""
+    entries = [_BATCH_ENTRY, {**_BATCH_ENTRY, "code": code}]
+    payload = {FIX_BATCH_KEY: entries} if wrapped else entries
+
+    with pytest.raises(AIFixParseError) as error:
+        parse_batch_response(json.dumps(payload), "structured.py")
+
+    assert_that(str(error.value)).contains("code", "structured.py")
+
+
 #: One batch entry in the shape the CLI fix schema requires (#2573).
 _BATCH_ENTRY = {
     "line": 5,

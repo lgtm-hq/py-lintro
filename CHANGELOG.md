@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.2] - 2026-11-02
+
+### Fixed
+
+- **ai**: harden suggestion parsing follow-ups (#3138) (88ed899)
+- **semgrep**: restore only shipped packaged rule identifiers (#3137) (e0c6c6e)
+
 ## [0.177.1] - 2026-11-02
 
 ### Changed
