@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.3] - 2026-11-02
+
+### Fixed
+
+- **ci**: disable Semgrep startup update checks in dogfood (#3141) (a7073ec)
+
 ## [0.177.2] - 2026-11-02
 
 ### Fixed
