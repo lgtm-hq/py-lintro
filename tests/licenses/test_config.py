@@ -284,6 +284,147 @@ def test_licenses_cli_fails_for_invalid_yaml(
     )
 
     assert_that(result.exit_code).is_not_equal_to(0)
-    assert_that(result.exception).is_instance_of(ConfigurationError)
-    assert_that(str(result.exception)).contains(str(invalid_file), "must be a mapping")
+    assert_that(result.stderr).contains(str(invalid_file), "must be a mapping")
     assert_that(result.output).does_not_contain("[]")
+
+
+@pytest.mark.parametrize(
+    "value",
+    ['""', '"invalid"', "false", "0", "1.5", "[]", '["MIT"]'],
+)
+def test_non_mapping_pyproject_licenses_cannot_fall_back_to_global(
+    license_config_files: tuple[Path, Path],
+    value: str,
+) -> None:
+    """A present invalid TOML policy cannot silently inherit global settings.
+
+    Args:
+        license_config_files: Independent global and project YAML paths.
+        value: Non-table TOML value for the licenses section.
+    """
+    global_file, project_file = license_config_files
+    global_file.write_text("licenses:\n  policy: strict\n", encoding="utf-8")
+    pyproject = project_file.parent / "pyproject.toml"
+    pyproject.write_text(f"[tool.lintro]\nlicenses = {value}\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError) as error:
+        load_licenses_config(start_dir=project_file.parent)
+
+    assert_that(str(error.value)).contains(
+        str(pyproject),
+        "tool.lintro.licenses",
+        "must be a mapping",
+    )
+
+
+@pytest.mark.parametrize("section", ["tool", "tool.lintro"])
+def test_non_mapping_pyproject_parent_has_a_configuration_diagnostic(
+    license_config_files: tuple[Path, Path],
+    section: str,
+) -> None:
+    """Invalid parent tables must not crash traversal to the license policy.
+
+    Args:
+        license_config_files: Independent global and project YAML paths.
+        section: Parent table replaced by a scalar.
+    """
+    _, project_file = license_config_files
+    pyproject = project_file.parent / "pyproject.toml"
+    pyproject.write_text(f"{section} = false\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError) as error:
+        load_licenses_config(start_dir=project_file.parent)
+
+    assert_that(str(error.value)).contains(str(pyproject), section, "must be a mapping")
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["[project]\n", "[tool.lintro]\n", "[tool.lintro.licenses]\n"],
+)
+def test_absent_and_empty_pyproject_licenses_preserve_global_policy(
+    license_config_files: tuple[Path, Path],
+    content: str,
+) -> None:
+    """An absent or empty TOML table keeps the global base intact.
+
+    Args:
+        license_config_files: Independent global and project YAML paths.
+        content: TOML with an omitted or empty license table.
+    """
+    global_file, project_file = license_config_files
+    global_file.write_text(
+        "licenses:\n  policy: strict\n  allowed: [MIT]\n",
+        encoding="utf-8",
+    )
+    (project_file.parent / "pyproject.toml").write_text(content, encoding="utf-8")
+
+    config = load_licenses_config(start_dir=project_file.parent)
+
+    assert_that(config).is_equal_to(LicensesConfig(policy="strict", allowed=["MIT"]))
+
+
+@pytest.mark.parametrize("content", ["[tool.lintro]\nlicenses = []\n", "invalid = [\n"])
+def test_populated_yaml_licenses_do_not_read_lower_priority_toml(
+    license_config_files: tuple[Path, Path],
+    content: str,
+) -> None:
+    """A populated YAML section retains precedence over invalid lower-tier TOML.
+
+    Args:
+        license_config_files: Independent global and project YAML paths.
+        content: Invalid lower-priority TOML configuration.
+    """
+    _, project_file = license_config_files
+    project_file.write_text("licenses:\n  policy: copyleft-ok\n", encoding="utf-8")
+    (project_file.parent / "pyproject.toml").write_text(content, encoding="utf-8")
+
+    config = load_licenses_config(start_dir=project_file.parent)
+
+    assert_that(config.policy).is_equal_to("copyleft-ok")
+
+
+@pytest.mark.parametrize("tier", ["global", "project"])
+@pytest.mark.parametrize("failure", ["syntax", "encoding", "read"])
+def test_yaml_failures_are_path_attributed_configuration_errors(
+    license_config_files: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    tier: str,
+    failure: str,
+) -> None:
+    """YAML parse, decoding and I/O errors retain their source and cause.
+
+    Args:
+        license_config_files: Independent global and project YAML paths.
+        monkeypatch: Fixture for injecting an otherwise platform-dependent read error.
+        tier: Source containing the invalid input.
+        failure: Parse, decode or read failure to exercise.
+    """
+    global_file, project_file = license_config_files
+    invalid_file = global_file if tier == "global" else project_file
+    invalid_file.write_bytes(b"licenses: [\n" if failure == "syntax" else b"\xff")
+    if failure == "read":
+        original_read = Path.read_text
+
+        def read_text(
+            path: Path,
+            encoding: str | None = None,
+            errors: str | None = None,
+        ) -> str:
+            """Deny only the selected config file while leaving other reads intact."""
+            if path == invalid_file:
+                raise PermissionError("injected license config read failure")
+            return original_read(path, encoding=encoding, errors=errors)
+
+        monkeypatch.setattr(Path, "read_text", read_text)
+
+    with pytest.raises(ConfigurationError) as error:
+        load_licenses_config(start_dir=project_file.parent)
+
+    assert_that(str(error.value)).contains(
+        str(invalid_file),
+        "Failed to parse" if failure == "syntax" else "Failed to read",
+    )
+    assert_that(error.value.__cause__).is_not_none()
+    if failure == "read":
+        assert_that(str(error.value)).contains("injected license config read failure")

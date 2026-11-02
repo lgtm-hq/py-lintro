@@ -55,11 +55,21 @@ loaded defaults now raise an error. Remove an unused config file or replace its 
 with `{}` to keep the fallback behavior. Replace bare section keys such as `ai:` with
 `ai: {}` when default section settings are intended.
 
-The independent `lintro licenses` YAML reader applies the same mapping requirement to
-project and global documents and their `licenses:` sections. Invalid input raises
-`ConfigurationError` before merging or falling back to `pyproject.toml`, even when the
-other tier supplies a valid policy. Omitted `licenses` sections, `licenses: {}`, and
-`{}` documents keep their existing defaults, inheritance, and pyproject fallback.
+The independent `lintro licenses` reader applies the same mapping requirement to project
+and global YAML documents and their `licenses:` sections, and to a present
+`[tool.lintro.licenses]` table in `pyproject.toml`. Invalid shapes raise
+`ConfigurationError` before merging, even when the other tier supplies a valid policy.
+YAML syntax, decoding, and read failures also raise `ConfigurationError` with the source
+path and original cause. The Python loader propagates TOML read/parse errors (`OSError`
+/ `ValueError`) and policy-field validation errors (Pydantic `ValidationError`, a
+`ValueError`); an invalid explicit global path still raises `FileNotFoundError`. The CLI
+reports these configuration failures on stderr and exits with status 1, including
+without `--check`, before collecting packages or emitting a report.
+
+Omitted `licenses` sections, `licenses: {}`, and `{}` documents keep their existing
+defaults, inheritance, and pyproject fallback. An absent or empty TOML license table
+inherits the global policy or uses defaults. A populated project YAML license section
+takes precedence over TOML, so the lower-priority file is not read in that case.
 **Migration for licenses:** Replace `licenses: null`, `licenses: ~`, or a bare
 `licenses:` with `licenses: {}`, or omit the section to inherit settings. Remove unused
 empty files or replace their contents with `{}`.
