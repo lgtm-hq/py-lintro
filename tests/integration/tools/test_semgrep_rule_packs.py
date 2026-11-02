@@ -12,7 +12,9 @@ from typing import Any
 
 import pytest
 from assertpy import assert_that
+from click.testing import CliRunner
 
+from lintro.cli import cli
 from lintro.parsers.semgrep.semgrep_issue import SemgrepIssue
 from lintro.tools.semgrep.definition import SemgrepPlugin
 from tests.integration._tools import require_tool
@@ -21,6 +23,83 @@ pytestmark = require_tool("semgrep")
 
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "rules" / "none_coercion"
 PACK = Path(__file__).parents[3] / "lintro" / "rules" / "python" / "none-coercion.yaml"
+
+
+@pytest.mark.parametrize(
+    ("selection", "expected_ids"),
+    [
+        (
+            "python/none-coercion|",
+            {"local-rule", "lintro.python.none-coercion.or-fallback"},
+        ),
+        ("|", {"local-rule"}),
+    ],
+    ids=["one-pack", "disable-inherited"],
+)
+def test_cli_rule_pack_lists_replace_inherited_selection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    selection: str,
+    expected_ids: set[str],
+) -> None:
+    """Documented CLI lists control actual matcher findings, retaining native IDs.
+
+    Args:
+        tmp_path: Project with both packs inherited and one native rule.
+        monkeypatch: Isolate configuration discovery and Semgrep state.
+        selection: Literal pipe-list value passed through Click.
+        expected_ids: Complete rule ID set emitted by this CLI invocation.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SEMGREP_SETTINGS_FILE", str(tmp_path / "settings.yml"))
+    monkeypatch.setenv("SEMGREP_LOG_FILE", str(tmp_path / "semgrep.log"))
+    monkeypatch.setenv("SEMGREP_SEND_METRICS", "off")
+    monkeypatch.setenv("SEMGREP_ENABLE_VERSION_CHECK", "0")
+    (tmp_path / ".lintro-config.yaml").write_text(
+        "tools:\n  semgrep:\n    rule_packs: "
+        "[python/none-coercion, scripts/no-direct-formatter]\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".semgrep.yaml").write_text(
+        "rules:\n  - id: local-rule\n    languages: [python]\n"
+        "    severity: WARNING\n    message: Local finding\n"
+        "    pattern: local_call()\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "sample.py").write_text(
+        "items = result.issues or []\nlocal_call()\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "format.sh").write_text(
+        "black sample.py\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "findings.json"
+    result = CliRunner().invoke(
+        cli,
+        [
+            "check",
+            ".",
+            "--tools",
+            "semgrep",
+            "--tool-options",
+            f"semgrep:config=.semgrep.yaml,semgrep:jobs=1,semgrep:rule_packs={selection}",
+            "--output-format",
+            "json",
+            "--output",
+            str(output),
+        ],
+    )
+
+    assert_that(result.exit_code).described_as(result.output).is_equal_to(1)
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert_that(report["results"]).is_length(1)
+    semgrep = report["results"][0]
+    assert_that(semgrep["success"]).is_true()
+    findings = semgrep["issues"]
+    assert_that({finding["code"] for finding in findings}).is_equal_to(expected_ids)
+    assert_that(findings).is_length(len(expected_ids))
 
 
 @pytest.fixture(scope="module")
@@ -144,10 +223,10 @@ def test_plugin_runs_pack_and_native_rules_together(
     source = tmp_path / "sample.py"
     source.write_text("items = result.issues or []\nlocal_call()\n", encoding="utf-8")
     options: dict[str, object] = {"jobs": 1}
-    if explicit_config:
-        options["config"] = str(config.relative_to(tmp_path))
-    plugin = SemgrepPlugin()
     native_options = {**options, "config": str(config.relative_to(tmp_path))}
+    if explicit_config:
+        options = native_options
+    plugin = SemgrepPlugin()
     original = plugin.check(
         [str(source)],
         native_options,

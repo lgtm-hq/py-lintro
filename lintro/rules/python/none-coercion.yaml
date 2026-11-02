@@ -76,6 +76,8 @@ rules:
                     - pattern-not-inside: |
                         def $NESTED(...):
                           ...
+          # False needs function context to exclude is_*/has_* predicates;
+          # the other defaults above can also match module-level handlers.
           - patterns:
               - pattern: |
                   try:
