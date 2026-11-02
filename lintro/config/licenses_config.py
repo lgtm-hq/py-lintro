@@ -117,7 +117,8 @@ def _load_named_yaml_section(
 
     Raises:
         ConfigurationError: If the file cannot be read or parsed, or the document
-            or a present section is not a mapping.
+            or a present section is not a mapping. Parsing includes constructor
+            failures and excessive nesting.
     """
     try:
         import yaml
@@ -130,7 +131,7 @@ def _load_named_yaml_section(
         raise ConfigurationError(
             f"Failed to read YAML config at {path}: {exc}",
         ) from exc
-    except yaml.YAMLError as exc:
+    except (yaml.YAMLError, ValueError, RecursionError) as exc:
         raise ConfigurationError(
             f"Failed to parse YAML config at {path}: {exc}",
         ) from exc
@@ -181,7 +182,8 @@ def _load_yaml_section(start_dir: Path) -> dict[str, Any] | None:
 def _load_pyproject_section(start_dir: Path) -> dict[str, Any] | None:
     """Load ``[tool.lintro.licenses]`` from ``pyproject.toml``.
 
-    TOML parsing and file-read errors propagate to the caller.
+    File I/O errors propagate to the caller. Parsing and decoding errors are
+    converted to path-attributed ``ConfigurationError`` exceptions.
 
     Args:
         start_dir: Directory to begin the upward search from.
@@ -190,13 +192,23 @@ def _load_pyproject_section(start_dir: Path) -> dict[str, Any] | None:
         dict[str, Any] | None: The raw licenses section, or None if absent.
 
     Raises:
-        ConfigurationError: If a present table on the license path is not a mapping.
+        ConfigurationError: If the file cannot be decoded or parsed, or a present
+            table on the license path is not a mapping.
     """
     pyproject = find_file_upward(start_dir.resolve(), ["pyproject.toml"])
     if pyproject is None:
         return None
 
-    section = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    try:
+        section = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except UnicodeError as exc:
+        raise ConfigurationError(
+            f"Failed to read TOML config at {pyproject}: {exc}",
+        ) from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigurationError(
+            f"Failed to parse TOML config at {pyproject}: {exc}",
+        ) from exc
     table_path: list[str] = []
     for key in ("tool", "lintro", "licenses"):
         table_path.append(key)
@@ -222,12 +234,13 @@ def load_licenses_config(start_dir: Path | None = None) -> LicensesConfig:
     ``pyproject.toml`` is the project overlay. Falls back to permissive defaults
     when neither tier supplies a section.
 
-    YAML read/parse failures, non-mapping documents, and present non-mapping
-    license sections (including TOML) propagate as ``ConfigurationError`` before
-    merging. Invalid explicit global paths propagate ``FileNotFoundError``;
-    TOML read/parse errors propagate ``OSError`` / ``ValueError``. Invalid policy
-    fields propagate Pydantic ``ValidationError`` (a ``ValueError``). The CLI
-    renders these failures on stderr and exits with status 1.
+    YAML read/parse failures (including constructor errors and excessive nesting),
+    TOML parse/decode failures, non-mapping documents, and present non-mapping
+    license sections propagate as ``ConfigurationError`` before merging.
+    Invalid explicit global paths propagate ``FileNotFoundError``; TOML I/O
+    errors propagate ``OSError``. Invalid policy fields propagate Pydantic
+    ``ValidationError`` (a ``ValueError``). The CLI renders these failures on
+    stderr and exits with status 1.
 
     Args:
         start_dir: Directory to search from. Defaults to the current directory.

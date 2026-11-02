@@ -59,12 +59,13 @@ The independent `lintro licenses` reader applies the same mapping requirement to
 and global YAML documents and their `licenses:` sections, and to a present
 `[tool.lintro.licenses]` table in `pyproject.toml`. Invalid shapes raise
 `ConfigurationError` before merging, even when the other tier supplies a valid policy.
-YAML syntax, decoding, and read failures also raise `ConfigurationError` with the source
-path and original cause. The Python loader propagates TOML read/parse errors (`OSError`
-/ `ValueError`) and policy-field validation errors (Pydantic `ValidationError`, a
-`ValueError`); an invalid explicit global path still raises `FileNotFoundError`. The CLI
-reports these configuration failures on stderr and exits with status 1, including
-without `--check`, before collecting packages or emitting a report.
+YAML syntax, constructor, excessive nesting, decoding, and read failures also raise
+`ConfigurationError` with the source path and original cause, as do TOML parse/decode
+failures. The Python loader propagates TOML I/O errors (`OSError`) and policy-field
+validation errors (Pydantic `ValidationError`, a `ValueError`); an invalid explicit
+global path still raises `FileNotFoundError`. The CLI reports these configuration
+failures on stderr and exits with status 1, including without `--check`, before
+collecting packages or emitting a report.
 
 Omitted `licenses` sections, `licenses: {}`, and `{}` documents keep their existing
 defaults, inheritance, and pyproject fallback. An absent or empty TOML license table

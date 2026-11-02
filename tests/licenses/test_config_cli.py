@@ -48,6 +48,9 @@ def license_cli_files(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
     }
     env.update(
         HOME=str(home),
+        USERPROFILE=str(home),
+        HOMEDRIVE=home.drive,
+        HOMEPATH=str(home)[len(home.drive) :],
         XDG_CONFIG_HOME=str(home / ".config"),
         LINTRO_GLOBAL_CONFIG=str(global_file),
         LINTRO_LOG_DIR=str(tmp_path / "logs"),
@@ -104,10 +107,25 @@ def _run_license_cli(
         ("project", b"licenses: null\n", "must be a mapping"),
         ("global", b"licenses: [\n", "Failed to parse"),
         ("project", b"licenses: [\n", "Failed to parse"),
+        ("global", b"licenses:\n  policy: 2001-13-45\n", "Failed to parse"),
+        ("project", b"licenses:\n  policy: 2001-13-45\n", "Failed to parse"),
+        pytest.param(
+            "global",
+            b"licenses: " + b"[" * 20_000 + b"0" + b"]" * 20_000,
+            "Failed to parse",
+            id="global-yaml-recursion",
+        ),
+        pytest.param(
+            "project",
+            b"licenses: " + b"[" * 20_000 + b"0" + b"]" * 20_000,
+            "Failed to parse",
+            id="project-yaml-recursion",
+        ),
         ("global", b"\xff", "Failed to read"),
         ("project", b"\xff", "Failed to read"),
         ("pyproject", b"[tool.lintro]\nlicenses = []\n", "must be a mapping"),
-        ("pyproject", b"[tool.lintro.licenses\n", "Expected"),
+        ("pyproject", b"[tool.lintro.licenses\n", "Failed to parse"),
+        ("pyproject", b"\xff", "Failed to read"),
         ("project", b"licenses:\n  policy: invalid\n", "validation error"),
         (
             "pyproject",
@@ -146,9 +164,46 @@ def test_license_config_failure_is_friendly_at_process_boundary(
     assert_that(result.returncode).is_equal_to(1)
     assert_that(result.stdout).is_empty()
     assert_that(result.stderr).contains("Error:", diagnostic)
-    if diagnostic not in {"validation error", "Expected"}:
+    if diagnostic != "validation error":
         assert_that(result.stderr).contains(str(invalid_file))
     assert_that(result.stderr).does_not_contain("Traceback")
+
+
+def test_license_cli_child_home_is_isolated_on_posix_and_windows(
+    license_cli_files: tuple[Path, Path, dict[str, str]],
+) -> None:
+    """The child resolves its owned home using native and Windows rules.
+
+    Args:
+        license_cli_files: Owned project, global file and subprocess environment.
+    """
+    project, global_file, env = license_cli_files
+    result = subprocess.run(  # nosec B603 - fixed Python probe, shell=False
+        [
+            sys.executable,
+            "-c",
+            """import json
+import ntpath
+import os
+from pathlib import Path
+
+homes = [str(Path.home()), ntpath.expanduser("~")]
+os.environ.pop("USERPROFILE", None)
+homes.append(ntpath.expanduser("~"))
+print(json.dumps(homes))
+""",
+        ],
+        cwd=project,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stderr).is_empty()
+    assert_that(json.loads(result.stdout)).is_equal_to([str(global_file.parent)] * 3)
 
 
 @pytest.mark.parametrize("failure", ["project-read", "missing-global"])

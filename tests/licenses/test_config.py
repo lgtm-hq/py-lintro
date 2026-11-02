@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import pytest
+import yaml
 from assertpy import assert_that
 from click.testing import CliRunner
 
@@ -385,24 +387,32 @@ def test_populated_yaml_licenses_do_not_read_lower_priority_toml(
 
 
 @pytest.mark.parametrize("tier", ["global", "project"])
-@pytest.mark.parametrize("failure", ["syntax", "encoding", "read"])
+@pytest.mark.parametrize(
+    "failure",
+    ["syntax", "encoding", "read", "constructor", "recursion"],
+)
 def test_yaml_failures_are_path_attributed_configuration_errors(
     license_config_files: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
     tier: str,
     failure: str,
 ) -> None:
-    """YAML parse, decoding and I/O errors retain their source and cause.
+    """YAML parsing, construction and read errors retain their source and cause.
 
     Args:
         license_config_files: Independent global and project YAML paths.
         monkeypatch: Fixture for injecting an otherwise platform-dependent read error.
         tier: Source containing the invalid input.
-        failure: Parse, decode or read failure to exercise.
+        failure: Parse, construction, recursion, decode or read failure to exercise.
     """
     global_file, project_file = license_config_files
     invalid_file = global_file if tier == "global" else project_file
-    invalid_file.write_bytes(b"licenses: [\n" if failure == "syntax" else b"\xff")
+    contents = {
+        "syntax": b"licenses: [\n",
+        "constructor": b"licenses:\n  policy: 2001-13-45\n",
+        "recursion": b"licenses: " + b"[" * 20_000 + b"0" + b"]" * 20_000,
+    }
+    invalid_file.write_bytes(contents.get(failure, b"\xff"))
     if failure == "read":
         original_read = Path.read_text
 
@@ -423,8 +433,48 @@ def test_yaml_failures_are_path_attributed_configuration_errors(
 
     assert_that(str(error.value)).contains(
         str(invalid_file),
-        "Failed to parse" if failure == "syntax" else "Failed to read",
+        "Failed to read" if failure in {"encoding", "read"} else "Failed to parse",
     )
-    assert_that(error.value.__cause__).is_not_none()
+    causes = {
+        "syntax": yaml.YAMLError,
+        "constructor": ValueError,
+        "recursion": RecursionError,
+        "encoding": UnicodeDecodeError,
+        "read": PermissionError,
+    }
+    assert_that(error.value.__cause__).is_instance_of(causes[failure])
     if failure == "read":
         assert_that(str(error.value)).contains("injected license config read failure")
+
+
+@pytest.mark.parametrize(
+    ("content", "cause_type", "diagnostic"),
+    [
+        (b"[tool.lintro.licenses\n", tomllib.TOMLDecodeError, "Failed to parse"),
+        (b"\xff", UnicodeDecodeError, "Failed to read"),
+    ],
+)
+def test_toml_failures_are_path_attributed_configuration_errors(
+    license_config_files: tuple[Path, Path],
+    content: bytes,
+    cause_type: type[Exception],
+    diagnostic: str,
+) -> None:
+    """Invalid TOML cannot lose its source or silently inherit the global policy.
+
+    Args:
+        license_config_files: Independent global and project YAML paths.
+        content: Malformed or undecodable TOML bytes.
+        cause_type: Original exception type retained by the loader.
+        diagnostic: Expected read or parse diagnostic.
+    """
+    global_file, project_file = license_config_files
+    global_file.write_text("licenses:\n  policy: strict\n", encoding="utf-8")
+    pyproject = project_file.parent / "pyproject.toml"
+    pyproject.write_bytes(content)
+
+    with pytest.raises(ConfigurationError) as error:
+        load_licenses_config(start_dir=project_file.parent)
+
+    assert_that(str(error.value)).contains(str(pyproject), diagnostic, "TOML config")
+    assert_that(error.value.__cause__).is_instance_of(cause_type)
