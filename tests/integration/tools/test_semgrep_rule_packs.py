@@ -113,7 +113,7 @@ def test_plugin_runs_pack_and_native_rules_together(
     monkeypatch: pytest.MonkeyPatch,
     explicit_config: bool,
 ) -> None:
-    """Real plugin execution returns both local and shipped findings with stable IDs.
+    """Sequential scans retain native rules and enable packaged findings once.
 
     Args:
         tmp_path: Isolated project with native rules and source to scan.
@@ -146,9 +146,11 @@ def test_plugin_runs_pack_and_native_rules_together(
     options: dict[str, object] = {"jobs": 1}
     if explicit_config:
         options["config"] = str(config.relative_to(tmp_path))
-    original = SemgrepPlugin().check(
+    plugin = SemgrepPlugin()
+    native_options = {**options, "config": str(config.relative_to(tmp_path))}
+    original = plugin.check(
         [str(source)],
-        {**options, "config": str(config.relative_to(tmp_path))},
+        native_options,
     )
     assert_that(original.success).is_true()
     original_ids = {
@@ -158,7 +160,7 @@ def test_plugin_runs_pack_and_native_rules_together(
     }
     assert_that(original_ids).is_length(1)
 
-    result = SemgrepPlugin().check(
+    result = plugin.check(
         [str(source)],
         {**options, "rule_packs": ["python/none-coercion"]},
     )
@@ -171,3 +173,14 @@ def test_plugin_runs_pack_and_native_rules_together(
         original_ids | {"lintro.python.none-coercion.or-fallback"},
     )
     assert_that({issue.severity for issue in findings}).is_equal_to({"INFO", "WARNING"})
+
+    restored = plugin.check([str(source)], native_options)
+    assert_that(restored.success).is_true()
+    assert_that(restored.issues_count).is_equal_to(1)
+    assert_that(
+        {
+            issue.check_id
+            for issue in restored.issues
+            if isinstance(issue, SemgrepIssue)
+        },
+    ).is_equal_to(original_ids)

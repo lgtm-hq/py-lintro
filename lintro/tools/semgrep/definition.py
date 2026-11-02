@@ -419,11 +419,13 @@ class SemgrepPlugin(BaseToolPlugin):
 
         Returns:
             ToolResult with check results.
-
         """
         if options:
+            # Validate before discovery without retaining overrides on this instance.
+            execution = self.copy_for_execution()
             runtime_options: dict[str, Any] = dict(options)
-            self.set_options(**runtime_options)
+            execution.set_options(**runtime_options)
+            return execution.check(paths=paths, options={})
         # Use shared preparation for version check, path validation, file discovery
         ctx = self.prepare(paths=paths, options=options)
         if isinstance(ctx, ToolResult):
