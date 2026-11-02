@@ -55,6 +55,15 @@ loaded defaults now raise an error. Remove an unused config file or replace its 
 with `{}` to keep the fallback behavior. Replace bare section keys such as `ai:` with
 `ai: {}` when default section settings are intended.
 
+The independent `lintro licenses` YAML reader applies the same mapping requirement to
+project and global documents and their `licenses:` sections. Invalid input raises
+`ConfigurationError` before merging or falling back to `pyproject.toml`, even when the
+other tier supplies a valid policy. Omitted `licenses` sections, `licenses: {}`, and
+`{}` documents keep their existing defaults, inheritance, and pyproject fallback.
+**Migration for licenses:** Replace `licenses: null`, `licenses: ~`, or a bare
+`licenses:` with `licenses: {}`, or omit the section to inherit settings. Remove unused
+empty files or replace their contents with `{}`.
+
 ### Tiered Configuration Flow
 
 The configuration system works in a specific order:

@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from lintro.exceptions.errors import ConfigurationError
 from lintro.utils.path_utils import find_file_upward
 
 _YAML_FILENAMES = [
@@ -112,18 +113,31 @@ def _load_named_yaml_section(
 
     Returns:
         dict[str, Any] | None: The named section, or None if PyYAML is
-            missing, the file has no mapping, or the key is absent.
+            missing or the key is absent.
+
+    Raises:
+        ConfigurationError: If the document or a present section is not a mapping.
     """
     try:
         import yaml
     except ImportError:
         return None
 
-    data = yaml.safe_load(path.read_text()) or {}
+    data = yaml.safe_load(path.read_text())
     if not isinstance(data, dict):
+        actual = "null" if data is None else type(data).__name__
+        raise ConfigurationError(
+            f"Config document {path} must be a mapping, got {actual}",
+        )
+    if section_name not in data:
         return None
-    section = data.get(section_name)
-    return section if isinstance(section, dict) else None
+    section = data[section_name]
+    if not isinstance(section, dict):
+        actual = "null" if section is None else type(section).__name__
+        raise ConfigurationError(
+            f"{section_name} in {path} must be a mapping, got {actual}",
+        )
+    return section
 
 
 def _load_yaml_section(start_dir: Path) -> dict[str, Any] | None:
@@ -174,10 +188,13 @@ def load_licenses_config(start_dir: Path | None = None) -> LicensesConfig:
 
     Resolution matches :func:`lintro.config.config_loader.load_config`: the
     user-level global file is the base tier, then a non-global project
-    ``.lintro-config.yaml`` ``licenses:`` section overlays it. When no
-    project YAML exists, ``[tool.lintro.licenses]`` in ``pyproject.toml``
-    is the project overlay. Falls back to permissive defaults when neither
-    tier supplies a section.
+    ``.lintro-config.yaml`` ``licenses:`` section overlays it. When project
+    YAML supplies no license settings, ``[tool.lintro.licenses]`` in
+    ``pyproject.toml`` is the project overlay. Falls back to permissive defaults
+    when neither tier supplies a section.
+
+    Non-mapping YAML documents or explicitly non-mapping licenses sections raise
+    ``ConfigurationError`` before either tier is merged.
 
     Args:
         start_dir: Directory to search from. Defaults to the current directory.
