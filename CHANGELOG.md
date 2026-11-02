@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.1] - 2026-11-02
+
+### Changed
+
+- **ai**: isolate shared `check_answered` helper (#3135) (d1a0209)
+
+### Fixed
+
+- **semgrep**: isolate runtime options between checks (#3134) (120ea79)
+- **ai**: label unmeasured validation as unverified (#3133) (4845f43)
+- **config**: reuse pyproject section mapping guard (#3132) (d7d9be2)
+
 ## [0.177.0] - 2026-11-01
 
 ### Changed
