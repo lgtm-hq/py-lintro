@@ -364,12 +364,29 @@ def test_checkpoint_error_with_unreadable_snapshot_aborts_prepare(
     assert_that((repo / UNDO_DIR / UNDO_FILE).exists()).is_false()
 
 
+@pytest.mark.parametrize(
+    "snapshot_readable",
+    [False, True],
+    ids=["unreadable", "readable"],
+)
 def test_git_index_tempfile_failure_falls_back_to_file_snapshot(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    snapshot_readable: bool,
 ) -> None:
-    """An OSError allocating the checkpoint index leaves file rollback usable."""
+    """After pruning and index failure, snapshot reads restore bytes or abort."""
     repo = init_git_repo(tmp_path, files={"target.py": "committed = True\n"})
+    seeded_refs = []
+    for number in range(3):
+        seed = capture_checkpoint(
+            ["target.py"],
+            workspace_root=repo,
+            run_id=f"100{number}-seed",
+            keep=10,
+        )
+        assert seed is not None
+        seeded_refs.append(seed.ref)
+    assert_that(list_checkpoint_refs(workspace_root=repo)).is_equal_to(seeded_refs)
     target = repo / "target.py"
     original = b"unsaved = True\r\n"
     target.write_bytes(original)
@@ -381,11 +398,32 @@ def test_git_index_tempfile_failure_falls_back_to_file_snapshot(
         return real_mkstemp(*args, **kwargs)
 
     monkeypatch.setattr("lintro.ai.checkpoints.tempfile.mkstemp", fail_git_index)
-    state = prepare_fix_batch([_make_suggestion(file="target.py")], repo)
+    suggestions = [_make_suggestion(file="target.py")]
+    if not snapshot_readable:
+        real_read_bytes = Path.read_bytes
+
+        def read_bytes(path: Path) -> bytes:
+            if path == target:
+                raise PermissionError("snapshot denied")
+            return real_read_bytes(path)
+
+        with monkeypatch.context() as snapshot:
+            snapshot.setattr(Path, "read_bytes", read_bytes)
+            with pytest.raises(PermissionError, match="snapshot denied"):
+                prepare_fix_batch(suggestions, repo, retention=1)
+
+        assert_that(list_checkpoint_refs(workspace_root=repo)).is_empty()
+        assert_that(target.read_bytes()).is_equal_to(original)
+        assert_that((repo / UNDO_DIR / UNDO_FILE).exists()).is_false()
+        return
+
+    state = prepare_fix_batch(suggestions, repo, retention=1)
 
     assert state is not None
     assert_that(state.kind).is_equal_to("file")
     assert_that(state.checkpoint).is_none()
+    assert state.file_snapshot is not None
+    assert_that(state.file_snapshot.contents).is_equal_to({"target.py": original})
     assert_that(list_checkpoint_refs(workspace_root=repo)).is_empty()
     assert state.patch_path is not None
     assert_that(state.patch_path.read_text(encoding="utf-8")).contains("---", "+++")
