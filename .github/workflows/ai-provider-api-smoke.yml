@@ -30,6 +30,9 @@ name: AI - Provider API Smoke
 # pending commit
 # status. It must never read as a pass: a green tick for a call that was never
 # made is the failure mode this workflow exists to remove.
+# A row with a parked reason is validated but excluded from the matrix, with
+# a notice and summary every run and no call or commit status (#2837).
+# Delete its parked flag after funding returns to restore the probe.
 
 'on':
   schedule:
@@ -59,6 +62,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.table.outputs.matrix }}
+      has_active: ${{ steps.table.outputs.has_active }}
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
@@ -81,8 +85,8 @@ jobs:
       - name: Expand the provider table into a matrix
         id: table
         # The loader validates every row (protocol, https base URL, secret
-        # name, model) and fails the job on a malformed table, so a typo costs
-        # one cheap job instead of four confusing ones.
+        # name, model, parked reason), including parked rows. It reports each
+        # parked row's reason and emits only active rows (#2837).
         run: python3 scripts/ci/ai_provider_smoke/run_smoke.py --emit-matrix
 
   smoke:
@@ -90,6 +94,9 @@ jobs:
     # checks tab explains itself without anyone reading this file.
     name: ${{ matrix.name }}
     needs: [resolve-table]
+    # Job conditions run before matrix expansion. An all-parked table has no
+    # provider verdict: skip the job instead of inventing a successful row.
+    if: needs.resolve-table.outputs.has_active == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: read # checkout lintro and its provider code path
@@ -165,6 +172,7 @@ jobs:
         # Main only: a branch dispatch must not paint main's HEAD. `always()`
         # because the status is the whole point of the job — a failure that
         # reports nothing is the defect this workflow replaces.
+        # The publisher makes no status call for a direct parked invocation.
         if: always() && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}

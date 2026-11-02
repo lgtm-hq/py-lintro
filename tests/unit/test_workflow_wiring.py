@@ -7569,7 +7569,7 @@ def _api_smoke_matrix() -> list[dict[str, str]]:
     reaches the runner with is the one asserted here.
 
     Returns:
-        The matrix include entries, one per table row.
+        The matrix include entries, one per active table row.
 
     Raises:
         RuntimeError: When the runner script cannot be imported.
@@ -7735,6 +7735,9 @@ def test_provider_api_smoke_is_driven_by_the_committed_table() -> None:
     assert_that(rows).is_not_empty()
     egress = {entry["name"]: entry["egress"] for entry in _api_smoke_matrix()}
     for row in rows:
+        if "parked" in row:
+            assert_that(egress).does_not_contain_key(row["name"])
+            continue
         parsed = urlparse(row["base_url"])
         host = parsed.hostname
         # Without this, a row whose base_url does not parse yields host None
@@ -7748,7 +7751,7 @@ def test_provider_api_smoke_is_driven_by_the_committed_table() -> None:
         # host or port, fails the weekly run on blocked egress with an opaque
         # network error instead of the provider's own verdict.
         assert_that(egress).described_as(
-            "every table row must reach the matrix with an egress entry",
+            "every active table row must reach the matrix with an egress entry",
         ).contains_key(row["name"])
         assert_that(egress[row["name"]]).described_as(
             f"{row['name']} egress must allow its own base_url host",
@@ -7759,6 +7762,17 @@ def test_provider_api_smoke_is_driven_by_the_committed_table() -> None:
 
     resolve = workflow["jobs"]["resolve-table"]["steps"][-1]
     assert_that(str(resolve["run"])).contains("--emit-matrix")
+
+
+def test_provider_api_smoke_skips_an_empty_matrix_before_expansion() -> None:
+    """An all-parked table schedules no fake provider job or commit status."""
+    jobs = _load_workflow(name=_API_SMOKE_WORKFLOW)["jobs"]
+    assert_that(jobs["resolve-table"]["outputs"]["has_active"]).is_equal_to(
+        "${{ steps.table.outputs.has_active }}",
+    )
+    assert_that(_normalize_github_expr(str(jobs[_API_SMOKE_JOB]["if"]))).is_equal_to(
+        "needs.resolve-table.outputs.has_active == 'true'",
+    )
 
 
 #: The Actions results service, which upload-artifact and download-artifact
@@ -7848,6 +7862,9 @@ def test_provider_api_smoke_failures_are_visible_on_main() -> None:
     # would break on a rename that changes no behaviour, and would equally be
     # satisfied by a comment. This test owns the wiring: that the job runs
     # that script at all, with the permission and the condition it needs.
+    assert_that(status_step["env"]["SMOKE_OUTCOME"]).is_equal_to(
+        "${{ steps.smoke.outputs.outcome }}",
+    )
     assert_that(
         (_REPO_ROOT / "scripts" / "ci" / "ai_provider_smoke")
         .joinpath("report-commit-status.sh")

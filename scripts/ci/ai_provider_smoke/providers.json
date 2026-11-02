@@ -1,6 +1,6 @@
 {
   "$comment": [
-    "Weekly live API smoke table (#2600). One row per funded provider; the row",
+    "Weekly API smoke table (#2600). One row per provider; the row",
     "name is the job name and the commit-status context, so the checks tab",
     "explains itself. key_env is the NAME of the environment variable the",
     "workflow injects the repository secret into — never a credential value;",
@@ -8,6 +8,11 @@
     "repository secret of that name, never a workflow edit. A row whose",
     "variable is empty reports a visible skip notice and a pending commit",
     "status, never a pass.",
+    "parked is an optional non-empty single-line reason (#2837). All rows are",
+    "validated, but parked rows are excluded from the matrix and listed in a",
+    "notice and job summary every run. They make no call and post no commit",
+    "status, even when selected directly. Delete the parked flag to unpark",
+    "after funding returns; keep #2837 open until the funded probes are verified.",
     "protocol selects which of lintro's own API providers drives the call:",
     "'anthropic' and 'openai' are the two wire protocols lintro implements, and",
     "gateways (kimi, z.ai) reuse them through base_url.",
@@ -34,7 +39,8 @@
       "protocol": "openai",
       "base_url": "https://api.openai.com/v1",
       "key_env": "OPENAI_API_KEY",
-      "model": "gpt-4o-mini"
+      "model": "gpt-4o-mini",
+      "parked": "Unfunded; owner decision: park until I can fund again (#2837)"
     },
     {
       "name": "kimi-api",
@@ -42,7 +48,8 @@
       "base_url": "https://api.moonshot.ai/anthropic",
       "key_env": "KIMI_API_KEY",
       "model": "kimi-k3",
-      "max_tokens": 1024
+      "max_tokens": 1024,
+      "parked": "Unfunded; owner decision: park until I can fund again (#2837)"
     },
     {
       "name": "zai-api",
@@ -50,7 +57,8 @@
       "base_url": "https://api.z.ai/api/coding/paas/v4",
       "key_env": "ZAI_AUTH_TOKEN",
       "model": "glm-5.3-flash",
-      "max_tokens": 1024
+      "max_tokens": 1024,
+      "parked": "Unfunded; owner decision: park until I can fund again (#2837)"
     },
     {
       "name": "zai-anthropic-api",
@@ -58,7 +66,8 @@
       "base_url": "https://api.z.ai/api/anthropic",
       "key_env": "ZAI_AUTH_TOKEN",
       "model": "glm-5.3-flash",
-      "max_tokens": 1024
+      "max_tokens": 1024,
+      "parked": "Unfunded; owner decision: park until I can fund again (#2837)"
     }
   ]
 }

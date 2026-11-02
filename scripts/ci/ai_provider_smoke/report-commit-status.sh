@@ -15,6 +15,7 @@
 #   pending  the row's secret is not configured — nothing was called, so
 #            nothing may look green
 #   failure  the provider failed, credit exhaustion included
+# A parked row has no verdict and publishes no status (#2837).
 #
 # Required environment:
 #   GH_TOKEN       token with statuses: write
@@ -38,7 +39,8 @@ Environment:
   GH_TOKEN       Token with `statuses: write`.
   SMOKE_NAME     Table row name; becomes the context ai-provider-smoke/<name>.
   SMOKE_KEY_ENV  The row's credential variable NAME, quoted in a skip status.
-  SMOKE_OUTCOME  The smoke script's outcome: success, failure or skipped.
+  SMOKE_OUTCOME  The smoke script's outcome: success, failure, skipped or parked.
+                 'parked' publishes no status: no provider call was made.
   SMOKE_STEP     The smoke step's outcome, used when the script wrote none.
                  'skipped' there means the step never ran (an earlier step
                  failed) and reports pending; anything else is a failure.
@@ -49,6 +51,11 @@ may look green — either the row's credential variable is empty or the smoke st
 never ran because an earlier step failed) and failure (anything else, credit
 exhaustion included).
 EOF
+	exit 0
+fi
+
+if [[ "${SMOKE_OUTCOME:-}" == "parked" ]]; then
+	echo "Provider smoke parked: no call, no commit status (#2837)"
 	exit 0
 fi
 

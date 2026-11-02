@@ -8,6 +8,7 @@ import asyncio
 import importlib.util
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -59,6 +60,20 @@ def smoke() -> ModuleType:
         The loaded ``run_smoke`` module.
     """
     return _load("ai_provider_run_smoke_diag", _SMOKE_DIR / "run_smoke.py")
+
+
+def _active_row(smoke: ModuleType, name: str) -> Any:
+    """Unpark a row copy only for offline provider diagnostic tests.
+
+    Args:
+        smoke: The loaded smoke runner module.
+        name: The committed row to exercise with a stub transport.
+
+    Returns:
+        A copy ready to exercise the provider path without changing the table.
+    """
+    row = next(row for row in smoke.load_table(path=_TABLE) if row.name == name)
+    return replace(row, parked=None)
 
 
 @pytest.fixture
@@ -681,7 +696,7 @@ def test_the_echoed_model_on_a_pass_is_redacted_or_withheld(
     monkeypatch.setenv("LINTRO_SMOKE_CREDENTIAL", _FAKE_CREDENTIAL)
 
     code = smoke.run_smoke(
-        row=next(r for r in smoke.load_table(path=_TABLE) if r.name == "kimi-api"),
+        row=_active_row(smoke, "kimi-api"),
         credential_env="LINTRO_SMOKE_CREDENTIAL",
         error_file=None,
     )
@@ -838,7 +853,7 @@ def test_an_empty_answer_writes_the_exchange_to_the_error_file(
     error_file = tmp_path / "smoke-error.md"
 
     code = smoke.run_smoke(
-        row=next(r for r in smoke.load_table(path=_TABLE) if r.name == row_name),
+        row=_active_row(smoke, row_name),
         credential_env="LINTRO_SMOKE_CREDENTIAL",
         error_file=error_file,
     )
@@ -947,7 +962,7 @@ def test_a_refused_call_writes_the_exchange_next_to_the_error(
     error_file = tmp_path / "smoke-error.md"
 
     code = smoke.run_smoke(
-        row=next(r for r in smoke.load_table(path=_TABLE) if r.name == "zai-api"),
+        row=_active_row(smoke, "zai-api"),
         credential_env="LINTRO_SMOKE_CREDENTIAL",
         error_file=error_file,
     )
@@ -992,7 +1007,7 @@ def test_a_failing_diagnostic_never_costs_the_provider_error(
     error_file = tmp_path / "smoke-error.md"
 
     code = smoke.run_smoke(
-        row=next(r for r in smoke.load_table(path=_TABLE) if r.name == "zai-api"),
+        row=_active_row(smoke, "zai-api"),
         credential_env="LINTRO_SMOKE_CREDENTIAL",
         error_file=error_file,
     )
@@ -1028,7 +1043,7 @@ def test_a_failure_before_any_response_says_none_was_recorded(
     error_file = tmp_path / "smoke-error.md"
 
     code = smoke.run_smoke(
-        row=next(r for r in smoke.load_table(path=_TABLE) if r.name == "zai-api"),
+        row=_active_row(smoke, "zai-api"),
         credential_env="LINTRO_SMOKE_CREDENTIAL",
         error_file=error_file,
     )
@@ -1068,7 +1083,7 @@ def test_a_pass_reports_the_echoed_model_latency_and_tokens(
     monkeypatch.setenv("LINTRO_SMOKE_CREDENTIAL", _FAKE_CREDENTIAL)
 
     code = smoke.run_smoke(
-        row=next(r for r in smoke.load_table(path=_TABLE) if r.name == "kimi-api"),
+        row=_active_row(smoke, "kimi-api"),
         credential_env="LINTRO_SMOKE_CREDENTIAL",
         error_file=None,
     )

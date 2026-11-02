@@ -15,6 +15,7 @@ import os
 import shutil
 import subprocess  # nosec B404 - runs the repo's own script with a fixed argv
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -97,7 +98,7 @@ def _write_table(path: Path, rows: list[dict[str, Any]]) -> Path:
     return path
 
 
-def _row(**overrides: str) -> dict[str, str]:
+def _row(**overrides: Any) -> dict[str, Any]:
     """Return a valid table row with optional overrides.
 
     Args:
@@ -106,7 +107,7 @@ def _row(**overrides: str) -> dict[str, str]:
     Returns:
         A row mapping.
     """
-    row = {
+    row: dict[str, Any] = {
         "name": "example-api",
         "protocol": "anthropic",
         "base_url": "https://api.example.com",
@@ -117,10 +118,10 @@ def _row(**overrides: str) -> dict[str, str]:
     return row
 
 
-def test_committed_table_loads_and_covers_the_funded_providers(
+def test_committed_table_loads_and_covers_the_declared_providers(
     smoke: ModuleType,
 ) -> None:
-    """The shipped table validates and carries the four rows #2600 names.
+    """The shipped table validates and retains the four rows #2600 names.
 
     Plus the Z.ai Anthropic-protocol route the dogfood's zai lane takes
     (#2873).
@@ -177,7 +178,10 @@ def test_matrix_carries_the_egress_host_for_every_row(smoke: ModuleType) -> None
     Args:
         smoke: The loaded smoke runner module.
     """
-    matrix = smoke.build_matrix(rows=smoke.load_table(path=_TABLE))
+    # Exercise each row's egress offline, including currently parked routes.
+    matrix = smoke.build_matrix(
+        rows=[replace(row, parked=None) for row in smoke.load_table(path=_TABLE)],
+    )
     egress = {entry["name"]: entry["egress"] for entry in matrix["include"]}
     assert_that(egress["anthropic-api"]).is_equal_to("api.anthropic.com:443")
     assert_that(egress["zai-api"]).is_equal_to("api.z.ai:443")
@@ -311,11 +315,7 @@ def test_a_missing_secret_reports_a_skip_and_never_calls_the_provider(
     monkeypatch.delenv("LINTRO_SMOKE_CREDENTIAL", raising=False)
 
     row = smoke.load_table(path=_TABLE)[0]
-    code = smoke.run_smoke(
-        row=row,
-        credential_env="LINTRO_SMOKE_CREDENTIAL",
-        error_file=None,
-    )
+    code = smoke.main(["--provider", row.name])
 
     assert_that(code).is_equal_to(0)
     assert_that(called).is_false()
@@ -348,11 +348,7 @@ def test_a_successful_call_reports_success(
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     monkeypatch.setenv("LINTRO_SMOKE_CREDENTIAL", _FAKE_CREDENTIAL)
 
-    code = smoke.run_smoke(
-        row=smoke.load_table(path=_TABLE)[0],
-        credential_env="LINTRO_SMOKE_CREDENTIAL",
-        error_file=None,
-    )
+    code = smoke.main(["--provider", "anthropic-api"])
 
     assert_that(code).is_equal_to(0)
     assert_that(output.read_text(encoding="utf-8")).contains("outcome=success")
@@ -457,6 +453,29 @@ def test_a_wrong_answer_carrying_the_credential_is_redacted(
         assert_that(text).contains("RedactedProviderError")
 
 
+def _run_script(
+    argv: list[str],
+    *,
+    env: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    """Run a fixed repository script offline with captured output.
+
+    Args:
+        argv: Interpreter and repository-owned script arguments.
+        env: Environment overrides for the script.
+
+    Returns:
+        The script's output and exit code.
+    """
+    return subprocess.run(  # nosec B603 - fixed argv, shell=False, no user input
+        argv,
+        check=False,
+        capture_output=True,
+        text=True,
+        env={**os.environ, **env},
+    )
+
+
 def _run_status_script(*, tmp_path: Path, env: dict[str, str]) -> dict[str, str]:
     """Run the commit-status script against a stub ``gh`` and return its call.
 
@@ -482,13 +501,9 @@ def _run_status_script(*, tmp_path: Path, env: dict[str, str]) -> dict[str, str]
     stub.chmod(0o755)
 
     bash = shutil.which("bash") or "/bin/bash"
-    result = subprocess.run(  # nosec B603 - fixed argv, shell=False, no user input
+    result = _run_script(
         [bash, str(_STATUS_SCRIPT)],
-        check=False,
-        capture_output=True,
-        text=True,
         env={
-            **os.environ,
             "PATH": f"{stub_dir}:{os.environ['PATH']}",
             "GH_RECORDING": str(recording),
             **env,
@@ -496,6 +511,8 @@ def _run_status_script(*, tmp_path: Path, env: dict[str, str]) -> dict[str, str]
     )
     assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
 
+    if not recording.exists():
+        return {}
     fields: dict[str, str] = {}
     args = recording.read_text(encoding="utf-8").splitlines()
     for flag, value in zip(args, args[1:], strict=False):
@@ -797,3 +814,195 @@ def test_the_skip_notice_names_the_variable_and_holds_no_credential(
     written = summary.read_text(encoding="utf-8")
     assert_that(written).contains(row.key_env)
     assert_that(written).does_not_contain(_FAKE_CREDENTIAL)
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [None, False, True, 7, [], {}, "", "  ", "\n", "a\nb"],
+)
+def test_parked_requires_a_nonempty_printable_reason(
+    smoke: ModuleType,
+    tmp_path: Path,
+    reason: Any,
+) -> None:
+    """A malformed parking declaration fails closed, never enabling the row."""
+    table = _write_table(tmp_path / "providers.json", [_row(parked=reason)])
+    with pytest.raises(ValueError, match="parked.*non-empty.*single-line"):
+        smoke.load_table(path=table)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"name": "Invalid Name"},
+        {"protocol": "unknown"},
+        {"base_url": "http://example.com"},
+        {"key_env": "bad-key"},
+        {"model": ""},
+        {"max_tokens": False},
+        {"surprise": "unknown field"},
+    ],
+)
+def test_parking_does_not_bypass_row_validation(
+    smoke: ModuleType,
+    tmp_path: Path,
+    change: dict[str, Any],
+) -> None:
+    """Excluded rows must remain safe to unpark by deleting one flag."""
+    table = _write_table(
+        tmp_path / "providers.json",
+        [_row(parked="Unfunded (#2837)", **change)],
+    )
+    with pytest.raises(ValueError, match=next(iter(change))):
+        smoke.load_table(path=table)
+
+
+@pytest.mark.parametrize("all_parked", [False, True])
+def test_emit_matrix_cli_reports_parking_and_unparking(
+    tmp_path: Path,
+    all_parked: bool,
+) -> None:
+    """The real CLI emits only live rows and reports every excluded reason.
+
+    Deleting the flag restores the same row, including its egress. An
+    all-parked table emits an empty matrix and a false job gate, no dummy row.
+    """
+    script = tmp_path / "run_smoke.py"
+    shutil.copyfile(_SMOKE_DIR / "run_smoke.py", script)
+    parked = _row(name="parked-api", parked="Awaiting funding (#2837)")
+    live = _row(name="live-api", parked="Owner paused (#2837)")
+    if not all_parked:
+        del live["parked"]
+    _write_table(tmp_path / "providers.json", [parked, live])
+    output = tmp_path / "output"
+    summary = tmp_path / "summary"
+
+    result = _run_script(
+        [sys.executable, str(script), "--emit-matrix"],
+        env={
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_STEP_SUMMARY": str(summary),
+        },
+    )
+
+    assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
+    entries = json.loads(result.stdout)["include"]
+    assert_that([entry["name"] for entry in entries]).is_equal_to(
+        [] if all_parked else ["live-api"],
+    )
+    if entries:
+        assert_that(entries[0]["egress"]).is_equal_to("api.example.com:443")
+        assert_that(entries[0]).does_not_contain_key("parked")
+    outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    assert_that(json.loads(outputs["matrix"])).is_equal_to(json.loads(result.stdout))
+    assert_that(outputs["has_active"]).is_equal_to("false" if all_parked else "true")
+    assert_that(outputs).does_not_contain_key("outcome")
+    written = summary.read_text(encoding="utf-8")
+    for row in [parked, live] if all_parked else [parked]:
+        assert_that(result.stderr).contains("::notice", row["name"], row["parked"])
+        assert_that(written).contains(row["name"], row["parked"])
+    assert_that(written).contains("no call", "no commit status")
+
+
+def test_committed_emit_matrix_cli_keeps_only_anthropic_live(tmp_path: Path) -> None:
+    """The shipped table's four unfunded rows are visibly excluded (#2837)."""
+    output = tmp_path / "output"
+    summary = tmp_path / "summary"
+    result = _run_script(
+        [sys.executable, str(_SMOKE_DIR / "run_smoke.py"), "--emit-matrix"],
+        env={
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_STEP_SUMMARY": str(summary),
+        },
+    )
+
+    assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
+    assert_that(
+        [row["name"] for row in json.loads(result.stdout)["include"]],
+    ).is_equal_to(
+        ["anthropic-api"],
+    )
+    written = summary.read_text(encoding="utf-8")
+    for name in ("openai-api", "kimi-api", "zai-api", "zai-anthropic-api"):
+        assert_that(result.stderr).contains(f"{name}: parked", "::notice", "#2837")
+        assert_that(written).contains(name, "#2837")
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["openai-api", "kimi-api", "zai-api", "zai-anthropic-api"],
+)
+@pytest.mark.parametrize("credential", ["", _FAKE_CREDENTIAL])
+def test_direct_parked_invocation_never_calls_or_publishes_status(
+    smoke: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    name: str,
+    credential: str,
+) -> None:
+    """Direct CLI selection cannot turn parked rows into pending or success."""
+    called: list[str] = []
+
+    async def _complete(**_kwargs: Any) -> str:
+        called.append("provider")
+        return "pong"
+
+    monkeypatch.setattr(smoke, "_complete", _complete)
+    output = tmp_path / "output"
+    summary = tmp_path / "summary"
+    error_file = tmp_path / "error.md"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setenv("LINTRO_SMOKE_CREDENTIAL", credential)
+
+    code = smoke.main(["--provider", name, "--error-file", str(error_file)])
+
+    assert_that(code).is_equal_to(2)
+    assert_that(called).is_empty()
+    assert_that(output.read_text(encoding="utf-8")).is_equal_to("outcome=parked\n")
+    assert_that(error_file.exists()).is_false()
+    assert_that(summary.read_text(encoding="utf-8")).contains(name, "parked", "#2837")
+    logs = capsys.readouterr()
+    assert_that(logs.err).contains("::notice", name, "no call", "no commit status")
+    assert_that(logs.out).does_not_contain(": ok")
+    # Run the workflow's actual publisher with the CLI's outcome. A stub gh
+    # records any attempted status mutation without accessing GitHub.
+    fields = _run_status_script(
+        tmp_path=tmp_path,
+        env={
+            "SMOKE_OUTCOME": output.read_text().strip().split("=", 1)[1],
+            "SMOKE_NAME": name,
+            "SMOKE_STEP": "failure",
+            "GITHUB_REPOSITORY": "lgtm-hq/py-lintro",
+            "GITHUB_SHA": "0" * 40,
+        },
+    )
+    assert_that(fields).is_empty()
+
+
+def test_duplicate_parked_rows_fail_before_matrix_output(
+    tmp_path: Path,
+) -> None:
+    """Even an all-parked table is fully validated before any output is emitted."""
+    script = tmp_path / "run_smoke.py"
+    shutil.copyfile(_SMOKE_DIR / "run_smoke.py", script)
+    _write_table(
+        tmp_path / "providers.json",
+        [_row(parked="Unfunded (#2837)"), _row(parked="Unfunded (#2837)")],
+    )
+    output = tmp_path / "output"
+    summary = tmp_path / "summary"
+    result = _run_script(
+        [sys.executable, str(script), "--emit-matrix"],
+        env={
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_STEP_SUMMARY": str(summary),
+        },
+    )
+
+    assert_that(result.returncode).is_not_equal_to(0)
+    assert_that(result.stderr).contains("duplicate row names")
+    assert_that(result.stdout).is_empty()
+    assert_that(output.exists()).is_false()
+    assert_that(summary.exists()).is_false()

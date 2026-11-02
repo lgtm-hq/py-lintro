@@ -12,8 +12,10 @@ sent through *lintro's own* provider code path so a green run proves the code a
 review will run on, not a hand-rolled HTTP call.
 
 The provider list is data, not code: ``providers.json`` next to this file
-declares one row per provider, and the workflow expands it into one job per
-row. Adding a provider is a row plus a secret.
+declares one row per provider, and the workflow expands active rows into jobs.
+An optional ``parked`` reason suspends a row until funding returns (#2837);
+delete the flag to unpark. Every row is still validated, and parked rows are
+listed in notices and the job summary. Adding a provider is a row plus a secret.
 
 Two subcommands:
 
@@ -37,7 +39,8 @@ failure notifier can quote it on the tracker issue) and as an ``outcome`` step
 output of ``success`` / ``failure`` / ``skipped``. A row whose credential
 variable is empty exits 0 but reports ``skipped`` with a workflow notice, and
 the workflow turns that into a *pending* commit status — a call that was never
-made must never show a green tick.
+made must never show a green tick. Directly selecting a parked row exits 2 with
+``outcome=parked``, makes no call and posts no commit status.
 """
 
 from __future__ import annotations
@@ -104,7 +107,7 @@ SMOKE_MAX_TOKENS_CEILING: Final[int] = 4096
 _REQUIRED_KEYS: Final[frozenset[str]] = frozenset(
     {"name", "protocol", "base_url", "key_env", "model"},
 )
-_OPTIONAL_KEYS: Final[frozenset[str]] = frozenset({"max_tokens"})
+_OPTIONAL_KEYS: Final[frozenset[str]] = frozenset({"max_tokens", "parked"})
 
 #: Per-call timeout. A provider that cannot answer a one-word prompt inside a
 #: minute is a failure worth seeing, not a job worth waiting on.
@@ -125,6 +128,7 @@ class ProviderRow:
         model: Model slug sent with the smoke prompt.
         max_tokens: Response cap for the call; a thinking model needs room for
             its reasoning before the answer (see :data:`SMOKE_MAX_TOKENS`).
+        parked: Reason execution is suspended; absent for active rows.
     """
 
     name: str
@@ -133,6 +137,7 @@ class ProviderRow:
     key_env: str
     model: str
     max_tokens: int = SMOKE_MAX_TOKENS
+    parked: str | None = None
 
     @property
     def egress(self) -> str:
@@ -179,6 +184,26 @@ def _fail_table(message: str) -> None:
     raise ValueError(f"{TABLE_PATH.name}: {message}")
 
 
+def _parked_reason(*, entry: dict[str, Any], index: int) -> str | None:
+    """Validate the optional parking reason without coercing malformed values.
+
+    Args:
+        entry: The raw row mapping.
+        index: Row index for validation errors.
+
+    Returns:
+        The reason, or None when the flag is absent.
+    """
+    if "parked" not in entry:
+        return None
+    reason = entry["parked"]
+    if not isinstance(reason, str) or not reason.strip() or not reason.isprintable():
+        _fail_table(
+            f"row {index} parked must be a non-empty, single-line printable reason",
+        )
+    return str(reason)
+
+
 def _validate_row(*, entry: Any, index: int) -> ProviderRow:
     """Validate one raw table entry.
 
@@ -215,6 +240,7 @@ def _validate_row(*, entry: Any, index: int) -> ProviderRow:
         key_env=str(entry["key_env"]),
         model=str(entry["model"]),
         max_tokens=max_tokens,
+        parked=_parked_reason(entry=entry, index=index),
     )
     if not _NAME_RE.match(row.name):
         _fail_table(f"row {index} name {row.name!r} is not a valid job name")
@@ -271,7 +297,7 @@ def load_table(*, path: Path = TABLE_PATH) -> list[ProviderRow]:
 
 
 def build_matrix(*, rows: list[ProviderRow]) -> dict[str, list[dict[str, str]]]:
-    """Build the GitHub Actions matrix for the table.
+    """Build the GitHub Actions matrix from active rows of the validated table.
 
     Args:
         rows: The validated table rows.
@@ -279,7 +305,7 @@ def build_matrix(*, rows: list[ProviderRow]) -> dict[str, list[dict[str, str]]]:
     Returns:
         A matrix mapping with a single ``include`` list.
     """
-    return {"include": [row.as_matrix_entry() for row in rows]}
+    return {"include": [row.as_matrix_entry() for row in rows if row.parked is None]}
 
 
 def _write_github_output(*, name: str, value: str) -> None:
@@ -307,6 +333,21 @@ def _write_summary(text: str) -> None:
         return
     with Path(summary).open("a", encoding="utf-8") as handle:
         handle.write(f"{text}\n")
+
+
+def _report_parked(*, rows: list[ProviderRow]) -> None:
+    """Announce suspended coverage on every CLI run without a provider verdict.
+
+    Args:
+        rows: All validated rows, including parked ones.
+    """
+    for row in rows:
+        if row.parked is None:
+            continue
+        notice = f"{row.name}: parked — {row.parked}; no call, no commit status"
+        # Keep --emit-matrix stdout valid JSON for non-Actions consumers too.
+        print(f"::notice title=Provider smoke parked::{notice}", file=sys.stderr)
+        _write_summary(f"### `{row.name}` parked\n\n{notice}\n")
 
 
 def row_for(*, name: str, rows: list[ProviderRow]) -> ProviderRow:
@@ -461,6 +502,27 @@ def _normalized_answer(text: str) -> str:
     return text.casefold().strip(_ANSWER_TRIM)
 
 
+def _skip_missing_credential(*, row: ProviderRow) -> int:
+    """Report an active row's missing credential without a provider verdict.
+
+    Args:
+        row: The active row without a credential.
+
+    Returns:
+        Zero, with a skipped outcome that the workflow publishes as pending.
+    """
+    # A missing credential is not a pass and not a failure of the provider.
+    # The workflow publishes pending so no uncalled row gets a green tick.
+    notice = (
+        f"{row.name}: no credential in {row.key_env} — "
+        "smoke skipped, no call was made"
+    )
+    print(f"::notice title=Provider smoke skipped::{notice}")
+    _write_summary(f"### `{row.name}` skipped\n\n{notice}\n")
+    _write_github_output(name="outcome", value="skipped")
+    return 0
+
+
 def run_smoke(*, row: ProviderRow, credential_env: str, error_file: Path | None) -> int:
     """Run the smoke for one row and report it the way CI reads it.
 
@@ -472,19 +534,15 @@ def run_smoke(*, row: ProviderRow, credential_env: str, error_file: Path | None)
     Returns:
         The process exit code.
     """
+    if row.parked is not None:
+        # main reports parking reasons after validating the entire table.
+        # Refuse direct selection before inspecting credentials or importing
+        # providers; the status publisher treats this as no verdict (#2837).
+        _write_github_output(name="outcome", value="parked")
+        return 2
+
     if not os.environ.get(credential_env, "").strip():
-        # A missing credential is not a pass and not a failure of the provider.
-        # It is announced, and the workflow turns it into a pending commit
-        # status so the checks tab never shows a green tick for a call that was
-        # never made.
-        notice = (
-            f"{row.name}: no credential in {row.key_env} — "
-            "smoke skipped, no call was made"
-        )
-        print(f"::notice title=Provider smoke skipped::{notice}")
-        _write_summary(f"### `{row.name}` skipped\n\n{notice}\n")
-        _write_github_output(name="outcome", value="skipped")
-        return 0
+        return _skip_missing_credential(row=row)
 
     http_capture = _http_capture()
     content = ""
@@ -634,10 +692,16 @@ def main(argv: list[str] | None = None) -> int:
     """
     args = _build_parser().parse_args(argv)
     rows = load_table()
+    _report_parked(rows=rows)
 
     if args.emit_matrix:
-        matrix = json.dumps(build_matrix(rows=rows), separators=(",", ":"))
+        matrix_data = build_matrix(rows=rows)
+        matrix = json.dumps(matrix_data, separators=(",", ":"))
         _write_github_output(name="matrix", value=matrix)
+        _write_github_output(
+            name="has_active",
+            value="true" if matrix_data["include"] else "false",
+        )
         print(matrix)
         return 0
 
