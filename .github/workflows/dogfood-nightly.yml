@@ -110,6 +110,8 @@ jobs:
     with:
       tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
       job-name: '🌙 Nightly Dogfooding Lint'
+      # Same startup protection as docker-ci; metrics stay auto (#2521).
+      semgrep-enable-version-check: '0'
       # black:timeout=120: the 30s default timed out on the full repo (#2352).
       lintro-tool-options: >-
         pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
@@ -154,6 +156,7 @@ jobs:
     with:
       tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
       job-name: '🌙 Nightly Dogfooding Lint (retry)'
+      semgrep-enable-version-check: '0'
       # black:timeout=120: the 30s default timed out on the full repo (#2352).
       lintro-tool-options: >-
         pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
