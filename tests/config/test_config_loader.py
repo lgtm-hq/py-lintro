@@ -254,6 +254,23 @@ def test_convert_non_mapping_execution_enforce_raises(
     )
 
 
+def test_mapping_sections_contract() -> None:
+    """Keep shared parametrization from silently losing a required section."""
+    # This explicit inventory is independent of the production tuple used by
+    # the loader, global-config and validator behavior tests below and elsewhere.
+    assert_that(MAPPING_SECTIONS).contains_only(
+        "enforce",
+        "execution",
+        "defaults",
+        "tools",
+        "ai",
+        "review",
+        "output",
+        "watch",
+        "deps",
+    )
+
+
 @pytest.mark.parametrize(
     "section",
     MAPPING_SECTIONS,
