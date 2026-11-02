@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from lintro.tools.core.verify_pass import check_answered
+from lintro.utils.check_answered import check_answered
 
 if TYPE_CHECKING:
     from lintro.ai.models import AIFixSuggestion
