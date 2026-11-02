@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -39,6 +40,8 @@ def license_config_files(
     project_file = project / ".lintro-config.yaml"
     for path in (global_file, project_file):
         path.write_text("{}\n", encoding="utf-8")
+    # Fence fallback searches before they can reach an unrelated ancestor config.
+    (tmp_path / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
     monkeypatch.setenv("LINTRO_GLOBAL_CONFIG", str(global_file))
     return global_file, project_file
 
@@ -420,11 +423,12 @@ def test_yaml_failures_are_path_attributed_configuration_errors(
             path: Path,
             encoding: str | None = None,
             errors: str | None = None,
+            **kwargs: Any,
         ) -> str:
             """Deny only the selected config file while leaving other reads intact."""
-            if path == invalid_file:
+            if path.resolve() == invalid_file.resolve():
                 raise PermissionError("injected license config read failure")
-            return original_read(path, encoding=encoding, errors=errors)
+            return original_read(path, encoding=encoding, errors=errors, **kwargs)
 
         monkeypatch.setattr(Path, "read_text", read_text)
 
@@ -451,6 +455,12 @@ def test_yaml_failures_are_path_attributed_configuration_errors(
     ("content", "cause_type", "diagnostic"),
     [
         (b"[tool.lintro.licenses\n", tomllib.TOMLDecodeError, "Failed to parse"),
+        pytest.param(
+            b"[tool.lintro]\nlicenses = " + b"[" * 20_000 + b"]" * 20_000 + b"\n",
+            RecursionError,
+            "Failed to parse",
+            id="toml-recursion",
+        ),
         (b"\xff", UnicodeDecodeError, "Failed to read"),
     ],
 )
@@ -464,7 +474,7 @@ def test_toml_failures_are_path_attributed_configuration_errors(
 
     Args:
         license_config_files: Independent global and project YAML paths.
-        content: Malformed or undecodable TOML bytes.
+        content: Malformed, excessively nested or undecodable TOML bytes.
         cause_type: Original exception type retained by the loader.
         diagnostic: Expected read or parse diagnostic.
     """

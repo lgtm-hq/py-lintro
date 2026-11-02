@@ -158,8 +158,9 @@ def _load_yaml_section(start_dir: Path) -> dict[str, Any] | None:
     project config; :func:`load_licenses_config` loads those as the base
     tier separately.
 
-    Propagates ``ConfigurationError`` for unreadable, malformed or non-mapping
-    YAML and ``FileNotFoundError`` for an invalid explicit global config path.
+    Helper readers propagate ``ConfigurationError`` for unreadable, malformed,
+    excessively nested or non-mapping YAML, and ``FileNotFoundError`` for an
+    invalid explicit global config path.
 
     Args:
         start_dir: Directory to begin the upward search from.
@@ -182,8 +183,9 @@ def _load_yaml_section(start_dir: Path) -> dict[str, Any] | None:
 def _load_pyproject_section(start_dir: Path) -> dict[str, Any] | None:
     """Load ``[tool.lintro.licenses]`` from ``pyproject.toml``.
 
-    File I/O errors propagate to the caller. Parsing and decoding errors are
-    converted to path-attributed ``ConfigurationError`` exceptions.
+    File I/O errors propagate to the caller. Parsing failures (including excessive
+    nesting) and decoding errors become path-attributed ``ConfigurationError``
+    exceptions with the original cause.
 
     Args:
         start_dir: Directory to begin the upward search from.
@@ -192,8 +194,9 @@ def _load_pyproject_section(start_dir: Path) -> dict[str, Any] | None:
         dict[str, Any] | None: The raw licenses section, or None if absent.
 
     Raises:
-        ConfigurationError: If the file cannot be decoded or parsed, or a present
-            table on the license path is not a mapping.
+        ConfigurationError: If the file cannot be decoded or parsed (including
+            excessive nesting), or a present table on the license path is not a
+            mapping.
     """
     pyproject = find_file_upward(start_dir.resolve(), ["pyproject.toml"])
     if pyproject is None:
@@ -205,7 +208,7 @@ def _load_pyproject_section(start_dir: Path) -> dict[str, Any] | None:
         raise ConfigurationError(
             f"Failed to read TOML config at {pyproject}: {exc}",
         ) from exc
-    except tomllib.TOMLDecodeError as exc:
+    except (tomllib.TOMLDecodeError, RecursionError) as exc:
         raise ConfigurationError(
             f"Failed to parse TOML config at {pyproject}: {exc}",
         ) from exc

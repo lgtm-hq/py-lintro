@@ -43,7 +43,19 @@ def license_cli_files(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
     )
     env = {
         key: os.environ[key]
-        for key in ("PATH", "SYSTEMROOT", "TMPDIR", "LANG", "LC_ALL")
+        for key in (
+            "PATH",
+            "SYSTEMROOT",
+            "COMSPEC",
+            "PATHEXT",
+            "TMPDIR",
+            "TEMP",
+            "TMP",
+            "LANG",
+            "LC_ALL",
+            "PYTHONUTF8",
+            "PYTHONIOENCODING",
+        )
         if key in os.environ
     }
     env.update(
@@ -51,6 +63,8 @@ def license_cli_files(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
         USERPROFILE=str(home),
         HOMEDRIVE=home.drive,
         HOMEPATH=str(home)[len(home.drive) :],
+        APPDATA=str(home / "AppData" / "Roaming"),
+        LOCALAPPDATA=str(home / "AppData" / "Local"),
         XDG_CONFIG_HOME=str(home / ".config"),
         LINTRO_GLOBAL_CONFIG=str(global_file),
         LINTRO_LOG_DIR=str(tmp_path / "logs"),
@@ -125,6 +139,12 @@ def _run_license_cli(
         ("project", b"\xff", "Failed to read"),
         ("pyproject", b"[tool.lintro]\nlicenses = []\n", "must be a mapping"),
         ("pyproject", b"[tool.lintro.licenses\n", "Failed to parse"),
+        pytest.param(
+            "pyproject",
+            b"[tool.lintro]\nlicenses = " + b"[" * 20_000 + b"]" * 20_000 + b"\n",
+            "Failed to parse",
+            id="pyproject-toml-recursion",
+        ),
         ("pyproject", b"\xff", "Failed to read"),
         ("project", b"licenses:\n  policy: invalid\n", "validation error"),
         (
@@ -169,10 +189,10 @@ def test_license_config_failure_is_friendly_at_process_boundary(
     assert_that(result.stderr).does_not_contain("Traceback")
 
 
-def test_license_cli_child_home_is_isolated_on_posix_and_windows(
+def test_license_cli_fixture_home_matches_native_and_ntpath_expansion(
     license_cli_files: tuple[Path, Path, dict[str, str]],
 ) -> None:
-    """The child resolves its owned home using native and Windows rules.
+    """Fixture control for native Path.home and stdlib ntpath home expansion.
 
     Args:
         license_cli_files: Owned project, global file and subprocess environment.
