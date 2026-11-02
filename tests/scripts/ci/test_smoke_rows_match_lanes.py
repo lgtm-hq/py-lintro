@@ -6,7 +6,8 @@ ADR-0011 decision A: adding a lane requires a manifest row, a smoke row and a
 credential binding. The two tables are committed separately, so this test is
 what holds them together: a lane's ``smoke_row`` must name a row of the
 provider-smoke table that calls the same host over the same wire protocol
-the lane's CLI speaks, with a credential the API can take. Otherwise a green
+the lane's CLI speaks, with a credential the API can take. Parked rows retain
+these contracts for unparking but provide no live coverage (#2837). Otherwise a green
 smoke would prove nothing about the route the dogfood really uses, which is
 how the Z.ai outage went undetected.
 """
@@ -255,6 +256,23 @@ def test_the_committed_tables_agree_today(
     )
     assert_that(rows["zai-anthropic-api"]["protocol"]).is_equal_to("anthropic")
     assert_that(rows["zai-anthropic-api"]["key_env"]).is_equal_to("ZAI_AUTH_TOKEN")
+
+
+def test_parked_rows_keep_the_lane_bindings_for_unparking(
+    lanes: dict[str, dict[str, Any]],
+    rows: dict[str, dict[str, Any]],
+) -> None:
+    """Parking suspends execution, while route and credential checks stay live."""
+    parked = {name for name, row in rows.items() if "parked" in row}
+    assert_that(parked).is_equal_to(
+        {"openai-api", "kimi-api", "zai-api", "zai-anthropic-api"},
+    )
+    assert_that(rows["anthropic-api"]).does_not_contain_key("parked")
+    for lane_id in ("openai", "kimi", "zai"):
+        lane = lanes[lane_id]
+        assert_that(parked).contains(lane["smoke_row"])
+        assert_that(rows[lane["smoke_row"]]["parked"]).contains("#2837")
+        _check_lane(lane_id, lane, rows)
 
 
 def _refuses(resolver: ModuleType, document: dict[str, Any], fragment: str) -> None:

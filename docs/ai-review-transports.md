@@ -212,6 +212,16 @@ dropped whole if it echoes the credential and otherwise redacted, so a gateway q
 the key back cannot leak it onto an issue. A row whose credential variable is empty
 reports a pending status and a skip notice, never a pass.
 
+**Unfunded probes can be parked explicitly** (#2837). A row's optional `parked` field
+holds a non-empty, single-line reason. Parked rows are still validated but excluded from
+the matrix; every run lists their reasons in notices and the job summary. They make no
+provider call and publish no commit status. Direct `--provider` selection exits 2 with
+`outcome=parked`, never success or pending. If all rows are parked, the provider job is
+skipped without a dummy success. To unpark after funding returns, delete the row's
+`parked` flag. Keep #2837 open until the funded probes have been verified, including
+Z.ai's earlier wrong-answer case. `anthropic-api` remains live; `openai-api`,
+`kimi-api`, `zai-api` and `zai-anthropic-api` are parked by the owner's decision.
+
 **Every dogfood lane names its smoke row and how far it reaches** (#2873). A row of the
 lanes manifest carries `smoke_row`, the smoke table row that stands for the lane, and
 `smoke_covers`, what that weekly call proves. `route`: the row sends the lane's own
@@ -227,7 +237,8 @@ verdict on the next review, never by the smoke. A lane no smoke can reach at all
 (`cursor`, no API protocol lintro implements) carries `smoke_row: null` and a
 `smoke_gap` saying why. `tests/scripts/ci/test_smoke_rows_match_lanes.py` pins the
 metered key and the level each session lane may claim, and fails when the two files
-drift apart.
+drift apart. Parking retains those bindings and validates their contracts, but suspends
+live coverage: `smoke_covers` describes what an active probe proves, not a parked row.
 
 **Parser drift is caught for free.**
 `tests/fixtures/ai/cli_replay/<cli>/<version>.jsonl` holds one stdout capture per agent
