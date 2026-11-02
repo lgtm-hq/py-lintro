@@ -1,14 +1,21 @@
-"""Tests for the AI undo patch writer."""
+"""Tests for AI undo patches and checkpoint fallback rollback."""
 
 from __future__ import annotations
 
+import subprocess  # nosec B404 - intercept git plumbing failures in regression tests
+import tempfile
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
 
-from lintro.ai.checkpoints import CheckpointError
+from lintro.ai.checkpoints import (
+    CheckpointError,
+    capture_checkpoint,
+    list_checkpoint_refs,
+)
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.undo import (
     UNDO_DIR,
@@ -145,7 +152,7 @@ def test_file_fallback_restore_preserves_mode(
 @pytest.mark.parametrize(
     "checkpoint_error",
     [None, CheckpointError("git ls-files failed: enumeration failed")],
-    ids=["unavailable", "checkpoint-error"],
+    ids=["capture-returned-none", "checkpoint-error"],
 )
 def test_checkpoint_failure_falls_back_to_restorable_file_snapshot(
     tmp_path: Path,
@@ -185,30 +192,172 @@ def test_checkpoint_failure_falls_back_to_restorable_file_snapshot(
     assert_that(created.exists()).is_false()
 
 
+@pytest.mark.parametrize("failure", ["exit", "oserror", "timeout"])
+def test_directory_expansion_failure_reaches_file_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    """Real capture rejects a failed git listing; undo keeps restorable bytes."""
+    repo = init_git_repo(
+        tmp_path,
+        files={"target.py": "committed = True\n", "pkg/other.py": "keep = True\n"},
+    )
+    previous = capture_checkpoint(["target.py"], workspace_root=repo)
+    assert previous is not None
+    target = repo / "target.py"
+    original = b"unsaved = True\r\n"
+    target.write_bytes(original)
+    real_run = subprocess.run
+
+    def fail_directory_listing(
+        args: list[str],
+        **kwargs: Any,
+    ) -> subprocess.CompletedProcess[str]:
+        if args[1:2] == ["ls-files"] and args[-1] == "pkg":
+            if failure == "oserror":
+                raise OSError("enumeration failed")
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired(args, 60.0)
+            return subprocess.CompletedProcess(
+                args,
+                1,
+                stdout="pkg/other.py\0",
+                stderr="enumeration failed",
+            )
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr("lintro.ai.checkpoints.subprocess.run", fail_directory_listing)
+    state = prepare_fix_batch(
+        [_make_suggestion(file="target.py"), _make_suggestion(file="pkg")],
+        repo,
+        retention=1,
+    )
+
+    assert state is not None
+    assert_that(state.kind).is_equal_to("file")
+    assert_that(state.checkpoint).is_none()
+    assert_that(list_checkpoint_refs(workspace_root=repo)).is_equal_to([previous.ref])
+    assert_that(target.read_bytes()).is_equal_to(original)
+    target.write_bytes(b"fixed = True\n")
+
+    restore_undo(state)
+
+    assert_that(target.read_bytes()).is_equal_to(original)
+    assert_that((repo / "pkg/other.py").read_text(encoding="utf-8")).is_equal_to(
+        "keep = True\n",
+    )
+
+
+@pytest.mark.parametrize(
+    "capture_error",
+    [CheckpointError("git checkpoint failed"), OSError("checkpoint index denied")],
+    ids=["checkpoint-error", "oserror"],
+)
 def test_checkpoint_error_with_unreadable_snapshot_aborts_prepare(
     tmp_path: Path,
+    capture_error: CheckpointError | OSError,
 ) -> None:
     """A capture error cannot let a batch proceed without a usable snapshot."""
     repo = init_git_repo(tmp_path, files={"target.py": "original = True\n"})
     suggestion = _make_suggestion(file="target.py")
+    target = repo / "target.py"
+    bystander = repo / "bystander.py"
+    bystander.write_bytes(b"readable = True\n")
+    real_read_bytes = Path.read_bytes
+
+    def read_bytes(path: Path) -> bytes:
+        if path == target:
+            raise PermissionError("snapshot denied")
+        return real_read_bytes(path)
 
     with (
         patch(
             "lintro.ai.undo.capture_checkpoint",
-            side_effect=CheckpointError("git checkpoint failed"),
+            side_effect=capture_error,
         ),
-        patch.object(
-            Path,
-            "read_bytes",
-            side_effect=PermissionError("snapshot denied"),
-        ),
-        pytest.raises(PermissionError, match="snapshot denied"),
+        patch.object(Path, "read_bytes", read_bytes),
     ):
-        prepare_fix_batch([suggestion], repo)
+        assert_that(bystander.read_bytes()).is_equal_to(b"readable = True\n")
+        with pytest.raises(PermissionError, match="snapshot denied"):
+            prepare_fix_batch([suggestion], repo)
 
-    assert_that((repo / "target.py").read_text(encoding="utf-8")).is_equal_to(
+    assert_that(target.read_text(encoding="utf-8")).is_equal_to(
         "original = True\n",
     )
+    assert_that((repo / UNDO_DIR / UNDO_FILE).exists()).is_false()
+
+
+def test_git_index_tempfile_failure_falls_back_to_file_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An OSError allocating the checkpoint index leaves file rollback usable."""
+    repo = init_git_repo(tmp_path, files={"target.py": "committed = True\n"})
+    target = repo / "target.py"
+    original = b"unsaved = True\r\n"
+    target.write_bytes(original)
+    real_mkstemp = tempfile.mkstemp
+
+    def fail_git_index(**kwargs: Any) -> tuple[int, str]:
+        if kwargs.get("prefix") == "lintro-git-index-":
+            raise OSError("checkpoint index denied")
+        return real_mkstemp(**kwargs)
+
+    monkeypatch.setattr("lintro.ai.checkpoints.tempfile.mkstemp", fail_git_index)
+    state = prepare_fix_batch([_make_suggestion(file="target.py")], repo)
+
+    assert state is not None
+    assert_that(state.kind).is_equal_to("file")
+    assert_that(state.checkpoint).is_none()
+    assert_that(list_checkpoint_refs(workspace_root=repo)).is_empty()
+    assert state.patch_path is not None
+    assert_that(state.patch_path.read_text(encoding="utf-8")).contains("---", "+++")
+    assert_that(target.read_bytes()).is_equal_to(original)
+    target.write_bytes(b"fixed = True\n")
+
+    restore_undo(state)
+
+    assert_that(target.read_bytes()).is_equal_to(original)
+
+
+@pytest.mark.parametrize(
+    "use_git",
+    [False, True],
+    ids=["file-snapshot", "git-checkpoint"],
+)
+def test_legacy_patch_tempfile_failure_preserves_rollback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    use_git: bool,
+) -> None:
+    """An optional reverse-patch failure cannot discard either rollback backend."""
+    workspace = (
+        init_git_repo(tmp_path, files={"target.py": "original = True\n"})
+        if use_git
+        else tmp_path
+    )
+    target = workspace / "target.py"
+    target.write_bytes(b"user_edit = True\n")
+    real_mkstemp = tempfile.mkstemp
+
+    def fail_legacy_patch(**kwargs: Any) -> tuple[int, str]:
+        if kwargs.get("dir") == workspace / UNDO_DIR:
+            raise OSError("legacy patch denied")
+        return real_mkstemp(**kwargs)
+
+    monkeypatch.setattr("lintro.ai.undo.tempfile.mkstemp", fail_legacy_patch)
+    state = prepare_fix_batch([_make_suggestion(file="target.py")], workspace)
+
+    assert state is not None
+    assert_that(state.kind).is_equal_to("git" if use_git else "file")
+    assert_that(state.patch_path).is_none()
+    assert_that(list((workspace / UNDO_DIR).iterdir())).is_empty()
+    target.write_bytes(b"fixed = True\n")
+
+    restore_undo(state)
+
+    assert_that(target.read_bytes()).is_equal_to(b"user_edit = True\n")
 
 
 @pytest.fixture

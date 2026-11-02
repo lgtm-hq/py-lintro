@@ -288,9 +288,9 @@ def prepare_fix_batch(
     """Capture rollback state before an AI fix batch mutates files.
 
     Prefers a git checkpoint ref. When git checkpoints are unavailable or
-    capture raises :class:`CheckpointError`, falls back to a file-content
-    snapshot plus the legacy reverse patch. A failure to read that snapshot
-    still aborts preparation before the batch can mutate files.
+    capture raises :class:`CheckpointError` or :class:`OSError`, falls back
+    to a file-content snapshot plus the legacy reverse patch. A failure to
+    read that snapshot still aborts preparation before the batch can mutate files.
 
     Args:
         suggestions: Fixes about to be applied.
@@ -313,7 +313,7 @@ def prepare_fix_batch(
                 workspace_root=workspace_root,
                 keep=retention,
             )
-        except CheckpointError as exc:
+        except (CheckpointError, OSError) as exc:
             logger.debug("Git checkpoint capture failed: {}", exc)
             checkpoint = None
         if checkpoint is not None:
