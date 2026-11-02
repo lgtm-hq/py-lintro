@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess  # nosec B404 - constructs a timeout exception only
 from typing import TYPE_CHECKING
 from unittest.mock import patch
@@ -52,6 +53,15 @@ def test_ruff_parse_warning_names_rejected_records(
         ('{}\n{"filename": "a.py", "message": "bad syntax", "code": null}', 1),
         ('{"filename":', 0),
         ('{"filename":\n{"file": "a.py", "message": "bad syntax", "code": null}', 1),
+        ("null", 0),
+        (" \nnull\t", 0),
+        ("0", 0),
+        ("42", 0),
+        ("-3.5", 0),
+        ('""', 0),
+        ('"diagnostics"', 0),
+        ("true", 0),
+        ("false", 0),
     ],
 )
 def test_ruff_check_counts_rejected_records(
@@ -73,6 +83,43 @@ def test_ruff_check_counts_rejected_records(
     assert_that(result.issues_count).is_equal_to(expected_issues)
     assert_that(result.issues).is_length(expected_issues)
     assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.inspected_files).is_none()
+
+
+@pytest.mark.parametrize("code", [None, "F401"])
+def test_ruff_check_keeps_valid_diagnostic_with_optional_code(
+    ruff_plugin: RuffPlugin,
+    temp_python_file: str,
+    code: str | None,
+) -> None:
+    """A null rule code is valid within an otherwise complete diagnostic array."""
+    output = json.dumps(
+        [
+            {
+                "filename": temp_python_file,
+                "message": "diagnostic retained",
+                "location": {"row": 1, "column": 1},
+                "code": code,
+            },
+        ],
+    )
+    ruff_plugin.options["format_check"] = False
+    with patch(
+        "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+        return_value=subprocess_result(False, output),
+    ):
+        result = ruff_plugin.check([temp_python_file], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_zero()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.issues).extracting("file", "message", "code").is_equal_to(
+        [(temp_python_file, "diagnostic retained", code or "")],
+    )
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.findings_complete).is_true()
 
 
 def test_ruff_parse_failure_survives_format_timeout(
@@ -113,7 +160,13 @@ def test_execute_ruff_check_with_real_plugin_no_files(
 
 @pytest.mark.parametrize(
     ("output", "expected_success", "expected_failures"),
-    [("", False, 1), ("[]", True, 0)],
+    [
+        ("", False, 1),
+        (" \n\t", False, 1),
+        ("[]", True, 0),
+        (" \n[]\n", True, 0),
+        ("[\n]", True, 0),
+    ],
 )
 def test_execute_ruff_check_with_real_plugin(
     ruff_plugin: RuffPlugin,
