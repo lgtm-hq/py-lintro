@@ -38,9 +38,13 @@ def test_validation_import_does_not_load_tools_or_plugins(module: str) -> None:
         cwd=_PROJECT_ROOT,
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
         timeout=30,
     )
+    assert_that(completed.returncode).described_as(
+        f"Import probe for {module} failed:\n"
+        f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
+    ).is_equal_to(0)
     report = json.loads(completed.stdout)
 
     assert_that(Path(report["file"]).resolve()).is_equal_to(
