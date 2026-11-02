@@ -144,10 +144,17 @@ Before an AI fix batch mutates files, lintro captures a snapshot under
   in-memory copies. Files an earlier accepted group already changed are left alone, so
   rejecting one group never discards fixes you just accepted.
 - **Retention** keeps the last N checkpoint refs (default 10), pruning older ones via
-  `git update-ref -d` before the new ref is written. `0` keeps only the current run's
-  checkpoint.
+  `git update-ref -d` before allocating the temporary index. This best-effort pruning
+  attempts to reserve a slot for the new ref, leaving at most `max(N - 1, 0)` older
+  refs. If pruning succeeds but index allocation fails, those refs stay pruned and no
+  new ref is created; for `N=0` or `N=1`, none remain. A successful capture with `0`
+  keeps only the current run's checkpoint.
 - **Fallback:** outside a git work tree (or in a bare repo), lintro falls back to
-  file-content snapshots / the legacy reverse patch under `.lintro-cache/ai`.
+  file-content snapshots / the legacy reverse patch under `.lintro-cache/ai`. AI fix
+  preparation also uses this fallback when checkpoint capture returns no checkpoint or
+  raises `CheckpointError` or `OSError`, including index allocation failure. It does not
+  restore pruned refs. If reading the fallback snapshot fails, preparation aborts before
+  the batch mutates files or writes its reverse patch.
 
 Optional: set `ai.checkpoint_fmt: true` to capture the same style of checkpoint before
 `lintro format` mutates files. This one is git-only — an in-process snapshot would not

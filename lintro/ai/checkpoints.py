@@ -298,12 +298,15 @@ def capture_checkpoint(
     failures propagate as :class:`CheckpointError`, aborting capture before
     any checkpoint refs are pruned or written.
 
-    Filesystem errors, including temporary-index allocation, close, and
-    cleanup failures, propagate as :class:`OSError`. Git failures inside the
-    later capture try block return None instead; the earlier directory-listing
-    :class:`CheckpointError` propagates as described above. Retention pruning
-    precedes temporary-index allocation and is not rolled back if a later
-    operation fails.
+    Local temporary-index allocation, close, and cleanup failures propagate
+    as :class:`OSError`; cleanup can fail after the new ref has been written.
+    Git subprocess launch errors are wrapped as :class:`CheckpointError`:
+    failures inside the later capture try block return None instead, while
+    directory-listing failures propagate as described above. Best-effort retention
+    pruning first attempts to reserve a slot by keeping at most
+    ``max(keep - 1, 0)`` older refs. It is not rolled back on later failure:
+    if temporary-index allocation fails, successfully pruned refs stay deleted
+    and no new ref is created.
 
     Args:
         paths: Files (and/or directories) to include in the snapshot.

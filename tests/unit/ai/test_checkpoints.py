@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess  # nosec B404 - intercept git plumbing failures in regression tests
+import tempfile
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -537,6 +538,69 @@ def test_capture_with_zero_retention_keeps_current_ref(tmp_path: Path) -> None:
     assert_that(list_checkpoint_refs(workspace_root=repo)).is_equal_to(
         [current.ref],  # type: ignore[union-attr]
     )
+
+
+@pytest.mark.parametrize("keep", [0, 1, 2])
+@pytest.mark.parametrize("allocation_fails", [False, True], ids=["capture", "mkstemp"])
+def test_capture_retention_precedes_index_allocation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    keep: int,
+    allocation_fails: bool,
+) -> None:
+    """Pruning reserves a slot even when index allocation prevents a new ref."""
+    repo = _init_git_repo(tmp_path)
+    target = repo / "tracked.py"
+    seeded_refs = []
+    for number in range(3):
+        target.write_bytes(f"alpha = {number}\n".encode())
+        seed = capture_checkpoint(
+            ["tracked.py"],
+            workspace_root=repo,
+            run_id=f"100{number}-seed",
+            keep=10,
+        )
+        assert seed is not None
+        seeded_refs.append(seed.ref)
+    assert_that(list_checkpoint_refs(workspace_root=repo)).is_equal_to(seeded_refs)
+    original = b"alpha = 'unsaved user edit'\n"
+    target.write_bytes(original)
+    index = repo / ".git" / "index"
+    index_before = index.read_bytes()
+
+    def deny_index(*args: Any, **kwargs: Any) -> tuple[int, str]:
+        raise OSError("checkpoint index denied")
+
+    current = None
+    if allocation_fails:
+        with monkeypatch.context() as allocation:
+            allocation.setattr(tempfile, "mkstemp", deny_index)
+            with pytest.raises(OSError, match="checkpoint index denied"):
+                capture_checkpoint(
+                    ["tracked.py"],
+                    workspace_root=repo,
+                    run_id="2000-new",
+                    keep=keep,
+                )
+    else:
+        current = capture_checkpoint(
+            ["tracked.py"],
+            workspace_root=repo,
+            run_id="2000-new",
+            keep=keep,
+        )
+        assert current is not None
+
+    expected_refs = seeded_refs[-(keep - 1) :] if keep > 1 else []
+    if current is not None:
+        expected_refs.append(current.ref)
+    assert_that(list_checkpoint_refs(workspace_root=repo)).is_equal_to(expected_refs)
+    assert_that(target.read_bytes()).is_equal_to(original)
+    assert_that(index.read_bytes()).is_equal_to(index_before)
+    if current is not None:
+        target.write_bytes(b"alpha = 'fixed'\n")
+        restore_checkpoint(current)
+        assert_that(target.read_bytes()).is_equal_to(original)
 
 
 def test_capture_ignores_ambient_git_index_file(
