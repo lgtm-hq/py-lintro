@@ -1114,16 +1114,15 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     The pyproject format uses flat tool sections like [tool.lintro.ruff],
     while .lintro-config.yaml uses nested tools: section.
 
+    Nested ``execution``, ``enforce`` and tool tables must be mappings.
+    Other section values are passed through so :func:`build_config_from_dict`
+    can validate their types.
+
     Args:
         data: Raw [tool.lintro] section from pyproject.toml.
 
     Returns:
         dict[str, Any]: Converted configuration in .lintro-config.yaml format.
-
-    Raises:
-        ValueError: If a nested ``execution``, ``enforce`` or tool table is not
-            a mapping. Other section values are passed through so
-            :func:`build_config_from_dict` can validate their types.
     """
     result: dict[str, Any] = {
         "enforce": {},
@@ -1175,30 +1174,18 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
                     continue
                 nested_canonical = tool_aliases.get(nested_lower, nested_lower)
                 result["tools"].setdefault(nested_canonical, nested_value)
-        elif key_lower == "execution":
-            # Nested ``[tool.lintro.execution]`` is the structured form of
-            # the same keys accepted flat under ``[tool.lintro]``.
-            if not isinstance(value, dict):
-                actual = "null" if value is None else type(value).__name__
-                raise ValueError(
-                    f"execution must be a mapping, got {actual}.",
-                )
-            result["execution"].update(
-                {
-                    nested_key.replace("-", "_"): nested_value
-                    for nested_key, nested_value in value.items()
-                },
+        elif key_lower in ("execution", "enforce"):
+            # Nested tables are the structured form of the same keys
+            # accepted flat under ``[tool.lintro]``.
+            table_path = f"tool.lintro.{key_lower}"
+            section_data = _require_mapping_section(
+                data={table_path: value},
+                section=table_path,
             )
-        elif key_lower == "enforce":
-            if not isinstance(value, dict):
-                actual = "null" if value is None else type(value).__name__
-                raise ValueError(
-                    f"enforce must be a mapping, got {actual}.",
-                )
-            result["enforce"].update(
+            result[key_lower].update(
                 {
                     nested_key.replace("-", "_"): nested_value
-                    for nested_key, nested_value in value.items()
+                    for nested_key, nested_value in section_data.items()
                 },
             )
         elif key in execution_keys or key.replace("-", "_") in execution_keys:
