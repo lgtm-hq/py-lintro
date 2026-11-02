@@ -140,6 +140,9 @@ def parse_fix_response(
 ) -> AIFixSuggestion | None:
     """Parse an AI response into an AIFixSuggestion.
 
+    Both code snippets must be strings. Missing, null, or non-string
+    confidence defaults to medium; blank or unknown strings yield low.
+
     Args:
         content: Raw AI response content.
         file_path: Path to the file.
@@ -203,8 +206,14 @@ def parse_batch_response(
     as well as a bare array, which older transcripts and cache entries hold.
     A malformed entry rejects the whole batch, so generation retries every
     issue individually without retaining partial suggestions. Source snippets
-    must be strings. Rule codes retain legacy scalar string conversion and
-    missing/null defaults, but mappings and lists are rejected.
+    must be strings, including when the other snippet is empty or unchanged.
+
+    Legacy line conversion preserves booleans as booleans (an ``int`` subclass)
+    and truncates finite fractional numbers toward zero. Missing values and
+    values that cannot be converted with ``int`` default to zero; non-finite numbers
+    reject the batch. Rule codes use Python's scalar ``str`` conversion
+    (for example, ``True`` becomes ``"True"`` and infinity becomes ``"inf"``).
+    Missing/null codes default to ``""``; mappings and lists reject the batch.
 
     Args:
         content: Raw AI response content (a JSON object carrying ``fixes``, or

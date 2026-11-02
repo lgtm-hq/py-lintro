@@ -8,6 +8,7 @@ import pytest
 from assertpy import assert_that
 from loguru import logger
 
+from lintro.ai.cli_schemas import FIX_BATCH_KEY
 from lintro.ai.fix import generate_fixes
 from lintro.ai.providers.base import AIResponse
 from tests.unit.ai.conftest import MockAIProvider, MockIssue
@@ -17,9 +18,36 @@ _MALFORMED_BATCH_FIELDS: list[tuple[str, dict[str, object]]] = [
     ("nan-line", {"line": float("nan")}),
     ("mapping-rule-code", {"code": {"rule": "B101"}}),
     ("list-rule-code", {"code": ["B101"]}),
-    ("mapping-snippet", {"suggested_code": {"text": "y = 9"}}),
-    ("list-snippet", {"original_code": ["y = 2"]}),
+    ("mapping-original", {"original_code": {"text": "y = 2"}}),
+    ("list-original", {"original_code": ["y = 2"]}),
+    ("mapping-suggested", {"suggested_code": {"text": "y = 9"}}),
+    ("list-suggested", {"suggested_code": ["y = 9"]}),
 ]
+
+
+def _malformed_batch_content(
+    fields: dict[str, object],
+    *,
+    wrapped: bool,
+    invalid_first: bool,
+) -> str:
+    """Pair a malformed fix with a valid fix that fallback must discard.
+
+    Args:
+        fields: Fields that invalidate the second source line's fix.
+        wrapped: Whether to use the CLI schema object instead of a bare array.
+        invalid_first: Whether the malformed fix precedes the valid fix.
+
+    Returns:
+        The batch response to feed to generation.
+    """
+    entries = [
+        {"original_code": "x = 1", "suggested_code": "x = 9"},
+        {"original_code": "y = 2", "suggested_code": "y = 9", **fields},
+    ]
+    if invalid_first:
+        entries.reverse()
+    return json.dumps({FIX_BATCH_KEY: entries} if wrapped else entries)
 
 
 def _response(content: str) -> AIResponse:
@@ -110,20 +138,17 @@ async def test_single_generation_logs_only_malformed_response_as_failure(
         pytest.param("not json", True, id="malformed-json"),
         *[
             pytest.param(
-                json.dumps(
-                    [
-                        {"original_code": "x = 1", "suggested_code": "x = 9"},
-                        {
-                            "original_code": "y = 2",
-                            "suggested_code": "y = 9",
-                            **fields,
-                        },
-                    ],
+                _malformed_batch_content(
+                    fields,
+                    wrapped=wrapped,
+                    invalid_first=invalid_first,
                 ),
                 True,
-                id=name,
+                id=f"{name}-wrapped={wrapped}-invalid-first={invalid_first}",
             )
             for name, fields in _MALFORMED_BATCH_FIELDS
+            for wrapped in (False, True)
+            for invalid_first in (False, True)
         ],
     ],
 )
@@ -132,7 +157,7 @@ async def test_batch_generation_recovers_from_missing_or_malformed_suggestions(
     content,
     malformed,
 ):
-    """Count mismatches retry every issue; only malformed replies log failure."""
+    """Retry every issue, discarding valid batch fixes on any malformed entry."""
     source = tmp_path / "batch.py"
     source.write_text("x = 1\ny = 2\n")
     issues = [
@@ -162,6 +187,7 @@ async def test_batch_generation_recovers_from_missing_or_malformed_suggestions(
     )
     assert_that([s.line for s in result]).is_equal_to([1, 2])
     assert_that(progress).is_equal_to([(1, 2), (2, 2)])
+    assert_that(source.read_text()).is_equal_to("x = 1\ny = 2\n")
     transcript = "".join(messages)
     assert_that("Batch AI fix generation failed" in transcript).is_equal_to(malformed)
     assert_that("malformed response" in transcript).is_equal_to(malformed)

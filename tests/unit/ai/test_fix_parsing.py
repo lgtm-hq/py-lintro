@@ -18,6 +18,17 @@ from lintro.ai.fix_parsing import (
 from lintro.ai.metadata import suggestion_to_payload
 from lintro.ai.models import AIFixSuggestion
 
+#: One batch entry in the shape the CLI fix schema requires (#2573).
+_BATCH_ENTRY = {
+    "line": 5,
+    "code": "E501",
+    "original_code": "old",
+    "suggested_code": "new",
+    "explanation": "Fix",
+    "confidence": "high",
+    "risk_level": "safe-style",
+}
+
 # ---------------------------------------------------------------------------
 # generate_diff
 # ---------------------------------------------------------------------------
@@ -54,10 +65,11 @@ def test_parse_fix_response_valid_response():
         },
     )
     result = parse_fix_response(content, "main.py", 10, "B101")
-    assert_that(result).is_not_none()
-    assert_that(result.file).is_equal_to("main.py")  # type: ignore[union-attr]  # assertpy is_not_none narrows this
-    assert_that(result.confidence).is_equal_to("high")  # type: ignore[union-attr]  # assertpy is_not_none narrows this
-    assert_that(result.diff).is_not_empty()  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    if result is None:
+        pytest.fail("Expected a suggestion for a non-empty patch")
+    assert_that(result.file).is_equal_to("main.py")
+    assert_that(result.confidence).is_equal_to("high")
+    assert_that(result.diff).is_not_empty()
 
 
 @pytest.mark.parametrize(
@@ -135,8 +147,9 @@ def test_parse_fix_response_extracts_risk_level():
         },
     )
     result = parse_fix_response(content, "main.py", 10, "B101")
-    assert_that(result).is_not_none()
-    assert_that(result.risk_level).is_same_as(RiskLevel.SAFE_STYLE)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    if result is None:
+        pytest.fail("Expected a suggestion for a non-empty patch")
+    assert_that(result.risk_level).is_same_as(RiskLevel.SAFE_STYLE)
 
 
 def test_parse_fix_response_risk_level_defaults_to_empty():
@@ -150,8 +163,9 @@ def test_parse_fix_response_risk_level_defaults_to_empty():
         },
     )
     result = parse_fix_response(content, "main.py", 10, "B101")
-    assert_that(result).is_not_none()
-    assert_that(result.risk_level).is_equal_to("")  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    if result is None:
+        pytest.fail("Expected a suggestion for a non-empty patch")
+    assert_that(result.risk_level).is_equal_to("")
 
 
 def test_parse_fix_response_confidence_defaults_to_medium():
@@ -164,8 +178,9 @@ def test_parse_fix_response_confidence_defaults_to_medium():
         },
     )
     result = parse_fix_response(content, "main.py", 10, "B101")
-    assert_that(result).is_not_none()
-    assert_that(result.confidence).is_equal_to("medium")  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    if result is None:
+        pytest.fail("Expected a suggestion for a non-empty patch")
+    assert_that(result.confidence).is_equal_to("medium")
 
 
 @pytest.mark.parametrize("shape", ["single", "batch", "wrapped"])
@@ -376,6 +391,58 @@ def test_parse_batch_response_coerces_line_and_code():
 
 
 @pytest.mark.parametrize("wrapped", [False, True])
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        pytest.param(True, True, id="true-stays-bool"),
+        pytest.param(False, False, id="false-stays-bool"),
+        pytest.param(7.9, 7, id="positive-fraction"),
+        pytest.param(-7.9, -7, id="negative-fraction"),
+        pytest.param(0.9, 0, id="positive-fraction-below-one"),
+        pytest.param(-0.9, 0, id="negative-fraction-above-minus-one"),
+    ],
+)
+def test_batch_legacy_line_conversion_preserves_type_and_value(wrapped, line, expected):
+    """Keep bool identity and truncation toward zero as compatibility behavior."""
+    entries = [{**_BATCH_ENTRY, "line": line}]
+    payload = {FIX_BATCH_KEY: entries} if wrapped else entries
+
+    result = parse_batch_response(json.dumps(payload), "legacy.py")
+
+    assert_that(result).is_length(1)
+    assert_that(result[0].line).is_type_of(type(expected)).is_equal_to(expected)
+    assert_that(result[0].suggested_code).is_equal_to("new")
+    assert_that(result[0].diff).contains("-old", "+new")
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+@pytest.mark.parametrize(
+    "code,expected",
+    [
+        pytest.param(True, "True", id="true"),
+        pytest.param(False, "False", id="false"),
+        pytest.param(1.25, "1.25", id="fraction"),
+        pytest.param(float("nan"), "nan", id="nan"),
+        pytest.param(float("inf"), "inf", id="infinity"),
+        pytest.param(float("-inf"), "-inf", id="negative-infinity"),
+        pytest.param("", "", id="blank-string"),
+        pytest.param(" E501 ", " E501 ", id="padded-string"),
+    ],
+)
+def test_batch_legacy_scalar_rule_codes_survive_serialization(wrapped, code, expected):
+    """Legacy scalar codes use Python spelling and preserve string whitespace."""
+    entries = [{**_BATCH_ENTRY, "code": code}]
+    payload = {FIX_BATCH_KEY: entries} if wrapped else entries
+
+    result = parse_batch_response(json.dumps(payload), "scalar.py")
+
+    assert_that(result).is_length(1)
+    assert_that(result[0].code).is_type_of(str).is_equal_to(expected)
+    serialized = json.loads(json.dumps(suggestion_to_payload(result[0]).to_dict()))
+    assert_that(serialized).contains_entry({"code": expected})
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
 @pytest.mark.parametrize("invalid_first", [False, True])
 @pytest.mark.parametrize("number", ["NaN", "Infinity", "-Infinity", "1e309", "-1e309"])
 def test_batch_nonfinite_line_rejects_every_entry(wrapped, invalid_first, number):
@@ -397,29 +464,26 @@ def test_batch_nonfinite_line_rejects_every_entry(wrapped, invalid_first, number
     assert_that(str(error.value)).contains("line", "nonfinite.py")
 
 
-@pytest.mark.parametrize("code", [{}, {"rule": "E501"}, [], ["E501"]])
+@pytest.mark.parametrize("field", ["code", "original_code", "suggested_code"])
+@pytest.mark.parametrize("value", [{}, {"text": "E501"}, [], ["E501"]])
 @pytest.mark.parametrize("wrapped", [False, True])
-def test_batch_structured_rule_code_is_rejected(code, wrapped):
-    """A structured rule code cannot become a fabricated string identifier."""
-    entries = [_BATCH_ENTRY, {**_BATCH_ENTRY, "code": code}]
+@pytest.mark.parametrize("invalid_first", [False, True])
+def test_batch_structured_codes_and_snippets_reject_every_entry(
+    field,
+    value,
+    wrapped,
+    invalid_first,
+):
+    """Structured fields reject the whole batch in either entry order or wrapper."""
+    entries = [{**_BATCH_ENTRY, field: value}, _BATCH_ENTRY]
+    if not invalid_first:
+        entries.reverse()
     payload = {FIX_BATCH_KEY: entries} if wrapped else entries
 
     with pytest.raises(AIFixParseError) as error:
         parse_batch_response(json.dumps(payload), "structured.py")
 
     assert_that(str(error.value)).contains("code", "structured.py")
-
-
-#: One batch entry in the shape the CLI fix schema requires (#2573).
-_BATCH_ENTRY = {
-    "line": 5,
-    "code": "E501",
-    "original_code": "old",
-    "suggested_code": "new",
-    "explanation": "Fix",
-    "confidence": "high",
-    "risk_level": "safe-style",
-}
 
 
 def test_parse_batch_response_accepts_the_wrapped_cli_schema_object():
