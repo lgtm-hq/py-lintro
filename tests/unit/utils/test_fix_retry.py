@@ -325,7 +325,7 @@ def test_retry_distinguishes_measured_zero_from_unmeasured_initial_issues(
     assert_that(payload["remaining"]).is_none()
 
 
-@pytest.mark.parametrize("initial_count", [None, 3])
+@pytest.mark.parametrize("initial_count", [None, 5])
 @pytest.mark.parametrize("timed_out", [False, True])
 def test_fix_retry_merge_preserves_last_pass_payload(
     initial_count: int | None,
@@ -334,7 +334,8 @@ def test_fix_retry_merge_preserves_last_pass_payload(
     """Preserve last-pass payloads with explicit or inferred first-pass counts.
 
     Args:
-        initial_count: First-pass measurement, if one was available.
+        initial_count: None infers the detected-list length; 5 is an explicit
+            measurement that must take precedence over that length.
         timed_out: Whether the final pass exceeded its execution deadline.
     """
     detected = [
@@ -357,7 +358,7 @@ def test_fix_retry_merge_preserves_last_pass_payload(
         output="last pass",
         formatted_output="last formatted output",
         issues_count=1,
-        issues=detected[-1:],
+        issues=[BaseIssue(file="last.txt", message="only found on the last pass")],
         initial_issues_count=2,
         fixed_issues_count=1,
         remaining_issues_count=1,
@@ -373,10 +374,11 @@ def test_fix_retry_merge_preserves_last_pass_payload(
 
     result = run_fix_with_retry(tool, ["."], {}, max_retries=2)
 
-    assert_that(result.initial_issues_count).is_equal_to(3)
+    expected_initial_count = len(detected) if initial_count is None else initial_count
+    assert_that(result.initial_issues_count).is_equal_to(expected_initial_count)
     assert_that(result.initial_issues).is_equal_to(detected)
     assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.fixed_issues_count).is_equal_to(2)
+    assert_that(result.fixed_issues_count).is_equal_to(expected_initial_count - 1)
     assert_that(result.remaining_issues_count).is_equal_to(1)
     assert_that(result.issues).is_equal_to(last.issues)
     assert_that(result.success).is_false()
@@ -386,6 +388,38 @@ def test_fix_retry_merge_preserves_last_pass_payload(
     assert_that(result.parse_failures_count).is_equal_to(0)
     assert_that(result.pytest_summary).is_equal_to(last.pytest_summary)
     assert_that(result.timed_out).is_equal_to(timed_out)
+
+
+def test_fix_retry_preserves_first_pass_payload_when_no_residual_remains() -> None:
+    """A measured zero residual retains the complete first-pass payload."""
+    first = ToolResult(
+        name="formatter",
+        success=True,
+        output="first pass fixed everything",
+        formatted_output="first formatted output",
+        issues_count=0,
+        initial_issues_count=1,
+        initial_issues=[BaseIssue(file="a.txt", message="format a")],
+        fixed_issues_count=1,
+        remaining_issues_count=0,
+        metadata={"stage": "first"},
+        parse_failures_count=0,
+        pytest_summary={"passed": 2},
+        cwd="/repo",
+        duration_seconds=1.5,
+        inspected_files=True,
+    )
+    tool = MagicMock()
+    tool.fix.side_effect = [first]
+
+    result = run_fix_with_retry(tool, ["."], {}, max_retries=3)
+
+    assert_that(result).is_equal_to(first)
+    assert_that(result.issues).is_empty()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.remaining_issues_count).is_equal_to(0)
+    assert_that(result.fixed_issues_count).is_equal_to(1)
+    assert_that(result.residual_unknown).is_false()
 
 
 @pytest.mark.parametrize("failure_pass", [1, 2, 3])
