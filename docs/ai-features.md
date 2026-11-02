@@ -104,6 +104,27 @@ For safe-style groups, pressing `Enter` defaults to accepting the group.
 After the review session, a post-fix AI summary contextualizes what was fixed and what
 remains.
 
+### Fix Response Validation
+
+Fix confidence labels ignore case and surrounding whitespace. Omitted, null, or
+non-string confidence defaults to `medium`; an explicitly blank string (including
+whitespace only) or an unknown label becomes `low`. Unknown risk labels remain
+unclassified and follow the conservative behavior described above.
+
+Both `original_code` and `suggested_code` must be strings. Empty strings and identical
+snippets are valid responses that yield no suggestion. Missing or non-string snippets
+are malformed. Batch rule identifiers (`code`) retain legacy scalar-to-string
+conversion, including numeric codes; omitted or null identifiers default to an empty
+string. Mappings and lists are rejected instead of being stringified. Non-finite batch
+line numbers are also malformed.
+
+One malformed entry rejects the whole batch, including any valid entries before or after
+it. Generation then retries every issue individually, keeping no suggestions from the
+rejected batch. An empty batch or a batch whose usable suggestion count differs from the
+issue count also triggers this fallback; valid empty or no-op patches do not produce
+parse-failure diagnostics. Malformed generation and refinement replies produce concise
+debug diagnostics without a generic traceback.
+
 ### Git Checkpoints & Rollback
 
 Before an AI fix batch mutates files, lintro captures a snapshot under

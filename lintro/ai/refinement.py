@@ -18,7 +18,7 @@ from loguru import logger
 from lintro.ai.apply import apply_fixes
 from lintro.ai.fix import _call_fix_ai
 from lintro.ai.fix_context import extract_context, read_file_safely
-from lintro.ai.fix_parsing import parse_fix_response
+from lintro.ai.fix_parsing import AIFixParseError, parse_fix_response
 from lintro.ai.paths import resolve_workspace_file, to_provider_path
 from lintro.ai.prompts import REFINEMENT_PROMPT_TEMPLATE
 from lintro.ai.sanitize import make_boundary_marker, sanitize_code_content
@@ -248,6 +248,11 @@ async def refine_unverified_fixes(
 
         except (KeyboardInterrupt, SystemExit):
             raise
+        except AIFixParseError as exc:
+            logger.debug(
+                f"Refinement failed for {suggestion.file}:{suggestion.line}: "
+                f"malformed response ({exc})",
+            )
         except Exception as exc:
             logger.debug(
                 f"Refinement failed for {suggestion.file}:{suggestion.line} "
