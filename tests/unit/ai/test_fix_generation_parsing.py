@@ -12,6 +12,15 @@ from lintro.ai.fix import generate_fixes
 from lintro.ai.providers.base import AIResponse
 from tests.unit.ai.conftest import MockAIProvider, MockIssue
 
+_MALFORMED_BATCH_FIELDS: list[tuple[str, dict[str, object]]] = [
+    ("infinite-line", {"line": float("inf")}),
+    ("nan-line", {"line": float("nan")}),
+    ("mapping-rule-code", {"code": {"rule": "B101"}}),
+    ("list-rule-code", {"code": ["B101"]}),
+    ("mapping-snippet", {"suggested_code": {"text": "y = 9"}}),
+    ("list-snippet", {"original_code": ["y = 2"]}),
+]
+
 
 def _response(content: str) -> AIResponse:
     """Build a provider response with a controlled payload."""
@@ -99,6 +108,23 @@ async def test_single_generation_logs_only_malformed_response_as_failure(
             id="too-many",
         ),
         pytest.param("not json", True, id="malformed-json"),
+        *[
+            pytest.param(
+                json.dumps(
+                    [
+                        {"original_code": "x = 1", "suggested_code": "x = 9"},
+                        {
+                            "original_code": "y = 2",
+                            "suggested_code": "y = 9",
+                            **fields,
+                        },
+                    ],
+                ),
+                True,
+                id=name,
+            )
+            for name, fields in _MALFORMED_BATCH_FIELDS
+        ],
     ],
 )
 async def test_batch_generation_recovers_from_missing_or_malformed_suggestions(

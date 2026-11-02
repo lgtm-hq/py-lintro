@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import math
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -76,8 +77,9 @@ def _parse_suggestion(
 ) -> AIFixSuggestion | None:
     """Validate a fix entry, preserving empty patches as valid absence.
 
-    Missing or non-string confidence defaults to medium; unknown labels
-    stay low-confidence. Unrecognized risk stays unclassified.
+    Missing, null, or non-string confidence defaults to medium; blank and
+    unknown string labels stay low-confidence. Unrecognized risk stays
+    unclassified.
 
     Args:
         data: Decoded fix entry.
@@ -199,6 +201,10 @@ def parse_batch_response(
     Accepts the wrapped object the CLI transport now requests
     (``{"fixes": [...]}``, see :data:`lintro.ai.cli_schemas.FIX_BATCH_CLI_SCHEMA`)
     as well as a bare array, which older transcripts and cache entries hold.
+    A malformed entry rejects the whole batch, so generation retries every
+    issue individually without retaining partial suggestions. Source snippets
+    must be strings. Rule codes retain legacy scalar string conversion and
+    missing/null defaults, but mappings and lists are rejected.
 
     Args:
         content: Raw AI response content (a JSON object carrying ``fixes``, or
@@ -226,11 +232,19 @@ def parse_batch_response(
                 f"Batch fix entry must be a JSON object for {file_path}",
             )
         raw_line = item.get("line", 0)
+        if isinstance(raw_line, float) and not math.isfinite(raw_line):
+            raise AIFixParseError(
+                f"Batch fix line must be finite for {file_path}",
+            )
         try:
             line = int(raw_line) if not isinstance(raw_line, int) else raw_line
         except (TypeError, ValueError):
             line = 0
         raw_code = item.get("code", "")
+        if isinstance(raw_code, (dict, list)):
+            raise AIFixParseError(
+                f"Batch fix code must be a scalar or null for {file_path}:{line}",
+            )
         code = str(raw_code) if raw_code is not None else ""
         suggestion = _parse_suggestion(item, file_path, line, code)
         if suggestion is not None:
