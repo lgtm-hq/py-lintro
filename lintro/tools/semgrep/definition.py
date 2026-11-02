@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote as url_quote
 
+import yaml
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
@@ -87,15 +88,25 @@ def _rule_configs(
 
 
 def _restore_pack_rule_ids(data: dict[str, Any], packs: list[str]) -> None:
-    """Remove installation-path prefixes only from marked packaged findings.
+    """Remove installation-path prefixes only from marked, shipped rule IDs.
 
     Args:
         data: Semgrep report to normalize before parsing issue objects.
-        packs: Enabled packaged rules, whose metadata identifies their findings.
+        packs: Enabled packs whose YAML defines the eligible rule IDs.
     """
     results = data.get("results")
     if not isinstance(results, list):
         return
+    # User rules can copy the metadata marker; the shipped YAML owns the IDs.
+    shipped_ids = {
+        pack: {
+            rule["id"]
+            for rule in yaml.safe_load(
+                resolve_rule_pack(pack).read_text(encoding="utf-8"),
+            )["rules"]
+        }
+        for pack in packs
+    }
     for result in results:
         if not isinstance(result, dict):
             continue
@@ -111,7 +122,9 @@ def _restore_pack_rule_ids(data: dict[str, Any], packs: list[str]) -> None:
             continue
         namespace = "lintro." + pack.replace("/", ".") + "."
         prefix, marker, suffix = check_id.rpartition(namespace)
-        if marker and (not prefix or prefix.endswith(".")):
+        if marker + suffix in shipped_ids[pack] and (
+            not prefix or prefix.endswith(".")
+        ):
             result["check_id"] = marker + suffix
 
 

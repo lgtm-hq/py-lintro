@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 from assertpy import assert_that
 from click.testing import CliRunner
 from pydantic import ValidationError
@@ -17,11 +18,89 @@ from lintro.config.lintro_config import LintroConfig
 from lintro.config.tool_config import LintroToolConfig
 from lintro.enums.action import Action
 from lintro.exceptions.errors import ConfigurationError
+from lintro.plugins.subprocess_executor import SubprocessResult
+from lintro.rules import available_rule_packs, resolve_rule_pack
 from lintro.tools.semgrep.definition import SemgrepPlugin
 from lintro.utils.execution.tool_configuration import configure_tool_for_execution
 from lintro.utils.unified_config import UnifiedConfigManager
 
 PACK = "python/none-coercion"
+
+
+@pytest.mark.parametrize("pack", available_rule_packs())
+@pytest.mark.parametrize("enabled", [False, True], ids=["disabled", "enabled"])
+def test_only_shipped_rule_ids_are_restored_before_parsing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    semgrep_plugin: SemgrepPlugin,
+    pack: str,
+    enabled: bool,
+) -> None:
+    """User metadata cannot turn arbitrary native IDs into packaged IDs.
+
+    Args:
+        tmp_path: Directory containing a discoverable scan input.
+        monkeypatch: Replace only the engine report boundary.
+        semgrep_plugin: Plugin with version probing bypassed.
+        pack: Shipped pack whose actual YAML defines the positive controls.
+        enabled: Whether the pack is selected for this scan.
+    """
+    source = tmp_path / "scan.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+    rules = yaml.safe_load(resolve_rule_pack(pack).read_text(encoding="utf-8"))["rules"]
+    shipped_ids = [rule["id"] for rule in rules]
+    namespace = "lintro." + pack.replace("/", ".") + "."
+    marked = {"lintro_rule_pack": pack}
+    cases = [
+        (f"installed.rules.{rule_id}", marked, rule_id) for rule_id in shipped_ids
+    ] + [(rule_id, marked, rule_id) for rule_id in shipped_ids]
+    native_ids = [
+        (f"custom.{namespace}user-rule", marked),
+        (f"custom.{shipped_ids[0]}.user-extension", marked),
+        (f"custom.{shipped_ids[0]}", {}),
+        (f"custom.{shipped_ids[0]}", {"lintro_rule_pack": "python/unknown"}),
+        (
+            f"custom.{shipped_ids[0]}",
+            (
+                {"lintro_rule_pack": "scripts/no-direct-formatter"}
+                if pack == PACK
+                else {"lintro_rule_pack": PACK}
+            ),
+        ),
+        (f"custom{shipped_ids[0]}", marked),
+        ("custom.native-rule", marked),
+    ]
+    cases.extend((rule_id, metadata, rule_id) for rule_id, metadata in native_ids)
+    report = json.dumps(
+        {
+            "results": [
+                {
+                    "check_id": reported,
+                    "path": str(source),
+                    "start": {"line": line, "col": 1},
+                    "extra": {"message": "ID control", "metadata": metadata},
+                }
+                for line, (reported, metadata, _expected) in enumerate(cases, 1)
+            ],
+            "errors": [],
+        },
+    )
+    monkeypatch.setattr(
+        semgrep_plugin,
+        "_run_subprocess_result",
+        lambda **kwargs: SubprocessResult(0, report, "", report),
+    )
+    result = semgrep_plugin.check(
+        [str(source)],
+        {"rule_packs": [pack] if enabled else []},
+    )
+
+    assert_that(result.success).is_true()
+    assert_that(result.parse_failures_count or 0).is_zero()
+    assert_that(result.issues_count).is_equal_to(len(cases))
+    assert_that(result.issues).extracting("check_id").is_equal_to(
+        [expected if enabled else reported for reported, _metadata, expected in cases],
+    )
 
 
 @pytest.mark.parametrize("native", [".semgrep.yaml", ".semgrep.yml", ".semgrep/"])
@@ -284,17 +363,21 @@ def test_invalid_pack_in_yaml_is_rejected(tmp_path: Path, packs: object) -> None
 
 
 @pytest.mark.parametrize("json_output", [False, True], ids=["text", "json"])
-def test_rule_pack_listing(json_output: bool, tmp_path: Path) -> None:
+@pytest.mark.parametrize("verbose", [False, True], ids=["normal", "verbose"])
+def test_rule_pack_listing(json_output: bool, verbose: bool, tmp_path: Path) -> None:
     """Packs can be discovered without running the Semgrep binary.
 
     Args:
         json_output: Select machine-readable output.
+        verbose: Tool details must not affect the pack listing.
         tmp_path: Destination for the listing's file output.
     """
     output = tmp_path / "packs.txt"
     result = CliRunner().invoke(
         list_tools_command,
-        ["--rules", "--output", str(output)] + (["--json"] if json_output else []),
+        ["--rules", "--output", str(output)]
+        + (["--json"] if json_output else [])
+        + (["--verbose"] if verbose else []),
     )
     assert_that(result.exit_code).is_zero()
     assert_that(result.output).contains(PACK)
