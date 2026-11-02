@@ -298,6 +298,13 @@ def capture_checkpoint(
     failures propagate as :class:`CheckpointError`, aborting capture before
     any checkpoint refs are pruned or written.
 
+    Filesystem errors, including temporary-index allocation, close, and
+    cleanup failures, propagate as :class:`OSError`. Git failures inside the
+    later capture try block return None instead; the earlier directory-listing
+    :class:`CheckpointError` propagates as described above. Retention pruning
+    precedes temporary-index allocation and is not rolled back if a later
+    operation fails.
+
     Args:
         paths: Files (and/or directories) to include in the snapshot.
         workspace_root: Directory inside the repository.
@@ -309,7 +316,8 @@ def capture_checkpoint(
 
     Returns:
         The created :class:`Checkpoint`, or None when git checkpoints are
-        unavailable or no paths remain after normalization.
+        unavailable, no paths remain after normalization, or a git plumbing
+        step fails after the temporary index has been allocated.
     """
     if not git_checkpoints_available(workspace_root):
         return None
