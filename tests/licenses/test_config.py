@@ -4,13 +4,41 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from assertpy import assert_that
+from click.testing import CliRunner
 
+from lintro.cli import cli
 from lintro.config.licenses_config import (
     LicensesConfig,
     PackageException,
     load_licenses_config,
 )
+from lintro.exceptions.errors import ConfigurationError
+
+
+@pytest.fixture
+def license_config_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, Path]:
+    """Provide independent global and project YAML files.
+
+    Args:
+        tmp_path: Temporary directory for both configuration tiers.
+        monkeypatch: Fixture for selecting the global file.
+
+    Returns:
+        tuple[Path, Path]: Global and project configuration paths.
+    """
+    global_file = tmp_path / "global.yaml"
+    project = tmp_path / "project"
+    project.mkdir()
+    project_file = project / ".lintro-config.yaml"
+    for path in (global_file, project_file):
+        path.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setenv("LINTRO_GLOBAL_CONFIG", str(global_file))
+    return global_file, project_file
 
 
 def test_defaults_are_permissive() -> None:
@@ -67,3 +95,195 @@ def test_load_defaults_when_absent(tmp_path: Path) -> None:
     """
     config = load_licenses_config(start_dir=tmp_path)
     assert_that(config.policy).is_equal_to("permissive")
+
+
+@pytest.mark.parametrize("tier", ["global", "project"])
+@pytest.mark.parametrize("boundary", ["document", "licenses"])
+@pytest.mark.parametrize(
+    ("value", "actual"),
+    [
+        ("", "null"),
+        ("# comment\n", "null"),
+        ("null\n", "null"),
+        ("~\n", "null"),
+        ("false\n", "bool"),
+        ("0\n", "int"),
+        ('""\n', "str"),
+        ("invalid\n", "str"),
+        ("[]\n", "list"),
+        ("[MIT]\n", "list"),
+    ],
+)
+def test_invalid_license_yaml_fails_before_overlay_or_fallback(
+    license_config_files: tuple[Path, Path],
+    tier: str,
+    boundary: str,
+    value: str,
+    actual: str,
+) -> None:
+    """Invalid input cannot be hidden by another tier or a pyproject policy.
+
+    Args:
+        license_config_files: Independent global and project YAML paths.
+        tier: Source containing the invalid value.
+        boundary: Whether the document or its licenses section is invalid.
+        value: YAML spelling of the invalid input.
+        actual: Parsed input type to identify in the error.
+    """
+    global_file, project_file = license_config_files
+    for path in license_config_files:
+        path.write_text("licenses:\n  policy: strict\n", encoding="utf-8")
+    invalid_file = global_file if tier == "global" else project_file
+    content = value if boundary == "document" else f"licenses: {value}"
+    invalid_file.write_text(content, encoding="utf-8")
+    (project_file.parent / "pyproject.toml").write_text(
+        '[tool.lintro.licenses]\npolicy = "permissive"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError) as error:
+        load_licenses_config(start_dir=project_file.parent)
+
+    assert_that(str(error.value)).contains(
+        str(invalid_file),
+        "Config document" if boundary == "document" else "licenses",
+        f"must be a mapping, got {actual}",
+    )
+
+
+@pytest.mark.parametrize(
+    "global_content",
+    [None, "{}\n", "enforce: {}\n", "licenses: {}\n"],
+)
+@pytest.mark.parametrize(
+    "project_content",
+    [None, "{}\n", "enforce: {}\n", "licenses: {}\n"],
+)
+def test_absent_and_empty_license_mappings_keep_defaults(
+    license_config_files: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    global_content: str | None,
+    project_content: str | None,
+) -> None:
+    """Omission and empty mappings in either tier still resolve to defaults.
+
+    Args:
+        license_config_files: Independent global and project YAML paths.
+        monkeypatch: Fixture for disabling an absent global tier.
+        global_content: Valid global document, or None to omit the file.
+        project_content: Valid project document, or None to omit the file.
+    """
+    global_file, project_file = license_config_files
+    if global_content is None:
+        global_file.unlink()
+        monkeypatch.setenv("LINTRO_GLOBAL_CONFIG", "off")
+    else:
+        global_file.write_text(global_content, encoding="utf-8")
+    if project_content is None:
+        project_file.unlink()
+    else:
+        project_file.write_text(project_content, encoding="utf-8")
+
+    config = load_licenses_config(start_dir=project_file.parent)
+
+    assert_that(config).is_equal_to(LicensesConfig())
+
+
+@pytest.mark.parametrize("content", [None, "{}\n", "enforce: {}\n", "licenses: {}\n"])
+@pytest.mark.parametrize("pyproject_fallback", [False, True])
+def test_empty_project_license_mappings_keep_inheritance_and_fallback(
+    license_config_files: tuple[Path, Path],
+    content: str | None,
+    pyproject_fallback: bool,
+) -> None:
+    """Empty project inputs preserve global policy and optional TOML overrides.
+
+    Args:
+        license_config_files: Independent global and project YAML paths.
+        content: Valid project document, or None to omit the file.
+        pyproject_fallback: Whether to supply a TOML project overlay.
+    """
+    global_file, project_file = license_config_files
+    global_file.write_text(
+        "licenses:\n  policy: strict\n  allowed: [MIT]\n",
+        encoding="utf-8",
+    )
+    if content is None:
+        project_file.unlink()
+    else:
+        project_file.write_text(content, encoding="utf-8")
+    if pyproject_fallback:
+        (project_file.parent / "pyproject.toml").write_text(
+            '[tool.lintro.licenses]\nunknown_policy = "deny"\n',
+            encoding="utf-8",
+        )
+
+    config = load_licenses_config(start_dir=project_file.parent)
+
+    assert_that(config.policy).is_equal_to("strict")
+    assert_that(config.allowed).is_equal_to(["MIT"])
+    assert_that(config.unknown_policy).is_equal_to(
+        "deny" if pyproject_fallback else "warn",
+    )
+
+
+def test_project_license_mapping_replaces_lists_and_inherits_other_keys(
+    license_config_files: tuple[Path, Path],
+) -> None:
+    """A populated project mapping keeps per-key merge and YAML precedence.
+
+    Args:
+        license_config_files: Independent global and project YAML paths.
+    """
+    global_file, project_file = license_config_files
+    global_file.write_text(
+        "licenses:\n  policy: strict\n  allowed: [MIT]\n  denied: [GPL-3.0-only]\n",
+        encoding="utf-8",
+    )
+    project_file.write_text(
+        "licenses:\n  allowed: []\n  unknown_policy: deny\n",
+        encoding="utf-8",
+    )
+    (project_file.parent / "pyproject.toml").write_text(
+        '[tool.lintro.licenses]\npolicy = "permissive"\n',
+        encoding="utf-8",
+    )
+
+    config = load_licenses_config(start_dir=project_file.parent)
+
+    assert_that(config.policy).is_equal_to("strict")
+    assert_that(config.allowed).is_empty()
+    assert_that(config.denied).is_equal_to(["GPL-3.0-only"])
+    assert_that(config.unknown_policy).is_equal_to("deny")
+
+
+@pytest.mark.parametrize("tier", ["global", "project"])
+@pytest.mark.parametrize("content", ["null\n", "licenses: null\n"])
+def test_licenses_cli_fails_for_invalid_yaml(
+    license_config_files: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    tier: str,
+    content: str,
+) -> None:
+    """The licenses command cannot report success with an invalid YAML policy.
+
+    Args:
+        license_config_files: Independent global and project YAML paths.
+        monkeypatch: Fixture for selecting the project directory.
+        tier: Source containing the invalid input.
+        content: Invalid document or licenses section.
+    """
+    global_file, project_file = license_config_files
+    invalid_file = global_file if tier == "global" else project_file
+    invalid_file.write_text(content, encoding="utf-8")
+    monkeypatch.chdir(project_file.parent)
+
+    result = CliRunner().invoke(
+        cli,
+        ["licenses", "--lang", "npm", "--check", "--format", "json"],
+    )
+
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(result.exception).is_instance_of(ConfigurationError)
+    assert_that(str(result.exception)).contains(str(invalid_file), "must be a mapping")
+    assert_that(result.output).does_not_contain("[]")
