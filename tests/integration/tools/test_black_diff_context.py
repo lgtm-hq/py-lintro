@@ -16,11 +16,31 @@ from lintro.utils.execution.baseline_filter import apply_baseline
 from lintro.utils.fingerprint_baseline import snapshot
 from tests.integration._tools import require_tool
 
+# The production plugin measures E501 with Ruff after each completed Black pass.
 pytestmark = [require_tool("black"), require_tool("ruff")]
 
 
-@pytest.fixture
-def string_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+@pytest.fixture(
+    params=[
+        ("context", "\n"),
+        ("context", "\u2028"),
+        ("context", "\x0c"),
+        ("changed", "\u2028"),
+        ("changed", "\x0c"),
+    ],
+    ids=[
+        "lf-context",
+        "unicode-context",
+        "ff-context",
+        "unicode-changed",
+        "ff-changed",
+    ],
+)
+def string_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> Path:
     """Create the reproduced valid string without executing the source payload."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".lintro-config.yaml").write_text(
@@ -28,8 +48,14 @@ def string_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         encoding="utf-8",
     )
     file = tmp_path / "example.py"
+    row_kind, separator = request.param
+    start, end = (
+        ('message = """', '"""') if row_kind == "context" else ("message='''", "'''")
+    )
     file.write_text(
-        'message = """\nreformatted phantom.py\nwould reformat ghost.py\n"""\nx=1\n',
+        f"{start}head{separator}reformatted phantom.py\n"
+        f"would reformat ghost.py{separator}9 files would be reformatted.\n"
+        f"{end}\nx=1\n",
         encoding="utf-8",
     )
     return file
@@ -51,15 +77,21 @@ def test_real_diff_string_context_keeps_only_actual_file(string_file: Path) -> N
     parsed = parse_black_output(native.output)
     plugin.set_options(diff=True)
     result = plugin.fix([str(string_file)], {})
-    print("Native diff:", native)
-    print("Parsed findings:", parsed)
-    print("Production preview:", result)
-
     assert_that(native.returncode).is_zero()
     assert_that(native.stdout).contains(
-        "\n reformatted phantom.py\n would reformat ghost.py\n",
-        "-x=1\n+x = 1\n",
+        "reformatted phantom.py",
+        "would reformat ghost.py",
+        "9 files would be reformatted.",
+        "\n-x=1\n",
+        "\n+x = 1\n",
     )
+    if before.startswith(b"message='''"):
+        assert_that(native.stdout).contains(
+            "\n-message='''head",
+            '\n+message = """head',
+        )
+    else:
+        assert_that(native.stdout).contains('\n message = """head')
     assert_that(native.stderr).contains("would reformat example.py")
     assert_that(result.issues_count).is_equal_to(1)
     assert_that([issue.file for issue in parsed]).is_equal_to([string_file.name])
@@ -96,7 +128,12 @@ def test_real_string_mutation_and_clean_preview_keep_measured_counts(
     )
     assert_that(result.parse_failures_count).is_none()
     formatted = string_file.read_bytes()
-    assert_that(formatted).is_equal_to(before.replace(b"x=1\n", b"x = 1\n"))
+    expected = (
+        before.replace(b"x=1\n", b"x = 1\n")
+        .replace(b"message='''", b'message = """')
+        .replace(b"\n'''\n", b'\n"""\n')
+    )
+    assert_that(formatted).is_equal_to(expected)
     plugin.set_options(diff=True)
     clean = plugin.fix([str(string_file)], {})
     assert_that(clean.success).is_true()
