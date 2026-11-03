@@ -108,6 +108,8 @@ def parse_ruff_output_with_stats(output: str) -> tuple[list[RuffIssue], int]:
     so they count as parse failures rather than intentional filtering. Malformed
     JSON object lines also count as parse failures. An invalid array envelope
     counts as a failure even when JSON Lines fallback recovers diagnostics.
+    Arrays may be followed by warning lines or Ruff summary lines; other
+    trailing content counts as a framing failure.
 
     Args:
         output: JSON array or JSON Lines output from Ruff.
@@ -118,19 +120,23 @@ def parse_ruff_output_with_stats(output: str) -> tuple[list[RuffIssue], int]:
     if not output.strip() or output.strip() == "[]":
         return [], 0
 
-    # First try JSON array (with possible trailing non-JSON data)
+    # Decode the first JSON value rather than searching warning text for ']'.
     array_decode_failed = False
     try:
-        json_end = output.rfind("]")
-        if json_end != -1:
-            json_part = output[: json_end + 1]
-            ruff_data = json.loads(json_part)
-        else:
-            ruff_data = json.loads(output)
+        json_output = output.lstrip()
+        ruff_data, json_end = json.JSONDecoder().raw_decode(json_output)
 
         if isinstance(ruff_data, list):
-            return safe_parse_items_with_stats(ruff_data, _parse_ruff_item, "ruff")
-        if not isinstance(ruff_data, dict):
+            # Only warning/summary lines may follow an array. Extra JSON or an
+            # unfinished array must still fail closed, even after a valid [].
+            if all(
+                not line.strip() or line.lstrip().startswith(("warning:", "Ruff "))
+                for line in json_output[json_end:].splitlines()
+            ):
+                return safe_parse_items_with_stats(ruff_data, _parse_ruff_item, "ruff")
+            array_decode_failed = True
+            logger.debug("Unexpected data after Ruff array, falling back to JSON Lines")
+        elif not isinstance(ruff_data, dict):
             return [], 1
     except (json.JSONDecodeError, TypeError) as e:
         # Fall back to JSON Lines parsing below

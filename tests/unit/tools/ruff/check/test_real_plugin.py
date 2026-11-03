@@ -127,6 +127,10 @@ def test_ruff_check_keeps_valid_diagnostic_with_optional_code(
 @pytest.mark.parametrize("returncode", [0, 1])
 @pytest.mark.parametrize("warning_on_stderr", [False, True])
 @pytest.mark.parametrize(
+    "warning",
+    ["warning: stray output\n", "warning: cache path [cache]/ruff is unavailable\n"],
+)
+@pytest.mark.parametrize(
     ("report", "expected_codes", "native_array"),
     [
         ("null", [], False),
@@ -141,6 +145,7 @@ def test_ruff_check_keeps_valid_diagnostic_with_optional_code(
         (" \n[]\n", [], True),
         ("[\n]", [], True),
         ("array", [""], True),
+        ("object", [""], False),
         ("json-lines", ["", "F401"], False),
     ],
 )
@@ -152,6 +157,7 @@ def test_ruff_check_warning_stream_controls_report_certification(
     native_array: bool,
     warning_on_stderr: bool,
     returncode: int,
+    warning: str,
 ) -> None:
     """Keep recovered findings while only certifying complete native stdout."""
     diagnostic = {
@@ -162,12 +168,12 @@ def test_ruff_check_warning_stream_controls_report_certification(
     }
     reports = {
         "array": json.dumps([diagnostic]),
+        "object": json.dumps(diagnostic),
         "json-lines": json.dumps(diagnostic)
         + "\n"
         + json.dumps({**diagnostic, "message": "unused import", "code": "F401"}),
     }
     stdout = reports.get(report, report)
-    warning = "warning: stray output\n"
     stderr = warning if warning_on_stderr else ""
     if not warning_on_stderr:
         stdout += "\n" + warning

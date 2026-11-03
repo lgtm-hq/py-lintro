@@ -14,6 +14,7 @@ from lintro.parsers.ruff.ruff_parser import (
 )
 
 
+@pytest.mark.parametrize("suffix", ["", "\nwarning: cache [cache]/ruff is unavailable"])
 @pytest.mark.parametrize(
     "item",
     [
@@ -28,12 +29,15 @@ from lintro.parsers.ruff.ruff_parser import (
         {"filename": "a.py", "message": " "},
     ],
 )
-def test_ruff_rejects_unusable_required_fields(item: dict[str, object]) -> None:
+def test_ruff_rejects_unusable_required_fields(
+    item: dict[str, object],
+    suffix: str,
+) -> None:
     """Batch, JSON Lines and streaming paths reject incomplete records."""
     for output in (json.dumps([item]), json.dumps(item) + "\n"):
-        assert_that(parse_ruff_output(output)).is_empty()
-        assert_that(parse_ruff_output_with_stats(output)).is_equal_to(([], 1))
-        assert_that(list(stream_ruff_output(output))).is_empty()
+        assert_that(parse_ruff_output(output + suffix)).is_empty()
+        assert_that(parse_ruff_output_with_stats(output + suffix)).is_equal_to(([], 1))
+        assert_that(list(stream_ruff_output(output + suffix))).is_empty()
 
 
 @pytest.mark.parametrize(
@@ -88,6 +92,15 @@ def test_ruff_json_lines_counts_decode_and_field_failures(malformed_line: str) -
         ("[]", 0),
         (" \n[]\n", 0),
         ("[\n]", 0),
+        ("[]\n[null]", 1),
+        ("[]\n[", 1),
+        ("[]\n]", 1),
+        ("garbage\n[]", 1),
+        ("[]\ngarbage", 1),
+        ("[]\nnull", 1),
+        ("[]\n42", 1),
+        ('[]\n"diagnostics"', 1),
+        ("[]\nwarning: cache [cache]\n[null]", 1),
     ],
 )
 def test_ruff_rejected_only_and_empty_reports(
@@ -101,6 +114,14 @@ def test_ruff_rejected_only_and_empty_reports(
     assert_that(parse_ruff_output(output)).is_empty()
 
 
+@pytest.mark.parametrize(
+    "warning",
+    [
+        "warning: stray output\n",
+        "warning: cache path [cache]/ruff is unavailable\n",
+        "warning: cache path cache] is unavailable\n",
+    ],
+)
 @pytest.mark.parametrize(
     ("report", "expected_codes", "expected_failures"),
     [
@@ -116,6 +137,7 @@ def test_ruff_rejected_only_and_empty_reports(
         (" \n[]\n", [], 0),
         ("[\n]", [], 0),
         ("array", [""], 0),
+        ("object", [""], 0),
         ("json-lines", ["", "F401"], 0),
     ],
 )
@@ -123,15 +145,17 @@ def test_ruff_warning_framing_preserves_parser_statistics(
     report: str,
     expected_codes: list[str],
     expected_failures: int,
+    warning: str,
 ) -> None:
-    """Stray warning text cannot turn a scalar into a valid empty report."""
+    """Warnings preserve arrays and JSON Lines without accepting scalars."""
     diagnostic = {"file": "syntax.py", "message": "Expected expression", "code": None}
     reports = {
         "array": json.dumps([diagnostic]),
+        "object": json.dumps(diagnostic),
         "json-lines": json.dumps(diagnostic)
         + '\n{"filename": "a.py", "message": "unused import", "code": "F401"}',
     }
-    output = reports.get(report, report) + "\nwarning: stray output\n"
+    output = reports.get(report, report) + "\n" + warning
 
     issues, failures = parse_ruff_output_with_stats(output)
 
@@ -162,9 +186,13 @@ def test_ruff_valid_json_lines_do_not_count_array_decode_failure(prefix: str) ->
 
 
 @pytest.mark.parametrize("prefix", ["", " \n\t"])
-def test_ruff_truncated_array_keeps_diagnostics_and_counts_failure(prefix: str) -> None:
+@pytest.mark.parametrize("suffix", ["", "\nwarning: cache [cache]/ruff is unavailable"])
+def test_ruff_truncated_array_keeps_diagnostics_and_counts_failure(
+    prefix: str,
+    suffix: str,
+) -> None:
     """Recover complete diagnostics without hiding an invalid array envelope."""
-    output = prefix + '[\n{"filename":"a.py","message":"bad"}\n'
+    output = prefix + '[\n{"filename":"a.py","message":"bad"}\n' + suffix
 
     issues, failures = parse_ruff_output_with_stats(output)
 
