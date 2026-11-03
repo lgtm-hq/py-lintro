@@ -8,7 +8,7 @@ across projects.
 from __future__ import annotations
 
 import subprocess  # nosec B404 - used safely with shell disabled
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from loguru import logger
@@ -403,7 +403,12 @@ class BlackPlugin(BaseToolPlugin):
         try:
             process = self._run_subprocess_result(cmd=cmd, timeout=timeout, cwd=cwd)
         except subprocess.TimeoutExpired:
-            return self._handle_timeout_error(timeout, initial_count, cwd)
+            return replace(
+                self._handle_timeout_error(timeout, initial_count, cwd),
+                issues_count=len(initial_issues),
+                issues=initial_issues,
+                initial_issues=initial_issues,
+            )
         issues = parse_black_output(process.output)
         parse_failures = black_report_parse_failures(process.output, issues)
         execution_failed = not (
@@ -411,6 +416,16 @@ class BlackPlugin(BaseToolPlugin):
         )
         if not (execution_failed or parse_failures):
             return process
+        # Unknown residuals still carry measured pre-fix findings. Mutation
+        # reports describe applied changes, so only read-only reports can add
+        # findings. Deduplicate formatting by file without collapsing E501s.
+        retained = list(initial_issues)
+        if check or "--diff" in cmd:
+            files = {issue.file for issue in retained if not issue.code}
+            for issue in issues:
+                if issue.file == "<unknown>" or issue.file not in files:
+                    retained.append(issue)
+                    files.add(issue.file)
         return ToolResult.from_outcome(
             ToolOutcome(
                 execution=Checked(success=False),
@@ -418,13 +433,13 @@ class BlackPlugin(BaseToolPlugin):
                     initial=initial_count,
                     reason="Black report incomplete; fix counts unavailable",
                 ),
-                issues_count=len(issues),
+                issues_count=len(retained),
             ),
             name=self.definition.name,
             execution_failed=execution_failed,
             parse_failures_count=parse_failures or None,
             output=process.output,
-            issues=issues,
+            issues=retained,
             initial_issues=initial_issues,
             cwd=cwd,
         )
@@ -432,8 +447,10 @@ class BlackPlugin(BaseToolPlugin):
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Format files using Black.
 
-        An incomplete Black pass cannot certify inspection or fix counts. A
-        failed initial E501 supplement aborts before formatting. If the final
+        An incomplete Black pass cannot certify inspection or fix counts. An
+        incomplete initial report conservatively aborts before any mutation,
+        even if Black could format other files beside a syntax error. A failed
+        initial E501 supplement also aborts before formatting. If the final
         supplement is unavailable, retain its earlier findings and credit only
         the measured reduction in Black's own formatting issues.
 
@@ -474,6 +491,7 @@ class BlackPlugin(BaseToolPlugin):
                 timeout=ctx.timeout,
                 cwd=ctx.cwd,
                 initial_issues=[],
+                initial_count=None,
             )
             if isinstance(check_process, ToolResult):
                 return check_process
