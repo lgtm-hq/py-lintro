@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.11] - 2026-11-03
+
+### Changed
+
+- **ai**: cover single-response structured and empty snippets (#3179) (8ca74e4)
+- **black**: cover native CRLF and CR source previews (#3178) (9f5983c)
+
+### Fixed
+
+- **prettier**: avoid conflicting generated config flags (#3181) (d721f75)
+
 ## [0.177.10] - 2026-11-03
 
 ### Fixed
