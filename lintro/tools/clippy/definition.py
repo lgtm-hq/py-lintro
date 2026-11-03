@@ -296,7 +296,8 @@ class ClippyPlugin(BaseToolPlugin):
             # Rustc lint verdicts are absent from structured Clippy findings.
             output=(
                 run.output
-                if run.parse_failures
+                if run.timed_out
+                or run.parse_failures
                 or run.execution_failed
                 or (
                     not run.success
@@ -317,6 +318,7 @@ class ClippyPlugin(BaseToolPlugin):
         Returns:
             Native verdict, usable findings and parser/compiler statistics.
         """
+        timed_out = False
         try:
             success, output = run_subprocess_with_timeout(
                 tool=self,
@@ -326,13 +328,19 @@ class ClippyPlugin(BaseToolPlugin):
                 tool_name="clippy",
             )
         except subprocess.TimeoutExpired as exc:
-            partial = exc.output or str(exc)
+            success, timed_out = False, True
+            # The shared timeout wrapper keeps native output in its cause.
+            cause = exc.__cause__
+            partial = (
+                (cause.output if isinstance(cause, subprocess.TimeoutExpired) else None)
+                or exc.output
+                or str(exc)
+            )
             output = (
                 partial.decode(errors="replace")
                 if isinstance(partial, bytes)
                 else partial
             )
-            return _ClippyRun(False, output, [], timed_out=True)
         diagnostics = parse_clippy_diagnostics(output)
         return _ClippyRun(
             success,
@@ -342,6 +350,7 @@ class ClippyPlugin(BaseToolPlugin):
             diagnostics.compiler_errors,
             diagnostics.lint_diagnostics,
             _cargo_failure(output),
+            timed_out=timed_out,
         )
 
     def _run_fix_stage(

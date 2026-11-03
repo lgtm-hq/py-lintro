@@ -297,6 +297,121 @@ def test_timeout_output_remains_readable(
     )
 
 
+@pytest.mark.parametrize("as_bytes", [False, True], ids=["str", "bytes"])
+@pytest.mark.parametrize(
+    ("output", "findings", "failures", "errors"),
+    [
+        (_VALID, 1, 0, 0),
+        (_VALID + '\n{"reason":"compiler-message",', 1, 1, 0),
+        (_VALID + "\n" + _COMPILER_ERROR, 1, 0, 1),
+        ("", 0, 0, 0),
+    ],
+    ids=["lint", "truncated-tail", "compiler-error", "empty"],
+)
+def test_timeout_retains_diagnostic_statistics(
+    clippy_plugin: ClippyPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+    output: str,
+    findings: int,
+    failures: int,
+    errors: int,
+    as_bytes: bool,
+) -> None:
+    """Partial native records supply independent statistics despite timeout."""
+
+    def timeout(**kwargs: object) -> tuple[bool, str]:
+        raise subprocess.TimeoutExpired(
+            "cargo",
+            120,
+            output=output.encode() if as_bytes else output,
+        )
+
+    monkeypatch.setattr(
+        "lintro.tools.clippy.definition.run_subprocess_with_timeout",
+        timeout,
+    )
+    run = clippy_plugin._run_clippy(["cargo", "clippy"], 120, ".")
+
+    assert_that(run.timed_out).is_true()
+    assert_that(run.success).is_false()
+    assert_that(len(run.issues)).is_equal_to(findings)
+    assert_that(run.parse_failures).is_equal_to(failures)
+    assert_that(run.compiler_errors).is_equal_to(errors)
+    assert_that(run.lint_diagnostics).is_equal_to(findings)
+    if errors:
+        assert_that(run.execution_failed).is_true()
+    if output:
+        assert_that(run.output).contains(output)
+    else:
+        assert_that(run.output).contains("timed out")
+
+
+@pytest.mark.parametrize("as_bytes", [False, True], ids=["str", "bytes"])
+@pytest.mark.parametrize(
+    "output",
+    [
+        _VALID,
+        _VALID + '\n{"reason":"compiler-message",',
+        _VALID + "\n" + _COMPILER_ERROR,
+        "",
+    ],
+    ids=["lint", "truncated-tail", "compiler-error", "empty"],
+)
+@pytest.mark.parametrize("phase", ["check", "initial", "mutation", "verify"])
+def test_timeout_diagnostics_reach_check_and_fix(
+    clippy_plugin: ClippyPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    phase: str,
+    output: str,
+    as_bytes: bool,
+) -> None:
+    """Actual process-boundary timeouts retain evidence and stop incomplete fixes."""
+    stage = {"check": 0, "initial": 0, "mutation": 1, "verify": 2}[phase]
+    stages: list[tuple[int, str] | subprocess.TimeoutExpired] = [
+        (0, _VALID),
+        (0, ""),
+        (0, ""),
+    ]
+    stages = stages[: stage + 1]
+    stages[stage] = subprocess.TimeoutExpired(
+        "cargo",
+        120,
+        output=output.encode() if as_bytes else output,
+    )
+    result = _run(
+        clippy_plugin,
+        monkeypatch,
+        tmp_path,
+        "check" if phase == "check" else "fix",
+        stages,
+    )
+
+    assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_true()
+    assert_that(result.inspected_files).is_false()
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.issues_count).is_equal_to(int(bool(output) or stage > 0))
+    assert_that(result.parse_failures_count or 0).is_equal_to(
+        int(output.endswith(",")),
+    )
+    if _COMPILER_ERROR in output:
+        assert_that(result.execution_failed).is_true()
+    if output:
+        assert_that(result.output).contains(output)
+    else:
+        assert_that(result.output).contains("timed out")
+    if output or stage > 0:
+        assert_that(result.issues).extracting("message").is_equal_to(["kept lint"])
+    assert_that(result.initial_issues_count).is_equal_to(1 if stage > 0 else None)
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.residual_unknown).is_equal_to(phase != "check")
+    assert_that((tmp_path / "src" / "main.rs").read_text()).is_equal_to(
+        "fn main() {}\n",
+    )
+
+
 @pytest.mark.parametrize("method", ["check", "fix"])
 def test_denied_lint_and_cargo_summary_are_a_complete_verdict(
     clippy_plugin: ClippyPlugin,

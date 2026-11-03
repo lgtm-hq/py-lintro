@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess  # nosec B404 - fixed offline Cargo commands, shell=False
 from pathlib import Path
+from typing import Any
 
 import pytest
 from assertpy import assert_that
@@ -68,6 +69,55 @@ def _cargo(
         timeout=60,
         check=False,
     )
+
+
+@pytest.mark.parametrize("as_bytes", [False, True], ids=["str", "bytes"])
+def test_native_timeout_keeps_partial_diagnostics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    as_bytes: bool,
+) -> None:
+    """Real Cargo records survive the process timeout boundary and a broken tail."""
+    root = tmp_path / "timeout_control"
+    target = _project(root, _PERSISTENT)
+    native = _cargo(root)
+    assert_that(native.returncode).is_zero()
+    findings, failures, errors = parse_clippy_output_with_stats(native.stdout)
+    assert_that(findings).is_not_empty()
+    assert_that((failures, errors)).is_equal_to((0, 0))
+    partial = native.stdout + '\n{"reason":"compiler-message",'
+    original_run = subprocess.run
+
+    def timeout(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        """Replay Cargo's captured output at the native process boundary."""
+        if args[:2] == ["cargo", "clippy"] and "--message-format=json" in args:
+            assert_that(args).does_not_contain("--fix")
+            raise subprocess.TimeoutExpired(
+                args,
+                120,
+                output=partial.encode() if as_bytes else partial,
+                stderr=native.stderr.encode() if as_bytes else native.stderr,
+            )
+        return original_run(args, **kwargs)
+
+    monkeypatch.setattr("subprocess.run", timeout)
+    for method in ("check", "fix"):
+        result = getattr(ClippyPlugin(), method)([str(root)], {})
+        assert_that(result.skipped).is_false()
+        assert_that(result.unavailable).is_false()
+        assert_that(result.success).is_false()
+        assert_that(result.timed_out).is_true()
+        assert_that(result.issues_count).is_equal_to(len(findings))
+        assert_that(result.issues).extracting("message").is_equal_to(
+            [issue.message for issue in findings],
+        )
+        assert_that(result.parse_failures_count).is_equal_to(1)
+        assert_that(result.output).contains(partial, native.stderr)
+        assert_that(result.initial_issues_count).is_none()
+        assert_that(result.fixed_issues_count).is_none()
+        assert_that(result.remaining_issues_count).is_none()
+        assert_that(result.residual_unknown).is_equal_to(method == "fix")
+    assert_that(target.read_text()).is_equal_to(_PERSISTENT)
 
 
 @pytest.mark.parametrize(
@@ -261,6 +311,9 @@ def test_native_failure_preserves_sibling_lints(tmp_path: Path, failure: str) ->
     assert_that(errors > 0).is_equal_to(failure == "compiler")
 
     for method in ("check", "fix"):
+        # Re-run the delay: a cached build script lets compiler failure race
+        # ahead of the sibling warning's replay on subsequent invocations.
+        (root / "broken" / "build.rs").touch()
         result = getattr(ClippyPlugin(), method)([str(root)], {})
         assert_that(result.success).is_false()
         assert_that(result.execution_failed).is_true()
