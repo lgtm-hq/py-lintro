@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.7] - 2026-11-03
+
+### Changed
+
+- **config**: make malformed mapping type expectations explicit (#3166) (21ba5bd)
+- **config**: extract mapping value validation helper (#3164) (f410186)
+- **ai**: pin snippet validation before empty filtering (#3160) (a8f25f1)
+
+### Fixed
+
+- **ai**: contextualize oversized JSON integer errors (#3165) (fea1ca4)
+
 ## [0.177.6] - 2026-11-03
 
 ### Changed
