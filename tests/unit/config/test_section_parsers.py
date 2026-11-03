@@ -70,21 +70,24 @@ def test_private_section_parser_keeps_configured_value(
 
 @pytest.mark.parametrize("section", SECTION_PARSERS)
 @pytest.mark.parametrize(
-    "value",
-    [None, False, 0, "", [], (), "invalid", ["ruff"], UserDict()],
-    ids=[
-        "null",
-        "false",
-        "zero",
-        "empty-string",
-        "empty-list",
-        "tuple",
-        "string",
-        "list",
-        "non-dict-mapping",
+    ("value", "expected_type"),
+    [
+        pytest.param(None, "null", id="null"),
+        pytest.param(False, "bool", id="false"),
+        pytest.param(0, "int", id="zero"),
+        pytest.param("", "str", id="empty-string"),
+        pytest.param([], "list", id="empty-list"),
+        pytest.param((), "tuple", id="tuple"),
+        pytest.param("invalid", "str", id="string"),
+        pytest.param(["ruff"], "list", id="list"),
+        pytest.param(UserDict(), "UserDict", id="non-dict-mapping"),
     ],
 )
-def test_private_section_parser_rejects_non_mapping(section: str, value: Any) -> None:
+def test_private_section_parser_rejects_non_mapping(
+    section: str,
+    value: Any,
+    expected_type: str,
+) -> None:
     """Null and other non-mappings fail at the direct parser boundary.
 
     Inputs deliberately violate the dict annotation to exercise runtime
@@ -94,13 +97,13 @@ def test_private_section_parser_rejects_non_mapping(section: str, value: Any) ->
     Args:
         section: Private parser expected to reject the value.
         value: Invalid section value, including falsey non-mappings.
+        expected_type: Type label required in the error message.
     """
     parser, _ = SECTION_PARSERS[section]
 
     with pytest.raises(ValueError) as error:
         parser(value)
 
-    actual = "null" if value is None else type(value).__name__
     assert_that(str(error.value)).is_equal_to(
-        f"{section} config must be a mapping, got {actual}",
+        f"{section} config must be a mapping, got {expected_type}",
     )
