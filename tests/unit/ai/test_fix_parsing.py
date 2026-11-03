@@ -143,6 +143,34 @@ def test_parse_fix_response_rejects_malformed_responses(content):
     assert_that(str(exc_info.value)).contains("main.py:10")
 
 
+@pytest.mark.parametrize(
+    "value",
+    [{}, {"text": "same"}, [], ["same"]],
+    ids=["empty-mapping", "mapping", "empty-list", "list"],
+)
+@pytest.mark.parametrize("pairing", ["empty-original", "empty-suggested", "identical"])
+def test_single_validates_snippets_before_empty_or_noop_filtering(value, pairing):
+    """Structured lookalikes fail the response; matched string controls are absent."""
+    fields = {
+        "original_code": "" if pairing == "empty-original" else value,
+        "suggested_code": "" if pairing == "empty-suggested" else value,
+    }
+
+    with pytest.raises(AIFixParseError) as error:
+        parse_fix_response(json.dumps(fields), "single.py", 17, "B101")
+
+    assert_that(str(error.value)).is_equal_to(
+        "AI fix code fields must be strings for single.py:17",
+    )
+    string_control = {
+        "original_code": "" if pairing == "empty-original" else "same",
+        "suggested_code": "" if pairing == "empty-suggested" else "same",
+    }
+    assert_that(
+        parse_fix_response(json.dumps(string_control), "single.py", 17, "B101"),
+    ).is_none()
+
+
 def test_parse_fix_response_identical_code():
     """Verify that identical original and suggested code returns None."""
     content = json.dumps(
@@ -551,6 +579,7 @@ def test_batch_validates_snippet_types_before_empty_or_noop_filtering(
     suggested = "" if pairing == "empty-suggested" else value
     candidate = {
         **_BATCH_ENTRY,
+        "line": 17,
         "original_code": original,
         "suggested_code": suggested,
     }
@@ -564,14 +593,20 @@ def test_batch_validates_snippet_types_before_empty_or_noop_filtering(
 
     assert_that(str(error.value)).contains(
         "code fields must be strings",
-        "ordering.py:5",
+        "ordering.py:17",
     )
 
-    # Replace only structured fields: legitimate empty/no-op strings are skipped,
-    # and the neighboring valid fix survives in either position and container.
-    candidate["original_code"] = "" if pairing == "empty-original" else "same"
-    candidate["suggested_code"] = "" if pairing == "empty-suggested" else "same"
-    result = parse_batch_response(json.dumps(payload), "ordering.py")
+    # Build a separate payload: string absence is skipped, and the valid fix survives.
+    string_candidate = {
+        **candidate,
+        "original_code": "" if pairing == "empty-original" else "same",
+        "suggested_code": "" if pairing == "empty-suggested" else "same",
+    }
+    string_entries = [string_candidate, _BATCH_ENTRY]
+    if not candidate_first:
+        string_entries.reverse()
+    string_payload = {FIX_BATCH_KEY: string_entries} if wrapped else string_entries
+    result = parse_batch_response(json.dumps(string_payload), "ordering.py")
 
     assert_that(result).is_length(1)
     assert_that(result[0].original_code).is_equal_to("old")
