@@ -12,6 +12,8 @@ from loguru import logger
 from lintro.parsers.base_parser import strip_ansi_codes
 from lintro.parsers.clippy.clippy_issue import ClippyIssue
 
+_RUSTC_LINT_RE = re.compile(r"[a-z][a-z0-9_]*")
+
 
 @dataclass
 class ClippyDiagnostics:
@@ -106,7 +108,7 @@ def _parse_record(item: dict[str, Any]) -> tuple[ClippyIssue | None, int, int, i
             # Rustc lint names (including denied lints) differ from hard E####
             # errors and uncoded errors such as compile_error! diagnostics.
             lint = level in {"warning", "error"} and bool(
-                re.fullmatch(r"[a-z][a-z0-9_]*", code),
+                _RUSTC_LINT_RE.fullmatch(code),
             )
             return None, 0, int(level.startswith("error") and not lint), int(lint)
         return (
@@ -172,7 +174,10 @@ def parse_clippy_output_with_stats(output: str) -> tuple[list[ClippyIssue], int,
         output: Raw Cargo JSON Lines and progress output.
 
     Returns:
-        Usable Clippy findings, malformed-record count and compiler-error count.
+        A 3-tuple of (issues, failures, compiler_errors), in that order:
+        usable Clippy findings, malformed-record count and compiler-error count.
+        It excludes lint_diagnostics to preserve the existing API; use
+        parse_clippy_diagnostics for that measurement.
     """
     result = parse_clippy_diagnostics(output)
     return result.issues, result.failures, result.compiler_errors
