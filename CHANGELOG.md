@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.12] - 2026-11-03
+
+### Fixed
+
+- **ai**: reject non-object custom-agent findings (#3183) (2a3cca0)
+
 ## [0.177.11] - 2026-11-03
 
 ### Changed
