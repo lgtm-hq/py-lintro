@@ -17,6 +17,7 @@ in lintro's own lockfiles too, so these rules carry their time box in
 from __future__ import annotations
 
 import datetime
+import re
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -151,6 +152,23 @@ def test_grype_ignore_package_matches_osv_reason(rule: dict[str, Any]) -> None:
         f"{vuln_id}: .osv-scanner.toml reason must start with "
         f"'{rule['package']['name']}@' to match .grype.yaml",
     ).starts_with(f"{rule['package']['name']}@")
+
+
+def test_markdown_it_lockfiles_remain_patched() -> None:
+    """Keep every locked copy patched after removing the three DoS exceptions."""
+    versions = []
+    for lockfile in (_REPO_ROOT / "bun.lock", _REPO_ROOT / "apps/site/bun.lock"):
+        for version in re.findall(
+            r'\["markdown-it@([^"]+)"',
+            lockfile.read_text(encoding="utf-8"),
+        ):
+            versions.append(version)
+            assert_that(Version(version) >= Version("15.0.3")).described_as(
+                f"{lockfile.relative_to(_REPO_ROOT)}: markdown-it@{version} must "
+                "fix GHSA-r7fv-28h4-cvq7, GHSA-vfgh-jcmw-g37q and "
+                "GHSA-gfr2-rv44-r23c",
+            ).is_true()
+    assert_that(versions).is_not_empty()
 
 
 def test_semgrep_telemetry_ignore_cannot_hide_vulnerable_application_lock() -> None:
