@@ -1,5 +1,6 @@
 """Mapping contracts for private review, output, deps and watch parsers."""
 
+from collections import UserDict
 from collections.abc import Callable
 from typing import Any
 
@@ -41,10 +42,36 @@ def test_private_section_parser_empty_mapping_uses_defaults(section: str) -> Non
     assert_that(parser({})).is_equal_to(model())
 
 
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("review", "depth", 2),
+        ("output", "art", False),
+        ("deps", "require_upper_bound", False),
+        ("watch", "debounce_ms", 0),
+    ],
+)
+def test_private_section_parser_keeps_configured_value(
+    section: str,
+    field: str,
+    value: Any,
+) -> None:
+    """A populated mapping retains its configured value through the guard.
+
+    Args:
+        section: Private parser that receives the mapping.
+        field: Configured field on the returned model.
+        value: Non-default value the parser must preserve.
+    """
+    parser, _ = SECTION_PARSERS[section]
+
+    assert_that(getattr(parser({field: value}), field)).is_equal_to(value)
+
+
 @pytest.mark.parametrize("section", SECTION_PARSERS)
 @pytest.mark.parametrize(
     "value",
-    [None, False, 0, "", [], (), "invalid", ["ruff"]],
+    [None, False, 0, "", [], (), "invalid", ["ruff"], UserDict()],
     ids=[
         "null",
         "false",
@@ -54,10 +81,15 @@ def test_private_section_parser_empty_mapping_uses_defaults(section: str) -> Non
         "tuple",
         "string",
         "list",
+        "non-dict-mapping",
     ],
 )
 def test_private_section_parser_rejects_non_mapping(section: str, value: Any) -> None:
     """Null and other non-mappings fail at the direct parser boundary.
+
+    Inputs deliberately violate the dict annotation to exercise runtime
+    validation for untyped callers. Non-dict mappings remain unsupported;
+    direct parser labels retain ``config`` unlike public section labels.
 
     Args:
         section: Private parser expected to reject the value.

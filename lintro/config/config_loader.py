@@ -875,7 +875,7 @@ def _parse_review_config(data: dict[str, Any]) -> ReviewConfig:
     Returns:
         ReviewConfig: Parsed review configuration.
     """
-    data = _require_mapping_section({"review config": data}, "review config")
+    data = _require_mapping_value(data, label="review config")
     if not data:
         return ReviewConfig()
 
@@ -906,7 +906,7 @@ def _parse_output_config(data: dict[str, Any]) -> OutputConfig:
         ValueError: When the output section is not a mapping or ``art`` is not
             a boolean.
     """
-    data = _require_mapping_section({"output config": data}, "output config")
+    data = _require_mapping_value(data, label="output config")
     if not data:
         return OutputConfig()
 
@@ -943,7 +943,7 @@ def _parse_deps_config(data: dict[str, Any]) -> DepsConfig:
             loudly rather than silently fall back to the default policy and let
             specs that should fail pass in CI.
     """
-    data = _require_mapping_section({"deps config": data}, "deps config")
+    data = _require_mapping_value(data, label="deps config")
     if not data:
         return DepsConfig()
 
@@ -970,7 +970,7 @@ def _parse_watch_config(data: dict[str, Any]) -> WatchConfig:
     Returns:
         WatchConfig: Parsed watch configuration.
     """
-    data = _require_mapping_section({"watch config": data}, "watch config")
+    data = _require_mapping_value(data, label="watch config")
     if not data:
         return WatchConfig()
 
@@ -1097,6 +1097,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     while .lintro-config.yaml uses nested tools: section.
 
     Nested ``execution``, ``enforce`` and tool tables must be mappings.
+    Raises ``ValueError`` when one of these tables is not a mapping.
     Other section values are passed through so :func:`build_config_from_dict`
     can validate their types.
 
@@ -1145,9 +1146,9 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             # was dropped, so ``enabled = false`` silently did nothing and the
             # tool kept running (#1716).
             table_path = f"tool.lintro.{key_lower}"
-            nested_tools = _require_mapping_section(
-                data={table_path: value},
-                section=table_path,
+            nested_tools = _require_mapping_value(
+                value,
+                label=table_path,
             )
             for nested_key, nested_value in nested_tools.items():
                 nested_lower = str(nested_key).lower()
@@ -1160,9 +1161,9 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             # Nested tables are the structured form of the same keys
             # accepted flat under ``[tool.lintro]``.
             table_path = f"tool.lintro.{key_lower}"
-            section_data = _require_mapping_section(
-                data={table_path: value},
-                section=table_path,
+            section_data = _require_mapping_value(
+                value,
+                label=table_path,
             )
             result[key_lower].update(
                 {
@@ -1351,6 +1352,25 @@ def load_config(
         raise ConfigurationError(str(exc)) from exc
 
 
+def _require_mapping_value(value: Any, label: str) -> dict[str, Any]:
+    """Validate an already-present value as a mapping.
+
+    Args:
+        value: Raw value that must be a dict, including an empty dict.
+        label: Error label identifying the section or table being validated.
+
+    Returns:
+        dict[str, Any]: The validated mapping.
+
+    Raises:
+        ValueError: When the value is null or is not a dict.
+    """
+    if isinstance(value, dict):
+        return value
+    actual = "null" if value is None else type(value).__name__
+    raise ValueError(f"{label} must be a mapping, got {actual}")
+
+
 def _require_mapping_section(
     data: dict[str, Any],
     section: str,
@@ -1359,7 +1379,8 @@ def _require_mapping_section(
 
     YAML spells a bare section as ``enforce:`` which deserializes to ``None``.
     Only omission supplies defaults; explicit nulls and other non-mappings
-    must fail before section parsing.
+    must fail before section parsing. Raises ``ValueError`` when a present
+    section is not a mapping.
 
     Args:
         data: Normalized configuration mapping.
@@ -1368,17 +1389,10 @@ def _require_mapping_section(
     Returns:
         dict[str, Any]: The section mapping, or an empty mapping when
             the key is omitted.
-
-    Raises:
-        ValueError: When the key is present but is not a mapping.
     """
     if section not in data:
         return {}
-    value = data[section]
-    if isinstance(value, dict):
-        return value
-    actual = "null" if value is None else type(value).__name__
-    raise ValueError(f"{section} must be a mapping, got {actual}")
+    return _require_mapping_value(data[section], label=section)
 
 
 def build_config_from_dict(
