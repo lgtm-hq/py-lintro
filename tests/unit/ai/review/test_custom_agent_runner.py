@@ -45,6 +45,18 @@ from lintro.ai.review.session import ReviewSessionOptions
 
 _Patcher = AbstractContextManager[MagicMock]
 
+_VALID_FINDING = {
+    "severity": "P3",
+    "category": "security",
+    "file": "src/app.py",
+    "line": 2,
+    "title": "Raw SQL in handler",
+    "description": "Executes SQL directly",
+    "cause": "cursor.execute",
+    "fix": "Use the repository",
+    "confidence": "high",
+}
+
 _UNUSABLE_RESPONSES = (
     "not json at all",
     "[]",
@@ -58,6 +70,13 @@ _UNUSABLE_RESPONSES = (
     '{"findings": "none"}',
     '{"findings": false}',
     '{"findings": 0}',
+    '{"findings": [1, "x"]}',
+    '{"findings": [null]}',
+    '{"findings": [false]}',
+    '{"findings": [1.5]}',
+    '{"findings": [[]]}',
+    json.dumps({"findings": [1, _VALID_FINDING]}),
+    json.dumps({"findings": [_VALID_FINDING, "x"]}),
 )
 
 _AGENT_TEXT = """---
@@ -716,3 +735,134 @@ def test_only_mode_coverage_requires_a_usable_agent_response(
     assert_that(result.readiness_verdict).is_equal_to(
         ReviewVerdict.READY if successful else ReviewVerdict.INCOMPLETE,
     )
+
+
+@pytest.mark.parametrize("failed_agent_first", [True, False])
+@pytest.mark.parametrize("has_finding", [True, False])
+def test_only_mode_rejects_whole_response_without_losing_independent_agent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failed_agent_first: bool,
+    has_finding: bool,
+) -> None:
+    """Offline mixed answers earn no credit; independent passes and spend survive."""
+    failed_agent = _agent(
+        tmp_path=tmp_path,
+        text=_AGENT_TEXT.replace("src/**/*.py", "**/*"),
+    )
+    successful_agent = _agent(
+        tmp_path=tmp_path,
+        text=(
+            "---\nname: docs-agent\ninclude: ['docs/**']\nseverity: low\n---\n"
+            "Check docs.\n"
+        ),
+    )
+    successful_finding = {
+        **_VALID_FINDING,
+        "file": "docs/readme.md",
+        "title": "Document the repository method",
+    }
+
+    async def _offline_call(
+        *,
+        user_prompt: str,
+        budget: CostBudget,
+        **_kwargs: object,
+    ) -> AIResponse:
+        successful = "`docs-agent`" in user_prompt
+        cost = 0.01 if successful else 0.07
+        budget.record(cost)
+        findings: list[object] = [successful_finding] if has_finding else []
+        if not successful:
+            findings = [_VALID_FINDING, "x"]
+        return AIResponse(
+            content=json.dumps({"findings": findings}),
+            model="offline-fixture",
+            cost_estimate=cost,
+        )
+
+    monkeypatch.setattr("lintro.ai.review.custom_agent_runner.call_ai", _offline_call)
+    agents = (failed_agent, successful_agent)
+    result = run_review(
+        _context(),
+        options=ReviewSessionOptions(
+            provider=_mock_provider(content="unused offline fixture"),
+            ai_config=_ai_config(),
+            checklist_items=[],
+            checklist_text="",
+            classifications=[],
+            custom_agents=agents if failed_agent_first else agents[::-1],
+            run_builtin_checklist=False,
+        ),
+    )
+
+    assert_that(result.metadata.custom_agents_run).is_equal_to(1)
+    assert_that(result.metadata.custom_agents_skipped).is_equal_to(1)
+    assert_that(result.metadata.reviewed_paths).is_equal_to(("docs/readme.md",))
+    assert_that(result.metadata.files_reviewed).is_equal_to(1)
+    assert_that(result.metadata.cost_estimate_usd).is_close_to(0.08, 1e-9)
+    assert_that(result.summary).contains(
+        f"1 agent(s) ran and reported {int(has_finding)}",
+    )
+    assert_that([(f.title, f.source) for f in result.findings]).is_equal_to(
+        [(successful_finding["title"], successful_agent.name)] if has_finding else [],
+    )
+    assert_that(result.coverage).is_equal_to(
+        CoverageCounts(reviewed=1, awaiting=1, eligible=2),
+    )
+    assert_that(tuple(record.path for record in result.coverage_records)).is_equal_to(
+        ("docs/readme.md",),
+    )
+    assert_that(result.awaiting_paths).is_equal_to(("src/app.py",))
+    assert_that(
+        {entry.path: entry.reason for entry in result.metadata.skipped_files},
+    ).is_equal_to({"src/app.py": FileSkipReason.AGENT_SCOPE})
+    assert_that(result.readiness_verdict).is_equal_to(ReviewVerdict.INCOMPLETE)
+
+
+def test_rejected_agent_spend_still_stops_later_passes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An offline rejected answer consumes budget without completing a pass."""
+    agent = _agent(tmp_path=tmp_path)
+    later_agent = _agent(
+        tmp_path=tmp_path,
+        text=_AGENT_TEXT.replace("no-raw-sql", "later-agent"),
+    )
+    budget = CostBudget(max_cost_usd=0.05)
+    completed: list[str] = []
+    failed: list[str] = []
+
+    async def _offline_call(*, budget: CostBudget, **_kwargs: object) -> AIResponse:
+        budget.record(0.07)
+        return AIResponse(
+            content='{"findings": [1, "x"]}',
+            model="offline-fixture",
+            cost_estimate=0.07,
+        )
+
+    monkeypatch.setattr("lintro.ai.review.custom_agent_runner.call_ai", _offline_call)
+    with pytest.raises(AICostBudgetExceededError, match="budget exceeded"):
+        asyncio.run(
+            run_custom_agent_passes(
+                request=CustomAgentPassRequest(
+                    selected=tuple(
+                        SelectedCustomAgent(agent=spec, files=("src/app.py",))
+                        for spec in (agent, later_agent)
+                    ),
+                    context=_context(),
+                    provider=_mock_provider(content="unused offline fixture"),
+                    ai_config=_ai_config(),
+                    provider_cache={},
+                    budget=budget,
+                    on_pass_complete=lambda result: completed.append(result.agent_name),
+                    on_agent_failed=failed.append,
+                ),
+            ),
+        )
+
+    assert_that(budget.spent).is_close_to(0.07, 1e-9)
+    assert_that(budget.remaining).is_equal_to(0.0)
+    assert_that(completed).is_empty()
+    assert_that(failed).is_equal_to([agent.name])
