@@ -451,6 +451,15 @@ class ClippyPlugin(BaseToolPlugin):
             name=self.definition.name,
             issues=after.issues,
             initial_issues=initial.issues,
+            # Rustc lints are not Clippy issues. Keep failed-stage diagnostics
+            # that the structured findings cannot explain, even with zero counts.
+            output="\n".join(
+                run.output
+                for run in (mutation, after)
+                if not run.success
+                and (not run.issues or run.lint_diagnostics > len(run.issues))
+            )
+            or None,
             # The verify pass resolves crate-relative diagnostic paths here.
             cwd=str(cargo_root),
         )

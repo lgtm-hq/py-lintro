@@ -214,6 +214,7 @@ def test_legitimate_no_lint_output_is_not_corruption(
     assert_that(result.success).is_true()
     assert_that(result.parse_failures_count or 0).is_zero()
     assert_that(result.issues).is_empty()
+    assert_that(result.output).is_none()
     if method == "fix":
         assert_that(
             (
@@ -330,3 +331,44 @@ def test_denied_lint_and_cargo_summary_are_a_complete_verdict(
                 result.remaining_issues_count,
             ),
         ).is_equal_to((1, 0, 1))
+
+
+@pytest.mark.parametrize("stage", [1, 2], ids=["mutation", "verify"])
+@pytest.mark.parametrize("with_clippy", [False, True], ids=["rustc", "mixed-lints"])
+def test_complete_fix_preserves_unrepresented_native_failure(
+    clippy_plugin: ClippyPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    stage: int,
+    with_clippy: bool,
+) -> None:
+    """Failed complete stages keep rustc evidence alongside measured Clippy counts."""
+    denial = json.dumps(
+        {
+            "reason": "compiler-message",
+            "message": {
+                "code": {"code": "unconditional_recursion"},
+                "message": f"native denial in stage {stage}",
+                "level": "error",
+                "spans": [],
+            },
+        },
+    )
+    lint = _VALID if with_clippy else ""
+    stages = [(0, lint)] * 3
+    stages[stage] = (101, "\n".join((lint, denial)))
+    result = _run(clippy_plugin, monkeypatch, tmp_path, "fix", stages)
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.inspected_files).is_true()
+    assert_that(result.residual_unknown).is_false()
+    assert_that(result.parse_failures_count).is_none()
+    assert_that(result.output).contains(denial)
+    assert_that(
+        (
+            result.initial_issues_count,
+            result.fixed_issues_count,
+            result.remaining_issues_count,
+        ),
+    ).is_equal_to((int(with_clippy), 0, int(with_clippy)))

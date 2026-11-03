@@ -11,14 +11,16 @@ from assertpy import assert_that
 from lintro.parsers.clippy.clippy_parser import parse_clippy_output_with_stats
 from lintro.tools.clippy.definition import ClippyPlugin
 from tests.conftest import run_git
-from tests.integration._tools import NO_MIN_VERSION, require_tool
+from tests.integration._tools import require_tool
 
 pytestmark = [
-    require_tool("rustc", pin="clippy"),
+    # Probe the same tool identity production validates, not rustc's version:
+    # patch releases can ship a Clippy component below the enforced minimum.
     require_tool(
         "cargo",
         version_args=["clippy", "--version"],
-        min_version=NO_MIN_VERSION,
+        pin="clippy",
+        label="cargo clippy",
     ),
 ]
 
@@ -117,7 +119,41 @@ def test_native_lint_verdicts_allow_fixes(
     assert_that(fixed.initial_issues_count).is_equal_to(len(findings))
     assert_that(fixed.fixed_issues_count).is_equal_to(len(findings))
     assert_that(fixed.remaining_issues_count).is_zero()
+    assert_that(fixed.output).is_none()
     assert_that(target.read_text()).does_not_contain("return 7", "let unused")
+
+
+def test_native_unfixable_rustc_denial_keeps_diagnostics(tmp_path: Path) -> None:
+    """A complete zero-Clippy fix can still fail on an unfixable rustc lint."""
+    source = (
+        "#![deny(unconditional_recursion)]\n"
+        "fn recurse() { recurse(); }\nfn main() { recurse(); }\n"
+    )
+    root = tmp_path / "rustc_denial"
+    target = _project(root, source)
+    run_git(["git", "init", "--quiet"], cwd=root)
+    native = _cargo(root)
+    assert_that(native.returncode).is_equal_to(101)
+    assert_that(parse_clippy_output_with_stats(native.stdout)).is_equal_to(([], 0, 0))
+
+    for method in ("check", "fix"):
+        result = getattr(ClippyPlugin(), method)([str(root)], {})
+        assert_that(result.skipped).is_false()
+        assert_that(result.success).is_false()
+        assert_that(result.execution_failed).is_false()
+        assert_that(result.inspected_files).is_true()
+        assert_that(result.residual_unknown).is_false()
+        assert_that(result.issues_count).is_zero()
+        assert_that(result.output).contains("unconditional_recursion", "recurse")
+        if method == "fix":
+            assert_that(
+                (
+                    result.initial_issues_count,
+                    result.fixed_issues_count,
+                    result.remaining_issues_count,
+                ),
+            ).is_equal_to((0, 0, 0))
+    assert_that(target.read_text()).is_equal_to(source)
 
 
 @pytest.mark.parametrize(
