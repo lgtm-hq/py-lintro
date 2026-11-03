@@ -20,9 +20,14 @@ from lintro.parsers.base_parser import (
     extract_int_field,
     extract_str_field,
     safe_parse_items_with_stats,
+    strip_ansi_codes,
 )
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.parsers.streaming import stream_json_array_fallback
+
+_WARNING_CONTINUATION = re.compile(
+    r"  - '([\w-]+)' -> 'lint\.\1'|    - [A-Z]+[0-9]+",
+)
 
 
 def _parse_ruff_item(item: dict[str, object]) -> RuffIssue:
@@ -100,6 +105,27 @@ def parse_ruff_output(output: str) -> list[RuffIssue]:
     return issues
 
 
+def _is_ruff_warning_suffix(suffix: str) -> bool:
+    """Recognize warnings with deprecated-setting mappings or removed-rule bullets.
+
+    Args:
+        suffix: Text following the decoded JSON array.
+
+    Returns:
+        Whether every nonblank line belongs to a supported warning.
+    """
+    in_warning = False
+    for raw_line in suffix.splitlines():
+        line = strip_ansi_codes(raw_line)
+        if not line.strip():
+            continue
+        if line.lstrip().startswith("warning:"):
+            in_warning = True
+        elif not (in_warning and _WARNING_CONTINUATION.fullmatch(line)):
+            return False
+    return True
+
+
 def parse_ruff_output_with_stats(output: str) -> tuple[list[RuffIssue], int]:
     """Parse Ruff output and count malformed or unusable diagnostic records.
 
@@ -108,6 +134,9 @@ def parse_ruff_output_with_stats(output: str) -> tuple[list[RuffIssue], int]:
     so they count as parse failures rather than intentional filtering. Malformed
     JSON object lines also count as parse failures. An invalid array envelope
     counts as a failure even when JSON Lines fallback recovers diagnostics.
+    Arrays may be followed by warning lines, including Ruff's indented
+    deprecated-setting mappings and removed-rule bullets. Other trailing content
+    counts as a framing failure without discarding findings from the complete array.
 
     Args:
         output: JSON array or JSON Lines output from Ruff.
@@ -118,18 +147,25 @@ def parse_ruff_output_with_stats(output: str) -> tuple[list[RuffIssue], int]:
     if not output.strip() or output.strip() == "[]":
         return [], 0
 
-    # First try JSON array (with possible trailing non-JSON data)
+    # Decode the first JSON value rather than searching warning text for ']'.
     array_decode_failed = False
     try:
-        json_end = output.rfind("]")
-        if json_end != -1:
-            json_part = output[: json_end + 1]
-            ruff_data = json.loads(json_part)
-        else:
-            ruff_data = json.loads(output)
+        json_output = output.lstrip()
+        ruff_data, json_end = json.JSONDecoder().raw_decode(json_output)
 
         if isinstance(ruff_data, list):
-            return safe_parse_items_with_stats(ruff_data, _parse_ruff_item, "ruff")
+            issues, failures = safe_parse_items_with_stats(
+                ruff_data,
+                _parse_ruff_item,
+                "ruff",
+            )
+            # Extra JSON, garbage and stderr errors still fail closed. The
+            # decoded array remains usable; JSON Lines fallback would lose
+            # pretty-printed findings and miscount their opening braces.
+            if not _is_ruff_warning_suffix(json_output[json_end:]):
+                failures += 1
+                logger.debug("Unexpected data after Ruff array")
+            return issues, failures
         if not isinstance(ruff_data, dict):
             return [], 1
     except (json.JSONDecodeError, TypeError) as e:
@@ -177,8 +213,6 @@ def parse_ruff_format_check_output(output: str) -> list[str]:
     Returns:
         List of file paths that would be reformatted
     """
-    from lintro.parsers.base_parser import strip_ansi_codes
-
     if not output:
         return []
     files = []
@@ -259,8 +293,6 @@ def stream_ruff_format_output(
         >>> for filepath in stream_ruff_format_output(format_output):
         ...     print(f"Needs formatting: {filepath}")
     """
-    from lintro.parsers.base_parser import strip_ansi_codes
-
     lines: Iterable[str]
     lines = output.splitlines() if isinstance(output, str) else output
 

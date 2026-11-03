@@ -247,3 +247,84 @@ def test_fix_empty_reports_stay_clean(
     assert_that(result.success).is_true()
     assert_that(result.parse_failures_count).is_zero()
     assert_that(result.issues_count).is_zero()
+
+
+@pytest.mark.parametrize("ansi", [False, True])
+@pytest.mark.parametrize(
+    ("suffix", "failures_per_report"),
+    [
+        ("", 0),
+        ("warning: cache [cache]/ruff is unavailable\n", 0),
+        (
+            "warning: The top-level linter settings are deprecated:\n"
+            "  - 'ignore' -> 'lint.ignore'\n"
+            "  - 'select' -> 'lint.select'\n",
+            0,
+        ),
+        (
+            "warning: The following rules have been removed and ignoring them has no effect:\n"
+            "    - ANN101\n"
+            "    - UP027\n\n",
+            0,
+        ),
+        ("error: Failed to read [cache]/other.py (os error 2)\n", 1),
+        ("Ruff failed\n  Cause: configuration error\n", 1),
+        ("[]", 1),
+        ("[", 1),
+        ("null", 1),
+        ("42", 1),
+        ('"diagnostics"', 1),
+        ("garbage", 1),
+    ],
+)
+def test_fix_suffix_retains_measurements_and_failure_evidence(
+    ruff_plugin: RuffPlugin,
+    temp_python_file: str,
+    suffix: str,
+    failures_per_report: int,
+    ansi: bool,
+) -> None:
+    """Initial, final and unsafe reads retain findings without hiding bad suffixes."""
+    if ansi:
+        suffix = f"\x1b[1;33m{suffix}\x1b[0m\n"
+    initial = [
+        {"filename": temp_python_file, "message": "unused import", "code": "F401"},
+        {"filename": temp_python_file, "message": "undefined name", "code": "F821"},
+    ]
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch(
+            "subprocess.run",
+            side_effect=[
+                subprocess.CompletedProcess(
+                    ["ruff"],
+                    1,
+                    json.dumps(items, indent=2),
+                    suffix,
+                )
+                for items in (initial, initial[1:], initial[1:])
+            ],
+        ),
+    ):
+        result = ruff_plugin.fix(
+            [temp_python_file],
+            {"format": False, "unsafe_fixes": False},
+        )
+
+    assert_that(result.success).is_false()
+    assert_that(result.initial_issues).extracting("code").is_equal_to(["F401", "F821"])
+    assert_that(result.issues).extracting("code", "message").is_equal_to(
+        [("F821", "undefined name")],
+    )
+    assert_that(result.parse_failures_count).is_equal_to(3 * failures_per_report)
+    assert_that(
+        (
+            result.initial_issues_count,
+            result.fixed_issues_count,
+            result.remaining_issues_count,
+            result.issues_count,
+        ),
+    ).is_equal_to((2, 1, 1, 1))
