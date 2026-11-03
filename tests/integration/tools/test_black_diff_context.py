@@ -7,6 +7,7 @@ from assertpy import assert_that
 
 from lintro.enums.action import Action
 from lintro.models.core.run_artifact import RunArtifact
+from lintro.parsers.black.black_issue import BlackIssue
 from lintro.parsers.black.black_parser import (
     black_report_parse_failures,
     parse_black_output,
@@ -25,6 +26,7 @@ pytestmark = [require_tool("black"), require_tool("ruff")]
         ("context", "\n"),
         ("context", "\u2028"),
         ("context", "\x0c"),
+        ("changed", "\n"),
         ("changed", "\u2028"),
         ("changed", "\x0c"),
     ],
@@ -32,6 +34,7 @@ pytestmark = [require_tool("black"), require_tool("ruff")]
         "lf-context",
         "unicode-context",
         "ff-context",
+        "lf-changed",
         "unicode-changed",
         "ff-changed",
     ],
@@ -61,10 +64,28 @@ def string_file(
     return file
 
 
-def test_real_diff_string_context_keeps_only_actual_file(string_file: Path) -> None:
-    """A completed preview preserves bytes and measures only the actual file."""
+@pytest.mark.parametrize("ending", [b"\n", b"\r\n", b"\r"], ids=["lf", "crlf", "cr"])
+def test_real_check_and_diff_string_context_keep_only_actual_file(
+    string_file: Path,
+    ending: bytes,
+) -> None:
+    """Native checks and previews preserve source endings and exact findings."""
+    # Write actual source bytes; text I/O would hide CRLF/CR through translation.
+    string_file.write_bytes(string_file.read_bytes().replace(b"\n", ending))
     before = string_file.read_bytes()
     plugin = BlackPlugin()
+    plugin.set_options(_baseline_coverage=True)
+    checked = plugin.check([str(string_file)], {})
+    expected = BlackIssue(file=string_file.name, message="Would reformat file")
+    assert_that(checked.issues).is_equal_to([expected])
+    assert_that(checked.issues_count).is_equal_to(1)
+    assert_that(checked.success).is_false()
+    assert_that(checked.findings_complete).is_true()
+    assert_that(checked.execution_failed).is_false()
+    assert_that(checked.parse_failures_count).is_none()
+    assert_that(checked.inspected_files).is_true()
+    assert_that(checked.inspected_paths).is_equal_to(frozenset({str(string_file)}))
+    assert_that(string_file.read_bytes()).is_equal_to(before)
     native = plugin._run_subprocess_result(
         cmd=[
             *plugin._get_executable_command(tool_name="black"),
@@ -94,12 +115,10 @@ def test_real_diff_string_context_keeps_only_actual_file(string_file: Path) -> N
         assert_that(native.stdout).contains('\n message = """head')
     assert_that(native.stderr).contains("would reformat example.py")
     assert_that(result.issues_count).is_equal_to(1)
-    assert_that([issue.file for issue in parsed]).is_equal_to([string_file.name])
+    assert_that(parsed).is_equal_to([expected])
     assert_that(black_report_parse_failures(native.output, parsed)).is_zero()
     # The preview and final check both describe this one still-unformatted file.
-    assert_that([issue.file for issue in result.issues]).is_equal_to(
-        [string_file.name, string_file.name],
-    )
+    assert_that(result.issues).is_equal_to([expected, expected])
     assert_that(result.initial_issues_count).is_equal_to(1)
     assert_that(result.fixed_issues_count).is_zero()
     assert_that(result.remaining_issues_count).is_equal_to(1)
