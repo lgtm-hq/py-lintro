@@ -21,6 +21,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.6] - 2026-11-03
+
+### Changed
+
+- **ruff**: cover scalar reports with stray warning text (#3159) (31e8f88)
+- **ai**: pin suggestion parser compatibility controls (#3158) (c40d929)
+- **ruff**: pin scalar report rejection contracts (#3156) (953cb34)
+- **ai**: pin checkpoint retention before allocation failure (#3157) (926cc05)
+
+### Fixed
+
+- **docker**: refresh markdownlint from app version source (#3163) (29ec746)
+- **security**: upgrade markdownlint and remove expired exceptions (#3161) (fbdb3eb)
+
 ## [0.177.5] - 2026-11-02
 
 ### Changed
