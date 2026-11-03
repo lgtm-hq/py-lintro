@@ -160,3 +160,96 @@ def test_summary_like_filenames_do_not_override_native_count(
     assert_that(
         parse_black_output(f"error: cannot format {filename}: invalid"),
     ).is_empty()
+
+
+@pytest.mark.parametrize("prefix", [" ", "+", "-"], ids=["context", "added", "deleted"])
+@pytest.mark.parametrize("color", [False, True], ids=["plain", "ansi"])
+@pytest.mark.parametrize(
+    "separator",
+    ["", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"],
+    ids=["none", "vt", "ff", "fs", "gs", "rs", "nel", "ls", "ps"],
+)
+@pytest.mark.parametrize(
+    ("report", "expected_files", "failures"),
+    [
+        ("", [], 0),
+        (
+            "would reformat actual.py\n1 file would be reformatted.\n",
+            ["actual.py"],
+            0,
+        ),
+        ("1 file would be reformatted.\n", ["<unknown>"], 1),
+    ],
+    ids=["no-report", "identified", "summary-only"],
+)
+def test_diff_rows_cannot_supply_native_findings_or_summary_counts(
+    prefix: str,
+    color: bool,
+    separator: str,
+    report: str,
+    expected_files: list[str],
+    failures: int,
+) -> None:
+    """Source separators cannot detach pseudo-records from their diff prefix."""
+    payload = [
+        "reformatted phantom.py",
+        "would reformat ghost.py",
+        "9 files would be reformatted.",
+        "8 files reformatted, 1 file left unchanged.",
+    ]
+    start = f'message = """a{separator}' if separator else ""
+    rows = "\n".join(prefix + start + line for line in payload)
+    if color:
+        rows = "\x1b[32m" + rows + "\x1b[0m"
+    output = f"--- actual.py\n+++ actual.py\n@@ -1,4 +1,4 @@\n{rows}\n{report}"
+
+    issues = parse_black_output(output)
+
+    assert_that([issue.file for issue in issues]).is_equal_to(expected_files)
+    assert_that(black_report_parse_failures(output, issues)).is_equal_to(failures)
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"], ids=["lf", "crlf", "cr"])
+@pytest.mark.parametrize("check", [True, False], ids=["preview", "applied"])
+@pytest.mark.parametrize("color", [False, True], ids=["plain", "ansi"])
+@pytest.mark.parametrize("identified", [True, False], ids=["partial", "summary-only"])
+def test_native_row_endings_preserve_records_and_missing_summary_entries(
+    ending: str,
+    check: bool,
+    color: bool,
+    identified: bool,
+) -> None:
+    """Real row boundaries preserve native records and fail closed on lost paths."""
+    record = "would reformat" if check else "reformatted"
+    summary = "would be reformatted" if check else "reformatted"
+    lines = ([f"{record} actual.py"] if identified else []) + [
+        "All done!",
+        f"2 files {summary}.",
+    ]
+    if color:
+        lines = [f"\x1b[1m{line}\x1b[0m" for line in lines]
+    output = ending.join(lines) + ending
+
+    issues = parse_black_output(output)
+
+    expected = ["actual.py"] if identified else ["<unknown>", "<unknown>"]
+    assert_that([issue.file for issue in issues]).is_equal_to(expected)
+    assert_that(black_report_parse_failures(output, issues)).is_equal_to(
+        1 if identified else 2,
+    )
+
+
+@pytest.mark.parametrize("indent", ["  ", "\t"], ids=["spaces", "tab"])
+def test_intentionally_indented_pseudo_records_are_not_native_reports(
+    indent: str,
+) -> None:
+    """Black emits native records at column zero, even outside a unified diff."""
+    output = (
+        f"{indent}would reformat ghost.py\n"
+        f"{indent}reformatted phantom.py\n"
+        f"{indent}9 files would be reformatted.\n"
+        f"{indent}8 files reformatted.\n"
+    )
+
+    assert_that(parse_black_output(output)).is_empty()
+    assert_that(black_report_parse_failures(output, [])).is_zero()

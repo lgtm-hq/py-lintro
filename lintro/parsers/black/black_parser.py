@@ -29,15 +29,17 @@ _UNCHANGED = re.compile(
     r"^(?P<file>.+) (?:already well formatted, good job\."
     r"|wasn't modified on disk since last run\.)$",
 )
-# Native summaries occupy a whole line; filenames can contain the same words.
+# Native records start in column zero. Preserve diff prefixes so Python string
+# contents in context, added or deleted rows cannot become report records.
+# Summaries occupy a whole line; filenames can contain the same words.
 _SUMMARY_WOULD = re.compile(
-    r"^[ \t]*(?P<count>\d+) files? would be reformatted"
+    r"^(?P<count>\d+) files? would be reformatted"
     r"(?:, \d+ files? would be left unchanged)?"
     r"(?:, \d+ files? would fail to reformat)?\.?[ \t]*\r?$",
     re.IGNORECASE | re.MULTILINE,
 )
 _SUMMARY_REFORMATTED = re.compile(
-    r"^[ \t]*(?P<count>\d+) files? reformatted"
+    r"^(?P<count>\d+) files? reformatted"
     r"(?:, \d+ files? left unchanged)?"
     r"(?:, \d+ files? failed to reformat)?\.?[ \t]*\r?$",
     re.IGNORECASE | re.MULTILINE,
@@ -53,6 +55,13 @@ _VERBOSE_METADATA = re.compile(
 )
 
 
+def _normalize_black_output(output: str) -> str:
+    """Strip ANSI and normalize Black's CRLF, LF and CR row boundaries."""
+    # Black's _splitlines_no_ff keeps other Unicode/control separators inside
+    # source rows. They must never expose a new column-zero report record.
+    return strip_ansi_codes(output).replace("\r\n", "\n").replace("\r", "\n")
+
+
 def black_report_parse_failures(output: str, issues: list[BlackIssue]) -> int:
     """Count unaccounted formatting entries in Black's native summary.
 
@@ -63,7 +72,7 @@ def black_report_parse_failures(output: str, issues: list[BlackIssue]) -> int:
     Returns:
         Missing entries, including summary-only findings without file identities.
     """
-    output = strip_ansi_codes(output)
+    output = _normalize_black_output(output)
     summary = _SUMMARY_WOULD.search(output) or _SUMMARY_REFORMATTED.search(output)
     expected = int(summary.group("count")) if summary else len(issues)
     identified = sum(issue.file != "<unknown>" for issue in issues)
@@ -124,7 +133,7 @@ def black_inspected_paths(
 
 def _iter_issue_lines(lines: Iterable[str]) -> Iterable[str]:
     for line in lines:
-        s = line.strip()
+        s = line.rstrip()
         if not s:
             continue
         yield s
@@ -150,12 +159,11 @@ def parse_black_output(output: str, *, applied: bool = False) -> list[BlackIssue
 
     would_reformat_message = "Reformatted file" if applied else "Would reformat file"
 
-    # Strip ANSI codes for consistent parsing across environments
-    output = strip_ansi_codes(output)
+    output = _normalize_black_output(output)
 
     issues: list[BlackIssue] = []
     try:
-        for line in _iter_issue_lines(output.splitlines()):
+        for line in _iter_issue_lines(output.split("\n")):
             try:
                 m = _WOULD_REFORMAT.match(line)
                 if m:
