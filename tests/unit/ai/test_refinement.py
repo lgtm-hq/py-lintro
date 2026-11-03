@@ -212,6 +212,24 @@ async def test_refine_returns_empty_when_no_unverified_keys(tmp_path: Path) -> N
         *[
             pytest.param(
                 json.dumps({"original_code": original, "suggested_code": suggested}),
+                True,
+                id=f"{name}-{pairing}",
+            )
+            for name, value in [
+                ("empty-mapping", {}),
+                ("mapping", {"text": "x = 1"}),
+                ("empty-list", []),
+                ("list", ["x = 1"]),
+            ]
+            for pairing, original, suggested in [
+                ("empty-original", "", value),
+                ("empty-suggested", value, ""),
+                ("identical", value, value),
+            ]
+        ],
+        *[
+            pytest.param(
+                json.dumps({"original_code": original, "suggested_code": suggested}),
                 False,
                 id=name,
             )
@@ -219,6 +237,7 @@ async def test_refine_returns_empty_when_no_unverified_keys(tmp_path: Path) -> N
                 ("noop", "x = 1", "x = 1"),
                 ("empty-original", "", "x = 3"),
                 ("empty-suggested", "x = 1", ""),
+                ("both-empty", "", ""),
             ]
         ],
     ],
@@ -231,8 +250,8 @@ async def test_refinement_parse_diagnostic_preserves_reverted_file(
 ):
     """Bad replies log concise failures; valid absence leaves the reverted file."""
     source = tmp_path / "test.py"
-    source.write_text("x = 2\n")
-    suggestion = _make_suggestion(line=1)
+    source.write_bytes(b"# unchanged context\nx = 2\n")
+    suggestion = _make_suggestion(line=2)
     provider = MockAIProvider(
         responses=[
             AIResponse(
@@ -257,11 +276,11 @@ async def test_refinement_parse_diagnostic_preserves_reverted_file(
         level="DEBUG",
     )
 
-    refined, cost = await refine_unverified_fixes(
+    refined, _cost = await refine_unverified_fixes(
         applied_suggestions=[suggestion],
         validation=ValidationResult(
             unverified=1,
-            details=["[E001] test.py:1 — issue still present"],
+            details=["[E001] test.py:2 — issue still present"],
         ),
         provider=provider,
         ai_config=ai_config,
@@ -269,8 +288,7 @@ async def test_refinement_parse_diagnostic_preserves_reverted_file(
     )
 
     assert_that(refined).is_empty()
-    assert_that(cost).is_equal_to(0.0)
-    assert_that(source.read_text()).is_equal_to("x = 1\n")
+    assert_that(source.read_bytes()).is_equal_to(b"# unchanged context\nx = 1\n")
     failures = [
         (text, noisy) for text, noisy in diagnostics if "Refinement failed" in text
     ]
@@ -278,7 +296,7 @@ async def test_refinement_parse_diagnostic_preserves_reverted_file(
     if malformed:
         text, noisy = failures[0]
         assert_that(text).starts_with(
-            "Refinement failed for test.py:1: malformed response (",
+            "Refinement failed for test.py:2: malformed response (",
         )
         assert_that(noisy).is_false()
 
