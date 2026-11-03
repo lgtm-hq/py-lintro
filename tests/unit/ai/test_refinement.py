@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -10,6 +11,7 @@ import pytest
 from assertpy import assert_that
 from loguru import logger
 
+from lintro.ai.config import AIConfig
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.providers.base import AIResponse
 from lintro.ai.refinement import _revert_fix, refine_unverified_fixes
@@ -69,6 +71,101 @@ def test_revert_fix_returns_false_when_apply_fails(tmp_path: Path) -> None:
 
 
 # -- refine_unverified_fixes -----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "response_kind",
+    ["oversized", "ordinary-valid", "ordinary-malformed"],
+)
+async def test_refinement_json_integer_response_controls(
+    tmp_path: Path,
+    ai_config: AIConfig,
+    oversized_json_integer: str,
+    response_kind: str,
+) -> None:
+    """Real decoding failures leave reverted source intact with concise diagnostics."""
+    original = b"# unchanged context\nx = 1\n"
+    source = tmp_path / "integer.py"
+    source.write_bytes(b"# unchanged context\nx = 2\n")
+    template = json.dumps(
+        {
+            "original_code": "x = 1",
+            "suggested_code": "x = 3",
+            "explanation": "private-refinement-payload",
+            "line": "INTEGER",
+        },
+    )
+    token = {
+        "oversized": oversized_json_integer,
+        "ordinary-valid": "17",
+        "ordinary-malformed": "?",
+    }[response_kind]
+    content = template.replace('"INTEGER"', token)
+    response = AIResponse(
+        content=content,
+        model="mock",
+        provider="mock",
+        input_tokens=11,
+        output_tokens=7,
+        cost_estimate=0.003,
+    )
+    diagnostics: list[tuple[str, bool]] = []
+    logger.add(
+        lambda message: diagnostics.append(
+            (
+                message.record["message"],
+                "exc_info" in message.record["extra"]
+                or message.record["exception"] is not None,
+            ),
+        ),
+        level="DEBUG",
+    )
+    limit = sys.get_int_max_str_digits()
+
+    refined, cost = await refine_unverified_fixes(
+        applied_suggestions=[_make_suggestion(file="integer.py", line=2)],
+        validation=ValidationResult(
+            unverified=1,
+            details=["[E001] integer.py:2 — issue still present"],
+        ),
+        provider=MockAIProvider(responses=[response]),
+        ai_config=ai_config,
+        workspace_root=tmp_path,
+    )
+
+    transcript = "\n".join(text for text, _ in diagnostics)
+    assert_that(transcript).does_not_contain(
+        oversized_json_integer,
+        "private-refinement-payload",
+        content,
+        "ValueError",
+        "Traceback",
+    )
+    assert_that(any(noisy for _, noisy in diagnostics)).is_false()
+    assert_that(sys.get_int_max_str_digits()).is_equal_to(limit)
+    failures = [text for text, _ in diagnostics if text.startswith("Refinement failed")]
+    if response_kind == "ordinary-valid":
+        assert_that(failures).is_empty()
+        assert_that(refined).is_length(1)
+        assert_that(refined[0].line).is_equal_to(2)
+        assert_that(refined[0].suggested_code).is_equal_to("x = 3")
+        assert_that(refined[0].diff).contains("-x = 1", "+x = 3")
+        assert_that((refined[0].input_tokens, refined[0].output_tokens)).is_equal_to(
+            (11, 7),
+        )
+        assert_that(cost).is_equal_to(response.cost_estimate)
+        assert_that(source.read_bytes()).is_equal_to(b"# unchanged context\nx = 3\n")
+    else:
+        assert_that(refined).is_empty()
+        assert_that(source.read_bytes()).is_equal_to(original)
+        assert_that(failures).is_equal_to(
+            [
+                "Refinement failed for integer.py:2: malformed response "
+                "(Invalid JSON in AI fix response for integer.py:2)",
+            ],
+        )
+        # Failed-parse cost undercount is an existing #3116 follow-up, not a
+        # contract: deliberately do not pin the returned cost to zero here.
 
 
 async def test_refine_returns_empty_when_no_unverified_keys(tmp_path: Path) -> None:
