@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.10] - 2026-11-03
+
+### Fixed
+
+- **ruff**: frame reports before trailing warnings (#3175) (c1c506d)
+
 ## [0.177.9] - 2026-11-03
 
 ### Fixed
