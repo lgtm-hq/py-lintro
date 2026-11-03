@@ -53,8 +53,27 @@ def test_workflow_sources_are_small_and_definitions_unique() -> None:
 
 def test_workflow_roots_and_documented_constant_export() -> None:
     """Readers resolve this checkout and the README's original import stays valid."""
-    for path in [*_workflow_test_paths(), _UNIT / "workflow_wiring_helpers.py"]:
-        module = importlib.import_module(f"tests.unit.{path.stem}")
+    from tests.unit import (
+        test_workflow_ai_contracts,
+        test_workflow_binaries,
+        test_workflow_ci_contracts,
+        test_workflow_docker,
+        test_workflow_publishing,
+        test_workflow_release,
+        test_workflow_wiring,
+        workflow_wiring_helpers,
+    )
+
+    for module in (
+        test_workflow_ai_contracts,
+        test_workflow_binaries,
+        test_workflow_ci_contracts,
+        test_workflow_docker,
+        test_workflow_publishing,
+        test_workflow_release,
+        test_workflow_wiring,
+        workflow_wiring_helpers,
+    ):
         assert module._REPO_ROOT == _ROOT
     wiring = importlib.import_module("tests.unit.test_workflow_wiring")
     helpers = importlib.import_module("tests.unit.workflow_wiring_helpers")
