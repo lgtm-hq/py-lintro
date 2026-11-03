@@ -20,11 +20,21 @@ _DEPRECATION_WARNING = (
     "  - 'ignore' -> 'lint.ignore'\n"
     "  - 'select' -> 'lint.select'\n"
 )
+_REMOVED_RULE_WARNING = (
+    "warning: The following rules have been removed and ignoring them has no effect:\n"
+    "    - ANN101\n"
+    "    - UP027\n\n"
+)
 
 
 @pytest.mark.parametrize(
     "suffix",
-    ["", "\nwarning: cache [cache]/ruff is unavailable", _DEPRECATION_WARNING],
+    [
+        "",
+        "\nwarning: cache [cache]/ruff is unavailable",
+        _DEPRECATION_WARNING,
+        _REMOVED_RULE_WARNING,
+    ],
 )
 @pytest.mark.parametrize(
     "item",
@@ -114,6 +124,7 @@ def test_ruff_json_lines_counts_decode_and_field_failures(malformed_line: str) -
         ("[]\nwarning: cache [cache]\n[null]", 1),
         ("[]\nRuff failed", 1),
         ("[]\n  - 'select' -> 'lint.select'", 1),
+        ("[]\n    - ANN101", 1),
         ("[]\nwarning: deprecated\n  garbage", 1),
         ("[]\nwarning: deprecated\n  null", 1),
         ("[]\nwarning: deprecated\n  []", 1),
@@ -138,6 +149,8 @@ def test_ruff_rejected_only_and_empty_reports(
         "warning: cache path [cache]/ruff is unavailable\n",
         "warning: cache path cache] is unavailable\n",
         _DEPRECATION_WARNING,
+        _REMOVED_RULE_WARNING,
+        _DEPRECATION_WARNING + _REMOVED_RULE_WARNING,
     ],
 )
 @pytest.mark.parametrize(
@@ -205,6 +218,11 @@ def test_ruff_warning_framing_preserves_parser_statistics(
         _DEPRECATION_WARNING + "  garbage",
         _DEPRECATION_WARNING + "  []",
         _DEPRECATION_WARNING + "  null",
+        _REMOVED_RULE_WARNING + "    garbage",
+        _REMOVED_RULE_WARNING + "    - []",
+        _REMOVED_RULE_WARNING + "    - null",
+        _REMOVED_RULE_WARNING + "    - ANN101 trailing garbage",
+        _REMOVED_RULE_WARNING + '{"filename": "extra.py", "message": "extra"}',
     ],
 )
 def test_ruff_invalid_suffix_keeps_array_findings_and_counts_failures(
@@ -243,7 +261,12 @@ def test_ruff_valid_json_lines_do_not_count_array_decode_failure(prefix: str) ->
 @pytest.mark.parametrize("prefix", ["", " \n\t"])
 @pytest.mark.parametrize(
     "suffix",
-    ["", "\nwarning: cache [cache]/ruff is unavailable", _DEPRECATION_WARNING],
+    [
+        "",
+        "\nwarning: cache [cache]/ruff is unavailable",
+        _DEPRECATION_WARNING,
+        _REMOVED_RULE_WARNING,
+    ],
 )
 def test_ruff_truncated_array_keeps_diagnostics_and_counts_failure(
     prefix: str,

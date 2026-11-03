@@ -260,6 +260,12 @@ def test_fix_empty_reports_stay_clean(
             "  - 'select' -> 'lint.select'\n",
             0,
         ),
+        (
+            "warning: The following rules have been removed and ignoring them has no effect:\n"
+            "    - ANN101\n"
+            "    - UP027\n\n",
+            0,
+        ),
         ("error: Failed to read [cache]/other.py (os error 2)\n", 1),
         ("Ruff failed\n  Cause: configuration error\n", 1),
         ("[]", 1),

@@ -24,6 +24,10 @@ from lintro.parsers.base_parser import (
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.parsers.streaming import stream_json_array_fallback
 
+_WARNING_CONTINUATION = re.compile(
+    r"  - '([\w-]+)' -> 'lint\.\1'|    - [A-Z]+[0-9]+",
+)
+
 
 def _parse_ruff_item(item: dict[str, object]) -> RuffIssue:
     """Parse a single Ruff issue item into a RuffIssue object.
@@ -101,7 +105,7 @@ def parse_ruff_output(output: str) -> list[RuffIssue]:
 
 
 def _is_ruff_warning_suffix(suffix: str) -> bool:
-    """Recognize warning lines and Ruff's deprecated-setting continuations.
+    """Recognize warnings with deprecated-setting mappings or removed-rule bullets.
 
     Args:
         suffix: Text following the decoded JSON array.
@@ -115,7 +119,7 @@ def _is_ruff_warning_suffix(suffix: str) -> bool:
             continue
         if line.lstrip().startswith("warning:"):
             in_warning = True
-        elif not (in_warning and re.fullmatch(r"  - '([\w-]+)' -> 'lint\.\1'", line)):
+        elif not (in_warning and _WARNING_CONTINUATION.fullmatch(line)):
             return False
     return True
 
@@ -129,8 +133,8 @@ def parse_ruff_output_with_stats(output: str) -> tuple[list[RuffIssue], int]:
     JSON object lines also count as parse failures. An invalid array envelope
     counts as a failure even when JSON Lines fallback recovers diagnostics.
     Arrays may be followed by warning lines, including Ruff's indented
-    deprecated-setting mappings. Other trailing content counts as a framing
-    failure without discarding findings from the complete array.
+    deprecated-setting mappings and removed-rule bullets. Other trailing content
+    counts as a framing failure without discarding findings from the complete array.
 
     Args:
         output: JSON array or JSON Lines output from Ruff.
@@ -160,7 +164,7 @@ def parse_ruff_output_with_stats(output: str) -> tuple[list[RuffIssue], int]:
                 failures += 1
                 logger.debug("Unexpected data after Ruff array")
             return issues, failures
-        elif not isinstance(ruff_data, dict):
+        if not isinstance(ruff_data, dict):
             return [], 1
     except (json.JSONDecodeError, TypeError) as e:
         # Fall back to JSON Lines parsing below
