@@ -449,7 +449,7 @@ def get_defaults_injection_args(
         "bandit": ["-c", config_str],
         "oxlint": ["--config", config_str],
         "oxfmt": ["--config", config_str],
-        "prettier": ["--no-config", "--config", config_str],
+        "prettier": ["--config", config_str],
     }
 
     return config_flags.get(tool_lower, [])

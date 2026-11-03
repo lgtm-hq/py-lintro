@@ -376,7 +376,7 @@ class PrettierPlugin(BaseToolPlugin):
             "--check",
         ]
 
-        # Add Lintro config injection args (--no-config, --config)
+        # Add Lintro config injection args (--config)
         config_args = self._build_config_args()
         if config_args:
             cmd.extend(config_args)
@@ -455,7 +455,7 @@ class PrettierPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        # Get Lintro config injection args (--no-config, --config)
+        # Get Lintro config injection args (--config)
         config_args = self._build_config_args()
         fallback_args: list[str] = []
         if not config_args:
