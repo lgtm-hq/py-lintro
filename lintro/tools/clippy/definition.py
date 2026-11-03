@@ -24,22 +24,18 @@ from lintro.models.core.claim import Claim
 from lintro.models.core.tool_outcome import (
     Checked,
     FixMeasured,
+    FixUnmeasured,
     NoFiles,
     Skipped,
+    TimedOut,
     ToolOutcome,
 )
 from lintro.models.core.tool_result import ToolResult
-from lintro.parsers.clippy.clippy_parser import parse_clippy_output
-from lintro.plugins.base import BaseToolPlugin
+from lintro.parsers.clippy.clippy_issue import ClippyIssue
+from lintro.parsers.clippy.clippy_parser import parse_clippy_output_with_stats
+from lintro.plugins.base import BaseToolPlugin, PreparedExecution
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
-from lintro.tools.core.batch_runner import (
-    BatchCheckPolicy,
-    BatchOutput,
-    BatchSuccess,
-    batch_fix_timeout_result,
-    run_batch_check,
-)
 from lintro.tools.core.cargo import cargo_package_args, resolve_cargo_root
 from lintro.tools.core.option_validators import (
     filter_none_options,
@@ -52,6 +48,36 @@ from lintro.tools.core.timeout_utils import (
 # Constants for Clippy configuration
 CLIPPY_DEFAULT_TIMEOUT: int = 120
 CLIPPY_FILE_PATTERNS: list[str] = ["*.rs", "Cargo.toml"]
+
+
+@dataclass
+class _ClippyRun:
+    """Native verdict and independent diagnostic measurements for one pass.
+
+    Attributes:
+        success: Whether Cargo exited zero.
+        output: Complete native output, including configuration errors.
+        issues: Usable Clippy diagnostics.
+        parse_failures: Number of malformed records.
+        compiler_errors: Number of valid non-Clippy compiler errors.
+        timed_out: Whether the pass stopped before measurement completed.
+    """
+
+    success: bool
+    output: str
+    issues: list[ClippyIssue]
+    parse_failures: int = 0
+    compiler_errors: int = 0
+    timed_out: bool = False
+
+    @property
+    def execution_failed(self) -> bool:
+        """Identify native failures independently of parser failures.
+
+        Returns:
+            Whether Cargo failed without a usable lint verdict.
+        """
+        return bool(self.compiler_errors) or (not self.success and not self.issues)
 
 
 def _build_clippy_command(
@@ -219,20 +245,96 @@ class ClippyPlugin(BaseToolPlugin):
             selection=cargo_package_args(ctx.files, cargo_root),
         )
 
-        # Clippy's exit status is the verdict; the raw output is only worth
-        # surfacing when the command failed with nothing parsed out of it,
-        # because that is a compilation or configuration error, not a lint.
-        return run_batch_check(
-            ctx,
-            plugin=self,
-            cmd=cmd,
-            parse=lambda output: parse_clippy_output(output=output),
-            policy=BatchCheckPolicy(
-                success=BatchSuccess.EXIT_STATUS,
-                output=BatchOutput.ON_EXIT_FAILURE_WITHOUT_ISSUES,
+        run = self._run_clippy(cmd, ctx.timeout, str(cargo_root))
+        execution = (
+            TimedOut(run.output)
+            if run.timed_out
+            else Checked(
+                success=run.success
+                and not run.parse_failures
+                and not run.compiler_errors,
+                inspected_files=(
+                    True
+                    if not run.parse_failures and (run.success or run.issues)
+                    else None
+                ),
+            )
+        )
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=execution, issues_count=len(run.issues)),
+            name=self.definition.name,
+            issues=run.issues,
+            parse_failures_count=run.parse_failures or None,
+            execution_failed=run.execution_failed,
+            output=(run.output if run.parse_failures or run.execution_failed else None),
+        )
+
+    def _run_clippy(self, cmd: list[str], timeout: float, cwd: str) -> _ClippyRun:
+        """Execute and parse one pass without losing independent failure evidence.
+
+        Args:
+            cmd: Complete Cargo invocation.
+            timeout: Deadline for the pass.
+            cwd: Cargo project root.
+
+        Returns:
+            Native verdict, usable findings and parser/compiler statistics.
+        """
+        try:
+            success, output = run_subprocess_with_timeout(
+                tool=self,
+                cmd=cmd,
+                timeout=timeout,
+                cwd=cwd,
                 tool_name="clippy",
+            )
+        except subprocess.TimeoutExpired as exc:
+            return _ClippyRun(False, str(exc.output or exc), [], timed_out=True)
+        issues, failures, compiler_errors = parse_clippy_output_with_stats(output)
+        return _ClippyRun(success, output, issues, failures, compiler_errors)
+
+    def _run_fix_stage(
+        self,
+        cmd: list[str],
+        ctx: PreparedExecution,
+        cwd: str,
+        initial_issues: list[ClippyIssue] | None = None,
+    ) -> _ClippyRun | ToolResult:
+        """Stop incomplete fix passes without inventing before/after counts.
+
+        Args:
+            cmd: Complete check or mutation command.
+            ctx: Prepared execution context.
+            cwd: Cargo project root.
+            initial_issues: Findings from a completed initial check, if measured.
+
+        Returns:
+            A complete pass or an unmeasured failure with native evidence.
+        """
+        run = self._run_clippy(cmd, ctx.timeout, cwd)
+        if not (run.parse_failures or run.execution_failed or run.timed_out):
+            return run
+        retained = run.issues or initial_issues or []
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=(TimedOut(run.output) if run.timed_out else Checked(False)),
+                accounting=FixUnmeasured(
+                    initial=(
+                        len(initial_issues) if initial_issues is not None else None
+                    ),
+                    reason="Clippy pass incomplete; fix counts unavailable",
+                ),
+                issues_count=len(retained),
             ),
-            cwd=str(cargo_root),
+            name=self.definition.name,
+            issues=retained,
+            initial_issues=(
+                initial_issues if initial_issues is not None else run.issues
+            ),
+            output=run.output,
+            parse_failures_count=run.parse_failures or None,
+            execution_failed=run.execution_failed,
+            cwd=cwd,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -269,89 +371,28 @@ class ClippyPlugin(BaseToolPlugin):
         selection = cargo_package_args(ctx.files, cargo_root)
         check_cmd = _build_clippy_command(fix=False, selection=selection)
 
-        # First, count issues before fixing
-        try:
-            success_check, output_check = run_subprocess_with_timeout(
-                tool=self,
-                cmd=check_cmd,
-                timeout=ctx.timeout,
-                cwd=str(cargo_root),
-                tool_name="clippy",
-            )
-        except subprocess.TimeoutExpired:
-            return batch_fix_timeout_result(
-                plugin=self,
-                timeout=ctx.timeout,
-                initial_issues=[],
-                cmd=check_cmd,
-                tool_name="clippy",
-                cwd=str(cargo_root),
-            )
+        initial = self._run_fix_stage(check_cmd, ctx, str(cargo_root))
+        if isinstance(initial, ToolResult):
+            return initial
 
-        initial_issues = parse_clippy_output(output=output_check)
-        initial_count = len(initial_issues)
-
-        # Run fix
         fix_cmd = _build_clippy_command(fix=True, selection=selection)
-        try:
-            success_fix, output_fix = run_subprocess_with_timeout(
-                tool=self,
-                cmd=fix_cmd,
-                timeout=ctx.timeout,
-                cwd=str(cargo_root),
-                tool_name="clippy",
-            )
-        except subprocess.TimeoutExpired:
-            return batch_fix_timeout_result(
-                plugin=self,
-                timeout=ctx.timeout,
-                initial_issues=initial_issues,
-                cmd=fix_cmd,
-                tool_name="clippy",
-                cwd=str(cargo_root),
-            )
+        mutation = self._run_fix_stage(fix_cmd, ctx, str(cargo_root), initial.issues)
+        if isinstance(mutation, ToolResult):
+            return mutation
 
-        # Re-check after fix to count remaining issues
-        try:
-            success_after, output_after = run_subprocess_with_timeout(
-                tool=self,
-                cmd=check_cmd,
-                timeout=ctx.timeout,
-                cwd=str(cargo_root),
-                tool_name="clippy",
-            )
-        except subprocess.TimeoutExpired:
-            return batch_fix_timeout_result(
-                plugin=self,
-                timeout=ctx.timeout,
-                initial_issues=initial_issues,
-                cmd=check_cmd,
-                tool_name="clippy",
-                cwd=str(cargo_root),
-            )
+        after = self._run_fix_stage(check_cmd, ctx, str(cargo_root), initial.issues)
+        if isinstance(after, ToolResult):
+            return after
 
-        remaining_issues = parse_clippy_output(output=output_after)
-        remaining_count = len(remaining_issues)
-        fixed_count = max(0, initial_count - remaining_count)
+        remaining_count = len(after.issues)
+        fixed_count = max(0, len(initial.issues) - remaining_count)
         # Recompiling after fixes can surface additional warnings.
-        initial_count = max(initial_count, fixed_count + remaining_count)
-
-        # Preserve output when command fails but no issues were parsed
-        # This allows users to see error messages like compilation failures
-        should_show_output = not success_after and remaining_count == 0
-
+        initial_count = max(len(initial.issues), fixed_count + remaining_count)
         return ToolResult.from_outcome(
             ToolOutcome(
                 execution=Checked(
-                    success=remaining_count == 0,
-                    inspected_files=(
-                        True
-                        if success_check
-                        or success_after
-                        or initial_issues
-                        or remaining_issues
-                        else None
-                    ),
+                    success=remaining_count == 0 and mutation.success and after.success,
+                    inspected_files=True,
                 ),
                 accounting=FixMeasured(
                     initial=initial_count,
@@ -361,12 +402,8 @@ class ClippyPlugin(BaseToolPlugin):
                 issues_count=remaining_count,
             ),
             name=self.definition.name,
-            output=output_after if should_show_output else None,
-            issues=remaining_issues,
-            initial_issues=initial_issues,
-            # clippy runs from the crate root, and its parser can report paths
-            # relative to it. The run-level verify pass (#1743) resolves each
-            # issue's file against this directory to decide whether the file
-            # was rewritten, so dropping it would overstate the residual.
+            issues=after.issues,
+            initial_issues=initial.issues,
+            # The verify pass resolves crate-relative diagnostic paths here.
             cwd=str(cargo_root),
         )

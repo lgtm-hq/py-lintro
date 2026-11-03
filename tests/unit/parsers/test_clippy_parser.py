@@ -7,7 +7,12 @@ import json
 import pytest
 from assertpy import assert_that
 
-from lintro.parsers.clippy.clippy_parser import parse_clippy_output
+from lintro.parsers.clippy.clippy_parser import (
+    parse_clippy_output,
+    parse_clippy_output_with_stats,
+)
+from lintro.utils.output.parser_registration import register_all_parsers
+from lintro.utils.output.parser_registry import ParserRegistry
 
 
 @pytest.mark.parametrize("value", [None, 42, False, [], {}])
@@ -149,3 +154,115 @@ def test_parse_clippy_output_ansi_codes_stripped() -> None:
     assert_that(issues).is_length(1)
     assert_that(issues[0].file).is_equal_to("src/lib.rs")
     assert_that(issues[0].code).is_equal_to("clippy::needless_return")
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        '{"reason":"compiler-message","message":null}',
+        '{"reason":"compiler-message","message":[]}',
+        '{"reason":"compiler-message","message":{}}',
+        '{"reason":"compiler-message","message":',
+        '{"reason":"compiler-message","message":{"code":42}}',
+    ],
+    ids=["null-message", "array-message", "missing-fields", "truncated", "bad-code"],
+)
+def test_clippy_record_failures_preserve_valid_siblings(record: str) -> None:
+    """Count one corrupt Cargo record while preserving usable diagnostics."""
+    valid = json.dumps(
+        {
+            "reason": "compiler-message",
+            "message": {
+                "code": {"code": "clippy::needless_return"},
+                "message": "kept",
+                "level": "warning",
+                "spans": [{"file_name": "src/lib.rs", "line_start": 1}],
+            },
+        },
+    )
+    output = "\n".join((valid, record, valid))
+    issues, failures, compiler_errors = parse_clippy_output_with_stats(
+        output,
+    )
+    assert_that(failures).is_equal_to(1)
+    assert_that(compiler_errors).is_zero()
+    assert_that(issues).extracting("message").is_equal_to(["kept", "kept"])
+    assert_that(parse_clippy_output(output)).is_equal_to(issues)
+    register_all_parsers()
+    assert_that(ParserRegistry.parse("clippy", output)).is_equal_to(issues)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("code", {}),
+        ("code", {"code": None}),
+        ("message", None),
+        ("message", "  "),
+        ("level", []),
+        ("spans", None),
+        ("spans", {}),
+        ("spans", [None]),
+        ("spans", [{"file_name": None}]),
+        ("spans", [{"file_name": "src/lib.rs", "line_start": "broken"}]),
+        ("spans", [{"file_name": "src/lib.rs", "line_start": []}]),
+        ("spans", [{"file_name": "src/lib.rs", "column_start": {}}]),
+    ],
+)
+def test_clippy_malformed_diagnostic_fields_are_measured(
+    field: str,
+    value: object,
+) -> None:
+    """Every dropped malformed diagnostic contributes one parser failure."""
+    message: dict[str, object] = {
+        "code": {"code": "clippy::needless_return"},
+        "message": "unneeded return",
+        "level": "warning",
+        "spans": [{"file_name": "src/lib.rs", "line_start": 1}],
+    }
+    message[field] = value
+    issues, failures, _compiler_errors = parse_clippy_output_with_stats(
+        json.dumps({"reason": "compiler-message", "message": message}),
+    )
+    assert_that(issues).is_empty()
+    assert_that(failures).is_equal_to(1)
+
+
+@pytest.mark.parametrize("code", [None, {"code": "unused_variables"}])
+def test_clippy_nullable_and_non_clippy_codes_are_valid(code: object) -> None:
+    """Rustc permits code:null and global diagnostics without spans."""
+    output = json.dumps(
+        {
+            "reason": "compiler-message",
+            "message": {
+                "code": code,
+                "message": "For more information about this error",
+                "level": "failure-note",
+                "spans": [],
+            },
+        },
+    )
+    assert_that(parse_clippy_output_with_stats(output)).is_equal_to(
+        ([], 0, 0),
+    )
+
+
+def test_clippy_empty_spans_retain_a_global_lint() -> None:
+    """A valid locationless Clippy diagnostic remains visible without corruption."""
+    issues, failures, compiler_errors = parse_clippy_output_with_stats(
+        json.dumps(
+            {
+                "reason": "compiler-message",
+                "message": {
+                    "code": {"code": "clippy::needless_return"},
+                    "message": "global lint",
+                    "level": "warning",
+                    "spans": [],
+                },
+            },
+        ),
+    )
+    assert_that((failures, compiler_errors)).is_equal_to((0, 0))
+    assert_that(issues).extracting("file", "line", "message").is_equal_to(
+        [("<unknown>", 0, "global lint")],
+    )
