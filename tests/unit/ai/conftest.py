@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess  # nosec B404 - only CompletedProcess objects are constructed here
+import sys
 import threading
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -477,6 +478,22 @@ def _clear_provider_block_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
     for name in (*FLAT_AI_OVERRIDE_ENV, BARE_MODE_ENV):
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture
+def oversized_json_integer() -> Iterator[str]:
+    """Bound decoder regressions by lowering and restoring the digit limit.
+
+    Yields:
+        str: A decimal token one digit beyond the interpreter's minimum limit.
+    """
+    previous = sys.get_int_max_str_digits()
+    limit = sys.int_info.str_digits_check_threshold
+    try:
+        sys.set_int_max_str_digits(limit)
+        yield "9" * (limit + 1)
+    finally:
+        sys.set_int_max_str_digits(previous)
 
 
 @pytest.fixture

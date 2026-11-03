@@ -157,7 +157,8 @@ def parse_fix_response(
     """
     try:
         data = json.loads(content)
-    except json.JSONDecodeError as exc:
+    except ValueError as exc:
+        # Includes JSONDecodeError and the interpreter's integer digit limit.
         raise AIFixParseError(
             f"Invalid JSON in AI fix response for {file_path}:{line}",
         ) from exc
@@ -230,7 +231,8 @@ def parse_batch_response(
     """
     try:
         data = json.loads(content)
-    except json.JSONDecodeError as exc:
+    except ValueError as exc:
+        # Includes JSONDecodeError and the interpreter's integer digit limit.
         raise AIFixParseError(
             f"Invalid JSON in batch AI response for {file_path}",
         ) from exc

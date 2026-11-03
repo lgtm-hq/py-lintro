@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Mapping
+from pathlib import Path
 
 import pytest
 from assertpy import assert_that
@@ -78,6 +80,92 @@ def _response(content: str) -> AIResponse:
         output_tokens=10,
         cost_estimate=0.001,
     )
+
+
+async def test_single_generation_reports_oversized_json_integer_without_payload(
+    tmp_path: Path,
+    oversized_json_integer: str,
+) -> None:
+    """The actual single parser routes digit-limit failures to concise logging."""
+    source = tmp_path / "integer.py"
+    source.write_text("x = 1\n")
+    content = (
+        '{"original_code": "x = 1", "suggested_code": "x = 9", '
+        '"explanation": "private-response-marker", "line": '
+        + oversized_json_integer
+        + "}"
+    )
+    provider = MockAIProvider(responses=[_response(content)])
+    messages: list[str] = []
+    logger.add(messages.append, format="{message}", level="DEBUG")
+    limit = sys.get_int_max_str_digits()
+
+    result = await generate_fixes(
+        [MockIssue(file=str(source), line=1, code="B101", message="Issue")],
+        provider,
+        tool_name="ruff",
+        workspace_root=tmp_path,
+    )
+
+    assert_that(result).is_empty()
+    assert_that("".join(messages)).contains(
+        "malformed response (Invalid JSON in AI fix response",
+        f"{source}:1",
+    ).does_not_contain(oversized_json_integer, "private-response-marker", "ValueError")
+    assert_that(source.read_text()).is_equal_to("x = 1\n")
+    assert_that(sys.get_int_max_str_digits()).is_equal_to(limit)
+
+
+@pytest.mark.parametrize("wrapped", [False, True], ids=["bare", "wrapped"])
+async def test_batch_generation_retries_every_issue_after_oversized_json_integer(
+    tmp_path: Path,
+    oversized_json_integer: str,
+    wrapped: bool,
+) -> None:
+    """A real decode failure discards the batch and returns only single fixes."""
+    source = tmp_path / "integer_batch.py"
+    source.write_text("x = 1\ny = 2\n")
+    content = (
+        '[{"original_code": "x = 1", "suggested_code": "x = 9", "line": 1},'
+        '{"original_code": "y = 2", "suggested_code": "y = 9", '
+        '"explanation": "private-response-marker", "line": '
+        + oversized_json_integer
+        + "}]"
+    )
+    if wrapped:
+        content = '{"fixes": ' + content + "}"
+    fallback = [
+        _response(json.dumps({"original_code": original, "suggested_code": suggested}))
+        for original, suggested in [("x = 1", "x = 2"), ("y = 2", "y = 3")]
+    ]
+    provider = MockAIProvider(responses=[_response(content), *fallback])
+    messages: list[str] = []
+    logger.add(messages.append, format="{message}", level="DEBUG")
+    progress: list[tuple[int, int]] = []
+    limit = sys.get_int_max_str_digits()
+
+    result = await generate_fixes(
+        [
+            MockIssue(file=str(source), line=line, code="B101", message="Issue")
+            for line in (1, 2)
+        ],
+        provider,
+        tool_name="ruff",
+        workspace_root=tmp_path,
+        max_workers=1,
+        progress_callback=lambda done, total: progress.append((done, total)),
+    )
+
+    assert_that([s.suggested_code for s in result]).is_equal_to(["x = 2", "y = 3"])
+    assert_that([s.line for s in result]).is_equal_to([1, 2])
+    assert_that(progress).is_equal_to([(1, 2), (2, 2)])
+    assert_that("".join(messages)).contains(
+        "malformed response (Invalid JSON in batch AI response",
+        str(source),
+        "falling back to single-issue mode",
+    ).does_not_contain(oversized_json_integer, "private-response-marker", "ValueError")
+    assert_that(source.read_text()).is_equal_to("x = 1\ny = 2\n")
+    assert_that(sys.get_int_max_str_digits()).is_equal_to(limit)
 
 
 @pytest.mark.parametrize("malformed", [False, True])
