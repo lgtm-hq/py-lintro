@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
+from json import scanner
 from pathlib import Path
 
 import pytest
@@ -24,14 +27,50 @@ from lintro.ai.refinement import refine_unverified_fixes
 from lintro.ai.validation import ValidationResult
 from tests.unit.ai.conftest import MockAIProvider, MockIssue
 
+_DECODER_RECURSION_LIMIT = 1000
+
+
+@contextmanager
+def _recursive_json_decoder() -> Iterator[None]:
+    """Use real stdlib Python decoding with a bounded, restorable recursion limit.
+
+    Python 3.14's C scanner uses native stack space, so a fixed JSON depth
+    need not exhaust it. The Python scanner exercises the same json.loads
+    boundary with real decoder recursion, independent of native stack size.
+
+    Yields:
+        None: Restores the exact decoder and recursion limit on every exit.
+    """
+    decoder = json.JSONDecoder()
+    # These stdlib decoder hooks are not exposed by typeshed.
+    vars(decoder)["scan_once"] = vars(scanner)["py_make_scanner"](decoder)
+    previous_decoder = vars(json)["_default_decoder"]
+    previous_limit = sys.getrecursionlimit()
+    try:
+        vars(json)["_default_decoder"] = decoder
+        sys.setrecursionlimit(_DECODER_RECURSION_LIMIT)
+        yield
+    finally:
+        vars(json)["_default_decoder"] = previous_decoder
+        sys.setrecursionlimit(previous_limit)
+
+
+@pytest.fixture
+def recursive_json_decoder() -> Iterator[None]:
+    """Keep the controlled real decoder local to each boundary test.
+
+    Yields:
+        None: Runs the test with deterministic decoder recursion.
+    """
+    with _recursive_json_decoder():
+        yield
+
 
 def _json_token(response_kind: str) -> str:
-    """Build balanced nested JSON without changing the interpreter's limit."""
+    """Build small balanced JSON that exhausts the controlled Python decoder."""
     if response_kind == "malformed":
         return "?"
-    # Python 3.14's C decoder follows the native stack limit, so merely
-    # exceeding sys.getrecursionlimit() does not reproduce this failure.
-    depth = 100_000 if response_kind == "deep" else 8
+    depth = _DECODER_RECURSION_LIMIT if response_kind == "deep" else 8
     return "[" * depth + "0" + "]" * depth
 
 
@@ -119,6 +158,46 @@ def _quiet_transcript(diagnostics: list[tuple[str, bool]], content: str) -> str:
     return transcript
 
 
+@pytest.mark.parametrize("response_kind", ["ordinary", "malformed", "deep"])
+def test_recursive_decoder_restores_state_after_real_decoding(
+    response_kind: str,
+) -> None:
+    """Both normal exits and real decoder failures restore state and controls."""
+    previous_decoder = vars(json)["_default_decoder"]
+    previous_scanner = previous_decoder.scan_once
+    previous_limit = sys.getrecursionlimit()
+    previous_loads = json.loads
+    ordinary = _content("single", _json_token("ordinary"))
+    malformed = _content("single", _json_token("malformed"))
+    expected = json.loads(ordinary)
+    with pytest.raises(json.JSONDecodeError) as before:
+        json.loads(malformed)
+
+    cause = {"deep": RecursionError, "malformed": json.JSONDecodeError}.get(
+        response_kind,
+    )
+    with pytest.raises(cause) if cause else nullcontext():
+        with _recursive_json_decoder():
+            assert_that(json.loads).is_same_as(previous_loads)
+            assert_that(sys.getrecursionlimit()).is_equal_to(_DECODER_RECURSION_LIMIT)
+            assert_that(json.loads(ordinary)).is_equal_to(expected)
+            with pytest.raises(json.JSONDecodeError) as during:
+                json.loads(malformed)
+            assert_that(str(during.value)).is_equal_to(str(before.value))
+            result = json.loads(_content("single", _json_token(response_kind)))
+            assert_that(result).is_equal_to(expected)
+
+    assert_that(vars(json)["_default_decoder"]).is_same_as(previous_decoder)
+    assert_that(previous_decoder.scan_once).is_same_as(previous_scanner)
+    assert_that(sys.getrecursionlimit()).is_equal_to(previous_limit)
+    assert_that(json.loads).is_same_as(previous_loads)
+    assert_that(json.loads(ordinary)).is_equal_to(expected)
+    with pytest.raises(json.JSONDecodeError) as after:
+        json.loads(malformed)
+    assert_that(str(after.value)).is_equal_to(str(before.value))
+
+
+@pytest.mark.usefixtures("recursive_json_decoder")
 @pytest.mark.parametrize("shape", ["single", "bare", "wrapped"])
 @pytest.mark.parametrize("response_kind", ["deep", "ordinary", "malformed"])
 def test_fix_decoder_normalizes_recursion_with_ordinary_controls(
@@ -159,6 +238,7 @@ def test_fix_decoder_normalizes_recursion_with_ordinary_controls(
     assert_that(sys.getrecursionlimit()).is_equal_to(limit)
 
 
+@pytest.mark.usefixtures("recursive_json_decoder")
 @pytest.mark.parametrize("shape", ["single", "bare", "wrapped"])
 @pytest.mark.parametrize("response_kind", ["deep", "ordinary", "malformed"])
 async def test_generation_recursion_diagnostic_and_whole_batch_fallback(
@@ -226,6 +306,7 @@ async def test_generation_recursion_diagnostic_and_whole_batch_fallback(
     assert_that(source.read_bytes()).is_equal_to(original)
 
 
+@pytest.mark.usefixtures("recursive_json_decoder")
 @pytest.mark.parametrize("response_kind", ["deep", "ordinary", "malformed"])
 async def test_refinement_recursion_keeps_reverted_bytes_and_provider_charge(
     tmp_path: Path,
