@@ -1,5 +1,6 @@
 """Tests for config_loader module."""
 
+from collections import UserDict
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -233,16 +234,16 @@ def test_parse_tools_config_rejects_null_entry() -> None:
         _parse_tools_config({"ruff": None})
 
 
-@pytest.mark.parametrize("section", ["execution", "enforce"])
-@pytest.mark.parametrize("value", [None, False, [], "", 0])
-def test_convert_non_mapping_execution_enforce_raises(
+@pytest.mark.parametrize("section", ["tool", "tools", "execution", "enforce"])
+@pytest.mark.parametrize("value", [None, False, [], "", 0, UserDict()])
+def test_convert_non_mapping_tables_raise(
     section: str,
     value: Any,
 ) -> None:
     """Reject invalid tables, including null which TOML cannot represent.
 
     Args:
-        section: Nested pyproject section that requires a mapping.
+        section: Nested pyproject table that requires a dict.
         value: Invalid section value supplied directly to the converter.
     """
     with pytest.raises(ValueError) as error:
