@@ -101,6 +101,50 @@ def test_ruff_rejected_only_and_empty_reports(
     assert_that(parse_ruff_output(output)).is_empty()
 
 
+@pytest.mark.parametrize(
+    ("report", "expected_codes", "expected_failures"),
+    [
+        ("null", [], 1),
+        ("0", [], 1),
+        ("42", [], 1),
+        ("-3.5", [], 1),
+        ('""', [], 1),
+        ('"diagnostics"', [], 1),
+        ("true", [], 1),
+        ("false", [], 1),
+        ("[]", [], 0),
+        (" \n[]\n", [], 0),
+        ("[\n]", [], 0),
+        ("array", [""], 0),
+        ("json-lines", ["", "F401"], 0),
+    ],
+)
+def test_ruff_warning_framing_preserves_parser_statistics(
+    report: str,
+    expected_codes: list[str],
+    expected_failures: int,
+) -> None:
+    """Stray warning text cannot turn a scalar into a valid empty report."""
+    diagnostic = {"file": "syntax.py", "message": "Expected expression", "code": None}
+    reports = {
+        "array": json.dumps([diagnostic]),
+        "json-lines": json.dumps(diagnostic)
+        + '\n{"filename": "a.py", "message": "unused import", "code": "F401"}',
+    }
+    output = reports.get(report, report) + "\nwarning: stray output\n"
+
+    issues, failures = parse_ruff_output_with_stats(output)
+
+    assert_that(failures).is_equal_to(expected_failures)
+    assert_that(issues).extracting("code").is_equal_to(expected_codes)
+    assert_that(issues).extracting("file", "message").is_equal_to(
+        [("syntax.py", "Expected expression"), ("a.py", "unused import")][
+            : len(expected_codes)
+        ],
+    )
+    assert_that(parse_ruff_output(output)).is_equal_to(issues)
+
+
 @pytest.mark.parametrize("prefix", ["", "Ruff progress...\n"])
 def test_ruff_valid_json_lines_do_not_count_array_decode_failure(prefix: str) -> None:
     """Successful JSON Lines fallback does not inherit the array decoder failure."""

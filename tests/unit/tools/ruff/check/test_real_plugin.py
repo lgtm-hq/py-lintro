@@ -11,6 +11,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_name import ToolName
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.tools.ruff.check import execute_ruff_check
 from tests.unit.tools.subprocess_helpers import subprocess_result
 
@@ -94,7 +95,7 @@ def test_ruff_check_keeps_valid_diagnostic_with_optional_code(
     temp_python_file: str,
     code: str | None,
 ) -> None:
-    """A null rule code is valid within an otherwise complete diagnostic array."""
+    """An optional rule code, null or set, keeps a complete diagnostic array."""
     output = json.dumps(
         [
             {
@@ -120,6 +121,78 @@ def test_ruff_check_keeps_valid_diagnostic_with_optional_code(
     )
     assert_that(result.execution_failed).is_false()
     assert_that(result.findings_complete).is_true()
+    assert_that(result.inspected_files).is_true()
+
+
+@pytest.mark.parametrize("returncode", [0, 1])
+@pytest.mark.parametrize("warning_on_stderr", [False, True])
+@pytest.mark.parametrize(
+    ("report", "expected_codes", "native_array"),
+    [
+        ("null", [], False),
+        ("0", [], False),
+        ("42", [], False),
+        ("-3.5", [], False),
+        ('""', [], False),
+        ('"diagnostics"', [], False),
+        ("true", [], False),
+        ("false", [], False),
+        ("[]", [], True),
+        (" \n[]\n", [], True),
+        ("[\n]", [], True),
+        ("array", [""], True),
+        ("json-lines", ["", "F401"], False),
+    ],
+)
+def test_ruff_check_warning_stream_controls_report_certification(
+    ruff_plugin: RuffPlugin,
+    temp_python_file: str,
+    report: str,
+    expected_codes: list[str],
+    native_array: bool,
+    warning_on_stderr: bool,
+    returncode: int,
+) -> None:
+    """Keep recovered findings while only certifying complete native stdout."""
+    diagnostic = {
+        "filename": temp_python_file,
+        "message": "Expected expression",
+        "location": {"row": 1, "column": 1},
+        "code": None,
+    }
+    reports = {
+        "array": json.dumps([diagnostic]),
+        "json-lines": json.dumps(diagnostic)
+        + "\n"
+        + json.dumps({**diagnostic, "message": "unused import", "code": "F401"}),
+    }
+    stdout = reports.get(report, report)
+    warning = "warning: stray output\n"
+    stderr = warning if warning_on_stderr else ""
+    if not warning_on_stderr:
+        stdout += "\n" + warning
+    process = SubprocessResult(returncode, stdout, stderr, stdout + "\n" + stderr)
+    ruff_plugin.options["format_check"] = False
+    with patch(
+        "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+        return_value=process,
+    ):
+        result = ruff_plugin.check([temp_python_file], {})
+
+    valid_report = native_array and warning_on_stderr
+    complete = valid_report and (returncode == 0 or bool(expected_codes))
+    assert_that(result.parse_failures_count).is_equal_to(0 if valid_report else 1)
+    assert_that(result.issues_count).is_equal_to(len(expected_codes))
+    assert_that(result.issues).extracting("file", "code").is_equal_to(
+        [(temp_python_file, code) for code in expected_codes],
+    )
+    assert_that(result.success).is_equal_to(
+        complete and returncode == 0 and not expected_codes,
+    )
+    assert_that(result.findings_complete).is_equal_to(complete)
+    assert_that(result.execution_failed).is_equal_to(not complete)
+    assert_that(result.inspected_files).is_equal_to(True if complete else None)
+    assert_that(result.output).is_equal_to(None if complete else process.output)
 
 
 def test_ruff_parse_failure_survives_format_timeout(
@@ -180,7 +253,7 @@ def test_execute_ruff_check_with_real_plugin(
     Args:
         ruff_plugin: RuffPlugin instance for testing.
         temp_python_file: Temporary Python file for testing.
-        output: Empty lint report from Ruff.
+        output: Native lint report envelope from Ruff.
         expected_success: Whether a native JSON array was received.
         expected_failures: Number of malformed report envelopes.
     """
