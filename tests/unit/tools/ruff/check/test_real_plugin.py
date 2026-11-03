@@ -128,7 +128,13 @@ def test_ruff_check_keeps_valid_diagnostic_with_optional_code(
 @pytest.mark.parametrize("warning_on_stderr", [False, True])
 @pytest.mark.parametrize(
     "warning",
-    ["warning: stray output\n", "warning: cache path [cache]/ruff is unavailable\n"],
+    [
+        "warning: stray output\n",
+        "warning: cache path [cache]/ruff is unavailable\n",
+        "warning: The top-level linter settings are deprecated in `project[cache]`:\n"
+        "  - 'ignore' -> 'lint.ignore'\n"
+        "  - 'select' -> 'lint.select'\n",
+    ],
 )
 @pytest.mark.parametrize(
     ("report", "expected_codes", "native_array"),
@@ -167,7 +173,7 @@ def test_ruff_check_warning_stream_controls_report_certification(
         "code": None,
     }
     reports = {
-        "array": json.dumps([diagnostic]),
+        "array": json.dumps([diagnostic], indent=2),
         "object": json.dumps(diagnostic),
         "json-lines": json.dumps(diagnostic)
         + "\n"

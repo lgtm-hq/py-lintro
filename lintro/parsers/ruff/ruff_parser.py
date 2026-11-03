@@ -100,6 +100,26 @@ def parse_ruff_output(output: str) -> list[RuffIssue]:
     return issues
 
 
+def _is_ruff_warning_suffix(suffix: str) -> bool:
+    """Recognize warning lines and Ruff's deprecated-setting continuations.
+
+    Args:
+        suffix: Text following the decoded JSON array.
+
+    Returns:
+        Whether every nonblank line belongs to a supported warning.
+    """
+    in_warning = False
+    for line in suffix.splitlines():
+        if not line.strip():
+            continue
+        if line.lstrip().startswith("warning:"):
+            in_warning = True
+        elif not (in_warning and re.fullmatch(r"  - '([\w-]+)' -> 'lint\.\1'", line)):
+            return False
+    return True
+
+
 def parse_ruff_output_with_stats(output: str) -> tuple[list[RuffIssue], int]:
     """Parse Ruff output and count malformed or unusable diagnostic records.
 
@@ -108,8 +128,9 @@ def parse_ruff_output_with_stats(output: str) -> tuple[list[RuffIssue], int]:
     so they count as parse failures rather than intentional filtering. Malformed
     JSON object lines also count as parse failures. An invalid array envelope
     counts as a failure even when JSON Lines fallback recovers diagnostics.
-    Arrays may be followed by warning lines or Ruff summary lines; other
-    trailing content counts as a framing failure.
+    Arrays may be followed by warning lines, including Ruff's indented
+    deprecated-setting mappings. Other trailing content counts as a framing
+    failure without discarding findings from the complete array.
 
     Args:
         output: JSON array or JSON Lines output from Ruff.
@@ -127,15 +148,18 @@ def parse_ruff_output_with_stats(output: str) -> tuple[list[RuffIssue], int]:
         ruff_data, json_end = json.JSONDecoder().raw_decode(json_output)
 
         if isinstance(ruff_data, list):
-            # Only warning/summary lines may follow an array. Extra JSON or an
-            # unfinished array must still fail closed, even after a valid [].
-            if all(
-                not line.strip() or line.lstrip().startswith(("warning:", "Ruff "))
-                for line in json_output[json_end:].splitlines()
-            ):
-                return safe_parse_items_with_stats(ruff_data, _parse_ruff_item, "ruff")
-            array_decode_failed = True
-            logger.debug("Unexpected data after Ruff array, falling back to JSON Lines")
+            issues, failures = safe_parse_items_with_stats(
+                ruff_data,
+                _parse_ruff_item,
+                "ruff",
+            )
+            # Extra JSON, garbage and stderr errors still fail closed. The
+            # decoded array remains usable; JSON Lines fallback would lose
+            # pretty-printed findings and miscount their opening braces.
+            if not _is_ruff_warning_suffix(json_output[json_end:]):
+                failures += 1
+                logger.debug("Unexpected data after Ruff array")
+            return issues, failures
         elif not isinstance(ruff_data, dict):
             return [], 1
     except (json.JSONDecodeError, TypeError) as e:
