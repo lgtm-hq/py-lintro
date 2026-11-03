@@ -154,19 +154,40 @@ def test_grype_ignore_package_matches_osv_reason(rule: dict[str, Any]) -> None:
     ).starts_with(f"{rule['package']['name']}@")
 
 
-def test_markdown_it_lockfiles_remain_patched() -> None:
-    """Keep every locked copy patched after removing the three DoS exceptions."""
+@pytest.mark.parametrize(
+    ("package", "minimum", "advisories"),
+    [
+        (
+            "markdown-it",
+            "15.0.3",
+            "GHSA-r7fv-28h4-cvq7, GHSA-vfgh-jcmw-g37q and GHSA-gfr2-rv44-r23c",
+        ),
+        ("re2js", "2.8.7", "GHSA-gg6h-894w-4m9c"),
+    ],
+    ids=["markdown-it", "re2js"],
+)
+def test_markdownlint_dependency_lockfiles_remain_patched(
+    package: str,
+    minimum: str,
+    advisories: str,
+) -> None:
+    """Keep every locked markdownlint dependency copy above its security floor.
+
+    Args:
+        package: Dependency whose copies must remain patched.
+        minimum: First patched version admitted by this guard.
+        advisories: Advisories fixed by the minimum version.
+    """
     versions = []
     for lockfile in (_REPO_ROOT / "bun.lock", _REPO_ROOT / "apps/site/bun.lock"):
         for version in re.findall(
-            r'\["markdown-it@([^"]+)"',
+            rf'\["{re.escape(package)}@([^"]+)"',
             lockfile.read_text(encoding="utf-8"),
         ):
             versions.append(version)
-            assert_that(Version(version) >= Version("15.0.3")).described_as(
-                f"{lockfile.relative_to(_REPO_ROOT)}: markdown-it@{version} must "
-                "fix GHSA-r7fv-28h4-cvq7, GHSA-vfgh-jcmw-g37q and "
-                "GHSA-gfr2-rv44-r23c",
+            assert_that(Version(version) >= Version(minimum)).described_as(
+                f"{lockfile.relative_to(_REPO_ROOT)}: {package}@{version} must "
+                f"fix {advisories}",
             ).is_true()
     assert_that(versions).is_not_empty()
 
