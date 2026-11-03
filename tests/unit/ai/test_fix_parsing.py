@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 from assertpy import assert_that
@@ -28,6 +29,55 @@ _BATCH_ENTRY = {
     "confidence": "high",
     "risk_level": "safe-style",
 }
+
+
+@pytest.mark.parametrize("shape", ["single", "bare-batch", "wrapped-batch"])
+def test_json_integer_decode_errors_keep_context_and_cause(
+    shape: str,
+    oversized_json_integer: str,
+) -> None:
+    """Real decoder failures are contextual; ordinary integers still parse."""
+    template = json.dumps(
+        {**_BATCH_ENTRY, "line": "INTEGER", "explanation": "private-response-marker"},
+    )
+    if shape != "single":
+        template = "[" + template + "]"
+    if shape == "wrapped-batch":
+        template = '{"fixes": ' + template + "}"
+    content = template.replace('"INTEGER"', oversized_json_integer)
+    limit = sys.get_int_max_str_digits()
+
+    def parse(content: str) -> AIFixSuggestion | None:
+        if shape == "single":
+            return parse_fix_response(content, "integer.py", 10, "E501")
+        return parse_batch_response(content, "integer.py")[0]
+
+    context = (
+        "Invalid JSON in AI fix response for integer.py:10"
+        if shape == "single"
+        else "Invalid JSON in batch AI response for integer.py"
+    )
+    with pytest.raises(AIFixParseError) as error:
+        parse(content)
+
+    assert_that(error.value.__cause__).is_type_of(ValueError)
+    assert_that(str(error.value)).is_equal_to(context).does_not_contain(
+        oversized_json_integer,
+        "private-response-marker",
+    )
+    assert_that(sys.get_int_max_str_digits()).is_equal_to(limit)
+
+    suggestion = parse(template.replace('"INTEGER"', "17"))
+    if suggestion is None:
+        pytest.fail("Expected a suggestion with an ordinary JSON integer")
+    assert_that(suggestion.line).is_equal_to(10 if shape == "single" else 17)
+    assert_that(suggestion.suggested_code).is_equal_to("new")
+
+    with pytest.raises(AIFixParseError) as malformed:
+        parse(template.replace('"INTEGER"', "?"))
+    assert_that(malformed.value.__cause__).is_type_of(json.JSONDecodeError)
+    assert_that(str(malformed.value)).is_equal_to(context)
+
 
 # ---------------------------------------------------------------------------
 # generate_diff
