@@ -293,11 +293,15 @@ class ClippyPlugin(BaseToolPlugin):
             issues=run.issues,
             parse_failures_count=run.parse_failures or None,
             execution_failed=run.execution_failed,
+            # Rustc lint verdicts are absent from structured Clippy findings.
             output=(
                 run.output
                 if run.parse_failures
                 or run.execution_failed
-                or (not run.success and not run.issues)
+                or (
+                    not run.success
+                    and (not run.issues or run.lint_diagnostics > len(run.issues))
+                )
                 else None
             ),
         )

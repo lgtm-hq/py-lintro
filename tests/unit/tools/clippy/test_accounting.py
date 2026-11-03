@@ -372,3 +372,37 @@ def test_complete_fix_preserves_unrepresented_native_failure(
             result.remaining_issues_count,
         ),
     ).is_equal_to((int(with_clippy), 0, int(with_clippy)))
+
+
+@pytest.mark.parametrize("status", [0, 101], ids=["warning", "denial"])
+def test_check_mixed_lints_retain_only_failed_native_diagnostics(
+    clippy_plugin: ClippyPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    status: int,
+) -> None:
+    """A sibling Clippy issue cannot explain a failed rustc lint verdict."""
+    rustc = json.dumps(
+        {
+            "reason": "compiler-message",
+            "message": {
+                "code": {"code": "unconditional_recursion"},
+                "message": "function cannot return without recursing",
+                "level": "error" if status else "warning",
+                "spans": [],
+            },
+        },
+    )
+    output = "\n".join((_VALID, rustc))
+    result = _run(clippy_plugin, monkeypatch, tmp_path, "check", [(status, output)])
+
+    assert_that(result.success).is_equal_to(status == 0)
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.inspected_files).is_true()
+    assert_that(result.parse_failures_count).is_none()
+    assert_that(result.issues).extracting("message").is_equal_to(["kept lint"])
+    assert_that(result.output).is_equal_to(output if status else None)
+    assert_that(result.residual_unknown).is_false()
+    assert_that(result.initial_issues_count).is_none()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
