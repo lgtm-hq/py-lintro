@@ -225,10 +225,21 @@ def _findings_from_response(
     raw_findings = payload.get("findings")
     if not isinstance(raw_findings, list):
         raise AIProviderError("Custom agent response must contain a findings list")
-    if any(not isinstance(item, dict) for item in raw_findings):
-        raise AIProviderError(
-            "Custom agent findings list must contain only JSON objects",
-        )
+    for index, item in enumerate(raw_findings):
+        if not isinstance(item, dict):
+            # Fixed JSON labels keep response values and arbitrary type names private.
+            json_type = {
+                type(None): "null",
+                bool: "boolean",
+                int: "number",
+                float: "number",
+                str: "string",
+                list: "array",
+            }.get(type(item), "unknown")
+            raise AIProviderError(
+                "Custom agent findings list must contain only JSON objects "
+                f"(index {index}, type {json_type})",
+            )
     return parse_findings(
         raw_findings=raw_findings,
         source=agent.name,
