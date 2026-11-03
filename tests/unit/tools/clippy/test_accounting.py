@@ -246,12 +246,18 @@ def test_compiler_error_survives_mixed_corruption(
     assert_that(result.remaining_issues_count).is_none()
 
 
-@pytest.mark.parametrize("stage", [0, 1, 2], ids=["initial", "mutation", "verify"])
+@pytest.mark.parametrize(
+    ("stage", "expected_initial_count", "expected_issues_count"),
+    [(0, None, 0), (1, 1, 1), (2, 1, 1)],
+    ids=["initial", "mutation", "verify"],
+)
 def test_fix_timeout_preserves_only_completed_measurements(
     clippy_plugin: ClippyPlugin,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     stage: int,
+    expected_initial_count: int | None,
+    expected_issues_count: int,
 ) -> None:
     """A stopped process cannot supply a zero before or after measurement."""
     stages: list[tuple[int, str] | subprocess.TimeoutExpired] = [
@@ -265,10 +271,11 @@ def test_fix_timeout_preserves_only_completed_measurements(
     assert_that(result.success).is_false()
     assert_that(result.timed_out).is_true()
     assert_that(result.residual_unknown).is_true()
-    assert_that(result.initial_issues_count).is_equal_to(None if stage == 0 else 1)
+    # initial_issues_count stays unknown when the initial check times out.
+    assert_that(result.initial_issues_count).is_equal_to(expected_initial_count)
     assert_that(result.fixed_issues_count).is_none()
     assert_that(result.remaining_issues_count).is_none()
-    assert_that(result.issues_count).is_equal_to(0 if stage == 0 else 1)
+    assert_that(result.issues_count).is_equal_to(expected_issues_count)
 
 
 @pytest.mark.parametrize(
@@ -348,25 +355,78 @@ def test_timeout_retains_diagnostic_statistics(
 
 @pytest.mark.parametrize("as_bytes", [False, True], ids=["str", "bytes"])
 @pytest.mark.parametrize(
-    "output",
+    ("phase", "output", "expected_counts"),
     [
-        _VALID,
-        _VALID + '\n{"reason":"compiler-message",',
-        _VALID + "\n" + _COMPILER_ERROR,
-        "",
+        # Expected counts: retained issues, parse failures, initial issues.
+        pytest.param("check", _VALID, (1, 0, None), id="check-lint"),
+        pytest.param(
+            "check",
+            _VALID + '\n{"reason":"compiler-message",',
+            (1, 1, None),
+            id="check-truncated-tail",
+        ),
+        pytest.param(
+            "check",
+            _VALID + "\n" + _COMPILER_ERROR,
+            (1, 0, None),
+            id="check-compiler-error",
+        ),
+        pytest.param("check", "", (0, 0, None), id="check-empty"),
+        pytest.param("initial", _VALID, (1, 0, None), id="initial-lint"),
+        pytest.param(
+            "initial",
+            _VALID + '\n{"reason":"compiler-message",',
+            (1, 1, None),
+            id="initial-truncated-tail",
+        ),
+        pytest.param(
+            "initial",
+            _VALID + "\n" + _COMPILER_ERROR,
+            (1, 0, None),
+            id="initial-compiler-error",
+        ),
+        pytest.param("initial", "", (0, 0, None), id="initial-empty"),
+        pytest.param("mutation", _VALID, (1, 0, 1), id="mutation-lint"),
+        pytest.param(
+            "mutation",
+            _VALID + '\n{"reason":"compiler-message",',
+            (1, 1, 1),
+            id="mutation-truncated-tail",
+        ),
+        pytest.param(
+            "mutation",
+            _VALID + "\n" + _COMPILER_ERROR,
+            (1, 0, 1),
+            id="mutation-compiler-error",
+        ),
+        pytest.param("mutation", "", (1, 0, 1), id="mutation-empty"),
+        pytest.param("verify", _VALID, (1, 0, 1), id="verify-lint"),
+        pytest.param(
+            "verify",
+            _VALID + '\n{"reason":"compiler-message",',
+            (1, 1, 1),
+            id="verify-truncated-tail",
+        ),
+        pytest.param(
+            "verify",
+            _VALID + "\n" + _COMPILER_ERROR,
+            (1, 0, 1),
+            id="verify-compiler-error",
+        ),
+        pytest.param("verify", "", (1, 0, 1), id="verify-empty"),
     ],
-    ids=["lint", "truncated-tail", "compiler-error", "empty"],
 )
-@pytest.mark.parametrize("phase", ["check", "initial", "mutation", "verify"])
 def test_timeout_diagnostics_reach_check_and_fix(
     clippy_plugin: ClippyPlugin,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     phase: str,
     output: str,
+    expected_counts: tuple[int, int, int | None],
     as_bytes: bool,
 ) -> None:
     """Actual process-boundary timeouts retain evidence and stop incomplete fixes."""
+    expected_issues, expected_failures, expected_initial = expected_counts
     stage = {"check": 0, "initial": 0, "mutation": 1, "verify": 2}[phase]
     stages: list[tuple[int, str] | subprocess.TimeoutExpired] = [
         (0, _VALID),
@@ -391,10 +451,8 @@ def test_timeout_diagnostics_reach_check_and_fix(
     assert_that(result.timed_out).is_true()
     assert_that(result.inspected_files).is_false()
     assert_that(result.findings_complete).is_false()
-    assert_that(result.issues_count).is_equal_to(int(bool(output) or stage > 0))
-    assert_that(result.parse_failures_count or 0).is_equal_to(
-        int(output.endswith(",")),
-    )
+    assert_that(result.issues_count).is_equal_to(expected_issues)
+    assert_that(result.parse_failures_count or 0).is_equal_to(expected_failures)
     if _COMPILER_ERROR in output:
         assert_that(result.execution_failed).is_true()
     if output:
@@ -403,7 +461,7 @@ def test_timeout_diagnostics_reach_check_and_fix(
         assert_that(result.output).contains("timed out")
     if output or stage > 0:
         assert_that(result.issues).extracting("message").is_equal_to(["kept lint"])
-    assert_that(result.initial_issues_count).is_equal_to(1 if stage > 0 else None)
+    assert_that(result.initial_issues_count).is_equal_to(expected_initial)
     assert_that(result.fixed_issues_count).is_none()
     assert_that(result.remaining_issues_count).is_none()
     assert_that(result.residual_unknown).is_equal_to(phase != "check")
