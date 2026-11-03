@@ -70,10 +70,11 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
 # FROMs a digest-pinned tools image that will not contain them until the
 # next published digest. Bridge typos, spectral, buf, import-linter, pylint,
 # cppcheck and checkov here so dogfood and the manifest-vs-image gate run
-# them instead of failing with binary_missing. No-op once the digest already
-# has them on PATH.
+# them instead of failing with binary_missing. Also refresh markdownlint from
+# this build's version source: uv sync does not replace the older global Bun
+# package inherited from the pinned tools image (#3100).
 RUN chmod +x /app/scripts/utils/install-tools.sh && \
-    /app/scripts/utils/install-tools.sh --docker --tools typos,spectral,buf,import-linter,pylint,cppcheck,checkov && \
+    /app/scripts/utils/install-tools.sh --docker --tools typos,spectral,buf,import-linter,pylint,cppcheck,checkov,markdownlint && \
     rm -rf /var/lib/apt/lists/*
 
 # Refresh the decoder even while FROM still pins an older tools image.
