@@ -11,6 +11,7 @@ a Cargo.toml file in the project.
 
 from __future__ import annotations
 
+import re
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from typing import Any
@@ -31,8 +32,9 @@ from lintro.models.core.tool_outcome import (
     ToolOutcome,
 )
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_parser import strip_ansi_codes
 from lintro.parsers.clippy.clippy_issue import ClippyIssue
-from lintro.parsers.clippy.clippy_parser import parse_clippy_output_with_stats
+from lintro.parsers.clippy.clippy_parser import parse_clippy_diagnostics
 from lintro.plugins.base import BaseToolPlugin, PreparedExecution
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
@@ -59,7 +61,9 @@ class _ClippyRun:
         output: Complete native output, including configuration errors.
         issues: Usable Clippy diagnostics.
         parse_failures: Number of malformed records.
-        compiler_errors: Number of valid non-Clippy compiler errors.
+        compiler_errors: Number of hard compiler errors, excluding denied lints.
+        lint_diagnostics: Number of Clippy or rustc lint verdicts.
+        cargo_failed: Whether plain-text Cargo errors indicate an incomplete pass.
         timed_out: Whether the pass stopped before measurement completed.
     """
 
@@ -68,6 +72,8 @@ class _ClippyRun:
     issues: list[ClippyIssue]
     parse_failures: int = 0
     compiler_errors: int = 0
+    lint_diagnostics: int = 0
+    cargo_failed: bool = False
     timed_out: bool = False
 
     @property
@@ -75,9 +81,32 @@ class _ClippyRun:
         """Identify native failures independently of parser failures.
 
         Returns:
-            Whether Cargo failed without a usable lint verdict.
+            Whether hard compiler errors or an independent Cargo failure occurred.
         """
-        return bool(self.compiler_errors) or (not self.success and not self.issues)
+        return bool(self.compiler_errors) or (
+            not self.success
+            and (self.cargo_failed or not (self.lint_diagnostics or self.issues))
+        )
+
+
+def _cargo_failure(output: str) -> bool:
+    """Find plain-text Cargo errors independently of JSON lint verdicts.
+
+    Args:
+        output: Combined Cargo output, including progress and diagnostic JSON.
+
+    Returns:
+        Whether an error other than Cargo's redundant compile summary appears.
+    """
+    return any(
+        line.startswith(("error:", "error["))
+        and not re.fullmatch(
+            r"error: could not compile `[^`]+` .+ due to "
+            r"(?:\d+ )?previous errors?(?:; .*)?",
+            line,
+        )
+        for line in strip_ansi_codes(output).splitlines()
+    )
 
 
 def _build_clippy_command(
@@ -252,11 +281,9 @@ class ClippyPlugin(BaseToolPlugin):
             else Checked(
                 success=run.success
                 and not run.parse_failures
-                and not run.compiler_errors,
+                and not run.execution_failed,
                 inspected_files=(
-                    True
-                    if not run.parse_failures and (run.success or run.issues)
-                    else None
+                    True if not (run.parse_failures or run.execution_failed) else None
                 ),
             )
         )
@@ -266,7 +293,13 @@ class ClippyPlugin(BaseToolPlugin):
             issues=run.issues,
             parse_failures_count=run.parse_failures or None,
             execution_failed=run.execution_failed,
-            output=(run.output if run.parse_failures or run.execution_failed else None),
+            output=(
+                run.output
+                if run.parse_failures
+                or run.execution_failed
+                or (not run.success and not run.issues)
+                else None
+            ),
         )
 
     def _run_clippy(self, cmd: list[str], timeout: float, cwd: str) -> _ClippyRun:
@@ -289,9 +322,23 @@ class ClippyPlugin(BaseToolPlugin):
                 tool_name="clippy",
             )
         except subprocess.TimeoutExpired as exc:
-            return _ClippyRun(False, str(exc.output or exc), [], timed_out=True)
-        issues, failures, compiler_errors = parse_clippy_output_with_stats(output)
-        return _ClippyRun(success, output, issues, failures, compiler_errors)
+            partial = exc.output or str(exc)
+            output = (
+                partial.decode(errors="replace")
+                if isinstance(partial, bytes)
+                else partial
+            )
+            return _ClippyRun(False, output, [], timed_out=True)
+        diagnostics = parse_clippy_diagnostics(output)
+        return _ClippyRun(
+            success,
+            output,
+            diagnostics.issues,
+            diagnostics.failures,
+            diagnostics.compiler_errors,
+            diagnostics.lint_diagnostics,
+            _cargo_failure(output),
+        )
 
     def _run_fix_stage(
         self,

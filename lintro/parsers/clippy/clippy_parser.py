@@ -3,12 +3,24 @@
 from __future__ import annotations
 
 import json
+import re
+from dataclasses import dataclass, field
 from typing import Any
 
 from loguru import logger
 
 from lintro.parsers.base_parser import strip_ansi_codes
 from lintro.parsers.clippy.clippy_issue import ClippyIssue
+
+
+@dataclass
+class ClippyDiagnostics:
+    """Independent diagnostic measurements, including rustc lint verdicts."""
+
+    issues: list[ClippyIssue] = field(default_factory=list)
+    failures: int = 0
+    compiler_errors: int = 0
+    lint_diagnostics: int = 0
 
 
 def _diagnostic_code(value: object) -> str:
@@ -54,21 +66,21 @@ def _diagnostic_span(spans: list[Any]) -> dict[str, Any]:
     return span
 
 
-def _parse_record(item: dict[str, Any]) -> tuple[ClippyIssue | None, int, int]:
+def _parse_record(item: dict[str, Any]) -> tuple[ClippyIssue | None, int, int, int]:
     """Separate usable Clippy findings, corrupt diagnostics and compiler errors.
 
     Args:
         item: One decoded Cargo JSON record.
 
     Returns:
-        Optional finding, malformed-record count and native compiler-error count.
+        Optional finding, malformed, compiler-error and lint-diagnostic counts.
     """
     if item.get("reason") != "compiler-message":
-        return None, 0, 0
+        return None, 0, 0, 0
     try:
         message = item.get("message")
         if not isinstance(message, dict):
-            return None, 1, 0
+            return None, 1, 0, 0
         code = _diagnostic_code(message.get("code"))
         text = message.get("message")
         level = message.get("level")
@@ -80,7 +92,7 @@ def _parse_record(item: dict[str, Any]) -> tuple[ClippyIssue | None, int, int]:
             or not level.strip()
             or not isinstance(spans, list)
         ):
-            return None, 1, 0
+            return None, 1, 0, 0
         span = _diagnostic_span(spans)
         line_start = span.get("line_start")
         column_start = span.get("column_start")
@@ -91,8 +103,12 @@ def _parse_record(item: dict[str, Any]) -> tuple[ClippyIssue | None, int, int]:
         end_line = int(line_end) if line_end is not None else line
         end_column = int(column_end) if column_end is not None else column
         if not code.startswith("clippy::"):
-            # Native compilation failures are valid diagnostics, not corruption.
-            return None, 0, int(level.startswith("error"))
+            # Rustc lint names (including denied lints) differ from hard E####
+            # errors and uncoded errors such as compile_error! diagnostics.
+            lint = level in {"warning", "error"} and bool(
+                re.fullmatch(r"[a-z][a-z0-9_]*", code),
+            )
+            return None, 0, int(level.startswith("error") and not lint), int(lint)
         return (
             ClippyIssue(
                 file=span["file_name"],
@@ -106,13 +122,14 @@ def _parse_record(item: dict[str, Any]) -> tuple[ClippyIssue | None, int, int]:
             ),
             0,
             0,
+            1,
         )
     except (TypeError, ValueError, OverflowError) as exc:
         logger.debug(f"Failed to parse clippy diagnostic: {exc}")
-        return None, 1, 0
+        return None, 1, 0, 0
 
 
-def parse_clippy_output_with_stats(output: str) -> tuple[list[ClippyIssue], int, int]:
+def parse_clippy_diagnostics(output: str) -> ClippyDiagnostics:
     """Parse Cargo JSON Lines and account for discarded malformed records.
 
     Cargo permits arbitrary non-JSON progress output, so only lines starting
@@ -125,12 +142,10 @@ def parse_clippy_output_with_stats(output: str) -> tuple[list[ClippyIssue], int,
         output: Raw output emitted by cargo clippy using --message-format=json.
 
     Returns:
-        Usable Clippy findings, malformed-record count and compiler-error count.
+        Clippy findings, malformed records, hard errors and lint verdicts.
         Empty output and valid non-Clippy diagnostics have no parse failures.
     """
-    issues: list[ClippyIssue] = []
-    failures = 0
-    compiler_errors = 0
+    result = ClippyDiagnostics()
     for line in strip_ansi_codes(output).splitlines():
         line = line.strip()
         if not line.startswith("{"):
@@ -139,14 +154,28 @@ def parse_clippy_output_with_stats(output: str) -> tuple[list[ClippyIssue], int,
             data = json.loads(line)
         except json.JSONDecodeError as exc:
             logger.debug(f"Failed to decode clippy JSON line: {exc}")
-            failures += 1
+            result.failures += 1
             continue
-        issue, malformed, errors = _parse_record(data)
-        failures += malformed
-        compiler_errors += errors
+        issue, malformed, errors, lints = _parse_record(data)
+        result.failures += malformed
+        result.compiler_errors += errors
+        result.lint_diagnostics += lints
         if issue is not None:
-            issues.append(issue)
-    return issues, failures, compiler_errors
+            result.issues.append(issue)
+    return result
+
+
+def parse_clippy_output_with_stats(output: str) -> tuple[list[ClippyIssue], int, int]:
+    """Return findings and failure counts through the existing statistics API.
+
+    Args:
+        output: Raw Cargo JSON Lines and progress output.
+
+    Returns:
+        Usable Clippy findings, malformed-record count and compiler-error count.
+    """
+    result = parse_clippy_diagnostics(output)
+    return result.issues, result.failures, result.compiler_errors
 
 
 def parse_clippy_output(output: str) -> list[ClippyIssue]:

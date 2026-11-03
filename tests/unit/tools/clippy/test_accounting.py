@@ -136,8 +136,20 @@ def test_fix_corruption_never_invents_complete_counts(
 @pytest.mark.parametrize("stage", [0, 1, 2], ids=["initial", "mutation", "verify"])
 @pytest.mark.parametrize(
     "output",
-    ["error: invalid configuration", _COMPILER_ERROR, _VALID + "\n" + _COMPILER_ERROR],
-    ids=["config", "compiler", "compiler-and-lint"],
+    [
+        "error: invalid configuration",
+        _COMPILER_ERROR,
+        _VALID + "\n" + _COMPILER_ERROR,
+        _VALID + "\nerror: failed to run custom build command for `broken v0.1.0`",
+        _VALID + "\nerror: failed to parse manifest at `/workspace/broken/Cargo.toml`",
+    ],
+    ids=[
+        "config",
+        "compiler",
+        "compiler-and-lint",
+        "build-script-and-lint",
+        "manifest-and-lint",
+    ],
 )
 def test_fix_native_failure_stays_independent_of_lint_counts(
     clippy_plugin: ClippyPlugin,
@@ -256,3 +268,65 @@ def test_fix_timeout_preserves_only_completed_measurements(
     assert_that(result.fixed_issues_count).is_none()
     assert_that(result.remaining_issues_count).is_none()
     assert_that(result.issues_count).is_equal_to(0 if stage == 0 else 1)
+
+
+@pytest.mark.parametrize(
+    "partial",
+    [b"Checking crate\npartial output\xff", "Checking crate\npartial output"],
+)
+def test_timeout_output_remains_readable(
+    clippy_plugin: ClippyPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+    partial: str | bytes,
+) -> None:
+    """The Clippy timeout boundary decodes byte output without a bytes repr."""
+
+    def timeout(**kwargs: object) -> tuple[bool, str]:
+        raise subprocess.TimeoutExpired("cargo", 120, output=partial)
+
+    monkeypatch.setattr(
+        "lintro.tools.clippy.definition.run_subprocess_with_timeout",
+        timeout,
+    )
+    run = clippy_plugin._run_clippy(["cargo", "clippy"], 120, ".")
+
+    assert_that(run.timed_out).is_true()
+    assert_that(run.output).is_equal_to(
+        partial.decode(errors="replace") if isinstance(partial, bytes) else partial,
+    )
+
+
+@pytest.mark.parametrize("method", ["check", "fix"])
+def test_denied_lint_and_cargo_summary_are_a_complete_verdict(
+    clippy_plugin: ClippyPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    method: str,
+) -> None:
+    """Exit 101, progress and a compile summary alone do not mean native failure."""
+    output = "\n".join(
+        (
+            _VALID.replace('"warning"', '"error"'),
+            "    Checking accounting v0.1.0",
+            'error: could not compile `accounting` (bin "accounting") '
+            "due to 1 previous error",
+            "warning: build failed, waiting for other jobs to finish...",
+            '{"reason":"build-finished","success":false}',
+        ),
+    )
+    result = _run(clippy_plugin, monkeypatch, tmp_path, method, [(101, output)] * 3)
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.inspected_files).is_true()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.output).is_none()
+    assert_that(result.residual_unknown).is_false()
+    if method == "fix":
+        assert_that(
+            (
+                result.initial_issues_count,
+                result.fixed_issues_count,
+                result.remaining_issues_count,
+            ),
+        ).is_equal_to((1, 0, 1))

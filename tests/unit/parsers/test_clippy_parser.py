@@ -266,3 +266,33 @@ def test_clippy_empty_spans_retain_a_global_lint() -> None:
     assert_that(issues).extracting("file", "line", "message").is_equal_to(
         [("<unknown>", 0, "global lint")],
     )
+
+
+@pytest.mark.parametrize(
+    ("code", "level", "errors"),
+    [
+        ({"code": "unused_variables"}, "error", 0),
+        ({"code": "E0425"}, "error", 1),
+        (None, "error", 1),
+        (None, "failure-note", 0),
+        (None, "note", 0),
+    ],
+)
+def test_rustc_lint_denials_are_distinct_from_compiler_errors(
+    code: object,
+    level: str,
+    errors: int,
+) -> None:
+    """Named rustc lints remain fixable; coded and uncoded hard errors do not."""
+    output = json.dumps(
+        {
+            "reason": "compiler-message",
+            "message": {
+                "code": code,
+                "message": "native diagnostic",
+                "level": level,
+                "spans": [],
+            },
+        },
+    )
+    assert_that(parse_clippy_output_with_stats(output)).is_equal_to(([], 0, errors))
