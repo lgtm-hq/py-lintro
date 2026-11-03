@@ -10,19 +10,4 @@
 # box is _TOOLING_CHECKOUT_EXPIRY in tests/unit/test_vuln_suppression_parity.py.
 
 ---
-ignore:
-  # markdown-it 15.0.1: pinned exactly by markdownlint-cli2 0.23.3 (latest);
-  # DoS-only quadratic parsing of linted Markdown. Mirrors .osv-scanner.toml,
-  # review by 2026-11-03.
-  - vulnerability: GHSA-r7fv-28h4-cvq7
-    package:
-      name: markdown-it
-      type: npm
-  - vulnerability: GHSA-vfgh-jcmw-g37q
-    package:
-      name: markdown-it
-      type: npm
-  - vulnerability: GHSA-gfr2-rv44-r23c
-    package:
-      name: markdown-it
-      type: npm
+ignore: []

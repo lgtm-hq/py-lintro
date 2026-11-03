@@ -17,6 +17,7 @@ in lintro's own lockfiles too, so these rules carry their time box in
 from __future__ import annotations
 
 import datetime
+import re
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -151,6 +152,44 @@ def test_grype_ignore_package_matches_osv_reason(rule: dict[str, Any]) -> None:
         f"{vuln_id}: .osv-scanner.toml reason must start with "
         f"'{rule['package']['name']}@' to match .grype.yaml",
     ).starts_with(f"{rule['package']['name']}@")
+
+
+@pytest.mark.parametrize(
+    ("package", "minimum", "advisories"),
+    [
+        (
+            "markdown-it",
+            "15.0.3",
+            "GHSA-r7fv-28h4-cvq7, GHSA-vfgh-jcmw-g37q and GHSA-gfr2-rv44-r23c",
+        ),
+        ("re2js", "2.8.7", "GHSA-gg6h-894w-4m9c"),
+    ],
+    ids=["markdown-it", "re2js"],
+)
+def test_markdownlint_dependency_lockfiles_remain_patched(
+    package: str,
+    minimum: str,
+    advisories: str,
+) -> None:
+    """Keep every locked markdownlint dependency copy above its security floor.
+
+    Args:
+        package: Dependency whose copies must remain patched.
+        minimum: First patched version admitted by this guard.
+        advisories: Advisories fixed by the minimum version.
+    """
+    versions = []
+    for lockfile in (_REPO_ROOT / "bun.lock", _REPO_ROOT / "apps/site/bun.lock"):
+        for version in re.findall(
+            rf'\["{re.escape(package)}@([^"]+)"',
+            lockfile.read_text(encoding="utf-8"),
+        ):
+            versions.append(version)
+            assert_that(Version(version) >= Version(minimum)).described_as(
+                f"{lockfile.relative_to(_REPO_ROOT)}: {package}@{version} must "
+                f"fix {advisories}",
+            ).is_true()
+    assert_that(versions).is_not_empty()
 
 
 def test_semgrep_telemetry_ignore_cannot_hide_vulnerable_application_lock() -> None:
