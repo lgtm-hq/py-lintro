@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.9] - 2026-11-03
+
+### Fixed
+
+- **black**: distinguish diff context from report records (#3172) (c803a33)
+- **ai**: normalize JSON recursion failures (#3170) (cedc212)
+
 ## [0.177.8] - 2026-11-03
 
 ### Changed
