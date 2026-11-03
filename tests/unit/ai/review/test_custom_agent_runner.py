@@ -769,12 +769,14 @@ def test_only_mode_rejects_whole_response_without_losing_independent_agent(
         budget: CostBudget,
         **_kwargs: object,
     ) -> AIResponse:
-        successful = "`docs-agent`" in user_prompt
-        cost = 0.01 if successful else 0.07
+        # call_ai receives the scope in the prompt; only the failed pass sees app.py.
+        if "src/app.py" in user_prompt:
+            cost = 0.07
+            findings: list[object] = [_VALID_FINDING, "x"]
+        else:
+            cost = 0.01
+            findings = [successful_finding] if has_finding else []
         budget.record(cost)
-        findings: list[object] = [successful_finding] if has_finding else []
-        if not successful:
-            findings = [_VALID_FINDING, "x"]
         return AIResponse(
             content=json.dumps({"findings": findings}),
             model="offline-fixture",
