@@ -214,7 +214,7 @@ def _findings_from_response(
 
     Raises:
         AIProviderError: When the payload is not a JSON object containing a
-            findings list.
+            findings list of JSON objects.
     """
     try:
         payload = json.loads(strip_json_fences(content=content))
@@ -225,6 +225,10 @@ def _findings_from_response(
     raw_findings = payload.get("findings")
     if not isinstance(raw_findings, list):
         raise AIProviderError("Custom agent response must contain a findings list")
+    if any(not isinstance(item, dict) for item in raw_findings):
+        raise AIProviderError(
+            "Custom agent findings list must contain only JSON objects",
+        )
     return parse_findings(
         raw_findings=raw_findings,
         source=agent.name,
