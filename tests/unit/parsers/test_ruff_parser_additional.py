@@ -25,6 +25,11 @@ _REMOVED_RULE_WARNING = (
     "    - ANN101\n"
     "    - UP027\n\n"
 )
+_INCOMPATIBLE_WARNING = (
+    "warning: `incorrect-blank-line-before-class` (D203) and "
+    "`blank-line-before-class` (D211) are incompatible. "
+    "Ignoring `incorrect-blank-line-before-class`.\n"
+)
 
 
 @pytest.mark.parametrize(
@@ -142,6 +147,7 @@ def test_ruff_rejected_only_and_empty_reports(
     assert_that(parse_ruff_output(output)).is_empty()
 
 
+@pytest.mark.parametrize("ansi", [False, True])
 @pytest.mark.parametrize(
     "warning",
     [
@@ -150,6 +156,7 @@ def test_ruff_rejected_only_and_empty_reports(
         "warning: cache path cache] is unavailable\n",
         _DEPRECATION_WARNING,
         _REMOVED_RULE_WARNING,
+        _INCOMPATIBLE_WARNING,
         _DEPRECATION_WARNING + _REMOVED_RULE_WARNING,
     ],
 )
@@ -177,15 +184,26 @@ def test_ruff_warning_framing_preserves_parser_statistics(
     expected_codes: list[str],
     expected_failures: int,
     warning: str,
+    ansi: bool,
 ) -> None:
     """Warnings preserve arrays and JSON Lines without accepting scalars."""
-    diagnostic = {"file": "syntax.py", "message": "Expected expression", "code": None}
+    message = "Expected expression \x1b[31m[bad]\x1b[0m"
+    diagnostic = {"file": "syntax.py", "message": message, "code": None}
     reports = {
         "array": json.dumps([diagnostic], indent=2),
         "object": json.dumps(diagnostic),
         "json-lines": json.dumps(diagnostic)
         + '\n{"filename": "a.py", "message": "unused import", "code": "F401"}',
     }
+    if ansi:
+        warning = (
+            "\x1b[1;33m"
+            + warning.replace(
+                "warning:",
+                "warning\x1b[0m\x1b[1m:\x1b[0m",
+            )
+            + "\x1b[0m\n"
+        )
     output = reports.get(report, report) + "\n" + warning
 
     issues, failures = parse_ruff_output_with_stats(output)
@@ -193,13 +211,12 @@ def test_ruff_warning_framing_preserves_parser_statistics(
     assert_that(failures).is_equal_to(expected_failures)
     assert_that(issues).extracting("code").is_equal_to(expected_codes)
     assert_that(issues).extracting("file", "message").is_equal_to(
-        [("syntax.py", "Expected expression"), ("a.py", "unused import")][
-            : len(expected_codes)
-        ],
+        [("syntax.py", message), ("a.py", "unused import")][: len(expected_codes)],
     )
     assert_that(parse_ruff_output(output)).is_equal_to(issues)
 
 
+@pytest.mark.parametrize("ansi", [False, True])
 @pytest.mark.parametrize(
     "suffix",
     [
@@ -218,6 +235,7 @@ def test_ruff_warning_framing_preserves_parser_statistics(
         _DEPRECATION_WARNING + "  garbage",
         _DEPRECATION_WARNING + "  []",
         _DEPRECATION_WARNING + "  null",
+        _DEPRECATION_WARNING.rstrip() + " []",
         _REMOVED_RULE_WARNING + "    garbage",
         _REMOVED_RULE_WARNING + "    - []",
         _REMOVED_RULE_WARNING + "    - null",
@@ -227,6 +245,7 @@ def test_ruff_warning_framing_preserves_parser_statistics(
 )
 def test_ruff_invalid_suffix_keeps_array_findings_and_counts_failures(
     suffix: str,
+    ansi: bool,
 ) -> None:
     """Retain decoded findings and field failures while rejecting trailing data."""
     report = json.dumps(
@@ -234,6 +253,8 @@ def test_ruff_invalid_suffix_keeps_array_findings_and_counts_failures(
         indent=2,
     )
 
+    if ansi:
+        suffix = f"\x1b[1;33m{suffix}\x1b[0m\n"
     issues, failures = parse_ruff_output_with_stats(report + "\n" + suffix)
 
     assert_that(issues).extracting("file", "message", "code").is_equal_to(
@@ -258,6 +279,7 @@ def test_ruff_valid_json_lines_do_not_count_array_decode_failure(prefix: str) ->
     )
 
 
+@pytest.mark.parametrize("ansi", [False, True])
 @pytest.mark.parametrize("prefix", ["", " \n\t"])
 @pytest.mark.parametrize(
     "suffix",
@@ -271,8 +293,11 @@ def test_ruff_valid_json_lines_do_not_count_array_decode_failure(prefix: str) ->
 def test_ruff_truncated_array_keeps_diagnostics_and_counts_failure(
     prefix: str,
     suffix: str,
+    ansi: bool,
 ) -> None:
     """Recover complete diagnostics without hiding an invalid array envelope."""
+    if ansi:
+        suffix = f"\x1b[1;33m{suffix}\x1b[0m\n"
     output = prefix + '[\n{"filename":"a.py","message":"bad"}\n' + suffix
 
     issues, failures = parse_ruff_output_with_stats(output)

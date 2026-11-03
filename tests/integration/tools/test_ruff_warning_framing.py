@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
+from lintro.parsers.base_parser import strip_ansi_codes
 from lintro.parsers.ruff.ruff_parser import parse_ruff_output_with_stats
 from lintro.tools.ruff.commands import build_ruff_check_command
 from lintro.tools.ruff.definition import RuffPlugin
@@ -15,11 +16,34 @@ from tests.integration._tools import require_tool
 pytestmark = require_tool("ruff")
 
 
-@pytest.fixture(params=["deprecated-settings", "ANN101", "UP027"])
+@pytest.fixture(params=[None, "FORCE_COLOR", "CLICOLOR_FORCE"])
+def native_warning_color(
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> str | None:
+    """Control native color with both forcing variables absent by default.
+
+    Args:
+        monkeypatch: Environment isolation.
+        request: Color variable to enable, or None for unforced output.
+
+    Returns:
+        Enabled color variable, or None when both variables are unset.
+    """
+    color_variable: str | None = request.param
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    monkeypatch.delenv("CLICOLOR_FORCE", raising=False)
+    if color_variable is not None:
+        monkeypatch.setenv(color_variable, "1")
+    return color_variable
+
+
+@pytest.fixture(params=["deprecated-settings", "ANN101", "UP027", "incompatible"])
 def native_warning_project(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
+    native_warning_color: str | None,
 ) -> tuple[Path, list[str]]:
     """Create native warning settings in a bracketed project path.
 
@@ -27,6 +51,7 @@ def native_warning_project(
         tmp_path: Temporary test directory.
         monkeypatch: Environment and working-directory isolation.
         request: Native warning configuration to exercise.
+        native_warning_color: Isolated color forcing inherited by native Ruff.
 
     Returns:
         Source path and expected stderr fragments in the native Ruff project.
@@ -40,6 +65,17 @@ def native_warning_project(
             "  - 'ignore' -> 'lint.ignore'",
             "  - 'select' -> 'lint.select'",
             "project[cache]",
+        ]
+    elif request.param == "incompatible":
+        config = (
+            "[tool.ruff.lint]\n"
+            'select = ["F401", "F821", "D203", "D211", "D212", "D213"]\n'
+        )
+        warning_fragments = [
+            "warning: `incorrect-blank-line-before-class` (D203) and "
+            "`blank-line-before-class` (D211) are incompatible.",
+            "warning: `multi-line-summary-first-line` (D212) and "
+            "`multi-line-summary-second-line` (D213) are incompatible.",
         ]
     else:
         config = (
@@ -67,6 +103,7 @@ def native_warning_project(
 )
 def test_native_multiline_warning_statistics(
     native_warning_project: tuple[Path, list[str]],
+    native_warning_color: str | None,
     source: str,
     codes: list[str],
 ) -> None:
@@ -79,7 +116,10 @@ def test_native_multiline_warning_statistics(
     )
 
     assert_that(process.returncode).is_equal_to(int(bool(codes)))
-    assert_that(process.stderr).contains(*warning_fragments)
+    assert_that(strip_ansi_codes(process.stderr)).contains(*warning_fragments)
+    assert_that("\x1b[" in process.stderr).is_equal_to(native_warning_color is not None)
+    if native_warning_color and "    - " in process.stderr:
+        assert_that(process.stderr.splitlines()).contains("\x1b[0m")
     issues, failures = parse_ruff_output_with_stats(process.output)
     assert_that(failures).is_zero()
     assert_that(issues).extracting("code").is_equal_to(codes)

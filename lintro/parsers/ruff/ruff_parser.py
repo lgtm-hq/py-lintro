@@ -20,6 +20,7 @@ from lintro.parsers.base_parser import (
     extract_int_field,
     extract_str_field,
     safe_parse_items_with_stats,
+    strip_ansi_codes,
 )
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.parsers.streaming import stream_json_array_fallback
@@ -114,7 +115,8 @@ def _is_ruff_warning_suffix(suffix: str) -> bool:
         Whether every nonblank line belongs to a supported warning.
     """
     in_warning = False
-    for line in suffix.splitlines():
+    for raw_line in suffix.splitlines():
+        line = strip_ansi_codes(raw_line)
         if not line.strip():
             continue
         if line.lstrip().startswith("warning:"):
@@ -211,8 +213,6 @@ def parse_ruff_format_check_output(output: str) -> list[str]:
     Returns:
         List of file paths that would be reformatted
     """
-    from lintro.parsers.base_parser import strip_ansi_codes
-
     if not output:
         return []
     files = []
@@ -293,8 +293,6 @@ def stream_ruff_format_output(
         >>> for filepath in stream_ruff_format_output(format_output):
         ...     print(f"Needs formatting: {filepath}")
     """
-    from lintro.parsers.base_parser import strip_ansi_codes
-
     lines: Iterable[str]
     lines = output.splitlines() if isinstance(output, str) else output
 

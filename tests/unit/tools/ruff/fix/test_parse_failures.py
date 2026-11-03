@@ -249,6 +249,7 @@ def test_fix_empty_reports_stay_clean(
     assert_that(result.issues_count).is_zero()
 
 
+@pytest.mark.parametrize("ansi", [False, True])
 @pytest.mark.parametrize(
     ("suffix", "failures_per_report"),
     [
@@ -281,8 +282,11 @@ def test_fix_suffix_retains_measurements_and_failure_evidence(
     temp_python_file: str,
     suffix: str,
     failures_per_report: int,
+    ansi: bool,
 ) -> None:
     """Initial, final and unsafe reads retain findings without hiding bad suffixes."""
+    if ansi:
+        suffix = f"\x1b[1;33m{suffix}\x1b[0m\n"
     initial = [
         {"filename": temp_python_file, "message": "unused import", "code": "F401"},
         {"filename": temp_python_file, "message": "undefined name", "code": "F821"},
