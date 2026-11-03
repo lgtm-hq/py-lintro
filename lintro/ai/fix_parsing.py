@@ -153,7 +153,8 @@ def parse_fix_response(
         Parsed AIFixSuggestion, or None for a valid empty or no-op patch.
 
     Raises:
-        AIFixParseError: The response is invalid JSON or has malformed fix fields.
+        AIFixParseError: The response is invalid JSON, contains an integer exceeding
+            the interpreter's digit limit, or has malformed fix fields.
     """
     try:
         data = json.loads(content)
