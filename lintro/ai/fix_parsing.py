@@ -153,13 +153,13 @@ def parse_fix_response(
         Parsed AIFixSuggestion, or None for a valid empty or no-op patch.
 
     Raises:
-        AIFixParseError: The response is invalid JSON, contains an integer exceeding
-            the interpreter's digit limit, or has malformed fix fields.
+        AIFixParseError: The response is invalid JSON, exceeds the decoder's
+            recursion or integer digit limit, or has malformed fix fields.
     """
     try:
         data = json.loads(content)
-    except ValueError as exc:
-        # Includes JSONDecodeError and the interpreter's integer digit limit.
+    except (ValueError, RecursionError) as exc:
+        # Includes malformed JSON, integer digit limits, and excessive nesting.
         raise AIFixParseError(
             f"Invalid JSON in AI fix response for {file_path}:{line}",
         ) from exc
@@ -228,12 +228,13 @@ def parse_batch_response(
         List of parsed AIFixSuggestions, empty for valid absence of fixes.
 
     Raises:
-        AIFixParseError: The JSON, batch container, or a fix entry is malformed.
+        AIFixParseError: The JSON is invalid or exceeds the decoder's recursion
+            or integer digit limit, or the batch container or an entry is malformed.
     """
     try:
         data = json.loads(content)
-    except ValueError as exc:
-        # Includes JSONDecodeError and the interpreter's integer digit limit.
+    except (ValueError, RecursionError) as exc:
+        # Includes malformed JSON, integer digit limits, and excessive nesting.
         raise AIFixParseError(
             f"Invalid JSON in batch AI response for {file_path}",
         ) from exc
