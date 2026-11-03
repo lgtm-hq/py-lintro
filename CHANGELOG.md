@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.8] - 2026-11-03
+
+### Changed
+
+- **ai**: cover oversized integer refinement responses (#3168) (13c0589)
+
+### Fixed
+
+- **black**: keep failed inspection provenance unknown (#3169) (e78314c)
+
 ## [0.177.7] - 2026-11-03
 
 ### Changed
