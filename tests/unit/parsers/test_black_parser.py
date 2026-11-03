@@ -160,3 +160,43 @@ def test_summary_like_filenames_do_not_override_native_count(
     assert_that(
         parse_black_output(f"error: cannot format {filename}: invalid"),
     ).is_empty()
+
+
+@pytest.mark.parametrize("prefix", [" ", "+", "-"], ids=["context", "added", "deleted"])
+@pytest.mark.parametrize("color", [False, True], ids=["plain", "ansi"])
+@pytest.mark.parametrize(
+    ("report", "expected_files", "failures"),
+    [
+        ("", [], 0),
+        (
+            "would reformat actual.py\n1 file would be reformatted.\n",
+            ["actual.py"],
+            0,
+        ),
+        ("1 file would be reformatted.\n", ["<unknown>"], 1),
+    ],
+    ids=["no-report", "identified", "summary-only"],
+)
+def test_diff_rows_cannot_supply_native_findings_or_summary_counts(
+    prefix: str,
+    color: bool,
+    report: str,
+    expected_files: list[str],
+    failures: int,
+) -> None:
+    """Diff text retains its prefix even when it resembles native Black records."""
+    payload = [
+        "reformatted phantom.py",
+        "would reformat ghost.py",
+        "9 files would be reformatted.",
+        "8 files reformatted, 1 file left unchanged.",
+    ]
+    rows = "\n".join(prefix + line for line in payload)
+    if color:
+        rows = "\x1b[32m" + rows + "\x1b[0m"
+    output = f"--- actual.py\n+++ actual.py\n@@ -1,4 +1,4 @@\n{rows}\n{report}"
+
+    issues = parse_black_output(output)
+
+    assert_that([issue.file for issue in issues]).is_equal_to(expected_files)
+    assert_that(black_report_parse_failures(output, issues)).is_equal_to(failures)

@@ -29,15 +29,17 @@ _UNCHANGED = re.compile(
     r"^(?P<file>.+) (?:already well formatted, good job\."
     r"|wasn't modified on disk since last run\.)$",
 )
-# Native summaries occupy a whole line; filenames can contain the same words.
+# Native records start in column zero. Preserve diff prefixes so Python string
+# contents in context, added or deleted rows cannot become report records.
+# Summaries occupy a whole line; filenames can contain the same words.
 _SUMMARY_WOULD = re.compile(
-    r"^[ \t]*(?P<count>\d+) files? would be reformatted"
+    r"^(?P<count>\d+) files? would be reformatted"
     r"(?:, \d+ files? would be left unchanged)?"
     r"(?:, \d+ files? would fail to reformat)?\.?[ \t]*\r?$",
     re.IGNORECASE | re.MULTILINE,
 )
 _SUMMARY_REFORMATTED = re.compile(
-    r"^[ \t]*(?P<count>\d+) files? reformatted"
+    r"^(?P<count>\d+) files? reformatted"
     r"(?:, \d+ files? left unchanged)?"
     r"(?:, \d+ files? failed to reformat)?\.?[ \t]*\r?$",
     re.IGNORECASE | re.MULTILINE,
@@ -124,7 +126,7 @@ def black_inspected_paths(
 
 def _iter_issue_lines(lines: Iterable[str]) -> Iterable[str]:
     for line in lines:
-        s = line.strip()
+        s = line.rstrip()
         if not s:
             continue
         yield s
