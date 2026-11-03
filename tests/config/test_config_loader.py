@@ -235,23 +235,34 @@ def test_parse_tools_config_rejects_null_entry() -> None:
 
 
 @pytest.mark.parametrize("section", ["tool", "tools", "execution", "enforce"])
-@pytest.mark.parametrize("value", [None, False, [], "", 0, UserDict()])
+@pytest.mark.parametrize(
+    ("value", "expected_type"),
+    [
+        pytest.param(None, "null", id="null"),
+        pytest.param(False, "bool", id="false"),
+        pytest.param([], "list", id="empty-list"),
+        pytest.param("", "str", id="empty-string"),
+        pytest.param(0, "int", id="zero"),
+        pytest.param(UserDict(), "UserDict", id="non-dict-mapping"),
+    ],
+)
 def test_convert_non_mapping_tables_raise(
     section: str,
     value: Any,
+    expected_type: str,
 ) -> None:
     """Reject invalid tables, including null which TOML cannot represent.
 
     Args:
         section: Nested pyproject table that requires a dict.
         value: Invalid section value supplied directly to the converter.
+        expected_type: Type label required in the error message.
     """
     with pytest.raises(ValueError) as error:
         _convert_pyproject_to_config({section: value})
 
-    actual = "null" if value is None else type(value).__name__
     assert_that(str(error.value)).is_equal_to(
-        f"tool.lintro.{section} must be a mapping, got {actual}",
+        f"tool.lintro.{section} must be a mapping, got {expected_type}",
     )
 
 
