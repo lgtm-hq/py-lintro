@@ -8,7 +8,7 @@ across projects.
 from __future__ import annotations
 
 import subprocess  # nosec B404 - used safely with shell disabled
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from loguru import logger
@@ -16,10 +16,12 @@ from loguru import logger
 from lintro.enums.capability import Cap
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.models.core.tool_outcome import (
     Checked,
     FixMeasured,
     FixPartial,
+    FixUnmeasured,
     TimedOut,
     ToolOutcome,
 )
@@ -344,6 +346,7 @@ class BlackPlugin(BaseToolPlugin):
         result_output = output if count or execution_failed or parse_failures else None
         if supplement.note:
             result_output = "\n".join(filter(None, (output.rstrip(), supplement.note)))
+        complete = not (execution_failed or parse_failures or supplement.failed)
 
         return ToolResult.from_outcome(
             ToolOutcome(
@@ -351,24 +354,19 @@ class BlackPlugin(BaseToolPlugin):
                     TimedOut(result_output)
                     if supplement.timed_out
                     else Checked(
-                        success=process.success
-                        and count == 0
-                        and not supplement.failed,
-                        inspected_files=True,
+                        success=process.success and count == 0 and complete,
+                        inspected_files=True if complete else None,
                     )
                 ),
                 issues_count=count,
             ),
             name=self.definition.name,
-            findings_complete=not (
-                execution_failed or parse_failures or supplement.failed
-            ),
+            findings_complete=complete,
             execution_failed=execution_failed or supplement.failed,
             parse_failures_count=parse_failures or None,
             inspected_paths=(
                 black_inspected_paths(output, files=ctx.rel_files, cwd=ctx.cwd)
-                if self.options.get("_baseline_coverage", False)
-                and not (execution_failed or parse_failures or supplement.failed)
+                if self.options.get("_baseline_coverage", False) and complete
                 else None
             ),
             # The separate E501 subprocess has its own native exclusions.
@@ -378,10 +376,81 @@ class BlackPlugin(BaseToolPlugin):
             cwd=ctx.cwd,
         )
 
+    def _run_fix_pass(
+        self,
+        cmd: list[str],
+        *,
+        timeout: float,
+        cwd: str | None,
+        initial_issues: list[BlackIssue],
+        initial_count: int | None = None,
+        check: bool = True,
+    ) -> SubprocessResult | ToolResult:
+        """Keep incomplete Black passes from certifying inspection or fix counts.
+
+        Args:
+            cmd: Native Black command for this pass.
+            timeout: Subprocess deadline in seconds.
+            cwd: Working directory for the report's file identities.
+            initial_issues: Findings retained from a completed initial check.
+            initial_count: Initial count, only when its measurement completed.
+            check: Whether exit 1 with findings is a legitimate check verdict.
+
+        Returns:
+            An unmeasured failure retaining native diagnostics and findings,
+            or the native result when this pass completed without losing entries.
+        """
+        try:
+            process = self._run_subprocess_result(cmd=cmd, timeout=timeout, cwd=cwd)
+        except subprocess.TimeoutExpired:
+            return replace(
+                self._handle_timeout_error(timeout, initial_count, cwd),
+                issues_count=len(initial_issues),
+                issues=initial_issues,
+                initial_issues=initial_issues,
+            )
+        issues = parse_black_output(process.output)
+        parse_failures = black_report_parse_failures(process.output, issues)
+        execution_failed = not (
+            process.success or (check and process.returncode == 1 and bool(issues))
+        )
+        if not (execution_failed or parse_failures):
+            return process
+        # Unknown residuals still carry measured pre-fix findings. Mutation
+        # reports describe applied changes, so only read-only reports can add
+        # findings. Deduplicate formatting by file without collapsing E501s.
+        retained = list(initial_issues)
+        if check or "--diff" in cmd:
+            files = {issue.file for issue in retained if not issue.code}
+            for issue in issues:
+                if issue.file == "<unknown>" or issue.file not in files:
+                    retained.append(issue)
+                    files.add(issue.file)
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=False),
+                accounting=FixUnmeasured(
+                    initial=initial_count,
+                    reason="Black report incomplete; fix counts unavailable",
+                ),
+                issues_count=len(retained),
+            ),
+            name=self.definition.name,
+            execution_failed=execution_failed,
+            parse_failures_count=parse_failures or None,
+            output=process.output,
+            issues=retained,
+            initial_issues=initial_issues,
+            cwd=cwd,
+        )
+
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Format files using Black.
 
-        A failed initial E501 supplement aborts before formatting. If the final
+        An incomplete Black pass cannot certify inspection or fix counts. An
+        incomplete initial report conservatively aborts before any mutation,
+        even if Black could format other files beside a syntax error. A failed
+        initial E501 supplement also aborts before formatting. If the final
         supplement is unavailable, retain its earlier findings and credit only
         the measured reduction in Black's own formatting issues.
 
@@ -417,18 +486,16 @@ class BlackPlugin(BaseToolPlugin):
             initial_supplement = _LineLengthResult([])
             initial_count = 0
         else:
-            try:
-                _, check_output = self._run_subprocess(
-                    cmd=check_cmd,
-                    timeout=ctx.timeout,
-                    cwd=ctx.cwd,
-                )
-            except subprocess.TimeoutExpired:
-                return self._handle_timeout_error(
-                    ctx.timeout,
-                    initial_count=0,
-                    cwd=ctx.cwd,
-                )
+            check_process = self._run_fix_pass(
+                check_cmd,
+                timeout=ctx.timeout,
+                cwd=ctx.cwd,
+                initial_issues=[],
+                initial_count=None,
+            )
+            if isinstance(check_process, ToolResult):
+                return check_process
+            check_output = check_process.output
             initial_supplement = self._line_length_result(
                 files=ctx.rel_files,
                 cwd=ctx.cwd,
@@ -468,32 +535,29 @@ class BlackPlugin(BaseToolPlugin):
         fix_cmd.extend(ctx.rel_files)
 
         logger.debug(f"[BlackPlugin] Fixing: {' '.join(fix_cmd)} (cwd={ctx.cwd})")
-        try:
-            _, fix_output = self._run_subprocess(
-                cmd=fix_cmd,
-                timeout=ctx.timeout,
-                cwd=ctx.cwd,
-            )
-        except subprocess.TimeoutExpired:
-            return self._handle_timeout_error(
-                ctx.timeout,
-                initial_count=initial_count,
-                cwd=ctx.cwd,
-            )
+        fix_process = self._run_fix_pass(
+            fix_cmd,
+            timeout=ctx.timeout,
+            cwd=ctx.cwd,
+            initial_issues=initial_issues,
+            initial_count=None if self.options.get("diff") else initial_count,
+            check=False,
+        )
+        if isinstance(fix_process, ToolResult):
+            return fix_process
+        fix_output = fix_process.output
 
         # Final check for remaining differences
-        try:
-            final_success, final_output = self._run_subprocess(
-                cmd=check_cmd,
-                timeout=ctx.timeout,
-                cwd=ctx.cwd,
-            )
-        except subprocess.TimeoutExpired:
-            return self._handle_timeout_error(
-                ctx.timeout,
-                initial_count=initial_count,
-                cwd=ctx.cwd,
-            )
+        final_process = self._run_fix_pass(
+            check_cmd,
+            timeout=ctx.timeout,
+            cwd=ctx.cwd,
+            initial_issues=initial_issues,
+            initial_count=None if self.options.get("diff") else initial_count,
+        )
+        if isinstance(final_process, ToolResult):
+            return final_process
+        final_output = final_process.output
         remaining_issues = parse_black_output(output=final_output)
 
         # Check for line length violations that Black cannot wrap
@@ -547,7 +611,7 @@ class BlackPlugin(BaseToolPlugin):
                     if supplement.timed_out
                     else Checked(
                         success=remaining_count == 0 and (not supplement.failed),
-                        inspected_files=True,
+                        inspected_files=None if supplement.failed else True,
                     )
                 ),
                 accounting=FixMeasured(
@@ -559,6 +623,7 @@ class BlackPlugin(BaseToolPlugin):
                 issues_count=remaining_count,
             ),
             name=self.definition.name,
+            execution_failed=supplement.failed,
             output=final_summary,
             issues=all_issues,
             initial_issues=initial_issues,

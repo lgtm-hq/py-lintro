@@ -4,14 +4,26 @@ from __future__ import annotations
 
 import json
 import subprocess  # nosec B404 - subprocess results and exceptions only; no real processes
+from collections.abc import Sequence
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
 
+from lintro.enums.action import Action
+from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.subprocess_result import SubprocessResult
+from lintro.models.core.tool_result import ToolResult
 from lintro.tools.black.definition import BlackPlugin
+from lintro.utils.execution.baseline_filter import apply_baseline
+from lintro.utils.execution.exit_codes import (
+    aggregate_tool_results,
+    determine_exit_code,
+    unknown_residual_tool_names,
+)
+from lintro.utils.fingerprint_baseline import maintain_baseline, snapshot
+from lintro.utils.meaningful_run import run_inspected_files
 from tests.unit.tools.subprocess_helpers import subprocess_result
 
 # Tests for BlackPlugin.check method
@@ -39,6 +51,7 @@ def test_check_clean_file(black_plugin: BlackPlugin, tmp_path: Path) -> None:
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.inspected_files).is_true()
 
 
 def test_check_needs_reformat(black_plugin: BlackPlugin, tmp_path: Path) -> None:
@@ -65,6 +78,7 @@ def test_check_needs_reformat(black_plugin: BlackPlugin, tmp_path: Path) -> None
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.inspected_files).is_true()
     issues = result.issues
     first_issue = issues[0]
     assert_that(first_issue.file).ends_with("module.py")
@@ -82,11 +96,14 @@ def test_fix_retains_findings_surfaced_by_formatting(
     with (
         patch.object(
             black_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=[
-                (False, f"would reformat {files[0]}\n"),
-                (True, ""),
-                (False, "".join(f"would reformat {path}\n" for path in files)),
+                subprocess_result(False, f"would reformat {files[0]}\n"),
+                subprocess_result(True, ""),
+                subprocess_result(
+                    False,
+                    "".join(f"would reformat {path}\n" for path in files),
+                ),
             ],
         ),
         patch.object(black_plugin, "_check_line_length_violations", return_value=[]),
@@ -139,6 +156,7 @@ def test_fix_reformats_and_rechecks(
     assert_that(result.initial_issues_count).is_equal_to(1)
     assert_that(result.fixed_issues_count).is_equal_to(1)
     assert_that(result.remaining_issues_count).is_equal_to(0)
+    assert_that(result.inspected_files).is_true()
 
 
 @pytest.mark.parametrize("code", [None, "invalid-syntax"], ids=["null", "named"])
@@ -282,6 +300,7 @@ def test_check_surfaces_unmeasured_supplement(
 
     assert_that(result.success).is_false()
     assert_that(result.timed_out).is_equal_to(timed_out)
+    assert_that(result.inspected_files).is_equal_to(False if timed_out else None)
     assert_that(result.output).contains(
         "E501 supplement failed",
         reason,
@@ -620,3 +639,409 @@ def test_fix_missing_ruff_keeps_formatting_result(
     assert_that(result.output).contains("E501 supplement skipped", "Ruff not found")
     assert_that(str(result.output).count("E501 supplement skipped")).is_equal_to(1)
     assert_that(result.timed_out).is_false()
+
+
+_CLEAN = (
+    "example.py already well formatted, good job.\n"
+    "All done! ✨ 🍰 ✨\n1 file would be left unchanged.\n"
+)
+_FINDING = "would reformat example.py\n1 file would be reformatted.\n"
+_ERROR = (
+    "error: cannot format broken.py: Cannot parse: 1:6: def f(:\n"
+    "Oh no! 💥 💔 💥\n1 file would fail to reformat.\n"
+)
+_PARTIAL = (
+    "would reformat example.py\n"
+    "error: cannot format broken.py: Cannot parse: 1:6: def f(:\n"
+    "Oh no! 💥 💔 💥\n"
+    "1 file would be reformatted, 1 file would fail to reformat.\n"
+)
+_LOST = "would reformat example.py\n2 files would be reformatted.\n"
+_DISTINCT = _PARTIAL.replace(
+    "would reformat example.py\n",
+    "would reformat example.py\nwould reformat other.py\n",
+).replace("1 file would be reformatted", "2 files would be reformatted")
+
+
+def _native_reports(
+    monkeypatch: pytest.MonkeyPatch,
+    reports: Sequence[tuple[int, str] | subprocess.TimeoutExpired],
+    e501_output: str = "[]",
+) -> None:
+    """Replace only process execution; keep discovery, parsing and outcomes real.
+
+    Args:
+        monkeypatch: Pytest patch manager.
+        reports: Consecutive Black statuses and stderr reports, or timeouts.
+        e501_output: Native Ruff JSON findings for each E501 invocation.
+    """
+    pending = iter(reports)
+
+    def run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """Supply native Black stderr or a legitimate empty Ruff E501 report.
+
+        Args:
+            cmd: Production subprocess command.
+            **kwargs: Production subprocess settings.
+
+        Returns:
+            Native process status and separate output streams.
+
+        Raises:
+            subprocess.TimeoutExpired: For an explicitly requested timeout.
+        """
+        if "E501" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, e501_output, "")
+        report = next(pending)
+        if isinstance(report, subprocess.TimeoutExpired):
+            raise subprocess.TimeoutExpired(cmd, report.timeout)
+        return subprocess.CompletedProcess(cmd, report[0], "", report[1])
+
+    monkeypatch.setattr("subprocess.run", run)
+
+
+def _assert_failed_fix_baseline_preserved(
+    result: ToolResult,
+    black_plugin: BlackPlugin,
+    root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Incomplete format results cannot suppress findings or prune prior entries."""
+    _native_reports(monkeypatch, [(1, _FINDING)])
+    baseline = snapshot([black_plugin.check([str(root / "example.py")], {})], root=root)
+    assert_that(baseline.entries).is_length(1)
+    assert_that(snapshot([result], root=root).entries).is_empty()
+    maintained = maintain_baseline(
+        baseline,
+        snapshot([result], root=root),
+        results=[result],
+        root=root,
+        prune=True,
+    )
+    assert_that(maintained.entries).is_equal_to(baseline.entries)
+    artifact = RunArtifact(
+        tool_results=[result],
+        action=Action.FIX,
+        workspace_root=root,
+        total_issues=result.issues_count,
+        exit_code=1,
+    )
+    apply_baseline(artifact, baseline)
+    assert_that(artifact.exit_code).is_equal_to(1)
+    assert_that(artifact.total_issues).is_equal_to(result.issues_count)
+    assert_that(artifact.tool_results[0].baselined_count).is_zero()
+
+
+@pytest.mark.parametrize(
+    ("native", "inspected", "count", "parse_failures", "failed"),
+    [
+        ((0, _CLEAN), True, 0, None, False),
+        ((1, _FINDING), True, 1, None, False),
+        ((123, _ERROR), None, 0, None, True),
+        ((123, _PARTIAL), None, 1, None, True),
+        ((1, _LOST), None, 1, 1, False),
+        ((0, _LOST), None, 1, 1, False),
+        ((1, "1 file would be reformatted.\n"), None, 1, 1, False),
+        ((2, "error: invalid configuration\n"), None, 0, None, True),
+    ],
+    ids=[
+        "clean",
+        "finding",
+        "error",
+        "partial",
+        "lost",
+        "lost-zero",
+        "summary",
+        "config",
+    ],
+)
+def test_check_inspection_requires_complete_native_verdict(
+    black_plugin: BlackPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    native: tuple[int, str],
+    inspected: bool | None,
+    count: int,
+    parse_failures: int | None,
+    failed: bool,
+) -> None:
+    """Failed or partially parsed reports retain findings without coverage claims."""
+    returncode, report = native
+    file = tmp_path / "example.py"
+    file.write_text("x=1\n", encoding="utf-8")
+    black_plugin.set_options(_baseline_coverage=True)
+    _native_reports(monkeypatch, [(1, _FINDING), (returncode, report)])
+    baseline = snapshot([black_plugin.check([str(file)], {})], root=tmp_path)
+    assert_that(baseline.entries).is_length(1)
+    if report == _CLEAN:
+        file.write_text("x = 1\n", encoding="utf-8")
+    if report in {_ERROR, _PARTIAL}:
+        (tmp_path / "broken.py").write_text("def f(:\n", encoding="utf-8")
+    if report == _LOST:
+        (tmp_path / "other.py").write_text("y=2\n", encoding="utf-8")
+
+    result = black_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.inspected_files).is_equal_to(inspected)
+    assert_that(run_inspected_files([result])).is_equal_to(inspected is True)
+    assert_that(result.success).is_equal_to(report == _CLEAN)
+    assert_that(result.findings_complete).is_equal_to(inspected is True)
+    assert_that(result.execution_failed).is_equal_to(failed)
+    assert_that(result.parse_failures_count).is_equal_to(parse_failures)
+    assert_that(result.issues_count).is_equal_to(count)
+    if inspected is None:
+        assert_that(result.inspected_paths).is_none()
+        assert_that(result.output).contains(report.rstrip())
+        assert_that(snapshot([result], root=tmp_path).entries).is_empty()
+        maintained = maintain_baseline(
+            baseline,
+            snapshot([result], root=tmp_path),
+            results=[result],
+            root=tmp_path,
+            prune=True,
+        )
+        assert_that(maintained.entries).is_equal_to(baseline.entries)
+    artifact = RunArtifact(
+        tool_results=[result],
+        workspace_root=tmp_path,
+        total_issues=count,
+        exit_code=int(not result.success),
+    )
+    apply_baseline(artifact, baseline)
+    assert_that(artifact.exit_code).is_equal_to(0 if inspected else 1)
+    assert_that(artifact.tool_results[0].baselined_count).is_equal_to(
+        1 if report == _FINDING else 0,
+    )
+
+
+@pytest.mark.parametrize("stage", ["initial", "mutation", "final", "diff"])
+@pytest.mark.parametrize(
+    ("returncode", "report", "parse_failures", "reported_files"),
+    [
+        (123, _ERROR, None, []),
+        (123, _PARTIAL, None, ["example.py"]),
+        (123, _DISTINCT, None, ["example.py", "other.py"]),
+        (1, _LOST, 1, ["example.py"]),
+        (0, _LOST, 1, ["example.py"]),
+        (1, "1 file would be reformatted.\n", 1, ["<unknown>"]),
+        (2, "error: invalid configuration\n", None, []),
+        (1, "", None, []),
+    ],
+    ids=[
+        "error",
+        "partial",
+        "distinct",
+        "lost",
+        "lost-zero",
+        "summary",
+        "config",
+        "empty",
+    ],
+)
+def test_fix_incomplete_pass_cannot_claim_inspection_or_measured_fixes(
+    black_plugin: BlackPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    returncode: int,
+    report: str,
+    parse_failures: int | None,
+    reported_files: list[str],
+) -> None:
+    """An incomplete Black pass cannot become a successful measured formatter run."""
+    file = tmp_path / "example.py"
+    file.write_text("x=1\n", encoding="utf-8")
+    expected_files = reported_files
+    if stage == "mutation":
+        expected_files = ["example.py"]
+    elif stage == "final":
+        expected_files = list(dict.fromkeys(["example.py", *expected_files]))
+    if returncode == 123:
+        (tmp_path / "broken.py").write_text("def f(:\n", encoding="utf-8")
+    if stage == "mutation" or report in {_LOST, _DISTINCT}:
+        (tmp_path / "other.py").write_text("y=2\n", encoding="utf-8")
+    if stage == "mutation":
+        # A distinct applied file must never replace the initial open finding.
+        if report != _DISTINCT:
+            report = report.replace("example.py", "other.py")
+        report = report.replace("would reformat ", "reformatted ")
+        report = report.replace("would be reformatted", "reformatted")
+        report = report.replace("would fail to reformat", "failed to reformat")
+    reports = [(1, _FINDING), (0, "reformatted example.py\n"), (0, _CLEAN)]
+    if stage == "diff":
+        black_plugin.set_options(diff=True)
+        reports = [(returncode, report), (0, _CLEAN)]
+    else:
+        reports[["initial", "mutation", "final"].index(stage)] = (returncode, report)
+    _native_reports(monkeypatch, reports)
+
+    result = black_plugin.fix([str(tmp_path)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.inspected_files).is_none()
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.inspected_paths).is_none()
+    assert_that(result.execution_failed).is_equal_to(
+        returncode not in {0, 1}
+        or (returncode == 1 and (not report or stage in {"mutation", "diff"})),
+    )
+    assert_that(result.parse_failures_count).is_equal_to(parse_failures)
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.initial_issues_count).is_equal_to(
+        None if stage in {"initial", "diff"} else 1,
+    )
+    if report:
+        assert_that(result.output).is_equal_to(report)
+    else:
+        assert_that(result.output).contains("exit code 1", "No stdout/stderr")
+    totals = aggregate_tool_results([result], Action.FIX)
+    assert_that(totals).is_equal_to((len(expected_files), 0, 0))
+    assert_that(result.issues).extracting("file").is_equal_to(expected_files)
+    assert_that(unknown_residual_tool_names([result])).is_equal_to(["black"])
+    assert_that(
+        determine_exit_code(Action.FIX, [result], totals[0], totals[2]),
+    ).is_equal_to(1)
+    _assert_failed_fix_baseline_preserved(result, black_plugin, tmp_path, monkeypatch)
+    assert_that(file.read_text()).is_equal_to("x=1\n")
+
+
+@pytest.mark.parametrize("stage", ["mutation", "final"])
+def test_incomplete_black_retains_each_initial_e501_finding(
+    black_plugin: BlackPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+) -> None:
+    """File-level formatting deduplication preserves distinct initial E501s."""
+    file = tmp_path / "example.py"
+    file.write_text("x=1\n", encoding="utf-8")
+    (tmp_path / "broken.py").write_text("def f(:\n", encoding="utf-8")
+    (tmp_path / "other.py").write_text("y=2\n", encoding="utf-8")
+    e501_output = json.dumps(
+        [
+            {
+                "filename": "example.py",
+                "code": "E501",
+                "location": {"row": line, "column": 89},
+                "message": "Line too long (100 > 88)",
+            }
+            for line in (1, 2)
+        ],
+    )
+    reports = [(1, _FINDING)]
+    if stage == "final":
+        reports.append((0, "reformatted example.py\n"))
+    reports.append(
+        (123, _PARTIAL if stage == "final" else "reformatted other.py\n" + _ERROR),
+    )
+    _native_reports(monkeypatch, reports, e501_output)
+
+    result = black_plugin.fix([str(tmp_path)], {})
+
+    assert_that(aggregate_tool_results([result], Action.FIX)).is_equal_to((3, 0, 0))
+    assert_that(result.issues).extracting("file", "code", "line").is_equal_to(
+        [
+            ("example.py", "", 0),
+            (str(file), "E501", 1),
+            (str(file), "E501", 2),
+        ],
+    )
+    assert_that(result.initial_issues).is_equal_to(result.issues)
+    assert_that(result.initial_issues_count).is_equal_to(3)
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+
+
+@pytest.mark.parametrize("diff", [False, True], ids=["format", "diff"])
+@pytest.mark.parametrize("remaining", [False, True], ids=["clean", "finding"])
+def test_fix_complete_reports_keep_aggregate_accounting(
+    black_plugin: BlackPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    diff: bool,
+    remaining: bool,
+) -> None:
+    """Complete format and safe diff reports retain measured consumer totals."""
+    file = tmp_path / "example.py"
+    file.write_text("x=1\n", encoding="utf-8")
+    black_plugin.set_options(diff=diff)
+    reports = [] if diff else [(1, _FINDING)]
+    reports.extend(
+        [
+            (0, _FINDING if diff else "reformatted example.py\n1 file reformatted.\n"),
+            (1, _FINDING) if remaining else (0, _CLEAN),
+        ],
+    )
+    _native_reports(monkeypatch, reports)
+
+    result = black_plugin.fix([str(file)], {})
+
+    assert_that(result.inspected_files).is_true()
+    assert_that(result.success).is_equal_to(not remaining)
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.parse_failures_count).is_none()
+    assert_that(result.residual_unknown).is_false()
+    expected_fixed = int(not diff and not remaining)
+    assert_that(result.fixed_issues_count).is_equal_to(expected_fixed)
+    assert_that(result.remaining_issues_count).is_equal_to(int(remaining))
+    assert_that(aggregate_tool_results([result], Action.FIX)).is_equal_to(
+        (int(remaining), expected_fixed, int(remaining)),
+    )
+    assert_that(unknown_residual_tool_names([result])).is_empty()
+    assert_that(file.read_text()).is_equal_to("x=1\n")
+
+
+@pytest.mark.parametrize("fix", [False, True], ids=["check", "fix"])
+@pytest.mark.parametrize("timeout", [False, True], ids=["no-files", "timeout"])
+def test_inactive_black_does_not_claim_inspection(
+    black_plugin: BlackPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fix: bool,
+    timeout: bool,
+) -> None:
+    """Empty discovery succeeds without inspection; native timeouts stay failures."""
+    if timeout:
+        (tmp_path / "example.py").write_text("x=1\n", encoding="utf-8")
+    _native_reports(monkeypatch, [subprocess.TimeoutExpired(["black"], 30)])
+
+    result = (black_plugin.fix if fix else black_plugin.check)([str(tmp_path)], {})
+
+    assert_that(result.inspected_files).is_false()
+    assert_that(result.success).is_equal_to(not timeout)
+    assert_that(result.no_files).is_equal_to(not timeout)
+    assert_that(result.timed_out).is_equal_to(timeout)
+    assert_that(result.issues).is_empty()
+    assert_that(result.findings_complete).is_false()
+
+
+@pytest.mark.parametrize("stage", ["mutation", "final"])
+def test_fix_timeout_preserves_only_completed_initial_measurement(
+    black_plugin: BlackPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+) -> None:
+    """A later timeout cannot credit fixes or claim a complete residual count."""
+    file = tmp_path / "example.py"
+    file.write_text("x=1\n", encoding="utf-8")
+    reports: list[tuple[int, str] | subprocess.TimeoutExpired] = [(1, _FINDING)]
+    if stage == "final":
+        reports.append((0, "reformatted example.py\n"))
+    reports.append(subprocess.TimeoutExpired(["black"], 30))
+    _native_reports(monkeypatch, reports)
+
+    result = black_plugin.fix([str(file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_true()
+    assert_that(result.inspected_files).is_false()
+    assert_that(result.initial_issues_count).is_equal_to(1)
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(aggregate_tool_results([result], Action.FIX)).is_equal_to((1, 0, 0))
+    assert_that(result.issues).extracting("file").is_equal_to(["example.py"])
