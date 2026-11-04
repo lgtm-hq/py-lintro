@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -15,6 +16,7 @@ from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AICostBudgetExceededError, AIProviderError
 from lintro.ai.fix import generate_fixes
+from lintro.ai.fix_context import read_file_safely
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.pipeline import run_fix_pipeline
 from lintro.ai.providers.response import AIResponse
@@ -41,6 +43,13 @@ _RESPONSES = [
     pytest.param(json.dumps(_FIX), True, id="accepted"),
     pytest.param(None, False, id="provider-exception"),
 ]
+_EXITS = [None, RuntimeError, KeyboardInterrupt, SystemExit, asyncio.CancelledError]
+_CHARGES = [
+    pytest.param("paid", 0.125, id="paid"),
+    pytest.param("zero", 0.0, id="zero"),
+    pytest.param("unknown", 0.0, id="unknown"),
+    pytest.param("no-response", 0.0, id="no-response"),
+]
 
 
 @pytest.fixture
@@ -65,6 +74,227 @@ def _response(content: str, cost: float) -> AIResponse:
         input_tokens=31,
         output_tokens=17,
         cost_estimate=cost,
+    )
+
+
+def _completion(kind: str) -> AIResponse | AIProviderError:
+    """Distinguish observed spend, explicit zero, absent usage and no response."""
+    content = json.dumps(_FIX)
+    if kind == "no-response":
+        return AIProviderError("offline without a response")
+    if kind == "unknown":
+        return AIResponse(content=content, model="mock", provider="mock")
+    return _response(content, 0.125 if kind == "paid" else 0.0)
+
+
+@pytest.mark.parametrize("exit_type", _EXITS)
+@pytest.mark.parametrize("response_kind,expected_cost", _CHARGES)
+async def test_generation_session_charge_survives_progress_exit(
+    tmp_path: Path,
+    ai_config: AIConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    exit_type: type[BaseException] | None,
+    response_kind: str,
+    expected_cost: float,
+) -> None:
+    """A public pipeline exit after a real response retains only observed spend."""
+    source = tmp_path / "progress.py"
+    source.write_text("x = 1\n")
+    issue = MockIssue(file=str(source), line=1, code="B101")
+    result = ToolResult(name="ruff", success=False, issues=[issue], issues_count=1)
+    provider = MockAIProvider()
+    monkeypatch.setattr(
+        provider,
+        "complete",
+        AsyncMock(side_effect=[_completion(response_kind)]),
+    )
+    error = exit_type("progress stopped") if exit_type is not None else None
+    console = RecordingConsoleLogger()
+
+    def progress_output(text: str, color: str | None = None) -> None:
+        console.lines.append(text)
+        if error is not None and "generating fixes... 1/1" in text:
+            raise error
+
+    monkeypatch.setattr(console, "console_output", progress_output)
+    budget = CostBudget(max_cost_usd=1.0)
+    budget.record(0.25)
+    pipeline = run_fix_pipeline(
+        fix_issues=[(result, issue)],
+        all_results=[result],
+        provider=provider,
+        ai_config=ai_config.model_copy(update={"dry_run": True}),
+        logger=console,
+        output_format="plain",
+        workspace_root=tmp_path,
+        budget=budget,
+    )
+
+    if error is None:
+        applied, failed, suggestions = await pipeline
+        assert_that((applied, failed, len(suggestions))).is_equal_to(
+            (0, 0, int(response_kind != "no-response")),
+        )
+    else:
+        with pytest.raises(type(error)) as raised:
+            await pipeline
+        assert_that(raised.value).is_same_as(error)
+
+    assert_that(console.text).contains("generating fixes... 1/1")
+    assert_that((budget.spent, budget.remaining, budget.reserved)).is_equal_to(
+        (0.25 + expected_cost, 0.75 - expected_cost, 0.0),
+    )
+    assert_that(source.read_text()).is_equal_to("x = 1\n")
+
+
+@pytest.mark.parametrize("exit_type", _EXITS)
+@pytest.mark.parametrize("response_kind,expected_cost", _CHARGES)
+async def test_refinement_session_charge_survives_later_read_exit(
+    tmp_path: Path,
+    ai_config: AIConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    exit_type: type[BaseException] | None,
+    response_kind: str,
+    expected_cost: float,
+) -> None:
+    """A later refinement failure preserves earlier charges and the same exception."""
+    issues = []
+    for name in ("first.py", "second.py"):
+        source = tmp_path / name
+        source.write_text("x = 1\n")
+        issues.append(MockIssue(file=str(source), line=1, code="B101"))
+    result = ToolResult(name="ruff", success=False, issues=issues, issues_count=2)
+    initial = json.dumps({**_FIX, "suggested_code": "x = 2"})
+    provider = MockAIProvider()
+    monkeypatch.setattr(
+        provider,
+        "complete",
+        AsyncMock(
+            side_effect=[
+                _response(initial, 0.0625),
+                _response(initial, 0.0625),
+                _completion(response_kind),
+                _response(json.dumps(_FIX), 0.5),
+            ],
+        ),
+    )
+    validation = ValidationResult(
+        unverified=2,
+        details=[f"[B101] {issue.file}:1 — issue still present" for issue in issues],
+    )
+    monkeypatch.setattr("lintro.ai.pipeline.verify_fixes", lambda **kw: validation)
+    monkeypatch.setattr(
+        "lintro.ai.pipeline.validate_applied_fixes",
+        lambda fixes: ValidationResult(verified=len(fixes)),
+    )
+    error = None if exit_type is None else exit_type("later refinement read stopped")
+
+    def read_refinement_file(path: str) -> str | None:
+        if error is not None and path == issues[1].file:
+            raise error
+        return read_file_safely(path)
+
+    monkeypatch.setattr("lintro.ai.refinement.read_file_safely", read_refinement_file)
+    budget = CostBudget(max_cost_usd=2.0)
+    budget.record(0.25)
+    pipeline = run_fix_pipeline(
+        fix_issues=[(result, issue) for issue in issues],
+        all_results=[result],
+        provider=provider,
+        ai_config=ai_config.model_copy(
+            update={"auto_apply": True, "max_parallel_calls": 1},
+        ),
+        logger=RecordingConsoleLogger(),
+        output_format="json",
+        workspace_root=tmp_path,
+        budget=budget,
+    )
+
+    if error is None:
+        applied, failed, suggestions = await pipeline
+        assert_that((applied, failed, len(suggestions))).is_equal_to((2, 0, 2))
+    else:
+        with pytest.raises(type(error)) as raised:
+            await pipeline
+        assert_that(raised.value).is_same_as(error)
+
+    total = 0.375 + expected_cost + (0.5 if error is None else 0.0)
+    assert_that((budget.spent, budget.remaining, budget.reserved)).is_equal_to(
+        (total, 2.0 - total, 0.0),
+    )
+    assert_that([Path(issue.file).read_text() for issue in issues]).is_equal_to(
+        [
+            "x = 1\n" if response_kind == "no-response" else "x = 3\n",
+            "x = 3\n" if error is None else "x = 1\n",
+        ],
+    )
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+async def test_cancelling_generation_keeps_completed_charge_and_drains_provider(
+    tmp_path: Path,
+    ai_config: AIConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    workers: int,
+) -> None:
+    """Real task cancellation keeps a completed sibling's charge exactly once."""
+    issues = []
+    for name in ("completed.py", "pending.py"):
+        source = tmp_path / name
+        source.write_text("x = 1\n")
+        issues.append(MockIssue(file=str(source), line=1, code="B101"))
+    result = ToolResult(name="ruff", success=False, issues=issues, issues_count=2)
+    started = asyncio.Event()
+    drained = asyncio.Event()
+
+    async def pending_response() -> AIResponse:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            drained.set()
+        return _response(json.dumps(_FIX), 0.5)
+
+    provider = MockAIProvider()
+    responses = iter([_response(json.dumps(_FIX), 0.125)])
+
+    async def complete(*args: object, **kwargs: object) -> AIResponse:
+        response = next(responses, None)
+        return response if response is not None else await pending_response()
+
+    monkeypatch.setattr(provider, "complete", complete)
+    budget = CostBudget()
+    budget.record(0.25)
+    task = asyncio.create_task(
+        run_fix_pipeline(
+            fix_issues=[(result, issue) for issue in issues],
+            all_results=[result],
+            provider=provider,
+            ai_config=ai_config.model_copy(update={"max_parallel_calls": workers}),
+            logger=RecordingConsoleLogger(),
+            output_format="json",
+            workspace_root=tmp_path,
+            budget=budget,
+        ),
+    )
+    try:
+        await asyncio.wait_for(started.wait(), timeout=5)
+        task.cancel("session cancelled")
+        with pytest.raises(asyncio.CancelledError) as raised:
+            await task
+        assert_that(raised.value.args).is_equal_to(("session cancelled",))
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert_that(task.cancelled()).is_true()
+    assert_that(drained.is_set()).is_true()
+    assert_that((budget.spent, budget.remaining, budget.reserved)).is_equal_to(
+        (0.375, None, 0.0),
+    )
+    assert_that([Path(issue.file).read_text() for issue in issues]).is_equal_to(
+        ["x = 1\n", "x = 1\n"],
     )
 
 

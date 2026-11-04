@@ -10,6 +10,7 @@ re-validation.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -73,6 +74,7 @@ async def refine_unverified_fixes(
     provider: BaseAIProvider,
     ai_config: AIConfig,
     workspace_root: Path,
+    cost_callback: Callable[[float], None] | None = None,
 ) -> tuple[list[AIFixSuggestion], float]:
     """Attempt one refinement round for unverified fixes.
 
@@ -87,6 +89,8 @@ async def refine_unverified_fixes(
         provider: AI provider instance.
         ai_config: AI configuration.
         workspace_root: Workspace root path.
+        cost_callback: Receives each completed response's cost before parsing,
+            including responses from a round that later exits exceptionally.
 
     Returns:
         Tuple of (successfully refined suggestions, total completed-response cost),
@@ -208,6 +212,8 @@ async def refine_unverified_fixes(
                 workspace_root=workspace_root,
             )
             total_cost += response.cost_estimate
+            if cost_callback is not None:
+                cost_callback(response.cost_estimate)
 
             refined_suggestion = parse_fix_response(
                 response.content,
