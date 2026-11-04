@@ -21,6 +21,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.13] - 2026-11-04
+
+### Changed
+
+- **ai**: cover custom-agent JSON element diagnostics (#3196) (f82f5ea)
+- **black**: make native source fixtures portable (#3195) (138185c)
+- **clippy**: clarify parser stats and timeout expectations (#3193) (d732fa4)
+- **ai**: clarify custom-agent offline response fixture (#3191) (112beca)
+
+### Fixed
+
+- **ci**: adopt repaired Trivy acquisition for tools promotion (#3199) (2e22dcc)
+- **ci**: adopt released Trivy repair for tools image (#3197) (24c5db7)
+- **ai**: add safe custom-agent rejection context (#3194) (24cdaab)
+- **clippy**: account for malformed diagnostic records (#3180) (55dc342)
+
 ## [0.177.12] - 2026-11-03
 
 ### Fixed
