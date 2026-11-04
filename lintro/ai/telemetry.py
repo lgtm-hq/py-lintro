@@ -8,7 +8,11 @@ at the end of the pipeline.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from lintro.ai.exceptions import AITurnLimitError
+    from lintro.ai.providers.response import AIResponse
 
 
 @dataclass
@@ -16,7 +20,8 @@ class AITelemetry:
     """Accumulator for AI session metrics.
 
     Attributes:
-        total_api_calls: Number of AI provider API calls made.
+        total_api_calls: Observed provider responses and turn-limit outcomes.
+            This does not count hidden SDK/network attempts or CLI agent turns.
         total_input_tokens: Sum of input tokens across all calls.
         total_output_tokens: Sum of output tokens across all calls.
         total_cost_usd: Cumulative estimated cost in USD.
@@ -32,6 +37,26 @@ class AITelemetry:
     total_latency_ms: float = 0.0
     successful_fixes: int = 0
     failed_fixes: int = 0
+
+    def record_response(self, response: AIResponse | AITurnLimitError) -> None:
+        """Record one observed fix outcome before parsing or applying its content.
+
+        Returned responses and turn-limit envelopes each prove one observable
+        invocation, even when they carry no usage. Keep unreported usage at its
+        provider-normalized defaults; do not estimate it from suggestions. Cache
+        hits and errors without a response envelope never reach this boundary.
+        Latency is not exposed by these envelopes, so it is left unchanged.
+
+        Args:
+            response: Returned response or billed turn-limit exception, with the
+                transport's existing pricing already applied.
+        """
+        self.record_call(
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            cost=response.cost_estimate,
+            latency_ms=0.0,
+        )
 
     def record_call(
         self,

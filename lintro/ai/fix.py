@@ -57,6 +57,7 @@ from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
     from lintro.ai.providers.base import AIResponse, BaseAIProvider
+    from lintro.ai.telemetry import AITelemetry
     from lintro.parsers.base_issue import BaseIssue
 
 
@@ -95,6 +96,7 @@ async def _call_fix_ai(
     max_tokens: int,
     workspace_root: Path,
     batch: bool = False,
+    telemetry: AITelemetry | None = None,
 ) -> AIResponse:
     """Invoke the unified AI transport for fix generation.
 
@@ -105,24 +107,36 @@ async def _call_fix_ai(
         max_tokens: Maximum tokens to request.
         workspace_root: Root directory forwarded as the provider repo root.
         batch: Whether this is a multi-issue batch prompt.
+        telemetry: Optional accumulator, updated before parsing or applying.
 
     Returns:
         The provider response.
+
+    Raises:
+        AITurnLimitError: Re-raised after recording the stopped call's usage.
     """
-    return await call_ai(
-        provider=provider,
-        ai_config=ai_config,
-        user_prompt=prompt,
-        system_prompt=FIX_SYSTEM,
-        budget=CostBudget(),
-        max_tokens=max_tokens,
-        repo_root=str(workspace_root),
-        cli_schema=cli_schema_for_fix(
-            transport=ai_config.transport,
-            batch=batch,
-        ),
-        call_kind=AICallKind.FIX,
-    )
+    try:
+        response = await call_ai(
+            provider=provider,
+            ai_config=ai_config,
+            user_prompt=prompt,
+            system_prompt=FIX_SYSTEM,
+            budget=CostBudget(),
+            max_tokens=max_tokens,
+            repo_root=str(workspace_root),
+            cli_schema=cli_schema_for_fix(
+                transport=ai_config.transport,
+                batch=batch,
+            ),
+            call_kind=AICallKind.FIX,
+        )
+    except AITurnLimitError as exc:
+        if telemetry is not None:
+            telemetry.record_response(exc)
+        raise
+    if telemetry is not None:
+        telemetry.record_response(response)
+    return response
 
 
 # Maximum concurrent API calls for fix generation
@@ -142,6 +156,7 @@ async def _call_and_cache_fix(
     file_content: str,
     enable_cache: bool,
     cost_callback: Callable[[float], None] | None = None,
+    telemetry: AITelemetry | None = None,
 ) -> AIFixSuggestion | None:
     """Call the provider, parse the response, and optionally cache the result."""
     try:
@@ -151,6 +166,7 @@ async def _call_and_cache_fix(
             prompt=prompt,
             max_tokens=max_tokens,
             workspace_root=workspace_root,
+            telemetry=telemetry,
         )
         if cost_callback is not None:
             cost_callback(response.cost_estimate)
@@ -218,6 +234,7 @@ async def _generate_single_fix(
     sanitize_mode: SanitizeMode = SanitizeMode.WARN,
     cache_max_entries: int = 100,
     cost_callback: Callable[[float], None] | None = None,
+    telemetry: AITelemetry | None = None,
 ) -> AIFixSuggestion | None:
     """Generate a fix suggestion for a single issue.
 
@@ -246,6 +263,7 @@ async def _generate_single_fix(
         sanitize_mode: How to handle detected prompt injection patterns.
         cache_max_entries: Maximum file cache entries to limit memory.
         cost_callback: Receives completed-response and turn-limit exception costs.
+        telemetry: Optional accumulator for observed provider outcomes and usage.
 
     Returns:
         AIFixSuggestion, or None if generation fails.
@@ -303,6 +321,7 @@ async def _generate_single_fix(
         file_content,
         enable_cache,
         cost_callback,
+        telemetry,
     )
 
 
@@ -319,6 +338,7 @@ async def _generate_batch_fixes(
     max_prompt_tokens: int,
     sanitize_mode: SanitizeMode = SanitizeMode.WARN,
     cost_callback: Callable[[float], None] | None = None,
+    telemetry: AITelemetry | None = None,
 ) -> list[AIFixSuggestion] | None:
     """Generate fixes for multiple issues in one file via a batch prompt.
 
@@ -340,6 +360,7 @@ async def _generate_batch_fixes(
         max_prompt_tokens: Token budget for the prompt.
         sanitize_mode: How to handle detected prompt injection patterns.
         cost_callback: Receives completed-batch and turn-limit exception costs.
+        telemetry: Optional accumulator for observed provider outcomes and usage.
 
     Returns:
         List of AIFixSuggestions, or None on failure (fall back to single).
@@ -402,6 +423,7 @@ async def _generate_batch_fixes(
             max_tokens=max_tokens,
             workspace_root=workspace_root,
             batch=True,
+            telemetry=telemetry,
         )
         if cost_callback is not None:
             cost_callback(response.cost_estimate)
@@ -473,6 +495,7 @@ async def generate_fixes(
     sanitize_mode: SanitizeMode = SanitizeMode.WARN,
     cache_max_entries: int = 1000,
     cost_callback: Callable[[float], None] | None = None,
+    telemetry: AITelemetry | None = None,
 ) -> list[AIFixSuggestion]:
     """Generate AI fix suggestions for unfixable issues.
 
@@ -508,6 +531,9 @@ async def generate_fixes(
             including malformed, empty and no-op responses and discarded batches,
             plus spend carried by turn-limit exceptions. Cache hits and other
             provider errors do not invoke it.
+        telemetry: Optional accumulator for returned provider responses and
+            turn-limit outcomes, including rejected/discarded responses. Counts
+            observable invocations, not hidden SDK/network attempts or CLI turns.
 
     Returns:
         List of fix suggestions.
@@ -593,6 +619,7 @@ async def generate_fixes(
             max_prompt_tokens,
             sanitize_mode=sanitize_mode,
             cost_callback=cost_callback,
+            telemetry=telemetry,
         )
         if batch_result is not None:
             suggestions.extend(batch_result)
@@ -629,6 +656,7 @@ async def generate_fixes(
                 sanitize_mode=sanitize_mode,
                 cache_max_entries=cache_max_entries,
                 cost_callback=cost_callback,
+                telemetry=telemetry,
             )
             if result:
                 suggestions.append(result)
@@ -667,6 +695,7 @@ async def generate_fixes(
                     sanitize_mode=sanitize_mode,
                     cache_max_entries=cache_max_entries,
                     cost_callback=cost_callback,
+                    telemetry=telemetry,
                 )
 
         tasks = [asyncio.ensure_future(_run_one(issue)) for issue in single_issues]
@@ -748,4 +777,5 @@ async def generate_fixes_from_params(
         sanitize_mode=params.sanitize_mode,
         cache_max_entries=params.cache_max_entries,
         cost_callback=params.cost_callback,
+        telemetry=params.telemetry,
     )

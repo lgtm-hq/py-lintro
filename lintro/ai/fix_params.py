@@ -17,6 +17,7 @@ from lintro.ai.fix_context import CONTEXT_LINES
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
+    from lintro.ai.telemetry import AITelemetry
 
 
 def _no_progress(completed: int, total: int) -> None:
@@ -60,6 +61,7 @@ class FixGenParams:
             and retry settings.
         cost_callback: Receives each completed response's cost before parsing,
             including responses that yield no suggestions.
+        telemetry: Optional accumulator for observed provider outcomes and usage.
     """
 
     workspace_root: Path
@@ -82,3 +84,4 @@ class FixGenParams:
     progress_callback: Callable[[int, int], None] = _no_progress
     ai_config: AIConfig | None = None
     cost_callback: Callable[[float], None] | None = None
+    telemetry: AITelemetry | None = None

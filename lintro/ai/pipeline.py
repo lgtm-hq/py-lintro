@@ -122,6 +122,7 @@ async def _generate_all_suggestions(
             sanitize_mode=ai_config.sanitize_mode,
             ai_config=ai_config,
             cost_callback=response_costs.append,
+            telemetry=telemetry,
         )
         try:
             suggestions = await generate_fixes_from_params(issues, provider, fix_params)
@@ -138,20 +139,6 @@ async def _generate_all_suggestions(
             loguru_logger.info(
                 f"AI fix: {tool_name} generated {len(suggestions)} suggestions",
             )
-
-        # Count API calls by unique token footprint (batch = 1 call, not N).
-        # Cache hits (0 tokens) are not counted as API calls.
-        seen_calls: set[tuple[int, int]] = set()
-        for s in suggestions:
-            telemetry.total_input_tokens += s.input_tokens
-            telemetry.total_output_tokens += s.output_tokens
-            if s.input_tokens > 0 or s.output_tokens > 0:
-                seen_calls.add((s.input_tokens, s.output_tokens))
-        telemetry.total_api_calls += len(seen_calls)
-
-        # Response charges survive rejected parses and batch fallback. Suggestion
-        # metadata still describes only the response that produced that patch.
-        telemetry.total_cost_usd += tool_cost
 
         if ai_config.verbose:
             loguru_logger.info(
@@ -370,17 +357,12 @@ async def _verify_and_refine(
                 ai_config=ai_config,
                 workspace_root=workspace_root,
                 cost_callback=response_costs.append,
+                telemetry=telemetry,
             )
         finally:
             # A later refinement failure must not discard earlier responses.
             budget.record(sum(response_costs))
-        telemetry.total_cost_usd += refinement_cost
         if refined:
-            telemetry.total_api_calls += len(refined)
-            for s in refined:
-                telemetry.total_input_tokens += s.input_tokens
-                telemetry.total_output_tokens += s.output_tokens
-
             re_validation = validate_applied_fixes(refined)
             if re_validation:
                 validation.verified += re_validation.verified
