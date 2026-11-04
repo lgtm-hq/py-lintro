@@ -140,6 +140,7 @@ async def _call_and_cache_fix(
     workspace_root: Path,
     file_content: str,
     enable_cache: bool,
+    cost_callback: Callable[[float], None] | None = None,
 ) -> AIFixSuggestion | None:
     """Call the provider, parse the response, and optionally cache the result."""
     try:
@@ -150,6 +151,8 @@ async def _call_and_cache_fix(
             max_tokens=max_tokens,
             workspace_root=workspace_root,
         )
+        if cost_callback is not None:
+            cost_callback(response.cost_estimate)
 
         suggestion = parse_fix_response(
             response.content,
@@ -210,6 +213,7 @@ async def _generate_single_fix(
     full_file_threshold: int = FULL_FILE_THRESHOLD,
     sanitize_mode: SanitizeMode = SanitizeMode.WARN,
     cache_max_entries: int = 100,
+    cost_callback: Callable[[float], None] | None = None,
 ) -> AIFixSuggestion | None:
     """Generate a fix suggestion for a single issue.
 
@@ -237,6 +241,7 @@ async def _generate_single_fix(
             (default 500).
         sanitize_mode: How to handle detected prompt injection patterns.
         cache_max_entries: Maximum file cache entries to limit memory.
+        cost_callback: Receives each completed response's cost before parsing.
 
     Returns:
         AIFixSuggestion, or None if generation fails.
@@ -293,6 +298,7 @@ async def _generate_single_fix(
         workspace_root,
         file_content,
         enable_cache,
+        cost_callback,
     )
 
 
@@ -308,6 +314,7 @@ async def _generate_batch_fixes(
     timeout: float,
     max_prompt_tokens: int,
     sanitize_mode: SanitizeMode = SanitizeMode.WARN,
+    cost_callback: Callable[[float], None] | None = None,
 ) -> list[AIFixSuggestion] | None:
     """Generate fixes for multiple issues in one file via a batch prompt.
 
@@ -328,6 +335,7 @@ async def _generate_batch_fixes(
         timeout: Request timeout in seconds.
         max_prompt_tokens: Token budget for the prompt.
         sanitize_mode: How to handle detected prompt injection patterns.
+        cost_callback: Receives the completed batch response's cost before parsing.
 
     Returns:
         List of AIFixSuggestions, or None on failure (fall back to single).
@@ -391,6 +399,8 @@ async def _generate_batch_fixes(
             workspace_root=workspace_root,
             batch=True,
         )
+        if cost_callback is not None:
+            cost_callback(response.cost_estimate)
         suggestions = parse_batch_response(response.content, file_path)
         if len(suggestions) != len(file_issues):
             logger.debug(
@@ -456,6 +466,7 @@ async def generate_fixes(
     fallback_models: list[str] | None = None,
     sanitize_mode: SanitizeMode = SanitizeMode.WARN,
     cache_max_entries: int = 1000,
+    cost_callback: Callable[[float], None] | None = None,
 ) -> list[AIFixSuggestion]:
     """Generate AI fix suggestions for unfixable issues.
 
@@ -487,6 +498,9 @@ async def generate_fixes(
             to try when the primary model fails with a retryable error.
         sanitize_mode: How to handle prompt injection patterns.
         cache_max_entries: Maximum file cache entries to limit memory.
+        cost_callback: Receives each completed provider response's cost once,
+            including malformed, empty and no-op responses and discarded batches.
+            Cache hits and calls that raise without a response do not invoke it.
 
     Returns:
         List of fix suggestions.
@@ -571,6 +585,7 @@ async def generate_fixes(
             timeout,
             max_prompt_tokens,
             sanitize_mode=sanitize_mode,
+            cost_callback=cost_callback,
         )
         if batch_result is not None:
             suggestions.extend(batch_result)
@@ -606,6 +621,7 @@ async def generate_fixes(
                 cache_ttl=cache_ttl,
                 sanitize_mode=sanitize_mode,
                 cache_max_entries=cache_max_entries,
+                cost_callback=cost_callback,
             )
             if result:
                 suggestions.append(result)
@@ -643,6 +659,7 @@ async def generate_fixes(
                     cache_ttl=cache_ttl,
                     sanitize_mode=sanitize_mode,
                     cache_max_entries=cache_max_entries,
+                    cost_callback=cost_callback,
                 )
 
         tasks = [asyncio.ensure_future(_run_one(issue)) for issue in single_issues]
@@ -723,4 +740,5 @@ async def generate_fixes_from_params(
         fallback_models=params.fallback_models,
         sanitize_mode=params.sanitize_mode,
         cache_max_entries=params.cache_max_entries,
+        cost_callback=params.cost_callback,
     )

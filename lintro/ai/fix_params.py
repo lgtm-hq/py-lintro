@@ -58,6 +58,8 @@ class FixGenParams:
             ignoring progress updates.
         ai_config: Optional AI configuration for ``call_ai`` transport
             and retry settings.
+        cost_callback: Receives each completed response's cost before parsing,
+            including responses that yield no suggestions.
     """
 
     workspace_root: Path
@@ -79,3 +81,4 @@ class FixGenParams:
     sanitize_mode: SanitizeMode = SanitizeMode.WARN
     progress_callback: Callable[[int, int], None] = _no_progress
     ai_config: AIConfig | None = None
+    cost_callback: Callable[[float], None] | None = None
