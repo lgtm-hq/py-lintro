@@ -17,6 +17,7 @@ import subprocess  # nosec B404 - subprocess invokes git with shell=False; args 
 import tempfile
 import time
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -28,8 +29,10 @@ from lintro.ai.paths import atomic_write_bytes
 CHECKPOINT_REF_PREFIX = "refs/lintro/checkpoints/"
 DEFAULT_CHECKPOINT_RETENTION = 10
 _GIT_TIMEOUT_SECONDS = 60.0
-# Keep path-list argv comfortably under platform ARG_MAX limits.
+# Bound process count as well as encoded argv size.
 _GIT_PATH_CHUNK = 500
+_GIT_ARG_MAX = 128 * 1024
+_GIT_ARG_RESERVE = 8 * 1024
 # Git tree entry modes that are not plain file content.
 _SYMLINK_MODE = "120000"
 _GITLINK_MODE = "160000"
@@ -303,6 +306,58 @@ def _raw_file_mode(path: Path) -> str | None:
     return None
 
 
+def _git_path_batches(
+    paths: list[str],
+    *,
+    args: list[str],
+    env: dict[str, str],
+) -> Iterator[list[str]]:
+    """Yield literal path operands within a conservative encoded exec budget.
+
+    Args:
+        paths: Repo-relative path operands.
+        args: Fixed Git arguments before the operands, including ``--``.
+        env: Temporary-index environment overlay.
+
+    Yields:
+        list[str]: Batches bounded by both count and encoded bytes.
+
+    Raises:
+        CheckpointError: When even one target cannot fit the exec budget.
+    """
+    try:
+        arg_max = os.sysconf("SC_ARG_MAX")
+    except (AttributeError, OSError, ValueError):
+        arg_max = 32 * 1024
+    # Cap argv at half macOS's usual 256 KiB limit even on larger-limit hosts.
+    # Include NULs and conservative 64-bit argv/environ pointers; reserve extra
+    # space for platform overhead and the subprocess implementation.
+    budget = arg_max if arg_max > 0 else 32 * 1024
+    budget -= _GIT_ARG_RESERVE
+    budget -= sum(
+        len(os.fsencode(key)) + len(os.fsencode(value)) + 2 + 8
+        for key, value in _git_env(env).items()
+    )
+    budget = min(budget, _GIT_ARG_MAX)
+    fixed_size = sum(
+        len(os.fsencode(arg)) + 1 + 8 for arg in [_git_bin() or "git", *args]
+    )
+    size = fixed_size
+    chunk: list[str] = []
+    for path in paths:
+        path_size = len(os.fsencode(path)) + 1 + 8
+        if fixed_size + path_size > budget:
+            raise CheckpointError("Checkpoint target exceeds Git argument budget")
+        if chunk and (len(chunk) >= _GIT_PATH_CHUNK or size + path_size > budget):
+            yield chunk
+            chunk = []
+            size = fixed_size
+        chunk.append(path)
+        size += path_size
+    if chunk:
+        yield chunk
+
+
 def _update_raw_index(
     *,
     root: Path,
@@ -332,31 +387,31 @@ def _update_raw_index(
             for rel, mode in modes.items()
             if mode == "0" or (mode is None and remove_nonfiles)
         ]
-        for start in range(0, len(missing), _GIT_PATH_CHUNK):
+        remove_args = ["update-index", "--force-remove", "--"]
+        for chunk in _git_path_batches(missing, args=remove_args, env=env):
             _run_git(
-                [
-                    "update-index",
-                    "--force-remove",
-                    "--",
-                    *missing[start : start + _GIT_PATH_CHUNK],
-                ],
+                [*remove_args, *chunk],
                 cwd=str(root),
                 env=env,
                 check=True,
             )
         entries: list[bytes] = []
         regular = [rel for rel, mode in modes.items() if mode in ("100644", "100755")]
-        for start in range(0, len(regular), _GIT_PATH_CHUNK):
-            chunk = regular[start : start + _GIT_PATH_CHUNK]
+        hash_args = ["hash-object", "-w", "--no-filters", "--"]
+        for chunk in _git_path_batches(regular, args=hash_args, env=env):
             # Explicit argv operands need no stdin-paths C-style quoting, even
             # for embedded newlines, tabs, quotes or leading dashes.
             blobs = _run_git(
-                ["hash-object", "-w", "--no-filters", "--", *chunk],
+                [*hash_args, *chunk],
                 cwd=str(root),
                 env=env,
                 check=True,
                 binary=True,
             ).stdout.splitlines()
+            if len(blobs) != len(chunk):
+                raise CheckpointError(
+                    "Git returned an unexpected checkpoint hash count",
+                )
             for rel, blob in zip(chunk, blobs, strict=True):
                 entries.append(
                     os.fsencode(f"{modes[rel]} {blob.decode('ascii')}\t{rel}\0"),
@@ -467,6 +522,7 @@ def capture_checkpoint(
         # symlink to one, a FIFO) is dropped from the snapshot entirely: it
         # cannot be captured as a blob, and leaving it in ``paths`` would let
         # a restore delete a path lintro never touched.
+        #
         # ``git add`` would apply contributor clean filters and CRLF conversion.
         # Insert raw blobs directly, touching only the temporary index.
         rel_paths = _update_raw_index(root=root, paths=rel_paths, env=env)
@@ -665,20 +721,19 @@ def diff_checkpoint(
         # ``--no-color`` defends against a user's ``color.ui = always``.
         # ``--no-textconv`` matters as much as ``--no-ext-diff``: a repo's
         # ``diff.*.textconv`` would otherwise run an external program here.
-        # Chunked to keep path-list argv below platform limits.
+        diff_args = [
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-color",
+            "--cached",
+            treeish,
+            "--",
+        ]
         chunks: list[bytes] = []
-        for start in range(0, len(rels), _GIT_PATH_CHUNK):
+        for chunk in _git_path_batches(rels, args=diff_args, env=env):
             result = _run_git(
-                [
-                    "diff",
-                    "--no-ext-diff",
-                    "--no-textconv",
-                    "--no-color",
-                    "--cached",
-                    treeish,
-                    "--",
-                    *rels[start : start + _GIT_PATH_CHUNK],
-                ],
+                [*diff_args, *chunk],
                 cwd=str(root),
                 env=env,
                 check=True,

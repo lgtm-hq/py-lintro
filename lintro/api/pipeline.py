@@ -127,6 +127,7 @@ def _capture_fmt_checkpoint(*, ctx: RunContext, paths: list[str]) -> None:
     Raises:
         click.ClickException: When checkpoint enumeration fails, before any
             formatting runs.
+        click.UsageError: When an ``LINTRO_AI_*`` overlay fails validation.
     """
     from lintro.enums.action import Action as _Action
 
@@ -138,8 +139,12 @@ def _capture_fmt_checkpoint(*, ctx: RunContext, paths: list[str]) -> None:
     # this API boundary before reading the checkpoint options as attributes.
     if isinstance(ai_config, dict):
         from lintro.ai.effective_config import resolve_effective_ai_config
+        from lintro.ai.exceptions import AIConfigOverrideError
 
-        ai_config = resolve_effective_ai_config(ai_config, diagnostics=False).config
+        try:
+            ai_config = resolve_effective_ai_config(ai_config, diagnostics=False).config
+        except AIConfigOverrideError as exc:
+            raise click.UsageError(str(exc)) from exc
     if not getattr(ai_config, "checkpoint_fmt", False):
         return
 

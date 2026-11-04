@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import subprocess  # nosec B404 - exercise failing Git plumbing in disposable repos
 import tempfile
 import time
 from collections import Counter
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
@@ -23,6 +27,7 @@ from lintro.ai.checkpoints import (
     restore_checkpoint,
 )
 from lintro.cli import cli
+from lintro.utils.tool_executor import execute_run
 from tests.conftest import run_git
 from tests.unit.conftest import init_git_repo
 
@@ -190,7 +195,7 @@ def test_checkpoint_keeps_absence_and_symlink_semantics(
     assert_that((repo / ".git/filter-invocations").exists()).is_false()
 
 
-@pytest.mark.parametrize("command", ["hash-object", "update-index"])
+@pytest.mark.parametrize("command", ["hash-object", "update-index", "hash-count"])
 def test_raw_capture_failure_publishes_no_checkpoint(
     byte_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -208,6 +213,11 @@ def test_raw_capture_failure_publishes_no_checkpoint(
         args: list[str],
         **kwargs: Any,
     ) -> subprocess.CompletedProcess[Any]:
+        if command == "hash-count" and args[1] == "hash-object":
+            temporary_indexes.append(Path(kwargs["env"]["GIT_INDEX_FILE"]))
+            result = real_run(args, **kwargs)
+            result.stdout = b""
+            return result
         if args[1] == command:
             temporary_indexes.append(Path(kwargs["env"]["GIT_INDEX_FILE"]))
             # Drive a real nonzero Git process with the same stdin/environment.
@@ -512,16 +522,19 @@ def test_capture_filesystem_oserror_keeps_user_state(
         assert_that(index.exists()).is_false()
 
 
+@pytest.mark.parametrize("checkpoint_fmt", [False, True])
 def test_public_fmt_captures_raw_bytes_from_project_checkpoint_option(
     byte_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
+    checkpoint_fmt: bool,
 ) -> None:
     """A real fmt invocation honors the raw config mapping and records pre-run bytes."""
     repo = byte_repo
     (repo / ".lintro-config.yaml").write_text(
-        "ai:\n  enabled: false\n  checkpoint_fmt: true\n",
+        f"ai:\n  enabled: false\n  checkpoint_fmt: {str(checkpoint_fmt).lower()}\n",
         encoding="utf-8",
     )
+    monkeypatch.setenv("LINTRO_AI_PROVIDER", "anthropic")
     target = repo / "ready.py"
     original = b"ready=1\r\n"
     target.write_bytes(original)
@@ -536,19 +549,186 @@ def test_public_fmt_captures_raw_bytes_from_project_checkpoint_option(
     assert_that(result.exception).described_as(result.output).is_none()
     assert_that(result.exit_code).is_equal_to(0)
     refs = list_checkpoint_refs(workspace_root=repo)
-    assert_that(refs).is_length(1)
-    assert_that(result.output).contains("Captured fmt checkpoint", refs[0])
     assert_that(target.read_bytes()).is_equal_to(b"ready = 1\r\n")
-    restore_checkpoint(
-        Checkpoint(
-            ref=refs[0],
-            run_id=refs[0].rsplit("/", 1)[1],
-            root=repo,
-            paths=("ready.py",),
-        ),
+    if checkpoint_fmt:
+        assert_that(refs).is_length(1)
+        assert_that(result.output).contains("Captured fmt checkpoint", refs[0])
+        restore_checkpoint(
+            Checkpoint(
+                ref=refs[0],
+                run_id=refs[0].rsplit("/", 1)[1],
+                root=repo,
+                paths=("ready.py",),
+            ),
+        )
+        assert_that(target.read_bytes()).is_equal_to(original)
+    else:
+        assert_that(refs).is_empty()
+        assert_that(result.output).does_not_contain("Captured fmt checkpoint")
+    assert_that(_user_state(repo)).is_equal_to(before)
+
+
+@pytest.mark.parametrize(
+    "ai_section",
+    ["{}\n", "ai:\n  enabled: false\n"],
+    ids=["default", "disabled"],
+)
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [("LINTRO_AI_PROVIDER", "bogus"), ("LINTRO_AI_PROVIDERS__BOGUS__X", "1")],
+)
+def test_public_fmt_invalid_ai_override_is_usage_error_before_formatting(
+    byte_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    ai_section: str,
+    variable: str,
+    value: str,
+) -> None:
+    """Default and disabled AI reject invalid overrides before any formatter runs."""
+    repo = byte_repo
+    (repo / ".lintro-config.yaml").write_text(ai_section, encoding="utf-8")
+    target = repo / "ready.py"
+    original = b"ready=1\r\n"
+    target.write_bytes(original)
+    before = _user_state(repo)
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv(variable, value)
+
+    with patch("lintro.api.pipeline.execute_run", wraps=execute_run) as execution:
+        result = CliRunner().invoke(
+            cli,
+            ["fmt", "ready.py", "--tools", "black", "--no-art"],
+        )
+
+    assert_that(result.exit_code).described_as(repr(result.exception)).is_equal_to(2)
+    assert_that(result.output).contains("Error:", variable).does_not_contain(
+        "Traceback",
     )
     assert_that(target.read_bytes()).is_equal_to(original)
     assert_that(_user_state(repo)).is_equal_to(before)
+    assert_that(list_checkpoint_refs(workspace_root=repo)).is_empty()
+    execution.assert_not_called()
+
+
+@pytest.mark.parametrize("boundary", ["capture", "diff"])
+@pytest.mark.parametrize("deleted", [False, True], ids=["regular", "deleted"])
+def test_long_path_arguments_fit_constrained_exec_budget(
+    byte_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+    deleted: bool,
+) -> None:
+    """Real Git survives an artificial 64 KiB exec budget, not native macOS testing."""
+    repo = byte_repo
+    prefix = Path("-" + "é" * 90) / ("界" * 60) / ("ø" * 90)
+    names = [
+        (prefix / f"file-{number:04}\t\n[1].txt").as_posix() for number in range(503)
+    ]
+    for number, name in enumerate(names):
+        target = repo / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(f"ORIGINAL {number}\r\n".encode())
+    run_git(["git", "add", "--", prefix.as_posix()], cwd=repo)
+    run_git(["git", "commit", "-m", "seed long paths"], cwd=repo)
+    _configure_conversion(repo, autocrlf="input", filtered=True)
+    checkpoint = None
+    if boundary == "diff":
+        checkpoint = capture_checkpoint(names, workspace_root=repo)
+        assert checkpoint is not None
+    if deleted:
+        for name in names:
+            (repo / name).unlink()
+    before = _user_state(repo)
+    budget = 64 * 1024
+    with _constrained_git_exec(monkeypatch, budget=budget) as (
+        commands,
+        sizes,
+        indexes,
+    ):
+        if boundary == "capture":
+            checkpoint = capture_checkpoint(names, workspace_root=repo)
+            assert checkpoint is not None
+        else:
+            assert checkpoint is not None
+            diff = diff_checkpoint(checkpoint)
+            assert_that(diff.count("-ORIGINAL")).is_equal_to(
+                len(names) if deleted else 0,
+            )
+            assert_that(bool(diff)).is_equal_to(deleted)
+
+    print(
+        f"artificial exec budget={budget} boundary={boundary} deleted={deleted} max_bytes={max(sizes)} processes={sum(commands.values())} commands={dict(commands)}",
+    )
+    assert_that(max(sizes)).is_less_than_or_equal_to(budget)
+    assert_that(sum(commands.values())).is_less_than(60)
+    assert_that(_user_state(repo)).is_equal_to(before)
+    for index in indexes:
+        assert_that(index.exists()).is_false()
+        assert_that(Path(f"{index}.lock").exists()).is_false()
+    if boundary == "capture":
+        for name in names:
+            (repo / name).write_bytes(b"changed\n")
+        restore_checkpoint(checkpoint)
+        for number, name in enumerate(names):
+            if deleted:
+                assert_that((repo / name).exists()).is_false()
+            else:
+                assert_that((repo / name).read_bytes()).is_equal_to(
+                    f"ORIGINAL {number}\r\n".encode(),
+                )
+    assert_that(_user_state(repo)).is_equal_to(before)
+    assert_that((repo / ".git/filter-invocations").exists()).is_false()
+
+
+@contextmanager
+def _constrained_git_exec(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    budget: int,
+) -> Iterator[tuple[Counter[str], list[int], set[Path]]]:
+    """Enforce an artificial exec limit while delegating valid calls to real Git.
+
+    Args:
+        monkeypatch: Scoped patch facility.
+        budget: Combined argv/environment byte ceiling, including pointers.
+
+    Yields:
+        tuple[Counter[str], list[int], set[Path]]: Observed commands, encoded
+            exec sizes, and temporary index paths.
+    """
+    real_run = subprocess.run
+    real_sysconf = os.sysconf
+    commands: Counter[str] = Counter()
+    sizes: list[int] = []
+    indexes: set[Path] = set()
+
+    def constrained_run(
+        args: list[str],
+        **kwargs: Any,
+    ) -> subprocess.CompletedProcess[Any]:
+        environment = kwargs["env"]
+        size = sum(len(os.fsencode(arg)) + 1 + 8 for arg in args)
+        size += sum(
+            len(os.fsencode(key)) + len(os.fsencode(value)) + 2 + 8
+            for key, value in environment.items()
+        )
+        sizes.append(size)
+        commands[args[1]] += 1
+        if "GIT_INDEX_FILE" in environment:
+            indexes.add(Path(environment["GIT_INDEX_FILE"]))
+        if size > budget:
+            raise OSError(errno.E2BIG, f"artificial exec budget {budget}; got {size}")
+        return real_run(args, **kwargs)
+
+    with monkeypatch.context() as limited:
+        # Advertise the same deterministic limit that constrained_run enforces.
+        limited.setattr(
+            os,
+            "sysconf",
+            lambda key: budget if key == "SC_ARG_MAX" else real_sysconf(key),
+        )
+        limited.setattr("lintro.ai.checkpoints.subprocess.run", constrained_run)
+        yield commands, sizes, indexes
 
 
 @pytest.mark.parametrize("command", ["hash-object", "update-index", "diff"])
