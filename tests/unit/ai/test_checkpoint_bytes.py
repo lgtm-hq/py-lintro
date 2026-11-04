@@ -493,13 +493,26 @@ def test_capture_filesystem_oserror_keeps_user_state(
             indexes.append(Path(kwargs["env"]["GIT_INDEX_FILE"]))
         return result
 
+    real_os_stat = os.stat
+
+    def _is_target(path: Any, kwargs: dict[str, Any]) -> bool:
+        # Descriptor-relative calls name only the final component.
+        if kwargs.get("dir_fd") is not None:
+            return bool(path == target.name)
+        return Path(path) == target
+
     def deny_stat(path: Path, *args: Any, **kwargs: Any) -> os.stat_result:
         if indexes and path == target:
             raise PermissionError("owned stat failure")
         return real_stat(path, *args, **kwargs)
 
+    def deny_os_stat(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+        if indexes and _is_target(path, kwargs):
+            raise PermissionError("owned stat failure")
+        return real_os_stat(path, *args, **kwargs)
+
     def deny_readlink(path: Any, *args: Any, **kwargs: Any) -> Any:
-        if indexes and Path(path) == target:
+        if indexes and _is_target(path, kwargs):
             raise OSError("owned readlink failure")
         return real_readlink(path, *args, **kwargs)
 
@@ -508,6 +521,7 @@ def test_capture_filesystem_oserror_keeps_user_state(
         if operation == "stat":
             failing.setattr(Path, "stat", deny_stat)
             failing.setattr(Path, "lstat", deny_stat)
+            failing.setattr(os, "stat", deny_os_stat)
         else:
             failing.setattr(os, "readlink", deny_readlink)
         checkpoint = capture_checkpoint([target.name], workspace_root=repo)
@@ -1032,9 +1046,167 @@ def test_constrained_exec_scrubs_inherited_git_location(
     assert_that(indexes).is_not_empty().does_not_contain(sentinel_index)
     assert_that(sentinel_index.exists()).is_false()
     assert_that((repo / "target.txt").read_bytes()).is_equal_to(b"committed\n")
+    # The checks below run real Git outside the scrubbing fixture; with these
+    # still exported they would inspect the decoy instead of ``repo``.
     for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
         monkeypatch.delenv(name)
     assert_that(list_checkpoint_refs(workspace_root=repo)).is_equal_to([checkpoint.ref])
     assert_that(list_checkpoint_refs(workspace_root=decoy)).is_empty()
     assert_that(_user_state(decoy)).is_equal_to(decoy_state)
+    assert_that(_user_state(repo)).is_equal_to(before)
+
+
+_DIR_FD_ONLY = pytest.mark.skipif(
+    os.open not in os.supports_dir_fd,
+    reason="descriptor-relative access needs dir_fd support",
+)
+
+
+def _checkpoint_blob(repo: Path, checkpoint: Checkpoint, rel: str) -> bytes:
+    """Return the bytes a checkpoint recorded for ``rel``.
+
+    Args:
+        repo: Test repository root.
+        checkpoint: Captured checkpoint.
+        rel: Repo-relative path inside the checkpoint tree.
+
+    Returns:
+        The recorded blob contents.
+    """
+    return subprocess.run(  # nosec B603 B607 - fixed git argv in a disposable repo
+        ["git", "cat-file", "-p", f"{checkpoint.tree_sha}:{rel}"],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    ).stdout
+
+
+@_DIR_FD_ONLY
+@pytest.mark.parametrize("boundary", ["capture", "diff"])
+@pytest.mark.parametrize("escape", ["outside", "inside"])
+def test_parent_swapped_after_mode_check_never_redirects_read(
+    byte_repo: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+    escape: str,
+) -> None:
+    """A parent swapped for a link after the symlink check cannot supply bytes."""
+    repo = byte_repo
+    (repo / "sub").mkdir()
+    (repo / "sub/f.txt").write_bytes(b"captured\n")
+    destination = _linked_destination(repo, tmp_path_factory, escape)
+    checkpoint = None
+    if boundary == "diff":
+        checkpoint = capture_checkpoint(["sub/f.txt"], workspace_root=repo)
+        assert checkpoint is not None
+    before = _user_state(repo)
+    real_target_modes = checkpoints._target_modes
+    swaps: list[Path] = []
+
+    def check_then_swap(*args: Any, **kwargs: Any) -> Any:
+        modes = real_target_modes(*args, **kwargs)
+        _replace_with_symlink(repo / "sub", destination)
+        swaps.append(repo / "sub")
+        return modes
+
+    monkeypatch.setattr(checkpoints, "_target_modes", check_then_swap)
+    if boundary == "capture":
+        checkpoint = capture_checkpoint(["sub/f.txt"], workspace_root=repo)
+        assert checkpoint is not None
+    else:
+        assert checkpoint is not None
+        diff = diff_checkpoint(checkpoint)
+        assert_that(diff).does_not_contain(_BEYOND_LINK.decode())
+
+    assert_that(swaps).is_length(1)
+    assert_that((repo / "sub").is_symlink()).is_true()
+    # The bytes are the ones present when the parent was checked.
+    assert_that(_checkpoint_blob(repo, checkpoint, "sub/f.txt")).is_equal_to(
+        b"captured\n",
+    )
+    assert_that(_object_exists(repo, _BEYOND_LINK)).is_false()
+    assert_that((destination / "f.txt").read_bytes()).is_equal_to(_BEYOND_LINK)
+    assert_that(_user_state(repo)).is_equal_to(before)
+
+
+@_DIR_FD_ONLY
+def test_capture_reads_through_the_pinned_parent_descriptor(
+    byte_repo: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Swapping a parent after its descriptor is opened cannot redirect the read."""
+    repo = byte_repo
+    (repo / "sub").mkdir()
+    (repo / "sub/f.txt").write_bytes(b"captured\n")
+    destination = _linked_destination(repo, tmp_path_factory, "outside")
+    real_open = os.open
+    swaps: list[int] = []
+
+    def open_then_swap(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        descriptor = real_open(path, flags, *args, **kwargs)
+        if path == "sub" and kwargs.get("dir_fd") is not None and not swaps:
+            (repo / "sub").rename(repo / "sub-moved")
+            (repo / "sub").symlink_to(destination, target_is_directory=True)
+            swaps.append(descriptor)
+        return descriptor
+
+    with monkeypatch.context() as racing:
+        racing.setattr(os, "open", open_then_swap)
+        checkpoint = capture_checkpoint(["sub/f.txt"], workspace_root=repo)
+
+    assert checkpoint is not None
+    assert_that(swaps).is_length(1)
+    assert_that((repo / "sub").is_symlink()).is_true()
+    assert_that(_checkpoint_blob(repo, checkpoint, "sub/f.txt")).is_equal_to(
+        b"captured\n",
+    )
+    assert_that(_object_exists(repo, _BEYOND_LINK)).is_false()
+
+
+@_DIR_FD_ONLY
+@pytest.mark.parametrize("operation", ["write", "delete"])
+@pytest.mark.parametrize("escape", ["outside", "inside"])
+def test_restore_never_follows_parent_swapped_after_plan(
+    byte_repo: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    escape: str,
+) -> None:
+    """A parent swapped between the restore plan and its writes stops the rollback."""
+    repo = byte_repo
+    (repo / "sub").mkdir()
+    name = "f.txt" if operation == "write" else "created.txt"
+    if operation == "write":
+        (repo / "sub/f.txt").write_bytes(b"captured\n")
+    checkpoint = capture_checkpoint([f"sub/{name}"], workspace_root=repo)
+    assert checkpoint is not None
+    (repo / "sub" / name).write_bytes(b"edited after capture\n")
+    destination = _linked_destination(repo, tmp_path_factory, escape)
+    (destination / name).write_bytes(_BEYOND_LINK)
+    outside_before = {
+        path.name: path.read_bytes() for path in sorted(destination.iterdir())
+    }
+    before = _user_state(repo)
+    real_blob_for_path = checkpoints._blob_for_path
+
+    def plan_then_swap(**kwargs: Any) -> Any:
+        blob = real_blob_for_path(**kwargs)
+        if not (repo / "sub").is_symlink():
+            _replace_with_symlink(repo / "sub", destination)
+        return blob
+
+    monkeypatch.setattr(checkpoints, "_blob_for_path", plan_then_swap)
+
+    with pytest.raises(CheckpointError, match="symbolic link"):
+        restore_checkpoint(checkpoint)
+
+    assert_that((repo / "sub").is_symlink()).is_true()
+    outside_after = {
+        path.name: path.read_bytes() for path in sorted(destination.iterdir())
+    }
+    # Nothing written, deleted or left behind as a temporary file.
+    assert_that(outside_after).is_equal_to(outside_before)
     assert_that(_user_state(repo)).is_equal_to(before)

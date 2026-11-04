@@ -10,6 +10,8 @@ back to :mod:`lintro.ai.undo` file-content snapshots.
 
 from __future__ import annotations
 
+import contextlib
+import errno
 import os
 import shutil
 import stat
@@ -48,6 +50,17 @@ _INHERITED_GIT_VARS = (
     "GIT_COMMON_DIR",
     "GIT_NAMESPACE",
 )
+# Descriptor-relative access binds each symlink check to the file actually
+# read or written. Platforms without it keep the path-based behaviour.
+_DIR_FD_ACCESS = (
+    hasattr(os, "O_NOFOLLOW")
+    and hasattr(os, "O_DIRECTORY")
+    and hasattr(os, "O_NONBLOCK")
+    and hasattr(os, "fchmod")
+    and {os.open, os.stat, os.readlink, os.unlink, os.rename, os.mkdir, os.symlink}
+    <= os.supports_dir_fd
+)
+_COPY_CHUNK = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -75,6 +88,26 @@ class Checkpoint:
 
 class CheckpointError(Exception):
     """Raised when a checkpoint capture, restore, or prune operation fails."""
+
+
+class _BeyondSymlinkError(CheckpointError):
+    """A target's parent directory component is a symbolic link."""
+
+
+@dataclass
+class _TargetSnapshot:
+    """Working-tree state of checkpoint targets, read once.
+
+    Attributes:
+        modes: Git mode per path, ``0`` for absence, None for unsupported.
+        sources: ``hash-object`` operand per regular file: a private staged
+            copy of the bytes, or the repo-relative path on the fallback.
+        links: Symlink target text per file-symlink path.
+    """
+
+    modes: dict[str, str | None] = field(default_factory=dict)
+    sources: dict[str, str] = field(default_factory=dict)
+    links: dict[str, bytes] = field(default_factory=dict)
 
 
 def _git_bin() -> str | None:
@@ -347,6 +380,165 @@ def _raw_file_mode(path: Path) -> str | None:
     return None
 
 
+def _open_root(root: Path) -> int:
+    """Open the repository root directory for descriptor-relative access.
+
+    Args:
+        root: Repository root.
+
+    Returns:
+        A directory descriptor the caller must close.
+    """
+    return os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+
+
+def _descend(parent: int, part: str, *, create: bool) -> int | None:
+    """Open one directory component below ``parent`` without following links.
+
+    Args:
+        parent: Descriptor of the directory holding ``part``.
+        part: A single path component.
+        create: Create ``part`` when missing (restore).
+
+    Returns:
+        The component's descriptor, or None when it is absent or not a
+        directory and ``create`` is False.
+
+    Raises:
+        CheckpointError: When ``part`` would leave the repository.
+        _BeyondSymlinkError: When ``part`` is a symbolic link.
+        FileNotFoundError: When a directory to create vanished again.
+        OSError: When ``part`` cannot be created or opened.
+    """
+    if part in (os.sep, os.curdir, os.pardir):
+        raise CheckpointError(f"Invalid checkpoint path component: {part!r}")
+    if create:
+        with contextlib.suppress(FileExistsError):
+            os.mkdir(part, dir_fd=parent)
+    try:
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        return os.open(part, flags, dir_fd=parent)
+    except FileNotFoundError:
+        if create:
+            raise
+        return None
+    except OSError as exc:
+        # Linux reports ENOTDIR, macOS ELOOP and FreeBSD EMLINK for a link.
+        if exc.errno not in (errno.ENOTDIR, errno.ELOOP, errno.EMLINK):
+            raise
+        info = os.stat(part, dir_fd=parent, follow_symlinks=False)
+        if stat.S_ISLNK(info.st_mode):
+            raise _BeyondSymlinkError(part) from exc
+        if create:
+            raise
+        return None
+
+
+def _open_parent(root_fd: int, rel: str, *, create: bool) -> int | None:
+    """Open the directory holding ``rel`` through no-follow descriptors.
+
+    Each component is opened relative to the one before it, so the directory
+    returned is the one that was checked, whatever later happens to the
+    pathname.
+
+    Args:
+        root_fd: Repository root descriptor; left open.
+        rel: Repo-relative POSIX path.
+        create: Create missing directories (restore).
+
+    Returns:
+        A descriptor the caller must close, or None when an ancestor is
+        absent or not a directory and ``create`` is False.
+
+    Raises:
+        _BeyondSymlinkError: When an ancestor is a symbolic link.
+    """
+    current = os.dup(root_fd)
+    try:
+        for part in Path(rel).parts[:-1]:
+            child = _descend(current, part, create=create)
+            os.close(current)
+            current = -1
+            if child is None:
+                return None
+            current = child
+        opened, current = current, -1
+        return opened
+    except _BeyondSymlinkError as exc:
+        raise _BeyondSymlinkError(
+            f"Checkpoint target is beyond a symbolic link: {rel}",
+        ) from exc
+    finally:
+        if current >= 0:
+            os.close(current)
+
+
+def _copy_regular(parent: int, name: str, staged: Path) -> str | None:
+    """Copy a regular file's exact bytes from a no-follow descriptor.
+
+    Args:
+        parent: Pinned descriptor of the directory holding ``name``.
+        name: Final path component.
+        staged: Private destination for the bytes.
+
+    Returns:
+        The Git mode from ``fstat`` of the opened file, or None when it is
+        no longer a regular file.
+    """
+    # ``O_NONBLOCK`` keeps a FIFO swapped in after ``lstat`` from blocking.
+    source = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+    try:
+        info = os.fstat(source)
+        if not stat.S_ISREG(info.st_mode):
+            return None
+        with staged.open("xb") as out:
+            while chunk := os.read(source, _COPY_CHUNK):
+                out.write(chunk)
+    finally:
+        os.close(source)
+    return "100755" if info.st_mode & stat.S_IXUSR else "100644"
+
+
+def _read_target(
+    root_fd: int,
+    rel: str,
+    staged: Path,
+) -> tuple[str | None, bytes | None]:
+    """Read one target's state through pinned no-follow descriptors.
+
+    Args:
+        root_fd: Repository root descriptor; left open.
+        rel: Repo-relative POSIX path.
+        staged: Private destination for a regular file's bytes.
+
+    Returns:
+        ``(Git mode, symlink target text)``; the text is set only for a file
+        symlink.
+    """
+    parent = _open_parent(root_fd, rel, create=False)
+    if parent is None:
+        return "0", None
+    name = Path(rel).name
+    try:
+        try:
+            info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except (FileNotFoundError, NotADirectoryError):
+            return "0", None
+        if stat.S_ISREG(info.st_mode):
+            return _copy_regular(parent, name, staged), None
+        if not stat.S_ISLNK(info.st_mode):
+            return None, None
+        try:
+            # Resolved from the pinned directory, as the kernel resolves links.
+            if not stat.S_ISREG(os.stat(name, dir_fd=parent).st_mode):
+                return None, None
+        except (FileNotFoundError, NotADirectoryError):
+            return None, None
+        return _SYMLINK_MODE, os.fsencode(os.readlink(name, dir_fd=parent))
+    finally:
+        os.close(parent)
+
+
 def _git_path_batches(
     paths: list[str],
     *,
@@ -404,30 +596,67 @@ def _target_modes(
     root: Path,
     paths: list[str],
     remove_nonfiles: bool,
-) -> dict[str, str | None]:
-    """Map each target to its disk Git mode without following parent symlinks.
+    staging: Path,
+) -> _TargetSnapshot:
+    """Read each target's Git mode and content without following parent symlinks.
+
+    Where the platform supports it, every target is opened through
+    descriptors pinned component by component with ``O_NOFOLLOW``, and the
+    bytes are copied from that descriptor into ``staging``. The symlink check
+    and the read are therefore one access: a parent swapped for a link
+    afterwards cannot redirect what is hashed.
 
     Args:
         root: Repository root.
         paths: Literal repo-relative target paths.
         remove_nonfiles: Diff mode; a path beyond a symlink is reported absent,
             matching Git's own working-tree view, instead of failing.
+        staging: Private directory receiving copies of regular-file bytes.
 
     Returns:
-        Git mode per path, ``0`` for absence, None for unsupported targets.
+        Modes (``0`` for absence, None for unsupported targets), Git operands
+        for regular files, and file-symlink target text.
 
     Raises:
-        CheckpointError: At capture, when a target lies beyond a symlink.
+        CheckpointError: At capture, when a target lies beyond a symlink
+            (path-based fallback).
+        _BeyondSymlinkError: At capture, when a target lies beyond a symlink.
     """
-    modes: dict[str, str | None] = {}
-    for rel in paths:
-        if not _beyond_symlink(root, rel):
-            modes[rel] = _raw_file_mode(root / rel)
-        elif remove_nonfiles:
-            modes[rel] = "0"
-        else:
-            raise CheckpointError(f"Checkpoint target is beyond a symbolic link: {rel}")
-    return modes
+    snapshot = _TargetSnapshot()
+    if not _DIR_FD_ACCESS:
+        for rel in paths:
+            if _beyond_symlink(root, rel):
+                if not remove_nonfiles:
+                    raise CheckpointError(
+                        f"Checkpoint target is beyond a symbolic link: {rel}",
+                    )
+                snapshot.modes[rel] = "0"
+                continue
+            mode = _raw_file_mode(root / rel)
+            snapshot.modes[rel] = mode
+            if mode in _REGULAR_MODES:
+                snapshot.sources[rel] = rel
+            elif mode == _SYMLINK_MODE:
+                snapshot.links[rel] = os.fsencode(os.readlink(root / rel))
+        return snapshot
+    root_fd = _open_root(root)
+    try:
+        for number, rel in enumerate(paths):
+            staged = staging / str(number)
+            try:
+                mode, link = _read_target(root_fd, rel, staged)
+            except _BeyondSymlinkError:
+                if not remove_nonfiles:
+                    raise
+                mode, link = "0", None
+            snapshot.modes[rel] = mode
+            if mode in _REGULAR_MODES:
+                snapshot.sources[rel] = str(staged)
+            elif link is not None:
+                snapshot.links[rel] = link
+    finally:
+        os.close(root_fd)
+    return snapshot
 
 
 def _ignore_executable_bits(
@@ -439,7 +668,8 @@ def _ignore_executable_bits(
     """Keep the private index's regular-file modes, as ``core.filemode=false`` does.
 
     Mirrors Git: a regular file keeps the mode its index entry already has,
-    and a file with no regular entry is recorded as ``100644``.
+    and a file with no regular entry is recorded as ``100644``. A failure to
+    list the private index propagates as :class:`CheckpointError`.
 
     Args:
         root: Repository root.
@@ -465,6 +695,53 @@ def _ignore_executable_bits(
         modes[rel] = prior if prior in _REGULAR_MODES else "100644"
 
 
+def _hash_regular_files(
+    *,
+    root: Path,
+    snapshot: _TargetSnapshot,
+    env: dict[str, str],
+) -> list[bytes]:
+    """Write regular-file blobs in batches and return their index records.
+
+    Args:
+        root: Repository root.
+        snapshot: Target state; ``sources`` names each file's Git operand.
+        env: Temporary-index environment overlay.
+
+    Returns:
+        ``--index-info`` records for the regular-file targets.
+
+    Raises:
+        CheckpointError: When Git fails or returns the wrong hash count.
+    """
+    entries: list[bytes] = []
+    regular = [rel for rel, mode in snapshot.modes.items() if mode in _REGULAR_MODES]
+    owners = {snapshot.sources[rel]: rel for rel in regular}
+    hash_args = ["hash-object", "-w", "--no-filters", "--"]
+    for chunk in _git_path_batches(list(owners), args=hash_args, env=env):
+        # Explicit argv operands need no stdin-paths C-style quoting, even
+        # for embedded newlines, tabs, quotes or leading dashes.
+        blobs = _run_git(
+            [*hash_args, *chunk],
+            cwd=str(root),
+            env=env,
+            check=True,
+            binary=True,
+        ).stdout.splitlines()
+        if len(blobs) != len(chunk):
+            raise CheckpointError(
+                "Git returned an unexpected checkpoint hash count",
+            )
+        for source, blob in zip(chunk, blobs, strict=True):
+            rel = owners[source]
+            entries.append(
+                os.fsencode(
+                    f"{snapshot.modes[rel]} {blob.decode('ascii')}\t{rel}\0",
+                ),
+            )
+    return entries
+
+
 def _update_raw_index(
     *,
     root: Path,
@@ -474,6 +751,10 @@ def _update_raw_index(
     trust_filemode: bool = True,
 ) -> list[str]:
     """Batch raw blobs into a private index, returning supported target paths.
+
+    Regular-file bytes are copied once, through no-follow descriptors, into a
+    private staging directory and hashed from there, so Git never resolves a
+    working-tree pathname itself.
 
     Args:
         root: Repository root.
@@ -492,7 +773,17 @@ def _update_raw_index(
         CheckpointError: When a filesystem read or Git operation fails.
     """
     try:
-        modes = _target_modes(root=root, paths=paths, remove_nonfiles=remove_nonfiles)
+        staging = Path(tempfile.mkdtemp(prefix="lintro-git-blobs-"))
+    except OSError as exc:
+        raise CheckpointError("Failed to allocate checkpoint staging") from exc
+    try:
+        snapshot = _target_modes(
+            root=root,
+            paths=paths,
+            remove_nonfiles=remove_nonfiles,
+            staging=staging,
+        )
+        modes = snapshot.modes
         if not trust_filemode:
             _ignore_executable_bits(root=root, modes=modes, env=env)
         missing = [
@@ -508,37 +799,15 @@ def _update_raw_index(
                 env=env,
                 check=True,
             )
-        entries: list[bytes] = []
-        regular = [rel for rel, mode in modes.items() if mode in _REGULAR_MODES]
-        hash_args = ["hash-object", "-w", "--no-filters", "--"]
-        for chunk in _git_path_batches(regular, args=hash_args, env=env):
-            # Explicit argv operands need no stdin-paths C-style quoting, even
-            # for embedded newlines, tabs, quotes or leading dashes.
-            blobs = _run_git(
-                [*hash_args, *chunk],
-                cwd=str(root),
-                env=env,
-                check=True,
-                binary=True,
-            ).stdout.splitlines()
-            if len(blobs) != len(chunk):
-                raise CheckpointError(
-                    "Git returned an unexpected checkpoint hash count",
-                )
-            for rel, blob in zip(chunk, blobs, strict=True):
-                entries.append(
-                    os.fsencode(f"{modes[rel]} {blob.decode('ascii')}\t{rel}\0"),
-                )
-        for rel, mode in modes.items():
-            if mode != _SYMLINK_MODE:
-                continue
+        entries = _hash_regular_files(root=root, snapshot=snapshot, env=env)
+        for rel, link in snapshot.links.items():
             blob = _run_git(
                 ["hash-object", "-w", "--no-filters", "--stdin"],
                 cwd=str(root),
                 env=env,
                 check=True,
                 binary=True,
-                input_bytes=os.fsencode(os.readlink(root / rel)),
+                input_bytes=link,
             ).stdout.strip()
             entries.append(b"120000 " + blob + b"\t" + os.fsencode(rel) + b"\0")
         if entries:
@@ -552,6 +821,8 @@ def _update_raw_index(
             )
     except OSError as exc:
         raise CheckpointError("Failed to read checkpoint targets") from exc
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
     return [rel for rel, mode in modes.items() if mode is not None]
 
 
@@ -716,6 +987,107 @@ def _blob_for_path(
     return raw.stdout, git_mode
 
 
+def _restore_by_path(abs_path: Path, blob: tuple[bytes, str] | None) -> None:
+    """Restore one target by pathname (platforms without ``dir_fd`` support).
+
+    Args:
+        abs_path: Absolute target path.
+        blob: ``(contents, git mode)``, or None to delete the target.
+    """
+    if blob is None:
+        # ``missing_ok`` because a concurrent delete between the read and
+        # write phases must not abandon the rest of the rollback.
+        abs_path.unlink(missing_ok=True)
+        return
+    contents, git_mode = blob
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    if git_mode == _SYMLINK_MODE:
+        # The blob of a symlink entry is its target path, not file content.
+        abs_path.unlink(missing_ok=True)
+        abs_path.symlink_to(contents.decode("utf-8", errors="replace"))
+        return
+    if abs_path.is_symlink():
+        # Never write through a link: that would rewrite its target.
+        abs_path.unlink()
+    atomic_write_bytes(
+        abs_path,
+        contents,
+        mode=0o755 if git_mode.endswith("755") else 0o644,
+    )
+
+
+def _write_at(parent: int, name: str, contents: bytes, mode: int) -> None:
+    """Atomically replace ``name`` in a pinned directory with ``contents``.
+
+    Args:
+        parent: Pinned descriptor of the destination directory.
+        name: Final path component.
+        contents: Bytes to write.
+        mode: Permission bits to force on the new file.
+
+    Raises:
+        BaseException: Re-raised after the partial temporary file is removed.
+    """
+    temp = f".{uuid.uuid4().hex}.lintro-tmp"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    descriptor = os.open(temp, flags, 0o600, dir_fd=parent)
+    try:
+        try:
+            handle = os.fdopen(descriptor, "wb")
+        except BaseException:
+            os.close(descriptor)
+            raise
+        with handle:
+            handle.write(contents)
+            os.fchmod(handle.fileno(), mode)
+        # ``rename`` replaces a link at ``name`` itself, never its target.
+        os.replace(temp, name, src_dir_fd=parent, dst_dir_fd=parent)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(temp, dir_fd=parent)
+        raise
+
+
+def _restore_at(root_fd: int, rel: str, blob: tuple[bytes, str] | None) -> None:
+    """Restore one target relative to a parent pinned without following links.
+
+    Args:
+        root_fd: Repository root descriptor; left open.
+        rel: Repo-relative POSIX path.
+        blob: ``(contents, git mode)``, or None to delete the target.
+
+    Raises:
+        CheckpointError: When a parent component is now a symbolic link.
+    """
+    try:
+        parent = _open_parent(root_fd, rel, create=blob is not None)
+    except _BeyondSymlinkError as exc:
+        raise CheckpointError(
+            f"Refusing to restore checkpoint target beyond a symbolic link: {rel}",
+        ) from exc
+    if parent is None:
+        # Nothing to delete below an absent parent.
+        return
+    name = Path(rel).name
+    try:
+        if blob is None or blob[1] == _SYMLINK_MODE:
+            # ``missing_ok`` semantics: a concurrent delete between the read
+            # and write phases must not abandon the rest of the rollback.
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(name, dir_fd=parent)
+        if blob is None:
+            return
+        contents, git_mode = blob
+        if git_mode == _SYMLINK_MODE:
+            # The blob of a symlink entry is its target path, not file content.
+            text = contents.decode("utf-8", errors="replace")
+            os.symlink(text, name, dir_fd=parent)
+            return
+        _write_at(parent, name, contents, 0o755 if git_mode.endswith("755") else 0o644)
+    finally:
+        os.close(parent)
+
+
 def restore_checkpoint(
     checkpoint: Checkpoint,
     paths: list[str] | tuple[str, ...] | None = None,
@@ -746,7 +1118,10 @@ def restore_checkpoint(
     Raises:
         CheckpointError: Before any write, when a target's parent directory
             has since become a symbolic link; writing or deleting through it
-            could reach outside the repository.
+            could reach outside the repository. Each write and deletion is
+            also made relative to a parent directory pinned through no-follow
+            descriptors, so a parent swapped for a link during the write phase
+            stops the rollback there instead of being followed.
     """
     root = checkpoint.root
     treeish = checkpoint.tree_sha or checkpoint.ref
@@ -776,34 +1151,23 @@ def restore_checkpoint(
         raise CheckpointError(
             f"Refusing to restore checkpoint targets beyond a symbolic link: {linked}",
         )
-    planned: list[tuple[Path, tuple[bytes, str] | None]] = []
+    planned: list[tuple[str, tuple[bytes, str] | None]] = []
     for rel in target_rels:
         planned.append(
-            (root / rel, _blob_for_path(root=root, treeish=treeish, rel_path=rel)),
+            (rel, _blob_for_path(root=root, treeish=treeish, rel_path=rel)),
         )
 
     # Read phase complete — apply all writes/deletes.
-    for abs_path, blob in planned:
-        if blob is None:
-            # ``missing_ok`` because a concurrent delete between the read and
-            # write phases must not abandon the rest of the rollback.
-            abs_path.unlink(missing_ok=True)
-            continue
-        contents, git_mode = blob
-        abs_path.parent.mkdir(parents=True, exist_ok=True)
-        if git_mode == _SYMLINK_MODE:
-            # The blob of a symlink entry is its target path, not file content.
-            abs_path.unlink(missing_ok=True)
-            abs_path.symlink_to(contents.decode("utf-8", errors="replace"))
-            continue
-        if abs_path.is_symlink():
-            # Never write through a link: that would rewrite its target.
-            abs_path.unlink()
-        atomic_write_bytes(
-            abs_path,
-            contents,
-            mode=0o755 if git_mode.endswith("755") else 0o644,
-        )
+    if not _DIR_FD_ACCESS:
+        for rel, blob in planned:
+            _restore_by_path(root / rel, blob)
+        return
+    root_fd = _open_root(root)
+    try:
+        for rel, blob in planned:
+            _restore_at(root_fd, rel, blob)
+    finally:
+        os.close(root_fd)
 
 
 def _trusts_filemode(root: Path) -> bool:
