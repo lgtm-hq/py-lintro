@@ -176,7 +176,7 @@ def parse_cargo_deny_output_with_stats(output: str) -> tuple[list[CargoDenyIssue
     - An informational record such as "log" or "summary", which is ignored
 
     Args:
-        output: Raw output (stdout/stderr) emitted by cargo deny check --format json.
+        output: Raw output (stdout/stderr) emitted by cargo deny --format json check.
 
     Returns:
         Parsed issues and a count of malformed JSON or finding records.
@@ -215,7 +215,7 @@ def parse_cargo_deny_output(output: str) -> list[CargoDenyIssue]:
     """Compatibility wrapper returning cargo-deny issues without parse statistics.
 
     Args:
-        output: Raw output emitted by cargo deny check --format json.
+        output: Raw output emitted by cargo deny --format json check.
 
     Returns:
         Parsed issues, omitting informational and malformed records.

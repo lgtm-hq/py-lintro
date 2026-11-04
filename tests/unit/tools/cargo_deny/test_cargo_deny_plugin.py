@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -298,6 +299,28 @@ def test_check_keeps_error_and_raw_output_on_parse_failure(
     )
     assert_that(result.parse_failures_count).is_equal_to(1)
     assert_that(result.output).is_equal_to(output)
+
+
+def test_check_passes_global_format_before_subcommand(
+    cargo_deny_plugin: CargoDenyPlugin,
+    cargo_deny_check: Callable[[bool, str], ToolResult],
+) -> None:
+    """Pin the actual subprocess argv and preserve parsed findings.
+
+    Args:
+        cargo_deny_plugin: The plugin instance.
+        cargo_deny_check: Callable running the plugin with controlled output.
+    """
+    result = cargo_deny_check(False, _ERROR_DIAGNOSTIC)
+
+    run_subprocess = cast(MagicMock, cargo_deny_plugin._run_subprocess)
+    assert_that(run_subprocess.call_args.kwargs["cmd"]).is_equal_to(
+        ["cargo", "deny", "--format", "json", "check"],
+    )
+    assert_that(result.success).is_false()
+    assert_that(result.issues).extracting("message").is_equal_to(
+        ["license is not allowed"],
+    )
 
 
 def test_definition_name(cargo_deny_plugin: CargoDenyPlugin) -> None:

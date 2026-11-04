@@ -17,7 +17,7 @@ subcommand and produces JSON output for structured analysis.
 
 ### Preserved Features
 
-- Executes `cargo deny check --format json`
+- Executes `cargo deny --format json check`
 - Parses JSON diagnostic output into structured issues
 - Discovers Cargo root from provided paths
 - Respects project-level `deny.toml` configuration
@@ -40,7 +40,7 @@ subcommand and produces JSON output for structured analysis.
 ### Core cargo-deny
 
 ```bash
-cargo deny check --format json
+cargo deny --format json check
 cargo deny check advisories
 cargo deny check licenses
 ```
