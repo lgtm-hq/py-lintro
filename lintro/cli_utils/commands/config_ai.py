@@ -20,33 +20,6 @@ if TYPE_CHECKING:
 __all__ = ["ai_config_json", "print_ai_config"]
 
 
-def _describe_failure(exc: Exception) -> str:
-    """Render a resolution failure as one line for the report row.
-
-    A pydantic error's first line is a count ("1 validation error for
-    AIConfig"), so its own message is used instead — that is the text the
-    nested-block validator wrote, naming the ``ai.providers.<name>.<field>``
-    path the user typed.
-
-    Args:
-        exc: The resolution failure to describe.
-
-    Returns:
-        A single line naming what is wrong.
-    """
-    from pydantic import ValidationError
-
-    if isinstance(exc, ValidationError):
-        errors = exc.errors()
-        if errors:
-            message = str(errors[0].get("msg", "")).strip()
-            return message.removeprefix("Value error, ") or type(exc).__name__
-    for line in str(exc).splitlines():
-        if line.strip():
-            return line.strip()
-    return type(exc).__name__
-
-
 def print_ai_config(
     *,
     console: Console,
@@ -75,7 +48,7 @@ def print_ai_config(
 
     from lintro.ai.effective_config import resolve_effective_ai_config
     from lintro.ai.exceptions import AIConfigOverrideError
-    from lintro.ai.provider_blocks import nested_source_key
+    from lintro.ai.provider_blocks import describe_config_error, nested_source_key
     from lintro.ai.resolved_ai_config import format_sourced_value
 
     try:
@@ -87,9 +60,8 @@ def print_ai_config(
         # The failure text quotes the value the user wrote, so a value such
         # as ``[/]`` would otherwise make this line invalid Rich markup and
         # crash the report it exists to keep printable.
-        console.print(
-            f"[bold]AI Settings[/bold]  [red]{escape(_describe_failure(exc))}[/red]",
-        )
+        failure = escape(describe_config_error(exc))
+        console.print(f"[bold]AI Settings[/bold]  [red]{failure}[/red]")
         console.print()
         return
 
@@ -225,12 +197,12 @@ def ai_config_json(config: LintroConfig) -> dict[str, Any]:
 
     from lintro.ai.effective_config import resolve_effective_ai_config
     from lintro.ai.exceptions import AIConfigOverrideError
-    from lintro.ai.provider_blocks import nested_source_key
+    from lintro.ai.provider_blocks import describe_config_error, nested_source_key
 
     try:
         resolved = resolve_effective_ai_config(config.ai, diagnostics=True)
     except (AIConfigOverrideError, ValidationError) as exc:
-        return {"error": _describe_failure(exc)}
+        return {"error": describe_config_error(exc)}
 
     ai_config = resolved.config
     provider = ai_config.provider

@@ -1,6 +1,8 @@
 """Resolution helpers for the ``ai.providers`` blocks (#2309).
 
-Naming, error text and provenance seeding for the nested provider blocks.
+Naming, error text and provenance seeding for the nested provider blocks,
+plus the one-line description of a rejected ``ai:`` section that every
+surface reporting one shares.
 They live beside :mod:`lintro.ai.provider_config` rather than in
 :mod:`lintro.ai.config` so the flat model keeps declaring fields and nothing
 else, and so a surface that only needs a provenance key never imports
@@ -21,6 +23,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "describe_block_error",
+    "describe_config_error",
     "nested_source_key",
     "nested_sources",
     "provider_label",
@@ -55,6 +58,39 @@ def describe_block_error(*, name: Any, exc: ValidationError) -> str:
     field = ".".join(str(part) for part in loc)
     path = f"ai.providers.{label}.{field}" if field else f"ai.providers.{label}"
     return f"{path}: {first.get('msg', 'invalid value')}"
+
+
+def describe_config_error(exc: Exception) -> str:
+    """Describe a failed ``ai:`` resolution as one line, without its value.
+
+    A pydantic error's ``str()`` opens with a count ("1 validation error for
+    AIConfig") and quotes the rejected input, so the first error is rendered
+    as ``ai.<field path>: <constraint>`` instead. The input is never part of
+    the line — an ``ai:`` value can be a key pasted into the wrong field. A
+    message a validator wrote already naming its ``ai.`` path is kept as is.
+    Any other failure (an ``LINTRO_AI_*`` override) reports its first line.
+
+    Args:
+        exc: The resolution failure to describe.
+
+    Returns:
+        A single line naming what is wrong.
+    """
+    from pydantic import ValidationError
+
+    if isinstance(exc, ValidationError):
+        errors = exc.errors()
+        if errors:
+            first = errors[0]
+            message = str(first.get("msg", "")).strip().removeprefix("Value error, ")
+            field = ".".join(str(part) for part in first.get("loc", ()))
+            if not field or message.startswith("ai."):
+                return message or type(exc).__name__
+            return f"ai.{field}: {message or 'invalid value'}"
+    for line in str(exc).splitlines():
+        if line.strip():
+            return line.strip()
+    return type(exc).__name__
 
 
 def nested_source_key(*, provider: AIProvider | str, field: str) -> str:
