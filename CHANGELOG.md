@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.18] - 2026-11-04
+
+### Fixed
+
+- **ai**: label suggestion estimates separately from session spend (#3217) (4d15787)
+
 ## [0.177.17] - 2026-11-04
 
 ### Changed
