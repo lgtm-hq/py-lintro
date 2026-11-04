@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.20] - 2026-11-04
+
+### Fixed
+
+- **ci**: raise dogfood Bandit timeout to 300s (#3223) (5c9314b)
+
 ## [0.177.19] - 2026-11-04
 
 ### Fixed
