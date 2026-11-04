@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.22] - 2026-11-04
+
+### Fixed
+
+- **ai**: report invalid ai config in review and mcp without traceback (#3228) (66ebe68)
+
 ## [0.177.21] - 2026-11-04
 
 ### Fixed
