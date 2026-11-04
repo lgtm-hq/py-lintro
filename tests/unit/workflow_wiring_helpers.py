@@ -1588,7 +1588,7 @@ _DOGFOOD_TOOL_OPTIONS_RE = re.compile(
 )
 
 _EXPECTED_DOGFOOD_TOOL_OPTIONS = (
-    "pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,"
+    "pydoclint:timeout=120,black:timeout=120,bandit:timeout=300,prettier:timeout=120,"
     "mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,"
     "osv_scanner:check_suppressions=false"
 )
