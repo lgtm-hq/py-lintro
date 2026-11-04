@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.21] - 2026-11-04
+
+### Fixed
+
+- **ai**: refuse checkpoints through symlinked parents (#3222) (876e16f)
+
 ## [0.177.20] - 2026-11-04
 
 ### Fixed
