@@ -44,6 +44,30 @@ __all__ = [
 ]
 
 
+def _ai_config_error_message(exc: Exception) -> str:
+    """Describe a rejected AI configuration for the CLI's usage error (exit 2).
+
+    An invalid ``LINTRO_AI_*`` override already reads as one line. A value the
+    ``ai:`` config section itself carries surfaces as a pydantic
+    ``ValidationError``, whose text is a multi-line dump quoting the rejected
+    input; it is reduced to the field path and the constraint instead (#3116).
+
+    Args:
+        exc: An :class:`~lintro.ai.exceptions.AIConfigOverrideError` or a
+            pydantic ``ValidationError`` raised while resolving ``ai:``.
+
+    Returns:
+        The one-line message for :class:`click.UsageError`.
+    """
+    from pydantic import ValidationError
+
+    from lintro.ai.provider_blocks import describe_config_error
+
+    if isinstance(exc, ValidationError):
+        return f"invalid AI configuration: {describe_config_error(exc)}"
+    return str(exc)
+
+
 def _ai_status_lines(ctx: RunContext) -> list[str] | None:
     """Render the AI rows of the pre-execution configuration summary.
 
@@ -58,10 +82,13 @@ def _ai_status_lines(ctx: RunContext) -> list[str] | None:
         ``None`` when no summary will be shown.
 
     Raises:
-        click.UsageError: When an ``LINTRO_AI_*`` overlay fails validation.
+        click.UsageError: When an ``LINTRO_AI_*`` overlay or the ``ai:``
+            config section fails validation.
     """
     if ctx.clean_stdout_output:
         return None
+
+    from pydantic import ValidationError
 
     from lintro.ai.exceptions import AIConfigOverrideError
     from lintro.ai.interface import render_ai_status
@@ -73,8 +100,8 @@ def _ai_status_lines(ctx: RunContext) -> list[str] | None:
             ai_config=getattr(ctx.lintro_config, "ai", None),
             is_ci=ci_env is not None and ci_env.is_ci,
         )
-    except AIConfigOverrideError as exc:
-        raise click.UsageError(str(exc)) from exc
+    except (AIConfigOverrideError, ValidationError) as exc:
+        raise click.UsageError(_ai_config_error_message(exc)) from exc
 
 
 def _sarif_enrichment(
@@ -127,7 +154,8 @@ def _capture_fmt_checkpoint(*, ctx: RunContext, paths: list[str]) -> None:
     Raises:
         click.ClickException: When checkpoint enumeration fails, before any
             formatting runs.
-        click.UsageError: When an ``LINTRO_AI_*`` overlay fails validation.
+        click.UsageError: When an ``LINTRO_AI_*`` overlay or the ``ai:``
+            config section fails validation.
     """
     from lintro.enums.action import Action as _Action
 
@@ -138,13 +166,15 @@ def _capture_fmt_checkpoint(*, ctx: RunContext, paths: list[str]) -> None:
     # LintroConfig stores the AI section as a raw mapping. Resolve it at
     # this API boundary before reading the checkpoint options as attributes.
     if isinstance(ai_config, dict):
+        from pydantic import ValidationError
+
         from lintro.ai.effective_config import resolve_effective_ai_config
         from lintro.ai.exceptions import AIConfigOverrideError
 
         try:
             ai_config = resolve_effective_ai_config(ai_config, diagnostics=False).config
-        except AIConfigOverrideError as exc:
-            raise click.UsageError(str(exc)) from exc
+        except (AIConfigOverrideError, ValidationError) as exc:
+            raise click.UsageError(_ai_config_error_message(exc)) from exc
     if not getattr(ai_config, "checkpoint_fmt", False):
         return
 
@@ -242,7 +272,8 @@ def run_lint_artifact(
         exit code.
 
     Raises:
-        click.UsageError: When an ``LINTRO_AI_*`` overlay fails validation.
+        click.UsageError: When an ``LINTRO_AI_*`` overlay or the ``ai:``
+            config section fails validation.
     """
     del stream, no_log  # accepted for signature stability; not yet implemented
 
@@ -292,6 +323,8 @@ def run_lint_artifact(
     )
 
     if ai_enabled:
+        from pydantic import ValidationError
+
         from lintro.ai.exceptions import AIConfigOverrideError
         from lintro.ai.interface import enhance_artifact
 
@@ -303,8 +336,8 @@ def run_lint_artifact(
                 ai_fix=ai_fix,
                 transport=transport,
             )
-        except AIConfigOverrideError as exc:
-            raise click.UsageError(str(exc)) from exc
+        except (AIConfigOverrideError, ValidationError) as exc:
+            raise click.UsageError(_ai_config_error_message(exc)) from exc
 
     if acknowledgements is not None:
         apply_baseline(artifact, acknowledgements)

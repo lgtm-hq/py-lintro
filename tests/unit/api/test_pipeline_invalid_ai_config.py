@@ -1,0 +1,141 @@
+"""Invalid ``ai:`` config-file values are a usage error on ``fmt``/``chk`` (#3116).
+
+A value the ``AIConfig`` model rejects used to escape the run pipeline as a raw
+pydantic ``ValidationError`` traceback (exit 1) — from the ``fmt`` checkpoint
+hook, from the pre-execution AI status row, and from the post-run AI layer.
+Each seam now reports it the way an invalid ``LINTRO_AI_*`` override already
+is: one ``Error:`` line naming the field and the constraint, exit 2, and never
+the rejected value itself.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from pathlib import Path
+
+import pytest
+from assertpy import assert_that
+from click.testing import CliRunner
+
+from lintro.cli import cli
+from lintro.config.config_loader import clear_config_cache
+
+_SOURCE = "x = 1\n"
+
+#: ``(ai: body, field path the error must name)``. The ``api_key_env`` case
+#: carries a key-shaped value that must never be echoed back.
+_INVALID = {
+    "wrong_type": ("  max_tokens: lots\n", "ai.max_tokens"),
+    "out_of_range": ("  max_tokens: 0\n", "ai.max_tokens"),
+    "unknown_enum": ("  transport: carrier-pigeon\n", "ai.transport"),
+    "nested_range": (
+        "  transports:\n    api:\n      timeout: -5\n",
+        "ai.transports.api.timeout",
+    ),
+    "secret_shaped": (
+        '  api_key_env: ["sk-ant-NOT-A-REAL-KEY-0123456789"]\n',
+        "ai.api_key_env",
+    ),
+}
+
+
+@pytest.fixture
+def make_project(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[[str | None], Path]:
+    """Return a factory for a one-file project with an isolated user tier.
+
+    The loader deep-merges ``~/.lintro-config.yaml`` and memoises the config it
+    resolved, so the home tier is redirected and the cache cleared before the
+    run reads the project's own ``.lintro-config.yaml``.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        A callable taking the indented ``ai:`` body (None for no ``ai:``
+        section) and returning the source file the run targets, with the
+        project already the working directory.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.delenv("LINTRO_GLOBAL_CONFIG", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    root = tmp_path / "project"
+    root.mkdir()
+    monkeypatch.chdir(root)
+
+    def _make(ai_body: str | None) -> Path:
+        config = "tools:\n  ruff:\n    enabled: true\n"
+        if ai_body is not None:
+            config += "ai:\n" + ai_body
+        (root / ".lintro-config.yaml").write_text(config, encoding="utf-8")
+        target = root / "a.py"
+        target.write_text(_SOURCE, encoding="utf-8")
+        clear_config_cache()
+        return target
+
+    return _make
+
+
+@pytest.mark.parametrize("case", sorted(_INVALID))
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["fmt"],
+        ["chk"],
+        ["fmt", "--output-format", "json"],
+        ["chk", "--output-format", "json"],
+    ],
+    ids=["fmt", "chk", "fmt-json", "chk-json"],
+)
+def test_invalid_ai_config_value_is_a_one_line_usage_error(
+    make_project: Callable[[str | None], Path],
+    case: str,
+    argv: list[str],
+) -> None:
+    """Every run surface exits 2 with the field path, no traceback, no value."""
+    ai_body, field_path = _INVALID[case]
+    target = make_project(ai_body)
+
+    result = CliRunner().invoke(cli, [*argv, "--tools", "ruff", "--no-art", "a.py"])
+
+    assert_that(result.exception).described_as(repr(result.exception)).is_instance_of(
+        SystemExit,
+    )
+    assert_that(result.exit_code).is_equal_to(2)
+    error_lines = [line for line in result.output.splitlines() if "Error:" in line]
+    assert_that(error_lines).is_length(1)
+    assert_that(error_lines[0]).contains("invalid AI configuration", field_path)
+    assert_that(result.output).does_not_contain(
+        "Traceback",
+        "validation error for",
+        "input_value",
+        "sk-ant-",
+        "carrier-pigeon",
+    )
+    assert_that(target.read_text(encoding="utf-8")).is_equal_to(_SOURCE)
+
+
+@pytest.mark.parametrize(
+    "ai_body",
+    [None, "  enabled: false\n  max_tokens: 1000\n"],
+    ids=["no-ai-section", "valid-ai-section"],
+)
+@pytest.mark.parametrize("command", ["fmt", "chk"])
+def test_valid_or_absent_ai_config_still_runs_clean(
+    make_project: Callable[[str | None], Path],
+    ai_body: str | None,
+    command: str,
+) -> None:
+    """Controls: a valid or missing ``ai:`` section reaches the formatter."""
+    make_project(ai_body)
+
+    result = CliRunner().invoke(cli, [command, "--tools", "ruff", "--no-art", "a.py"])
+
+    assert_that(result.exception).described_as(result.output).is_none()
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).does_not_contain("invalid AI configuration")
