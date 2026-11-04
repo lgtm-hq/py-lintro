@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from lintro.ai.apply import apply_fixes
+from lintro.ai.exceptions import AITurnLimitError
 from lintro.ai.fix import _call_fix_ai
 from lintro.ai.fix_context import extract_context, read_file_safely
 from lintro.ai.fix_parsing import AIFixParseError, parse_fix_response
@@ -90,11 +91,13 @@ async def refine_unverified_fixes(
         ai_config: AI configuration.
         workspace_root: Workspace root path.
         cost_callback: Receives each completed response's cost before parsing,
-            including responses from a round that later exits exceptionally.
+            plus spend carried by turn-limit exceptions, including charges from
+            a round that later exits exceptionally.
 
     Returns:
-        Tuple of (successfully refined suggestions, total completed-response cost),
-        including malformed responses and responses that yield no applied fix.
+        Tuple of (successfully refined suggestions, total observed provider cost),
+        including malformed responses, responses that yield no applied fix, and
+        spend carried by turn-limit exceptions.
 
     Raises:
         KeyboardInterrupt: Re-raised immediately.
@@ -261,6 +264,10 @@ async def refine_unverified_fixes(
                 f"malformed response ({exc})",
             )
         except Exception as exc:
+            if isinstance(exc, AITurnLimitError):
+                total_cost += exc.cost_estimate
+                if cost_callback is not None:
+                    cost_callback(exc.cost_estimate)
             logger.debug(
                 f"Refinement failed for {suggestion.file}:{suggestion.line} "
                 f"({type(exc).__name__}: {exc})",

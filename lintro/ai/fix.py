@@ -24,6 +24,7 @@ from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.enums.ai_call_kind import AICallKind
 from lintro.ai.enums.sanitize_mode import SanitizeMode
+from lintro.ai.exceptions import AITurnLimitError
 from lintro.ai.fix_context import (
     CONTEXT_LINES,
     FULL_FILE_THRESHOLD,
@@ -187,6 +188,9 @@ async def _call_and_cache_fix(
             f"malformed response ({exc})",
         )
     except Exception as exc:
+        if isinstance(exc, AITurnLimitError) and cost_callback is not None:
+            # call_ai priced and charged the temporary call budget before raising.
+            cost_callback(exc.cost_estimate)
         logger.debug(
             f"AI fix generation failed for {issue.file}:{issue.line} "
             f"({type(exc).__name__}: {exc})",
@@ -241,7 +245,7 @@ async def _generate_single_fix(
             (default 500).
         sanitize_mode: How to handle detected prompt injection patterns.
         cache_max_entries: Maximum file cache entries to limit memory.
-        cost_callback: Receives each completed response's cost before parsing.
+        cost_callback: Receives completed-response and turn-limit exception costs.
 
     Returns:
         AIFixSuggestion, or None if generation fails.
@@ -335,7 +339,7 @@ async def _generate_batch_fixes(
         timeout: Request timeout in seconds.
         max_prompt_tokens: Token budget for the prompt.
         sanitize_mode: How to handle detected prompt injection patterns.
-        cost_callback: Receives the completed batch response's cost before parsing.
+        cost_callback: Receives completed-batch and turn-limit exception costs.
 
     Returns:
         List of AIFixSuggestions, or None on failure (fall back to single).
@@ -435,6 +439,8 @@ async def _generate_batch_fixes(
         )
         return None
     except Exception as exc:
+        if isinstance(exc, AITurnLimitError) and cost_callback is not None:
+            cost_callback(exc.cost_estimate)
         logger.debug(
             f"Batch AI fix generation failed for {file_path} "
             f"({type(exc).__name__}: {exc}), falling back to single-issue mode",
@@ -499,8 +505,9 @@ async def generate_fixes(
         sanitize_mode: How to handle prompt injection patterns.
         cache_max_entries: Maximum file cache entries to limit memory.
         cost_callback: Receives each completed provider response's cost once,
-            including malformed, empty and no-op responses and discarded batches.
-            Cache hits and calls that raise without a response do not invoke it.
+            including malformed, empty and no-op responses and discarded batches,
+            plus spend carried by turn-limit exceptions. Cache hits and other
+            provider errors do not invoke it.
 
     Returns:
         List of fix suggestions.
