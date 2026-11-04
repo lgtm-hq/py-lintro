@@ -688,6 +688,8 @@ def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
         "all-checks-gate.yml": "8f0fd9339df5d30a529aa572ceb51345b8be33a0",
         # #3093: v0.83.11's verified Trivy acquisition, tools-image caller only.
         "docker-tools-publish.yml": "cade5e687630ce3208bf914d0b1590145f3d569e",
+        # #3089: the ordinary-main publisher must select the same repair.
+        "docker-tools-promote.yml": "cade5e687630ce3208bf914d0b1590145f3d569e",
     }
     ref_pattern = re.compile(
         r"lgtm-hq/lgtm-ci/[^@\s]+@([^\s#]+)|tooling-ref:\s*[\"']?([^\"'\s#]+)",

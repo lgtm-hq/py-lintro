@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from typing import Any
@@ -1858,6 +1859,15 @@ def test_dogfood_nightly_classifies_before_pinging_the_tracker() -> None:
     assert_that(condition).contains("needs.classify-failure.outputs.notify == 'true'")
     # Fail closed: a classifier that did not succeed still pings.
     assert_that(condition).contains("needs.classify-failure.result != 'success'")
+
+
+def test_tools_promote_fallback_preserves_native_runners() -> None:
+    """Explicit mappings keep newer tooling's amd64 default from changing CI."""
+    workflow = _load_workflow(name="docker-tools-promote.yml")
+    with_block = workflow["jobs"]["publish-fallback"]["with"]
+    assert_that(json.loads(with_block["runner-map"])).is_equal_to(
+        {"linux/amd64": "ubuntu-24.04", "linux/arm64": "ubuntu-24.04-arm"},
+    )
 
 
 def test_tools_promote_passes_manifest_staleness_shas() -> None:
