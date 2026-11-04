@@ -325,19 +325,34 @@ def run_lint_artifact(
     if ai_enabled:
         from pydantic import ValidationError
 
+        from lintro.ai.effective_config import (
+            AICliOverrides,
+            resolve_effective_ai_config,
+        )
         from lintro.ai.exceptions import AIConfigOverrideError
         from lintro.ai.interface import enhance_artifact
 
-        try:
-            artifact = enhance_artifact(
-                artifact,
-                ctx=ctx,
-                output_format=output_format,
-                ai_fix=ai_fix,
-                transport=transport,
-            )
-        except (AIConfigOverrideError, ValidationError) as exc:
-            raise click.UsageError(_ai_config_error_message(exc)) from exc
+        if not artifact.early_exit:
+            # Validate the section here, with the overlay the hook applies and
+            # no diagnostics (the hook prints those), rather than catching
+            # around the hook: anything it runs may raise a ValidationError,
+            # and with ``ai.fail_on_ai_error`` an unrelated one must not be
+            # reported as an invalid ``ai:`` section (#3116).
+            try:
+                resolve_effective_ai_config(
+                    getattr(ctx.lintro_config, "ai", None),
+                    cli_overrides=AICliOverrides(transport=transport),
+                    diagnostics=False,
+                )
+            except (AIConfigOverrideError, ValidationError) as exc:
+                raise click.UsageError(_ai_config_error_message(exc)) from exc
+        artifact = enhance_artifact(
+            artifact,
+            ctx=ctx,
+            output_format=output_format,
+            ai_fix=ai_fix,
+            transport=transport,
+        )
 
     if acknowledgements is not None:
         apply_baseline(artifact, acknowledgements)
