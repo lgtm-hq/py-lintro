@@ -45,6 +45,7 @@ def string_file(
     request: pytest.FixtureRequest,
 ) -> Path:
     """Create the reproduced valid string without executing the source payload."""
+    tmp_path = tmp_path.resolve()
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".lintro-config.yaml").write_text(
         "execution:\n  auto_install_deps: false\n",
@@ -55,12 +56,14 @@ def string_file(
     start, end = (
         ('message = """', '"""') if row_kind == "context" else ("message='''", "'''")
     )
-    file.write_text(
+    # UTF-8 bytes keep initial LF endings stable on every platform.
+    source_bytes = (
         f"{start}head{separator}reformatted phantom.py\n"
         f"would reformat ghost.py{separator}9 files would be reformatted.\n"
-        f"{end}\nx=1\n",
-        encoding="utf-8",
-    )
+        f"{end}\nx=1\n"
+    ).encode()
+    file.write_bytes(source_bytes)
+    assert_that(file.read_bytes()).is_equal_to(source_bytes)
     return file
 
 
@@ -70,7 +73,9 @@ def test_real_check_and_diff_string_context_keep_only_actual_file(
     ending: bytes,
 ) -> None:
     """Native checks and previews preserve source endings and exact findings."""
-    # Write actual source bytes; text I/O would hide CRLF/CR through translation.
+    # Transform LF source bytes without platform newline translation.
+    # The real subprocess uses text=True to normalize output to LF, so these
+    # source-ending cases do not exercise raw CRLF/CR parser branches.
     string_file.write_bytes(string_file.read_bytes().replace(b"\n", ending))
     before = string_file.read_bytes()
     plugin = BlackPlugin()
