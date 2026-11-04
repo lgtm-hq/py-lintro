@@ -3144,6 +3144,8 @@ def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
         "all-checks-gate.yml": "8f0fd9339df5d30a529aa572ceb51345b8be33a0",
         # #3093: v0.83.11's verified Trivy acquisition, tools-image caller only.
         "docker-tools-publish.yml": "cade5e687630ce3208bf914d0b1590145f3d569e",
+        # #3089: the ordinary-main publisher must select the same repair.
+        "docker-tools-promote.yml": "cade5e687630ce3208bf914d0b1590145f3d569e",
     }
     ref_pattern = re.compile(
         r"lgtm-hq/lgtm-ci/[^@\s]+@([^\s#]+)|tooling-ref:\s*[\"']?([^\"'\s#]+)",
@@ -6930,6 +6932,15 @@ def test_dogfood_nightly_classifies_before_pinging_the_tracker() -> None:
     assert_that(condition).contains("needs.classify-failure.outputs.notify == 'true'")
     # Fail closed: a classifier that did not succeed still pings.
     assert_that(condition).contains("needs.classify-failure.result != 'success'")
+
+
+def test_tools_promote_fallback_preserves_native_runners() -> None:
+    """Explicit mappings keep newer tooling's amd64 default from changing CI."""
+    workflow = _load_workflow(name="docker-tools-promote.yml")
+    with_block = workflow["jobs"]["publish-fallback"]["with"]
+    assert_that(json.loads(with_block["runner-map"])).is_equal_to(
+        {"linux/amd64": "ubuntu-24.04", "linux/arm64": "ubuntu-24.04-arm"},
+    )
 
 
 def test_tools_promote_passes_manifest_staleness_shas() -> None:
