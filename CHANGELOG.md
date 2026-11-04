@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.14] - 2026-11-04
+
+### Changed
+
+- **tests**: split workflow wiring contracts by concern (#3176) (ecd8aac)
+- **ai**: pair custom-agent scalar privacy cases (#3198) (2d7ff19)
+
+### Fixed
+
+- **ai**: retain charges for rejected fix responses (#3202) (c047244)
+
 ## [0.177.13] - 2026-11-04
 
 ### Changed
