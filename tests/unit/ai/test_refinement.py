@@ -144,6 +144,7 @@ async def test_refinement_json_integer_response_controls(
     assert_that(any(noisy for _, noisy in diagnostics)).is_false()
     assert_that(sys.get_int_max_str_digits()).is_equal_to(limit)
     failures = [text for text, _ in diagnostics if text.startswith("Refinement failed")]
+    assert_that(cost).is_equal_to(response.cost_estimate)
     if response_kind == "ordinary-valid":
         assert_that(failures).is_empty()
         assert_that(refined).is_length(1)
@@ -153,7 +154,6 @@ async def test_refinement_json_integer_response_controls(
         assert_that((refined[0].input_tokens, refined[0].output_tokens)).is_equal_to(
             (11, 7),
         )
-        assert_that(cost).is_equal_to(response.cost_estimate)
         assert_that(source.read_bytes()).is_equal_to(b"# unchanged context\nx = 3\n")
     else:
         assert_that(refined).is_empty()
@@ -164,8 +164,6 @@ async def test_refinement_json_integer_response_controls(
                 "(Invalid JSON in AI fix response for integer.py:2)",
             ],
         )
-        # Failed-parse cost undercount is an existing #3116 follow-up, not a
-        # contract: deliberately do not pin the returned cost to zero here.
 
 
 async def test_refine_returns_empty_when_no_unverified_keys(tmp_path: Path) -> None:

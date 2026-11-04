@@ -100,6 +100,7 @@ async def _generate_all_suggestions(
             f"AI fix: {tool_name} has {len(issues)} issues, budget={remaining_budget}",
         )
 
+        response_costs: list[float] = []
         fix_params = FixGenParams(
             tool_name=tool_name,
             workspace_root=workspace_root,
@@ -120,6 +121,7 @@ async def _generate_all_suggestions(
             fallback_models=ai_config.fallback_models,
             sanitize_mode=ai_config.sanitize_mode,
             ai_config=ai_config,
+            cost_callback=response_costs.append,
         )
         suggestions = await generate_fixes_from_params(issues, provider, fix_params)
         for suggestion in suggestions:
@@ -138,15 +140,17 @@ async def _generate_all_suggestions(
         for s in suggestions:
             telemetry.total_input_tokens += s.input_tokens
             telemetry.total_output_tokens += s.output_tokens
-            telemetry.total_cost_usd += s.cost_estimate
             if s.input_tokens > 0 or s.output_tokens > 0:
                 seen_calls.add((s.input_tokens, s.output_tokens))
         telemetry.total_api_calls += len(seen_calls)
 
-        budget.record(sum(s.cost_estimate for s in suggestions))
+        # Response charges survive rejected parses and batch fallback. Suggestion
+        # metadata still describes only the response that produced that patch.
+        tool_cost = sum(response_costs)
+        telemetry.total_cost_usd += tool_cost
+        budget.record(tool_cost)
 
         if ai_config.verbose:
-            tool_cost = sum(s.cost_estimate for s in suggestions)
             loguru_logger.info(
                 f"AI fix: {tool_name} cost=${tool_cost:.6f}, "
                 f"cumulative=${telemetry.total_cost_usd:.6f}",
@@ -361,13 +365,13 @@ async def _verify_and_refine(
             ai_config=ai_config,
             workspace_root=workspace_root,
         )
+        telemetry.total_cost_usd += refinement_cost
+        budget.record(refinement_cost)
         if refined:
             telemetry.total_api_calls += len(refined)
             for s in refined:
                 telemetry.total_input_tokens += s.input_tokens
                 telemetry.total_output_tokens += s.output_tokens
-                telemetry.total_cost_usd += s.cost_estimate
-            budget.record(refinement_cost)
 
             re_validation = validate_applied_fixes(refined)
             if re_validation:

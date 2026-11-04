@@ -89,7 +89,8 @@ async def refine_unverified_fixes(
         workspace_root: Workspace root path.
 
     Returns:
-        Tuple of (list of successfully refined suggestions, total cost).
+        Tuple of (successfully refined suggestions, total completed-response cost),
+        including malformed responses and responses that yield no applied fix.
 
     Raises:
         KeyboardInterrupt: Re-raised immediately.
@@ -206,6 +207,7 @@ async def refine_unverified_fixes(
                 max_tokens=ai_config.max_tokens,
                 workspace_root=workspace_root,
             )
+            total_cost += response.cost_estimate
 
             refined_suggestion = parse_fix_response(
                 response.content,
@@ -225,7 +227,6 @@ async def refine_unverified_fixes(
             refined_suggestion.input_tokens = response.input_tokens
             refined_suggestion.output_tokens = response.output_tokens
             refined_suggestion.cost_estimate = response.cost_estimate
-            total_cost += response.cost_estimate
 
             # Step 4: Apply the refined fix
             applied = apply_fixes(
