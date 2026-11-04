@@ -14,6 +14,7 @@ from lintro.ai.budget import CostBudget
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AICostBudgetExceededError, AIProviderError
+from lintro.ai.fix import generate_fixes
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.pipeline import run_fix_pipeline
 from lintro.ai.providers.response import AIResponse
@@ -65,6 +66,72 @@ def _response(content: str, cost: float) -> AIResponse:
         output_tokens=17,
         cost_estimate=cost,
     )
+
+
+@pytest.mark.parametrize("enable_cache", [True, False], ids=["cache-hit", "uncached"])
+async def test_generation_cache_reuse_charges_only_new_responses(
+    tmp_path: Path,
+    ai_config: AIConfig,
+    enable_cache: bool,
+) -> None:
+    """A real cache round trip skips charges; bypassing it charges once."""
+    source = tmp_path / "cached.py"
+    source.write_bytes(b"# unchanged context\nx = 1\n")
+    issue = MockIssue(file=str(source), line=2, code="B101", message="Issue")
+    provider = MockAIProvider(
+        responses=[
+            _response(json.dumps(_FIX), 0.125),
+            _response(json.dumps(_FIX), 0.25),
+        ],
+    )
+    initial_costs: list[float] = []
+
+    initial = await generate_fixes(
+        [issue],
+        provider,
+        tool_name="ruff",
+        ai_config=ai_config,
+        workspace_root=tmp_path,
+        enable_cache=True,
+        cost_callback=initial_costs.append,
+    )
+
+    assert_that(initial).is_length(1)
+    assert_that(initial_costs).is_equal_to([0.125])
+    assert_that(initial[0].cost_estimate).is_equal_to(0.125)
+    cache_files = list((tmp_path / ".lintro-cache/ai").glob("*.json"))
+    assert_that(cache_files).is_length(1)
+    assert_that(json.loads(cache_files[0].read_text())["suggestion"]).contains_entry(
+        cost_estimate=0.125,
+        input_tokens=31,
+        output_tokens=17,
+    )
+    response_costs: list[float] = []
+
+    repeated = await generate_fixes(
+        [issue],
+        provider,
+        tool_name="ruff",
+        ai_config=ai_config,
+        workspace_root=tmp_path,
+        enable_cache=enable_cache,
+        cost_callback=response_costs.append,
+    )
+
+    assert_that(repeated).is_length(1)
+    assert_that(response_costs).is_equal_to([] if enable_cache else [0.25])
+    assert_that(provider.calls).is_length(1 if enable_cache else 2)
+    assert_that(
+        (
+            repeated[0].input_tokens,
+            repeated[0].output_tokens,
+            repeated[0].cost_estimate,
+        ),
+    ).is_equal_to((0, 0, 0.0) if enable_cache else (31, 17, 0.25))
+    assert_that(
+        (repeated[0].original_code, repeated[0].suggested_code, repeated[0].diff),
+    ).is_equal_to(("x = 1", "x = 3", initial[0].diff))
+    assert_that(source.read_bytes()).is_equal_to(b"# unchanged context\nx = 1\n")
 
 
 @pytest.mark.parametrize("content,accepted", _RESPONSES)
