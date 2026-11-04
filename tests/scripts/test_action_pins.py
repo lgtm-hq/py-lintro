@@ -154,7 +154,7 @@ def test_mismatched_sha_across_workflows_fails(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("canonical_workflow", ["a.yml", "z.yml"])
 @pytest.mark.parametrize("repair_workflow", _REPAIR_WORKFLOWS)
-def test_exact_tools_image_repair_preserves_canonical_pin(
+def test_exact_docker_repair_preserves_canonical_pin(
     *,
     canonical_workflow: str,
     repair_workflow: str,
@@ -257,7 +257,7 @@ def test_exact_tools_image_repair_preserves_canonical_pin(
         "invalid-version",
     ],
 )
-def test_tools_image_repair_exception_is_exact(
+def test_docker_repair_exception_is_exact(
     *,
     repair_workflow: str,
     name: str,

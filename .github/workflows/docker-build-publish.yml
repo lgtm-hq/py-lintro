@@ -159,7 +159,8 @@ jobs:
         ${{ !inputs.staging && !(github.event_name == 'workflow_dispatch'
         && needs.validate-backfill-inputs.outputs.backfill_version != '') }}
       platforms: linux/amd64,linux/arm64
-      runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
+      # Preserve native runners when the new tooling's amd64 default changes.
+      runner-map: '{"linux/amd64":"ubuntu-24.04","linux/arm64":"ubuntu-24.04-arm"}'
       smoke-test: lintro --version
       validate-on-pr: false
       cache-registry-ref: ghcr.io/lgtm-hq/py-lintro-base:cache
@@ -238,7 +239,8 @@ jobs:
         ${{ !inputs.staging && !(github.event_name == 'workflow_dispatch'
         && needs.validate-backfill-inputs.outputs.backfill_version != '') }}
       platforms: linux/amd64,linux/arm64
-      runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
+      # Preserve native runners when the new tooling's amd64 default changes.
+      runner-map: '{"linux/amd64":"ubuntu-24.04","linux/arm64":"ubuntu-24.04-arm"}'
       smoke-test: lintro --version
       validate-on-pr: false
       cache-registry-ref: ghcr.io/lgtm-hq/py-lintro:cache
@@ -325,7 +327,8 @@ jobs:
         ${{ !inputs.staging && !(github.event_name == 'workflow_dispatch'
         && needs.validate-backfill-inputs.outputs.backfill_version != '') }}
       platforms: linux/amd64,linux/arm64
-      runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
+      # Preserve native runners when the new tooling's amd64 default changes.
+      runner-map: '{"linux/amd64":"ubuntu-24.04","linux/arm64":"ubuntu-24.04-arm"}'
       smoke-test: lintro --version
       validate-on-pr: false
       cache-registry-ref: ghcr.io/lgtm-hq/py-lintro-ai:cache

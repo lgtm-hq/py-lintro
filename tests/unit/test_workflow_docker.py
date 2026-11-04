@@ -2007,6 +2007,19 @@ def test_docker_ci_evidence_steps_cannot_be_execution_bypassed() -> None:
 
 
 @pytest.mark.parametrize("job_id", _RELEASE_IMAGE_JOBS)
+def test_release_images_preserve_native_runners(job_id: str) -> None:
+    """Explicit runner mappings preserve release builds across tooling bumps.
+
+    Args:
+        job_id: Base, full or AI release image job.
+    """
+    job = _load_workflow(name="docker-build-publish.yml")["jobs"][job_id]
+    assert_that(json.loads(job["with"]["runner-map"])).is_equal_to(
+        {"linux/amd64": "ubuntu-24.04", "linux/arm64": "ubuntu-24.04-arm"},
+    )
+
+
+@pytest.mark.parametrize("job_id", _RELEASE_IMAGE_JOBS)
 def test_release_images_select_the_verified_trivy_repair(job_id: str) -> None:
     """All release image callers select the repaired workflow and tooling (#3200).
 
