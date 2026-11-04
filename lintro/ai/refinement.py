@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
     from lintro.ai.models import AIFixSuggestion
     from lintro.ai.providers.base import BaseAIProvider
+    from lintro.ai.telemetry import AITelemetry
     from lintro.ai.validation import ValidationResult
 
 
@@ -76,6 +77,7 @@ async def refine_unverified_fixes(
     ai_config: AIConfig,
     workspace_root: Path,
     cost_callback: Callable[[float], None] | None = None,
+    telemetry: AITelemetry | None = None,
 ) -> tuple[list[AIFixSuggestion], float]:
     """Attempt one refinement round for unverified fixes.
 
@@ -93,6 +95,8 @@ async def refine_unverified_fixes(
         cost_callback: Receives each completed response's cost before parsing,
             plus spend carried by turn-limit exceptions, including charges from
             a round that later exits exceptionally.
+        telemetry: Optional accumulator for responses and turn-limit outcomes,
+            updated before parsing or applying, including rejected refinements.
 
     Returns:
         Tuple of (successfully refined suggestions, total observed provider cost),
@@ -213,6 +217,7 @@ async def refine_unverified_fixes(
                 prompt=prompt,
                 max_tokens=ai_config.max_tokens,
                 workspace_root=workspace_root,
+                telemetry=telemetry,
             )
             total_cost += response.cost_estimate
             if cost_callback is not None:
