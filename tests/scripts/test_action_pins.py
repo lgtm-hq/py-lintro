@@ -26,7 +26,11 @@ _SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
 _OTHER_SHA = "e14015d583714f6e62063499dc959a02595150a1"
 _REPAIR_ACTION = "lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml"
 _REPAIR_SHA = "cade5e687630ce3208bf914d0b1590145f3d569e"
-_REPAIR_WORKFLOWS = ("docker-tools-publish.yml", "docker-tools-promote.yml")
+_REPAIR_WORKFLOWS = (
+    "docker-tools-publish.yml",
+    "docker-tools-promote.yml",
+    "docker-build-publish.yml",
+)
 
 
 def _write_workflow(*, root: Path, name: str, body: str) -> Path:
@@ -150,7 +154,7 @@ def test_mismatched_sha_across_workflows_fails(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("canonical_workflow", ["a.yml", "z.yml"])
 @pytest.mark.parametrize("repair_workflow", _REPAIR_WORKFLOWS)
-def test_exact_tools_image_repair_preserves_canonical_pin(
+def test_exact_docker_repair_preserves_canonical_pin(
     *,
     canonical_workflow: str,
     repair_workflow: str,
@@ -160,7 +164,7 @@ def test_exact_tools_image_repair_preserves_canonical_pin(
 
     Args:
         canonical_workflow: Sorts the canonical pin before or after the repair.
-        repair_workflow: The independently adopted image or promotion caller.
+        repair_workflow: The independently adopted Docker caller.
         tmp_path: Pytest temporary directory.
     """
     _write_workflow(
@@ -253,7 +257,7 @@ def test_exact_tools_image_repair_preserves_canonical_pin(
         "invalid-version",
     ],
 )
-def test_tools_image_repair_exception_is_exact(
+def test_docker_repair_exception_is_exact(
     *,
     repair_workflow: str,
     name: str,
@@ -266,7 +270,7 @@ def test_tools_image_repair_exception_is_exact(
     """Near matches still enforce equality, immutable pins and version comments.
 
     Args:
-        repair_workflow: The independently adopted image or promotion caller.
+        repair_workflow: The independently adopted Docker caller.
         name: Candidate exception's file path relative to workflows.
         action: Candidate action identifier.
         ref: Candidate action reference.

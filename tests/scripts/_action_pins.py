@@ -10,7 +10,7 @@ The workflow files are therefore the source of truth. This module reads every
 refs by action, and asserts the invariants that actually matter: a third-party
 action is pinned to a full 40-character commit SHA, carries a ``# vX.Y.Z``
 version comment, and agrees on a canonical SHA except for the exact,
-independently adopted tools-image repair pins (#3093, #3089).
+independently adopted Docker repair pins (#3093, #3089, #3200).
 """
 
 from __future__ import annotations
@@ -32,8 +32,10 @@ _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _VERSION_COMMENT_RE = re.compile(r"^#\s*v\d+(?:\.\d+)*")
 #: Refs resolved inside this repository; they are not pinned and never can be.
 _LOCAL_PREFIXES = ("./", "../")
-#: #3093 and #3089 adopt v0.83.11's Trivy repair for these exact callers only.
-_TOOLS_IMAGE_REPAIR_PINS = {
+#: #3093, #3089 and #3200 adopt v0.83.11's Trivy repair for these callers only.
+#: Other callers intentionally retain the canonical pin; sibling-owned
+#: Renovate #2994 owns their migration.
+_DOCKER_REPAIR_PINS = {
     (
         ".github/workflows/docker-tools-publish.yml",
         "lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml",
@@ -41,6 +43,11 @@ _TOOLS_IMAGE_REPAIR_PINS = {
     ),
     (
         ".github/workflows/docker-tools-promote.yml",
+        "lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml",
+        "cade5e687630ce3208bf914d0b1590145f3d569e",
+    ),
+    (
+        ".github/workflows/docker-build-publish.yml",
         "lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml",
         "cade5e687630ce3208bf914d0b1590145f3d569e",
     ),
@@ -152,7 +159,7 @@ def pinned_action_shas(*, root: Path = REPO_ROOT) -> dict[str, str]:
     Asserts, over every ``uses:`` reference in the repository, that the ref is
     a 40-character commit SHA followed by a ``# vX.Y.Z``-style version comment,
     and that every ordinary caller pins a given action to the same SHA. The
-    exact tools-image repairs are validated but excluded from the canonical
+    exact Docker repairs are validated but excluded from the canonical
     mapping, so its position in traversal cannot determine the shared pin.
 
     Args:
@@ -187,7 +194,7 @@ def pinned_action_shas(*, root: Path = REPO_ROOT) -> dict[str, str]:
     drift: list[str] = []
     for use in uses:
         identity = (use.path.relative_to(root).as_posix(), use.action, use.ref)
-        if identity in _TOOLS_IMAGE_REPAIR_PINS:
+        if identity in _DOCKER_REPAIR_PINS:
             continue
         pinned = pins.setdefault(use.action, use.ref)
         if pinned != use.ref:

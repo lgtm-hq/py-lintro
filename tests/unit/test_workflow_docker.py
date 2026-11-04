@@ -2006,6 +2006,34 @@ def test_docker_ci_evidence_steps_cannot_be_execution_bypassed() -> None:
         )
 
 
+@pytest.mark.parametrize("job_id", _RELEASE_IMAGE_JOBS)
+def test_release_images_preserve_native_runners(job_id: str) -> None:
+    """Explicit runner mappings preserve release builds across tooling bumps.
+
+    Args:
+        job_id: Base, full or AI release image job.
+    """
+    job = _load_workflow(name="docker-build-publish.yml")["jobs"][job_id]
+    assert_that(json.loads(job["with"]["runner-map"])).is_equal_to(
+        {"linux/amd64": "ubuntu-24.04", "linux/arm64": "ubuntu-24.04-arm"},
+    )
+
+
+@pytest.mark.parametrize("job_id", _RELEASE_IMAGE_JOBS)
+def test_release_images_select_the_verified_trivy_repair(job_id: str) -> None:
+    """All release image callers select the repaired workflow and tooling (#3200).
+
+    Args:
+        job_id: Base, full or AI release image job.
+    """
+    repair = "cade5e687630ce3208bf914d0b1590145f3d569e"  # lgtm-ci v0.83.11
+    job = _load_workflow(name="docker-build-publish.yml")["jobs"][job_id]
+    assert_that(job["uses"]).is_equal_to(
+        f"lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@{repair}",
+    )
+    assert_that(job["with"]["tooling-ref"]).is_equal_to(repair)
+
+
 def test_docker_build_runs_before_the_gate_in_staging_mode() -> None:
     """Images are built and attested off classify-tag, never upstream of pypi-upload.
 

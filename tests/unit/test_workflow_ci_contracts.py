@@ -691,8 +691,21 @@ def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
         # #3089: the ordinary-main publisher must select the same repair.
         "docker-tools-promote.yml": "cade5e687630ce3208bf914d0b1590145f3d569e",
     }
+    # #3200: only the release Docker workflow and its tooling adopt Trivy's
+    # verified acquisition. Other actions in this file keep the canonical pin.
+    release_repair_refs = {
+        (
+            ".github/workflows/docker-build-publish.yml",
+            action,
+            "cade5e687630ce3208bf914d0b1590145f3d569e",
+        )
+        for action in (
+            "lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml",
+            "tooling-ref",
+        )
+    }
     ref_pattern = re.compile(
-        r"lgtm-hq/lgtm-ci/[^@\s]+@([^\s#]+)|tooling-ref:\s*[\"']?([^\"'\s#]+)",
+        r"(lgtm-hq/lgtm-ci/[^@\s]+)@([^\s#]+)|tooling-ref:\s*[\"']?([^\"'\s#]+)",
     )
     offenders: list[str] = []
     for path in _workflow_paths():
@@ -702,7 +715,14 @@ def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
             start=1,
         ):
             for match in ref_pattern.finditer(line):
-                ref = match.group(1) or match.group(2)
+                ref = match.group(2) or match.group(3)
+                identity = (
+                    path.relative_to(_REPO_ROOT).as_posix(),
+                    match.group(1) or "tooling-ref",
+                    ref,
+                )
+                if identity in release_repair_refs:
+                    continue
                 if ref != expected_pin:
                     offenders.append(f"{path.name}:{lineno}: {ref}")
 
