@@ -61,10 +61,10 @@ def _ai_config_error_message(exc: Exception) -> str:
     """
     from pydantic import ValidationError
 
-    from lintro.ai.provider_blocks import describe_config_error
+    from lintro.ai.provider_blocks import format_invalid_ai_config
 
     if isinstance(exc, ValidationError):
-        return f"invalid AI configuration: {describe_config_error(exc)}"
+        return format_invalid_ai_config(exc)
     return str(exc)
 
 
@@ -333,11 +333,16 @@ def run_lint_artifact(
         from lintro.ai.interface import enhance_artifact
 
         if not artifact.early_exit:
-            # Validate the section here, with the overlay the hook applies and
-            # no diagnostics (the hook prints those), rather than catching
-            # around the hook: anything it runs may raise a ValidationError,
-            # and with ``ai.fail_on_ai_error`` an unrelated one must not be
-            # reported as an invalid ``ai:`` section (#3116).
+            # Validate the section before the AI hook runs (this is after
+            # ``execute_run``, so a fmt run may already have written files),
+            # with the overlay the hook applies and no diagnostics (the hook
+            # prints those), rather than catching around the hook: anything
+            # it runs may raise a ValidationError, and with
+            # ``ai.fail_on_ai_error`` an unrelated one must not be reported as
+            # an invalid ``ai:`` section (#3116). Resolving the ``ai:``
+            # mapping again here is intentionally redundant with the hook's
+            # own resolution: it lets a bad ``ai:`` section be reported on its
+            # own, before the hook runs anything that could fail differently.
             try:
                 resolve_effective_ai_config(
                     getattr(ctx.lintro_config, "ai", None),

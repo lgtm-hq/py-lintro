@@ -15,8 +15,7 @@ MCP answers with the ``invalid_input`` envelope it already uses for a bad
 from __future__ import annotations
 
 import json
-import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +25,6 @@ from click.testing import CliRunner
 from mcp.client import Client
 
 from lintro.cli import cli
-from lintro.config.config_loader import clear_config_cache
 from lintro.mcp.enums.mcp_error_code import McpErrorCode
 from tests.unit.mcp.session_helpers import payload_from_result, run_in_memory_client
 
@@ -54,19 +52,16 @@ _PYDANTIC_DUMP = ("Traceback", "validation error for", "input_value")
 
 @pytest.fixture
 def write_config(
-    tmp_path: Path,
+    ai_config_project: Callable[[str], Path],
     monkeypatch: pytest.MonkeyPatch,
-) -> Iterator[Callable[[str | None], Path]]:
+) -> Callable[[str | None], Path]:
     """Return a factory for a project whose AI dependencies look installed.
 
-    The user tier, ``LINTRO_AI_*`` overlays and the memoised config are
-    isolated so only the project's own ``.lintro-config.yaml`` is resolved.
-
     Args:
-        tmp_path: Pytest temporary directory.
+        ai_config_project: Writer for an isolated project config.
         monkeypatch: Pytest monkeypatch fixture.
 
-    Yields:
+    Returns:
         Callable[[str | None], Path]: A factory taking the full ``ai:``
         section (None for none) and returning the project root, already the
         working directory.
@@ -74,27 +69,15 @@ def write_config(
     import lintro.ai.availability as availability
     import lintro.cli_utils.commands.review as review_module
 
-    home = tmp_path / "home"
-    home.mkdir()
-    for name in [key for key in os.environ if key.startswith("LINTRO_AI_")]:
-        monkeypatch.delenv(name)
-    monkeypatch.delenv("LINTRO_GLOBAL_CONFIG", raising=False)
-    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     monkeypatch.setattr(availability, "is_ai_available", lambda: True)
     monkeypatch.setattr(review_module, "require_ai", lambda: None)
-    root = (tmp_path / "project").resolve()
-    root.mkdir()
-    monkeypatch.chdir(root)
 
     def _write(ai_section: str | None) -> Path:
-        config = "tools:\n  ruff:\n    enabled: true\n" + (ai_section or "")
-        (root / ".lintro-config.yaml").write_text(config, encoding="utf-8")
-        clear_config_cache()
-        return root
+        return ai_config_project(
+            "tools:\n  ruff:\n    enabled: true\n" + (ai_section or ""),
+        )
 
-    yield _write
-    clear_config_cache()
+    return _write
 
 
 def _call_mcp_review(workspace: Path) -> tuple[bool, dict[str, Any]]:

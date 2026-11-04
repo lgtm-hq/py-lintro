@@ -43,7 +43,7 @@ from lintro.ai.exceptions import (
     AIProviderRequiredError,
 )
 from lintro.ai.paths import resolve_workspace_root
-from lintro.ai.provider_blocks import describe_config_error
+from lintro.ai.provider_blocks import format_invalid_ai_config
 from lintro.ai.provider_enum import (
     accepted_provider_names,
     accepted_provider_values,
@@ -835,9 +835,7 @@ def _resolve_ai(
     except ValidationError as exc:
         # Same one line ``chk``/``fmt`` print (#3116): the field path and the
         # constraint, never pydantic's dump quoting the rejected value.
-        raise click.UsageError(
-            f"invalid AI configuration: {describe_config_error(exc)}",
-        ) from exc
+        raise click.UsageError(format_invalid_ai_config(exc)) from exc
 
 
 def _parse_provider_options(*, values: tuple[str, ...]) -> dict[str, str]:

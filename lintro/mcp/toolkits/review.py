@@ -306,7 +306,7 @@ def _resolve_ai_config(*, workspace: Path) -> tuple[Any, ResolvedAIConfig]:
     from lintro.ai.availability import is_ai_available
     from lintro.ai.effective_config import resolve_effective_ai_config
     from lintro.ai.exceptions import AIConfigOverrideError
-    from lintro.ai.provider_blocks import describe_config_error
+    from lintro.ai.provider_blocks import format_invalid_ai_config
     from lintro.config.config_loader import get_config
 
     if not is_ai_available():
@@ -333,7 +333,7 @@ def _resolve_ai_config(*, workspace: Path) -> tuple[Any, ResolvedAIConfig]:
         # with pydantic's dump, which quotes the rejected value (#3116).
         raise McpError(
             code=McpErrorCode.INVALID_INPUT,
-            message=f"invalid AI configuration: {describe_config_error(exc)}",
+            message=format_invalid_ai_config(exc),
             detail={"tool": "lintro_review", "reason": "invalid_ai_config"},
         ) from exc
     ai_config = resolved.config

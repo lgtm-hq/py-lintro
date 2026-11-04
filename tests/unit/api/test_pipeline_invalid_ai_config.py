@@ -189,3 +189,42 @@ def test_a_validation_error_inside_the_ai_hook_is_not_a_config_error(
     assert_that(result.exit_code).is_equal_to(1)
     assert_that(result.output).does_not_contain("invalid AI configuration")
     assert_that(target.read_text(encoding="utf-8")).is_equal_to(_SOURCE)
+
+
+@pytest.mark.parametrize("case", sorted(_INVALID))
+def test_an_early_exit_run_skips_the_ai_config_check(
+    make_project: Callable[[str | None], Path],
+    case: str,
+) -> None:
+    """A run that stops before any tool ran reports its own error, not ``ai:``.
+
+    An unknown ``--tools`` name makes the executor return an ``early_exit``
+    artifact. JSON output keeps the pre-execution AI status row (the other
+    seam that validates ``ai:``) out of the way, so only the post-run check is
+    in play: it is skipped for an early exit, just as the AI hook is, and the
+    run exits 1 with the executor's error instead of 2 with the AI one.
+    """
+    ai_body, field_path = _INVALID[case]
+    target = make_project(ai_body)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "chk",
+            "--output-format",
+            "json",
+            "--tools",
+            "no-such-tool",
+            "--no-art",
+            "a.py",
+        ],
+    )
+
+    assert_that(result.exit_code).described_as(result.output).is_equal_to(1)
+    assert_that(result.output).contains("no-such-tool")
+    assert_that(result.output).does_not_contain(
+        "invalid AI configuration",
+        field_path,
+        "Traceback",
+    )
+    assert_that(target.read_text(encoding="utf-8")).is_equal_to(_SOURCE)
