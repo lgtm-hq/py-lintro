@@ -2134,8 +2134,13 @@ AI features use minimal API calls:
 
 1. **Limits** — `max_fix_attempts` (default 20) caps API calls
 2. **Opt-in flags** — `--fix` is opt-in; only the summary runs by default (1 call)
-3. **Cost display** — `show_cost_estimate: true` shows token usage and estimated cost
-   after each AI operation
+3. **Cost display** — `show_cost_estimate: true` shows token usage and estimated cost.
+   Fix displays and interactive review label these as **Suggestion estimates**: they sum
+   only the suggestions shown, rather than complete session spend. Charges from
+   discarded responses, batch fallback, filtered suggestions, or refinement may be
+   absent from these totals. Cache hits and unreported usage keep their existing zero
+   values and omit the estimate line; an absent line does not establish that the session
+   was free.
 
 ### Disabling AI
 

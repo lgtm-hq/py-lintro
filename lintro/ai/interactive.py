@@ -288,6 +288,8 @@ def review_fixes_interactive(
     total_cost = sum(s.cost_estimate for s in suggestions)
     codes = f"{total_groups} code{'s' if total_groups != 1 else ''}"
     cost_info = cost_str(total_input, total_output, total_cost)
+    if cost_info:
+        cost_info = f"   Suggestion estimates: {cost_info.strip()}"
     print_section_header(
         console,
         "🤖",
