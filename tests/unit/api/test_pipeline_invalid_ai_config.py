@@ -10,6 +10,7 @@ the rejected value itself.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -58,7 +59,10 @@ def make_project(
 
     The loader deep-merges ``~/.lintro-config.yaml`` and memoises the config it
     resolved, so the home tier is redirected and the cache cleared before the
-    run reads the project's own ``.lintro-config.yaml``.
+    run reads the project's own ``.lintro-config.yaml``. Inherited
+    ``LINTRO_AI_*`` overlays are unset too, as the AI suite's
+    ``ai_config_project`` fixture does, so one exported in the developer's
+    shell cannot change what the run resolves.
 
     Args:
         tmp_path: Pytest temporary directory.
@@ -71,6 +75,8 @@ def make_project(
     """
     home = tmp_path / "home"
     home.mkdir()
+    for name in [key for key in os.environ if key.startswith("LINTRO_AI_")]:
+        monkeypatch.delenv(name)
     monkeypatch.delenv("LINTRO_GLOBAL_CONFIG", raising=False)
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
@@ -191,7 +197,12 @@ def test_a_validation_error_inside_the_ai_hook_is_not_a_config_error(
     assert_that(target.read_text(encoding="utf-8")).is_equal_to(_SOURCE)
 
 
-@pytest.mark.parametrize("case", sorted(_INVALID))
+#: The early-exit skip does not depend on which value ``ai:`` rejects, so two
+#: representative cases pin it: a plain range error and a pasted key.
+_EARLY_EXIT_CASES = ("out_of_range", "secret_shaped_string")
+
+
+@pytest.mark.parametrize("case", _EARLY_EXIT_CASES)
 def test_an_early_exit_run_skips_the_ai_config_check(
     make_project: Callable[[str | None], Path],
     case: str,
@@ -220,11 +231,15 @@ def test_an_early_exit_run_skips_the_ai_config_check(
         ],
     )
 
+    assert_that(result.exception).described_as(repr(result.exception)).is_instance_of(
+        SystemExit,
+    )
     assert_that(result.exit_code).described_as(result.output).is_equal_to(1)
     assert_that(result.output).contains("no-such-tool")
     assert_that(result.output).does_not_contain(
         "invalid AI configuration",
         field_path,
         "Traceback",
+        "sk-ant-",
     )
     assert_that(target.read_text(encoding="utf-8")).is_equal_to(_SOURCE)

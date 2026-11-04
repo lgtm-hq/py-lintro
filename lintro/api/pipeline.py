@@ -333,16 +333,15 @@ def run_lint_artifact(
         from lintro.ai.interface import enhance_artifact
 
         if not artifact.early_exit:
-            # Validate the section before the AI hook runs (this is after
-            # ``execute_run``, so a fmt run may already have written files),
-            # with the overlay the hook applies and no diagnostics (the hook
-            # prints those), rather than catching around the hook: anything
-            # it runs may raise a ValidationError, and with
-            # ``ai.fail_on_ai_error`` an unrelated one must not be reported as
-            # an invalid ``ai:`` section (#3116). Resolving the ``ai:``
-            # mapping again here is intentionally redundant with the hook's
-            # own resolution: it lets a bad ``ai:`` section be reported on its
-            # own, before the hook runs anything that could fail differently.
+            # Validate the ``ai:`` section before the AI hook runs, with the
+            # overlay the hook applies and no diagnostics (the hook prints
+            # those). This is after ``execute_run``, so a fmt run may already
+            # have written files.
+            # Do not catch around the hook instead: anything it runs may raise
+            # a ValidationError, and with ``ai.fail_on_ai_error`` an unrelated
+            # one must not be reported as an invalid ``ai:`` section (#3116).
+            # Resolving ``ai:`` again is intentionally redundant with the
+            # hook's own resolution, so a bad section is reported on its own.
             try:
                 resolve_effective_ai_config(
                     getattr(ctx.lintro_config, "ai", None),
