@@ -294,6 +294,9 @@ async def test_refinement_turn_limit_settles_session_before_return_or_later_exit
     )
     error = RuntimeError("later refinement read stopped")
 
+    # Patch refinement's imported reader to inject an uncaught boundary exit,
+    # unlike the caught provider error above. The real reader converts
+    # OSError/UnicodeDecodeError to None; other reads still delegate to it.
     def read_refinement_file(path: str) -> str | None:
         # Reads happen after reverting and outside the per-suggestion catch.
         if later_read_fails and path == issues[1].file:

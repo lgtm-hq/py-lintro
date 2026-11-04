@@ -84,6 +84,11 @@ async def refine_unverified_fixes(
     2. Generate a refined fix using the refinement prompt
     3. Apply the refined fix
 
+    Ordinary exceptions during generation, response parsing, or refined-fix
+    application are logged and skipped for that suggestion. The file reader
+    returns None on OSError or UnicodeDecodeError, so those read failures skip
+    the suggestion rather than propagate.
+
     Args:
         applied_suggestions: All suggestions that were applied.
         validation: Validation result identifying unverified fixes.
@@ -102,6 +107,13 @@ async def refine_unverified_fixes(
     Raises:
         KeyboardInterrupt: Re-raised immediately.
         SystemExit: Re-raised immediately.
+
+    Note:
+        Cancellation (asyncio.CancelledError) also propagates. Ordinary exceptions
+        propagate from validation-detail processing before the loop, or from
+        reversion and file/context/prompt preparation before the per-suggestion
+        try block. Exceptions from cost_callback while handling a turn-limit
+        error also propagate.
     """
     # Identify unverified suggestions from validation details.
     # Detail format: "[code] file:line - issue still present"

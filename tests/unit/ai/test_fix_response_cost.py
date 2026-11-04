@@ -189,6 +189,9 @@ async def test_refinement_session_charge_survives_later_read_exit(
     )
     error = None if exit_type is None else exit_type("later refinement read stopped")
 
+    # Patch refinement's imported reader, outside its per-suggestion try, to
+    # inject a boundary exit after the real revert. The real reader converts
+    # OSError/UnicodeDecodeError to None; other reads still delegate to it.
     def read_refinement_file(path: str) -> str | None:
         if error is not None and path == issues[1].file:
             raise error
