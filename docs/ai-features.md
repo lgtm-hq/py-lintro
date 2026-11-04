@@ -302,6 +302,14 @@ at the repository method that should be used instead.
   carry, so a `severity: high` agent produces P1 findings that fail the exit gate.
 - Each scoped agent is one extra provider call and counts against `ai.max_cost_usd`
   exactly like a built-in checklist chunk.
+- An unusable response counts toward `custom_agents_skipped` and earns no file coverage.
+  This includes invalid JSON, a non-object payload, a missing or non-list `findings`
+  field, or any non-object entry in that list. A mixed list rejects the entire agent
+  pass, even when other entries are valid findings. The call still consumes budget.
+  `{"findings": []}` remains a completed pass.
+- Provider or transport failures raised as `AIError` during an agent call also count
+  toward `custom_agents_skipped` and earn no file coverage. Cost-budget exhaustion
+  instead stops the run so the caller can finalize a partial review.
 - A file with invalid front matter is reported with the offending field and skipped —
   never fatal, and the rest of the review still runs.
 

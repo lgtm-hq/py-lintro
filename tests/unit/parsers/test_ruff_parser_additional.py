@@ -13,7 +13,34 @@ from lintro.parsers.ruff.ruff_parser import (
     stream_ruff_output,
 )
 
+_DEPRECATION_WARNING = (
+    "warning: The top-level linter settings are deprecated in favour of their "
+    "counterparts in the `lint` section. Please update the following options "
+    "in `project[cache]/pyproject.toml`:\n"
+    "  - 'ignore' -> 'lint.ignore'\n"
+    "  - 'select' -> 'lint.select'\n"
+)
+_REMOVED_RULE_WARNING = (
+    "warning: The following rules have been removed and ignoring them has no effect:\n"
+    "    - ANN101\n"
+    "    - UP027\n\n"
+)
+_INCOMPATIBLE_WARNING = (
+    "warning: `incorrect-blank-line-before-class` (D203) and "
+    "`blank-line-before-class` (D211) are incompatible. "
+    "Ignoring `incorrect-blank-line-before-class`.\n"
+)
 
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "",
+        "\nwarning: cache [cache]/ruff is unavailable",
+        _DEPRECATION_WARNING,
+        _REMOVED_RULE_WARNING,
+    ],
+)
 @pytest.mark.parametrize(
     "item",
     [
@@ -28,12 +55,15 @@ from lintro.parsers.ruff.ruff_parser import (
         {"filename": "a.py", "message": " "},
     ],
 )
-def test_ruff_rejects_unusable_required_fields(item: dict[str, object]) -> None:
+def test_ruff_rejects_unusable_required_fields(
+    item: dict[str, object],
+    suffix: str,
+) -> None:
     """Batch, JSON Lines and streaming paths reject incomplete records."""
     for output in (json.dumps([item]), json.dumps(item) + "\n"):
-        assert_that(parse_ruff_output(output)).is_empty()
-        assert_that(parse_ruff_output_with_stats(output)).is_equal_to(([], 1))
-        assert_that(list(stream_ruff_output(output))).is_empty()
+        assert_that(parse_ruff_output(output + suffix)).is_empty()
+        assert_that(parse_ruff_output_with_stats(output + suffix)).is_equal_to(([], 1))
+        assert_that(list(stream_ruff_output(output + suffix))).is_empty()
 
 
 @pytest.mark.parametrize(
@@ -88,6 +118,22 @@ def test_ruff_json_lines_counts_decode_and_field_failures(malformed_line: str) -
         ("[]", 0),
         (" \n[]\n", 0),
         ("[\n]", 0),
+        ("[]\n[null]", 1),
+        ("[]\n[", 1),
+        ("[]\n]", 1),
+        ("garbage\n[]", 1),
+        ("[]\ngarbage", 1),
+        ("[]\nnull", 1),
+        ("[]\n42", 1),
+        ('[]\n"diagnostics"', 1),
+        ("[]\nwarning: cache [cache]\n[null]", 1),
+        ("[]\nRuff failed", 1),
+        ("[]\n  - 'select' -> 'lint.select'", 1),
+        ("[]\n    - ANN101", 1),
+        ("[]\nwarning: deprecated\n  garbage", 1),
+        ("[]\nwarning: deprecated\n  null", 1),
+        ("[]\nwarning: deprecated\n  []", 1),
+        ("[]\nwarning: deprecated\n  {}", 1),
     ],
 )
 def test_ruff_rejected_only_and_empty_reports(
@@ -101,6 +147,19 @@ def test_ruff_rejected_only_and_empty_reports(
     assert_that(parse_ruff_output(output)).is_empty()
 
 
+@pytest.mark.parametrize("ansi", [False, True])
+@pytest.mark.parametrize(
+    "warning",
+    [
+        "warning: stray output\n",
+        "warning: cache path [cache]/ruff is unavailable\n",
+        "warning: cache path cache] is unavailable\n",
+        _DEPRECATION_WARNING,
+        _REMOVED_RULE_WARNING,
+        _INCOMPATIBLE_WARNING,
+        _DEPRECATION_WARNING + _REMOVED_RULE_WARNING,
+    ],
+)
 @pytest.mark.parametrize(
     ("report", "expected_codes", "expected_failures"),
     [
@@ -116,6 +175,7 @@ def test_ruff_rejected_only_and_empty_reports(
         (" \n[]\n", [], 0),
         ("[\n]", [], 0),
         ("array", [""], 0),
+        ("object", [""], 0),
         ("json-lines", ["", "F401"], 0),
     ],
 )
@@ -123,26 +183,84 @@ def test_ruff_warning_framing_preserves_parser_statistics(
     report: str,
     expected_codes: list[str],
     expected_failures: int,
+    warning: str,
+    ansi: bool,
 ) -> None:
-    """Stray warning text cannot turn a scalar into a valid empty report."""
-    diagnostic = {"file": "syntax.py", "message": "Expected expression", "code": None}
+    """Warnings preserve arrays and JSON Lines without accepting scalars."""
+    message = "Expected expression \x1b[31m[bad]\x1b[0m"
+    diagnostic = {"file": "syntax.py", "message": message, "code": None}
     reports = {
-        "array": json.dumps([diagnostic]),
+        "array": json.dumps([diagnostic], indent=2),
+        "object": json.dumps(diagnostic),
         "json-lines": json.dumps(diagnostic)
         + '\n{"filename": "a.py", "message": "unused import", "code": "F401"}',
     }
-    output = reports.get(report, report) + "\nwarning: stray output\n"
+    if ansi:
+        warning = (
+            "\x1b[1;33m"
+            + warning.replace(
+                "warning:",
+                "warning\x1b[0m\x1b[1m:\x1b[0m",
+            )
+            + "\x1b[0m\n"
+        )
+    output = reports.get(report, report) + "\n" + warning
 
     issues, failures = parse_ruff_output_with_stats(output)
 
     assert_that(failures).is_equal_to(expected_failures)
     assert_that(issues).extracting("code").is_equal_to(expected_codes)
     assert_that(issues).extracting("file", "message").is_equal_to(
-        [("syntax.py", "Expected expression"), ("a.py", "unused import")][
-            : len(expected_codes)
-        ],
+        [("syntax.py", message), ("a.py", "unused import")][: len(expected_codes)],
     )
     assert_that(parse_ruff_output(output)).is_equal_to(issues)
+
+
+@pytest.mark.parametrize("ansi", [False, True])
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "error: Failed to read [cache]/other.py (os error 2)",
+        "error: Ruff failed\n  Cause: configuration error",
+        "Ruff failed",
+        "[]",
+        "[",
+        "]",
+        '{"filename": "extra.py", "message": "extra record"}',
+        "null",
+        "42",
+        '"diagnostics"',
+        "true",
+        "garbage",
+        _DEPRECATION_WARNING + "  garbage",
+        _DEPRECATION_WARNING + "  []",
+        _DEPRECATION_WARNING + "  null",
+        _DEPRECATION_WARNING.rstrip() + " []",
+        _REMOVED_RULE_WARNING + "    garbage",
+        _REMOVED_RULE_WARNING + "    - []",
+        _REMOVED_RULE_WARNING + "    - null",
+        _REMOVED_RULE_WARNING + "    - ANN101 trailing garbage",
+        _REMOVED_RULE_WARNING + '{"filename": "extra.py", "message": "extra"}',
+    ],
+)
+def test_ruff_invalid_suffix_keeps_array_findings_and_counts_failures(
+    suffix: str,
+    ansi: bool,
+) -> None:
+    """Retain decoded findings and field failures while rejecting trailing data."""
+    report = json.dumps(
+        [{"file": "syntax.py", "message": "Expected expression", "code": None}, {}],
+        indent=2,
+    )
+
+    if ansi:
+        suffix = f"\x1b[1;33m{suffix}\x1b[0m\n"
+    issues, failures = parse_ruff_output_with_stats(report + "\n" + suffix)
+
+    assert_that(issues).extracting("file", "message", "code").is_equal_to(
+        [("syntax.py", "Expected expression", "")],
+    )
+    assert_that(failures).is_equal_to(2)
 
 
 @pytest.mark.parametrize("prefix", ["", "Ruff progress...\n"])
@@ -161,10 +279,26 @@ def test_ruff_valid_json_lines_do_not_count_array_decode_failure(prefix: str) ->
     )
 
 
+@pytest.mark.parametrize("ansi", [False, True])
 @pytest.mark.parametrize("prefix", ["", " \n\t"])
-def test_ruff_truncated_array_keeps_diagnostics_and_counts_failure(prefix: str) -> None:
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "",
+        "\nwarning: cache [cache]/ruff is unavailable",
+        _DEPRECATION_WARNING,
+        _REMOVED_RULE_WARNING,
+    ],
+)
+def test_ruff_truncated_array_keeps_diagnostics_and_counts_failure(
+    prefix: str,
+    suffix: str,
+    ansi: bool,
+) -> None:
     """Recover complete diagnostics without hiding an invalid array envelope."""
-    output = prefix + '[\n{"filename":"a.py","message":"bad"}\n'
+    if ansi:
+        suffix = f"\x1b[1;33m{suffix}\x1b[0m\n"
+    output = prefix + '[\n{"filename":"a.py","message":"bad"}\n' + suffix
 
     issues, failures = parse_ruff_output_with_stats(output)
 

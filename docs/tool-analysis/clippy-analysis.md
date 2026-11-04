@@ -25,6 +25,8 @@ style, and performance lints across all targets and features.
 - Requires `Cargo.toml` to run; otherwise returns success with message
 - Times out after configurable default (120s)
 - Uses first span for location; multi-span support limited to first entry
+- Fix counts measure Clippy findings. A denied rustc lint can leave all counts at zero
+  while the run fails; native diagnostics explain the failure.
 
 ### 🚀 Enhancements
 

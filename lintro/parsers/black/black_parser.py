@@ -91,6 +91,12 @@ def black_inspected_paths(
     Cached unchanged confirmations are Black's native verdict for that file.
     Only invocation identities with unambiguous single-line reports grant coverage.
 
+    Unlike finding parsing, this reads verbose check reports without source diff
+    rows. Its use of ``splitlines()`` is deliberately conservative: Unicode and
+    control separators also split records and invalidate invocation spellings.
+    An ambiguous or unrecognized record leaves inspection unknown rather than
+    using the finding parser's CRLF/LF/CR-only normalization to certify coverage.
+
     Args:
         output: Complete native verbose check report.
         files: Exact file arguments passed to Black, relative to cwd.

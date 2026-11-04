@@ -21,6 +21,29 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.12] - 2026-11-03
+
+### Fixed
+
+- **ai**: reject non-object custom-agent findings (#3183) (2a3cca0)
+
+## [0.177.11] - 2026-11-03
+
+### Changed
+
+- **ai**: cover single-response structured and empty snippets (#3179) (8ca74e4)
+- **black**: cover native CRLF and CR source previews (#3178) (9f5983c)
+
+### Fixed
+
+- **prettier**: avoid conflicting generated config flags (#3181) (d721f75)
+
+## [0.177.10] - 2026-11-03
+
+### Fixed
+
+- **ruff**: frame reports before trailing warnings (#3175) (c1c506d)
+
 ## [0.177.9] - 2026-11-03
 
 ### Fixed

@@ -24,6 +24,9 @@ from tests.scripts._action_pins import (
 
 _SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
 _OTHER_SHA = "e14015d583714f6e62063499dc959a02595150a1"
+_REPAIR_ACTION = "lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml"
+_REPAIR_SHA = "cade5e687630ce3208bf914d0b1590145f3d569e"
+_REPAIR_WORKFLOW = "docker-tools-publish.yml"
 
 
 def _write_workflow(*, root: Path, name: str, body: str) -> Path:
@@ -31,15 +34,15 @@ def _write_workflow(*, root: Path, name: str, body: str) -> Path:
 
     Args:
         root: Fake repository root.
-        name: Workflow file name.
+        name: Path relative to the workflows directory.
         body: Workflow contents.
 
     Returns:
         The written path.
     """
     workflows = root / ".github" / "workflows"
-    workflows.mkdir(parents=True, exist_ok=True)
     path = workflows / name
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body, encoding="utf-8")
     return path
 
@@ -143,6 +146,141 @@ def test_mismatched_sha_across_workflows_fails(tmp_path: Path) -> None:
         pinned_action_shas(root=tmp_path)
 
     assert_that(str(excinfo.value)).contains("same commit SHA")
+
+
+@pytest.mark.parametrize("canonical_workflow", ["a.yml", "z.yml"])
+def test_exact_tools_image_repair_preserves_canonical_pin(
+    *,
+    canonical_workflow: str,
+    tmp_path: Path,
+) -> None:
+    """The #3093 exception cannot seed the mapping in either traversal order.
+
+    Args:
+        canonical_workflow: Sorts the canonical pin before or after the repair.
+        tmp_path: Pytest temporary directory.
+    """
+    _write_workflow(
+        root=tmp_path,
+        name=canonical_workflow,
+        body=_steps(f"{_REPAIR_ACTION}@{_SHA} # v0.78.1"),
+    )
+    _write_workflow(
+        root=tmp_path,
+        name=_REPAIR_WORKFLOW,
+        body=_steps(f"{_REPAIR_ACTION}@{_REPAIR_SHA} # v0.83.11"),
+    )
+
+    assert_that(pinned_action_shas(root=tmp_path)).is_equal_to({_REPAIR_ACTION: _SHA})
+
+
+@pytest.mark.parametrize(
+    ("name", "action", "ref", "comment", "error"),
+    [
+        ("other.yml", _REPAIR_ACTION, _REPAIR_SHA, "# v0.83.11", "same commit SHA"),
+        (
+            f"nested/{_REPAIR_WORKFLOW}",
+            _REPAIR_ACTION,
+            _REPAIR_SHA,
+            "# v0.83.11",
+            "same commit SHA",
+        ),
+        (
+            f"../actions/{_REPAIR_WORKFLOW}",
+            _REPAIR_ACTION,
+            _REPAIR_SHA,
+            "# v0.83.11",
+            "same commit SHA",
+        ),
+        (
+            _REPAIR_WORKFLOW,
+            "lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml",
+            _REPAIR_SHA,
+            "# v0.83.11",
+            "same commit SHA",
+        ),
+        (
+            _REPAIR_WORKFLOW,
+            "actions/checkout",
+            _REPAIR_SHA,
+            "# v0.83.11",
+            "same commit SHA",
+        ),
+        (
+            _REPAIR_WORKFLOW,
+            _REPAIR_ACTION,
+            _OTHER_SHA,
+            "# v0.83.11",
+            "same commit SHA",
+        ),
+        (
+            _REPAIR_WORKFLOW,
+            _REPAIR_ACTION,
+            "v0.83.11",
+            "# v0.83.11",
+            "40-character commit SHA",
+        ),
+        (
+            _REPAIR_WORKFLOW,
+            _REPAIR_ACTION,
+            _REPAIR_SHA[:7],
+            "# v0.83.11",
+            "40-character commit SHA",
+        ),
+        (_REPAIR_WORKFLOW, _REPAIR_ACTION, _REPAIR_SHA, "", "version comment"),
+        (
+            _REPAIR_WORKFLOW,
+            _REPAIR_ACTION,
+            _REPAIR_SHA,
+            "# repair",
+            "version comment",
+        ),
+    ],
+    ids=[
+        "wrong-file",
+        "nested-same-basename",
+        "composite-same-basename",
+        "wrong-lgtm-ci-action",
+        "third-party-action",
+        "wrong-sha",
+        "tag",
+        "short-sha",
+        "missing-version",
+        "invalid-version",
+    ],
+)
+def test_tools_image_repair_exception_is_exact(
+    *,
+    name: str,
+    action: str,
+    ref: str,
+    comment: str,
+    error: str,
+    tmp_path: Path,
+) -> None:
+    """Near matches still enforce equality, immutable pins and version comments.
+
+    Args:
+        name: Candidate exception's file path relative to workflows.
+        action: Candidate action identifier.
+        ref: Candidate action reference.
+        comment: Candidate version comment.
+        error: Expected validation failure.
+        tmp_path: Pytest temporary directory.
+    """
+    _write_workflow(
+        root=tmp_path,
+        name="a.yml",
+        body=_steps(f"{action}@{_SHA} # v0.78.1"),
+    )
+    _write_workflow(
+        root=tmp_path,
+        name=name,
+        body=_steps(f"{action}@{ref} {comment}"),
+    )
+
+    with pytest.raises(AssertionError, match=error):
+        pinned_action_shas(root=tmp_path)
 
 
 @pytest.mark.parametrize(

@@ -16,6 +16,24 @@ from lintro.ai.fix import generate_fixes
 from lintro.ai.providers.base import AIResponse
 from tests.unit.ai.conftest import MockAIProvider, MockIssue
 
+_STRUCTURED_SNIPPET_PAIRS: list[tuple[str, Mapping[str, object]]] = [
+    (
+        f"{name}-{pairing}",
+        {"original_code": original, "suggested_code": suggested},
+    )
+    for name, value in [
+        ("empty-mapping", {}),
+        ("mapping", {"text": "y = 2"}),
+        ("empty-list", []),
+        ("list", ["y = 2"]),
+    ]
+    for pairing, original, suggested in [
+        ("empty-original", "", value),
+        ("empty-suggested", value, ""),
+        ("identical", value, value),
+    ]
+]
+
 _MALFORMED_BATCH_FIELDS: list[tuple[str, Mapping[str, object]]] = [
     ("infinite-line", {"line": float("inf")}),
     ("nan-line", {"line": float("nan")}),
@@ -25,23 +43,7 @@ _MALFORMED_BATCH_FIELDS: list[tuple[str, Mapping[str, object]]] = [
     ("list-original", {"original_code": ["y = 2"]}),
     ("mapping-suggested", {"suggested_code": {"text": "y = 9"}}),
     ("list-suggested", {"suggested_code": ["y = 9"]}),
-    *[
-        (
-            f"{name}-{pairing}",
-            {"original_code": original, "suggested_code": suggested},
-        )
-        for name, value in [
-            ("empty-mapping", {}),
-            ("mapping", {"text": "y = 2"}),
-            ("empty-list", []),
-            ("list", ["y = 2"]),
-        ]
-        for pairing, original, suggested in [
-            ("empty-original", "", value),
-            ("empty-suggested", value, ""),
-            ("identical", value, value),
-        ]
-    ],
+    *_STRUCTURED_SNIPPET_PAIRS,
 ]
 
 
@@ -49,14 +51,14 @@ def _batch_content_with_candidate(
     fields: Mapping[str, object],
     *,
     wrapped: bool,
-    invalid_first: bool,
+    candidate_first: bool,
 ) -> str:
     """Pair a candidate fix with a valid fix that fallback must discard.
 
     Args:
         fields: Fields that invalidate or empty the second source line's fix.
         wrapped: Whether to use the CLI schema object instead of a bare array.
-        invalid_first: Whether the candidate fix precedes the valid fix.
+        candidate_first: Whether the candidate fix precedes the valid fix.
 
     Returns:
         The batch response to feed to generation.
@@ -65,7 +67,7 @@ def _batch_content_with_candidate(
         {"original_code": "x = 1", "suggested_code": "x = 9"},
         {"original_code": "y = 2", "suggested_code": "y = 9", **fields},
     ]
-    if invalid_first:
+    if candidate_first:
         entries.reverse()
     return json.dumps({FIX_BATCH_KEY: entries} if wrapped else entries)
 
@@ -168,30 +170,44 @@ async def test_batch_generation_retries_every_issue_after_oversized_json_integer
     assert_that(sys.get_int_max_str_digits()).is_equal_to(limit)
 
 
-@pytest.mark.parametrize("malformed", [False, True])
+@pytest.mark.parametrize(
+    "content,malformed",
+    [
+        pytest.param("not json", True, id="invalid-json"),
+        *[
+            pytest.param(json.dumps(fields), True, id=name)
+            for name, fields in _STRUCTURED_SNIPPET_PAIRS
+        ],
+        *[
+            pytest.param(
+                json.dumps({"original_code": original, "suggested_code": suggested}),
+                False,
+                id=name,
+            )
+            for name, original, suggested in [
+                ("noop", "x = 1", "x = 1"),
+                ("empty-original", "", "x = 3"),
+                ("empty-suggested", "x = 1", ""),
+                ("both-empty", "", ""),
+            ]
+        ],
+    ],
+)
 async def test_single_generation_logs_only_malformed_response_as_failure(
     tmp_path,
+    content,
     malformed,
 ):
-    """A broken answer logs a failure; a valid no-op simply yields no fix."""
+    """Reject malformed snippets as a whole; string absence leaves source intact."""
+    original = b"# unchanged context\nx = 1\n"
     source = tmp_path / "single.py"
-    source.write_text("x = 1\n")
-    content = (
-        "not json"
-        if malformed
-        else json.dumps(
-            {
-                "original_code": "x = 1",
-                "suggested_code": "x = 1",
-            },
-        )
-    )
+    source.write_bytes(original)
     provider = MockAIProvider(responses=[_response(content)])
     messages: list[str] = []
     logger.add(messages.append, format="{message}", level="DEBUG")
 
     result = await generate_fixes(
-        [MockIssue(file=str(source), line=1, code="B101", message="Issue")],
+        [MockIssue(file=str(source), line=2, code="B101", message="Issue")],
         provider,
         tool_name="ruff",
         workspace_root=tmp_path,
@@ -201,7 +217,8 @@ async def test_single_generation_logs_only_malformed_response_as_failure(
     transcript = "".join(messages)
     assert_that("AI fix generation failed" in transcript).is_equal_to(malformed)
     assert_that("malformed response" in transcript).is_equal_to(malformed)
-    assert_that(source.read_text()).is_equal_to("x = 1\n")
+    assert_that(transcript).does_not_contain("TypeError", "Traceback")
+    assert_that(source.read_bytes()).is_equal_to(original)
 
 
 @pytest.mark.parametrize(
@@ -247,10 +264,10 @@ async def test_single_generation_logs_only_malformed_response_as_failure(
                 _batch_content_with_candidate(
                     fields,
                     wrapped=wrapped,
-                    invalid_first=invalid_first,
+                    candidate_first=candidate_first,
                 ),
                 False,
-                id=f"{name}-wrapped={wrapped}-invalid-first={invalid_first}",
+                id=f"{name}-wrapped={wrapped}-candidate-first={candidate_first}",
             )
             for name, fields in [
                 ("empty-original", {"original_code": ""}),
@@ -259,21 +276,21 @@ async def test_single_generation_logs_only_malformed_response_as_failure(
                 ("identical-strings", {"suggested_code": "y = 2"}),
             ]
             for wrapped in (False, True)
-            for invalid_first in (False, True)
+            for candidate_first in (False, True)
         ],
         *[
             pytest.param(
                 _batch_content_with_candidate(
                     fields,
                     wrapped=wrapped,
-                    invalid_first=invalid_first,
+                    candidate_first=candidate_first,
                 ),
                 True,
-                id=f"{name}-wrapped={wrapped}-invalid-first={invalid_first}",
+                id=f"{name}-wrapped={wrapped}-candidate-first={candidate_first}",
             )
             for name, fields in _MALFORMED_BATCH_FIELDS
             for wrapped in (False, True)
-            for invalid_first in (False, True)
+            for candidate_first in (False, True)
         ],
     ],
 )

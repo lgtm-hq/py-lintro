@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.ai.budget import CostBudget
 from lintro.ai.config import AIConfig
@@ -24,6 +25,7 @@ from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.custom_agent_runner import (
     CustomAgentPassRequest,
+    _findings_from_response,
     build_custom_agent_prompt,
     run_custom_agent_passes,
     scope_diff_to_files,
@@ -45,6 +47,18 @@ from lintro.ai.review.session import ReviewSessionOptions
 
 _Patcher = AbstractContextManager[MagicMock]
 
+_VALID_FINDING = {
+    "severity": "P3",
+    "category": "security",
+    "file": "src/app.py",
+    "line": 2,
+    "title": "Raw SQL in handler",
+    "description": "Executes SQL directly",
+    "cause": "cursor.execute",
+    "fix": "Use the repository",
+    "confidence": "high",
+}
+
 _UNUSABLE_RESPONSES = (
     "not json at all",
     "[]",
@@ -58,6 +72,13 @@ _UNUSABLE_RESPONSES = (
     '{"findings": "none"}',
     '{"findings": false}',
     '{"findings": 0}',
+    '{"findings": [1, "x"]}',
+    '{"findings": [null]}',
+    '{"findings": [false]}',
+    '{"findings": [1.5]}',
+    '{"findings": [[]]}',
+    json.dumps({"findings": [1, _VALID_FINDING]}),
+    json.dumps({"findings": [_VALID_FINDING, "x"]}),
 )
 
 _AGENT_TEXT = """---
@@ -365,6 +386,126 @@ def test_run_custom_agent_passes_applies_declared_severity(tmp_path: Path) -> No
         )
 
     assert_that(results[0].findings[0].severity).is_equal_to(Severity.P1)
+
+
+@pytest.mark.parametrize(
+    ("findings", "expected"),
+    [
+        ([], ()),
+        ([_VALID_FINDING], (("src/app.py", "no-raw-sql", Severity.P1),)),
+    ],
+    ids=["empty", "object"],
+)
+def test_findings_from_response_accepts_valid_controls(
+    tmp_path: Path,
+    findings: list[dict[str, object]],
+    expected: tuple[tuple[str, str, Severity], ...],
+) -> None:
+    """Empty and object-only lists retain attribution and declared severity."""
+    parsed = _findings_from_response(
+        agent=_agent(tmp_path=tmp_path),
+        content=_agent_response(findings=findings),
+    )
+
+    assert_that(tuple((f.file, f.source, f.severity) for f in parsed)).is_equal_to(
+        expected,
+    )
+
+
+@pytest.mark.parametrize(
+    ("invalid_index", "json_type", "scalar_value"),
+    [
+        (0, "string", None),
+        (1, "array", None),
+        (0, "null", None),
+        (1, "number", 42),
+        (1, "number", 1.5),
+        (0, "boolean", True),
+        (1, "boolean", False),
+    ],
+    ids=[
+        "first-string",
+        "middle-array",
+        "first-null",
+        "middle-integer",
+        "middle-float",
+        "first-true",
+        "middle-false",
+    ],
+)
+def test_non_object_finding_diagnostics_keep_provider_content_private(
+    tmp_path: Path,
+    invalid_index: int,
+    json_type: str,
+    scalar_value: object,
+) -> None:
+    """Errors and logs identify the invalid entry without exposing response data."""
+    private_parts = (
+        "private-provider-content-3116",
+        "/private/provider-3116/secret.py",
+        "sk-test-private-token-3116",
+        "password=private-credential-3116",
+    )
+    private_value = " ".join(private_parts)
+    neighbor = {**_VALID_FINDING, "file": private_parts[1], "title": private_value}
+    # Neighbors carry private text for null, numbers and booleans too.
+    # Index 1 also checks privacy of an object preceding the invalid entry.
+    findings: list[object] = [neighbor, neighbor]
+    invalid_value = scalar_value
+    if json_type == "string":
+        invalid_value = private_value
+    elif json_type == "array":
+        invalid_value = [private_value]
+    findings.insert(invalid_index, invalid_value)
+    content = json.dumps({"findings": findings})
+    agent = _agent(tmp_path=tmp_path)
+    expected = (
+        "Custom agent findings list must contain only JSON objects "
+        f"(index {invalid_index}, type {json_type})"
+    )
+
+    with pytest.raises(AIProviderError) as caught:
+        _findings_from_response(agent=agent, content=content)
+
+    assert_that(str(caught.value)).is_equal_to(expected)
+    assert_that(caught.value.__cause__).is_none()
+    messages: list[Any] = []
+    failed: list[str] = []
+    completed: list[str] = []
+    sink = logger.add(messages.append, format="{message}", level="ERROR")
+    try:
+        with _patch_agent_call(content=content):
+            results = asyncio.run(
+                run_custom_agent_passes(
+                    request=CustomAgentPassRequest(
+                        selected=(
+                            SelectedCustomAgent(agent=agent, files=("src/app.py",)),
+                        ),
+                        context=_context(),
+                        provider=_mock_provider(content=content),
+                        ai_config=_ai_config(),
+                        provider_cache={},
+                        budget=CostBudget(),
+                        on_agent_failed=failed.append,
+                        on_pass_complete=lambda result: completed.append(
+                            result.agent_name,
+                        ),
+                    ),
+                ),
+            )
+    finally:
+        logger.remove(sink)
+
+    assert_that(results).is_empty()
+    assert_that(failed).is_equal_to([agent.name])
+    assert_that(completed).is_empty()
+    assert_that(messages).is_length(1)
+    diagnostic = messages[0]
+    assert_that(str(diagnostic)).contains(expected)
+    transcript = str(caught.value) + str(diagnostic) + repr(diagnostic.record["extra"])
+    assert_that(transcript).does_not_contain(content, *private_parts)
+    assert_that(diagnostic.record["exception"]).is_none()
+    assert_that(diagnostic.record["extra"]).does_not_contain_key("exc_info")
 
 
 @pytest.mark.parametrize("content", _UNUSABLE_RESPONSES)
@@ -716,3 +857,136 @@ def test_only_mode_coverage_requires_a_usable_agent_response(
     assert_that(result.readiness_verdict).is_equal_to(
         ReviewVerdict.READY if successful else ReviewVerdict.INCOMPLETE,
     )
+
+
+@pytest.mark.parametrize("failed_agent_first", [True, False])
+@pytest.mark.parametrize("has_finding", [True, False])
+def test_only_mode_rejects_whole_response_without_losing_independent_agent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failed_agent_first: bool,
+    has_finding: bool,
+) -> None:
+    """Offline mixed answers earn no credit; independent passes and spend survive."""
+    failed_agent = _agent(
+        tmp_path=tmp_path,
+        text=_AGENT_TEXT.replace("src/**/*.py", "**/*"),
+    )
+    successful_agent = _agent(
+        tmp_path=tmp_path,
+        text=(
+            "---\nname: docs-agent\ninclude: ['docs/**']\nseverity: low\n---\n"
+            "Check docs.\n"
+        ),
+    )
+    successful_finding = {
+        **_VALID_FINDING,
+        "file": "docs/readme.md",
+        "title": "Document the repository method",
+    }
+
+    async def _offline_call(
+        *,
+        user_prompt: str,
+        budget: CostBudget,
+        **_kwargs: object,
+    ) -> AIResponse:
+        # call_ai receives the scope in the prompt; only the failed pass sees app.py.
+        if "src/app.py" in user_prompt:
+            cost = 0.07
+            findings: list[object] = [_VALID_FINDING, "x"]
+        else:
+            cost = 0.01
+            findings = [successful_finding] if has_finding else []
+        budget.record(cost)
+        return AIResponse(
+            content=json.dumps({"findings": findings}),
+            model="offline-fixture",
+            cost_estimate=cost,
+        )
+
+    monkeypatch.setattr("lintro.ai.review.custom_agent_runner.call_ai", _offline_call)
+    agents = (failed_agent, successful_agent)
+    result = run_review(
+        _context(),
+        options=ReviewSessionOptions(
+            provider=_mock_provider(content="unused offline fixture"),
+            ai_config=_ai_config(),
+            checklist_items=[],
+            checklist_text="",
+            classifications=[],
+            custom_agents=agents if failed_agent_first else agents[::-1],
+            run_builtin_checklist=False,
+        ),
+    )
+
+    assert_that(result.metadata.custom_agents_run).is_equal_to(1)
+    assert_that(result.metadata.custom_agents_skipped).is_equal_to(1)
+    assert_that(result.metadata.reviewed_paths).is_equal_to(("docs/readme.md",))
+    assert_that(result.metadata.files_reviewed).is_equal_to(1)
+    assert_that(result.metadata.cost_estimate_usd).is_close_to(0.08, 1e-9)
+    assert_that(result.summary).contains(
+        f"1 agent(s) ran and reported {int(has_finding)}",
+    )
+    assert_that([(f.title, f.source) for f in result.findings]).is_equal_to(
+        [(successful_finding["title"], successful_agent.name)] if has_finding else [],
+    )
+    assert_that(result.coverage).is_equal_to(
+        CoverageCounts(reviewed=1, awaiting=1, eligible=2),
+    )
+    assert_that(tuple(record.path for record in result.coverage_records)).is_equal_to(
+        ("docs/readme.md",),
+    )
+    assert_that(result.awaiting_paths).is_equal_to(("src/app.py",))
+    assert_that(
+        {entry.path: entry.reason for entry in result.metadata.skipped_files},
+    ).is_equal_to({"src/app.py": FileSkipReason.AGENT_SCOPE})
+    assert_that(result.readiness_verdict).is_equal_to(ReviewVerdict.INCOMPLETE)
+
+
+def test_rejected_agent_spend_still_stops_later_passes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An offline rejected answer consumes budget without completing a pass."""
+    agent = _agent(tmp_path=tmp_path)
+    later_agent = _agent(
+        tmp_path=tmp_path,
+        text=_AGENT_TEXT.replace("no-raw-sql", "later-agent"),
+    )
+    budget = CostBudget(max_cost_usd=0.05)
+    completed: list[str] = []
+    failed: list[str] = []
+
+    async def _offline_call(*, budget: CostBudget, **_kwargs: object) -> AIResponse:
+        budget.record(0.07)
+        return AIResponse(
+            content='{"findings": [1, "x"]}',
+            model="offline-fixture",
+            cost_estimate=0.07,
+        )
+
+    monkeypatch.setattr("lintro.ai.review.custom_agent_runner.call_ai", _offline_call)
+    with pytest.raises(AICostBudgetExceededError, match="budget exceeded"):
+        asyncio.run(
+            run_custom_agent_passes(
+                request=CustomAgentPassRequest(
+                    selected=tuple(
+                        SelectedCustomAgent(agent=spec, files=("src/app.py",))
+                        for spec in (agent, later_agent)
+                    ),
+                    context=_context(),
+                    provider=_mock_provider(content="unused offline fixture"),
+                    ai_config=_ai_config(),
+                    provider_cache={},
+                    budget=budget,
+                    on_pass_complete=lambda result: completed.append(result.agent_name),
+                    on_agent_failed=failed.append,
+                ),
+            ),
+        )
+
+    assert_that(budget.spent).is_close_to(0.07, 1e-9)
+    assert_that(budget.remaining).is_equal_to(0.0)
+    assert_that(completed).is_empty()
+    assert_that(failed).is_equal_to([agent.name])

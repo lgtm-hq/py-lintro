@@ -673,19 +673,21 @@ def test_every_attestation_verifying_job_allows_the_attestation_store() -> None:
 
 
 def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
-    """Keep canonical pins except the independently adopted aggregate gate.
+    """Keep canonical pins except the independently adopted repair callers.
 
     Guards the repo-wide invariant from #1280: `uses:` refs,
     `tooling-ref:` inputs, and manual `actions/checkout` steps targeting
     lgtm-hq/lgtm-ci all point at the same lgtm-ci commit, so pins cannot
-    silently drift apart again. Only the named aggregate caller has an
-    independent exact pin; tags, branches and short SHAs remain offenders.
+    silently drift apart again. Only the named repair callers have independent
+    exact pins; tags, branches and short SHAs remain offenders.
     """
     canonical = _canonical_lgtm_ci_pin()
     # Gate-only adoption needs the released #1197 retry recovery and #1207
     # block-egress repair without migrating unrelated reusable callers.
     independent_pins = {
         "all-checks-gate.yml": "8f0fd9339df5d30a529aa572ceb51345b8be33a0",
+        # #3093: v0.83.11's verified Trivy acquisition, tools-image caller only.
+        "docker-tools-publish.yml": "cade5e687630ce3208bf914d0b1590145f3d569e",
     }
     ref_pattern = re.compile(
         r"lgtm-hq/lgtm-ci/[^@\s]+@([^\s#]+)|tooling-ref:\s*[\"']?([^\"'\s#]+)",
