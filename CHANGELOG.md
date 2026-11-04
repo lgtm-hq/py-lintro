@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.15] - 2026-11-04
+
+### Fixed
+
+- **ci**: adopt verified Trivy for release image staging (#3203) (790e3c4)
+
 ## [0.177.14] - 2026-11-04
 
 ### Changed
