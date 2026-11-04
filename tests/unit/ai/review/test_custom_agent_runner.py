@@ -413,14 +413,31 @@ def test_findings_from_response_accepts_valid_controls(
 
 
 @pytest.mark.parametrize(
-    ("invalid_index", "json_type"),
-    [(0, "string"), (1, "array")],
-    ids=["first-string", "middle-array"],
+    ("invalid_index", "json_type", "scalar_value"),
+    [
+        (0, "string", None),
+        (1, "array", None),
+        (0, "null", None),
+        (1, "number", 42),
+        (1, "number", 1.5),
+        (0, "boolean", True),
+        (1, "boolean", False),
+    ],
+    ids=[
+        "first-string",
+        "middle-array",
+        "first-null",
+        "middle-integer",
+        "middle-float",
+        "first-true",
+        "middle-false",
+    ],
 )
 def test_non_object_finding_diagnostics_keep_provider_content_private(
     tmp_path: Path,
     invalid_index: int,
     json_type: str,
+    scalar_value: object,
 ) -> None:
     """Errors and logs identify the invalid entry without exposing response data."""
     private_parts = (
@@ -431,11 +448,15 @@ def test_non_object_finding_diagnostics_keep_provider_content_private(
     )
     private_value = " ".join(private_parts)
     neighbor = {**_VALID_FINDING, "file": private_parts[1], "title": private_value}
+    # Neighbors carry private text for null, numbers and booleans too.
+    # Index 1 also checks privacy of an object preceding the invalid entry.
     findings: list[object] = [neighbor, neighbor]
-    findings.insert(
-        invalid_index,
-        private_value if json_type == "string" else [private_value],
-    )
+    invalid_value = scalar_value
+    if json_type == "string":
+        invalid_value = private_value
+    elif json_type == "array":
+        invalid_value = [private_value]
+    findings.insert(invalid_index, invalid_value)
     content = json.dumps({"findings": findings})
     agent = _agent(tmp_path=tmp_path)
     expected = (
