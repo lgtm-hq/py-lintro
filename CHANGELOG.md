@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.16] - 2026-11-04
+
+### Changed
+
+- **ai**: pin zero-charge cache-hit callbacks (#3207) (ada7b6d)
+
+### Fixed
+
+- **ai**: retain transport turn-limit charges in fix sessions (#3210) (3a1ab82)
+- **ai**: retain observed fix charges on exceptional exits (#3208) (96cd5ac)
+
 ## [0.177.15] - 2026-11-04
 
 ### Fixed
