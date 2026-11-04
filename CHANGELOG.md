@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.17] - 2026-11-04
+
+### Changed
+
+- **ai**: clarify refinement exceptional exits (#3213) (9325fc3)
+
+### Fixed
+
+- **ai**: count observed fix provider outcomes in telemetry (#3215) (2dda69d)
+
 ## [0.177.16] - 2026-11-04
 
 ### Changed
