@@ -123,7 +123,12 @@ async def _generate_all_suggestions(
             ai_config=ai_config,
             cost_callback=response_costs.append,
         )
-        suggestions = await generate_fixes_from_params(issues, provider, fix_params)
+        try:
+            suggestions = await generate_fixes_from_params(issues, provider, fix_params)
+        finally:
+            # Settle observed responses even if generation exits exceptionally.
+            tool_cost = sum(response_costs)
+            budget.record(tool_cost)
         for suggestion in suggestions:
             if not suggestion.tool_name:
                 suggestion.tool_name = tool_name
@@ -146,9 +151,7 @@ async def _generate_all_suggestions(
 
         # Response charges survive rejected parses and batch fallback. Suggestion
         # metadata still describes only the response that produced that patch.
-        tool_cost = sum(response_costs)
         telemetry.total_cost_usd += tool_cost
-        budget.record(tool_cost)
 
         if ai_config.verbose:
             loguru_logger.info(
@@ -358,15 +361,20 @@ async def _verify_and_refine(
         and validation.unverified > 0
         and ai_config.max_refinement_attempts >= 1
     ):
-        refined, refinement_cost = await refine_unverified_fixes(
-            applied_suggestions=applied_suggestions,
-            validation=validation,
-            provider=provider,
-            ai_config=ai_config,
-            workspace_root=workspace_root,
-        )
+        response_costs: list[float] = []
+        try:
+            refined, refinement_cost = await refine_unverified_fixes(
+                applied_suggestions=applied_suggestions,
+                validation=validation,
+                provider=provider,
+                ai_config=ai_config,
+                workspace_root=workspace_root,
+                cost_callback=response_costs.append,
+            )
+        finally:
+            # A later refinement failure must not discard earlier responses.
+            budget.record(sum(response_costs))
         telemetry.total_cost_usd += refinement_cost
-        budget.record(refinement_cost)
         if refined:
             telemetry.total_api_calls += len(refined)
             for s in refined:
