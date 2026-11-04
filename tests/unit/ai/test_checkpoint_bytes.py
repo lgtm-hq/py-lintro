@@ -18,6 +18,7 @@ import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
 
+from lintro.ai import checkpoints
 from lintro.ai.checkpoints import (
     Checkpoint,
     CheckpointError,
@@ -680,6 +681,36 @@ def test_long_path_arguments_fit_constrained_exec_budget(
     assert_that((repo / ".git/filter-invocations").exists()).is_false()
 
 
+def test_constrained_exec_isolates_oversized_ambient_environment(
+    byte_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The artificial limit applies to children without changing ambient state."""
+    budget = 64 * 1024
+    original = os.environ.copy()
+    before = _user_state(byte_repo)
+    with monkeypatch.context() as ambient:
+        ambient.setenv("LINTRO_TEST_EXEC_PADDING", "x" * (100 * 1024))
+        oversized = os.environ.copy()
+        effective = checkpoints._git_env(None)
+        assert_that(len(oversized["LINTRO_TEST_EXEC_PADDING"])).is_greater_than(budget)
+        with _constrained_git_exec(ambient, budget=budget) as (_, sizes, indexes):
+            checkpoint = capture_checkpoint(["target.txt"], workspace_root=byte_repo)
+            assert checkpoint is not None
+            assert_that(diff_checkpoint(checkpoint)).is_empty()
+            assert_that(dict(os.environ)).is_equal_to(oversized)
+        assert_that(dict(os.environ)).is_equal_to(oversized)
+        assert_that(checkpoints._git_env(None)).is_equal_to(effective)
+
+    assert_that(dict(os.environ)).is_equal_to(original)
+    assert_that(max(sizes)).is_less_than_or_equal_to(budget)
+    assert_that(_user_state(byte_repo)).is_equal_to(before)
+    assert_that(indexes).is_not_empty()
+    for index in indexes:
+        assert_that(index.exists()).is_false()
+        assert_that(Path(f"{index}.lock").exists()).is_false()
+
+
 @contextmanager
 def _constrained_git_exec(
     monkeypatch: pytest.MonkeyPatch,
@@ -721,6 +752,23 @@ def _constrained_git_exec(
         return real_run(args, **kwargs)
 
     with monkeypatch.context() as limited:
+        # Hosted CI's inherited environment can itself exceed this artificial
+        # ceiling. Give both the production batcher and subprocess adapter the
+        # same deterministic child environment without changing os.environ.
+        child_env = {
+            "PATH": os.defpath,
+            "LC_ALL": "C",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_SYSTEM": os.devnull,
+            "GIT_ATTR_NOSYSTEM": "1",
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_OPTIONAL_LOCKS": "0",
+            "GIT_LITERAL_PATHSPECS": "1",
+        }
+        limited.setattr(
+            "lintro.ai.checkpoints._git_env",
+            lambda overlay: {**child_env, **(overlay or {})},
+        )
         # Advertise the same deterministic limit that constrained_run enforces.
         limited.setattr(
             os,
