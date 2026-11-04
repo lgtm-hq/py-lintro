@@ -189,7 +189,7 @@ jobs:
     needs: resolve
     if: needs.resolve.outputs.action == 'publish' && github.ref == 'refs/heads/main'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@cade5e687630ce3208bf914d0b1590145f3d569e # v0.83.11
     permissions:
       contents: read
       packages: write
@@ -202,7 +202,8 @@ jobs:
       tags: latest
       push: true
       platforms: linux/amd64,linux/arm64
-      runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
+      # Preserve native runners when the new tooling's amd64 default changes.
+      runner-map: '{"linux/amd64":"ubuntu-24.04","linux/arm64":"ubuntu-24.04-arm"}'
       smoke-test: bun --version
       validate-on-pr: false
       cache-registry-ref: ghcr.io/lgtm-hq/lintro-tools:cache
@@ -211,7 +212,7 @@ jobs:
       cosign-sign: true
       scan: true
       scan-exit-code: '0'
-      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      tooling-ref: 'cade5e687630ce3208bf914d0b1590145f3d569e' # v0.83.11
       egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: docker
       allowed-endpoints-mode: replace
@@ -254,7 +255,6 @@ jobs:
         tuf-repo-cdn.sigstore.dev:443
         timestamp.sigstore.dev:443
         oauth2.sigstore.dev:443
-        get.trivy.dev:443
         mirror.gcr.io:443
 
   persist-pinned-digest:
