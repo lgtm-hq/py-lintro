@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 __all__ = [
     "describe_block_error",
     "describe_config_error",
+    "format_invalid_ai_config",
     "nested_source_key",
     "nested_sources",
     "provider_label",
@@ -91,6 +92,25 @@ def describe_config_error(exc: Exception) -> str:
         if line.strip():
             return line.strip()
     return type(exc).__name__
+
+
+def format_invalid_ai_config(exc: Exception) -> str:
+    """Return the one-line error every surface prints for a rejected ``ai:``.
+
+    ``lintro chk``/``fmt``, ``lintro review`` and MCP ``lintro_review`` all
+    report a section that fails validation with the same text; building the
+    prefix here keeps them from drifting apart (#3116). Those surfaces may not
+    import each other, so the shared wording lives in the AI layer they all
+    reach.
+
+    Args:
+        exc: The resolution failure to describe.
+
+    Returns:
+        ``invalid AI configuration: `` followed by
+        :func:`describe_config_error`'s line.
+    """
+    return f"invalid AI configuration: {describe_config_error(exc)}"
 
 
 def nested_source_key(*, provider: AIProvider | str, field: str) -> str:

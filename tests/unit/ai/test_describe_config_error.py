@@ -12,8 +12,7 @@ and pin the text ``lintro config`` shows for a plain field.
 from __future__ import annotations
 
 import json
-import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -23,9 +22,11 @@ from pydantic import BaseModel, ValidationError, model_validator
 
 from lintro.ai.config import AIConfig
 from lintro.ai.exceptions import AIConfigOverrideError
-from lintro.ai.provider_blocks import describe_config_error
+from lintro.ai.provider_blocks import (
+    describe_config_error,
+    format_invalid_ai_config,
+)
 from lintro.cli import cli
-from lintro.config.config_loader import clear_config_cache
 
 _PASTED_KEY = "sk-ant-NOT-A-REAL-KEY-0123456789"
 
@@ -112,37 +113,36 @@ def test_a_non_pydantic_failure_reports_its_first_non_blank_line() -> None:
     )
 
 
+def test_the_shared_usage_error_prefixes_the_described_line() -> None:
+    """Every surface's usage error is the prefix plus the one-line description.
+
+    ``chk``/``fmt``, ``lintro review`` and MCP ``lintro_review`` all print
+    this text, and the rejected value stays out of it.
+    """
+    exc = _rejection(lambda: AIConfig(api_key_env=_PASTED_KEY))
+
+    message = format_invalid_ai_config(exc)
+
+    assert_that(message).is_equal_to(
+        f"invalid AI configuration: {describe_config_error(exc)}",
+    )
+    assert_that(message).starts_with(
+        "invalid AI configuration: ai.api_key_env must be the NAME",
+    )
+    assert_that(message).does_not_contain(_PASTED_KEY, "\n")
+
+
 @pytest.fixture
-def plain_field_project(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> Iterator[Path]:
+def plain_field_project(ai_config_project: Callable[[str], Path]) -> Path:
     """Return a project whose ``ai:`` section has one out-of-range field.
 
     Args:
-        tmp_path: Pytest temporary directory.
-        monkeypatch: Pytest monkeypatch fixture.
+        ai_config_project: Writer for an isolated project config.
 
-    Yields:
+    Returns:
         Path: The project root, already the working directory.
     """
-    home = tmp_path / "home"
-    home.mkdir()
-    for name in [key for key in os.environ if key.startswith("LINTRO_AI_")]:
-        monkeypatch.delenv(name)
-    monkeypatch.delenv("LINTRO_GLOBAL_CONFIG", raising=False)
-    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
-    root = tmp_path / "project"
-    root.mkdir()
-    monkeypatch.chdir(root)
-    (root / ".lintro-config.yaml").write_text(
-        "ai:\n  max_tokens: -7\n",
-        encoding="utf-8",
-    )
-    clear_config_cache()
-    yield root
-    clear_config_cache()
+    return ai_config_project("ai:\n  max_tokens: -7\n")
 
 
 def test_lintro_config_rich_row_names_the_plain_field(
