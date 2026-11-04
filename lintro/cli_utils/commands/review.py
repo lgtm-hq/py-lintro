@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, NoReturn
 
 import click
 from loguru import logger
+from pydantic import ValidationError
 from rich.console import Console
 
 from lintro.ai.availability import require_ai
@@ -42,6 +43,7 @@ from lintro.ai.exceptions import (
     AIProviderRequiredError,
 )
 from lintro.ai.paths import resolve_workspace_root
+from lintro.ai.provider_blocks import describe_config_error
 from lintro.ai.provider_enum import (
     accepted_provider_names,
     accepted_provider_values,
@@ -811,7 +813,8 @@ def _resolve_ai(
         ResolvedAIConfig: Effective values with per-field provenance.
 
     Raises:
-        click.UsageError: When a flag or environment override is invalid.
+        click.UsageError: When a flag or environment override is invalid, or
+            when the ``ai:`` config section fails validation.
     """
     try:
         return resolve_effective_ai_config(
@@ -829,6 +832,12 @@ def _resolve_ai(
         )
     except AIConfigOverrideError as exc:
         raise click.UsageError(str(exc)) from exc
+    except ValidationError as exc:
+        # Same one line ``chk``/``fmt`` print (#3116): the field path and the
+        # constraint, never pydantic's dump quoting the rejected value.
+        raise click.UsageError(
+            f"invalid AI configuration: {describe_config_error(exc)}",
+        ) from exc
 
 
 def _parse_provider_options(*, values: tuple[str, ...]) -> dict[str, str]:

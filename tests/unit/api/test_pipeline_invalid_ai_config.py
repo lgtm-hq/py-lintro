@@ -16,14 +16,16 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
+from pydantic import BaseModel, ValidationError
 
 from lintro.cli import cli
 from lintro.config.config_loader import clear_config_cache
 
 _SOURCE = "x = 1\n"
 
-#: ``(ai: body, field path the error must name)``. The ``api_key_env`` case
-#: carries a key-shaped value that must never be echoed back.
+#: ``(ai: body, field path the error must name)``. The ``api_key_env`` cases
+#: carry a key-shaped value that must never be echoed back: the list form fails
+#: on type, the string form on the validator that recognises a pasted key.
 _INVALID = {
     "wrong_type": ("  max_tokens: lots\n", "ai.max_tokens"),
     "out_of_range": ("  max_tokens: 0\n", "ai.max_tokens"),
@@ -35,6 +37,14 @@ _INVALID = {
     "secret_shaped": (
         '  api_key_env: ["sk-ant-NOT-A-REAL-KEY-0123456789"]\n',
         "ai.api_key_env",
+    ),
+    "secret_shaped_string": (
+        '  api_key_env: "sk-ant-NOT-A-REAL-KEY-0123456789"\n',
+        "ai.api_key_env",
+    ),
+    "nested_provider": (
+        "  providers:\n    anthropic:\n      cli_bare: sometimes-maybe\n",
+        "ai.providers.anthropic.cli_bare",
     ),
 }
 
@@ -116,6 +126,7 @@ def test_invalid_ai_config_value_is_a_one_line_usage_error(
         "input_value",
         "sk-ant-",
         "carrier-pigeon",
+        "sometimes-maybe",
     )
     assert_that(target.read_text(encoding="utf-8")).is_equal_to(_SOURCE)
 
@@ -139,3 +150,42 @@ def test_valid_or_absent_ai_config_still_runs_clean(
     assert_that(result.exception).described_as(result.output).is_none()
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(result.output).does_not_contain("invalid AI configuration")
+
+
+class _HookPayload(BaseModel):
+    """A model the AI hook might validate that has nothing to do with ``ai:``."""
+
+    count: int
+
+
+def test_a_validation_error_inside_the_ai_hook_is_not_a_config_error(
+    make_project: Callable[[str | None], Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With ``fail_on_ai_error`` the hook's own failure surfaces unrelabelled.
+
+    The config is valid, so the ``ValidationError`` the hook raises is not
+    about ``ai:``; reporting it as "invalid AI configuration" would send the
+    user to fix a config that is fine. It propagates like any other hook
+    failure under ``ai.fail_on_ai_error`` instead.
+    """
+    from lintro.ai.hook import AIPostExecutionHook
+
+    def _execute(*_args: object, **_kwargs: object) -> None:
+        _HookPayload.model_validate({"count": "not-a-number"})
+
+    monkeypatch.setattr(AIPostExecutionHook, "execute", _execute)
+    target = make_project(
+        "  enabled: true\n  provider: anthropic\n  fail_on_ai_error: true\n",
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        ["chk", "--output-format", "json", "--tools", "ruff", "--no-art", "a.py"],
+    )
+
+    assert_that(result.exception).is_instance_of(ValidationError)
+    assert_that(str(result.exception)).contains("_HookPayload")
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(result.output).does_not_contain("invalid AI configuration")
+    assert_that(target.read_text(encoding="utf-8")).is_equal_to(_SOURCE)

@@ -299,11 +299,14 @@ def _resolve_ai_config(*, workspace: Path) -> tuple[Any, ResolvedAIConfig]:
             installed, ``ai.provider`` is unset, or ``ai.review`` is disabled
             for this workspace;
             :attr:`McpErrorCode.INVALID_INPUT` when an ``LINTRO_AI_*`` overlay
-            fails validation.
+            or the ``ai:`` config section fails validation.
     """
+    from pydantic import ValidationError
+
     from lintro.ai.availability import is_ai_available
     from lintro.ai.effective_config import resolve_effective_ai_config
     from lintro.ai.exceptions import AIConfigOverrideError
+    from lintro.ai.provider_blocks import describe_config_error
     from lintro.config.config_loader import get_config
 
     if not is_ai_available():
@@ -324,6 +327,14 @@ def _resolve_ai_config(*, workspace: Path) -> tuple[Any, ResolvedAIConfig]:
             code=McpErrorCode.INVALID_INPUT,
             message=str(exc),
             detail={"tool": "lintro_review", "reason": "invalid_ai_override"},
+        ) from exc
+    except ValidationError as exc:
+        # Without this the server's catch-all answered ``execution_error``
+        # with pydantic's dump, which quotes the rejected value (#3116).
+        raise McpError(
+            code=McpErrorCode.INVALID_INPUT,
+            message=f"invalid AI configuration: {describe_config_error(exc)}",
+            detail={"tool": "lintro_review", "reason": "invalid_ai_config"},
         ) from exc
     ai_config = resolved.config
     if not ai_config.review_enabled:
