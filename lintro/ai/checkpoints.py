@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess  # nosec B404 - subprocess invokes git with shell=False; args are plumbing only
 import tempfile
 import time
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -27,8 +29,10 @@ from lintro.ai.paths import atomic_write_bytes
 CHECKPOINT_REF_PREFIX = "refs/lintro/checkpoints/"
 DEFAULT_CHECKPOINT_RETENTION = 10
 _GIT_TIMEOUT_SECONDS = 60.0
-# Keep each ``git add`` argv comfortably under platform ARG_MAX limits.
-_GIT_ADD_CHUNK = 500
+# Bound process count as well as encoded argv size.
+_GIT_PATH_CHUNK = 500
+_GIT_ARG_MAX = 128 * 1024
+_GIT_ARG_RESERVE = 8 * 1024
 # Git tree entry modes that are not plain file content.
 _SYMLINK_MODE = "120000"
 _GITLINK_MODE = "160000"
@@ -113,6 +117,7 @@ def _run_git(
     env: dict[str, str] | None = None,
     check: bool = False,
     binary: bool = False,
+    input_bytes: bytes | None = None,
 ) -> subprocess.CompletedProcess[Any]:
     """Run a git command with optional temp-index environment.
 
@@ -123,6 +128,7 @@ def _run_git(
         check: When True, raise :class:`CheckpointError` on non-zero exit.
         binary: When True, return raw ``bytes`` streams instead of decoded
             text. Required for blob contents, which are not always UTF-8.
+        input_bytes: Optional raw stdin data; requires ``binary=True``.
 
     Returns:
         Completed process whose stdout/stderr are ``str`` (or ``bytes`` when
@@ -140,6 +146,7 @@ def _run_git(
             cwd=cwd,
             capture_output=True,
             text=not binary,
+            input=input_bytes,
             timeout=_GIT_TIMEOUT_SECONDS,
             check=False,
             env=_git_env(env),
@@ -283,6 +290,158 @@ def _new_run_id() -> str:
     return f"{int(time.time())}-{uuid.uuid4().hex[:8]}"
 
 
+def _raw_file_mode(path: Path) -> str | None:
+    """Return disk Git mode, ``0`` for absence, or None for unsupported targets."""
+    try:
+        mode = path.lstat().st_mode
+    except (FileNotFoundError, NotADirectoryError):
+        return "0"
+    if stat.S_ISREG(mode):
+        return "100755" if mode & stat.S_IXUSR else "100644"
+    if stat.S_ISLNK(mode):
+        try:
+            return _SYMLINK_MODE if stat.S_ISREG(path.stat().st_mode) else None
+        except (FileNotFoundError, NotADirectoryError):
+            return None
+    return None
+
+
+def _git_path_batches(
+    paths: list[str],
+    *,
+    args: list[str],
+    env: dict[str, str],
+) -> Iterator[list[str]]:
+    """Yield literal path operands within a conservative encoded exec budget.
+
+    Args:
+        paths: Repo-relative path operands.
+        args: Fixed Git arguments before the operands, including ``--``.
+        env: Temporary-index environment overlay.
+
+    Yields:
+        list[str]: Batches bounded by both count and encoded bytes.
+
+    Raises:
+        CheckpointError: When even one target cannot fit the exec budget.
+    """
+    try:
+        arg_max = os.sysconf("SC_ARG_MAX")
+    except (AttributeError, OSError, ValueError):
+        arg_max = 32 * 1024
+    # Cap argv at half macOS's usual 256 KiB limit even on larger-limit hosts.
+    # Include NULs and conservative 64-bit argv/environ pointers; reserve extra
+    # space for platform overhead and the subprocess implementation.
+    budget = arg_max if arg_max > 0 else 32 * 1024
+    budget -= _GIT_ARG_RESERVE
+    budget -= sum(
+        len(os.fsencode(key)) + len(os.fsencode(value)) + 2 + 8
+        for key, value in _git_env(env).items()
+    )
+    budget = min(budget, _GIT_ARG_MAX)
+    fixed_size = sum(
+        len(os.fsencode(arg)) + 1 + 8 for arg in [_git_bin() or "git", *args]
+    )
+    size = fixed_size
+    chunk: list[str] = []
+    for path in paths:
+        path_size = len(os.fsencode(path)) + 1 + 8
+        if fixed_size + path_size > budget:
+            raise CheckpointError("Checkpoint target exceeds Git argument budget")
+        if chunk and (len(chunk) >= _GIT_PATH_CHUNK or size + path_size > budget):
+            yield chunk
+            chunk = []
+            size = fixed_size
+        chunk.append(path)
+        size += path_size
+    if chunk:
+        yield chunk
+
+
+def _update_raw_index(
+    *,
+    root: Path,
+    paths: list[str],
+    env: dict[str, str],
+    remove_nonfiles: bool = False,
+) -> list[str]:
+    """Batch raw blobs into a private index, returning supported target paths.
+
+    Args:
+        root: Repository root.
+        paths: Literal repo-relative target paths.
+        env: Temporary-index environment overlay.
+        remove_nonfiles: For diff, record a captured file replaced by a non-file
+            as deleted. Capture instead excludes unsupported targets.
+
+    Returns:
+        Paths representing regular files, file symlinks, or absence.
+
+    Raises:
+        CheckpointError: When a filesystem read or Git operation fails.
+    """
+    try:
+        modes = {rel: _raw_file_mode(root / rel) for rel in paths}
+        missing = [
+            rel
+            for rel, mode in modes.items()
+            if mode == "0" or (mode is None and remove_nonfiles)
+        ]
+        remove_args = ["update-index", "--force-remove", "--"]
+        for chunk in _git_path_batches(missing, args=remove_args, env=env):
+            _run_git(
+                [*remove_args, *chunk],
+                cwd=str(root),
+                env=env,
+                check=True,
+            )
+        entries: list[bytes] = []
+        regular = [rel for rel, mode in modes.items() if mode in ("100644", "100755")]
+        hash_args = ["hash-object", "-w", "--no-filters", "--"]
+        for chunk in _git_path_batches(regular, args=hash_args, env=env):
+            # Explicit argv operands need no stdin-paths C-style quoting, even
+            # for embedded newlines, tabs, quotes or leading dashes.
+            blobs = _run_git(
+                [*hash_args, *chunk],
+                cwd=str(root),
+                env=env,
+                check=True,
+                binary=True,
+            ).stdout.splitlines()
+            if len(blobs) != len(chunk):
+                raise CheckpointError(
+                    "Git returned an unexpected checkpoint hash count",
+                )
+            for rel, blob in zip(chunk, blobs, strict=True):
+                entries.append(
+                    os.fsencode(f"{modes[rel]} {blob.decode('ascii')}\t{rel}\0"),
+                )
+        for rel, mode in modes.items():
+            if mode != _SYMLINK_MODE:
+                continue
+            blob = _run_git(
+                ["hash-object", "-w", "--no-filters", "--stdin"],
+                cwd=str(root),
+                env=env,
+                check=True,
+                binary=True,
+                input_bytes=os.fsencode(os.readlink(root / rel)),
+            ).stdout.strip()
+            entries.append(b"120000 " + blob + b"\t" + os.fsencode(rel) + b"\0")
+        if entries:
+            _run_git(
+                ["update-index", "--replace", "-z", "--index-info"],
+                cwd=str(root),
+                env=env,
+                check=True,
+                binary=True,
+                input_bytes=b"".join(entries),
+            )
+    except OSError as exc:
+        raise CheckpointError("Failed to read checkpoint targets") from exc
+    return [rel for rel, mode in modes.items() if mode is not None]
+
+
 def capture_checkpoint(
     paths: list[str] | tuple[str, ...],
     *,
@@ -293,12 +452,14 @@ def capture_checkpoint(
     """Snapshot target file state to ``refs/lintro/checkpoints/<run-id>``.
 
     Uses a temporary ``GIT_INDEX_FILE``: ``read-tree HEAD`` (or empty tree),
-    ``add`` target paths (including untracked), ``write-tree``, ``update-ref``.
+    raw ``hash-object`` / ``update-index`` for targets (including untracked),
+    ``write-tree``, ``update-ref``. Blobs contain the actual working-tree bytes,
+    bypassing newline conversion and clean filters without changing Git config.
     Does not modify the user index, stash, or ``HEAD``. Directory enumeration
     failures propagate as :class:`CheckpointError`, aborting capture before
     any checkpoint refs are pruned or written.
 
-    Local temporary-index allocation, close, and cleanup failures propagate
+    Temporary-index allocation, close, and cleanup failures propagate
     as :class:`OSError`; cleanup can fail after the new ref has been written.
     Git subprocess launch errors are wrapped as :class:`CheckpointError`:
     failures inside the later capture try block return None instead, while
@@ -319,8 +480,8 @@ def capture_checkpoint(
 
     Returns:
         The created :class:`Checkpoint`, or None when git checkpoints are
-        unavailable, no paths remain after normalization, or a git plumbing
-        step fails after the temporary index has been allocated.
+        unavailable, no paths remain after normalization, or a filesystem read
+        or git plumbing step fails after the temporary index has been allocated.
     """
     if not git_checkpoints_available(workspace_root):
         return None
@@ -361,31 +522,10 @@ def capture_checkpoint(
         # symlink to one, a FIFO) is dropped from the snapshot entirely: it
         # cannot be captured as a blob, and leaving it in ``paths`` would let
         # a restore delete a path lintro never touched.
-        missing = [p for p in rel_paths if not os.path.lexists(root / p)]
-        rel_paths = [p for p in rel_paths if p in set(missing) or (root / p).is_file()]
-        for start in range(0, len(missing), _GIT_ADD_CHUNK):
-            _run_git(
-                [
-                    "update-index",
-                    "--force-remove",
-                    "--",
-                    *missing[start : start + _GIT_ADD_CHUNK],
-                ],
-                cwd=cwd,
-                env=env,
-                check=True,
-            )
-
-        existing = [p for p in rel_paths if (root / p).is_file()]
-        # ``git add --`` updates only the temp index (via GIT_INDEX_FILE).
-        # Chunked so a large target set cannot overflow the platform argv limit.
-        for start in range(0, len(existing), _GIT_ADD_CHUNK):
-            _run_git(
-                ["add", "-f", "--", *existing[start : start + _GIT_ADD_CHUNK]],
-                cwd=cwd,
-                env=env,
-                check=True,
-            )
+        #
+        # ``git add`` would apply contributor clean filters and CRLF conversion.
+        # Insert raw blobs directly, touching only the temporary index.
+        rel_paths = _update_raw_index(root=root, paths=rel_paths, env=env)
 
         tree = _run_git(["write-tree"], cwd=cwd, env=env, check=True)
         tree_sha = tree.stdout.strip()
@@ -546,10 +686,9 @@ def diff_checkpoint(
     This is the accurate post-run "what lintro changed" report for files that
     were included in the checkpoint.
 
-    The diff runs against a throwaway index loaded from the checkpoint tree.
-    A plain ``git diff <tree>`` would consult the *real* index for the
-    working-tree side and so report every untracked target as a deletion,
-    which is precisely backwards for the files this feature exists to protect.
+    A throwaway index is loaded from the checkpoint, then updated with raw
+    current target bytes. Comparing trees via ``--cached`` avoids clean filters
+    and newline conversion on either side, including for untracked targets.
 
     Args:
         checkpoint: Checkpoint to diff against.
@@ -578,21 +717,23 @@ def diff_checkpoint(
     env = {"GIT_INDEX_FILE": str(index_file)}
     try:
         _run_git(["read-tree", treeish], cwd=str(root), env=env, check=True)
+        _update_raw_index(root=root, paths=rels, env=env, remove_nonfiles=True)
         # ``--no-color`` defends against a user's ``color.ui = always``.
         # ``--no-textconv`` matters as much as ``--no-ext-diff``: a repo's
         # ``diff.*.textconv`` would otherwise run an external program here.
-        # Chunked for the same argv-limit reason capture chunks ``git add``.
+        diff_args = [
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-color",
+            "--cached",
+            treeish,
+            "--",
+        ]
         chunks: list[bytes] = []
-        for start in range(0, len(rels), _GIT_ADD_CHUNK):
+        for chunk in _git_path_batches(rels, args=diff_args, env=env):
             result = _run_git(
-                [
-                    "diff",
-                    "--no-ext-diff",
-                    "--no-textconv",
-                    "--no-color",
-                    "--",
-                    *rels[start : start + _GIT_ADD_CHUNK],
-                ],
+                [*diff_args, *chunk],
                 cwd=str(root),
                 env=env,
                 check=True,
