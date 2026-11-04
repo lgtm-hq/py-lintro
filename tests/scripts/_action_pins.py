@@ -9,7 +9,8 @@ The workflow files are therefore the source of truth. This module reads every
 ``uses:`` line under ``.github/workflows`` and ``.github/actions``, groups the
 refs by action, and asserts the invariants that actually matter: a third-party
 action is pinned to a full 40-character commit SHA, carries a ``# vX.Y.Z``
-version comment, and is pinned to the *same* SHA everywhere it is used.
+version comment, and agrees on a canonical SHA except for the exact,
+independently adopted tools-image repair pin (#3093).
 """
 
 from __future__ import annotations
@@ -31,6 +32,12 @@ _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _VERSION_COMMENT_RE = re.compile(r"^#\s*v\d+(?:\.\d+)*")
 #: Refs resolved inside this repository; they are not pinned and never can be.
 _LOCAL_PREFIXES = ("./", "../")
+#: #3093 adopts v0.83.11's Trivy acquisition repair for this caller only.
+_TOOLS_IMAGE_REPAIR_PIN = (
+    ".github/workflows/docker-tools-publish.yml",
+    "lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml",
+    "cade5e687630ce3208bf914d0b1590145f3d569e",
+)
 
 
 @dataclass(frozen=True)
@@ -137,13 +144,16 @@ def pinned_action_shas(*, root: Path = REPO_ROOT) -> dict[str, str]:
 
     Asserts, over every ``uses:`` reference in the repository, that the ref is
     a 40-character commit SHA followed by a ``# vX.Y.Z``-style version comment,
-    and that every workflow pins a given action to the same SHA.
+    and that every ordinary caller pins a given action to the same SHA. The
+    exact tools-image repair is validated but excluded from the canonical
+    mapping, so its position in traversal cannot determine the shared pin.
 
     Args:
         root: Repository root to scan.
 
     Returns:
-        Mapping of ``owner/repo[/path]`` to the 40-character commit SHA.
+        Mapping of ``owner/repo[/path]`` to the canonical 40-character SHA,
+        excluding the independently pinned repair use.
     """
     uses = iter_action_uses(root=root)
     assert_that(uses).described_as("no third-party `uses:` refs found").is_not_empty()
@@ -169,6 +179,9 @@ def pinned_action_shas(*, root: Path = REPO_ROOT) -> dict[str, str]:
     pins: dict[str, str] = {}
     drift: list[str] = []
     for use in uses:
+        identity = (use.path.relative_to(root).as_posix(), use.action, use.ref)
+        if identity == _TOOLS_IMAGE_REPAIR_PIN:
+            continue
         pinned = pins.setdefault(use.action, use.ref)
         if pinned != use.ref:
             drift.append(f"{use.location}: {use.action}@{use.ref} != {pinned}")
