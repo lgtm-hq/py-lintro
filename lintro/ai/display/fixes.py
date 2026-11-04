@@ -64,6 +64,8 @@ def render_fixes_terminal(
     label = tool_name or "AI FIX SUGGESTIONS"
     detail = f"{count} fix suggestion{plural}"
     cost_info = cost_str(total_input, total_output, total_cost) if show_cost else ""
+    if cost_info:
+        cost_info = f"   Suggestion estimates: {cost_info.strip()}"
 
     print_section_header(
         console,
@@ -169,7 +171,7 @@ def render_fixes_github(
         lines.append("::endgroup::")
 
     if show_cost and total_cost > 0:
-        lines.append(f"AI cost: {format_cost(total_cost)}")
+        lines.append(f"Suggestion estimates: {format_cost(total_cost)}")
 
     return "\n".join(lines)
 
@@ -232,7 +234,7 @@ def render_fixes_markdown(
         lines.append("")
 
     if show_cost and total_cost > 0:
-        lines.append(f"*AI cost: {format_cost(total_cost)}*")
+        lines.append(f"*Suggestion estimates: {format_cost(total_cost)}*")
 
     return "\n".join(lines)
 
