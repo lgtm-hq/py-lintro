@@ -131,12 +131,16 @@ def _capture_fmt_checkpoint(*, ctx: RunContext, paths: list[str]) -> None:
     from lintro.enums.action import Action as _Action
 
     ai_config = getattr(ctx.lintro_config, "ai", None)
-    if (
-        ctx.action != _Action.FIX
-        or ctx.dry_run_preview
-        or ai_config is None
-        or not getattr(ai_config, "checkpoint_fmt", False)
-    ):
+    if ctx.action != _Action.FIX or ctx.dry_run_preview or ai_config is None:
+        return
+
+    # LintroConfig stores the AI section as a raw mapping. Resolve it at
+    # this API boundary before reading the checkpoint options as attributes.
+    if isinstance(ai_config, dict):
+        from lintro.ai.effective_config import resolve_effective_ai_config
+
+        ai_config = resolve_effective_ai_config(ai_config, diagnostics=False).config
+    if not getattr(ai_config, "checkpoint_fmt", False):
         return
 
     from pathlib import Path

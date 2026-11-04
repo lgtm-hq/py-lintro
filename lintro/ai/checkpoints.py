@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess  # nosec B404 - subprocess invokes git with shell=False; args are plumbing only
 import tempfile
 import time
@@ -286,42 +287,104 @@ def _new_run_id() -> str:
     return f"{int(time.time())}-{uuid.uuid4().hex[:8]}"
 
 
-def _add_raw_path(*, root: Path, rel_path: str, env: dict[str, str]) -> None:
-    """Store working-tree bytes and mode in the temporary index without filters.
+def _raw_file_mode(path: Path) -> str | None:
+    """Return disk Git mode, ``0`` for absence, or None for unsupported targets."""
+    try:
+        mode = path.lstat().st_mode
+    except (FileNotFoundError, NotADirectoryError):
+        return "0"
+    if stat.S_ISREG(mode):
+        return "100755" if mode & stat.S_IXUSR else "100644"
+    if stat.S_ISLNK(mode):
+        try:
+            return _SYMLINK_MODE if stat.S_ISREG(path.stat().st_mode) else None
+        except (FileNotFoundError, NotADirectoryError):
+            return None
+    return None
+
+
+def _update_raw_index(
+    *,
+    root: Path,
+    paths: list[str],
+    env: dict[str, str],
+    remove_nonfiles: bool = False,
+) -> list[str]:
+    """Batch raw blobs into a private index, returning supported target paths.
 
     Args:
         root: Repository root.
-        rel_path: Existing file or file-symlink path relative to the root.
+        paths: Literal repo-relative target paths.
         env: Temporary-index environment overlay.
+        remove_nonfiles: For diff, record a captured file replaced by a non-file
+            as deleted. Capture instead excludes unsupported targets.
+
+    Returns:
+        Paths representing regular files, file symlinks, or absence.
+
+    Raises:
+        CheckpointError: When a filesystem read or Git operation fails.
     """
-    path = root / rel_path
-    if path.is_symlink():
-        contents = os.fsencode(os.readlink(path))
-        mode = _SYMLINK_MODE
-    else:
-        contents = path.read_bytes()
-        mode = "100755" if path.stat().st_mode & 0o100 else "100644"
-    blob = _run_git(
-        ["hash-object", "-w", "--no-filters", "--stdin"],
-        cwd=str(root),
-        env=env,
-        check=True,
-        binary=True,
-        input_bytes=contents,
-    )
-    _run_git(
-        [
-            "update-index",
-            "--add",
-            "--cacheinfo",
-            mode,
-            blob.stdout.decode("ascii").strip(),
-            rel_path,
-        ],
-        cwd=str(root),
-        env=env,
-        check=True,
-    )
+    try:
+        modes = {rel: _raw_file_mode(root / rel) for rel in paths}
+        missing = [
+            rel
+            for rel, mode in modes.items()
+            if mode == "0" or (mode is None and remove_nonfiles)
+        ]
+        for start in range(0, len(missing), _GIT_PATH_CHUNK):
+            _run_git(
+                [
+                    "update-index",
+                    "--force-remove",
+                    "--",
+                    *missing[start : start + _GIT_PATH_CHUNK],
+                ],
+                cwd=str(root),
+                env=env,
+                check=True,
+            )
+        entries: list[bytes] = []
+        regular = [rel for rel, mode in modes.items() if mode in ("100644", "100755")]
+        for start in range(0, len(regular), _GIT_PATH_CHUNK):
+            chunk = regular[start : start + _GIT_PATH_CHUNK]
+            # Explicit argv operands need no stdin-paths C-style quoting, even
+            # for embedded newlines, tabs, quotes or leading dashes.
+            blobs = _run_git(
+                ["hash-object", "-w", "--no-filters", "--", *chunk],
+                cwd=str(root),
+                env=env,
+                check=True,
+                binary=True,
+            ).stdout.splitlines()
+            for rel, blob in zip(chunk, blobs, strict=True):
+                entries.append(
+                    os.fsencode(f"{modes[rel]} {blob.decode('ascii')}\t{rel}\0"),
+                )
+        for rel, mode in modes.items():
+            if mode != _SYMLINK_MODE:
+                continue
+            blob = _run_git(
+                ["hash-object", "-w", "--no-filters", "--stdin"],
+                cwd=str(root),
+                env=env,
+                check=True,
+                binary=True,
+                input_bytes=os.fsencode(os.readlink(root / rel)),
+            ).stdout.strip()
+            entries.append(b"120000 " + blob + b"\t" + os.fsencode(rel) + b"\0")
+        if entries:
+            _run_git(
+                ["update-index", "--replace", "-z", "--index-info"],
+                cwd=str(root),
+                env=env,
+                check=True,
+                binary=True,
+                input_bytes=b"".join(entries),
+            )
+    except OSError as exc:
+        raise CheckpointError("Failed to read checkpoint targets") from exc
+    return [rel for rel, mode in modes.items() if mode is not None]
 
 
 def capture_checkpoint(
@@ -341,7 +404,7 @@ def capture_checkpoint(
     failures propagate as :class:`CheckpointError`, aborting capture before
     any checkpoint refs are pruned or written.
 
-    Local file-read, temporary-index allocation, close, and cleanup failures propagate
+    Temporary-index allocation, close, and cleanup failures propagate
     as :class:`OSError`; cleanup can fail after the new ref has been written.
     Git subprocess launch errors are wrapped as :class:`CheckpointError`:
     failures inside the later capture try block return None instead, while
@@ -362,8 +425,8 @@ def capture_checkpoint(
 
     Returns:
         The created :class:`Checkpoint`, or None when git checkpoints are
-        unavailable, no paths remain after normalization, or a git plumbing
-        step fails after the temporary index has been allocated.
+        unavailable, no paths remain after normalization, or a filesystem read
+        or git plumbing step fails after the temporary index has been allocated.
     """
     if not git_checkpoints_available(workspace_root):
         return None
@@ -404,26 +467,9 @@ def capture_checkpoint(
         # symlink to one, a FIFO) is dropped from the snapshot entirely: it
         # cannot be captured as a blob, and leaving it in ``paths`` would let
         # a restore delete a path lintro never touched.
-        missing = [p for p in rel_paths if not os.path.lexists(root / p)]
-        rel_paths = [p for p in rel_paths if p in set(missing) or (root / p).is_file()]
-        for start in range(0, len(missing), _GIT_PATH_CHUNK):
-            _run_git(
-                [
-                    "update-index",
-                    "--force-remove",
-                    "--",
-                    *missing[start : start + _GIT_PATH_CHUNK],
-                ],
-                cwd=cwd,
-                env=env,
-                check=True,
-            )
-
-        existing = [p for p in rel_paths if (root / p).is_file()]
         # ``git add`` would apply contributor clean filters and CRLF conversion.
         # Insert raw blobs directly, touching only the temporary index.
-        for rel_path in existing:
-            _add_raw_path(root=root, rel_path=rel_path, env=env)
+        rel_paths = _update_raw_index(root=root, paths=rel_paths, env=env)
 
         tree = _run_git(["write-tree"], cwd=cwd, env=env, check=True)
         tree_sha = tree.stdout.strip()
@@ -584,10 +630,9 @@ def diff_checkpoint(
     This is the accurate post-run "what lintro changed" report for files that
     were included in the checkpoint.
 
-    The diff runs against a throwaway index loaded from the checkpoint tree.
-    A plain ``git diff <tree>`` would consult the *real* index for the
-    working-tree side and so report every untracked target as a deletion,
-    which is precisely backwards for the files this feature exists to protect.
+    A throwaway index is loaded from the checkpoint, then updated with raw
+    current target bytes. Comparing trees via ``--cached`` avoids clean filters
+    and newline conversion on either side, including for untracked targets.
 
     Args:
         checkpoint: Checkpoint to diff against.
@@ -616,6 +661,7 @@ def diff_checkpoint(
     env = {"GIT_INDEX_FILE": str(index_file)}
     try:
         _run_git(["read-tree", treeish], cwd=str(root), env=env, check=True)
+        _update_raw_index(root=root, paths=rels, env=env, remove_nonfiles=True)
         # ``--no-color`` defends against a user's ``color.ui = always``.
         # ``--no-textconv`` matters as much as ``--no-ext-diff``: a repo's
         # ``diff.*.textconv`` would otherwise run an external program here.
@@ -628,6 +674,8 @@ def diff_checkpoint(
                     "--no-ext-diff",
                     "--no-textconv",
                     "--no-color",
+                    "--cached",
+                    treeish,
                     "--",
                     *rels[start : start + _GIT_PATH_CHUNK],
                 ],
