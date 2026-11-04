@@ -113,8 +113,9 @@ jobs:
       # Same startup protection as docker-ci; metrics stay auto (#2521).
       semgrep-enable-version-check: '0'
       # black:timeout=120: the 30s default timed out on the full repo (#2352).
+      # bandit:timeout=300: 120s timed out repeatedly on main (#3090, #3086).
       lintro-tool-options: >-
-        pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+        pydoclint:timeout=120,black:timeout=120,bandit:timeout=300,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
       egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       # No CI build in this workflow: lint main with the image resolve-image
       # resolved for this run (#2602). Never a literal here — a hand-edited
@@ -158,8 +159,9 @@ jobs:
       job-name: '🌙 Nightly Dogfooding Lint (retry)'
       semgrep-enable-version-check: '0'
       # black:timeout=120: the 30s default timed out on the full repo (#2352).
+      # bandit:timeout=300: 120s timed out repeatedly on main (#3090, #3086).
       lintro-tool-options: >-
-        pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+        pydoclint:timeout=120,black:timeout=120,bandit:timeout=300,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
       egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       # No CI build in this workflow: lint main with the image resolve-image
       # resolved for this run (#2602). Never a literal here — a hand-edited
@@ -308,8 +310,9 @@ jobs:
         env:
           # Same tool coverage as dogfood-full so skip behaviour matches.
           # black:timeout=120: the 30s default timed out on the full repo (#2352).
+          # bandit:timeout=300: 120s timed out repeatedly on main (#3090, #3086).
           TOOL_OPTIONS: >-
-            pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+            pydoclint:timeout=120,black:timeout=120,bandit:timeout=300,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
           # The same resolved image dogfood-full lints with (#2602).
           LINTRO_IMAGE: ${{ needs.resolve-image.outputs.image }}
         # Memory trace (#1761): this job is repeatedly killed mid-lint with
@@ -406,8 +409,9 @@ jobs:
         env:
           # Same tool coverage as dogfood-full so skip behaviour matches.
           # black:timeout=120: the 30s default timed out on the full repo (#2352).
+          # bandit:timeout=300: 120s timed out repeatedly on main (#3090, #3086).
           TOOL_OPTIONS: >-
-            pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+            pydoclint:timeout=120,black:timeout=120,bandit:timeout=300,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
           # The same resolved image dogfood-full lints with (#2602).
           LINTRO_IMAGE: ${{ needs.resolve-image.outputs.image }}
         # Memory trace (#1761): this job is repeatedly killed mid-lint with

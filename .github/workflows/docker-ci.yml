@@ -576,8 +576,9 @@ jobs:
       # Disable Semgrep's startup update request; keep scan metrics auto (#2521).
       semgrep-enable-version-check: '0'
       # black:timeout=120: the 30s default timed out on the full repo (#2352).
+      # bandit:timeout=300: 120s timed out repeatedly on main (#3090, #3086).
       lintro-tool-options: >-
-        pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+        pydoclint:timeout=120,black:timeout=120,bandit:timeout=300,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
       egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       # The reusable's enforcing harden-runner step consumes this input
       # verbatim (the preset+append merge is only exposed as an output), so the
@@ -723,8 +724,9 @@ jobs:
           # Must stay in sync with the dogfooding-lint lintro-tool-options
           # above: identical tool coverage is the contract of changed mode.
           # black:timeout=120: the 30s default timed out on the full repo (#2352).
+          # bandit:timeout=300: 120s timed out repeatedly on main (#3090, #3086).
           TOOL_OPTIONS: >-
-            pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+            pydoclint:timeout=120,black:timeout=120,bandit:timeout=300,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
           # Same image selection as dogfooding-lint: CI-built image for
           # same-repo PRs, pinned release digest for forks (no CI push).
           # Fork fallback comes from the single LINTRO_FORK_FALLBACK_IMAGE
@@ -874,8 +876,9 @@ jobs:
         env:
           # Same tool coverage as the dogfooding run so skip behaviour matches.
           # black:timeout=120: the 30s default timed out on the full repo (#2352).
+          # bandit:timeout=300: 120s timed out repeatedly on main (#3090, #3086).
           TOOL_OPTIONS: >-
-            pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+            pydoclint:timeout=120,black:timeout=120,bandit:timeout=300,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
           # LINTRO_VERSION_TIMEOUT=120: semgrep's update check stalls past the
           # 30s probe default under CI egress even though semgrep.dev is
           # allowlisted (#2216 gate failures). The probe timeout is not the
@@ -927,8 +930,9 @@ jobs:
       job-name: '🛠️ Dogfooding Lint (retry)'
       semgrep-enable-version-check: '0'
       # black:timeout=120: the 30s default timed out on the full repo (#2352).
+      # bandit:timeout=300: 120s timed out repeatedly on main (#3090, #3086).
       lintro-tool-options: >-
-        pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+        pydoclint:timeout=120,black:timeout=120,bandit:timeout=300,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
       egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       # The reusable's enforcing harden-runner step consumes this input
       # verbatim (the preset+append merge is only exposed as an output), so the
