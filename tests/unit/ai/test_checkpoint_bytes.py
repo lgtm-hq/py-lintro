@@ -755,19 +755,23 @@ def _constrained_git_exec(
         # Hosted CI's inherited environment can itself exceed this artificial
         # ceiling. Give both the production batcher and subprocess adapter the
         # same deterministic child environment without changing os.environ.
-        child_env = {
+        # Inherited ``GIT_*`` variables stay in the base so production's own
+        # scrubbing, not this fixture, decides which of them reach Git.
+        base = {
+            **{
+                key: value
+                for key, value in os.environ.items()
+                if key.startswith("GIT_")
+            },
             "PATH": os.defpath,
             "LC_ALL": "C",
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_CONFIG_SYSTEM": os.devnull,
             "GIT_ATTR_NOSYSTEM": "1",
-            "GIT_TERMINAL_PROMPT": "0",
-            "GIT_OPTIONAL_LOCKS": "0",
-            "GIT_LITERAL_PATHSPECS": "1",
         }
         limited.setattr(
             "lintro.ai.checkpoints._git_env",
-            lambda overlay: {**child_env, **(overlay or {})},
+            lambda overlay: checkpoints._scrub_git_env(base, overlay),
         )
         # Advertise the same deterministic limit that constrained_run enforces.
         limited.setattr(
@@ -813,3 +817,224 @@ def test_raw_diff_failure_raises_and_cleans_private_index(
     for index in indexes:
         assert_that(index.exists()).is_false()
         assert_that(Path(f"{index}.lock").exists()).is_false()
+
+
+_BEYOND_LINK = b"bytes reached only through a symlinked parent\n"
+
+
+def _linked_destination(
+    repo: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    escape: str,
+) -> Path:
+    """Create the directory a swapped-in parent symlink will point at.
+
+    Args:
+        repo: Test repository root.
+        tmp_path_factory: Source of directories outside the repository.
+        escape: ``outside`` for a foreign directory, ``inside`` for an
+            untracked directory in the same work tree.
+
+    Returns:
+        The destination directory, holding ``f.txt`` with unique bytes.
+    """
+    if escape == "outside":
+        destination = tmp_path_factory.mktemp("outside-repo")
+    else:
+        destination = repo / "elsewhere"
+        destination.mkdir()
+    (destination / "f.txt").write_bytes(_BEYOND_LINK)
+    return destination
+
+
+def _replace_with_symlink(directory: Path, destination: Path) -> None:
+    """Swap a real target directory for a symlink to ``destination``.
+
+    Args:
+        directory: Directory to remove (its files are deleted first).
+        destination: Directory the new symlink points at.
+    """
+    for child in directory.iterdir():
+        child.unlink()
+    directory.rmdir()
+    directory.symlink_to(destination, target_is_directory=True)
+
+
+def _object_exists(repo: Path, data: bytes) -> bool:
+    """Return whether a blob holding ``data`` was written to the object store.
+
+    Args:
+        repo: Test repository root.
+        data: Exact blob contents.
+
+    Returns:
+        True when the repository has that blob object.
+    """
+    with tempfile.NamedTemporaryFile(delete=False) as probe:
+        probe.write(data)
+    try:
+        sha = run_git(
+            ["git", "hash-object", "--no-filters", probe.name],
+            cwd=repo,
+        ).stdout.strip()
+    finally:
+        Path(probe.name).unlink()
+    try:
+        run_git(["git", "cat-file", "-e", sha], cwd=repo)
+    except subprocess.CalledProcessError:
+        return False
+    return True
+
+
+@pytest.mark.parametrize("escape", ["outside", "inside"])
+def test_capture_refuses_target_beyond_symlinked_parent(
+    byte_repo: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    escape: str,
+) -> None:
+    """A parent that becomes a symlink after path checks fails capture closed."""
+    repo = byte_repo
+    (repo / "sub").mkdir()
+    (repo / "sub/f.txt").write_bytes(b"captured\n")
+    destination = _linked_destination(repo, tmp_path_factory, escape)
+    before = _user_state(repo)
+    real_normalize = checkpoints._normalize_paths
+
+    def normalize_then_swap(*args: Any, **kwargs: Any) -> list[str]:
+        rels = real_normalize(*args, **kwargs)
+        _replace_with_symlink(repo / "sub", destination)
+        return rels
+
+    monkeypatch.setattr(checkpoints, "_normalize_paths", normalize_then_swap)
+
+    checkpoint = capture_checkpoint(["target.txt", "sub/f.txt"], workspace_root=repo)
+
+    assert_that(checkpoint).is_none()
+    assert_that((repo / "sub").is_symlink()).is_true()
+    assert_that(list_checkpoint_refs(workspace_root=repo)).is_empty()
+    assert_that(_object_exists(repo, _BEYOND_LINK)).is_false()
+    assert_that((destination / "f.txt").read_bytes()).is_equal_to(_BEYOND_LINK)
+    assert_that(_user_state(repo)).is_equal_to(before)
+
+
+@pytest.mark.parametrize("escape", ["outside", "inside"])
+def test_rollback_never_crosses_parent_swapped_for_symlink(
+    byte_repo: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    escape: str,
+) -> None:
+    """Diff reads nothing and restore writes nothing beyond a swapped-in link."""
+    repo = byte_repo
+    (repo / "zz").mkdir()
+    (repo / "zz/f.txt").write_bytes(b"captured\n")
+    checkpoint = capture_checkpoint(["target.txt", "zz/f.txt"], workspace_root=repo)
+    assert checkpoint is not None
+    destination = _linked_destination(repo, tmp_path_factory, escape)
+    _replace_with_symlink(repo / "zz", destination)
+    (repo / "target.txt").write_bytes(b"edited after capture\n")
+    before = _user_state(repo)
+
+    diff = diff_checkpoint(checkpoint)
+
+    # Git's own working-tree view: nothing exists beyond a symbolic link.
+    assert_that(diff).contains("deleted file mode 100644", "-captured")
+    assert_that(diff).does_not_contain(_BEYOND_LINK.decode())
+    assert_that(_object_exists(repo, _BEYOND_LINK)).is_false()
+    with pytest.raises(CheckpointError, match="symbolic link"):
+        restore_checkpoint(checkpoint)
+    # Refused before the write phase: the earlier target is not rolled back.
+    assert_that((repo / "target.txt").read_bytes()).is_equal_to(
+        b"edited after capture\n",
+    )
+    assert_that((destination / "f.txt").read_bytes()).is_equal_to(_BEYOND_LINK)
+    assert_that(sorted(p.name for p in destination.iterdir())).is_equal_to(["f.txt"])
+    assert_that((repo / "zz").is_symlink()).is_true()
+    assert_that(list_checkpoint_refs(workspace_root=repo)).is_equal_to([checkpoint.ref])
+    assert_that(_user_state(repo)).is_equal_to(before)
+
+
+@pytest.mark.parametrize(
+    ("filemode", "mode_changes", "created_mode"),
+    [("true", 2, "100755"), ("false", 0, "100644")],
+)
+def test_diff_honours_core_filemode_for_mode_only_changes(
+    byte_repo: Path,
+    filemode: str,
+    mode_changes: int,
+    created_mode: str,
+) -> None:
+    """``core.filemode=false`` hides executable-bit changes, as ``git diff`` does."""
+    repo = byte_repo
+    run_git(["git", "config", "core.filemode", filemode], cwd=repo)
+    target = repo / "target.txt"
+    untracked = repo / "untracked.txt"
+    untracked.write_bytes(b"untracked\n")
+    for path in (target, untracked):
+        path.chmod(0o644)
+    later = repo / "later.txt"
+    checkpoint = capture_checkpoint(
+        ["target.txt", "untracked.txt", "later.txt"],
+        workspace_root=repo,
+    )
+    assert checkpoint is not None
+    before = _user_state(repo)
+    for path in (target, untracked):
+        path.chmod(0o755)
+
+    mode_only = diff_checkpoint(checkpoint)
+    target.write_bytes(b"committed\nedited\n")
+    later.write_bytes(b"created after capture\n")
+    later.chmod(0o755)
+    with_content = diff_checkpoint(checkpoint)
+
+    assert_that(mode_only.count("old mode 100644\nnew mode 100755")).is_equal_to(
+        mode_changes,
+    )
+    assert_that(bool(mode_only)).is_equal_to(bool(mode_changes))
+    assert_that(with_content.count("new mode 100755")).is_equal_to(mode_changes)
+    assert_that(with_content).contains(
+        "+edited",
+        f"new file mode {created_mode}\n",
+        "+created after capture",
+    )
+    restore_checkpoint(checkpoint)
+    for path in (target, untracked):
+        assert_that(path.stat().st_mode & 0o777).is_equal_to(0o644)
+    assert_that(target.read_bytes()).is_equal_to(b"committed\n")
+    assert_that(later.exists()).is_false()
+    assert_that(_user_state(repo)).is_equal_to(before)
+
+
+def test_constrained_exec_scrubs_inherited_git_location(
+    byte_repo: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hook-exported repository variables never reach constrained Git children."""
+    repo = byte_repo
+    decoy = init_git_repo(tmp_path_factory.mktemp("decoy"), files={"d.txt": "d\n"})
+    sentinel_index = decoy / "sentinel-index"
+    decoy_state = _user_state(decoy)
+    before = _user_state(repo)
+    monkeypatch.setenv("GIT_DIR", str(decoy / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(decoy))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(sentinel_index))
+
+    with _constrained_git_exec(monkeypatch, budget=64 * 1024) as (_, _, indexes):
+        checkpoint = capture_checkpoint(["target.txt"], workspace_root=repo)
+        assert checkpoint is not None
+        (repo / "target.txt").write_bytes(b"changed\n")
+        assert_that(diff_checkpoint(checkpoint)).contains("+changed")
+        restore_checkpoint(checkpoint)
+
+    assert_that(checkpoint.root).is_equal_to(repo.resolve())
+    assert_that(indexes).is_not_empty().does_not_contain(sentinel_index)
+    assert_that(sentinel_index.exists()).is_false()
+    assert_that((repo / "target.txt").read_bytes()).is_equal_to(b"committed\n")
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        monkeypatch.delenv(name)
+    assert_that(list_checkpoint_refs(workspace_root=repo)).is_equal_to([checkpoint.ref])
+    assert_that(list_checkpoint_refs(workspace_root=decoy)).is_empty()
+    assert_that(_user_state(decoy)).is_equal_to(decoy_state)
+    assert_that(_user_state(repo)).is_equal_to(before)

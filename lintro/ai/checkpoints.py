@@ -17,7 +17,7 @@ import subprocess  # nosec B404 - subprocess invokes git with shell=False; args 
 import tempfile
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -37,6 +37,7 @@ _GIT_ARG_RESERVE = 8 * 1024
 _SYMLINK_MODE = "120000"
 _GITLINK_MODE = "160000"
 _TREE_MODE = "040000"
+_REGULAR_MODES = ("100644", "100755")
 # Ambient git state that must never leak into these plumbing calls.
 _INHERITED_GIT_VARS = (
     "GIT_DIR",
@@ -84,6 +85,21 @@ def _git_bin() -> str | None:
 def _git_env(overlay: dict[str, str] | None) -> dict[str, str]:
     """Build a hardened environment for a git plumbing call.
 
+    Args:
+        overlay: Variables to set after sanitising (e.g. the temp index).
+
+    Returns:
+        The environment to pass to :func:`subprocess.run`.
+    """
+    return _scrub_git_env(os.environ, overlay)
+
+
+def _scrub_git_env(
+    base: Mapping[str, str],
+    overlay: dict[str, str] | None,
+) -> dict[str, str]:
+    """Apply the git plumbing environment policy to ``base``.
+
     Ambient ``GIT_*`` variables are stripped first. When lintro runs inside a
     git hook, git exports ``GIT_DIR``, ``GIT_INDEX_FILE`` and friends; a
     plumbing call that inherited them would target the hook's repository and
@@ -91,12 +107,13 @@ def _git_env(overlay: dict[str, str] | None) -> dict[str, str]:
     to touch the user's index.
 
     Args:
+        base: Inherited environment to sanitise; never mutated.
         overlay: Variables to set after sanitising (e.g. the temp index).
 
     Returns:
-        The environment to pass to :func:`subprocess.run`.
+        A new environment mapping.
     """
-    full_env = os.environ.copy()
+    full_env = dict(base)
     for leaked in _INHERITED_GIT_VARS:
         full_env.pop(leaked, None)
     if overlay:
@@ -290,6 +307,30 @@ def _new_run_id() -> str:
     return f"{int(time.time())}-{uuid.uuid4().hex[:8]}"
 
 
+def _beyond_symlink(root: Path, rel: str) -> bool:
+    """Return whether an existing ancestor of ``rel`` below ``root`` is a symlink.
+
+    Git refuses such a path ("beyond a symbolic link") because reading or
+    writing it would follow the link — possibly out of the repository.
+
+    Args:
+        root: Repository root.
+        rel: Repo-relative POSIX path.
+
+    Returns:
+        True when any parent directory component is a symbolic link.
+    """
+    current = root
+    for part in Path(rel).parts[:-1]:
+        current = current / part
+        try:
+            if stat.S_ISLNK(current.lstat().st_mode):
+                return True
+        except (FileNotFoundError, NotADirectoryError):
+            return False
+    return False
+
+
 def _raw_file_mode(path: Path) -> str | None:
     """Return disk Git mode, ``0`` for absence, or None for unsupported targets."""
     try:
@@ -358,12 +399,79 @@ def _git_path_batches(
         yield chunk
 
 
+def _target_modes(
+    *,
+    root: Path,
+    paths: list[str],
+    remove_nonfiles: bool,
+) -> dict[str, str | None]:
+    """Map each target to its disk Git mode without following parent symlinks.
+
+    Args:
+        root: Repository root.
+        paths: Literal repo-relative target paths.
+        remove_nonfiles: Diff mode; a path beyond a symlink is reported absent,
+            matching Git's own working-tree view, instead of failing.
+
+    Returns:
+        Git mode per path, ``0`` for absence, None for unsupported targets.
+
+    Raises:
+        CheckpointError: At capture, when a target lies beyond a symlink.
+    """
+    modes: dict[str, str | None] = {}
+    for rel in paths:
+        if not _beyond_symlink(root, rel):
+            modes[rel] = _raw_file_mode(root / rel)
+        elif remove_nonfiles:
+            modes[rel] = "0"
+        else:
+            raise CheckpointError(f"Checkpoint target is beyond a symbolic link: {rel}")
+    return modes
+
+
+def _ignore_executable_bits(
+    *,
+    root: Path,
+    modes: dict[str, str | None],
+    env: dict[str, str],
+) -> None:
+    """Keep the private index's regular-file modes, as ``core.filemode=false`` does.
+
+    Mirrors Git: a regular file keeps the mode its index entry already has,
+    and a file with no regular entry is recorded as ``100644``.
+
+    Args:
+        root: Repository root.
+        modes: Disk modes per path; regular-file entries are updated in place.
+        env: Temporary-index environment overlay.
+    """
+    regular = [rel for rel, mode in modes.items() if mode in _REGULAR_MODES]
+    recorded: dict[str, str] = {}
+    args = ["ls-files", "--stage", "-z", "--"]
+    for chunk in _git_path_batches(regular, args=args, env=env):
+        listing = _run_git(
+            [*args, *chunk],
+            cwd=str(root),
+            env=env,
+            check=True,
+            binary=True,
+        ).stdout
+        for record in filter(None, listing.split(b"\0")):
+            meta, _, name = record.partition(b"\t")
+            recorded[os.fsdecode(name)] = meta.split(b" ", 1)[0].decode("ascii")
+    for rel in regular:
+        prior = recorded.get(rel)
+        modes[rel] = prior if prior in _REGULAR_MODES else "100644"
+
+
 def _update_raw_index(
     *,
     root: Path,
     paths: list[str],
     env: dict[str, str],
     remove_nonfiles: bool = False,
+    trust_filemode: bool = True,
 ) -> list[str]:
     """Batch raw blobs into a private index, returning supported target paths.
 
@@ -372,7 +480,10 @@ def _update_raw_index(
         paths: Literal repo-relative target paths.
         env: Temporary-index environment overlay.
         remove_nonfiles: For diff, record a captured file replaced by a non-file
-            as deleted. Capture instead excludes unsupported targets.
+            (or now beyond a symlinked parent) as deleted. Capture instead
+            excludes unsupported targets and refuses symlinked parents.
+        trust_filemode: When False, keep the index's executable bits for
+            regular files (Git's ``core.filemode=false`` semantics).
 
     Returns:
         Paths representing regular files, file symlinks, or absence.
@@ -381,7 +492,9 @@ def _update_raw_index(
         CheckpointError: When a filesystem read or Git operation fails.
     """
     try:
-        modes = {rel: _raw_file_mode(root / rel) for rel in paths}
+        modes = _target_modes(root=root, paths=paths, remove_nonfiles=remove_nonfiles)
+        if not trust_filemode:
+            _ignore_executable_bits(root=root, modes=modes, env=env)
         missing = [
             rel
             for rel, mode in modes.items()
@@ -396,7 +509,7 @@ def _update_raw_index(
                 check=True,
             )
         entries: list[bytes] = []
-        regular = [rel for rel, mode in modes.items() if mode in ("100644", "100755")]
+        regular = [rel for rel, mode in modes.items() if mode in _REGULAR_MODES]
         hash_args = ["hash-object", "-w", "--no-filters", "--"]
         for chunk in _git_path_batches(regular, args=hash_args, env=env):
             # Explicit argv operands need no stdin-paths C-style quoting, even
@@ -455,6 +568,8 @@ def capture_checkpoint(
     raw ``hash-object`` / ``update-index`` for targets (including untracked),
     ``write-tree``, ``update-ref``. Blobs contain the actual working-tree bytes,
     bypassing newline conversion and clean filters without changing Git config.
+    Like ``git add``, a target beyond a symlinked parent directory is refused,
+    so no bytes are read through the link and no ref is written.
     Does not modify the user index, stash, or ``HEAD``. Directory enumeration
     failures propagate as :class:`CheckpointError`, aborting capture before
     any checkpoint refs are pruned or written.
@@ -480,8 +595,9 @@ def capture_checkpoint(
 
     Returns:
         The created :class:`Checkpoint`, or None when git checkpoints are
-        unavailable, no paths remain after normalization, or a filesystem read
-        or git plumbing step fails after the temporary index has been allocated.
+        unavailable, no paths remain after normalization, a target lies beyond
+        a symlinked parent directory, or a filesystem read or git plumbing step
+        fails after the temporary index has been allocated.
     """
     if not git_checkpoints_available(workspace_root):
         return None
@@ -539,8 +655,11 @@ def capture_checkpoint(
             check=True,
         )
         logger.debug("Captured AI checkpoint {} ({})", ref, tree_sha)
-    except CheckpointError:
-        logger.debug("Checkpoint capture failed; caller should use file fallback")
+    except CheckpointError as exc:
+        logger.debug(
+            "Checkpoint capture failed ({}); caller should use file fallback",
+            exc,
+        )
         return None
     finally:
         index_file.unlink(missing_ok=True)
@@ -623,6 +742,11 @@ def restore_checkpoint(
         paths: Optional subset of paths to restore; defaults to all paths
             recorded on the checkpoint. A failed write propagates to the
             caller after the partial temporary file is cleaned up.
+
+    Raises:
+        CheckpointError: Before any write, when a target's parent directory
+            has since become a symbolic link; writing or deleting through it
+            could reach outside the repository.
     """
     root = checkpoint.root
     treeish = checkpoint.tree_sha or checkpoint.ref
@@ -647,6 +771,11 @@ def restore_checkpoint(
                 skipped,
             )
 
+    linked = [rel for rel in target_rels if _beyond_symlink(root, rel)]
+    if linked:
+        raise CheckpointError(
+            f"Refusing to restore checkpoint targets beyond a symbolic link: {linked}",
+        )
     planned: list[tuple[Path, tuple[bytes, str] | None]] = []
     for rel in target_rels:
         planned.append(
@@ -677,6 +806,22 @@ def restore_checkpoint(
         )
 
 
+def _trusts_filemode(root: Path) -> bool:
+    """Return Git's effective ``core.filemode`` (true when unset or unreadable).
+
+    Args:
+        root: Repository root.
+
+    Returns:
+        False only when the repository configures ``core.filemode=false``.
+    """
+    result = _run_git(
+        ["config", "--type=bool", "--get", "core.filemode"],
+        cwd=str(root),
+    )
+    return result.returncode != 0 or result.stdout.strip() != "false"
+
+
 def diff_checkpoint(
     checkpoint: Checkpoint,
     paths: list[str] | tuple[str, ...] | None = None,
@@ -689,6 +834,10 @@ def diff_checkpoint(
     A throwaway index is loaded from the checkpoint, then updated with raw
     current target bytes. Comparing trees via ``--cached`` avoids clean filters
     and newline conversion on either side, including for untracked targets.
+    As in ``git diff``, a target now beyond a symlinked parent directory shows
+    as deleted (it is never read through the link), and with
+    ``core.filemode=false`` executable-bit changes are not reported. Restore
+    still writes the mode recorded at capture.
 
     Args:
         checkpoint: Checkpoint to diff against.
@@ -717,7 +866,13 @@ def diff_checkpoint(
     env = {"GIT_INDEX_FILE": str(index_file)}
     try:
         _run_git(["read-tree", treeish], cwd=str(root), env=env, check=True)
-        _update_raw_index(root=root, paths=rels, env=env, remove_nonfiles=True)
+        _update_raw_index(
+            root=root,
+            paths=rels,
+            env=env,
+            remove_nonfiles=True,
+            trust_filemode=_trusts_filemode(root),
+        )
         # ``--no-color`` defends against a user's ``color.ui = always``.
         # ``--no-textconv`` matters as much as ``--no-ext-diff``: a repo's
         # ``diff.*.textconv`` would otherwise run an external program here.
