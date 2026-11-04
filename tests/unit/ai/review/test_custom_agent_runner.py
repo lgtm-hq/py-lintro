@@ -413,31 +413,28 @@ def test_findings_from_response_accepts_valid_controls(
 
 
 @pytest.mark.parametrize(
-    ("invalid_index", "json_type", "scalar_value"),
+    "invalid_index",
+    [0, 1],
+    ids=["first", "later"],
+)
+@pytest.mark.parametrize(
+    ("json_type", "invalid_value"),
     [
-        (0, "string", None),
-        (1, "array", None),
-        (0, "null", None),
-        (1, "number", 42),
-        (1, "number", 1.5),
-        (0, "boolean", True),
-        (1, "boolean", False),
+        ("string", "private-provider-content-3116"),
+        ("array", ["private-provider-content-3116"]),
+        ("null", None),
+        ("number", 42),
+        ("number", 1.5),
+        ("boolean", True),
+        ("boolean", False),
     ],
-    ids=[
-        "first-string",
-        "middle-array",
-        "first-null",
-        "middle-integer",
-        "middle-float",
-        "first-true",
-        "middle-false",
-    ],
+    ids=["string", "array", "null", "integer", "float", "true", "false"],
 )
 def test_non_object_finding_diagnostics_keep_provider_content_private(
     tmp_path: Path,
     invalid_index: int,
     json_type: str,
-    scalar_value: object,
+    invalid_value: object,
 ) -> None:
     """Errors and logs identify the invalid entry without exposing response data."""
     private_parts = (
@@ -448,14 +445,9 @@ def test_non_object_finding_diagnostics_keep_provider_content_private(
     )
     private_value = " ".join(private_parts)
     neighbor = {**_VALID_FINDING, "file": private_parts[1], "title": private_value}
-    # Neighbors carry private text for null, numbers and booleans too.
-    # Index 1 also checks privacy of an object preceding the invalid entry.
+    # Both neighboring objects carry privacy sentinels, including for scalar cases.
+    # Index 1 checks an object before the invalid entry as well as after it.
     findings: list[object] = [neighbor, neighbor]
-    invalid_value = scalar_value
-    if json_type == "string":
-        invalid_value = private_value
-    elif json_type == "array":
-        invalid_value = [private_value]
     findings.insert(invalid_index, invalid_value)
     content = json.dumps({"findings": findings})
     agent = _agent(tmp_path=tmp_path)
@@ -504,6 +496,9 @@ def test_non_object_finding_diagnostics_keep_provider_content_private(
     assert_that(str(diagnostic)).contains(expected)
     transcript = str(caught.value) + str(diagnostic) + repr(diagnostic.record["extra"])
     assert_that(transcript).does_not_contain(content, *private_parts)
+    # Null/boolean cases rely on the sentinels; JSON type labels are public.
+    if json_type in {"string", "number"}:
+        assert_that(transcript).does_not_contain(str(invalid_value))
     assert_that(diagnostic.record["exception"]).is_none()
     assert_that(diagnostic.record["extra"]).does_not_contain_key("exc_info")
 
