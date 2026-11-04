@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.ai.budget import CostBudget
 from lintro.ai.config import AIConfig
@@ -24,6 +25,7 @@ from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.custom_agent_runner import (
     CustomAgentPassRequest,
+    _findings_from_response,
     build_custom_agent_prompt,
     run_custom_agent_passes,
     scope_diff_to_files,
@@ -384,6 +386,105 @@ def test_run_custom_agent_passes_applies_declared_severity(tmp_path: Path) -> No
         )
 
     assert_that(results[0].findings[0].severity).is_equal_to(Severity.P1)
+
+
+@pytest.mark.parametrize(
+    ("findings", "expected"),
+    [
+        ([], ()),
+        ([_VALID_FINDING], (("src/app.py", "no-raw-sql", Severity.P1),)),
+    ],
+    ids=["empty", "object"],
+)
+def test_findings_from_response_accepts_valid_controls(
+    tmp_path: Path,
+    findings: list[dict[str, object]],
+    expected: tuple[tuple[str, str, Severity], ...],
+) -> None:
+    """Empty and object-only lists retain attribution and declared severity."""
+    parsed = _findings_from_response(
+        agent=_agent(tmp_path=tmp_path),
+        content=_agent_response(findings=findings),
+    )
+
+    assert_that(tuple((f.file, f.source, f.severity) for f in parsed)).is_equal_to(
+        expected,
+    )
+
+
+@pytest.mark.parametrize(
+    ("invalid_index", "json_type"),
+    [(0, "string"), (1, "array")],
+    ids=["first-string", "middle-array"],
+)
+def test_non_object_finding_diagnostics_keep_provider_content_private(
+    tmp_path: Path,
+    invalid_index: int,
+    json_type: str,
+) -> None:
+    """Errors and logs identify the invalid entry without exposing response data."""
+    private_parts = (
+        "private-provider-content-3116",
+        "/private/provider-3116/secret.py",
+        "sk-test-private-token-3116",
+        "password=private-credential-3116",
+    )
+    private_value = " ".join(private_parts)
+    neighbor = {**_VALID_FINDING, "file": private_parts[1], "title": private_value}
+    findings: list[object] = [neighbor, neighbor]
+    findings.insert(
+        invalid_index,
+        private_value if json_type == "string" else [private_value],
+    )
+    content = json.dumps({"findings": findings})
+    agent = _agent(tmp_path=tmp_path)
+    expected = (
+        "Custom agent findings list must contain only JSON objects "
+        f"(index {invalid_index}, type {json_type})"
+    )
+
+    with pytest.raises(AIProviderError) as caught:
+        _findings_from_response(agent=agent, content=content)
+
+    assert_that(str(caught.value)).is_equal_to(expected)
+    assert_that(caught.value.__cause__).is_none()
+    messages: list[Any] = []
+    failed: list[str] = []
+    completed: list[str] = []
+    sink = logger.add(messages.append, format="{message}", level="ERROR")
+    try:
+        with _patch_agent_call(content=content):
+            results = asyncio.run(
+                run_custom_agent_passes(
+                    request=CustomAgentPassRequest(
+                        selected=(
+                            SelectedCustomAgent(agent=agent, files=("src/app.py",)),
+                        ),
+                        context=_context(),
+                        provider=_mock_provider(content=content),
+                        ai_config=_ai_config(),
+                        provider_cache={},
+                        budget=CostBudget(),
+                        on_agent_failed=failed.append,
+                        on_pass_complete=lambda result: completed.append(
+                            result.agent_name,
+                        ),
+                    ),
+                ),
+            )
+    finally:
+        logger.remove(sink)
+
+    assert_that(results).is_empty()
+    assert_that(failed).is_equal_to([agent.name])
+    assert_that(completed).is_empty()
+    assert_that(messages).is_length(1)
+    diagnostic = messages[0]
+    assert_that(str(diagnostic)).contains(expected)
+    transcript = str(caught.value) + str(diagnostic) + repr(diagnostic.record["extra"])
+    assert_that(transcript).does_not_contain(content, *private_parts)
+    assert_that(diagnostic.record["exception"]).is_none()
+    assert_that(diagnostic.record["extra"]).does_not_contain_key("exc_info")
 
 
 @pytest.mark.parametrize("content", _UNUSABLE_RESPONSES)
