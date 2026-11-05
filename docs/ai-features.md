@@ -1712,9 +1712,13 @@ uv pip install 'lintro[cursor]'
 
 The `cursor` extra is separate because `cursor-sdk` is a public beta published as wheels
 only (macOS arm64/x64, manylinux2014 x64/aarch64, Windows x64; the sdist is a stub), and
-each wheel bundles a ~55 MB native bridge. The `py-lintro-ai` image includes it. The API
-path is **inference-only**, like every `api` transport: the diff is embedded in the
-prompt, the agent gets no tools (`tools=[]` plus a deny list naming every documented
+each wheel bundles a ~55 MB native bridge. The package is proprietary (Cursor's
+[Terms of Service](https://cursor.com/terms-of-service) apply; the wheel carries no
+licence file) and the bundled bridge runtime includes a Statsig analytics bundle, so
+Socket reports a licence-policy and a telemetry alert for it; both are accepted in
+`socket.yml` as inherent to the vendor package. The `py-lintro-ai` image includes it.
+The API path is **inference-only**, like every `api` transport: the diff is embedded in
+the prompt, the agent gets no tools (`tools=[]` plus a deny list naming every documented
 tool), no cloud agent is used, and its working directory is an empty temporary directory
 lintro creates — never the repository under review — so a checkout's
 `.cursor/hooks.json`, rules and MCP config are not loaded. Cursor hooks cannot be

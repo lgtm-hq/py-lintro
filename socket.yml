@@ -28,3 +28,17 @@ packageRules:
       False positive: oxfmt contains compiled Rust binaries distributed via npm.
       Compiled machine code appears obfuscated to static analysis but is legitimate.
       See https://github.com/oxc-project/oxc
+
+  # cursor-sdk is Cursor's first-party Python SDK (#3253). It is published on
+  # PyPI under a proprietary licence and bundles the cursor-sdk-bridge runtime,
+  # which carries a Statsig analytics bundle. Both are inherent to the vendor
+  # package, not a supply-chain signal: lintro uses it only for the opt-in
+  # `lintro[cursor]` extra, with the user's own CURSOR_API_KEY. Accepted risk;
+  # the licence and the telemetry are documented in docs/ai-features.md.
+  - name: cursor-sdk
+    action: ignore
+    reason: >-
+      Vendor SDK: Cursor's own proprietary package, used only by the opt-in
+      lintro[cursor] extra with the user's own API key. The licence-policy
+      and telemetry alerts describe the package as shipped by Cursor and are
+      accepted. See https://github.com/lgtm-hq/py-lintro/issues/3253
