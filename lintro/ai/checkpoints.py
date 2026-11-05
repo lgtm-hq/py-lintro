@@ -442,7 +442,10 @@ def _open_parent(root_fd: int, rel: str, *, create: bool) -> int | None:
 
     Each component is opened relative to the one before it, so the directory
     returned is the one that was checked, whatever later happens to the
-    pathname.
+    pathname. With ``create`` True, an ancestor that exists as a
+    non-directory (for example a regular file) cannot be created, and the
+    ``NotADirectoryError`` from :func:`_descend` propagates unchanged;
+    :func:`_restore_at` reports it as :class:`CheckpointError`.
 
     Args:
         root_fd: Repository root descriptor; left open.
@@ -990,30 +993,47 @@ def _blob_for_path(
     return raw.stdout, git_mode
 
 
-def _restore_by_path(abs_path: Path, blob: tuple[bytes, str] | None) -> None:
+def _restore_by_path(
+    root: Path,
+    rel: str,
+    blob: tuple[bytes, str] | None,
+) -> None:
     """Restore one target by pathname (platforms without ``dir_fd`` support).
 
+    Mirrors :func:`_restore_at`: a deletion below an ancestor that is not a
+    directory has nothing to delete, and a write that would have to create a
+    directory where a non-directory stands raises :class:`CheckpointError`
+    naming the repo-relative path.
+
     Args:
-        abs_path: Absolute target path.
+        root: Repository root.
+        rel: Repo-relative POSIX path.
         blob: ``(contents, git mode)``, or None to delete the target.
 
     Raises:
-        CheckpointError: When an ancestor of the target is not a directory.
+        CheckpointError: When an ancestor the write must create is not a
+            directory.
     """
+    abs_path = root / rel
     if blob is None:
-        # ``missing_ok`` because a concurrent delete between the read and
-        # write phases must not abandon the rest of the rollback.
-        abs_path.unlink(missing_ok=True)
+        # A concurrent delete between the read and write phases must not
+        # abandon the rest of the rollback, and nothing can exist below an
+        # ancestor that is not a directory (ENOTDIR).
+        with contextlib.suppress(FileNotFoundError, NotADirectoryError):
+            abs_path.unlink()
         return
     contents, git_mode = blob
     try:
         abs_path.parent.mkdir(parents=True, exist_ok=True)
     except (FileExistsError, NotADirectoryError) as exc:
-        # ``exist_ok`` raises FileExistsError for a non-directory parent and a
-        # deeper non-directory ancestor surfaces as NotADirectoryError.
+        # ``exist_ok`` still raises FileExistsError when the parent exists but
+        # is not a directory to ``is_dir``: a regular file, or a dangling
+        # symbolic link swapped in mid-restore. On POSIX a deeper non-directory
+        # ancestor surfaces as NotADirectoryError; on Windows it arrives as
+        # FileExistsError from the recursive ``mkdir`` of that ancestor.
         raise CheckpointError(
             f"Cannot restore checkpoint target, an ancestor is not a directory: "
-            f"{abs_path}",
+            f"{rel}",
         ) from exc
     if git_mode == _SYMLINK_MODE:
         # The blob of a symlink entry is its target path, not file content.
@@ -1126,7 +1146,10 @@ def restore_checkpoint(
     relative to a parent directory pinned through no-follow descriptors, so
     a parent found swapped for a symbolic link mid-restore is such a failure
     rather than being followed. The ``_restore_by_path`` fallback checks
-    parents only before the write phase starts.
+    parents only before the write phase starts. On every platform, a write
+    whose ancestor directory exists as a non-directory (for example a
+    regular file) is a second such failure; a deletion below such an
+    ancestor has nothing to delete and is skipped.
 
     Paths present on disk but absent from the checkpoint tree are removed
     (they were created after capture). Paths that remain at the checkpoint
@@ -1191,7 +1214,7 @@ def restore_checkpoint(
     # Read phase complete — apply all writes/deletes.
     if not _DIR_FD_ACCESS:
         for rel, blob in planned:
-            _restore_by_path(root / rel, blob)
+            _restore_by_path(root, rel, blob)
         return
     root_fd = _open_root(root)
     try:
