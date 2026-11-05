@@ -21,6 +21,30 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.178.0] - 2026-11-05
+
+### Added
+
+- **ai/providers**: add Cursor API transport via cursor-sdk (#3258) (bc999c3)
+
+### Changed
+
+- **ai**: name dangling-link checkpoint fallback divergence and pin it (#3254) (bc4780e)
+- **audit**: use distinct same-named section models (#3270) (0323b29)
+- **audit**: cover ambiguous section model lookup (#3263) (b2e4adf)
+- **ai**: align checkpoint symlink skip reason (#3261) (dc062d5)
+- **audit**: share pinned section set across title guard assertions (#3262) (085344f)
+- **ci**: remove the CodeRabbit review-request workflow (#3260) (f3e7fd1)
+- **audit**: pin exact config section model set in title guard (#3257) (6437bc7)
+- **ai**: tidy dangling-link checkpoint divergence tests and wording (#3256) (c0f9908)
+- **audit**: note custom-title caveat for config section matching (#3255) (7505a75)
+
+### Fixed
+
+- **security**: bump klauspost/compress to v1.20.3 in the locked gitleaks rebuild
+  (#3274) (0daadd1)
+- **cargo-deny**: place global format option before check (#3212) (38d65d3)
+
 ## [0.177.26] - 2026-11-05
 
 ### Changed
