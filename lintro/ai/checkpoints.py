@@ -52,6 +52,9 @@ _INHERITED_GIT_VARS = (
 )
 # Descriptor-relative access binds each symlink check to the file actually
 # read or written. Platforms without it keep the path-based behaviour.
+# ``os.replace`` (used by ``_write_at``) has no entry of its own in
+# ``os.supports_dir_fd``: it shares ``rename``'s dir_fd support, so the
+# ``os.rename`` check below gates it too.
 _DIR_FD_ACCESS = (
     hasattr(os, "O_NOFOLLOW")
     and hasattr(os, "O_DIRECTORY")
@@ -1097,13 +1100,18 @@ def restore_checkpoint(
     Every target blob is read before anything is written, so a tree that
     cannot be read fails the whole rollback without having touched the working
     tree. Each individual file is then replaced atomically and with the mode
-    the checkpoint recorded, so a mode the run changed is rolled back too. The
-    write phase itself is sequential, so a failure part way through leaves the
-    earlier files already restored. Paths present on disk
-    but absent from the checkpoint tree are removed (they were created after
-    capture). Paths that remain at the checkpoint content are rewritten from
-    the tree — including when the user edited them between capture and
-    rollback (lintro targets always return to the pre-batch snapshot).
+    the checkpoint recorded, so a mode the run changed is rolled back too.
+
+    The write phase is per-target and sequential, not one transaction: a
+    failure part way through, including a parent directory found swapped for
+    a symbolic link mid-restore, stops the rollback at that target and leaves
+    the earlier targets already restored.
+
+    Paths present on disk but absent from the checkpoint tree are removed
+    (they were created after capture). Paths that remain at the checkpoint
+    content are rewritten from the tree — including when the user edited
+    them between capture and rollback (lintro targets always return to the
+    pre-batch snapshot).
 
     Only paths recorded on the checkpoint are eligible. Anything else is
     ignored rather than deleted, so a caller passing an unrelated (or
