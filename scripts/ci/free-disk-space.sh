@@ -4,7 +4,12 @@ set -euo pipefail
 # free-disk-space.sh
 #
 # Reclaim disk space on GitHub-hosted runners before large Docker builds.
-# Intended for fork PR fallback builds that cannot push to GHCR.
+# Runs before every hosted image build in docker-ci, fork or not (#3085).
+# Idempotent: `rm -rf` of an already-removed path succeeds, so reruns and
+# repeated calls are safe.
+#
+# Only preinstalled toolchains the image-build job never uses are removed;
+# the Python and Node entries under /opt/hostedtoolcache are left alone.
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	cat <<'EOF'
@@ -21,6 +26,19 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" && "${CI:-}" != "true" ]]; then
 	exit 0
 fi
 
-sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
-	/usr/local/share/boost
+echo "Disk usage before cleanup:"
+df -h /
+
+sudo rm -rf \
+	/usr/local/lib/android \
+	/usr/share/dotnet \
+	/opt/ghc \
+	/usr/local/.ghcup \
+	/usr/local/share/boost \
+	/usr/share/swift \
+	/usr/local/share/powershell \
+	/opt/hostedtoolcache/CodeQL
 sudo docker image prune -af
+
+echo "Disk usage after cleanup:"
+df -h /

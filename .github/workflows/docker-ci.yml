@@ -409,10 +409,11 @@ jobs:
       - name: Publish fork-fallback image pin
         id: fork-fallback
         run: echo "image=$LINTRO_FORK_FALLBACK_IMAGE" >> "$GITHUB_OUTPUT"
-      - name: Free disk space (fork fallback)
-        if: >-
-          needs.changes.outputs.pipeline != 'false' &&
-          steps.fork-check.outputs.is-fork == 'true'
+      # Every hosted build, fork or not: the full and ai images outgrow the
+      # stock runner disk and buildkit fails with "no space left on device"
+      # (#3085). Local deletions only, so no new harden-runner endpoints.
+      - name: Free disk space
+        if: needs.changes.outputs.pipeline != 'false'
         run: scripts/ci/free-disk-space.sh
       - name: Set up Docker Buildx (fork)
         if: >-

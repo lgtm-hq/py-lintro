@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import tempfile
 from pathlib import Path
@@ -1444,3 +1445,67 @@ def test_sweep_ci_ghcr_tags_rejects_unsafe_volatile_prefix(
 
     assert_that(result.returncode).is_equal_to(2)
     assert_that(result.stderr).contains("VOLATILE_TAG_PREFIXES entries must match")
+
+
+def _free_disk_stubs(bin_dir: Path, log: Path, *, sudo_exit: int = 0) -> None:
+    """Shadow ``sudo`` and ``df`` so free-disk-space.sh runs without root.
+
+    Args:
+        bin_dir: Directory prepended to PATH for the script under test.
+        log: File each stub appends its argv to.
+        sudo_exit: Exit status the ``sudo`` stub returns.
+    """
+    _write_stub(bin_dir, "sudo", f'echo "sudo $*" >> "{log}"\nexit {sudo_exit}')
+    _write_stub(bin_dir, "df", f'echo "df $*" >> "{log}"')
+
+
+def test_free_disk_space_reports_disk_and_spares_job_toolcache(
+    tmp_path: Path,
+) -> None:
+    """The cleanup reports df around itself and never touches used toolcaches.
+
+    Runs before every hosted docker-ci image build (#3085), so it must keep
+    the Python/Node toolcache entries other steps may resolve and must stay
+    re-runnable.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "calls.log"
+
+    for _ in range(2):
+        _free_disk_stubs(bin_dir, log)
+        result = _run_with_stubs(
+            "scripts/ci/free-disk-space.sh",
+            bin_dir,
+            {"GITHUB_ACTIONS": "true"},
+        )
+        assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
+
+    calls = log.read_text().splitlines()
+    assert_that(calls.count("df -h /")).is_equal_to(4)
+    rm_targets = [
+        target
+        for call in calls
+        if call.startswith("sudo rm -rf ")
+        for target in call.removeprefix("sudo rm -rf ").split()
+    ]
+    assert_that(rm_targets).contains("/opt/hostedtoolcache/CodeQL")
+    assert_that(rm_targets).does_not_contain("/opt/hostedtoolcache")
+    assert_that(
+        [t for t in rm_targets if re.search(r"hostedtoolcache/(Python|node)", t)],
+    ).is_empty()
+
+
+def test_free_disk_space_fails_when_cleanup_fails(tmp_path: Path) -> None:
+    """A failing privileged cleanup fails the step instead of being masked."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _free_disk_stubs(bin_dir, tmp_path / "calls.log", sudo_exit=1)
+
+    result = _run_with_stubs(
+        "scripts/ci/free-disk-space.sh",
+        bin_dir,
+        {"GITHUB_ACTIONS": "true"},
+    )
+
+    assert_that(result.returncode).is_not_equal_to(0)
