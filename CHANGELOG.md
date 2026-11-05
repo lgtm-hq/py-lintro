@@ -21,6 +21,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.26] - 2026-11-05
+
+### Changed
+
+- **ai**: clarify checkpoint fallback delete edge cases and pin normal delete (#3250)
+  (3333cca)
+- **audit**: tidy version-timeout config warning detail and tests (#3248) (3207474)
+- **audit**: sharpen version-timeout config warnings and contract tests (#3245)
+  (2cf9a54)
+
+### Fixed
+
+- **ai**: align checkpoint fallback restore errors with the descriptor path (#3247)
+  (e7f41a7)
+
 ## [0.177.25] - 2026-11-05
 
 ### Changed
