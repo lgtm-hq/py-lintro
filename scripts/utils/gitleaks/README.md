@@ -11,7 +11,7 @@ The seven changed embedded dependencies are:
 
 | Module                            | Selected version |
 | --------------------------------- | ---------------- |
-| `github.com/klauspost/compress`   | `v1.18.7`        |
+| `github.com/klauspost/compress`   | `v1.20.3`        |
 | `github.com/nwaples/rardecode/v2` | `v2.2.1`         |
 | `github.com/ulikunitz/xz`         | `v0.5.15`        |
 | `golang.org/x/crypto`             | `v0.56.0`        |

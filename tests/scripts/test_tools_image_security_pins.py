@@ -200,7 +200,7 @@ def test_gitleaks_build_uses_a_locked_security_dependency_closure() -> None:
     )
     assert versions["github.com/zricethezav/gitleaks/v8"] == "v8.30.1"
     for name, version in {
-        "github.com/klauspost/compress": "v1.18.7",
+        "github.com/klauspost/compress": "v1.20.3",
         "github.com/nwaples/rardecode/v2": "v2.2.1",
         "github.com/ulikunitz/xz": "v0.5.15",
         "golang.org/x/crypto": "v0.56.0",
