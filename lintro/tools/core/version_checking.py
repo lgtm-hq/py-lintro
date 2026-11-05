@@ -73,36 +73,92 @@ _COMMITLINT_CONFIG_CONVENTIONAL_PACKAGE = "@commitlint/config-conventional"
 _COMMITLINT_HINT_KEYS = {"commitlint", "@commitlint/cli"}
 
 
+#: Ceiling for the retry budget of a timed-out version probe (#3083): the
+#: retry doubles the first budget up to this value, and a first budget that
+#: already meets it is retried unchanged.
+VERSION_PROBE_RETRY_CAP: int = 120
+
+
+def _env_version_timeout() -> int | None:
+    """Return the ``LINTRO_VERSION_TIMEOUT`` override when it is set and valid.
+
+    Returns:
+        int | None: Timeout in seconds, or None when the env var is unset or
+            invalid. An invalid value is logged and ignored.
+    """
+    env_value = os.getenv("LINTRO_VERSION_TIMEOUT")
+    if env_value is None:
+        return None
+
+    try:
+        timeout = int(env_value)
+    except (TypeError, ValueError):
+        logger.warning(f"Invalid LINTRO_VERSION_TIMEOUT '{env_value}'; ignoring it")
+        return None
+
+    if timeout < 1:
+        logger.warning("LINTRO_VERSION_TIMEOUT must be >= 1; ignoring it")
+        return None
+
+    return timeout
+
+
 def _get_version_timeout() -> int:
-    """Return the validated version check timeout.
+    """Return the version check timeout from the environment or the default.
+
+    This ignores ``[tool.lintro.execution] version_check_timeout``; the
+    version probe uses :func:`get_version_check_timeout` instead.
 
     Returns:
         int: Timeout in seconds; falls back to default when the env var is invalid.
     """
     default_timeout = 30
-    env_value = os.getenv("LINTRO_VERSION_TIMEOUT")
-    if env_value is None:
-        return default_timeout
+    env_timeout = _env_version_timeout()
+    return default_timeout if env_timeout is None else env_timeout
+
+
+#: Import-time value of ``LINTRO_VERSION_TIMEOUT`` (or the default), kept for
+#: backward compatibility. The version probe resolves its budget at call time
+#: through :func:`get_version_check_timeout`.
+VERSION_CHECK_TIMEOUT: int = _get_version_timeout()
+
+
+def get_version_check_timeout() -> int:
+    """Return the effective version probe timeout, resolved at call time.
+
+    Precedence: the ``LINTRO_VERSION_TIMEOUT`` env var, then
+    ``[tool.lintro.execution] version_check_timeout``, then the default
+    (``30``). A config that cannot be loaded falls back to the default.
+
+    Returns:
+        int: Timeout in seconds for one version probe attempt.
+    """
+    env_timeout = _env_version_timeout()
+    if env_timeout is not None:
+        return env_timeout
+
+    from lintro.config.config_loader import get_config
 
     try:
-        timeout = int(env_value)
-    except (TypeError, ValueError):
-        logger.warning(
-            f"Invalid LINTRO_VERSION_TIMEOUT '{env_value}'; "
-            f"using default {default_timeout}",
-        )
-        return default_timeout
-
-    if timeout < 1:
-        logger.warning(
-            f"LINTRO_VERSION_TIMEOUT must be >= 1; using default {default_timeout}",
-        )
-        return default_timeout
-
-    return timeout
+        return get_config().execution.version_check_timeout
+    except (OSError, TypeError, ValueError) as exc:
+        logger.debug(f"Could not read execution.version_check_timeout: {exc}")
+        return _get_version_timeout()
 
 
-VERSION_CHECK_TIMEOUT: int = _get_version_timeout()
+def version_probe_retry_timeout(timeout: float) -> float:
+    """Return the budget for retrying a version probe that timed out.
+
+    Args:
+        timeout: Budget, in seconds, of the attempt that timed out.
+
+    Returns:
+        float: Double the budget, capped at :data:`VERSION_PROBE_RETRY_CAP`;
+            a budget already at or above the cap is retried unchanged.
+    """
+    if timeout >= VERSION_PROBE_RETRY_CAP:
+        return timeout
+    return min(2 * timeout, VERSION_PROBE_RETRY_CAP)
 
 
 def get_minimum_versions() -> dict[str, str]:

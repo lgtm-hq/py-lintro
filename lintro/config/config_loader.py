@@ -652,6 +652,8 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
         optional_fields["tool_snapshot_ttl"] = data["tool_snapshot_ttl"]
     if "strict_missing_tools" in data:
         optional_fields["strict_missing_tools"] = data["strict_missing_tools"]
+    if "version_check_timeout" in data:
+        optional_fields["version_check_timeout"] = data["version_check_timeout"]
 
     return ExecutionConfig(
         enabled_tools=enabled_tools,

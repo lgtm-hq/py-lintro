@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from assertpy import assert_that
 from loguru import logger
 
+from lintro.config.config_loader import clear_config_cache
 from lintro.tools.core import version_checking
 from lintro.tools.core.version_checking import (
+    VERSION_PROBE_RETRY_CAP,
     _get_version_timeout,
     get_install_hints,
     get_minimum_versions,
+    get_version_check_timeout,
+    version_probe_retry_timeout,
 )
 
 # Tests for _get_version_timeout
@@ -62,6 +68,111 @@ def test_get_version_timeout_invalid(
     monkeypatch.setenv("LINTRO_VERSION_TIMEOUT", env_value)
     result = _get_version_timeout()
     assert_that(result).is_equal_to(expected)
+
+
+# Tests for get_version_check_timeout (#3083)
+
+
+def _use_project_config(
+    project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    file_name: str,
+    content: str,
+) -> None:
+    """Make *project* the working directory with one config file in it.
+
+    Args:
+        project: Directory to run from.
+        monkeypatch: Pytest fixture for patching modules and attributes.
+        file_name: Name of the config file to write.
+        content: Config file content.
+    """
+    (project / file_name).write_text(content, encoding="utf-8")
+    monkeypatch.chdir(project)
+    clear_config_cache()
+
+
+@pytest.mark.parametrize(
+    ("env_value", "config_timeout", "expected"),
+    [
+        ("45", 120, 45),
+        (None, 120, 120),
+        (None, None, 30),
+        ("not-a-number", 120, 120),
+    ],
+    ids=["env_over_config", "config_over_default", "default", "invalid_env"],
+)
+def test_get_version_check_timeout_precedence(
+    env_value: str | None,
+    config_timeout: int | None,
+    expected: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resolve env var > execution.version_check_timeout > default 30.
+
+    Args:
+        env_value: ``LINTRO_VERSION_TIMEOUT`` value, or None to unset it.
+        config_timeout: Configured ``version_check_timeout``, or None to omit it.
+        expected: Effective timeout.
+        tmp_path: Temporary project directory.
+        monkeypatch: Pytest fixture for patching modules and attributes.
+    """
+    if env_value is None:
+        monkeypatch.delenv("LINTRO_VERSION_TIMEOUT", raising=False)
+    else:
+        monkeypatch.setenv("LINTRO_VERSION_TIMEOUT", env_value)
+    config_line = (
+        "" if config_timeout is None else f"  version_check_timeout: {config_timeout}\n"
+    )
+    _use_project_config(
+        tmp_path,
+        monkeypatch,
+        file_name=".lintro-config.yaml",
+        content=f"execution:\n  fail_fast: false\n{config_line}",
+    )
+
+    assert_that(get_version_check_timeout()).is_equal_to(expected)
+
+
+def test_get_version_check_timeout_reads_pyproject_execution_table(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``[tool.lintro.execution] version_check_timeout`` sets the budget.
+
+    Args:
+        tmp_path: Temporary project directory.
+        monkeypatch: Pytest fixture for patching modules and attributes.
+    """
+    monkeypatch.delenv("LINTRO_VERSION_TIMEOUT", raising=False)
+    _use_project_config(
+        tmp_path,
+        monkeypatch,
+        file_name="pyproject.toml",
+        content="[tool.lintro.execution]\nversion_check_timeout = 75\n",
+    )
+
+    assert_that(get_version_check_timeout()).is_equal_to(75)
+
+
+@pytest.mark.parametrize(
+    ("timeout", "retry_timeout"),
+    [(1, 2), (30, 60), (60, 120), (61, 120), (120, 120), (300, 300)],
+)
+def test_version_probe_retry_timeout_doubles_up_to_cap(
+    timeout: int,
+    retry_timeout: int,
+) -> None:
+    """The retry budget doubles, is capped at 120, and never shrinks.
+
+    Args:
+        timeout: Budget of the attempt that timed out.
+        retry_timeout: Expected retry budget.
+    """
+    assert_that(VERSION_PROBE_RETRY_CAP).is_equal_to(120)
+    assert_that(version_probe_retry_timeout(timeout)).is_equal_to(retry_timeout)
 
 
 # Tests for get_minimum_versions

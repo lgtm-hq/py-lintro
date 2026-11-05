@@ -197,3 +197,36 @@ def test_parse_precedence_keeps_a_repeated_pair() -> None:
     assert_that(
         _parse_precedence([["ruff", "black"], ["ruff", "black"]]),
     ).is_equal_to([("ruff", "black"), ("ruff", "black")])
+
+
+def test_execution_config_version_check_timeout_default_matches_env_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The config default equals the version probe's built-in default (#3083).
+
+    Args:
+        monkeypatch: Pytest fixture for patching modules and attributes.
+    """
+    from lintro.tools.core.version_checking import _get_version_timeout
+
+    monkeypatch.delenv("LINTRO_VERSION_TIMEOUT", raising=False)
+
+    assert_that(ExecutionConfig().version_check_timeout).is_equal_to(30)
+    assert_that(ExecutionConfig().version_check_timeout).is_equal_to(
+        _get_version_timeout(),
+    )
+
+
+def test_execution_config_version_check_timeout_rejects_zero() -> None:
+    """version_check_timeout must be at least one second."""
+    with pytest.raises(ValueError, match="greater than or equal to 1"):
+        ExecutionConfig(version_check_timeout=0)
+
+
+def test_parse_execution_config_forwards_version_check_timeout() -> None:
+    """The execution section parser keeps a configured version_check_timeout."""
+    from lintro.config.config_loader import _parse_execution_config
+
+    config = _parse_execution_config({"version_check_timeout": 120})
+
+    assert_that(config.version_check_timeout).is_equal_to(120)
