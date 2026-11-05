@@ -36,7 +36,8 @@ class CursorConfig(ProviderConfig):
             "Pass '--trust' to the Cursor 'agent' CLI, granting it workspace "
             "trust. Trust follows from choosing provider: cursor, so this "
             "defaults to True. Set false to restore the Cursor agent's "
-            "interactive trust prompt."
+            "interactive trust prompt. Ignored by transport: api, whose "
+            "agent runs tool-less in an empty temporary directory."
         ),
     )
 

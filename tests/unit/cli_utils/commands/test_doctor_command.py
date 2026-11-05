@@ -13,11 +13,14 @@ import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
 from loguru import logger
+from rich.console import Console
 
 from lintro.ai.config import AIConfig
+from lintro.ai.doctor_checks import AICheckResult
 from lintro.cli_utils.commands.doctor import (
     _generate_markdown_report,
     _output_json,
+    _render_ai_checks,
     doctor_command,
 )
 from lintro.config.lintro_config import LintroConfig
@@ -1229,3 +1232,25 @@ def test_doctor_order_lines_are_empty_when_selection_fails() -> None:
         lines = doctor_order_lines()
 
     assert_that(lines).is_empty()
+
+
+def test_ai_check_hint_keeps_its_extra_brackets() -> None:
+    """A ``lintro[cursor]`` hint prints verbatim, not as a Rich tag (#3253)."""
+    buffer = StringIO()
+    console = Console(file=buffer, width=200, no_color=True)
+
+    _render_ai_checks(
+        console,
+        [
+            AICheckResult(
+                name="ai.api.sdk.cursor",
+                status=ToolStatus.MISSING,
+                message="Provider SDK for cursor API transport is not installed",
+                hint="Install with: uv pip install 'lintro[cursor]'",
+            ),
+        ],
+    )
+
+    assert_that(buffer.getvalue()).contains(
+        "Install with: uv pip install 'lintro[cursor]'",
+    )

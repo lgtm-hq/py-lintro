@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 from assertpy import assert_that
 
@@ -10,6 +12,18 @@ from lintro.ai.doctor_checks import check_ai_configuration
 from lintro.ai.enums import AITransport
 from lintro.ai.registry import AIProvider
 from lintro.enums.tool_status import ToolStatus
+from tests.unit.ai.cli_only_plugin import cli_only_plugin
+
+
+@pytest.fixture()
+def _cli_only_cursor() -> Iterator[None]:
+    """Register a fake CLI-only plugin under Cursor's name for the test.
+
+    Yields:
+        None: For the duration of the test.
+    """
+    with cli_only_plugin():
+        yield
 
 
 def test_transport_optional_when_ai_disabled() -> None:
@@ -94,8 +108,13 @@ def test_doctor_skips_when_master_switch_off() -> None:
     assert_that(results).is_empty()
 
 
+@pytest.mark.usefixtures("_cli_only_cursor")
 def test_doctor_reports_cursor_api_combo_when_enabled() -> None:
-    """Doctor surfaces invalid cursor+api instead of raw config validation."""
+    """Doctor surfaces an invalid pairing instead of raw config validation.
+
+    Uses a fake CLI-only plugin under Cursor's name: real Cursor serves
+    ``transport: api`` since #3253.
+    """
     results = check_ai_configuration(
         AIConfig(
             enabled=True,

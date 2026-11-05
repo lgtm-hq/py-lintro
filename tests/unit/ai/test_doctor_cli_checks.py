@@ -10,6 +10,7 @@ to preserve.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,19 @@ from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers.cli_auth_probe import CliAuthProbe
 from lintro.ai.registry import metadata_for
 from lintro.enums.tool_status import ToolStatus
+from tests.unit.ai.cli_only_plugin import cli_only_plugin
+
+
+@pytest.fixture()
+def _cli_only_cursor() -> Iterator[None]:
+    """Register a fake CLI-only plugin under Cursor's name for the test.
+
+    Yields:
+        None: For the duration of the test.
+    """
+    with cli_only_plugin():
+        yield
+
 
 #: An API-key variable no provider declares, used for the override cases.
 _RENAMED_KEY = "RENAMED_KEY"
@@ -343,8 +357,13 @@ def test_openai_cli_auth_accepts_the_login_file(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.usefixtures("_cli_only_cursor")
 def test_unsupported_provider_transport_pairing_is_incompatible() -> None:
-    """Cursor over the API transport is a configuration error, not a probe."""
+    """A CLI-only provider over the API transport is a configuration error.
+
+    Cursor pinned this until #3253 gave it an API transport; a fake CLI-only
+    plugin under Cursor's name keeps the rule and its wording covered.
+    """
     config = AIConfig(
         enabled=True,
         review=True,
@@ -365,6 +384,7 @@ def test_unsupported_provider_transport_pairing_is_incompatible() -> None:
     )
 
 
+@pytest.mark.usefixtures("_cli_only_cursor")
 def test_liveness_skips_an_unsupported_pairing_without_probing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -372,7 +392,7 @@ def test_liveness_skips_an_unsupported_pairing_without_probing(
 
     Asserting the empty result alone would also pass if the probe ran and
     returned nothing, so the probe itself is replaced by one that fails the
-    test when called.
+    test when called. The pairing comes from a fake CLI-only plugin (#3253).
 
     Args:
         monkeypatch: Pytest attribute patcher.

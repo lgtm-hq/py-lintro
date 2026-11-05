@@ -102,18 +102,32 @@ def test_render_ai_status_unknown_provider() -> None:
     assert_that(lines[2]).is_equal_to("  provider: not-a-provider")
 
 
-def test_render_ai_status_sdk_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A missing SDK renders the install hint."""
+@pytest.mark.parametrize(
+    ("provider", "extra"),
+    [("anthropic", "ai"), ("openai", "ai"), ("cursor", "cursor")],
+)
+def test_render_ai_status_sdk_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    extra: str,
+) -> None:
+    """A missing SDK renders the provider's own extra (#3253).
+
+    Args:
+        monkeypatch: Pytest attribute patcher.
+        provider: Configured provider name.
+        extra: The extra its SDK ships in.
+    """
     monkeypatch.setattr(
         "lintro.ai.availability.is_provider_available",
         lambda _provider: False,
     )
 
-    lines = render_ai_status(ai_config=_stub_config(), is_ci=False)
+    lines = render_ai_status(ai_config=_stub_config(provider=provider), is_ci=False)
 
     assert_that(lines[0]).is_equal_to("[red]enabled (SDK not installed)[/red]")
     assert_that(lines[1]).is_equal_to(
-        "  [yellow]run: uv pip install 'lintro\\[ai]'[/yellow]",
+        f"  [yellow]run: uv pip install 'lintro\\[{extra}]'[/yellow]",
     )
 
 

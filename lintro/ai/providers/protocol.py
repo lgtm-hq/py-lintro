@@ -56,7 +56,26 @@ __all__ = [
     "CliBounds",
     "ProviderMetadata",
     "ProviderPlugin",
+    "sdk_install_command",
 ]
+
+#: The extra a provider's API SDK ships in when its metadata names none.
+DEFAULT_SDK_EXTRA = "ai"
+
+
+def sdk_install_command(extra: str | None) -> str:
+    """Return the command that installs a provider SDK's lintro extra.
+
+    Args:
+        extra: The ``lintro`` extra carrying the SDK, or ``None`` for the
+            shared ``ai`` extra.
+
+    Returns:
+        A ``uv pip install`` command naming the extra, e.g.
+        ``uv pip install 'lintro[cursor]'``.
+    """
+    return f"uv pip install 'lintro[{extra or DEFAULT_SDK_EXTRA}]'"
+
 
 #: Current major version of the in-tree provider plugin contract.
 #:
@@ -142,8 +161,20 @@ class ProviderMetadata:
             (#2537). A provider whose subscription catalogue is stable may name
             a model here instead. Ignored by API transport, which always
             resolves to *default_model*.
-        sdk_package: Distribution installed for API transport, or ``None``
+        sdk_package: Import name of the SDK API transport needs, or ``None``
             when the provider has no API transport (CLI-only vendors).
+            :mod:`lintro.ai.availability` passes it to
+            :func:`importlib.import_module`, so it is the module name
+            (``cursor_sdk``), not the distribution name (``cursor-sdk``).
+        sdk_extra: The ``lintro`` extra that installs *sdk_package*, or
+            ``None`` when the provider has no API transport. Every install
+            hint for a missing SDK is built from it (#3253), so a provider
+            whose SDK lives outside the shared ``ai`` extra is never told to
+            install the wrong one.
+        accepts_api_base_url: Whether ``ai.api_base_url`` is meaningful for
+            this provider's API transport. ``False`` for a vendor whose SDK
+            has no endpoint override (Cursor): doctor then neither offers the
+            base URL as a credential substitute nor counts it as one.
         cli_binary: Executable looked up on ``PATH`` for CLI transport, or
             ``None`` when the provider has no CLI transport.
         cli_contract_id: Stable string key for the provider's CLI contract, or
@@ -173,6 +204,8 @@ class ProviderMetadata:
     default_transport: AITransport
     cli_default_model: str | None = None
     sdk_package: str | None = None
+    sdk_extra: str | None = None
+    accepts_api_base_url: bool = True
     cli_binary: str | None = None
     cli_contract_id: str | None = None
     cli_contract: CliContract | None = None
@@ -206,6 +239,16 @@ class ProviderMetadata:
                 f"'{self.default_transport.value}', which is not among its "
                 f"supported transports: {supported or 'none'}.",
             )
+
+    @property
+    def sdk_install_hint(self) -> str:
+        """Return the install guidance for this provider's missing API SDK.
+
+        Returns:
+            ``Install with: uv pip install 'lintro[<extra>]'`` naming
+            :attr:`sdk_extra`.
+        """
+        return f"Install with: {sdk_install_command(self.sdk_extra)}"
 
     @property
     def pricing_keys(self) -> tuple[str, ...]:

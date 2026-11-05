@@ -82,6 +82,7 @@ ANTHROPIC_METADATA = ProviderMetadata(
     supported_transports=frozenset({AITransport.API, AITransport.CLI}),
     default_transport=AITransport.API,
     sdk_package="anthropic",
+    sdk_extra="ai",
     cli_binary=ANTHROPIC_CLI_BINARY,
     cli_contract_id=AIProvider.ANTHROPIC.value,
     cli_contract=ANTHROPIC_CLI_CONTRACT,

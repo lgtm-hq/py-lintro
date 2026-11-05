@@ -212,6 +212,26 @@ def test_ai_stage_installs_the_ai_extra() -> None:
     assert_that(_ai_stage_body()).contains("--extra ai")
 
 
+def test_ai_stage_installs_the_cursor_extra() -> None:
+    """Cursor's API transport SDK ships in its own extra, synced here (#3253)."""
+    assert_that(_ai_stage_body()).contains("--extra ai --extra cursor")
+
+
+def test_ai_stage_imports_cursor_sdk_and_its_bridge_as_non_root() -> None:
+    """The SDK spawns a bundled bridge runtime as whatever user lintro runs as.
+
+    A root-only bridge would pass a root-run import and fail every real call
+    once the entrypoint drops privileges, so the check runs as ``lintro``.
+    """
+    ai_stage = _ai_stage_body()
+
+    assert_that(ai_stage).contains(
+        'gosu lintro /app/.venv/bin/python -c "import cursor_sdk',
+    )
+    assert_that(ai_stage).contains("_vendor/bridge/bin/node")
+    assert_that(ai_stage).contains("os.access(node, os.X_OK)")
+
+
 def test_ai_stage_smoke_tests_every_declared_cli_as_non_root() -> None:
     """A root-only-readable CLI tree would break every real review.
 

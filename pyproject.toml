@@ -73,6 +73,11 @@ full = [
   "yamllint>=1.37.1",
 ]
 ai = ["anthropic>=0.39.0", "openai>=1.50.0"]
+# Cursor's first-party SDK backs `provider: cursor` + `transport: api` (#3253).
+# Its own extra, not part of `ai`: the package ships wheels only (the sdist is a
+# stub), each wheel bundles a ~55 MB native bridge binary, and it is a public
+# beta whose breaking release must not block the Anthropic/OpenAI lock.
+cursor = ["cursor-sdk>=1.3,<2"]
 # Floor: 2.0 is the first release of the constructor-registered low-level
 # `Server` API (`on_list_tools` / `on_call_tool`), explicit `ListToolsResult`,
 # and snake_case type fields (`input_schema`, `is_error`).

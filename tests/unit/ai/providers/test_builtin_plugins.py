@@ -18,6 +18,7 @@ from assertpy import assert_that
 from lintro.ai.availability import provider_api_key_env, provider_cli_binary
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport, CliBareMode
+from lintro.ai.exceptions import AINotAvailableError
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers import get_provider
 from lintro.ai.providers.anthropic.config import AnthropicConfig
@@ -35,6 +36,7 @@ from lintro.ai.providers.registry import (
     restore_registered,
 )
 from lintro.ai.registry import metadata_for
+from tests.unit.ai.cli_only_plugin import cli_only_plugin
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -53,6 +55,7 @@ _BINARY_FINDERS: dict[AIProvider, str] = {
 _SDK_FLAGS: dict[AIProvider, str] = {
     AIProvider.ANTHROPIC: "lintro.ai.providers.anthropic.provider._has_anthropic",
     AIProvider.OPENAI: "lintro.ai.providers.openai.provider._has_openai",
+    AIProvider.CURSOR: "lintro.ai.providers.cursor.provider._has_cursor_sdk",
 }
 
 #: Class each provider must still build, by qualified name. Compared as a
@@ -73,6 +76,17 @@ def _registered() -> Iterator[None]:
     """
     load_builtin_providers()
     yield
+
+
+@pytest.fixture()
+def _cli_only_cursor() -> Iterator[None]:
+    """Register a fake CLI-only plugin under Cursor's name for the test.
+
+    Yields:
+        None: For the duration of the test.
+    """
+    with cli_only_plugin():
+        yield
 
 
 @pytest.mark.usefixtures("_registered")
@@ -125,25 +139,19 @@ def test_every_consumer_reads_the_same_metadata_record(
 @pytest.mark.usefixtures("_registered")
 @pytest.mark.parametrize("provider", list(AIProvider))
 def test_plugin_declares_the_transports_it_serves(provider: AIProvider) -> None:
-    """Cursor is CLI-only; the SDK-backed providers serve both transports.
+    """Every in-tree provider serves both transports; Cursor's API is #3253.
 
     Args:
         provider: The provider under test.
     """
     transports = get_registered(provider).transports
 
-    if provider is AIProvider.CURSOR:
-        assert_that(transports).is_equal_to(frozenset({AITransport.CLI}))
-    else:
-        assert_that(transports).is_equal_to(
-            frozenset({AITransport.API, AITransport.CLI}),
-        )
+    assert_that(transports).is_equal_to(
+        frozenset({AITransport.API, AITransport.CLI}),
+    )
 
 
-@pytest.mark.parametrize(
-    "provider",
-    [AIProvider.ANTHROPIC, AIProvider.OPENAI],
-)
+@pytest.mark.parametrize("provider", list(AIProvider))
 def test_get_provider_builds_the_same_class_over_api_transport(
     provider: AIProvider,
 ) -> None:
@@ -242,7 +250,7 @@ def test_get_provider_threads_the_cursor_only_knob(trust: bool) -> None:
 
 
 def test_cursor_unset_transport_resolves_to_cli() -> None:
-    """An unset transport builds Cursor on ``cli``, the only one it serves (#2449)."""
+    """An unset transport builds Cursor on ``cli``, its default (#2449)."""
     config = AIConfig.model_construct(
         provider=AIProvider.CURSOR,
         transport=None,
@@ -262,26 +270,37 @@ def test_cursor_unset_transport_resolves_to_cli() -> None:
     assert_that(built._transport).is_equal_to(AITransport.CLI)
 
 
-def test_cursor_still_rejects_api_transport_with_its_own_message() -> None:
-    """An explicit ``transport: api`` keeps Cursor's pre-migration guard message."""
-    from lintro.ai.exceptions import AINotAvailableError
+def test_cursor_api_transport_builds_without_the_agent_binary() -> None:
+    """``transport: api`` needs the SDK, not ``agent`` on ``PATH`` (#3253)."""
+    config = AIConfig(provider=AIProvider.CURSOR, transport=AITransport.API)
 
+    with (
+        patch(_SDK_FLAGS[AIProvider.CURSOR], True),
+        patch(_BINARY_FINDERS[AIProvider.CURSOR], return_value=None),
+    ):
+        built = get_provider(config)
+
+    assert_that(type(built).__name__).is_equal_to("CursorProvider")
+    assert_that(built._transport).is_equal_to(AITransport.API)
+    assert_that(built._cli_transport()).is_none()
+
+
+@pytest.mark.usefixtures("_cli_only_cursor")
+def test_a_cli_only_plugin_rejects_api_transport_with_its_own_message() -> None:
+    """The factory surfaces a CLI-only plugin's own rejection, unchanged.
+
+    Cursor pinned this until #3253; a fake CLI-only plugin carries it now.
+    """
     config = AIConfig.model_construct(
         provider=AIProvider.CURSOR,
         transport=AITransport.API,
         model=None,
         api_key_env=None,
         max_tokens=4096,
-        providers={AIProvider.CURSOR: CursorConfig(trust_workspace=True)},
+        providers={},
     )
 
-    with (
-        patch(
-            _BINARY_FINDERS[AIProvider.CURSOR],
-            return_value="/usr/local/bin/agent",
-        ),
-        pytest.raises(AINotAvailableError) as excinfo,
-    ):
+    with pytest.raises(AINotAvailableError) as excinfo:
         get_provider(config)
 
     assert_that(str(excinfo.value)).is_equal_to(

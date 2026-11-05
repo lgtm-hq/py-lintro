@@ -226,10 +226,13 @@ COPY --from=aitools /opt/ai-tools /opt/ai-tools
 ENV PATH="/opt/ai-tools/bin:${PATH}"
 
 # The `full` stage syncs without the `ai` extra so the lint-only image does not
-# carry the provider SDKs; add them here for the API transports. The chown
-# mirrors `full`'s, which runs before these newly written .venv files exist.
+# carry the provider SDKs; add them here for the API transports. `cursor` is
+# its own opt-in extra (#3253): wheels-only, with a bundled native bridge. The
+# chown mirrors `full`'s, which runs before these newly written .venv files
+# exist.
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
-    uv sync --dev --extra full --extra tools --extra ai --no-progress && \
+    uv sync --dev --extra full --extra tools --extra ai --extra cursor \
+      --no-progress && \
     (uv cache clean || true) && \
     chown -R lintro:lintro /app
 
@@ -242,6 +245,16 @@ RUN echo "Smoke-testing AI agent CLIs..." && \
     gosu lintro codex --version && \
     gosu lintro agent --version && \
     echo "AI CLI smoke check passed."
+
+# Cursor's API transport (#3253) spawns the SDK's bundled bridge, a vendored
+# node runtime, as whatever user lintro runs as. Import the SDK and require the
+# bridge runtime to be executable as `lintro`, not just as root. The vendored
+# path is private to cursor-sdk; a layout change fails here, loudly, on the
+# Renovate PR that brings it.
+RUN gosu lintro /app/.venv/bin/python -c "import cursor_sdk, os, pathlib; \
+node = pathlib.Path(cursor_sdk.__file__).parent / '_vendor/bridge/bin/node'; \
+assert os.access(node, os.X_OK), f'{node} is not executable as lintro'" && \
+    echo "Cursor SDK smoke check passed."
 
 # This stage is the only place `full` and `ai` are installed together, so it is
 # the only place the `docstring_parser` module collision can reappear (#2378).

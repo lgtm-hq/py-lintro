@@ -210,7 +210,9 @@ def _render_ai_checks(console: Console, checks: list[AICheckResult]) -> None:
             line.append(check.message, style="dim")
         console.print(line)
         if check.hint:
-            console.print(f"         [dim]{check.hint}[/dim]")
+            # Plain Text, not markup: a hint like ``lintro[cursor]`` would
+            # otherwise lose its brackets as an unknown style tag.
+            console.print(Text(f"         {check.hint}", style="dim"))
 
 
 def _render_mcp_extra(console: Console) -> None:
@@ -271,7 +273,9 @@ def _render_oxlint_checks(console: Console, checks: list[OxlintCheckResult]) -> 
             line.append(check.message, style="dim")
         console.print(line)
         if check.hint:
-            console.print(f"         [dim]{check.hint}[/dim]")
+            # Plain Text, not markup: a hint like ``lintro[cursor]`` would
+            # otherwise lose its brackets as an unknown style tag.
+            console.print(Text(f"         {check.hint}", style="dim"))
 
 
 def _generate_markdown_report(
