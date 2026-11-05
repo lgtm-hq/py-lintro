@@ -9,10 +9,11 @@ import pytest
 import yaml
 from assertpy import assert_that
 from loguru import logger
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from lintro.config import config_loader
 from lintro.config.config_loader import clear_config_cache
+from lintro.config.lintro_config import LintroConfig
 from lintro.exceptions.errors import ConfigurationError
 from lintro.tools.core import version_checking
 from lintro.tools.core.version_checking import (
@@ -381,7 +382,8 @@ def test_multi_line_config_errors_warn_on_one_line(
 
     Args:
         error: Exception the config load raises.
-        expected_detail: Detail the single warning must end with.
+        expected_detail: Detail the single warning carries after
+            ``_CONFIG_WARNING``, compared for exact equality.
         monkeypatch: Pytest fixture for patching modules and attributes.
         logged_warnings: Captured WARNING-level log messages.
     """
@@ -394,6 +396,29 @@ def test_multi_line_config_errors_warn_on_one_line(
     assert_that(timeouts).is_equal_to([30, 30])
     assert_that(logged_warnings).is_equal_to([f"{_CONFIG_WARNING}{expected_detail}"])
     assert_that(logged_warnings[0]).does_not_contain("\n")
+
+
+def test_section_model_errors_are_titled_with_their_class_name() -> None:
+    """Every section model's ``ValidationError`` title is its class name.
+
+    ``_config_section_of`` matches a section by the error's title, which is
+    the class name only while the model's ``model_config`` sets no ``title``.
+    """
+    section_models = [
+        field.annotation
+        for field in LintroConfig.model_fields.values()
+        if isinstance(field.annotation, type)
+        and issubclass(field.annotation, BaseModel)
+    ]
+    assert_that(section_models).is_not_empty()
+
+    titles: dict[str, str] = {}
+    for model in section_models:
+        with pytest.raises(ValidationError) as caught:
+            model.model_validate("not a mapping")
+        titles[model.__name__] = caught.value.title
+
+    assert_that(titles).is_equal_to({name: name for name in titles})
 
 
 @pytest.mark.parametrize(
@@ -419,7 +444,8 @@ def test_other_config_errors_warn_with_their_first_non_empty_line(
 
     Args:
         error: Exception the config loader raises.
-        expected_detail: Detail the single warning must end with.
+        expected_detail: Detail the single warning carries after
+            ``_CONFIG_WARNING``, compared for exact equality.
         monkeypatch: Pytest fixture for patching modules and attributes.
         logged_warnings: Captured WARNING-level log messages.
     """
