@@ -403,17 +403,37 @@ def test_section_model_errors_are_titled_with_their_class_name() -> None:
 
     ``_config_section_of`` matches a section by the error's title, which is
     the class name only while the model's ``model_config`` sets no ``title``.
+    The section set is pinned exactly, so a section that drops out of the
+    model filter (say, retyped ``ExecutionConfig | None``) fails here instead
+    of leaving both this guard and ``_config_section_of`` silently skipping it.
     """
-    section_models = [
-        field.annotation
-        for field in LintroConfig.model_fields.values()
+    section_models = {
+        name: field.annotation
+        for name, field in LintroConfig.model_fields.items()
         if isinstance(field.annotation, type)
         and issubclass(field.annotation, BaseModel)
-    ]
-    assert_that(section_models).is_not_empty()
+    }
+    assert_that(
+        {name: model.__name__ for name, model in section_models.items()},
+    ).is_equal_to(
+        {
+            "execution": "ExecutionConfig",
+            "enforce": "EnforceConfig",
+            "review": "ReviewConfig",
+            "output": "OutputConfig",
+            "watch": "WatchConfig",
+            "deps": "DepsConfig",
+        },
+    )
+    assert_that(
+        {
+            name: version_checking._config_section_of(model.__name__)
+            for name, model in section_models.items()
+        },
+    ).is_equal_to({name: name for name in section_models})
 
     titles: dict[str, str] = {}
-    for model in section_models:
+    for model in section_models.values():
         with pytest.raises(ValidationError) as caught:
             model.model_validate("not a mapping")
         titles[model.__name__] = caught.value.title
