@@ -21,6 +21,24 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.25] - 2026-11-05
+
+### Changed
+
+- **ai**: qualify checkpoint restore docs and tighten config-error tests (#3242)
+  (ff2daca)
+- **ai**: clarify checkpoint and shared fixture docstrings (#3240) (58efa1b)
+- **ai**: keep raw-response and audit writes out of the checkout (#3243) (9cee1cf)
+- **audit**: tidy version-timeout warnings and review-state tests (#3241) (925c083)
+- **audit**: tighten version-probe and free-disk follow-ups (#3236) (3207af4)
+- **ai**: tidy shared AI config fixtures (#3239) (b2e6651)
+- **ai**: share the invalid ai config project fixture (#3237) (f891518)
+
+### Fixed
+
+- **ai**: report file ancestors as checkpoint errors and tidy restore docs (#3244)
+  (da6f2cb)
+
 ## [0.177.24] - 2026-11-05
 
 ### Changed
