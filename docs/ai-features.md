@@ -1717,7 +1717,8 @@ each wheel bundles a ~55 MB native bridge. The package is proprietary (Cursor's
 licence file) and the bundled bridge runtime includes a Statsig analytics bundle, so
 Socket reports a licence-policy and a telemetry alert for it; both are accepted as
 inherent to the vendor package by an org-level alert triage rule in the Socket
-dashboard (scoped to `cursor-sdk` 1.x and those two alert types; see #3253). The
+dashboard (scoped to the exact pinned `cursor-sdk` version and those two alert types,
+so every version bump re-raises them for a fresh look at the licence; see #3253). The
 `py-lintro-ai` image includes it.
 The API path is **inference-only**, like every `api` transport: the diff is embedded in
 the prompt, the agent gets no tools (`tools=[]` plus a deny list naming every documented
