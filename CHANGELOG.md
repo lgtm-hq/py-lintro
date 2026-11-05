@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.23] - 2026-11-05
+
+### Changed
+
+- **ai**: share invalid ai config error prefix (#3230) (9fb781e)
+
+### Fixed
+
+- **ci**: free runner disk before every hosted docker image build (#3233) (2e3d771)
+
 ## [0.177.22] - 2026-11-04
 
 ### Fixed
