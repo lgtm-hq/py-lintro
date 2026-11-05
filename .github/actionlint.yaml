@@ -5,6 +5,8 @@ paths:
   .github/workflows/docker-ci.yml:
     ignore:
       # actionlint v1.7.12 predates GitHub's supported concurrency.queue key.
+      # The publish job's registry mutex uses queue: max so a third main run
+      # cannot replace (cancel) a waiting promotion.
       - 'unexpected key "queue" for "concurrency" section'
   .github/workflows/ai-review.yml:
     ignore:

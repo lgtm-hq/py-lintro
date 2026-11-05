@@ -348,9 +348,29 @@ Delete both variables once a validation round is recorded.
 
 ## Concurrency
 
-Standard pattern: `<workflow>-${{ github.ref }}` with
-`cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}` for CI workflows. The
-slower `docker-ci.yml` also maps `main` to `queue: max` and other refs to
-`queue: single`: up to 100 main runs can wait without displacement (GitHub does not
-guarantee dispatch order), while a new PR push still supersedes the prior pending and
-in-progress run.
+Standard pattern for every CI workflow that runs on pushes to `main` (the same one
+lgtm-ci uses, lgtm-hq/lgtm-ci#1289):
+
+```yaml
+concurrency:
+  group: >-
+    <workflow>-${{ github.workflow_ref }}-${{ github.event_name }}-${{ github.event_name
+    == 'pull_request' && github.event.pull_request.number || github.run_id }}-${{
+    github.event_name == 'pull_request' && 'pr' || github.run_attempt }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+```
+
+Pull request runs share one group per PR and cancel the superseded head. Every push,
+`merge_group`, schedule or manual run gets its own group and is never cancelled or
+replaced. A group shared by all `main` pushes is wrong either way: with
+`cancel-in-progress` each merge cancels the previous commit's run, and without it the
+group still holds only one pending run, so a third merge replaces (cancels) the waiting
+one; `queue: max` avoids the cancellation but serialises a ~40-minute `docker-ci.yml`
+into a multi-hour backlog that times out the all-checks gate.
+
+Deliberate mutexes keep a shared, non-cancelling group: `lintro-tools-registry`
+(`docker-tools-publish.yml`, `docker-tools-promote.yml`), `release-auto-tag.yml`,
+`release-version-pr.yml`, the commit-keyed job group in `test-built-package.yml`
+(#1673), and the `publish` job of `docker-ci.yml` (`queue: max`, so promotions wait
+rather than displace each other). `tests/unit/test_workflow_ci_contracts.py` enforces
+the split and lists these exceptions.

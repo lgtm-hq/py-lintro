@@ -72,11 +72,15 @@ def test_only_one_caller_file_uses_the_gate() -> None:
     assert callers == [GATE.name]
 
 
-def test_main_gate_concurrency_is_commit_specific() -> None:
+def test_main_gate_concurrency_is_run_specific() -> None:
     """A following merge must not cancel the previous main gate proof."""
-    group = _gate()["concurrency"]["group"]
-    assert "github.event_name == 'push' && github.sha" in group
-    assert "github.event.pull_request.number || github.ref" in group
+    concurrency = _gate()["concurrency"]
+    group = " ".join(concurrency["group"].split())
+    assert "github.event.pull_request.number || github.run_id" in group
+    assert "'pr' || github.run_attempt" in group
+    assert concurrency["cancel-in-progress"] == (
+        "${{ github.event_name == 'pull_request' }}"
+    )
 
 
 def test_aggregate_retry_requires_operator_reconciliation() -> None:

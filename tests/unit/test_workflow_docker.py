@@ -1172,28 +1172,35 @@ def test_docker_ci_defers_ci_tag_cleanup() -> None:
     assert_that("\n".join(tag_values)).does_not_contain("github.run_attempt")
 
 
-def test_docker_ci_queues_main_without_changing_pr_supersession() -> None:
-    """Docker CI must retain main runs while PR pushes supersede stale work."""
+def test_docker_ci_runs_main_in_parallel_and_serialises_only_publish() -> None:
+    """Main runs must not queue behind each other; promotions still must.
+
+    A workflow-level ``queue: max`` on main turned ~40-minute runs into a
+    multi-hour backlog that timed out the all-checks gate. Main runs now get
+    a group of their own (pinned by the run-scoped contract test), the build
+    job carries no per-ref group that would re-serialise them, and only the
+    GHCR promotion keeps a mutex — with ``queue: max`` so a third main run
+    cannot replace a waiting promotion.
+    """
     docker_ci = _load_workflow(name="docker-ci.yml")
     workflow_concurrency = docker_ci["concurrency"]
-    assert_that(workflow_concurrency["group"]).is_equal_to(
-        "docker-ci-${{ github.ref }}",
-    )
-    assert_that(_normalize_github_expr(workflow_concurrency["queue"])).is_equal_to(
-        "${{ github.ref == 'refs/heads/main' && 'max' || 'single' }}",
-    )
-    expected_cancel = "${{ github.ref != 'refs/heads/main' }}"
+    assert_that(workflow_concurrency).does_not_contain_key("queue")
     assert_that(
         _normalize_github_expr(workflow_concurrency["cancel-in-progress"]),
-    ).is_equal_to(expected_cancel)
+    ).is_equal_to("${{ github.event_name == 'pull_request' }}")
 
-    docker_build_concurrency = docker_ci["jobs"]["docker-build"]["concurrency"]
-    assert_that(docker_build_concurrency["group"]).is_equal_to(
-        "docker-build-${{ github.ref }}",
+    assert_that(docker_ci["jobs"]["docker-build"]).does_not_contain_key(
+        "concurrency",
     )
-    assert_that(
-        _normalize_github_expr(docker_build_concurrency["cancel-in-progress"]),
-    ).is_equal_to(expected_cancel)
+
+    publish_concurrency = docker_ci["jobs"]["publish"]["concurrency"]
+    assert_that(publish_concurrency).is_equal_to(
+        {
+            "group": "publish-${{ github.ref }}",
+            "queue": "max",
+            "cancel-in-progress": False,
+        },
+    )
 
 
 def test_docker_ci_only_current_main_tip_updates_rolling_image_tags() -> None:

@@ -1088,22 +1088,31 @@ def _job_ancestors(workflow: dict[str, Any], *, job_id: str) -> set[str]:
     return ancestors
 
 
-_PUSH_SHA_TERNARY = "github.event_name == 'push' && github.sha || github.ref"
+# ``github.event_name == '<event>' && <then> || <else>``. Every ``<then>`` this
+# repository uses (a commit sha, a PR number, a quoted literal) is non-empty,
+# so the ternary never falls through to its ``||`` branch by accident.
+_EVENT_TERNARY_RE = re.compile(
+    r"^github\.event_name == '(?P<event>[a-z_]+)' && (?P<then>\S+)"
+    r" \|\| (?P<other>\S+)$",
+)
+
+_EVENT_EQUALS_RE = re.compile(r"^github\.event_name == '(?P<event>[a-z_]+)'$")
 
 
-# Job-level concurrency groups that legitimately key on ``github.ref`` even
-# though their workflow runs on pushes to ``main``. Maps ``"<workflow>:<job>"``
-# to the reason the #1673 self-cancellation cannot bite.
-_REF_KEYED_PUSH_GROUP_EXEMPTIONS: dict[str, str] = {
-    # docker-ci declares a workflow-level group with
-    # ``cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}``, so two
-    # main pushes never execute concurrently and this job-level group can never
-    # cancel a sibling commit's build. Re-keying it on github.sha would be a
-    # behavioural no-op.
-    "docker-ci.yml:docker-build": (
-        "workflow-level group already serializes main pushes"
-    ),
-}
+def _concurrency_operand(token: str, context: dict[str, str]) -> str:
+    """Resolve one ternary operand: a quoted literal or a context lookup.
+
+    Args:
+        token: Operand text, e.g. ``'pr'`` or ``github.run_id``.
+        context: Simulated expression context.
+
+    Returns:
+        The operand value.
+    """
+    if token.startswith("'") and token.endswith("'"):
+        return token[1:-1]
+    assert_that(context).contains_key(token)
+    return context[token]
 
 
 def _render_concurrency_group(
@@ -1113,13 +1122,13 @@ def _render_concurrency_group(
     ref: str,
     sha: str,
     matrix: dict[str, str] | None = None,
+    extra_context: dict[str, str] | None = None,
 ) -> str:
     """Evaluate a concurrency ``group`` the way GitHub Actions would.
 
     Only the small expression grammar this repository uses is supported: bare
-    context lookups and the ``github.event_name == 'push' && github.sha ||
-    github.ref`` ternary. ``github.sha`` is always a non-empty commit id, so the
-    ternary never falls through to its ``||`` branch by accident.
+    context lookups and ``github.event_name == '<event>' && <then> || <else>``
+    ternaries whose operands are context lookups or quoted literals.
 
     Args:
         group: Raw ``concurrency.group`` value from the workflow file.
@@ -1127,6 +1136,8 @@ def _render_concurrency_group(
         ref: Value of ``github.ref`` to simulate.
         sha: Value of ``github.sha`` to simulate.
         matrix: Optional ``matrix`` context values keyed by matrix dimension.
+        extra_context: Further context values (``github.run_id``,
+            ``github.event.pull_request.number``, ...) keyed by expression.
 
     Returns:
         The rendered concurrency group string.
@@ -1137,15 +1148,41 @@ def _render_concurrency_group(
         "github.sha": sha,
     }
     context.update({f"matrix.{key}": value for key, value in (matrix or {}).items()})
+    context.update(extra_context or {})
 
     def _render(match: re.Match[str]) -> str:
         expr = _normalize_github_expr(match.group(1))
-        if expr == _PUSH_SHA_TERNARY:
-            return sha if event_name == "push" else ref
+        ternary = _EVENT_TERNARY_RE.match(expr)
+        if ternary:
+            branch = "then" if event_name == ternary["event"] else "other"
+            return _concurrency_operand(ternary[branch], context)
         assert_that(context).contains_key(expr)
         return context[expr]
 
     return re.sub(r"\$\{\{(.+?)\}\}", _render, " ".join(group.split()))
+
+
+def _render_concurrency_cancel(value: object, *, event_name: str) -> bool:
+    """Evaluate a concurrency ``cancel-in-progress`` value for one event.
+
+    Supports a YAML boolean or ``${{ github.event_name == '<event>' }}``.
+
+    Args:
+        value: Raw ``cancel-in-progress`` value from the workflow file.
+        event_name: Value of ``github.event_name`` to simulate.
+
+    Returns:
+        Whether GitHub would cancel the in-progress run of the group.
+    """
+    if isinstance(value, bool):
+        return value
+    body = re.fullmatch(r"\$\{\{(.+)\}\}", str(value).strip())
+    assert_that(body).described_as(f"cancel-in-progress {value!r}").is_not_none()
+    assert body is not None  # narrow for mypy
+    equals = _EVENT_EQUALS_RE.match(_normalize_github_expr(body.group(1)))
+    assert_that(equals).described_as(f"cancel-in-progress {value!r}").is_not_none()
+    assert equals is not None  # narrow for mypy
+    return event_name == equals["event"]
 
 
 def _workflow_pushes_to_main(data: dict[str, Any]) -> bool:

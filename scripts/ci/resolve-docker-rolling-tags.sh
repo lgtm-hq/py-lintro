@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Keep rolling default-branch image tags monotonic when queued workflow runs
+# Keep rolling default-branch image tags monotonic when parallel or queued runs
 # dispatch or finish out of order. Immutable sha-* tags are controlled by the
 # workflow independently and remain enabled for every validated run.
 

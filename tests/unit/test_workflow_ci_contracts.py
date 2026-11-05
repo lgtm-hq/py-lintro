@@ -36,7 +36,6 @@ from tests.unit.workflow_wiring_helpers import (
     _OIDC_HOST,
     _PIPELINE_RELEVANT_TOP_LEVEL,
     _PIPELINE_SKIPPABLE_TOP_LEVEL,
-    _REF_KEYED_PUSH_GROUP_EXEMPTIONS,
     _REGEX_INTENT_TELLS,
     _REPO_ROOT,
     _RESOLVE_PIPELINE_SCRIPT,
@@ -56,6 +55,7 @@ from tests.unit.workflow_wiring_helpers import (
     _js_named_groups_to_python,
     _load_workflow,
     _normalize_github_expr,
+    _render_concurrency_cancel,
     _render_concurrency_group,
     _resolve_prune_min_age_days,
     _strip_regex_delimiters,
@@ -996,7 +996,6 @@ def test_ghcr_cleanup_prune_legs_forward_a_number_timeout() -> None:
             "test-package-install",
             {"package-type": "wheel"},
         ),
-        ("site-quality.yml", None, None),
     ],
 )
 def test_main_push_concurrency_groups_key_on_commit_sha(
@@ -1094,11 +1093,195 @@ def test_no_main_push_workflow_cancels_itself_on_ref() -> None:
             group = str(concurrency.get("group", ""))
             if "github.sha" in group:
                 continue
-            if label in _REF_KEYED_PUSH_GROUP_EXEMPTIONS:
-                continue
             offenders.append(label)
 
     assert_that(offenders).is_empty()
+
+
+# Concurrency scopes on main-push workflows that are deliberate mutexes and so
+# keep a shared, non-run-scoped group. Keyed ``"<workflow>"`` for the
+# workflow-level block, ``"<workflow>:<job>"`` for a job-level one. Each maps
+# to its expected ``cancel-in-progress`` and ``queue`` values (``None`` when
+# the key is absent), so a mutex cannot drift into cancelling or displacing.
+_MAIN_PUSH_CONCURRENCY_MUTEXES: dict[str, dict[str, object]] = {
+    # lintro-tools-registry GHCR mutex.
+    "docker-tools-promote.yml": {"cancel-in-progress": False, "queue": None},
+    # One tag mint at a time per repository.
+    "release-auto-tag.yml": {"cancel-in-progress": False, "queue": None},
+    # One release PR update at a time per repository.
+    "release-version-pr.yml": {"cancel-in-progress": False, "queue": None},
+    # Commit-keyed group (#1673): pushes never share it, so cancelling only
+    # supersedes a PR's stale head.
+    "test-built-package.yml:test-package-install": {
+        "cancel-in-progress": True,
+        "queue": None,
+    },
+    # GHCR promotion mutex: queue: max keeps every waiting promotion.
+    "docker-ci.yml:publish": {"cancel-in-progress": False, "queue": "max"},
+}
+
+_NON_PR_EVENTS = ("push", "merge_group", "schedule", "workflow_dispatch")
+
+
+def _main_push_concurrency_scopes() -> dict[str, dict[str, Any]]:
+    """Collect every concurrency block of the workflows that push to main.
+
+    Returns:
+        Concurrency blocks keyed ``"<workflow>"`` or ``"<workflow>:<job>"``.
+    """
+    scopes: dict[str, dict[str, Any]] = {}
+    for path in sorted((_REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or not _workflow_pushes_to_main(data):
+            continue
+        candidates: list[tuple[str, Any]] = [(path.name, data)]
+        candidates.extend(
+            (f"{path.name}:{job_id}", job)
+            for job_id, job in (data.get("jobs") or {}).items()
+            if isinstance(job, dict)
+        )
+        for label, scope in candidates:
+            concurrency = scope.get("concurrency")
+            if isinstance(concurrency, dict):
+                scopes[label] = concurrency
+    return scopes
+
+
+def _render_run_group(
+    group: str,
+    *,
+    event_name: str,
+    pr_number: str,
+    run_id: str,
+    run_attempt: str,
+) -> str:
+    """Render ``group`` for one simulated run of a main-push workflow.
+
+    Args:
+        group: Raw ``concurrency.group`` value.
+        event_name: Simulated ``github.event_name``.
+        pr_number: Simulated pull request number (empty outside PRs).
+        run_id: Simulated ``github.run_id``.
+        run_attempt: Simulated ``github.run_attempt``.
+
+    Returns:
+        The rendered group.
+    """
+    is_pr = event_name == _GITHUB_PULL_REQUEST_EVENT
+    ref = f"refs/pull/{pr_number}/merge" if is_pr else "refs/heads/main"
+    return _render_concurrency_group(
+        group,
+        event_name=event_name,
+        ref=ref,
+        sha="e" * 40,
+        extra_context={
+            "github.workflow_ref": f"lgtm-hq/py-lintro/.github/workflows/x.yml@{ref}",
+            "github.event.pull_request.number": pr_number,
+            "github.run_id": run_id,
+            "github.run_attempt": run_attempt,
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    sorted(_MAIN_PUSH_CONCURRENCY_MUTEXES.items()),
+)
+def test_main_push_concurrency_mutexes_keep_their_values(
+    label: str,
+    expected: dict[str, object],
+) -> None:
+    """Every allowlisted mutex exists and keeps its cancel and queue values.
+
+    Args:
+        label: Mutex scope, ``"<workflow>"`` or ``"<workflow>:<job>"``.
+        expected: Expected ``cancel-in-progress`` and ``queue`` values.
+    """
+    scopes = _main_push_concurrency_scopes()
+    assert_that(scopes).contains_key(label)
+    concurrency = scopes[label]
+    actual = {key: concurrency.get(key) for key in expected}
+    assert_that(actual).described_as(label).is_equal_to(expected)
+
+
+def test_main_push_concurrency_is_run_scoped_outside_pull_requests() -> None:
+    """Only PR runs share a cancelling group; every other run gets its own.
+
+    A group shared by all main pushes either cancels the previous commit's
+    run (``cancel-in-progress``) or, without it, holds a single pending run
+    that the next push replaces; ``queue: max`` avoids that but serialises
+    docker-ci into a backlog that timed out the all-checks gate. So a PR run
+    keys on the PR number and cancels its stale head, while push,
+    merge_group, schedule and manual runs key on run_id and run_attempt and
+    are never cancelled. Deliberate mutexes are listed explicitly.
+    """
+    scopes = _main_push_concurrency_scopes()
+    assert_that(scopes).contains_key(*_MAIN_PUSH_CONCURRENCY_MUTEXES)
+
+    for label, concurrency in scopes.items():
+        if label in _MAIN_PUSH_CONCURRENCY_MUTEXES:
+            continue
+        group = str(concurrency["group"])
+        cancel = concurrency.get("cancel-in-progress")
+        assert_that(concurrency).described_as(label).does_not_contain_key("queue")
+
+        pr_head = _render_run_group(
+            group,
+            event_name=_GITHUB_PULL_REQUEST_EVENT,
+            pr_number="4242",
+            run_id="1001",
+            run_attempt="1",
+        )
+        pr_next_head = _render_run_group(
+            group,
+            event_name=_GITHUB_PULL_REQUEST_EVENT,
+            pr_number="4242",
+            run_id="1002",
+            run_attempt="2",
+        )
+        other_pr = _render_run_group(
+            group,
+            event_name=_GITHUB_PULL_REQUEST_EVENT,
+            pr_number="4243",
+            run_id="1001",
+            run_attempt="1",
+        )
+        assert_that(pr_head).described_as(label).contains("4242")
+        assert_that(pr_next_head).described_as(label).is_equal_to(pr_head)
+        assert_that(other_pr).described_as(label).is_not_equal_to(pr_head)
+        assert_that(
+            _render_concurrency_cancel(cancel, event_name=_GITHUB_PULL_REQUEST_EVENT),
+        ).described_as(label).is_true()
+
+        for event_name in _NON_PR_EVENTS:
+            run = _render_run_group(
+                group,
+                event_name=event_name,
+                pr_number="",
+                run_id="2001",
+                run_attempt="1",
+            )
+            next_run = _render_run_group(
+                group,
+                event_name=event_name,
+                pr_number="",
+                run_id="2002",
+                run_attempt="1",
+            )
+            rerun = _render_run_group(
+                group,
+                event_name=event_name,
+                pr_number="",
+                run_id="2001",
+                run_attempt="2",
+            )
+            described = f"{label} on {event_name}"
+            assert_that(run).described_as(described).contains("2001")
+            assert_that(next_run).described_as(described).is_not_equal_to(run)
+            assert_that(rerun).described_as(described).is_not_equal_to(run)
+            assert_that(
+                _render_concurrency_cancel(cancel, event_name=event_name),
+            ).described_as(described).is_false()
 
 
 def test_dependency_vuln_gate_job_exists() -> None:
