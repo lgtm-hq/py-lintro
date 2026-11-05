@@ -28,6 +28,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
     AIRateLimitError,
 )
+from lintro.ai.liveness import LivenessState
 from lintro.ai.providers.cursor import provider as provider_mod
 from lintro.ai.providers.cursor import sdk_transport
 from lintro.ai.providers.cursor.provider import CursorProvider
@@ -653,3 +654,19 @@ def test_aclose_closes_the_bridge_and_removes_the_workdir(
     assert_that(workdir).is_not_none()
     assert_that(Path(workdir or "").exists()).is_false()
     assert_that(provider._sdk_bridge.client if provider._sdk_bridge else 1).is_none()
+
+
+def test_a_liveness_probe_stops_the_bridge_it_started(fake_sdk: _FakeSdk) -> None:
+    """``lintro doctor --ai-liveness`` leaves no bridge process behind.
+
+    Args:
+        fake_sdk: The recording SDK.
+    """
+    provider = _api_provider()
+
+    result = asyncio.run(provider.check_liveness(timeout=1.0))
+
+    assert_that(result.state).is_equal_to(LivenessState.OK)
+    assert_that(fake_sdk.clients).is_length(1)
+    assert_that(fake_sdk.clients[0].closed).is_true()
+    assert_that(provider._sdk_bridge.workdir if provider._sdk_bridge else "x").is_none()

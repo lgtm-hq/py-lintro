@@ -31,6 +31,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
 )
 from lintro.ai.json_response import CliSchemaRequest
+from lintro.ai.liveness import LIVENESS_TIMEOUT, LivenessResult
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers._api_common import finish_api_completion
 from lintro.ai.providers._cli_envelope import decode_envelope_or_prose
@@ -301,6 +302,29 @@ class CursorProvider(BaseAIProvider):
         self.end_durable_session()
         if self._cli is not None:
             self._durable_repo_root = repo_root
+
+    async def check_liveness(
+        self,
+        *,
+        timeout: float = LIVENESS_TIMEOUT,
+    ) -> LivenessResult:
+        """Probe the credential, then stop any bridge the probe started.
+
+        ``lintro doctor`` runs the probe on a short-lived loop and never closes
+        the provider, so under API transport the SDK bridge it starts is
+        stopped here rather than left to the exit-time fallback.
+
+        Args:
+            timeout: Seconds allowed for the probe.
+
+        Returns:
+            The classified liveness result.
+        """
+        try:
+            return await super().check_liveness(timeout=timeout)
+        finally:
+            if self._sdk_bridge is not None:
+                await self._sdk_bridge.aclose()
 
     async def aclose(self) -> None:
         """Stop the SDK bridge and remove its workdir. Idempotent."""

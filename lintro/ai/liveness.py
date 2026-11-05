@@ -402,6 +402,7 @@ def check_liveness_sync(
     """
     from lintro.ai.exceptions import AIError
     from lintro.ai.providers import get_provider
+    from lintro.ai.registry import metadata_for
 
     transport = config.transport
     try:
@@ -412,7 +413,12 @@ def check_liveness_sync(
             transport=transport,
             state=LivenessState.MISSING_CREDENTIAL,
             message=f"provider could not be constructed: {exc}",
-            hint="Install with: uv pip install 'lintro[ai]'",
+            # The provider's own extra: Cursor's SDK is lintro[cursor] (#3253).
+            hint=(
+                metadata_for(config.provider).sdk_install_hint
+                if config.provider is not None
+                else "Install with: uv pip install 'lintro[ai]'"
+            ),
         )
 
     return _run_blocking(provider.check_liveness(timeout=timeout))
