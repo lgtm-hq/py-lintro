@@ -9,7 +9,7 @@ import pytest
 import yaml
 from assertpy import assert_that
 from loguru import logger
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from lintro.config import config_loader
 from lintro.config.config_loader import clear_config_cache
@@ -436,6 +436,35 @@ def test_section_model_errors_are_titled_with_their_class_name() -> None:
         titles[model.__name__] = caught.value.title
 
     assert_that(titles).is_equal_to({name: name for name in titles})
+
+
+def test_config_section_of_is_none_when_two_sections_share_a_model_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A title carried by more than one section names no section.
+
+    A title is only a class name, so when two sections are typed with models
+    of the same name the error cannot be attributed to either and the lookup
+    returns ``None``; a title carried by exactly one section still resolves.
+
+    Args:
+        monkeypatch: Pytest fixture for patching modules and attributes.
+    """
+
+    class SharedModel(BaseModel):
+        """Section model whose class name two sections share."""
+
+    class OtherModel(BaseModel):
+        """Section model whose class name only one section carries."""
+
+    monkeypatch.setattr(
+        version_checking,
+        "_section_models",
+        lambda: {"first": SharedModel, "second": SharedModel, "third": OtherModel},
+    )
+
+    assert_that(version_checking._config_section_of("SharedModel")).is_none()
+    assert_that(version_checking._config_section_of("OtherModel")).is_equal_to("third")
 
 
 @pytest.mark.parametrize(
