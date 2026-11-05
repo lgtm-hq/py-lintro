@@ -6,6 +6,7 @@ import errno
 import os
 import shutil
 import subprocess  # nosec B404 - exercise failing Git plumbing in disposable repos
+import sys
 import tempfile
 import time
 from collections import Counter
@@ -1311,3 +1312,133 @@ def test_fallback_restore_deletes_a_target_in_a_normal_directory(
         b"untracked sibling\n",
     )
     assert_that((repo / "target.txt").read_bytes()).is_equal_to(b"committed\n")
+
+
+_POSIX_SYMLINKS = pytest.mark.skipif(
+    sys.platform == "win32" or not hasattr(os, "symlink"),
+    reason="pins POSIX errno behaviour for symbolic link ancestors",
+)
+
+
+def _link_parent_after_plan(
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    destination: Path,
+) -> Checkpoint:
+    """Plan deleting ``sub/created.txt``, then swap ``sub`` for a link.
+
+    The swap lands after the pre-write ``_beyond_symlink`` check, so only the
+    write phase sees the link, as in a concurrent swap mid-restore.
+
+    Args:
+        repo: Test repository root.
+        monkeypatch: Patches the plan step to perform the swap.
+        destination: Path the swapped-in ``sub`` link points at.
+
+    Returns:
+        The checkpoint whose rollback plans the deletion.
+    """
+    (repo / "sub").mkdir()
+    # Absent at capture, so the rollback plans a deletion for it.
+    checkpoint = capture_checkpoint(
+        ["target.txt", "sub/created.txt"],
+        workspace_root=repo,
+    )
+    assert checkpoint is not None
+    (repo / "target.txt").write_bytes(b"edited after capture\n")
+    (repo / "sub/created.txt").write_bytes(b"created after capture\n")
+    real_blob_for_path = checkpoints._blob_for_path
+
+    def plan_then_link(**kwargs: Any) -> Any:
+        blob = real_blob_for_path(**kwargs)
+        if not (repo / "sub").is_symlink():
+            (repo / "sub/created.txt").unlink()
+            (repo / "sub").rmdir()
+            (repo / "sub").symlink_to(destination)
+        return blob
+
+    monkeypatch.setattr(checkpoints, "_blob_for_path", plan_then_link)
+    return checkpoint
+
+
+def _link_destination(
+    tmp_path_factory: pytest.TempPathFactory,
+    link: str,
+) -> Path:
+    """Return a regular file outside the repository, or a missing path.
+
+    Args:
+        tmp_path_factory: Source of directories outside the repository.
+        link: ``file`` for a link to a regular file, ``dangling`` otherwise.
+
+    Returns:
+        The path the swapped-in link will point at.
+    """
+    outside = tmp_path_factory.mktemp("link-destination")
+    if link == "dangling":
+        return outside / "missing"
+    (outside / "file.txt").write_bytes(_BEYOND_LINK)
+    return outside / "file.txt"
+
+
+@_POSIX_SYMLINKS
+@pytest.mark.parametrize("link", ["file", "dangling"])
+def test_fallback_restore_deletes_nothing_below_a_swapped_in_link(
+    byte_repo: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    link: str,
+) -> None:
+    """The by-path fallback skips a deletion below a link it cannot see.
+
+    Pins the divergence documented on ``_restore_by_path``: an ancestor
+    swapped mid-restore for a link to a file (ENOTDIR) or a dangling link
+    (ENOENT) makes the deletion a silent no-op, and the rollback goes on.
+    """
+    monkeypatch.setattr(checkpoints, "_DIR_FD_ACCESS", False)
+    repo = byte_repo
+    destination = _link_destination(tmp_path_factory, link)
+    checkpoint = _link_parent_after_plan(repo, monkeypatch, destination)
+
+    restore_checkpoint(checkpoint)
+
+    assert_that((repo / "sub").is_symlink()).is_true()
+    assert_that(os.readlink(repo / "sub")).is_equal_to(str(destination))
+    if link == "file":
+        assert_that(destination.read_bytes()).is_equal_to(_BEYOND_LINK)
+    else:
+        assert_that(os.path.lexists(destination)).is_false()
+    # No error: the remaining targets are still rolled back.
+    assert_that((repo / "target.txt").read_bytes()).is_equal_to(b"committed\n")
+    assert_that([str(path) for path in repo.rglob("*.lintro-tmp")]).is_empty()
+
+
+@_POSIX_SYMLINKS
+@pytest.mark.parametrize("link", ["file", "dangling"])
+def test_descriptor_restore_refuses_a_deletion_below_a_swapped_in_link(
+    byte_repo: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    link: str,
+) -> None:
+    """The descriptor path reports the same swapped-in link as an error."""
+    if not checkpoints._DIR_FD_ACCESS:
+        pytest.skip("descriptor-relative access needs dir_fd support")
+    repo = byte_repo
+    destination = _link_destination(tmp_path_factory, link)
+    checkpoint = _link_parent_after_plan(repo, monkeypatch, destination)
+
+    with pytest.raises(CheckpointError) as raised:
+        restore_checkpoint(checkpoint)
+
+    assert_that(str(raised.value)).is_equal_to(
+        "Refusing to restore checkpoint target beyond a symbolic link: "
+        "sub/created.txt",
+    )
+    assert_that((repo / "sub").is_symlink()).is_true()
+    assert_that(os.readlink(repo / "sub")).is_equal_to(str(destination))
+    if link == "file":
+        assert_that(destination.read_bytes()).is_equal_to(_BEYOND_LINK)
+    else:
+        assert_that(os.path.lexists(destination)).is_false()
+    assert_that([str(path) for path in repo.rglob("*.lintro-tmp")]).is_empty()
