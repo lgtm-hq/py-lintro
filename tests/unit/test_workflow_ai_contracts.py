@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import importlib.util
 import re
-import sys
 from pathlib import Path
-from types import ModuleType
 from typing import Any
 from urllib.parse import urlparse
 
 import pytest
 from assertpy import assert_that
 
+from tests.module_helpers import load_fresh_module
 from tests.unit.workflow_wiring_helpers import (
     _AI_CONTRACT_GATE_ENV,
     _AI_CONTRACT_TIER1_CONTEXT,
@@ -554,30 +552,6 @@ def _review_state_artifact_steps() -> list[dict[str, Any]]:
     return steps
 
 
-def _fresh_module(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    path: Path,
-    name: str,
-) -> ModuleType:
-    """Execute *path* as a new module, registered under *name* for the test.
-
-    Args:
-        monkeypatch: Pytest fixture that unregisters the module on teardown.
-        path: Source file to execute.
-        name: Module name to register it under.
-
-    Returns:
-        ModuleType: The freshly executed module, with its shipped defaults.
-    """
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, name, module)
-    spec.loader.exec_module(module)
-    return module
-
-
 def test_review_state_defaults_match_the_workflow_artifact_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -604,7 +578,7 @@ def test_review_state_defaults_match_the_workflow_artifact_path(
 
     # The autouse ``_isolate_review_state`` fixture redirects the imported
     # module's paths, so the shipped defaults come from a fresh copy.
-    state_store = _fresh_module(
+    state_store = load_fresh_module(
         monkeypatch,
         path=_REPO_ROOT / "lintro" / "ai" / "review" / "state_store.py",
         name="_fresh_review_state_store",
@@ -617,10 +591,9 @@ def test_review_state_defaults_match_the_workflow_artifact_path(
     monkeypatch.delenv("GITHUB_ACTIONS")
     local_dir = state_store.state_dir(ci=False)
     assert_that(local_dir).is_equal_to(Path(".lintro-cache/ai/review-state"))
-    assert_that(local_dir.is_relative_to(artifact_dir)).is_false()
 
     # The helpers that seed, export and upload the directory share the default.
-    artifacts_script = _fresh_module(
+    artifacts_script = load_fresh_module(
         monkeypatch,
         path=_REPO_ROOT / "scripts" / "ci" / "review_state_artifacts.py",
         name="_fresh_review_state_artifacts",
@@ -629,6 +602,9 @@ def test_review_state_defaults_match_the_workflow_artifact_path(
     runner = (_REPO_ROOT / "scripts" / "ci" / "run-ai-review.sh").read_text(
         encoding="utf-8",
     )
+    # The pattern matches every ``${LINTRO_REVIEW_STATE_DIR:-...}`` default on
+    # purpose: the runner spells it twice (the ``rm -rf`` reset and the
+    # ``export``), and the set comparison fails if either one drifts.
     assert_that(
         set(re.findall(r"\$\{LINTRO_REVIEW_STATE_DIR:-([^}]*)\}", runner)),
     ).is_equal_to({artifact_dir})

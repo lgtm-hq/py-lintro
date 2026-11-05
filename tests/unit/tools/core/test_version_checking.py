@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
-from types import ModuleType
+from typing import NoReturn
 
 import pytest
+import yaml
 from assertpy import assert_that
 from loguru import logger
+from pydantic import ValidationError
 
 from lintro.config import config_loader
 from lintro.config.config_loader import clear_config_cache
+from lintro.exceptions.errors import ConfigurationError
 from lintro.tools.core import version_checking
 from lintro.tools.core.version_checking import (
     VERSION_PROBE_RETRY_CAP,
@@ -22,6 +23,7 @@ from lintro.tools.core.version_checking import (
     get_version_check_timeout,
     version_probe_retry_timeout,
 )
+from tests.module_helpers import load_fresh_module
 
 #: Text the config-error fallback warning opens with, before the detail.
 _CONFIG_WARNING = (
@@ -242,17 +244,33 @@ def test_malformed_config_falls_back_to_default_with_one_warning(
     )
 
 
+@pytest.mark.parametrize(
+    ("content", "field"),
+    [
+        (
+            "execution:\n  version_check_timeout: soon\n",
+            "execution.version_check_timeout",
+        ),
+        ("enforce:\n  line_length: soon\n", "enforce.line_length"),
+    ],
+    ids=["execution", "enforce"],
+)
 def test_invalid_config_value_warns_with_the_field_and_its_error(
+    content: str,
+    field: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     logged_warnings: list[str],
 ) -> None:
-    """A rejected field names the field and pydantic's message, not the count.
+    """A rejected field names its section, field and pydantic's message.
 
     The first line of a ``ValidationError`` is ``1 validation error for
-    ExecutionConfig``, which says nothing about what is wrong.
+    ExecutionConfig``, which says nothing about what is wrong, and its
+    location is relative to the section model, so the section is added back.
 
     Args:
+        content: ``.lintro-config.yaml`` content with one invalid value.
+        field: Dotted path of the invalid value, section first.
         tmp_path: Temporary project directory.
         monkeypatch: Pytest fixture for patching modules and attributes.
         logged_warnings: Captured WARNING-level log messages.
@@ -263,7 +281,7 @@ def test_invalid_config_value_warns_with_the_field_and_its_error(
         tmp_path,
         monkeypatch,
         file_name=".lintro-config.yaml",
-        content="execution:\n  version_check_timeout: soon\n",
+        content=content,
     )
 
     timeouts = [get_version_check_timeout() for _ in range(2)]
@@ -271,10 +289,111 @@ def test_invalid_config_value_warns_with_the_field_and_its_error(
     assert_that(timeouts).is_equal_to([30, 30])
     assert_that(logged_warnings).is_equal_to(
         [
-            f"{_CONFIG_WARNING}version_check_timeout: Input should be a valid "
+            f"{_CONFIG_WARNING}{field}: Input should be a valid "
             "integer, unable to parse string as an integer",
         ],
     )
+
+
+def _config_load_raises(monkeypatch: pytest.MonkeyPatch, error: Exception) -> None:
+    """Make every config load raise *error*, as a broken config file would.
+
+    ``load_config`` is patched, not ``get_config``: the real ``get_config``
+    looks ``load_config`` up in ``config_loader``'s globals, so the patch
+    holds however ``version_checking`` imports ``get_config``.
+
+    Args:
+        monkeypatch: Pytest fixture for patching modules and attributes.
+        error: Exception the config load raises.
+    """
+
+    def broken_load_config(*_args: object, **_kwargs: object) -> NoReturn:
+        raise error
+
+    monkeypatch.setattr(config_loader, "load_config", broken_load_config)
+    clear_config_cache()
+
+
+def _wrapped_validation_error(*, title: str, message: str) -> ConfigurationError:
+    """Return a ``ValidationError`` re-raised the way ``load_config`` does.
+
+    Args:
+        title: Name of the model the validation error is reported for.
+        message: Message of the validator's ``ValueError``.
+
+    Returns:
+        ConfigurationError: Carrying the ``ValidationError`` as its cause.
+    """
+    cause = ValidationError.from_exception_data(
+        title,
+        [
+            {
+                "type": "value_error",
+                "loc": ("version_check_timeout",),
+                "input": "soon",
+                "ctx": {"error": ValueError(message)},
+            },
+        ],
+    )
+    wrapped = ConfigurationError(str(cause))
+    wrapped.__cause__ = cause
+    return wrapped
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_detail"),
+    [
+        (
+            yaml.MarkedYAMLError(
+                problem="expected a mapping\n  but found a scalar",
+                problem_mark=yaml.Mark("cfg.yaml", 0, 2, 4, "", 0),
+            ),
+            "expected a mapping but found a scalar (cfg.yaml, line 3, column 5)",
+        ),
+        (
+            _wrapped_validation_error(
+                title="ExecutionConfig",
+                message="must be a number\n\n  of seconds",
+            ),
+            "execution.version_check_timeout: Value error, must be a number "
+            "of seconds",
+        ),
+        (
+            _wrapped_validation_error(
+                title="NotAConfigSection",
+                message="must be a number\nof seconds",
+            ),
+            "version_check_timeout: Value error, must be a number of seconds",
+        ),
+    ],
+    ids=["yaml_problem", "section_model", "unknown_model"],
+)
+def test_multi_line_config_errors_warn_on_one_line(
+    error: Exception,
+    expected_detail: str,
+    monkeypatch: pytest.MonkeyPatch,
+    logged_warnings: list[str],
+) -> None:
+    """A multi-line YAML problem or validator message is logged on one line.
+
+    The section prefix comes only from a model a config section is typed
+    with; any other model keeps its own location.
+
+    Args:
+        error: Exception the config load raises.
+        expected_detail: Detail the single warning must end with.
+        monkeypatch: Pytest fixture for patching modules and attributes.
+        logged_warnings: Captured WARNING-level log messages.
+    """
+    monkeypatch.setattr(version_checking, "_logged_warnings", set())
+    monkeypatch.delenv("LINTRO_VERSION_TIMEOUT", raising=False)
+    _config_load_raises(monkeypatch, error)
+
+    timeouts = [get_version_check_timeout() for _ in range(2)]
+
+    assert_that(timeouts).is_equal_to([30, 30])
+    assert_that(logged_warnings).is_equal_to([f"{_CONFIG_WARNING}{expected_detail}"])
+    assert_that(logged_warnings[0]).does_not_contain("\n")
 
 
 @pytest.mark.parametrize(
@@ -306,11 +425,7 @@ def test_other_config_errors_warn_with_their_first_non_empty_line(
     """
     monkeypatch.setattr(version_checking, "_logged_warnings", set())
     monkeypatch.delenv("LINTRO_VERSION_TIMEOUT", raising=False)
-
-    def broken_config() -> None:
-        raise error
-
-    monkeypatch.setattr(config_loader, "get_config", broken_config)
+    _config_load_raises(monkeypatch, error)
 
     timeouts = [get_version_check_timeout() for _ in range(2)]
 
@@ -365,29 +480,6 @@ def test_a_different_config_error_later_still_warns_once(
     )
 
 
-def _load_fresh_version_checking(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
-    """Execute ``version_checking``'s module body again, as a first import does.
-
-    The copy is registered under its own name, so the imported module (and
-    every reference to it) is left alone; ``monkeypatch`` drops it afterwards.
-
-    Args:
-        monkeypatch: Pytest fixture that unregisters the copy on teardown.
-
-    Returns:
-        ModuleType: A freshly executed copy with its own warn-once keys.
-    """
-    spec = importlib.util.spec_from_file_location(
-        "_fresh_version_checking",
-        version_checking.__file__,
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, spec.name, module)
-    spec.loader.exec_module(module)
-    return module
-
-
 def test_import_time_read_leaves_the_invalid_env_warning_for_the_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -405,7 +497,13 @@ def test_import_time_read_leaves_the_invalid_env_warning_for_the_run(
     """
     monkeypatch.setenv("LINTRO_VERSION_TIMEOUT", "not-a-number")
 
-    fresh = _load_fresh_version_checking(monkeypatch)
+    # The copy is registered under its own name, so the imported module (and
+    # every reference to it) keeps its warn-once keys.
+    fresh = load_fresh_module(
+        monkeypatch,
+        path=version_checking.__file__,
+        name="_fresh_version_checking",
+    )
 
     assert_that(fresh.VERSION_CHECK_TIMEOUT).is_equal_to(30)
     assert_that(logged_warnings).is_empty()

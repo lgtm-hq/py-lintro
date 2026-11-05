@@ -16,40 +16,31 @@ neither picks them up until a test copies them into ``tmp_path`` (#2375).
 
 from __future__ import annotations
 
-import importlib.util
 import shutil
-import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 from assertpy import assert_that
 
+from tests.module_helpers import load_fresh_module
+
 ROOT = Path(__file__).resolve().parents[4]
 SCANNER_DIR = ROOT / "scripts" / "ci" / "testing"
 CANARY_DIR = Path(__file__).parent / "canary"
 
 
-def _load(name: str) -> ModuleType:
-    """Import one scanner module by path.
+def _load(name: str, monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    """Import one scanner module by path, for the current test only.
 
     Args:
         name: Module file stem under ``scripts/ci/testing``.
+        monkeypatch: Pytest fixture that unregisters the module on teardown.
 
     Returns:
         The imported module.
-
-    Raises:
-        RuntimeError: If the module cannot be loaded from its path.
     """
-    path = SCANNER_DIR / f"{name}.py"
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load scanner module: {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_fresh_module(monkeypatch, path=SCANNER_DIR / f"{name}.py", name=name)
 
 
 def _plant_canary(*, stem: str, tmp_path: Path) -> Path:
@@ -73,17 +64,29 @@ def _plant_canary(*, stem: str, tmp_path: Path) -> Path:
 # =============================================================================
 
 
-def test_no_test_function_bodies_are_duplicated() -> None:
-    """No two test functions share a body, arguments and module context."""
-    scanner = _load("scan_duplicate_test_bodies")
+def test_no_test_function_bodies_are_duplicated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No two test functions share a body, arguments and module context.
+
+    Args:
+        monkeypatch: Pytest fixture that scopes the scanner module to the test.
+    """
+    scanner = _load("scan_duplicate_test_bodies", monkeypatch)
     groups = scanner.find_duplicate_groups()
     rendered = [[f"{f.path}:{f.lineno} {f.name}" for f in group] for group in groups]
     assert_that(rendered).is_empty()
 
 
-def test_no_test_asserts_only_on_mock_bookkeeping() -> None:
-    """Every test asserts on something other than how a mock was called."""
-    scanner = _load("scan_mock_only_tests")
+def test_no_test_asserts_only_on_mock_bookkeeping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every test asserts on something other than how a mock was called.
+
+    Args:
+        monkeypatch: Pytest fixture that scopes the scanner module to the test.
+    """
+    scanner = _load("scan_mock_only_tests", monkeypatch)
     offenders = scanner.find_mock_only_tests()
     rendered = [f"{t.path}:{t.lineno} {t.name}" for t in offenders]
     assert_that(rendered).is_empty()
@@ -94,13 +97,17 @@ def test_no_test_asserts_only_on_mock_bookkeeping() -> None:
 # =============================================================================
 
 
-def test_duplicate_scanner_reports_a_planted_duplicate_pair(tmp_path: Path) -> None:
+def test_duplicate_scanner_reports_a_planted_duplicate_pair(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The duplicate scanner groups the two copies and leaves the third alone.
 
     Args:
         tmp_path: Pytest temporary directory holding the planted canary.
+        monkeypatch: Pytest fixture that scopes the scanner module to the test.
     """
-    scanner = _load("scan_duplicate_test_bodies")
+    scanner = _load("scan_duplicate_test_bodies", monkeypatch)
 
     groups = scanner.find_duplicate_groups(
         root=_plant_canary(stem="canary_duplicates", tmp_path=tmp_path),
@@ -112,7 +119,10 @@ def test_duplicate_scanner_reports_a_planted_duplicate_pair(tmp_path: Path) -> N
     )
 
 
-def test_mock_only_scanner_reports_planted_bookkeeping_tests(tmp_path: Path) -> None:
+def test_mock_only_scanner_reports_planted_bookkeeping_tests(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The mock-only scanner flags the direct helper and the tainted local.
 
     The observable-result, ``pytest.raises`` and attribute-assignment canaries
@@ -121,8 +131,9 @@ def test_mock_only_scanner_reports_planted_bookkeeping_tests(tmp_path: Path) -> 
 
     Args:
         tmp_path: Pytest temporary directory holding the planted canary.
+        monkeypatch: Pytest fixture that scopes the scanner module to the test.
     """
-    scanner = _load("scan_mock_only_tests")
+    scanner = _load("scan_mock_only_tests", monkeypatch)
 
     offenders = scanner.find_mock_only_tests(
         root=_plant_canary(stem="canary_mock_only", tmp_path=tmp_path),
@@ -152,6 +163,7 @@ def test_scanner_rejects_a_root_that_is_not_a_directory(
     root_kind: str,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A ``--root`` that is not a directory exits 2 instead of reporting zero.
 
@@ -164,8 +176,9 @@ def test_scanner_rejects_a_root_that_is_not_a_directory(
         root_kind: Whether ``--root`` names an absent path or a regular file.
         tmp_path: Pytest temporary directory providing the bad root.
         capsys: Pytest capture fixture for the error message.
+        monkeypatch: Pytest fixture that scopes the scanner module to the test.
     """
-    scanner = _load(module_name)
+    scanner = _load(module_name, monkeypatch)
     if root_kind == "regular-file":
         bad_root = tmp_path / "not-a-directory.py"
         bad_root.write_text("def test_x() -> None:\n    assert True\n")
@@ -190,6 +203,7 @@ def test_scanner_library_call_raises_on_a_missing_root(
     module_name: str,
     finder: str,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Library callers get an error rather than a false clean result.
 
@@ -197,8 +211,9 @@ def test_scanner_library_call_raises_on_a_missing_root(
         module_name: Scanner module stem under ``scripts/ci/testing``.
         finder: Name of the module-level scan function to call.
         tmp_path: Pytest temporary directory providing a path that is absent.
+        monkeypatch: Pytest fixture that scopes the scanner module to the test.
     """
-    scanner = _load(module_name)
+    scanner = _load(module_name, monkeypatch)
 
     with pytest.raises(NotADirectoryError):
         getattr(scanner, finder)(root=tmp_path / "does-not-exist")
@@ -231,6 +246,7 @@ def test_scanner_main_exits_one_on_a_planted_canary(
     expected_names: list[str],
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``main`` prints every offender it found and exits ``1``.
 
@@ -246,8 +262,9 @@ def test_scanner_main_exits_one_on_a_planted_canary(
         expected_names: Every offending test name the report must list.
         tmp_path: Pytest temporary directory holding the planted canary.
         capsys: Pytest capture fixture for the printed report.
+        monkeypatch: Pytest fixture that scopes the scanner module to the test.
     """
-    scanner = _load(module_name)
+    scanner = _load(module_name, monkeypatch)
     planted = _plant_canary(stem=canary_stem, tmp_path=tmp_path)
 
     exit_code = scanner.main(["--root", str(planted)])
@@ -272,6 +289,7 @@ def test_scanner_main_exits_zero_on_a_clean_tree(
     module_name: str,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``main`` exits ``0`` and reports a zero count on an empty tree.
 
@@ -279,8 +297,9 @@ def test_scanner_main_exits_zero_on_a_clean_tree(
         module_name: Scanner module stem under ``scripts/ci/testing``.
         tmp_path: Pytest temporary directory standing in for a clean tree.
         capsys: Pytest capture fixture for the printed report.
+        monkeypatch: Pytest fixture that scopes the scanner module to the test.
     """
-    scanner = _load(module_name)
+    scanner = _load(module_name, monkeypatch)
 
     exit_code = scanner.main(["--root", str(tmp_path)])
 
@@ -322,10 +341,11 @@ def test_scanner_main_without_root_scans_the_repository_tests_tree(
         module_name: Scanner module stem under ``scripts/ci/testing``.
         canary_stem: Canary file stem under ``canary/``, without any suffix.
         tmp_path: Pytest temporary directory holding the planted canary.
-        monkeypatch: Pytest monkeypatch fixture, used to move the cwd.
+        monkeypatch: Pytest monkeypatch fixture, used to move the cwd and to
+            scope the scanner module to the test.
         capsys: Pytest capture fixture for the printed report.
     """
-    scanner = _load(module_name)
+    scanner = _load(module_name, monkeypatch)
     _plant_canary(stem=canary_stem, tmp_path=tmp_path)
     monkeypatch.chdir(tmp_path)
 
