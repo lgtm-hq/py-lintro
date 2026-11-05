@@ -1007,11 +1007,13 @@ def _restore_by_path(
 
     The two paths still diverge where this fallback cannot see a link,
     within the limit documented on :func:`restore_checkpoint` (it checks
-    parents only before the write phase). For example, an ancestor swapped
-    mid-restore for a symbolic link to a file (``NotADirectoryError``) or
-    for a dangling symbolic link (``FileNotFoundError``) makes a deletion a
-    silent no-op here, whereas :func:`_restore_at` raises
-    :class:`CheckpointError` for the link. Nothing is deleted either way.
+    parents only before the write phase, so, for example, a symbolic link to
+    a directory swapped in mid-restore is followed). Deletions show another
+    case: an ancestor swapped mid-restore for a symbolic link to a file
+    (``NotADirectoryError``) or for a dangling symbolic link
+    (``FileNotFoundError``) makes a deletion a silent no-op here, whereas
+    :func:`_restore_at` raises :class:`CheckpointError` for the link.
+    Nothing is deleted either way.
 
     Args:
         root: Repository root.
