@@ -11,6 +11,7 @@ import pytest
 from assertpy import assert_that
 from loguru import logger
 
+from lintro.config import config_loader
 from lintro.config.config_loader import clear_config_cache
 from lintro.tools.core import version_checking
 from lintro.tools.core.version_checking import (
@@ -20,6 +21,12 @@ from lintro.tools.core.version_checking import (
     get_minimum_versions,
     get_version_check_timeout,
     version_probe_retry_timeout,
+)
+
+#: Text the config-error fallback warning opens with, before the detail.
+_CONFIG_WARNING = (
+    "Could not read execution.version_check_timeout; using the default "
+    "version probe timeout: "
 )
 
 # Tests for _get_version_timeout
@@ -224,13 +231,93 @@ def test_malformed_config_falls_back_to_default_with_one_warning(
     timeouts = [get_version_check_timeout() for _ in range(3)]
 
     assert_that(timeouts).is_equal_to([30, 30, 30])
-    # PyYAML's message spans several lines; only the problem line is kept.
+    # PyYAML's message opens with the context ("while parsing a flow
+    # sequence"); the warning carries the problem and its 1-based position.
+    config = Path.cwd() / ".lintro-config.yaml"
     assert_that(logged_warnings).is_equal_to(
         [
-            "Could not read execution.version_check_timeout; using the default "
-            "version probe timeout: while parsing a flow sequence",
+            f"{_CONFIG_WARNING}expected ',' or ']', but got '<stream end>' "
+            f"({config}, line 2, column 1)",
         ],
     )
+
+
+def test_invalid_config_value_warns_with_the_field_and_its_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    logged_warnings: list[str],
+) -> None:
+    """A rejected field names the field and pydantic's message, not the count.
+
+    The first line of a ``ValidationError`` is ``1 validation error for
+    ExecutionConfig``, which says nothing about what is wrong.
+
+    Args:
+        tmp_path: Temporary project directory.
+        monkeypatch: Pytest fixture for patching modules and attributes.
+        logged_warnings: Captured WARNING-level log messages.
+    """
+    monkeypatch.setattr(version_checking, "_logged_warnings", set())
+    monkeypatch.delenv("LINTRO_VERSION_TIMEOUT", raising=False)
+    _use_project_config(
+        tmp_path,
+        monkeypatch,
+        file_name=".lintro-config.yaml",
+        content="execution:\n  version_check_timeout: soon\n",
+    )
+
+    timeouts = [get_version_check_timeout() for _ in range(2)]
+
+    assert_that(timeouts).is_equal_to([30, 30])
+    assert_that(logged_warnings).is_equal_to(
+        [
+            f"{_CONFIG_WARNING}version_check_timeout: Input should be a valid "
+            "integer, unable to parse string as an integer",
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_detail"),
+    [
+        (
+            OSError("\n\n  permission denied: .lintro-config.yaml  \nsecond line"),
+            "permission denied: .lintro-config.yaml",
+        ),
+        (ValueError("x" * 500), "x" * 197 + "..."),
+        (TypeError(""), "TypeError"),
+        (TypeError("\n \n"), "TypeError"),
+    ],
+    ids=["leading_blank_lines", "too_long", "empty", "blank_lines_only"],
+)
+def test_other_config_errors_warn_with_their_first_non_empty_line(
+    error: Exception,
+    expected_detail: str,
+    monkeypatch: pytest.MonkeyPatch,
+    logged_warnings: list[str],
+) -> None:
+    """Any other error quotes its first non-empty line, at most 200 characters.
+
+    Args:
+        error: Exception the config loader raises.
+        expected_detail: Detail the single warning must end with.
+        monkeypatch: Pytest fixture for patching modules and attributes.
+        logged_warnings: Captured WARNING-level log messages.
+    """
+    monkeypatch.setattr(version_checking, "_logged_warnings", set())
+    monkeypatch.delenv("LINTRO_VERSION_TIMEOUT", raising=False)
+
+    def broken_config() -> None:
+        raise error
+
+    monkeypatch.setattr(config_loader, "get_config", broken_config)
+
+    timeouts = [get_version_check_timeout() for _ in range(2)]
+
+    assert_that(timeouts).is_equal_to([30, 30])
+    assert_that(logged_warnings).is_equal_to([f"{_CONFIG_WARNING}{expected_detail}"])
+    logged_detail = logged_warnings[0].removeprefix(_CONFIG_WARNING)
+    assert_that(len(logged_detail)).is_less_than_or_equal_to(200)
 
 
 def test_a_different_config_error_later_still_warns_once(
@@ -265,8 +352,16 @@ def test_a_different_config_error_later_still_warns_once(
         timeouts.extend(get_version_check_timeout() for _ in range(2))
 
     assert_that(timeouts).is_equal_to([30] * 6)
-    assert_that([line.rsplit(": ", 1)[-1] for line in logged_warnings]).is_equal_to(
-        ["while parsing a flow sequence", "while parsing a flow mapping"],
+    config = Path.cwd() / ".lintro-config.yaml"
+    assert_that(
+        [line.removeprefix(_CONFIG_WARNING) for line in logged_warnings],
+    ).is_equal_to(
+        [
+            f"expected ',' or ']', but got '<stream end>' "
+            f"({config}, line 2, column 1)",
+            f"expected ',' or '}}', but got '<stream end>' "
+            f"({config}, line 2, column 1)",
+        ],
     )
 
 
