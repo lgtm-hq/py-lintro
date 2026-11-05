@@ -1315,7 +1315,7 @@ def test_fallback_restore_deletes_a_target_in_a_normal_directory(
 
 
 _POSIX_SYMLINKS = pytest.mark.skipif(
-    sys.platform == "win32" or not hasattr(os, "symlink"),
+    sys.platform == "win32",
     reason="pins POSIX errno behaviour for symbolic link ancestors",
 )
 
@@ -1361,7 +1361,7 @@ def _link_parent_after_plan(
     return checkpoint
 
 
-def _link_destination(
+def _non_directory_destination(
     tmp_path_factory: pytest.TempPathFactory,
     link: str,
 ) -> Path:
@@ -1392,12 +1392,13 @@ def test_fallback_restore_deletes_nothing_below_a_swapped_in_link(
     """The by-path fallback skips a deletion below a link it cannot see.
 
     Pins the divergence documented on ``_restore_by_path``: an ancestor
-    swapped mid-restore for a link to a file (ENOTDIR) or a dangling link
-    (ENOENT) makes the deletion a silent no-op, and the rollback goes on.
+    swapped mid-restore for a link to a file or a dangling link makes the
+    deletion a silent no-op, and the rollback goes on. On POSIX those surface
+    as ENOTDIR and ENOENT; only the outcome is asserted.
     """
     monkeypatch.setattr(checkpoints, "_DIR_FD_ACCESS", False)
     repo = byte_repo
-    destination = _link_destination(tmp_path_factory, link)
+    destination = _non_directory_destination(tmp_path_factory, link)
     checkpoint = _link_parent_after_plan(repo, monkeypatch, destination)
 
     restore_checkpoint(checkpoint)
@@ -1425,8 +1426,9 @@ def test_descriptor_restore_refuses_a_deletion_below_a_swapped_in_link(
     if not checkpoints._DIR_FD_ACCESS:
         pytest.skip("descriptor-relative access needs dir_fd support")
     repo = byte_repo
-    destination = _link_destination(tmp_path_factory, link)
+    destination = _non_directory_destination(tmp_path_factory, link)
     checkpoint = _link_parent_after_plan(repo, monkeypatch, destination)
+    before = _user_state(repo)
 
     with pytest.raises(CheckpointError) as raised:
         restore_checkpoint(checkpoint)
@@ -1442,3 +1444,4 @@ def test_descriptor_restore_refuses_a_deletion_below_a_swapped_in_link(
     else:
         assert_that(os.path.lexists(destination)).is_false()
     assert_that([str(path) for path in repo.rglob("*.lintro-tmp")]).is_empty()
+    assert_that(_user_state(repo)).is_equal_to(before)
