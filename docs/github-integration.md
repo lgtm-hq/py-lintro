@@ -45,9 +45,13 @@ No lint verdict (runner loss); auto-rerun will retry (run attempt N; up to 3 aut
 `.github/workflows/auto-rerun-on-infra-failure.yml` reruns the failed jobs on that
 signature, up to three **reruns** — the original run is attempt 1, so the last eligible
 attempt is 4, and the summary says so once the budget is spent. The check turns green
-only once a rerun produces a real lint verdict. Runner noise is still _classified_
-(`scripts/ci/is-infra-flake-failure.sh`) — it is just no longer absorbed into a green
-check.
+only once a rerun produces a real lint verdict. The same workflow's `refresh-gate` job
+then re-runs any red `PR - All Checks Gate` on that commit that finished before the
+latest successful retry on the commit (`scripts/ci/refresh-all-checks-gate.py`), so a
+recovered producer does not leave the aggregate red. It acts on any successful attempt
+2+, automatic or manual, and the re-run gate judges every check again. Runner noise is
+still _classified_ (`scripts/ci/is-infra-flake-failure.sh`) — it is just no longer
+absorbed into a green check.
 
 The one failure still absorbed is the mirror image: lint reported `status=passed` /
 `exit-code=0` and only a post-lint step of the surrounding job failed. That is a real

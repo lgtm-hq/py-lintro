@@ -825,6 +825,7 @@ jobs:
         reading ID token
         Get "https://registry-1.docker.io/v2/": context deadline exceeded
         No lint verdict (runner loss); auto-rerun will retry
+        ResourceExhausted: failed to compute cache key: write /var/lib/buildkit/
       tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
       # The reusable hardens its own runner first and resolves the
       # github-minimal allowlist itself; the caller passes no endpoints.

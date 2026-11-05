@@ -1487,6 +1487,24 @@ def test_auto_rerun_matches_docker_hub_buildx_pull_timeout() -> None:
     assert_that(signatures).does_not_contain("context deadline exceeded")
 
 
+def test_auto_rerun_matches_buildkit_out_of_disk() -> None:
+    """The matcher must know buildkit running out of disk on a hosted runner.
+
+    CI - Docker run 41776692501 died with ``no space left on device`` while
+    buildkit wrote the tools image layers on an AWS-provisioned runner; the
+    identical rerun passed. No signature matched, so it waited for a manual
+    rerun. The signature is anchored to buildkit's snapshot path rather than
+    a bare ``no space left on device``, which would absorb disk failures
+    elsewhere that deserve a human.
+    """
+    signatures = _auto_rerun_signatures()
+
+    assert_that(signatures).contains(
+        "ResourceExhausted: failed to compute cache key: write /var/lib/buildkit/",
+    )
+    assert_that(signatures).does_not_contain("no space left on device")
+
+
 def test_ghcr_cleanup_sweeps_commit_tags_with_the_shared_safety_rule() -> None:
     """Per-commit tags must be swept, reusing the ci-* sweeper's guardrails.
 

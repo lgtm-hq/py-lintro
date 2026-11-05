@@ -132,9 +132,73 @@ jobs:
       #      the line scripts/ci/assert-required-check.sh prints (which also
       #      carries a ::error:: prefix and a (result=...) suffix), and never
       #      printed for a genuine lint verdict, which reports status=failed.
+      # 6.   Hosted runner out of disk while buildkit writes the tools image
+      #      layers (CI - Docker run 41776692501, 2026-11-04: checkov's numpy
+      #      hit "no space left on device" on an AWS-provisioned runner; the
+      #      identical rerun on a normal runner passed). ResourceExhausted is
+      #      buildkit's ENOSPC wrapper; scoped to its snapshot path so a disk
+      #      failure anywhere else still needs a human, and the max-reruns
+      #      budget bounds the cost if the image ever outgrows every runner.
       signatures: |-
         fetching ambient OIDC credentials
         retrieving ID token
         reading ID token
         Get "https://registry-1.docker.io/v2/": context deadline exceeded
         No lint verdict (runner loss); auto-rerun will retry
+        ResourceExhausted: failed to compute cache key: write /var/lib/buildkit/
+
+  # Second half of the net: a successful retry leaves the All Checks Gate on
+  # the same commit red, because the gate already judged the failed first
+  # attempt and nothing re-evaluates it. On 2026-11-04 that kept main red for
+  # an hour after CI - Docker attempt 2 passed (gate run 41776692371).
+  #
+  # Fires on any later attempt of a watched workflow that concluded success
+  # (automatic or manual rerun) and re-runs each failed gate on that head SHA
+  # that finished before the retry did. This is not a retry budget for the
+  # gate: it only re-runs after a producer turned green, and the re-run gate
+  # re-judges every check, so a producer that is still red keeps it red.
+  refresh-gate:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.run_attempt > 1 &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # Serialize per commit so two producers recovering together cannot both
+    # re-run the same gate. GitHub keeps one pending run per group and
+    # replaces it by queue arrival, so the survivor may be an *older*
+    # recovery than the one it displaced. The script therefore ignores the
+    # event's own timestamp and reads the newest successful retry on the SHA
+    # from the API, so any survivor covers every recovery before it ran.
+    concurrency:
+      group: refresh-gate-${{ github.event.workflow_run.head_sha }}
+      cancel-in-progress: false
+    permissions:
+      actions: write # re-run the gate's failed jobs
+      contents: read
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        with:
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+      - name: Checkout refresh script
+        # workflow_run runs from the default branch, so this is trusted main
+        # code, never the triggering head.
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/ci/refresh-all-checks-gate.py
+            scripts/ci/github_api.py
+          sparse-checkout-cone-mode: false
+      - name: Re-run stale red gates for the recovered commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/refresh-all-checks-gate.py
