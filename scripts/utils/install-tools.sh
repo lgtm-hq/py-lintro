@@ -334,7 +334,7 @@ detect_platform() {
 	os=$(uname -s)
 	arch=$(uname -m)
 
-	# Normalize OS names for hadolint
+	# Normalize OS names
 	case "$os" in
 	Darwin) os="Darwin" ;;
 	Linux) os="Linux" ;;
@@ -342,7 +342,7 @@ detect_platform() {
 	*) ;; # keep original value
 	esac
 
-	# Normalize architecture names for hadolint
+	# Normalize architecture names
 	case "$arch" in
 	x86_64) arch="x86_64" ;;
 	amd64) arch="x86_64" ;;
@@ -404,84 +404,155 @@ install_python_package() {
 	return 1
 }
 
-# Function to install a tool via curl with platform detection
-install_tool_curl() {
-	local tool_name="$1"
-	local base_url="$2"
-	local target_path="$BIN_DIR/$tool_name"
+# Verify a downloaded file against a release checksums file.
+#
+# Usage: verify_sha256 <file> <sums-file> <asset-name>
+#
+# The sums file holds ``<sha256>  <asset>`` or ``<sha256> *<asset>`` lines
+# (sha256sum text and binary mode). Fails closed: a missing or empty sums
+# file, no line for the asset, no hash tool, or a mismatch each print a
+# reason and return 1. Nothing is ever skipped.
+verify_sha256() {
+	local file="$1"
+	local sums="$2"
+	local asset="$3"
+	local expected
+	local actual
 
-	if ! should_install "$tool_name"; then
-		log_verbose "Skipping $tool_name (not in --tools filter)"
+	if [ ! -s "$sums" ]; then
+		echo -e "${RED}✗ Checksum file for $asset is missing or empty${NC}"
+		return 1
+	fi
+	expected=$(awk -v asset="$asset" '{
+		name = $2
+		sub(/^\*/, "", name)
+		if (name == asset) { print $1; exit }
+	}' "$sums")
+	if [ -z "$expected" ]; then
+		echo -e "${RED}✗ No checksum entry for $asset in $(basename "$sums")${NC}"
+		return 1
+	fi
+	if command -v sha256sum >/dev/null 2>&1; then
+		actual=$(sha256sum "$file" | awk '{print $1}')
+	elif command -v shasum >/dev/null 2>&1; then
+		actual=$(shasum -a 256 "$file" | awk '{print $1}')
+	else
+		echo -e "${RED}✗ Unable to verify $asset: no hash tool found (sha256sum or shasum required)${NC}"
+		return 1
+	fi
+	if [ "$expected" != "$actual" ]; then
+		echo -e "${RED}✗ Checksum mismatch for $asset (expected $expected, got $actual)${NC}"
+		return 1
+	fi
+	echo -e "${GREEN}✓ Checksum verified for $asset${NC}"
+}
+
+# Map detect_platform output to the asset name hadolint publishes.
+#
+# hadolint releases ship hadolint-{linux,macos}-{x86_64,arm64} (plus a
+# Windows .exe this script does not handle). Prints nothing and returns 1
+# when the platform has no published asset.
+hadolint_asset_name() {
+	local platform="$1"
+	local os="${platform%%-*}"
+	local arch="${platform#*-}"
+	case "$os" in
+	Linux) os="linux" ;;
+	Darwin) os="macos" ;;
+	*) return 1 ;;
+	esac
+	case "$arch" in
+	x86_64 | arm64) ;;
+	*) return 1 ;;
+	esac
+	echo "hadolint-${os}-${arch}"
+}
+
+# Homebrew fallback for a platform hadolint publishes no asset for.
+#
+# Only --local may use it: brew installs whatever version it ships, without
+# the release checksum, so the tools image must never take this path.
+install_hadolint_via_brew() {
+	local platform="$1"
+	local target_path="$2"
+
+	if [ "$INSTALL_MODE" = "--docker" ] || [ "$INSTALL_MODE" = "docker" ]; then
+		echo -e "${RED}✗ hadolint publishes no release asset for $platform; --docker does not fall back to Homebrew${NC}"
+		exit 1
+	fi
+	if ! command -v brew &>/dev/null; then
+		echo -e "${RED}✗ hadolint publishes no release asset for $platform and Homebrew is unavailable${NC}"
+		exit 1
+	fi
+	echo -e "${YELLOW}⚠ hadolint publishes no release asset for $platform; falling back to Homebrew (unpinned, not checksum-verified)${NC}"
+	if [ $DRY_RUN -eq 1 ]; then
+		log_info "[DRY-RUN] Would run brew install hadolint"
+		return 0
+	fi
+	if brew install hadolint; then
+		local brew_path
+		brew_path="$(brew --prefix hadolint)/bin/hadolint"
+		if [ -f "$brew_path" ]; then
+			cp "$brew_path" "$target_path"
+			chmod +x "$target_path"
+			echo -e "${GREEN}✓ hadolint installed via Homebrew${NC}"
+			return 0
+		fi
+	fi
+	echo -e "${RED}✗ Homebrew failed to install hadolint${NC}"
+	exit 1
+}
+
+# Install hadolint from its GitHub release, verified against the release's
+# checksums.sha256. Any download or verification failure exits non-zero.
+install_hadolint() {
+	local version="$1"
+	local target_path="$BIN_DIR/hadolint"
+
+	if ! should_install "hadolint"; then
+		log_verbose "Skipping hadolint (not in --tools filter)"
 		return 0
 	fi
 
-	echo -e "${BLUE}Installing $tool_name...${NC}"
+	echo -e "${BLUE}Installing hadolint...${NC}"
 
-	# Get platform info
 	local platform
 	platform=$(detect_platform)
-	local download_url="${base_url}-${platform}"
-
 	echo -e "${YELLOW}Detected platform: $platform${NC}"
-	echo -e "${YELLOW}Download URL: $download_url${NC}"
 
-	if download_with_retries "$download_url" "$target_path" 3; then
-		chmod +x "$target_path"
-		# Attempt checksum verification when available
-		if [[ "$tool_name" == "hadolint" ]]; then
-			local checksum_url="${download_url}.sha256"
-			if download_with_retries "$checksum_url" "$target_path.sha256" 3; then
-				echo -e "${BLUE}Verifying checksum for $tool_name...${NC}"
-				# Portable verification regardless of filename in .sha256
-				local expected
-				expected=$(awk '{print $1}' "$target_path.sha256" | head -n1)
-				local actual
-				if command -v sha256sum >/dev/null 2>&1; then
-					actual=$(sha256sum "$target_path" | awk '{print $1}')
-				elif command -v shasum >/dev/null 2>&1; then
-					actual=$(shasum -a 256 "$target_path" | awk '{print $1}')
-				else
-					echo -e "${YELLOW}⚠ No checksum tool available; skipping verification${NC}"
-					actual=""
-				fi
-				if [[ -n "$actual" ]]; then
-					if [[ "$expected" != "$actual" ]]; then
-						echo -e "${RED}✗ Checksum mismatch for $tool_name${NC}"
-						exit 1
-					fi
-					echo -e "${GREEN}✓ Checksum verified${NC}"
-				fi
-				rm -f "$target_path.sha256" || true
-			fi
-		fi
-		echo -e "${GREEN}✓ $tool_name installed successfully${NC}"
-	else
-		echo -e "${YELLOW}Direct download failed, trying alternative methods...${NC}"
+	local asset
+	if ! asset=$(hadolint_asset_name "$platform"); then
+		install_hadolint_via_brew "$platform" "$target_path"
+		return 0
+	fi
 
-		# For hadolint, try alternative installation methods
-		if [ "$tool_name" = "hadolint" ]; then
-			# Try installing via package managers
-			if command -v brew &>/dev/null; then
-				echo -e "${YELLOW}Trying Homebrew installation...${NC}"
-				if brew install hadolint; then
-					# Copy from Homebrew location to target
-					local brew_path
-					brew_path="$(brew --prefix hadolint)/bin/hadolint"
-					if [ -f "$brew_path" ]; then
-						cp "$brew_path" "$target_path"
-						chmod +x "$target_path"
-						echo -e "${GREEN}✓ hadolint installed successfully via Homebrew${NC}"
-						return 0
-					fi
-				fi
-			fi
+	local release_url="https://github.com/hadolint/hadolint/releases/download/v${version}"
+	echo -e "${YELLOW}Download URL: $release_url/$asset${NC}"
+	if [ $DRY_RUN -eq 1 ]; then
+		log_info "[DRY-RUN] Would install $asset v${version} verified against checksums.sha256"
+		return 0
+	fi
 
-			# Remove invalid pip fallback for hadolint
-		fi
-
-		echo -e "${RED}✗ Failed to install $tool_name from $download_url and all fallback methods${NC}"
+	local workdir
+	workdir=$(mktemp -d)
+	if ! download_with_retries "$release_url/$asset" "$workdir/$asset" 3; then
+		rm -rf "$workdir"
+		echo -e "${RED}✗ Failed to download $release_url/$asset${NC}"
 		exit 1
 	fi
+	if ! download_with_retries "$release_url/checksums.sha256" "$workdir/checksums.sha256" 3; then
+		rm -rf "$workdir"
+		echo -e "${RED}✗ Failed to download $release_url/checksums.sha256; refusing to install an unverified hadolint${NC}"
+		exit 1
+	fi
+	if ! verify_sha256 "$workdir/$asset" "$workdir/checksums.sha256" "$asset"; then
+		rm -rf "$workdir"
+		exit 1
+	fi
+	cp "$workdir/$asset" "$target_path"
+	chmod +x "$target_path"
+	rm -rf "$workdir"
+	echo -e "${GREEN}✓ hadolint v${version} installed successfully${NC}"
 }
 
 # Function to install system dependencies for Docker
@@ -572,10 +643,9 @@ main() {
 	fi
 
 	# Install hadolint (Docker linting)
-	# hadolint with checksum verification when available
+	# Release binary, verified against the release's checksums.sha256
 	HADOLINT_VERSION=$(get_tool_version "hadolint") || exit 1
-	install_tool_curl "hadolint" \
-		"https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint"
+	install_hadolint "$HADOLINT_VERSION"
 
 	# Install gitleaks (secret detection)
 	if should_install "gitleaks"; then
