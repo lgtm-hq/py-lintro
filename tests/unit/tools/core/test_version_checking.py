@@ -451,8 +451,20 @@ def test_config_section_of_is_none_when_two_sections_share_a_model_name(
         monkeypatch: Pytest fixture for patching modules and attributes.
     """
 
-    class SharedModel(BaseModel):
-        """Section model whose class name two sections share."""
+    def make_shared_model() -> type[BaseModel]:
+        """Build a fresh model class named ``SharedModel``.
+
+        Returns:
+            type[BaseModel]: A distinct class object on every call.
+        """
+
+        class SharedModel(BaseModel):
+            """Section model whose class name two sections share."""
+
+        return SharedModel
+
+    first_model = make_shared_model()
+    second_model = make_shared_model()
 
     class OtherModel(BaseModel):
         """Section model whose class name only one section carries."""
@@ -460,8 +472,12 @@ def test_config_section_of_is_none_when_two_sections_share_a_model_name(
     monkeypatch.setattr(
         version_checking,
         "_section_models",
-        lambda: {"first": SharedModel, "second": SharedModel, "third": OtherModel},
+        lambda: {"first": first_model, "second": second_model, "third": OtherModel},
     )
+
+    assert_that(first_model).is_not_same_as(second_model)
+    assert_that(first_model.__name__).is_equal_to(second_model.__name__)
+    assert_that(first_model.__name__).is_equal_to("SharedModel")
 
     assert_that(version_checking._config_section_of("SharedModel")).is_none()
     assert_that(version_checking._config_section_of("OtherModel")).is_equal_to("third")
