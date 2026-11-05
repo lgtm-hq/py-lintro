@@ -1,10 +1,12 @@
 """Cursor AI provider implementation.
 
-Invokes the ``agent`` CLI (Cursor's headless agent) for completions. The
-Cursor CreateAgent HTTP API is not used because it currently returns
-internal errors in environments where the ``agent`` binary works reliably.
-
-Authentication is handled by the CLI: ``CURSOR_API_KEY`` or ``agent login``.
+``transport: cli`` (the default) invokes the ``agent`` CLI, Cursor's headless
+agent; it authenticates with ``CURSOR_API_KEY`` or ``agent login``.
+``transport: api`` (#3253) runs one inference-only prompt through Cursor's
+first-party ``cursor-sdk`` (``lintro[cursor]``) and needs ``CURSOR_API_KEY``;
+see :mod:`lintro.ai.providers.cursor.sdk_transport`. The Cloud Agents
+``CreateAgent`` HTTP API is not used: it is an orchestration API, not an
+inference endpoint, and it returned internal errors where the CLI worked.
 
 Imported on demand by
 :meth:`lintro.ai.providers.cursor.plugin.CursorPlugin.build`; importing
@@ -13,6 +15,7 @@ Imported on demand by
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 from dataclasses import replace
@@ -23,11 +26,13 @@ from loguru import logger
 from lintro.ai.cost import estimate_cost_with_floor
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import (
+    AIAuthenticationError,
     AINotAvailableError,
     AIProviderError,
 )
 from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.provider_enum import AIProvider
+from lintro.ai.providers._api_common import finish_api_completion
 from lintro.ai.providers._cli_envelope import decode_envelope_or_prose
 from lintro.ai.providers.base import (
     AIResponse,
@@ -42,14 +47,24 @@ from lintro.ai.providers.constants import (
     DEFAULT_TIMEOUT,
 )
 from lintro.ai.providers.cursor.metadata import CURSOR_CLI_BINARY, CURSOR_METADATA
+from lintro.ai.providers.cursor.sdk_transport import (
+    CURSOR_SDK_MODULE,
+    CursorSdkBridge,
+    run_prompt,
+)
 from lintro.ai.raw_response import CLI_ENVELOPE_STAGE, describe_raw_response
 from lintro.ai.token_budget import estimate_tokens
+from lintro.ai.transcript import TranscriptDirection, log_transcript_event
 
 CURSOR_MIN_TIMEOUT = 600.0
 
 _AGENT_BIN = CURSOR_CLI_BINARY
 DEFAULT_MODEL = CURSOR_METADATA.default_model
 DEFAULT_API_KEY_ENV = CURSOR_METADATA.default_api_key_env
+
+# Detected without importing: importing ``cursor_sdk`` is deferred to the first
+# API-transport call, so neither module import nor construction loads it.
+_has_cursor_sdk = importlib.util.find_spec(CURSOR_SDK_MODULE) is not None
 
 
 def _find_agent() -> str | None:
@@ -139,7 +154,7 @@ class _CursorCliTransport(CliTransport):
 
 
 class CursorProvider(BaseAIProvider):
-    """Cursor provider via the ``agent`` CLI."""
+    """Cursor provider via the ``agent`` CLI or the ``cursor-sdk`` API."""
 
     def __init__(
         self,
@@ -157,8 +172,11 @@ class CursorProvider(BaseAIProvider):
             model: Optional model override (defaults to provider config).
             api_key_env: Environment variable name for the API key.
             max_tokens: Default max tokens for provider configuration.
-            base_url: Unused; kept for provider API parity.
-            transport: AI transport mode (CLI only for Cursor).
+            base_url: Must be unset: Cursor has no endpoint override, so a
+                configured ``ai.api_base_url`` is rejected under API transport
+                and ignored under CLI.
+            transport: ``cli`` for the ``agent`` binary or ``api`` for the
+                ``cursor-sdk`` package.
             cursor_trust_workspace: Required. When True, ``--trust`` is
                 passed to the ``agent`` CLI, granting Cursor workspace trust;
                 when False, the flag is omitted and the ``agent`` CLI keeps
@@ -171,12 +189,39 @@ class CursorProvider(BaseAIProvider):
                 ``docs/ai-features.md`` for the residual injection risk.
 
         Raises:
-            AINotAvailableError: When transport is not CLI or the ``agent``
-                binary is not on PATH.
+            AINotAvailableError: When the transport is not one Cursor serves,
+                when API transport is given ``base_url`` or lacks the SDK, or
+                when CLI transport cannot find the ``agent`` binary.
         """
-        if transport != AITransport.CLI:
-            msg = "cursor provider only supports transport: cli"
+        self._trust_workspace = cursor_trust_workspace
+        self._session_id: str | None = None
+        self._durable_repo_root: str | None = None
+        self._cli: _CursorCliTransport | None = None
+        self._sdk_bridge: CursorSdkBridge | None = None
+        if not CURSOR_METADATA.supports(transport):
+            msg = f"cursor provider does not support transport: {transport}"
             raise AINotAvailableError(msg)
+        if transport == AITransport.API:
+            if base_url:
+                raise AINotAvailableError(
+                    "cursor API transport does not accept ai.api_base_url",
+                )
+            # Neither the SDK nor the key is touched here: the bridge starts
+            # and the key is read on the first call.
+            super().__init__(
+                provider_name=AIProvider.CURSOR,
+                has_sdk=_has_cursor_sdk,
+                sdk_package="cursor-sdk",
+                default_model=DEFAULT_MODEL,
+                default_api_key_env=DEFAULT_API_KEY_ENV,
+                model=model,
+                api_key_env=api_key_env,
+                max_tokens=max_tokens,
+                transport=transport,
+                sdk_extra=CURSOR_METADATA.sdk_extra,
+            )
+            self._sdk_bridge = CursorSdkBridge()
+            return
 
         agent_path = _find_agent()
         if not agent_path:
@@ -201,9 +246,6 @@ class CursorProvider(BaseAIProvider):
             binary_path=agent_path,
             model=self._model,
         )
-        self._trust_workspace = cursor_trust_workspace
-        self._session_id: str | None = None
-        self._durable_repo_root: str | None = None
 
     def _create_client(self, *, api_key: str) -> Any:
         """No persistent client -- each call spawns a subprocess."""
@@ -211,36 +253,39 @@ class CursorProvider(BaseAIProvider):
         return None
 
     def _get_client(self) -> Any:
-        """Override: skip API-key validation (the CLI handles auth)."""
+        """Override: no shared client; the CLI or the SDK bridge owns auth."""
         return None
 
     def is_available(self) -> bool:
-        """Check if the ``agent`` CLI is on PATH.
+        """Check the configured transport's presence requirements.
 
         Returns:
-            True when the ``agent`` binary is discoverable.
+            Under CLI, True when the ``agent`` binary is discoverable; under
+            API, True when the SDK is installed and the key variable is set.
         """
+        if self._sdk_bridge is not None:
+            return super().is_available()
         return _find_agent() is not None
 
-    def _cli_transport(self) -> _CursorCliTransport:
-        """Return the ``agent`` CLI transport.
+    def _cli_transport(self) -> _CursorCliTransport | None:
+        """Return the ``agent`` CLI transport, when one was constructed.
 
         Returns:
-            The CLI transport; Cursor supports no other transport, so one is
-            always constructed.
+            The CLI transport, or ``None`` under API transport.
         """
         return self._cli
 
     @property
     def capabilities(self) -> ProviderCapabilities:
-        """Declare Cursor capabilities.
+        """Declare Cursor capabilities for the configured transport.
 
         Returns:
-            The ``agent`` CLI resumes sessions but exposes neither native
-            structured output nor token streaming to lintro.
+            The ``agent`` CLI resumes sessions; the SDK path is one stateless
+            prompt per call. Neither exposes native structured output or token
+            streaming to lintro.
         """
         return ProviderCapabilities(
-            supports_sessions=True,
+            supports_sessions=self._cli is not None,
             supports_structured_output=False,
             supports_streaming=False,
         )
@@ -248,11 +293,20 @@ class CursorProvider(BaseAIProvider):
     def begin_durable_session(self, *, repo_root: str) -> None:
         """Start a reusable CLI session for single-chunk reviews.
 
+        A no-op under API transport, which has no session to resume.
+
         Args:
             repo_root: Absolute path to the git repository under review.
         """
         self.end_durable_session()
-        self._durable_repo_root = repo_root
+        if self._cli is not None:
+            self._durable_repo_root = repo_root
+
+    async def aclose(self) -> None:
+        """Stop the SDK bridge and remove its workdir. Idempotent."""
+        if self._sdk_bridge is not None:
+            await self._sdk_bridge.aclose()
+        await super().aclose()
 
     def end_durable_session(self) -> None:
         """Clear any active durable CLI session state."""
@@ -271,7 +325,7 @@ class CursorProvider(BaseAIProvider):
         model: str | None = None,
         cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
-        """Run a completion via ``agent --print``.
+        """Run a completion via ``agent --print`` or the Cursor SDK.
 
         Args:
             prompt: User prompt text.
@@ -280,14 +334,19 @@ class CursorProvider(BaseAIProvider):
                 lower of this and the provider-level cap; the ``agent`` CLI
                 enforces no hard limit, so it is stated to the model in the
                 prompt instead.
-            timeout: Subprocess timeout in seconds (minimum 600 for agent).
-            repo_root: Git repository root for ``--workspace``.
+            timeout: Timeout in seconds (minimum 600 for the ``agent`` CLI,
+                180 for the SDK).
+            repo_root: Git repository root for ``--workspace``; never used as
+                the SDK agent's working directory.
             use_one_shot: When True, do not resume an existing CLI session.
             model: Optional per-call model override.
             cli_schema: Unused; accepted for provider API parity.
 
         Returns:
             Parsed model response with usage metadata.
+
+        Raises:
+            AINotAvailableError: When no transport was constructed.
         """
         effective_model = model or self._model
         effective_max = min(max_tokens, self._max_tokens)
@@ -298,6 +357,16 @@ class CursorProvider(BaseAIProvider):
         combined_prompt = (
             f"{combined_prompt}\n\n[Respond in at most {effective_max} tokens.]"
         )
+        if self._sdk_bridge is not None:
+            return await self._complete_api(
+                combined_prompt,
+                bridge=self._sdk_bridge,
+                model=effective_model,
+                max_tokens=effective_max,
+                timeout=timeout,
+            )
+        if self._cli is None:
+            raise AINotAvailableError("Cursor CLI transport is not initialized")
 
         effective_root = repo_root or self._durable_repo_root or os.getcwd()
         resume_session = (
@@ -362,6 +431,66 @@ class CursorProvider(BaseAIProvider):
         if not use_one_shot and self._durable_repo_root is not None and session_id:
             self._session_id = session_id
         return response
+
+    async def _complete_api(
+        self,
+        prompt: str,
+        *,
+        bridge: CursorSdkBridge,
+        model: str,
+        max_tokens: int,
+        timeout: float,
+    ) -> AIResponse:
+        """Run one inference-only prompt through the Cursor SDK.
+
+        Args:
+            prompt: The combined prompt, output cap already stated in it.
+            bridge: This provider's bridge holder.
+            model: Effective model identifier.
+            max_tokens: Effective output cap, recorded in the transcript.
+            timeout: Requested timeout; the SDK path floors it at 180 s.
+
+        Returns:
+            The response, with the SDK's token usage or a local estimate.
+
+        Raises:
+            AIAuthenticationError: When the key variable is unset.
+        """
+        api_key = os.environ.get(self._api_key_env) or ""
+        if not api_key:
+            raise AIAuthenticationError(
+                f"No API key found. Set the {self._api_key_env} environment variable.",
+            )
+        log_transcript_event(
+            provider=AIProvider.CURSOR.value,
+            transport=AITransport.API.value,
+            direction=TranscriptDirection.REQUEST,
+            payload={
+                "model": model,
+                "max_tokens": max_tokens,
+                "prompt": prompt,
+                "timeout": timeout,
+            },
+        )
+        run = await run_prompt(
+            bridge=bridge,
+            message=prompt,
+            model=model,
+            api_key=api_key,
+            timeout=timeout,
+        )
+        # No usage on the run is recorded as an estimate, like the CLI path.
+        input_tokens = run.input_tokens or estimate_tokens(prompt)
+        output_tokens = run.output_tokens or estimate_tokens(run.content)
+        return finish_api_completion(
+            provider=AIProvider.CURSOR,
+            model=model,
+            content=run.content,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost=estimate_cost_with_floor(model, input_tokens, output_tokens),
+            served_model=run.served_model,
+        )
 
     @staticmethod
     def _estimate_usage(

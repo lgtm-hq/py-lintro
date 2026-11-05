@@ -122,8 +122,33 @@ def test_api_transport_implies_an_sdk_package(provider: AIProvider) -> None:
     metadata = metadata_for(provider)
     if metadata.supports(AITransport.API):
         assert_that(metadata.sdk_package).is_not_none()
+        assert_that(metadata.sdk_extra).is_not_none()
     else:
         assert_that(metadata.sdk_package).is_none()
+        assert_that(metadata.sdk_extra).is_none()
+
+
+@pytest.mark.parametrize(
+    ("provider", "extra"),
+    [
+        (AIProvider.ANTHROPIC, "ai"),
+        (AIProvider.OPENAI, "ai"),
+        (AIProvider.CURSOR, "cursor"),
+    ],
+)
+def test_sdk_install_hint_names_the_providers_own_extra(
+    provider: AIProvider,
+    extra: str,
+) -> None:
+    """Cursor's SDK is its own opt-in extra, never ``lintro[ai]`` (#3253).
+
+    Args:
+        provider: The provider under test.
+        extra: The extra its SDK ships in.
+    """
+    assert_that(metadata_for(provider).sdk_install_hint).is_equal_to(
+        f"Install with: uv pip install 'lintro[{extra}]'",
+    )
 
 
 @pytest.mark.parametrize(

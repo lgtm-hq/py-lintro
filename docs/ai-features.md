@@ -1249,13 +1249,13 @@ ai:
   lint: true # AI lint summaries during chk/fmt
   review: true # the `lintro review` AI diff review
 
-  # Provider: "anthropic", "cursor" or "openai" ("cursor" is CLI-only).
+  # Provider: "anthropic", "cursor" or "openai".
   # No default — set it explicitly whenever ai.lint or ai.review is enabled.
   provider: anthropic
 
   # How to invoke the provider: "api" (SDK) or "cli" (local agent binary).
   # No default — set it explicitly whenever ai.lint or ai.review is enabled.
-  # "cursor" requires "cli". See "Transports".
+  # "cursor" defaults to "cli"; its "api" needs lintro[cursor]. See "Transports".
   transport: api
 
   # Model override; omit to take the chosen provider's default. (str, default: none)
@@ -1635,16 +1635,15 @@ CI runs the same test, so a metadata change without the paste-back fails the bui
 | Provider  | Default model       | API key env         | Transports             | CLI binary |
 | --------- | ------------------- | ------------------- | ---------------------- | ---------- |
 | Anthropic | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` | `api` (default), `cli` | `claude`   |
-| Cursor    | `auto`              | `CURSOR_API_KEY`    | `cli` (default)        | `agent`    |
+| Cursor    | `auto`              | `CURSOR_API_KEY`    | `api`, `cli` (default) | `agent`    |
 | OpenAI    | `gpt-4o`            | `OPENAI_API_KEY`    | `api` (default), `cli` | `codex`    |
 
 <!-- END SNAPSHOT: provider-table -->
 
 `(default)` marks the transport lintro documents and `lintro doctor` steers you to. It
 is also the fallback for an omitted `ai.transport`: `api` for `anthropic` and `openai`,
-`cli` for `cursor`, the only transport Cursor serves (#2449). An explicit
-`transport: api` with `provider: cursor` still fails with
-`cursor provider only supports transport: cli`. Set `ai.transport` explicitly anyway.
+`cli` for `cursor` (#2449). Cursor's `api` transport is opt-in: set `transport: api` and
+install `lintro[cursor]` (#3253). Set `ai.transport` explicitly anyway.
 
 Prices are USD per million tokens, as lintro uses them for `ai.max_cost_usd` and the
 reported `$` figures. A model priced at zero is billed elsewhere (the Cursor
@@ -1698,12 +1697,34 @@ export CURSOR_API_KEY=...
 ```yaml
 ai:
   provider: cursor
-  transport: cli # cursor is CLI-only
+  transport: cli # default; or api with lintro[cursor]
   # model: auto  # provider default
 ```
 
-The `agent` CLI bills against a Cursor subscription rather than per token, so its models
-are priced at zero above and the run's cost basis is `unpriceable`
+`transport: cli` runs the `agent` binary. `transport: api` (#3253) runs the prompt
+through Cursor's first-party [Python SDK](https://cursor.com/docs/sdk/python),
+`cursor-sdk`, which authenticates with `CURSOR_API_KEY` alone and needs no `agent`
+binary. It ships in its own opt-in extra, not in `ai`:
+
+```bash
+uv pip install 'lintro[cursor]'
+```
+
+The `cursor` extra is separate because `cursor-sdk` is a public beta published as wheels
+only (macOS arm64/x64, manylinux2014 x64/aarch64, Windows x64; the sdist is a stub), and
+each wheel bundles a ~55 MB native bridge. The `py-lintro-ai` image includes it. The API
+path is **inference-only**, like every `api` transport: the diff is embedded in the
+prompt, the agent gets no tools (`tools=[]` plus a deny list naming every documented
+tool), no cloud agent is used, and its working directory is an empty temporary directory
+lintro creates — never the repository under review — so a checkout's
+`.cursor/hooks.json`, rules and MCP config are not loaded. Cursor hooks cannot be
+switched off by any SDK option, so hooks in your own `~/.cursor/` still run. Each call
+waits at least 180 s (a floor over `ai.transports.api.timeout`, which defaults to 60 s).
+The SDK has no output-token limit, so `max_tokens` is stated to the model in the prompt,
+as on the CLI path, and `ai.api_base_url` is rejected: Cursor has no endpoint override.
+
+On both transports Cursor bills against a subscription rather than per token, so its
+models are priced at zero above and the run's cost basis is `unpriceable`
 (`lintro/ai/transport.py`). What that means for `ai.max_cost_usd` depends on where the
 cap was set (`cap_is_enforced` in `lintro/ai/review/cost_cap.py`, #2154):
 
@@ -1749,7 +1770,8 @@ pruned from the published distributions, so running it needs a repository checko
 
 Lintro reaches a provider one of two ways, selected by `ai.transport`:
 
-- **`api`** — the provider's Python SDK over HTTPS. Requires the `ai` extra.
+- **`api`** — the provider's Python SDK over HTTPS. Requires the `ai` extra (the
+  `cursor` extra for Cursor).
 - **`cli`** — a subprocess call to a locally installed agent binary (`claude`, `codex`,
   Cursor's `agent`).
 
@@ -1763,11 +1785,10 @@ run still works: each provider plugin falls back to the transport it documents �
 for `anthropic` and `openai`, `cli` for `cursor` (#2449). That fallback exists for
 backward compatibility — legacy configs that set only `ai.enabled: true` (which
 implicitly switches `lint` and `review` on) rely on it — and is not something to depend
-on in new config. Asking Cursor for `transport: api` explicitly is still fatal:
-`cursor provider only supports transport: cli`.
+on in new config.
 
-`cursor` is a CLI-only provider: pair it with `transport: cli`. `anthropic` and `openai`
-support both transports.
+All three providers support both transports. Cursor's `api` transport needs the
+`lintro[cursor]` extra rather than `lintro[ai]`.
 
 ```yaml
 ai:
@@ -1788,6 +1809,13 @@ provider in its metadata.
 | `anthropic` | `--tools Read,Grep,Glob` (required) | `--max-turns N` (sent; backstop) |
 | `openai`    | `--sandbox read-only` (always)      | none: `codex exec` has no flag   |
 | `cursor`    | `--mode ask` (always)               | none: `agent` has no flag        |
+
+The `api` transport has no agentic session to bound, with one exception: Cursor's SDK
+runs an agent even for a single prompt, so lintro bounds it the same way.
+
+| Provider (`api`) | Read-only tools                                            | Turn limit                      |
+| ---------------- | ---------------------------------------------------------- | ------------------------------- |
+| `cursor`         | tools disabled (`tools=[]` + deny list), empty tempdir cwd | none: the SDK has no turn limit |
 
 The limit comes from the call's kind: 12 turns for review-type calls (each chunk's main
 call and its schema-recovery retry, the per-PR question pass, the depth-3 pass, the
@@ -1928,7 +1956,8 @@ credential-free.**
 | `anthropic` | `cli`     | `claude` login session, `ANTHROPIC_API_KEY`, or an `apiKeyHelper` |
 | `openai`    | `api`     | `OPENAI_API_KEY`                                                  |
 | `openai`    | `cli`     | `codex login` session (`~/.codex/auth.json`) or `CODEX_API_KEY`   |
-| `cursor`    | `cli`     | `agent login` session or `CURSOR_API_KEY` (CLI-only provider)     |
+| `cursor`    | `api`     | `CURSOR_API_KEY` (needs `lintro[cursor]`)                         |
+| `cursor`    | `cli`     | `agent login` session or `CURSOR_API_KEY`                         |
 
 `ai.api_key_env` overrides the API-transport variable name if you keep the key somewhere
 else.
@@ -2216,10 +2245,10 @@ at a glance.
 
 Two images are published. Which one you need depends on the transport.
 
-| Image                          | Contains                                                                                          | Use when                                               |
-| ------------------------------ | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `ghcr.io/lgtm-hq/py-lintro`    | The lint toolchain. Lean; **no** provider SDKs, **no** agent CLIs.                                | Linting only, or AI off.                               |
-| `ghcr.io/lgtm-hq/py-lintro-ai` | Everything above **plus** the `ai` extra and the baked `claude`, `codex` and Cursor `agent` CLIs. | `--transport api` or `--transport cli` in a container. |
+| Image                          | Contains                                                                                                        | Use when                                               |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `ghcr.io/lgtm-hq/py-lintro`    | The lint toolchain. Lean; **no** provider SDKs, **no** agent CLIs.                                              | Linting only, or AI off.                               |
+| `ghcr.io/lgtm-hq/py-lintro-ai` | Everything above **plus** the `ai` and `cursor` extras and the baked `claude`, `codex` and Cursor `agent` CLIs. | `--transport api` or `--transport cli` in a container. |
 
 Both carry the same tag scheme (`latest`, `0.94`, `0.94.2`, `sha-<commit>`) and are
 cosign-signed. The `ai` variant is a strict superset built `FROM` the base image's
@@ -2299,8 +2328,7 @@ export OPENAI_API_KEY=sk-...
 
 **Unknown provider:**
 
-Only `anthropic`, `openai` and `cursor` are supported (`cursor` is CLI-transport only).
-Check your `ai.provider` value.
+Only `anthropic`, `openai` and `cursor` are supported. Check your `ai.provider` value.
 
 ### Rate Limits
 

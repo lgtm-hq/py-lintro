@@ -1,9 +1,13 @@
 """Static description of the Cursor provider.
 
-Cursor has no API transport: the CreateAgent HTTP API is not used (see
-:mod:`lintro.ai.providers.cursor.provider`), so ``sdk_package`` is ``None``,
-``supported_transports`` holds ``cli`` alone, and the ``agent`` CLI is the only
-backend. Everything here is answerable without spawning that binary.
+Cursor serves two transports. ``cli`` (the default, #2449) runs the ``agent``
+binary once per call. ``api`` (#3253) runs one inference-only prompt through
+Cursor's first-party Python SDK, ``cursor-sdk``, which ships in its own opt-in
+``lintro[cursor]`` extra rather than ``lintro[ai]``: it is wheels-only with a
+~55 MB native bridge per wheel, and a public beta. ``sdk_package`` is the
+import name ``cursor_sdk`` because :mod:`lintro.ai.availability` imports it.
+The SDK has no endpoint override, so ``ai.api_base_url`` is not accepted.
+Everything here is answerable without importing the SDK or spawning a binary.
 
 Since #2308 this module *is* the declaration: pricing, defaults, the API-key
 variable, the CLI binary and its contract, the doctor install hint and the auth
@@ -29,17 +33,21 @@ CURSOR_CLI_BINARY = "agent"
 
 #: Static description of the Cursor provider.
 #:
-#: The ``agent`` CLI bills against a Cursor subscription rather than per token,
-#: so its models carry zero rates. :func:`lintro.ai.cost.estimate_cost_with_floor`
-#: is what keeps ``ai.max_cost_usd`` meaningful for them.
+#: Cursor bills against a subscription rather than per token, on both
+#: transports, so its models carry zero rates.
+#: :func:`lintro.ai.cost.estimate_cost_with_floor` is what keeps
+#: ``ai.max_cost_usd`` meaningful for them.
 CURSOR_METADATA = ProviderMetadata(
     provider=AIProvider.CURSOR,
     display_name="Cursor",
     default_model="auto",
     default_api_key_env="CURSOR_API_KEY",
-    supported_transports=frozenset({AITransport.CLI}),
+    supported_transports=frozenset({AITransport.API, AITransport.CLI}),
+    # The CLI stays the documented default (#2449); `transport: api` is opt-in.
     default_transport=AITransport.CLI,
-    sdk_package=None,
+    sdk_package="cursor_sdk",
+    sdk_extra="cursor",
+    accepts_api_base_url=False,
     cli_binary=CURSOR_CLI_BINARY,
     cli_contract_id=AIProvider.CURSOR.value,
     cli_contract=CURSOR_CLI_CONTRACT,

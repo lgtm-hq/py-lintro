@@ -72,6 +72,23 @@ def test_availability_require_raises_when_unavailable():
         require_ai()
 
 
+def test_require_ai_names_the_cursor_extra_beside_the_ai_extra() -> None:
+    """The error offers ``lintro[cursor]`` as Cursor's own extra (#3253)."""
+    with (
+        patch(
+            "lintro.ai.availability.is_ai_available",
+            return_value=False,
+        ),
+        pytest.raises(click.UsageError) as excinfo,
+    ):
+        require_ai()
+
+    assert_that(excinfo.value.message).is_equal_to(
+        "AI features require lintro[ai]. Install with: uv pip install "
+        "'lintro[ai]' (or 'lintro[cursor]' for Cursor)",
+    )
+
+
 def test_availability_require_passes_when_available():
     """Verify require_ai succeeds without error when AI is available."""
     with patch(

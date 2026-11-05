@@ -74,10 +74,10 @@ class CursorPlugin:
         Workspace trust is a Cursor-only knob, so its single default lives on
         :class:`~lintro.ai.providers.cursor.config.CursorConfig` and reaches
         users as ``ai.providers.cursor.trust_workspace`` (#2309); the plugin
-        forwards the resolved value here. An unset transport resolves to
-        ``cli``, the only transport Cursor serves (#2449); an explicit
-        ``transport: api`` is still rejected by the provider constructor with
-        ``cursor provider only supports transport: cli``.
+        forwards the resolved value here, and only the CLI transport reads it.
+        An unset transport resolves to ``cli``, Cursor's default (#2449); an
+        explicit ``transport: api`` builds the inference-only ``cursor-sdk``
+        path (#3253), which rejects a configured ``ai.api_base_url``.
 
         Args:
             config: Effective AI configuration for this run.

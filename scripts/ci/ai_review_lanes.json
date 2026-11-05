@@ -50,7 +50,7 @@
     "ChatGPT backend, chatgpt.com in the lane's egress, while openai-api calls",
     "api.openai.com). An expired session is reported by the dogfood's own",
     "auth_failed verdict on the next review, never by the smoke. A lane no smoke",
-    "can reach at all (cursor exposes no API protocol lintro implements) carries",
+    "can reach at all (cursor speaks neither wire protocol the smoke calls) carries",
     "smoke_row null and smoke_gap saying why.",
     "tests/scripts/ci/test_smoke_rows_match_lanes.py holds the two files to this."
   ],
@@ -135,7 +135,7 @@
       "shadow_price_model": "claude-sonnet-4-6",
       "cost_basis": "unpriceable",
       "smoke_row": null,
-      "smoke_gap": "cursor exposes no API protocol lintro implements; the CLI is the only transport"
+      "smoke_gap": "cursor speaks neither wire protocol the smoke calls: transport api (#3253) goes through the cursor-sdk bridge, not HTTP lintro drives, so the lane stays on the agent CLI and has no smoke row (#2788)"
     },
     "zai": {
       "provider": "anthropic",
