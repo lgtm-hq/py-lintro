@@ -1522,21 +1522,25 @@ def test_free_disk_space_fails_when_cleanup_fails(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "runner_environment",
-    ["self-hosted", ""],
-    ids=["self_hosted", "unset"],
+    ("runner_environment", "annotation"),
+    [("self-hosted", "::notice::"), ("", "::warning::")],
+    ids=["self_hosted", "empty"],
 )
 def test_free_disk_space_skips_off_github_hosted_runners(
     runner_environment: str,
+    annotation: str,
     tmp_path: Path,
 ) -> None:
-    """Off a GitHub-hosted runner the cleanup is a no-op with a notice.
+    """Off a GitHub-hosted runner the cleanup is a no-op with an annotation.
 
     A self-hosted runner's toolchains belong to the host, so the script must
-    not run ``sudo rm`` there even inside GitHub Actions.
+    not run ``sudo rm`` there even inside GitHub Actions. That skip is a
+    notice; an empty ``RUNNER_ENVIRONMENT``, which Actions always sets, is a
+    warning because a hosted runner's cleanup may be skipped by mistake.
 
     Args:
         runner_environment: ``RUNNER_ENVIRONMENT`` value for the run.
+        annotation: Workflow command the skip message must start with.
         tmp_path: Temporary directory for stubs and the call log.
     """
     bin_dir = tmp_path / "bin"
@@ -1551,6 +1555,6 @@ def test_free_disk_space_skips_off_github_hosted_runners(
     )
 
     assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
-    assert_that(result.stdout).starts_with("::notice::Skipping disk cleanup")
+    assert_that(result.stdout).starts_with(f"{annotation}Skipping disk cleanup")
     assert_that(result.stdout).contains("not github-hosted")
     assert_that(log.exists()).is_false()

@@ -11,7 +11,8 @@ set -euo pipefail
 # Only preinstalled toolchains the image-build job never uses are removed;
 # the Python and Node entries under /opt/hostedtoolcache are left alone.
 # Runs only when RUNNER_ENVIRONMENT is github-hosted: a self-hosted runner's
-# toolchains belong to the host, so the script skips with a notice there.
+# toolchains belong to the host, so the script skips with a notice there
+# (a warning when RUNNER_ENVIRONMENT is empty inside GitHub Actions).
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	cat <<'EOF'
@@ -29,7 +30,13 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" && "${CI:-}" != "true" ]]; then
 fi
 
 if [[ "${RUNNER_ENVIRONMENT:-}" != "github-hosted" ]]; then
-	echo "::notice::Skipping disk cleanup (RUNNER_ENVIRONMENT='${RUNNER_ENVIRONMENT:-}' is not github-hosted; host toolchains are left alone)"
+	# Actions always sets RUNNER_ENVIRONMENT, so an empty value there means
+	# the hosted check cannot tell and a needed cleanup may be skipped.
+	level="notice"
+	if [[ -z "${RUNNER_ENVIRONMENT:-}" && "${GITHUB_ACTIONS:-}" == "true" ]]; then
+		level="warning"
+	fi
+	echo "::${level}::Skipping disk cleanup (RUNNER_ENVIRONMENT='${RUNNER_ENVIRONMENT:-}' is not github-hosted; host toolchains are left alone)"
 	exit 0
 fi
 
