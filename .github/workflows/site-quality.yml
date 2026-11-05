@@ -27,12 +27,17 @@ permissions:
 
 # Same self-cancellation hazard as #1673: on push, github.ref is
 # `refs/heads/main` for every commit, so consecutive merges would cancel each
-# other's site build. Key pushes on the unique github.sha; other events keep
-# github.ref so a force-push still supersedes that PR's in-flight run.
+# other's site build. pull_request runs share one group per PR and cancel the
+# superseded head; every push gets its own group (run_id + run_attempt), so it
+# is never cancelled or replaced, not even by a re-run of the same commit. See
+# .github/workflows/README.md "Concurrency".
 concurrency:
   group: >-
-    site-quality-${{ github.event_name == 'push' && github.sha || github.ref }}
-  cancel-in-progress: true
+    site-quality-${{ github.workflow_ref }}-${{ github.event_name }}-${{
+    github.event_name == 'pull_request' && github.event.pull_request.number
+    || github.run_id }}-${{ github.event_name == 'pull_request' && 'pr' ||
+    github.run_attempt }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-and-link:

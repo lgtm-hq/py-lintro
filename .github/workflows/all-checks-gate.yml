@@ -16,11 +16,18 @@ name: PR - All Checks Gate
 
 permissions: {}
 
+# pull_request runs share one group per PR, so a new head or title edit
+# cancels the stale gate. Every main push and merge-queue run gets its own
+# group (run_id + run_attempt) and is never cancelled: a later merge must not
+# turn the previous commit's gate red. See .github/workflows/README.md
+# "Concurrency".
 concurrency:
   group: >-
-    all-checks-gate-${{ github.event_name == 'push' && github.sha
-    || github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+    all-checks-gate-${{ github.workflow_ref }}-${{ github.event_name }}-${{
+    github.event_name == 'pull_request' && github.event.pull_request.number
+    || github.run_id }}-${{ github.event_name == 'pull_request' && 'pr' ||
+    github.run_attempt }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   gate:

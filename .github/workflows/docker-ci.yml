@@ -47,11 +47,16 @@ name: CI - Docker
 # (dogfooding-lint). A nightly full-repo backstop lives in
 # dogfood-nightly.yml.
 #
-# Concurrency (#2241): main pushes use GitHub's multi-pending queue so a
-# later merge cannot displace a run that is waiting for this slow pipeline.
-# Other refs retain the default single-pending queue and cancel the in-progress
-# superseded run. The queue expression uses GitHub's documented `single` value;
-# `latest` is not a valid queue value.
+# Concurrency: pull_request runs share one group per PR and cancel the
+# superseded head. Every push, merge_group or manual run gets its own group
+# (run_id + run_attempt), so main runs execute in parallel and are never
+# cancelled or replaced. #2241 queued main runs behind one another instead
+# (`queue: max`), which turned ~40-minute runs into a multi-hour backlog that
+# timed out the all-checks gate. Parallel main runs are safe for GHCR: each
+# build pushes its own ci-<run_id> tags, sha-* tags are per commit, and the
+# publish job's rolling-tag guard (scripts/ci/resolve-docker-rolling-tags.sh)
+# only moves :main for the current origin/main tip. The publish job keeps a
+# job-level queue so promotions themselves still run one at a time.
 
 'on':
   push:
@@ -66,9 +71,12 @@ name: CI - Docker
 permissions: {}
 
 concurrency:
-  group: docker-ci-${{ github.ref }}
-  queue: ${{ github.ref == 'refs/heads/main' && 'max' || 'single' }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: >-
+    docker-ci-${{ github.workflow_ref }}-${{ github.event_name }}-${{
+    github.event_name == 'pull_request' && github.event.pull_request.number
+    || github.run_id }}-${{ github.event_name == 'pull_request' && 'pr' ||
+    github.run_attempt }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CACHE_OPTS: mode=max,compression=zstd,oci-mediatypes=true,image-manifest=true
@@ -347,9 +355,9 @@ jobs:
     defaults:
       run:
         shell: bash
-    concurrency:
-      group: docker-build-${{ github.ref }}
-      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    # No job-level concurrency: the workflow-level group already scopes PR
+    # supersession, and a per-ref group here would serialise parallel main
+    # builds and let a third push replace (cancel) the pending one.
     outputs:
       is-fork: ${{ steps.fork-check.outputs.is-fork }}
       # See the "Publish fork-fallback image pin" step below.
@@ -1494,8 +1502,13 @@ jobs:
       id-token: write # OIDC token for cosign keyless signing and the attestation
       attestations: write # GitHub build-provenance attestation on the promoted digests
     timeout-minutes: 15
+    # Registry mutex: promotions to GHCR run one at a time. queue: max keeps
+    # every waiting promotion (the default single-pending queue would let a
+    # third main run replace, i.e. cancel, the waiting one). Order is not
+    # guaranteed; the rolling-tags step below keeps :main monotonic.
     concurrency:
       group: publish-${{ github.ref }}
+      queue: max
       cancel-in-progress: false
     steps:
       - name: Harden Runner
@@ -1540,8 +1553,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Resolve rolling tag eligibility
-        # Queued main workflows are retained but do not have guaranteed
-        # dispatch order. A stale run may still publish its immutable sha- tag,
+        # Main runs execute in parallel and queued promotions have no
+        # guaranteed order. A stale run may still publish its immutable sha- tag,
         # but must not move :main backward over a newer validated image.
         id: rolling-tags
         env:

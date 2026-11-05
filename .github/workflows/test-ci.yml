@@ -32,9 +32,17 @@ name: CI - Tests
 
 permissions: {}
 
+# Concurrency: pull_request runs share one group per PR and cancel the
+# superseded head. Every push, merge_group, schedule or manual run gets its own
+# group (run_id + run_attempt), so it is never cancelled or replaced; see
+# .github/workflows/README.md "Concurrency".
 concurrency:
-  group: test-ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: >-
+    test-ci-${{ github.workflow_ref }}-${{ github.event_name }}-${{
+    github.event_name == 'pull_request' && github.event.pull_request.number
+    || github.run_id }}-${{ github.event_name == 'pull_request' && 'pr' ||
+    github.run_attempt }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Compat mode: multi-runtime matrix, no coverage or PR comments.
