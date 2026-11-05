@@ -40,6 +40,7 @@ from enum import StrEnum, auto
 from typing import TYPE_CHECKING, Final, TypeVar
 
 from lintro.ai.enums import AITransport
+from lintro.ai.provider_enum import AIProvider
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -381,6 +382,32 @@ def _run_blocking(coro: Coroutine[object, object, _T]) -> _T:
         return pool.submit(asyncio.run, coro).result()
 
 
+def _install_hint_for(provider: AIProvider | None) -> str:
+    """Return the install hint for *provider*'s SDK extra.
+
+    The provider's own extra (Cursor's SDK is ``lintro[cursor]``, #3253) when its
+    plugin is registered; the generic ``lintro[ai]`` hint when no provider is set
+    or its plugin is missing, since the metadata lookup fails for exactly the
+    reason construction did and must not raise inside the error handler.
+
+    Args:
+        provider: The configured provider, or ``None``.
+
+    Returns:
+        The install hint to show.
+    """
+    from lintro.ai.exceptions import AIError
+    from lintro.ai.registry import metadata_for
+
+    generic = "Install with: uv pip install 'lintro[ai]'"
+    if provider is None:
+        return generic
+    try:
+        return metadata_for(provider).sdk_install_hint
+    except AIError:
+        return generic
+
+
 def check_liveness_sync(
     *,
     config: AIConfig,
@@ -402,7 +429,6 @@ def check_liveness_sync(
     """
     from lintro.ai.exceptions import AIError
     from lintro.ai.providers import get_provider
-    from lintro.ai.registry import metadata_for
 
     transport = config.transport
     try:
@@ -413,12 +439,7 @@ def check_liveness_sync(
             transport=transport,
             state=LivenessState.MISSING_CREDENTIAL,
             message=f"provider could not be constructed: {exc}",
-            # The provider's own extra: Cursor's SDK is lintro[cursor] (#3253).
-            hint=(
-                metadata_for(config.provider).sdk_install_hint
-                if config.provider is not None
-                else "Install with: uv pip install 'lintro[ai]'"
-            ),
+            hint=_install_hint_for(config.provider),
         )
 
     return _run_blocking(provider.check_liveness(timeout=timeout))

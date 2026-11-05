@@ -8,6 +8,7 @@ and makes no network call: it only builds option objects and reads signatures.
 
 from __future__ import annotations
 
+import importlib
 import inspect
 from pathlib import Path
 
@@ -48,6 +49,21 @@ def test_real_entry_points_take_the_arguments_lintro_passes() -> None:
     assert_that(launch).contains_key("workspace")
     assert_that(list(prompt)[:2]).is_equal_to(["message", "options"])
     assert_that(prompt["client"].kind).is_equal_to(inspect.Parameter.KEYWORD_ONLY)
+
+
+def test_real_client_exposes_the_owned_bridge_process() -> None:
+    """The orphan-bridge finalizer reads ``client._owned_bridge.process``.
+
+    Both names are private to the SDK. ``_CursorSdkTransport`` reaches them with
+    ``getattr`` so a rename degrades to "no process to kill" rather than a crash;
+    this pins the names so that degradation is noticed when the SDK moves.
+    """
+    client_source = inspect.getsource(cursor_sdk.AsyncClient)
+    bridge_module = importlib.import_module("cursor_sdk._async_bridge")
+    bridge_source = inspect.getsource(bridge_module.AsyncBridge)
+
+    assert_that(client_source).contains("self._owned_bridge")
+    assert_that(bridge_source).contains("self.process = process")
 
 
 def test_real_error_classes_share_the_mapped_base() -> None:

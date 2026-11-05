@@ -34,6 +34,7 @@ from lintro.ai.liveness import (
     liveness_state_for_kind,
     missing_credential_result,
 )
+from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers.base import AIResponse
 from lintro.ai.review.errors_taxonomy import ReviewErrorKind
 from tests.unit.ai.conftest import MockAIProvider
@@ -322,6 +323,41 @@ def test_check_liveness_sync_reports_unconstructible_provider(
 
     assert_that(result.state).is_equal_to(LivenessState.MISSING_CREDENTIAL)
     assert_that(result.message).contains("could not be constructed")
+
+
+def test_check_liveness_sync_unregistered_provider_gets_the_generic_hint(
+    monkeypatch: Any,
+) -> None:
+    """A provider with no plugin yields the ``lintro[ai]`` hint, not a traceback.
+
+    The hint lookup goes through the same registry that failed construction, so
+    it must be guarded (lintro review on #3258).
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.ai.exceptions import AIProviderNotRegisteredError
+
+    def _raise(config: AIConfig) -> None:
+        del config
+        raise AIProviderNotRegisteredError("anthropic")
+
+    def _raise_lookup(provider: AIProvider | str) -> None:
+        raise AIProviderNotRegisteredError(str(provider))
+
+    monkeypatch.setattr("lintro.ai.providers.get_provider", _raise)
+    monkeypatch.setattr("lintro.ai.registry.metadata_for", _raise_lookup)
+
+    result = check_liveness_sync(
+        config=AIConfig(
+            enabled=True,
+            provider=AIProvider.ANTHROPIC,
+            transport=AITransport.API,
+        ),
+    )
+
+    assert_that(result.state).is_equal_to(LivenessState.MISSING_CREDENTIAL)
+    assert_that(result.hint).is_equal_to("Install with: uv pip install 'lintro[ai]'")
 
 
 def test_check_liveness_sync_runs_the_provider_probe(monkeypatch: Any) -> None:
