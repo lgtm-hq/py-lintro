@@ -124,10 +124,9 @@ def test_the_shared_usage_error_prefixes_the_described_line() -> None:
     message = format_invalid_ai_config(exc)
 
     assert_that(message).is_equal_to(
-        f"invalid AI configuration: {describe_config_error(exc)}",
-    )
-    assert_that(message).starts_with(
-        "invalid AI configuration: ai.api_key_env must be the NAME",
+        "invalid AI configuration: ai.api_key_env must be the NAME of an "
+        "environment variable (letters, digits and underscores, not starting "
+        "with a digit), never the key itself",
     )
     assert_that(message).does_not_contain(_PASTED_KEY, "\n")
 
