@@ -1716,19 +1716,19 @@ each wheel bundles a ~55 MB native bridge. The package is proprietary (Cursor's
 [Terms of Service](https://cursor.com/terms-of-service) apply; the wheel carries no
 licence file) and the bundled bridge runtime includes a Statsig analytics bundle, so
 Socket reports a licence-policy and a telemetry alert for it; both are accepted as
-inherent to the vendor package by an org-level alert triage rule in the Socket
-dashboard (scoped to the exact pinned `cursor-sdk` version and those two alert types,
-so every version bump re-raises them for a fresh look at the licence; see #3253). The
-`py-lintro-ai` image includes it.
-The API path is **inference-only**, like every `api` transport: the diff is embedded in
-the prompt, the agent gets no tools (`tools=[]` plus a deny list naming every documented
-tool), no cloud agent is used, and its working directory is an empty temporary directory
-lintro creates — never the repository under review — so a checkout's
-`.cursor/hooks.json`, rules and MCP config are not loaded. Cursor hooks cannot be
-switched off by any SDK option, so hooks in your own `~/.cursor/` still run. Each call
-waits at least 180 s (a floor over `ai.transports.api.timeout`, which defaults to 60 s).
-The SDK has no output-token limit, so `max_tokens` is stated to the model in the prompt,
-as on the CLI path, and `ai.api_base_url` is rejected: Cursor has no endpoint override.
+inherent to the vendor package by an org-level alert triage rule in the Socket dashboard
+(scoped to the exact pinned `cursor-sdk` version and those two alert types, so every
+version bump re-raises them for a fresh look at the licence; see #3253). The
+`py-lintro-ai` image includes it. The API path is **inference-only**, like every `api`
+transport: the diff is embedded in the prompt, the agent gets no tools (`tools=[]` plus
+a deny list naming every documented tool), no cloud agent is used, and its working
+directory is an empty temporary directory lintro creates — never the repository under
+review — so a checkout's `.cursor/hooks.json`, rules and MCP config are not loaded.
+Cursor hooks cannot be switched off by any SDK option, so hooks in your own `~/.cursor/`
+still run. Each call waits at least 180 s (a floor over `ai.transports.api.timeout`,
+which defaults to 60 s). The SDK has no output-token limit, so `max_tokens` is stated to
+the model in the prompt, as on the CLI path, and `ai.api_base_url` is rejected: Cursor
+has no endpoint override.
 
 On both transports Cursor bills against a subscription rather than per token, so its
 models are priced at zero above and the run's cost basis is `unpriceable`
