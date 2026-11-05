@@ -20,7 +20,6 @@ test pass.
 from __future__ import annotations
 
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 from assertpy import assert_that
@@ -38,21 +37,6 @@ _SCRIPT_PATH = _REPO_ROOT / "scripts" / "ci" / "import_matrix.py"
 _PACKAGE_ROOT = _REPO_ROOT / "lintro"
 
 
-def _load_import_matrix_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
-    """Import ``scripts/ci/import_matrix.py`` by path, for the current test only.
-
-    The CI scripts directory is not an importable package, so the module is
-    loaded from its file location rather than by name.
-
-    Args:
-        monkeypatch: Pytest fixture that unregisters the module on teardown.
-
-    Returns:
-        ModuleType: The loaded module.
-    """
-    return load_fresh_module(monkeypatch, path=_SCRIPT_PATH, name=_MODULE_NAME)
-
-
 def test_import_matrix_script_exists() -> None:
     """The audit script the ratchet depends on is committed."""
     assert_that(_SCRIPT_PATH.is_file()).is_true()
@@ -66,7 +50,7 @@ def test_package_import_cycle_count_does_not_grow(
     Args:
         monkeypatch: Pytest fixture for loading the import matrix script.
     """
-    module = _load_import_matrix_module(monkeypatch)
+    module = load_fresh_module(monkeypatch, path=_SCRIPT_PATH, name=_MODULE_NAME)
     matrix = module.build_matrix(package_root=_PACKAGE_ROOT, root_package="lintro")
     cycles = matrix.two_cycles()
 
@@ -86,7 +70,7 @@ def test_enums_imports_no_other_package(monkeypatch: pytest.MonkeyPatch) -> None
     Args:
         monkeypatch: Pytest fixture for loading the import matrix script.
     """
-    module = _load_import_matrix_module(monkeypatch)
+    module = load_fresh_module(monkeypatch, path=_SCRIPT_PATH, name=_MODULE_NAME)
     matrix = module.build_matrix(package_root=_PACKAGE_ROOT, root_package="lintro")
     outgoing = sorted(
         imported for importer, imported in matrix.edges if importer == "enums"

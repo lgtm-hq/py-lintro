@@ -273,7 +273,9 @@ def _config_section_of(model_name: str) -> str | None:
     """Return the config section that a model named *model_name* parses.
 
     A ``ValidationError``'s locations are relative to the model that raised
-    it, and its ``title`` is that model's name. ``build_config_from_dict``
+    it, and its ``title`` is that model's title: its class name unless its
+    ``model_config`` sets a ``title``, which no section model does (a section
+    model that set one would stop matching here). ``build_config_from_dict``
     builds each section model (``ExecutionConfig`` for ``execution``, ...)
     straight from its section mapping, so the section is the
     ``LintroConfig`` field typed with that model. A title is only a name, so
