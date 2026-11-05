@@ -54,7 +54,7 @@ def test_real_entry_points_take_the_arguments_lintro_passes() -> None:
 def test_real_client_exposes_the_owned_bridge_process() -> None:
     """The orphan-bridge finalizer reads ``client._owned_bridge.process``.
 
-    Both names are private to the SDK. ``_CursorSdkTransport`` reaches them with
+    Both names are private to the SDK. ``CursorSdkBridge`` reaches them with
     ``getattr`` so a rename degrades to "no process to kill" rather than a crash;
     this pins the names so that degradation is noticed when the SDK moves.
     """
