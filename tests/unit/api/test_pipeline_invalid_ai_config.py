@@ -10,7 +10,6 @@ the rejected value itself.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -20,7 +19,6 @@ from click.testing import CliRunner
 from pydantic import BaseModel, ValidationError
 
 from lintro.cli import cli
-from lintro.config.config_loader import clear_config_cache
 
 _SOURCE = "x = 1\n"
 
@@ -52,46 +50,30 @@ _INVALID = {
 
 @pytest.fixture
 def make_project(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    ai_config_project: Callable[[str], Path],
 ) -> Callable[[str | None], Path]:
     """Return a factory for a one-file project with an isolated user tier.
 
-    The loader deep-merges ``~/.lintro-config.yaml`` and memoises the config it
-    resolved, so the home tier is redirected and the cache cleared before the
-    run reads the project's own ``.lintro-config.yaml``. Inherited
-    ``LINTRO_AI_*`` overlays are unset too, as the AI suite's
-    ``ai_config_project`` fixture does, so one exported in the developer's
-    shell cannot change what the run resolves.
+    The isolation — home tier redirected, inherited ``LINTRO_AI_*`` overlays
+    unset, memoised config cleared — is the shared ``ai_config_project``
+    fixture's, so a run resolves only the project's own
+    ``.lintro-config.yaml``.
 
     Args:
-        tmp_path: Pytest temporary directory.
-        monkeypatch: Pytest monkeypatch fixture.
+        ai_config_project: Writer for an isolated project config.
 
     Returns:
         A callable taking the indented ``ai:`` body (None for no ``ai:``
         section) and returning the source file the run targets, with the
         project already the working directory.
     """
-    home = tmp_path / "home"
-    home.mkdir()
-    for name in [key for key in os.environ if key.startswith("LINTRO_AI_")]:
-        monkeypatch.delenv(name)
-    monkeypatch.delenv("LINTRO_GLOBAL_CONFIG", raising=False)
-    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
-    root = tmp_path / "project"
-    root.mkdir()
-    monkeypatch.chdir(root)
 
     def _make(ai_body: str | None) -> Path:
         config = "tools:\n  ruff:\n    enabled: true\n"
         if ai_body is not None:
             config += "ai:\n" + ai_body
-        (root / ".lintro-config.yaml").write_text(config, encoding="utf-8")
-        target = root / "a.py"
+        target = ai_config_project(config) / "a.py"
         target.write_text(_SOURCE, encoding="utf-8")
-        clear_config_cache()
         return target
 
     return _make

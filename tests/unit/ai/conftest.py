@@ -7,10 +7,9 @@ import os
 import subprocess  # nosec B404 - only CompletedProcess objects are constructed here
 import sys
 import threading
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -34,7 +33,6 @@ from lintro.ai.providers.base import AIResponse, BaseAIProvider
 from lintro.ai.providers.claude_auth import BARE_MODE_ENV
 from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.registry import AIProvider
-from lintro.config.config_loader import clear_config_cache
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.console.logger import ThreadSafeConsoleLogger
 
@@ -573,42 +571,3 @@ def sample_fix_suggestions() -> list[AIFixSuggestion]:
             cost_estimate=0.002,
         ),
     ]
-
-
-@pytest.fixture
-def ai_config_project(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> Iterator[Callable[[str], Path]]:
-    """Return a writer for a project whose own config file alone is resolved.
-
-    The user tier, ``LINTRO_AI_*`` overlays and the memoised config are
-    isolated, so a command run afterwards resolves only the
-    ``.lintro-config.yaml`` the writer put in the project.
-
-    Args:
-        tmp_path: Pytest temporary directory.
-        monkeypatch: Pytest monkeypatch fixture.
-
-    Yields:
-        Callable[[str], Path]: A writer taking the full config text and
-        returning the project root, already the working directory.
-    """
-    home = tmp_path / "home"
-    home.mkdir()
-    for name in [key for key in os.environ if key.startswith("LINTRO_AI_")]:
-        monkeypatch.delenv(name)
-    monkeypatch.delenv("LINTRO_GLOBAL_CONFIG", raising=False)
-    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
-    root = (tmp_path / "project").resolve()
-    root.mkdir()
-    monkeypatch.chdir(root)
-
-    def _write(config: str) -> Path:
-        (root / ".lintro-config.yaml").write_text(config, encoding="utf-8")
-        clear_config_cache()
-        return root
-
-    yield _write
-    clear_config_cache()
