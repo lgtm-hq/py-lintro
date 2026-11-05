@@ -996,6 +996,9 @@ def _restore_by_path(abs_path: Path, blob: tuple[bytes, str] | None) -> None:
     Args:
         abs_path: Absolute target path.
         blob: ``(contents, git mode)``, or None to delete the target.
+
+    Raises:
+        CheckpointError: When an ancestor of the target is not a directory.
     """
     if blob is None:
         # ``missing_ok`` because a concurrent delete between the read and
@@ -1003,7 +1006,15 @@ def _restore_by_path(abs_path: Path, blob: tuple[bytes, str] | None) -> None:
         abs_path.unlink(missing_ok=True)
         return
     contents, git_mode = blob
-    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        abs_path.parent.mkdir(parents=True, exist_ok=True)
+    except (FileExistsError, NotADirectoryError) as exc:
+        # ``exist_ok`` raises FileExistsError for a non-directory parent and a
+        # deeper non-directory ancestor surfaces as NotADirectoryError.
+        raise CheckpointError(
+            f"Cannot restore checkpoint target, an ancestor is not a directory: "
+            f"{abs_path}",
+        ) from exc
     if git_mode == _SYMLINK_MODE:
         # The blob of a symlink entry is its target path, not file content.
         abs_path.unlink(missing_ok=True)
@@ -1060,13 +1071,19 @@ def _restore_at(root_fd: int, rel: str, blob: tuple[bytes, str] | None) -> None:
         blob: ``(contents, git mode)``, or None to delete the target.
 
     Raises:
-        CheckpointError: When a parent component is now a symbolic link.
+        CheckpointError: When a parent component is now a symbolic link, or
+            an ancestor to create is not a directory.
     """
     try:
         parent = _open_parent(root_fd, rel, create=blob is not None)
     except _BeyondSymlinkError as exc:
         raise CheckpointError(
             f"Refusing to restore checkpoint target beyond a symbolic link: {rel}",
+        ) from exc
+    except NotADirectoryError as exc:
+        raise CheckpointError(
+            f"Cannot restore checkpoint target, an ancestor is not a directory: "
+            f"{rel}",
         ) from exc
     if parent is None:
         # Nothing to delete below an absent parent.
@@ -1133,7 +1150,9 @@ def restore_checkpoint(
             could reach outside the repository. Also raised mid-restore for a
             parent swapped for a link during the write phase, on platforms
             with descriptor-relative access (see the write-phase paragraph
-            above).
+            above), and when a directory the write must create exists as a
+            non-directory (for example a regular file); earlier targets stay
+            restored.
     """
     root = checkpoint.root
     treeish = checkpoint.tree_sha or checkpoint.ref
