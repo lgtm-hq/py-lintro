@@ -120,6 +120,11 @@ The configuration system works in a specific order:
      `status` or `unavailable` to detect that it did not run. Runtime capabilities
      include `supports_stdin`: `true`/`false` when declared by the tool definition, or
      `null` when unspecified.
+   - `version_check_timeout`: Seconds one tool version probe (`<tool> --version`) may
+     run (default: `30`, minimum `1`). A probe that times out is retried once with
+     double the budget, capped at `120` seconds; a budget already at or above `120` is
+     retried unchanged. The `LINTRO_VERSION_TIMEOUT` environment variable takes
+     precedence over this key.
 
 2. **Enforce Tier** - Cross-cutting settings injected as CLI flags
    - These settings override native configs via CLI arguments
@@ -674,7 +679,8 @@ overrides.
 # Override the directory where run logs/artifacts are written (default: .lintro)
 export LINTRO_LOG_DIR=/tmp/lintro-runs
 
-# Timeout (seconds) for tool version checks (default: 30)
+# Timeout (seconds) for tool version checks; overrides
+# execution.version_check_timeout (default: 30)
 export LINTRO_VERSION_TIMEOUT=60
 
 # Force Docker install-context detection (set to 1)

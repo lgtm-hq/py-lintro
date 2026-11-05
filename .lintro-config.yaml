@@ -18,6 +18,10 @@ execution:
   # that need a project dependency tree (tsc, vue-tsc, svelte-check, astro-check);
   # standalone binaries like prettier and oxlint run without node_modules.
   auto_install_deps: true
+  # A cold dogfood container can take over 30s to answer `semgrep --version`
+  # (#3083, #2521). The lint job runs through lgtm-ci, which does not forward
+  # LINTRO_VERSION_TIMEOUT into the container, so the budget is set here.
+  version_check_timeout: 120
   # artifacts: ['sarif', 'json']  # Side-channel outputs alongside primary display
   # Supported: json, csv, markdown, html, sarif, plain
   # SARIF auto-emits in GitHub Actions even without this

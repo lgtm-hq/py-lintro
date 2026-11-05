@@ -3,6 +3,8 @@
 import re
 import shutil
 import subprocess  # nosec B404 - used safely with shell disabled
+import time
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -19,8 +21,9 @@ from lintro.tools.core.update_channels import (
     resolve_channel_binary_path,
 )
 from lintro.tools.core.version_checking import (
-    VERSION_CHECK_TIMEOUT,
     build_outdated_version_advisory,
+    get_version_check_timeout,
+    version_probe_retry_timeout,
 )
 from lintro.tools.core.version_checking import (
     get_install_hints as _get_install_hints_impl,
@@ -118,6 +121,105 @@ def get_install_hints() -> dict[str, str]:
     """
     # Return a copy to avoid sharing mutable state
     return dict(_get_install_hints_cached())
+
+
+class VersionProbeTimeoutError(subprocess.TimeoutExpired):
+    """A version probe that timed out on its first attempt and on the retry.
+
+    Subclasses :class:`subprocess.TimeoutExpired` so existing handlers still
+    catch it; the message names both budgets so a skip report shows that the
+    retry happened.
+
+    Attributes:
+        first_timeout: Budget, in seconds, of the first attempt.
+    """
+
+    first_timeout: float
+
+    def __init__(
+        self,
+        cmd: Sequence[str],
+        first_timeout: float,
+        retry_timeout: float,
+    ) -> None:
+        """Record the command and both budgets.
+
+        Args:
+            cmd: The version probe argv.
+            first_timeout: Budget, in seconds, of the first attempt.
+            retry_timeout: Budget, in seconds, of the retry.
+        """
+        super().__init__(list(cmd), retry_timeout)
+        self.first_timeout = first_timeout
+
+    def __str__(self) -> str:
+        """Describe both timed-out attempts.
+
+        Returns:
+            str: Message naming the command and both budgets.
+        """
+        return (
+            f"Command '{self.cmd}' timed out after {self.first_timeout:g} seconds "
+            f"and again after {self.timeout:g} seconds on retry"
+        )
+
+
+def _run_probe_with_retry(
+    argv: Sequence[str],
+    timeout: float,
+    *,
+    env: Mapping[str, str] | None = None,
+    cwd: str | Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a version probe, retrying once if it times out.
+
+    A cold container can make a tool's first ``--version`` call slow (#3083),
+    so a timeout is retried once with the budget from
+    :func:`~lintro.tools.core.version_checking.version_probe_retry_timeout`.
+    A missing binary (``FileNotFoundError``) propagates without a retry.
+
+    Args:
+        argv: Probe command as an argv list; run with ``shell=False``.
+        timeout: Budget, in seconds, for the first attempt.
+        env: Environment for the subprocess.
+        cwd: Working directory for the subprocess.
+
+    Returns:
+        subprocess.CompletedProcess[str]: Result of the attempt that finished.
+
+    Raises:
+        VersionProbeTimeoutError: When both attempts time out.
+    """
+    cmd = list(argv)
+    started = time.monotonic()
+    try:
+        return subprocess.run(  # nosec B603 - args list, shell=False
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+            cwd=cwd,
+        )
+    except subprocess.TimeoutExpired:
+        elapsed = time.monotonic() - started
+
+    retry_timeout = version_probe_retry_timeout(timeout)
+    logger.warning(
+        f"[VersionCheck] {cmd} timed out after {elapsed:.1f}s "
+        f"(budget {timeout:g}s); retrying once with {retry_timeout:g}s",
+    )
+    try:
+        return subprocess.run(  # nosec B603 - args list, shell=False
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=retry_timeout,
+            env=env,
+            cwd=cwd,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise VersionProbeTimeoutError(cmd, timeout, retry_timeout) from exc
 
 
 @dataclass
@@ -304,11 +406,9 @@ def check_tool_version(
 
         run_env = get_subprocess_env()
 
-        result = subprocess.run(  # nosec B603 - args list, shell=False
+        result = _run_probe_with_retry(
             version_cmd,
-            capture_output=True,
-            text=True,
-            timeout=VERSION_CHECK_TIMEOUT,  # Configurable version check timeout
+            get_version_check_timeout(),
             env=run_env,
             cwd=cwd,
         )

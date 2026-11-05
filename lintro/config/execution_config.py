@@ -56,6 +56,10 @@ class ExecutionConfig(BaseModel):
         strict_missing_tools: When True, unavailable tools fail the run
             (exit code 1). Default False — missing tools degrade visibly
             without counting as a lint failure.
+        version_check_timeout: Seconds one tool version probe may run
+            (default: 30, minimum 1). A probe that times out is retried once
+            with double the budget, capped at 120 seconds. The
+            ``LINTRO_VERSION_TIMEOUT`` environment variable takes precedence.
     """
 
     model_config = ConfigDict(frozen=False, extra="forbid")
@@ -70,3 +74,4 @@ class ExecutionConfig(BaseModel):
     artifacts: list[ArtifactFormat] = Field(default_factory=list)
     tool_snapshot_ttl: int = Field(default=600, ge=1, le=86400)
     strict_missing_tools: bool = False
+    version_check_timeout: int = Field(default=30, ge=1)
