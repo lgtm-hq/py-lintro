@@ -158,6 +158,77 @@ def test_get_version_check_timeout_reads_pyproject_execution_table(
 
 
 @pytest.mark.parametrize(
+    ("env_value", "expected_warning"),
+    [
+        ("not-a-number", "Invalid LINTRO_VERSION_TIMEOUT 'not-a-number'"),
+        ("0", "LINTRO_VERSION_TIMEOUT must be >= 1"),
+    ],
+    ids=["non_numeric", "below_one"],
+)
+def test_invalid_env_version_timeout_warns_once_per_process(
+    env_value: str,
+    expected_warning: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    logged_warnings: list[str],
+) -> None:
+    """An invalid env override warns once, not once per version probe.
+
+    Args:
+        env_value: Invalid ``LINTRO_VERSION_TIMEOUT`` value.
+        expected_warning: Text the single warning must carry.
+        tmp_path: Temporary project directory.
+        monkeypatch: Pytest fixture for patching modules and attributes.
+        logged_warnings: Captured WARNING-level log messages.
+    """
+    monkeypatch.setattr(version_checking, "_logged_warnings", set())
+    monkeypatch.setenv("LINTRO_VERSION_TIMEOUT", env_value)
+    _use_project_config(
+        tmp_path,
+        monkeypatch,
+        file_name=".lintro-config.yaml",
+        content="execution:\n  version_check_timeout: 45\n",
+    )
+
+    timeouts = [get_version_check_timeout() for _ in range(3)]
+
+    assert_that(timeouts).is_equal_to([45, 45, 45])
+    assert_that(logged_warnings).is_length(1)
+    assert_that(logged_warnings[0]).contains(expected_warning)
+
+
+def test_malformed_config_falls_back_to_default_with_one_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    logged_warnings: list[str],
+) -> None:
+    """Malformed YAML yields the 30s default and warns once per process.
+
+    Args:
+        tmp_path: Temporary project directory.
+        monkeypatch: Pytest fixture for patching modules and attributes.
+        logged_warnings: Captured WARNING-level log messages.
+    """
+    monkeypatch.setattr(version_checking, "_logged_warnings", set())
+    monkeypatch.delenv("LINTRO_VERSION_TIMEOUT", raising=False)
+    _use_project_config(
+        tmp_path,
+        monkeypatch,
+        file_name=".lintro-config.yaml",
+        content="execution: [version_check_timeout: 45\n",
+    )
+
+    timeouts = [get_version_check_timeout() for _ in range(3)]
+
+    assert_that(timeouts).is_equal_to([30, 30, 30])
+    assert_that(logged_warnings).is_length(1)
+    assert_that(logged_warnings[0]).contains(
+        "Could not read execution.version_check_timeout",
+        "default version probe timeout",
+    )
+
+
+@pytest.mark.parametrize(
     ("timeout", "retry_timeout"),
     [(1, 2), (30, 60), (60, 120), (61, 120), (120, 120), (300, 300)],
 )

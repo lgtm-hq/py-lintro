@@ -2,9 +2,30 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
+from loguru import logger
+
+
+@pytest.fixture
+def logged_warnings() -> Generator[list[str], None, None]:
+    """Collect loguru WARNING-level messages emitted during a test.
+
+    Yields:
+        list[str]: Messages logged at WARNING or above.
+    """
+    messages: list[str] = []
+    sink_id = logger.add(
+        lambda message: messages.append(str(message).strip()),
+        level="WARNING",
+        format="{message}",
+    )
+    try:
+        yield messages
+    finally:
+        logger.remove(sink_id)
 
 
 @pytest.fixture

@@ -52,6 +52,7 @@ import os
 import threading
 from pathlib import Path
 
+import yaml
 from loguru import logger
 
 from lintro._tool_versions import (
@@ -79,12 +80,29 @@ _COMMITLINT_HINT_KEYS = {"commitlint", "@commitlint/cli"}
 VERSION_PROBE_RETRY_CAP: int = 120
 
 
+def _warn_once(key: str, message: str) -> None:
+    """Log *message* at warning level the first time *key* is seen.
+
+    The version timeout is resolved once per probe, so a bad setting would
+    otherwise repeat its warning for every tool checked.
+
+    Args:
+        key: Deduplication key, recorded in ``_logged_warnings``.
+        message: Warning text to log.
+    """
+    with _logged_warnings_lock:
+        if key in _logged_warnings:
+            return
+        _logged_warnings.add(key)
+    logger.warning(message)
+
+
 def _env_version_timeout() -> int | None:
     """Return the ``LINTRO_VERSION_TIMEOUT`` override when it is set and valid.
 
     Returns:
         int | None: Timeout in seconds, or None when the env var is unset or
-            invalid. An invalid value is logged and ignored.
+            invalid. An invalid value is logged once per process and ignored.
     """
     env_value = os.getenv("LINTRO_VERSION_TIMEOUT")
     if env_value is None:
@@ -93,11 +111,17 @@ def _env_version_timeout() -> int | None:
     try:
         timeout = int(env_value)
     except (TypeError, ValueError):
-        logger.warning(f"Invalid LINTRO_VERSION_TIMEOUT '{env_value}'; ignoring it")
+        _warn_once(
+            f"version_timeout_env_invalid:{env_value}",
+            f"Invalid LINTRO_VERSION_TIMEOUT '{env_value}'; ignoring it",
+        )
         return None
 
     if timeout < 1:
-        logger.warning("LINTRO_VERSION_TIMEOUT must be >= 1; ignoring it")
+        _warn_once(
+            f"version_timeout_env_below_one:{env_value}",
+            "LINTRO_VERSION_TIMEOUT must be >= 1; ignoring it",
+        )
         return None
 
     return timeout
@@ -128,7 +152,8 @@ def get_version_check_timeout() -> int:
 
     Precedence: the ``LINTRO_VERSION_TIMEOUT`` env var, then
     ``[tool.lintro.execution] version_check_timeout``, then the default
-    (``30``). A config that cannot be loaded falls back to the default.
+    (``30``). A config that cannot be loaded, including malformed YAML,
+    falls back to the default with one warning per process.
 
     Returns:
         int: Timeout in seconds for one version probe attempt.
@@ -141,8 +166,12 @@ def get_version_check_timeout() -> int:
 
     try:
         return get_config().execution.version_check_timeout
-    except (OSError, TypeError, ValueError) as exc:
-        logger.debug(f"Could not read execution.version_check_timeout: {exc}")
+    except (OSError, TypeError, ValueError, yaml.YAMLError) as exc:
+        _warn_once(
+            "version_timeout_config_unreadable",
+            "Could not read execution.version_check_timeout; using the "
+            f"default version probe timeout: {exc}",
+        )
         return _get_version_timeout()
 
 
