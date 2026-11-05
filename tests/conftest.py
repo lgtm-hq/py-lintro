@@ -175,6 +175,25 @@ def _isolate_review_state(
         monkeypatch: Pytest monkeypatch fixture.
         tmp_path_factory: Per-worker temporary directory factory.
     """
+    _redirect_review_state(monkeypatch, tmp_path_factory)
+
+
+def _redirect_review_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Path:
+    """Point both review state stores at a fresh, absent private directory.
+
+    The body of :func:`_isolate_review_state`, kept separate so a test can
+    check that every call hands out a new root.
+
+    Args:
+        monkeypatch: Monkeypatch that owns (and later undoes) the redirect.
+        tmp_path_factory: Per-worker temporary directory factory.
+
+    Returns:
+        Path: The root holding the ``ci`` and ``local`` store directories.
+    """
     from lintro.ai.review import state_store
 
     # Nothing is created here: the writers make the directory on demand and
@@ -182,6 +201,7 @@ def _isolate_review_state(
     root = tmp_path_factory.getbasetemp().resolve() / "review-state" / uuid.uuid4().hex
     monkeypatch.setattr(state_store, "CI_STATE_DIRNAME", str(root / "ci"))
     monkeypatch.setattr(state_store, "LOCAL_STATE_DIR", root / "local")
+    return root
 
 
 def _build_distributions(dist_dir: Path) -> None:

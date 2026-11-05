@@ -97,8 +97,13 @@ def _warn_once(key: str, message: str) -> None:
     logger.warning(message)
 
 
-def _env_version_timeout() -> int | None:
+def _env_version_timeout(*, warn: bool = True) -> int | None:
     """Return the ``LINTRO_VERSION_TIMEOUT`` override when it is set and valid.
+
+    Args:
+        warn: Whether an invalid value is reported. When False the value is
+            ignored silently and its warn-once key stays unused, so a later
+            read still reports it.
 
     Returns:
         int | None: Timeout in seconds, or None when the env var is unset or
@@ -111,40 +116,47 @@ def _env_version_timeout() -> int | None:
     try:
         timeout = int(env_value)
     except (TypeError, ValueError):
-        _warn_once(
-            f"version_timeout_env_invalid:{env_value}",
-            f"Invalid LINTRO_VERSION_TIMEOUT '{env_value}'; ignoring it",
-        )
+        if warn:
+            _warn_once(
+                f"version_timeout_env_invalid:{env_value}",
+                f"Invalid LINTRO_VERSION_TIMEOUT '{env_value}'; ignoring it",
+            )
         return None
 
     if timeout < 1:
-        _warn_once(
-            f"version_timeout_env_below_one:{env_value}",
-            "LINTRO_VERSION_TIMEOUT must be >= 1; ignoring it",
-        )
+        if warn:
+            _warn_once(
+                f"version_timeout_env_below_one:{env_value}",
+                "LINTRO_VERSION_TIMEOUT must be >= 1; ignoring it",
+            )
         return None
 
     return timeout
 
 
-def _get_version_timeout() -> int:
+def _get_version_timeout(*, warn: bool = True) -> int:
     """Return the version check timeout from the environment or the default.
 
     This ignores ``[tool.lintro.execution] version_check_timeout``; the
     version probe uses :func:`get_version_check_timeout` instead.
 
+    Args:
+        warn: Whether an invalid ``LINTRO_VERSION_TIMEOUT`` is reported.
+
     Returns:
         int: Timeout in seconds; falls back to default when the env var is invalid.
     """
     default_timeout = 30
-    env_timeout = _env_version_timeout()
+    env_timeout = _env_version_timeout(warn=warn)
     return default_timeout if env_timeout is None else env_timeout
 
 
 #: Import-time value of ``LINTRO_VERSION_TIMEOUT`` (or the default), kept for
 #: backward compatibility. The version probe resolves its budget at call time
-#: through :func:`get_version_check_timeout`.
-VERSION_CHECK_TIMEOUT: int = _get_version_timeout()
+#: through :func:`get_version_check_timeout`. Read silently: the run's log
+#: sinks (``debug.log``) do not exist at import time, and warning here would
+#: use up the warn-once key, so the first run-time read reports a bad value.
+VERSION_CHECK_TIMEOUT: int = _get_version_timeout(warn=False)
 
 
 def get_version_check_timeout() -> int:
@@ -153,7 +165,8 @@ def get_version_check_timeout() -> int:
     Precedence: the ``LINTRO_VERSION_TIMEOUT`` env var, then
     ``[tool.lintro.execution] version_check_timeout``, then the default
     (``30``). A config that cannot be loaded, including malformed YAML,
-    falls back to the default with one warning per process.
+    falls back to the default with one warning per distinct error per
+    process.
 
     Returns:
         int: Timeout in seconds for one version probe attempt.
@@ -167,10 +180,14 @@ def get_version_check_timeout() -> int:
     try:
         return get_config().execution.version_check_timeout
     except (OSError, TypeError, ValueError, yaml.YAMLError) as exc:
+        # A YAMLError renders as several lines (problem, then context and
+        # position); the first names the problem. Keying on it lets a
+        # different error later in the process (watch mode) still warn once.
+        detail = next(iter(str(exc).splitlines()), "") or type(exc).__name__
         _warn_once(
-            "version_timeout_config_unreadable",
+            f"version_timeout_config_unreadable:{detail}",
             "Could not read execution.version_check_timeout; using the "
-            f"default version probe timeout: {exc}",
+            f"default version probe timeout: {detail}",
         )
         return _get_version_timeout()
 
