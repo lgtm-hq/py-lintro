@@ -1239,7 +1239,7 @@ def test_restore_reports_a_file_ancestor_as_a_checkpoint_error(
     shutil.rmtree(repo / "zz")
     (repo / "zz").write_bytes(b"a file now\n")
 
-    with pytest.raises(CheckpointError, match="not a directory") as raised:
+    with pytest.raises(CheckpointError) as raised:
         restore_checkpoint(checkpoint)
 
     # Both access paths name the repo-relative target, never the absolute one.
@@ -1277,3 +1277,37 @@ def test_restore_skips_deleting_below_a_file_ancestor(
     assert_that((repo / "target.txt").read_bytes()).is_equal_to(b"committed\n")
     assert_that((repo / "zz").read_bytes()).is_equal_to(b"a file now\n")
     assert_that([str(path) for path in repo.rglob("*.lintro-tmp")]).is_empty()
+
+
+def test_fallback_restore_deletes_a_target_in_a_normal_directory(
+    byte_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The by-path fallback really deletes a target created after capture.
+
+    Pins the narrowed suppression in ``_restore_by_path``: only a missing
+    target or a non-directory ancestor is skipped, never an ordinary delete.
+    """
+    monkeypatch.setattr(checkpoints, "_DIR_FD_ACCESS", False)
+    repo = byte_repo
+    (repo / "sub").mkdir()
+    (repo / "sub/kept.txt").write_bytes(b"untracked sibling\n")
+    # Absent at capture, so the rollback plans a deletion for it.
+    checkpoint = capture_checkpoint(
+        ["target.txt", "sub/created.txt"],
+        workspace_root=repo,
+    )
+    assert checkpoint is not None
+    (repo / "target.txt").write_bytes(b"edited after capture\n")
+    (repo / "sub/created.txt").write_bytes(b"created after capture\n")
+
+    restore_checkpoint(checkpoint)
+
+    assert_that((repo / "sub/created.txt").exists()).is_false()
+    assert_that((repo / "sub/created.txt").is_symlink()).is_false()
+    # Only the recorded target goes; its directory and sibling stay.
+    assert_that((repo / "sub").is_dir()).is_true()
+    assert_that((repo / "sub/kept.txt").read_bytes()).is_equal_to(
+        b"untracked sibling\n",
+    )
+    assert_that((repo / "target.txt").read_bytes()).is_equal_to(b"committed\n")

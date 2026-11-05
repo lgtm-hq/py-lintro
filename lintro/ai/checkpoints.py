@@ -1005,6 +1005,13 @@ def _restore_by_path(
     directory where a non-directory stands raises :class:`CheckpointError`
     naming the repo-relative path.
 
+    One divergence stays within the limit documented on
+    :func:`restore_checkpoint` (this fallback checks parents only before the
+    write phase): an ancestor swapped for a symbolic link to a file
+    mid-restore makes a deletion a silent no-op here, whereas
+    :func:`_restore_at` raises :class:`CheckpointError` for the link. Nothing
+    is deleted either way.
+
     Args:
         root: Repository root.
         rel: Repo-relative POSIX path.
@@ -1018,7 +1025,10 @@ def _restore_by_path(
     if blob is None:
         # A concurrent delete between the read and write phases must not
         # abandon the rest of the rollback, and nothing can exist below an
-        # ancestor that is not a directory (ENOTDIR).
+        # ancestor that is not a directory (a regular file, or a symbolic link
+        # to one). POSIX reports that as NotADirectoryError (ENOTDIR); Windows
+        # may report FileNotFoundError or NotADirectoryError. Both are
+        # suppressed.
         with contextlib.suppress(FileNotFoundError, NotADirectoryError):
             abs_path.unlink()
         return
@@ -1027,10 +1037,11 @@ def _restore_by_path(
         abs_path.parent.mkdir(parents=True, exist_ok=True)
     except (FileExistsError, NotADirectoryError) as exc:
         # ``exist_ok`` still raises FileExistsError when the parent exists but
-        # is not a directory to ``is_dir``: a regular file, or a dangling
-        # symbolic link swapped in mid-restore. On POSIX a deeper non-directory
-        # ancestor surfaces as NotADirectoryError; on Windows it arrives as
-        # FileExistsError from the recursive ``mkdir`` of that ancestor.
+        # is not a directory to ``is_dir``: a regular file, or a symbolic link
+        # (to a file, or dangling) swapped in mid-restore. On POSIX a deeper
+        # non-directory ancestor surfaces as NotADirectoryError; on Windows it
+        # arrives as FileExistsError from the recursive ``mkdir`` of that
+        # ancestor.
         raise CheckpointError(
             f"Cannot restore checkpoint target, an ancestor is not a directory: "
             f"{rel}",
