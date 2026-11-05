@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import subprocess  # nosec B404 - only TimeoutExpired/CompletedProcess are used
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import pytest
 from assertpy import assert_that
-from loguru import logger
 
 from lintro.tools.core.version_parsing import (
     _run_probe_with_retry,
@@ -20,25 +19,6 @@ _SEMGREP_ARGV = ["semgrep", "--version"]
 
 #: One scripted outcome per attempt: an exception to raise or stdout to return.
 _Outcome = BaseException | str
-
-
-@pytest.fixture
-def warnings() -> Generator[list[str], None, None]:
-    """Collect loguru WARNING-level messages emitted during a test.
-
-    Yields:
-        list[str]: Messages logged at WARNING or above.
-    """
-    messages: list[str] = []
-    sink_id = logger.add(
-        lambda message: messages.append(str(message).strip()),
-        level="WARNING",
-        format="{message}",
-    )
-    try:
-        yield messages
-    finally:
-        logger.remove(sink_id)
 
 
 @pytest.fixture
@@ -91,14 +71,14 @@ def _timeout(seconds: float) -> subprocess.TimeoutExpired:
 def test_probe_timeout_then_success_parses_version_with_doubled_budget(
     monkeypatch: pytest.MonkeyPatch,
     scripted_run: Callable[[list[_Outcome]], list[float]],
-    warnings: list[str],
+    logged_warnings: list[str],
 ) -> None:
     """A probe that times out once is retried with double the budget.
 
     Args:
         monkeypatch: Pytest fixture for patching modules and attributes.
         scripted_run: Installs scripted ``subprocess.run`` outcomes.
-        warnings: Captured WARNING-level log messages.
+        logged_warnings: Captured WARNING-level log messages.
     """
     monkeypatch.setenv("LINTRO_VERSION_TIMEOUT", "30")
     semgrep_min = get_minimum_versions()["semgrep"]
@@ -110,8 +90,8 @@ def test_probe_timeout_then_success_parses_version_with_doubled_budget(
     assert_that(info.probe_failed).is_false()
     assert_that(info.error_message).is_none()
     assert_that(budgets).is_equal_to([30, 60])
-    assert_that(warnings).is_length(1)
-    assert_that(warnings[0]).contains(
+    assert_that(logged_warnings).is_length(1)
+    assert_that(logged_warnings[0]).contains(
         "timed out",
         "budget 30s",
         "retrying once with 60s",
@@ -147,14 +127,14 @@ def test_probe_timing_out_twice_is_skipped_naming_both_budgets(
 def test_probe_missing_binary_fails_without_retry(
     monkeypatch: pytest.MonkeyPatch,
     scripted_run: Callable[[list[_Outcome]], list[float]],
-    warnings: list[str],
+    logged_warnings: list[str],
 ) -> None:
     """A missing binary fails the probe immediately, as before the retry.
 
     Args:
         monkeypatch: Pytest fixture for patching modules and attributes.
         scripted_run: Installs scripted ``subprocess.run`` outcomes.
-        warnings: Captured WARNING-level log messages.
+        logged_warnings: Captured WARNING-level log messages.
     """
     monkeypatch.setenv("LINTRO_VERSION_TIMEOUT", "30")
     missing = FileNotFoundError(2, "No such file or directory", "semgrep")
@@ -168,7 +148,7 @@ def test_probe_missing_binary_fails_without_retry(
         f"Failed to run version check: {missing}",
     )
     assert_that(budgets).is_equal_to([30])
-    assert_that(warnings).is_empty()
+    assert_that(logged_warnings).is_empty()
 
 
 @pytest.mark.parametrize(

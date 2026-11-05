@@ -1447,6 +1447,10 @@ def test_sweep_ci_ghcr_tags_rejects_unsafe_volatile_prefix(
     assert_that(result.stderr).contains("VOLATILE_TAG_PREFIXES entries must match")
 
 
+#: Environment of a GitHub Actions job on a GitHub-hosted runner.
+_HOSTED_RUNNER_ENV = {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted"}
+
+
 def _free_disk_stubs(bin_dir: Path, log: Path, *, sudo_exit: int = 0) -> None:
     """Shadow ``sudo`` and ``df`` so free-disk-space.sh runs without root.
 
@@ -1471,13 +1475,13 @@ def test_free_disk_space_reports_disk_and_spares_job_toolcache(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log = tmp_path / "calls.log"
+    _free_disk_stubs(bin_dir, log)
 
     for _ in range(2):
-        _free_disk_stubs(bin_dir, log)
         result = _run_with_stubs(
             "scripts/ci/free-disk-space.sh",
             bin_dir,
-            {"GITHUB_ACTIONS": "true"},
+            _HOSTED_RUNNER_ENV,
         )
         assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
 
@@ -1500,12 +1504,53 @@ def test_free_disk_space_fails_when_cleanup_fails(tmp_path: Path) -> None:
     """A failing privileged cleanup fails the step instead of being masked."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    _free_disk_stubs(bin_dir, tmp_path / "calls.log", sudo_exit=1)
+    log = tmp_path / "calls.log"
+    _free_disk_stubs(bin_dir, log, sudo_exit=1)
 
     result = _run_with_stubs(
         "scripts/ci/free-disk-space.sh",
         bin_dir,
-        {"GITHUB_ACTIONS": "true"},
+        _HOSTED_RUNNER_ENV,
     )
 
     assert_that(result.returncode).is_not_equal_to(0)
+    calls = log.read_text().splitlines()
+    # The script stops at the failing ``sudo rm``: one sudo call, and only
+    # the "before" df ran.
+    assert_that([call for call in calls if call.startswith("sudo ")]).is_length(1)
+    assert_that(calls.count("df -h /")).is_equal_to(1)
+
+
+@pytest.mark.parametrize(
+    "runner_environment",
+    ["self-hosted", ""],
+    ids=["self_hosted", "unset"],
+)
+def test_free_disk_space_skips_off_github_hosted_runners(
+    runner_environment: str,
+    tmp_path: Path,
+) -> None:
+    """Off a GitHub-hosted runner the cleanup is a no-op with a notice.
+
+    A self-hosted runner's toolchains belong to the host, so the script must
+    not run ``sudo rm`` there even inside GitHub Actions.
+
+    Args:
+        runner_environment: ``RUNNER_ENVIRONMENT`` value for the run.
+        tmp_path: Temporary directory for stubs and the call log.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "calls.log"
+    _free_disk_stubs(bin_dir, log)
+
+    result = _run_with_stubs(
+        "scripts/ci/free-disk-space.sh",
+        bin_dir,
+        {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": runner_environment},
+    )
+
+    assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
+    assert_that(result.stdout).starts_with("::notice::Skipping disk cleanup")
+    assert_that(result.stdout).contains("not github-hosted")
+    assert_that(log.exists()).is_false()

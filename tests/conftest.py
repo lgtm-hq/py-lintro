@@ -150,6 +150,40 @@ def _isolate_plugin_registry() -> Generator[None]:
             ToolRegistry._origins = original_origins
 
 
+@pytest.fixture(autouse=True)
+def _isolate_review_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """Point the AI review state stores at a directory private to this test.
+
+    Both stores default to paths relative to the working directory: the CI
+    artifact directory (``ai-review-state``, read whenever ``GITHUB_ACTIONS``
+    is ``true``) and the local ledger (``.lintro-cache/ai/review-state``). A
+    test that drives a review round from the repository root therefore left
+    its state behind for every later test — and for the developer's checkout.
+    With ``MagicMock`` contexts that state is keyed on the mock's ``repr``,
+    which embeds its ``id``; once CPython reused the address, a later review
+    command test found its head "already reviewed" and ran the resume planner
+    over a ``MagicMock`` diff, exiting ``1`` with a ``TypeError`` instead of
+    ``2`` (order- and address-dependent). Giving each test its own, initially
+    absent, directory keeps that state inside the test that wrote it. Tests
+    that set ``LINTRO_REVIEW_STATE_DIR`` or patch ``LOCAL_STATE_DIR``
+    themselves still win.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path_factory: Per-worker temporary directory factory.
+    """
+    from lintro.ai.review import state_store
+
+    # Nothing is created here: the writers make the directory on demand and
+    # the readers treat a missing one as "no prior state".
+    root = tmp_path_factory.getbasetemp().resolve() / "review-state" / uuid.uuid4().hex
+    monkeypatch.setattr(state_store, "CI_STATE_DIRNAME", str(root / "ci"))
+    monkeypatch.setattr(state_store, "LOCAL_STATE_DIR", root / "local")
+
+
 def _build_distributions(dist_dir: Path) -> None:
     """Build the wheel and the sdist into ``dist_dir``.
 

@@ -2268,6 +2268,46 @@ def _workflows_with_local_image_builds() -> dict[str, dict[str, Any]]:
     }
 
 
+def _is_free_disk_step(step: dict[str, Any]) -> bool:
+    """Return whether *step* runs the disk cleanup as its whole command.
+
+    An exact match, so an ``echo`` or comment naming the script cannot pass
+    for the cleanup itself.
+
+    Args:
+        step: Parsed workflow step.
+
+    Returns:
+        bool: True when the step's ``run`` is exactly the cleanup script.
+    """
+    return str(step.get("run", "")).strip() == _FREE_DISK_SCRIPT
+
+
+@pytest.mark.parametrize(
+    ("run", "expected"),
+    [
+        (_FREE_DISK_SCRIPT, True),
+        (f"{_FREE_DISK_SCRIPT}\n", True),
+        (f"echo 'skipping {_FREE_DISK_SCRIPT}'", False),
+        (f"# {_FREE_DISK_SCRIPT}\ntrue", False),
+        (None, False),
+    ],
+    ids=["exact", "trailing_newline", "echo", "comment", "no_run"],
+)
+def test_free_disk_step_match_requires_the_script_as_the_command(
+    run: str | None,
+    expected: bool,
+) -> None:
+    """Only a step whose command is the script counts as the cleanup.
+
+    Args:
+        run: The step's ``run`` value, or None for a ``uses`` step.
+        expected: Whether the step should count as the cleanup.
+    """
+    step: dict[str, Any] = {} if run is None else {"run": run}
+    assert_that(_is_free_disk_step(step)).is_equal_to(expected)
+
+
 def test_docker_ci_is_scanned_for_hosted_image_builds() -> None:
     """The disk-cleanup contract below must actually cover docker-ci (#3085)."""
     assert_that(_workflows_with_local_image_builds()).contains_key("docker-ci.yml")
@@ -2294,9 +2334,7 @@ def test_hosted_image_builds_free_runner_disk_first() -> None:
             if not build_indexes:
                 continue
             cleanups = [
-                step
-                for step in steps[: build_indexes[0]]
-                if _FREE_DISK_SCRIPT in str(step.get("run", ""))
+                step for step in steps[: build_indexes[0]] if _is_free_disk_step(step)
             ]
             if not cleanups:
                 offenders.append(f"{name}:{job_id}: no cleanup before first build")
