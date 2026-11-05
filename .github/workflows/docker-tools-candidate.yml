@@ -81,7 +81,7 @@ jobs:
       github.actor == 'renovate[bot]' &&
       needs.resolve-pr.result == 'success'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@b830ca6972f0c9cbaeb1363283de594f68d66acf # v0.87.0
     permissions:
       contents: read
       packages: write
@@ -106,7 +106,7 @@ jobs:
       cosign-sign: true
       scan: true
       scan-exit-code: '0'
-      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      tooling-ref: 'b830ca6972f0c9cbaeb1363283de594f68d66acf' # v0.87.0
       egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: docker
       allowed-endpoints-mode: replace
@@ -208,7 +208,7 @@ jobs:
         # Append mode never moves the ref and fails cleanly if Renovate pushed
         # again after this run started; that newer push starts its own run.
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/create-signed-commit@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+        uses: lgtm-hq/lgtm-ci/.github/actions/create-signed-commit@b830ca6972f0c9cbaeb1363283de594f68d66acf # v0.87.0
         with:
           token: ${{ steps.digest-app.outputs.token }}
           branch: ${{ github.ref_name }}
