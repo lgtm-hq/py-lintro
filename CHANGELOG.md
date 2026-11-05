@@ -21,6 +21,15 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.178.1] - 2026-11-05
+
+### Fixed
+
+- **tools-image**: verify hadolint against checksums.sha256 with upstream asset names
+  (#3273) (157a3ea)
+- **ci**: give every main-push run its own concurrency group (#3277) (1e74f12)
+- **ci**: refresh stale All Checks Gate after a successful retry (#3201) (203f961)
+
 ## [0.178.0] - 2026-11-05
 
 ### Added
