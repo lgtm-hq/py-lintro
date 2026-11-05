@@ -19,13 +19,13 @@ test pass.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 from assertpy import assert_that
+
+from tests.module_helpers import load_fresh_module
 
 # Two-way cycles on `main` after #1305 removed `config -> plugins` and the
 # eager `cli_utils -> config` edge. Lower this only together with the refactor
@@ -38,26 +38,19 @@ _SCRIPT_PATH = _REPO_ROOT / "scripts" / "ci" / "import_matrix.py"
 _PACKAGE_ROOT = _REPO_ROOT / "lintro"
 
 
-def _load_import_matrix_module() -> ModuleType:
-    """Import ``scripts/ci/import_matrix.py`` by path.
+def _load_import_matrix_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    """Import ``scripts/ci/import_matrix.py`` by path, for the current test only.
 
     The CI scripts directory is not an importable package, so the module is
-    loaded from its file location rather than by name. It is registered in
-    ``sys.modules`` first because ``@dataclass`` resolves its own module there.
+    loaded from its file location rather than by name.
+
+    Args:
+        monkeypatch: Pytest fixture that unregisters the module on teardown.
 
     Returns:
         ModuleType: The loaded module.
     """
-    cached = sys.modules.get(_MODULE_NAME)
-    if cached is not None:
-        return cached
-    spec = importlib.util.spec_from_file_location(_MODULE_NAME, _SCRIPT_PATH)
-    if spec is None or spec.loader is None:
-        pytest.fail(f"could not load the import matrix script at {_SCRIPT_PATH}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[_MODULE_NAME] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_fresh_module(monkeypatch, path=_SCRIPT_PATH, name=_MODULE_NAME)
 
 
 def test_import_matrix_script_exists() -> None:
@@ -65,9 +58,15 @@ def test_import_matrix_script_exists() -> None:
     assert_that(_SCRIPT_PATH.is_file()).is_true()
 
 
-def test_package_import_cycle_count_does_not_grow() -> None:
-    """The number of two-way package cycles never exceeds the recorded count."""
-    module = _load_import_matrix_module()
+def test_package_import_cycle_count_does_not_grow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The number of two-way package cycles never exceeds the recorded count.
+
+    Args:
+        monkeypatch: Pytest fixture for loading the import matrix script.
+    """
+    module = _load_import_matrix_module(monkeypatch)
     matrix = module.build_matrix(package_root=_PACKAGE_ROOT, root_package="lintro")
     cycles = matrix.two_cycles()
 
@@ -76,15 +75,18 @@ def test_package_import_cycle_count_does_not_grow() -> None:
     ).is_less_than_or_equal_to(EXPECTED_CYCLES)
 
 
-def test_enums_imports_no_other_package() -> None:
+def test_enums_imports_no_other_package(monkeypatch: pytest.MonkeyPatch) -> None:
     """`lintro.enums` is the bottom layer and imports nothing above it.
 
     #2290 removed the `enums -> models` edge, the last one. The assertion is
     the whole invariant rather than that one edge, because a new `enums`
     dependency in any direction is the same mistake. `TYPE_CHECKING` imports
     count: `import-linter` and the import matrix both see them.
+
+    Args:
+        monkeypatch: Pytest fixture for loading the import matrix script.
     """
-    module = _load_import_matrix_module()
+    module = _load_import_matrix_module(monkeypatch)
     matrix = module.build_matrix(package_root=_PACKAGE_ROOT, root_package="lintro")
     outgoing = sorted(
         imported for importer, imported in matrix.edges if importer == "enums"

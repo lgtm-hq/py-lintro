@@ -381,7 +381,8 @@ def test_multi_line_config_errors_warn_on_one_line(
 
     Args:
         error: Exception the config load raises.
-        expected_detail: Detail the single warning must end with.
+        expected_detail: Detail the single warning carries after
+            ``_CONFIG_WARNING``, compared for exact equality.
         monkeypatch: Pytest fixture for patching modules and attributes.
         logged_warnings: Captured WARNING-level log messages.
     """
@@ -419,7 +420,8 @@ def test_other_config_errors_warn_with_their_first_non_empty_line(
 
     Args:
         error: Exception the config loader raises.
-        expected_detail: Detail the single warning must end with.
+        expected_detail: Detail the single warning carries after
+            ``_CONFIG_WARNING``, compared for exact equality.
         monkeypatch: Pytest fixture for patching modules and attributes.
         logged_warnings: Captured WARNING-level log messages.
     """
