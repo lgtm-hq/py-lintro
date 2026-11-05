@@ -278,6 +278,8 @@ def _config_section_of(model_name: str) -> str | None:
     straight from its section mapping, so the section is the
     ``LintroConfig`` field typed with that model. A title is only a name, so
     a section is returned only when exactly one field's model carries it.
+    The model class itself cannot be matched: pydantic's ``ValidationError``
+    records the model's title, not the model.
 
     Args:
         model_name: ``ValidationError.title`` of the error.
