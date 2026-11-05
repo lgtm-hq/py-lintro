@@ -171,12 +171,11 @@ def ai_config_project(
 ) -> Iterator[Callable[[str], Path]]:
     """Return a writer for a project whose own config file alone is resolved.
 
-    Shared by any config-resolution test under ``tests/unit``, not only the
-    AI ones: the name records where it started, not what it is limited to.
-    The user tier (home, ``LINTRO_GLOBAL_CONFIG``, ``XDG_CONFIG_HOME``),
-    ``LINTRO_AI_*`` overlays and the memoised config are isolated, so a
-    command run afterwards resolves only the ``.lintro-config.yaml`` the
-    writer put in the project.
+    Shared by any config-resolution test under ``tests/unit``. The user tier
+    (home, ``LINTRO_GLOBAL_CONFIG``, ``XDG_CONFIG_HOME``), ``LINTRO_AI_*``
+    overlays and the memoised config are isolated, so a command run
+    afterwards resolves only the ``.lintro-config.yaml`` the writer put in
+    the project.
 
     Args:
         tmp_path: Pytest temporary directory.
@@ -186,6 +185,7 @@ def ai_config_project(
         Callable[[str], Path]: A writer taking the full config text and
         returning the project root, already the working directory.
     """
+    # Lazy, like evict_foreign_config_singleton in tests/conftest.py; do not hoist.
     from lintro.config.config_loader import clear_config_cache
 
     home = tmp_path / "home"
