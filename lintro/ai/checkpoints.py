@@ -1103,9 +1103,13 @@ def restore_checkpoint(
     the checkpoint recorded, so a mode the run changed is rolled back too.
 
     The write phase is per-target and sequential, not one transaction: a
-    failure part way through, including a parent directory found swapped for
-    a symbolic link mid-restore, stops the rollback at that target and leaves
-    the earlier targets already restored.
+    failure part way through stops the rollback at that target and leaves
+    the earlier targets already restored. Where descriptor-relative access
+    (``_DIR_FD_ACCESS``) is available, each write and deletion is made
+    relative to a parent directory pinned through no-follow descriptors, so
+    a parent found swapped for a symbolic link mid-restore is such a failure
+    rather than being followed. The ``_restore_by_path`` fallback checks
+    parents only before the write phase starts.
 
     Paths present on disk but absent from the checkpoint tree are removed
     (they were created after capture). Paths that remain at the checkpoint
@@ -1126,10 +1130,10 @@ def restore_checkpoint(
     Raises:
         CheckpointError: Before any write, when a target's parent directory
             has since become a symbolic link; writing or deleting through it
-            could reach outside the repository. Each write and deletion is
-            also made relative to a parent directory pinned through no-follow
-            descriptors, so a parent swapped for a link during the write phase
-            stops the rollback there instead of being followed.
+            could reach outside the repository. Also raised mid-restore for a
+            parent swapped for a link during the write phase, on platforms
+            with descriptor-relative access (see the write-phase paragraph
+            above).
     """
     root = checkpoint.root
     treeish = checkpoint.tree_sha or checkpoint.ref
