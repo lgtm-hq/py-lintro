@@ -9,11 +9,10 @@ import pytest
 import yaml
 from assertpy import assert_that
 from loguru import logger
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 from lintro.config import config_loader
 from lintro.config.config_loader import clear_config_cache
-from lintro.config.lintro_config import LintroConfig
 from lintro.exceptions.errors import ConfigurationError
 from lintro.tools.core import version_checking
 from lintro.tools.core.version_checking import (
@@ -406,31 +405,29 @@ def test_section_model_errors_are_titled_with_their_class_name() -> None:
     The section set is pinned exactly, so a section that drops out of the
     model filter (say, retyped ``ExecutionConfig | None``) fails here instead
     of leaving both this guard and ``_config_section_of`` silently skipping it.
+    A new ``LintroConfig`` section model must be added to the pinned list on
+    purpose: this test fails until it is, so the new model's title is checked
+    deliberately rather than assumed.
     """
-    section_models = {
-        name: field.annotation
-        for name, field in LintroConfig.model_fields.items()
-        if isinstance(field.annotation, type)
-        and issubclass(field.annotation, BaseModel)
+    expected = {
+        "execution": "ExecutionConfig",
+        "enforce": "EnforceConfig",
+        "review": "ReviewConfig",
+        "output": "OutputConfig",
+        "watch": "WatchConfig",
+        "deps": "DepsConfig",
     }
+    section_models = version_checking._section_models()
+
     assert_that(
         {name: model.__name__ for name, model in section_models.items()},
-    ).is_equal_to(
-        {
-            "execution": "ExecutionConfig",
-            "enforce": "EnforceConfig",
-            "review": "ReviewConfig",
-            "output": "OutputConfig",
-            "watch": "WatchConfig",
-            "deps": "DepsConfig",
-        },
-    )
+    ).is_equal_to(expected)
     assert_that(
         {
-            name: version_checking._config_section_of(model.__name__)
-            for name, model in section_models.items()
+            name: version_checking._config_section_of(model_name)
+            for name, model_name in expected.items()
         },
-    ).is_equal_to({name: name for name in section_models})
+    ).is_equal_to({name: name for name in expected})
 
     titles: dict[str, str] = {}
     for model in section_models.values():
