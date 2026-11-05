@@ -480,6 +480,35 @@ def _clear_provider_block_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _run_from_scratch_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """Run every AI test from an empty working directory of its own.
+
+    Two AI writers default to paths under the process working directory:
+    :func:`lintro.ai.raw_response.persist_raw_response` captures unparsable
+    answers under ``.lintro-cache/ai/raw-responses`` when no workspace root
+    is given, and :func:`lintro.ai.audit.write_audit_log` appends
+    ``.lintro-cache/ai/audit.jsonl`` under the root the orchestrator resolves
+    from the cwd. Run from the repository root, provider, review and
+    orchestrator tests therefore left captures and audit records in the
+    developer's checkout (#3115). A fresh directory per test keeps those
+    writes inside pytest's temp tree without changing either default.
+
+    The directory is separate from ``tmp_path`` so a test that inspects its
+    own ``tmp_path`` does not see these writes. A test that calls
+    ``monkeypatch.chdir`` itself still wins, and monkeypatch restores the
+    original cwd at teardown either way.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path_factory: Per-worker temporary directory factory.
+    """
+    monkeypatch.chdir(tmp_path_factory.mktemp("cwd"))
+
+
 @pytest.fixture
 def oversized_json_integer() -> Iterator[str]:
     """Bound decoder regressions by lowering and restoring the digit limit.
