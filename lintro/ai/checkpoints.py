@@ -1005,12 +1005,13 @@ def _restore_by_path(
     directory where a non-directory stands raises :class:`CheckpointError`
     naming the repo-relative path.
 
-    One divergence stays within the limit documented on
-    :func:`restore_checkpoint` (this fallback checks parents only before the
-    write phase): an ancestor swapped for a symbolic link to a file
-    mid-restore makes a deletion a silent no-op here, whereas
-    :func:`_restore_at` raises :class:`CheckpointError` for the link. Nothing
-    is deleted either way.
+    The two paths still diverge where this fallback cannot see a link,
+    within the limit documented on :func:`restore_checkpoint` (it checks
+    parents only before the write phase). For example, an ancestor swapped
+    mid-restore for a symbolic link to a file (``NotADirectoryError``) or
+    for a dangling symbolic link (``FileNotFoundError``) makes a deletion a
+    silent no-op here, whereas :func:`_restore_at` raises
+    :class:`CheckpointError` for the link. Nothing is deleted either way.
 
     Args:
         root: Repository root.
@@ -1027,8 +1028,10 @@ def _restore_by_path(
         # abandon the rest of the rollback, and nothing can exist below an
         # ancestor that is not a directory (a regular file, or a symbolic link
         # to one). POSIX reports that as NotADirectoryError (ENOTDIR); Windows
-        # may report FileNotFoundError or NotADirectoryError. Both are
-        # suppressed.
+        # may report FileNotFoundError or NotADirectoryError. A dangling
+        # symbolic link ancestor resolves to nothing, so it reports
+        # FileNotFoundError (ENOENT) and likewise deletes nothing. Both
+        # exception types are suppressed.
         with contextlib.suppress(FileNotFoundError, NotADirectoryError):
             abs_path.unlink()
         return
