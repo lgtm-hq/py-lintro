@@ -47,9 +47,9 @@ def _build_cargo_deny_command() -> list[str]:
     return [
         "cargo",
         "deny",
-        "check",
         "--format",
         "json",
+        "check",
     ]
 
 
