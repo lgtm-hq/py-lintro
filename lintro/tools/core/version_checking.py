@@ -54,13 +54,14 @@ from pathlib import Path
 
 import yaml
 from loguru import logger
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from lintro._tool_versions import (
     _NPM_PACKAGE_TO_TOOL,
     get_all_minimum_versions,
     get_tool_version,
 )
+from lintro.config.lintro_config import LintroConfig
 from lintro.enums.tool_name import ToolName
 from lintro.enums.update_channel import UpdateChannel
 from lintro.tools.core import update_channels as update_channel_ops
@@ -211,12 +212,17 @@ def _config_error_detail(exc: BaseException) -> str:
 
     Returns:
         str: For a ``MarkedYAMLError``, its problem and position; for a
-            ``ValidationError``, the first error's location and message;
-            otherwise the first non-empty line of the message. The result is
-            cut to :data:`_CONFIG_ERROR_DETAIL_LIMIT` characters, and is the
+            ``ValidationError``, what :func:`_validation_error_detail`
+            returns; otherwise the first non-empty line of the message. Line
+            breaks are collapsed to single spaces, the result is cut to
+            :data:`_CONFIG_ERROR_DETAIL_LIMIT` characters, and it is the
             exception's type name when there is no text.
     """
     detail = ""
+    # Only ``exc`` and its ``__cause__`` are inspected: ``load_config``
+    # re-raises with ``raise ConfigurationError(...) from exc``, which puts the
+    # original error in ``__cause__``, so neither ``__context__`` nor a deeper
+    # chain is walked.
     for error in (exc, exc.__cause__):
         if isinstance(error, yaml.MarkedYAMLError) and error.problem:
             detail = error.problem
@@ -226,17 +232,70 @@ def _config_error_detail(exc: BaseException) -> str:
                 line, column = mark.line + 1, mark.column + 1
                 detail += f" ({mark.name}, line {line}, column {column})"
             break
-        if isinstance(error, ValidationError) and error.errors():
-            first = error.errors()[0]
-            location = ".".join(str(part) for part in first["loc"])
-            detail = f"{location}: {first['msg']}" if location else first["msg"]
-            break
+        if isinstance(error, ValidationError):
+            detail = _validation_error_detail(error)
+            if detail:
+                break
     if not detail:
         lines = (line.strip() for line in str(exc).splitlines())
         detail = next((line for line in lines if line), "")
+    # A YAML problem or a validator's message can span several lines, and the
+    # warning is one line.
+    detail = " ".join(line.strip() for line in detail.splitlines() if line.strip())
     if len(detail) > _CONFIG_ERROR_DETAIL_LIMIT:
         detail = detail[: _CONFIG_ERROR_DETAIL_LIMIT - 3].rstrip() + "..."
     return detail or type(exc).__name__
+
+
+def _validation_error_detail(error: ValidationError) -> str:
+    """Return the first error of *error* as ``location: message``.
+
+    Args:
+        error: Validation error raised while building a config model.
+
+    Returns:
+        str: The first error's dotted location, opened with its config
+            section when :func:`_config_section_of` names one, then its
+            message; an empty string when the error lists no errors.
+    """
+    errors = error.errors()
+    if not errors:
+        return ""
+    first = errors[0]
+    section = _config_section_of(error.title)
+    parts = [section] if section else []
+    parts.extend(str(part) for part in first["loc"])
+    location = ".".join(parts)
+    return f"{location}: {first['msg']}" if location else first["msg"]
+
+
+def _config_section_of(model_name: str) -> str | None:
+    """Return the config section that a model named *model_name* parses.
+
+    A ``ValidationError``'s locations are relative to the model that raised
+    it, and its ``title`` is that model's name. ``build_config_from_dict``
+    builds each section model (``ExecutionConfig`` for ``execution``, ...)
+    straight from its section mapping, so the section is the
+    ``LintroConfig`` field typed with that model. A title is only a name, so
+    a section is returned only when exactly one field's model carries it.
+
+    Args:
+        model_name: ``ValidationError.title`` of the error.
+
+    Returns:
+        str | None: The section name, or ``None`` when no single top-level
+            field is typed with a model of that name (``LintroConfig``
+            itself, a model nested inside a section, or a mapping section
+            such as ``tools``).
+    """
+    sections = [
+        name
+        for name, field in LintroConfig.model_fields.items()
+        if isinstance(field.annotation, type)
+        and issubclass(field.annotation, BaseModel)
+        and field.annotation.__name__ == model_name
+    ]
+    return sections[0] if len(sections) == 1 else None
 
 
 def version_probe_retry_timeout(timeout: float) -> float:
