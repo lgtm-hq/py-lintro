@@ -2244,3 +2244,70 @@ def test_docker_promote_promotes_the_full_release_tag_set() -> None:
         assert_that(tags).described_as(step_id).is_equal_to(
             patterns,
         )
+
+
+_FREE_DISK_SCRIPT = "scripts/ci/free-disk-space.sh"
+_BUILD_PUSH_ACTION = "docker/build-push-action@"
+# The only gate the cleanup may carry: the docs-only skip shared by every
+# heavy step in the job. Anything narrower (a fork check) leaves some
+# hosted builds on the stock runner disk (#3085).
+_FREE_DISK_ALLOWED_IFS = {None, "needs.changes.outputs.pipeline != 'false'"}
+
+
+def _workflows_with_local_image_builds() -> dict[str, dict[str, Any]]:
+    """Return every workflow that builds an image inline with build-push-action.
+
+    Returns:
+        Mapping of workflow file name to its parsed document.
+    """
+    workflows_dir = _REPO_ROOT / ".github" / "workflows"
+    return {
+        path.name: _load_workflow(name=path.name)
+        for path in sorted(workflows_dir.glob("*.yml"))
+        if _BUILD_PUSH_ACTION in path.read_text(encoding="utf-8")
+    }
+
+
+def test_docker_ci_is_scanned_for_hosted_image_builds() -> None:
+    """The disk-cleanup contract below must actually cover docker-ci (#3085)."""
+    assert_that(_workflows_with_local_image_builds()).contains_key("docker-ci.yml")
+
+
+def test_hosted_image_builds_free_runner_disk_first() -> None:
+    """Every hosted build-push job frees runner disk before its first build.
+
+    docker-ci once ran ``free-disk-space.sh`` only for fork PRs, so main and
+    same-repo PR builds started on the stock hosted-runner disk and the
+    full/ai images ran buildkit out of space (#3085). The cleanup must run
+    before the first ``docker/build-push-action`` step of each job, and its
+    ``if:`` may not restrict it to a subset of the builds (e.g. forks).
+    """
+    offenders: list[str] = []
+    for name, workflow in _workflows_with_local_image_builds().items():
+        for job_id, job in workflow["jobs"].items():
+            steps = job.get("steps") or []
+            build_indexes = [
+                index
+                for index, step in enumerate(steps)
+                if _BUILD_PUSH_ACTION in str(step.get("uses", ""))
+            ]
+            if not build_indexes:
+                continue
+            cleanups = [
+                step
+                for step in steps[: build_indexes[0]]
+                if _FREE_DISK_SCRIPT in str(step.get("run", ""))
+            ]
+            if not cleanups:
+                offenders.append(f"{name}:{job_id}: no cleanup before first build")
+                continue
+            for step in cleanups:
+                raw_if = step.get("if")
+                normalized = (
+                    None if raw_if is None else _normalize_github_expr(str(raw_if))
+                )
+                if normalized not in _FREE_DISK_ALLOWED_IFS:
+                    offenders.append(
+                        f"{name}:{job_id}: cleanup gated by {normalized!r}",
+                    )
+    assert_that(offenders).is_empty()
