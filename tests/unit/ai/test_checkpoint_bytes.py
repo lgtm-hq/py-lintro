@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import os
+import shutil
 import subprocess  # nosec B404 - exercise failing Git plumbing in disposable repos
 import tempfile
 import time
@@ -496,10 +497,15 @@ def test_capture_filesystem_oserror_keeps_user_state(
     real_os_stat = os.stat
 
     def _is_target(path: Any, kwargs: dict[str, Any]) -> bool:
-        # Descriptor-relative calls name only the final component.
-        if kwargs.get("dir_fd") is not None:
-            return bool(path == target.name)
-        return Path(path) == target
+        dir_fd = kwargs.get("dir_fd")
+        if dir_fd is None:
+            return Path(path) == target
+        # Descriptor-relative calls name only the final component, so the
+        # descriptor must also be the target's own parent directory.
+        return path == target.name and os.path.samestat(
+            os.fstat(dir_fd),
+            real_os_stat(target.parent),
+        )
 
     def deny_stat(path: Path, *args: Any, **kwargs: Any) -> os.stat_result:
         if indexes and path == target:
@@ -1210,3 +1216,34 @@ def test_restore_never_follows_parent_swapped_after_plan(
     # Nothing written, deleted or left behind as a temporary file.
     assert_that(outside_after).is_equal_to(outside_before)
     assert_that(_user_state(repo)).is_equal_to(before)
+
+
+@pytest.mark.parametrize("blocked", ["zz/f.txt", "zz/deep/f.txt"])
+@pytest.mark.parametrize("dir_fd_access", [True, False])
+def test_restore_reports_a_file_ancestor_as_a_checkpoint_error(
+    byte_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    blocked: str,
+    dir_fd_access: bool,
+) -> None:
+    """A regular file where a restore must create a directory is a CheckpointError."""
+    if dir_fd_access and not checkpoints._DIR_FD_ACCESS:
+        pytest.skip("descriptor-relative access needs dir_fd support")
+    monkeypatch.setattr(checkpoints, "_DIR_FD_ACCESS", dir_fd_access)
+    repo = byte_repo
+    (repo / blocked).parent.mkdir(parents=True)
+    (repo / blocked).write_bytes(b"captured\n")
+    checkpoint = capture_checkpoint(["target.txt", blocked], workspace_root=repo)
+    assert checkpoint is not None
+    (repo / "target.txt").write_bytes(b"edited after capture\n")
+    shutil.rmtree(repo / "zz")
+    (repo / "zz").write_bytes(b"a file now\n")
+
+    with pytest.raises(CheckpointError, match="not a directory") as raised:
+        restore_checkpoint(checkpoint)
+
+    assert_that(str(raised.value)).contains(blocked)
+    # Per-target, not transactional: the earlier target is already restored.
+    assert_that((repo / "target.txt").read_bytes()).is_equal_to(b"committed\n")
+    assert_that((repo / "zz").read_bytes()).is_equal_to(b"a file now\n")
+    assert_that([path.name for path in repo.glob("*.lintro-tmp")]).is_empty()
