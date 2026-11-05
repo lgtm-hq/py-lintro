@@ -185,7 +185,8 @@ def ai_config_project(
         Callable[[str], Path]: A writer taking the full config text and
         returning the project root, already the working directory.
     """
-    # Lazy, like evict_foreign_config_singleton in tests/conftest.py; do not hoist.
+    # Lazy purely for parity with evict_foreign_config_singleton in
+    # tests/conftest.py, which has already loaded config_loader.
     from lintro.config.config_loader import clear_config_cache
 
     home = tmp_path / "home"
