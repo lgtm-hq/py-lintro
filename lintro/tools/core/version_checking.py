@@ -269,6 +269,22 @@ def _validation_error_detail(error: ValidationError) -> str:
     return f"{location}: {first['msg']}" if location else first["msg"]
 
 
+def _section_models() -> dict[str, type[BaseModel]]:
+    """Return the ``LintroConfig`` fields typed with a pydantic model.
+
+    Returns:
+        dict[str, type[BaseModel]]: Section name mapped to the model that
+            section is typed with, in field order. Mapping sections such as
+            ``tools`` and scalar fields are left out.
+    """
+    return {
+        name: field.annotation
+        for name, field in LintroConfig.model_fields.items()
+        if isinstance(field.annotation, type)
+        and issubclass(field.annotation, BaseModel)
+    }
+
+
 def _config_section_of(model_name: str) -> str | None:
     """Return the config section that a model named *model_name* parses.
 
@@ -298,22 +314,6 @@ def _config_section_of(model_name: str) -> str | None:
         if model.__name__ == model_name
     ]
     return sections[0] if len(sections) == 1 else None
-
-
-def _section_models() -> dict[str, type[BaseModel]]:
-    """Return the ``LintroConfig`` fields typed with a pydantic model.
-
-    Returns:
-        dict[str, type[BaseModel]]: Section name mapped to the model that
-            section is typed with, in field order. Mapping sections such as
-            ``tools`` and scalar fields are left out.
-    """
-    return {
-        name: field.annotation
-        for name, field in LintroConfig.model_fields.items()
-        if isinstance(field.annotation, type)
-        and issubclass(field.annotation, BaseModel)
-    }
 
 
 def version_probe_retry_timeout(timeout: float) -> float:
