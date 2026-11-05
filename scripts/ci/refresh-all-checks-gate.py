@@ -13,7 +13,16 @@ red. The retry then goes green, but nothing re-evaluates the gate, so ``main``
 This script is the second half of that watcher. It runs on the
 ``workflow_run`` completion of a watched workflow and, when that completion is
 a *later* attempt that concluded ``success``, re-runs every failed gate run
-for the same head SHA that finished before the recovering attempt did.
+for the same head SHA that finished before the latest recovery on that SHA.
+
+The cutoff is not the triggering event's own timestamp. The job is serialized
+per SHA, and GitHub keeps one *pending* run per concurrency group, replacing
+it by queue arrival rather than by when the producer recovered. A delayed
+event for an early recovery can therefore displace the event for a later one.
+So the script asks the API for every same-repo workflow run on the SHA, takes
+the newest ``updated_at`` among the successful retries, and uses that as the
+cutoff. Whichever job survives covers every recovery that finished before it
+ran, and a recovery that finishes later sends its own event.
 
 The gate is never given a retry budget of its own: it is re-run only when one
 of its producers turned green, and the re-run gate re-judges every check from
@@ -114,8 +123,8 @@ def is_stale_failed_gate(*, gate: dict[str, Any], head_sha: str, before: str) ->
     Args:
         gate: A workflow run object for a gate run.
         head_sha: Head SHA of the recovering workflow attempt.
-        before: ``updated_at`` of the recovering attempt; only gates that
-            finished strictly earlier judged the old, failed attempt.
+        before: ``updated_at`` of the latest recovering run on the SHA; only
+            gates that finished strictly earlier judged a failed attempt.
 
     Returns:
         True when the gate is a completed failure on the same SHA that
@@ -199,6 +208,54 @@ def list_gate_runs(
     return list(runs.values())
 
 
+def latest_recovery(
+    *,
+    repository: str,
+    head_sha: str,
+    gh: GhJson,
+) -> str | None:
+    """Return when the newest successful retry on ``head_sha`` finished.
+
+    The runs API reports each run's latest attempt, so a retry that was
+    re-run again and failed no longer counts, and a replayed event cannot
+    bring it back. Runs from another repository on the same SHA (fork PRs)
+    are ignored.
+
+    Args:
+        repository: ``owner/name`` slug.
+        head_sha: Commit SHA to filter on.
+        gh: ``gh api`` JSON caller.
+
+    Returns:
+        The ``updated_at`` of the newest recovering run, or None when the
+        SHA has no current successful retry.
+    """
+    newest: tuple[datetime, str] | None = None
+    for page in range(1, MAX_PAGES + 1):
+        payload = gh(
+            f"repos/{repository}/actions/runs"
+            f"?head_sha={head_sha}&per_page={RUNS_PER_PAGE}&page={page}",
+        )
+        batch = payload.get("workflow_runs", []) if isinstance(payload, dict) else []
+        for run in batch:
+            if not isinstance(run, dict) or run.get("head_sha") != head_sha:
+                continue
+            head_repo = run.get("head_repository") or {}
+            if head_repo.get("full_name") != repository:
+                continue
+            if not is_recovering_attempt(run=run):
+                continue
+            try:
+                finished = _timestamp(run.get("updated_at"))
+            except ValueError:
+                continue
+            if newest is None or finished > newest[0]:
+                newest = (finished, str(run["updated_at"]))
+        if len(batch) < RUNS_PER_PAGE:
+            break
+    return newest[1] if newest else None
+
+
 def refresh(*, repository: str, trigger: dict[str, Any], gh: GhJson) -> int:
     """Re-run every stale red gate for the trigger's head SHA.
 
@@ -214,26 +271,18 @@ def refresh(*, repository: str, trigger: dict[str, Any], gh: GhJson) -> int:
         print("Not a successful retry of a watched workflow; nothing to refresh")
         return 0
     head_sha = trigger.get("head_sha")
-    run_id = trigger.get("id")
     if not isinstance(head_sha, str) or not _SHA.fullmatch(head_sha):
         print(f"::error::Malformed head_sha in event: {head_sha!r}", file=sys.stderr)
         return 1
-    if not isinstance(run_id, int):
-        print(f"::error::Malformed run id in event: {run_id!r}", file=sys.stderr)
-        return 1
 
-    # A replayed or delayed delivery may describe an attempt that has since
-    # been retried again; act only on what the API says now.
-    current = gh(f"repos/{repository}/actions/runs/{run_id}")
-    if not (
-        isinstance(current, dict)
-        and current.get("head_sha") == head_sha
-        and current.get("run_attempt") == trigger.get("run_attempt")
-        and is_recovering_attempt(run=current)
-    ):
-        print("Trigger no longer matches the successful attempt; skipping")
+    # The event only says that something on this SHA recovered. Pending
+    # concurrency runs replace each other by arrival, so this may be an older
+    # recovery than the one it displaced, or a replay of an attempt that was
+    # retried again since. Take the cutoff from the API's current state.
+    before = latest_recovery(repository=repository, head_sha=head_sha, gh=gh)
+    if before is None:
+        print(f"No current successful retry on {head_sha}; skipping")
         return 0
-    before = str(current.get("updated_at") or trigger.get("updated_at") or "")
 
     failures = 0
     refreshed = 0
@@ -265,8 +314,8 @@ def refresh(*, repository: str, trigger: dict[str, Any], gh: GhJson) -> int:
             continue
         refreshed += 1
         print(
-            f"Re-ran gate {gate_id} (attempt {gate.get('run_attempt')}) after "
-            f"{current.get('name')} attempt {current.get('run_attempt')} passed",
+            f"Re-ran gate {gate_id} (attempt {gate.get('run_attempt')}); the "
+            f"latest recovery on {head_sha} finished at {before}",
         )
     if refreshed == 0 and failures == 0:
         print(f"No stale red gate on {head_sha}")

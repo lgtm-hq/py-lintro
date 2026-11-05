@@ -165,8 +165,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     # Serialize per commit so two producers recovering together cannot both
-    # re-run the same gate. GitHub keeps one pending run per group; the one
-    # that survives is the later recovery, which covers every earlier gate.
+    # re-run the same gate. GitHub keeps one pending run per group and
+    # replaces it by queue arrival, so the survivor may be an *older*
+    # recovery than the one it displaced. The script therefore ignores the
+    # event's own timestamp and reads the newest successful retry on the SHA
+    # from the API, so any survivor covers every recovery before it ran.
     concurrency:
       group: refresh-gate-${{ github.event.workflow_run.head_sha }}
       cancel-in-progress: false

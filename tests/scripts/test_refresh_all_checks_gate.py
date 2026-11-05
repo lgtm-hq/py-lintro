@@ -48,6 +48,7 @@ def _trigger(**overrides: Any) -> dict[str, Any]:
         "conclusion": "success",
         "run_attempt": 2,
         "updated_at": RECOVERED_AT,
+        "head_repository": {"full_name": REPO},
     }
     run.update(overrides)
     return run
@@ -97,6 +98,9 @@ class FakeGitHub:
         (path,) = args
         if "/workflows/all-checks-gate.yml/runs?" in path:
             return {"workflow_runs": self.gates if "page=1" in path else []}
+        if "/actions/runs?" in path:
+            listed = list(self.runs.values()) if "page=1" in path else []
+            return {"workflow_runs": listed}
         if "/pulls/" in path:
             return self.pulls[int(path.rsplit("/", 1)[-1])]
         return self.runs[int(path.rsplit("/", 1)[-1])]
@@ -158,6 +162,56 @@ def test_skips_a_replayed_event_whose_run_was_retried_again() -> None:
     trigger = _trigger()
     gh = FakeGitHub(trigger=trigger, gates=[_gate(7)])
     gh.runs[trigger["id"]] = _trigger(run_attempt=3, conclusion="failure")
+
+    assert_that(MODULE.refresh(repository=REPO, trigger=trigger, gh=gh)).is_equal_to(0)
+    assert_that(gh.reran).is_empty()
+
+
+def test_a_displaced_later_recovery_still_sets_the_cutoff() -> None:
+    """Out-of-order events: the survivor must not drop the newest recovery.
+
+    CI - Tests recovered at 05:47 and its pending refresh was displaced by a
+    delayed event for CI - Docker, which recovered at 05:40. A gate that went
+    red at 05:45 judged the failed CI - Tests attempt and must be re-run,
+    although it finished after the surviving event's own recovery.
+    """
+    trigger = _trigger(updated_at="2026-11-04T05:40:00Z")
+    gh = FakeGitHub(
+        trigger=trigger,
+        gates=[_gate(7, updated_at="2026-11-04T05:45:00Z")],
+    )
+    later = _trigger(
+        id=41776699999,
+        name="CI - Tests",
+        path=".github/workflows/test-ci.yml",
+        updated_at="2026-11-04T05:47:00Z",
+    )
+    gh.runs[later["id"]] = later
+
+    assert_that(MODULE.refresh(repository=REPO, trigger=trigger, gh=gh)).is_equal_to(0)
+    assert_that(gh.reran).is_equal_to([7])
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"head_repository": {"full_name": "someone/py-lintro"}},
+        {"head_sha": OTHER_SHA},
+        {"run_attempt": 1},
+    ],
+    ids=["fork-run", "other-sha", "first-attempt"],
+)
+def test_only_same_repo_retries_on_the_sha_move_the_cutoff(
+    overrides: dict[str, Any],
+) -> None:
+    """A later green run that is not a same-repo retry on the SHA is ignored."""
+    trigger = _trigger(updated_at="2026-11-04T05:40:00Z")
+    gh = FakeGitHub(
+        trigger=trigger,
+        gates=[_gate(7, updated_at="2026-11-04T05:45:00Z")],
+    )
+    other = _trigger(id=41776699999, updated_at="2026-11-04T05:47:00Z", **overrides)
+    gh.runs[other["id"]] = other
 
     assert_that(MODULE.refresh(repository=REPO, trigger=trigger, gh=gh)).is_equal_to(0)
     assert_that(gh.reran).is_empty()
