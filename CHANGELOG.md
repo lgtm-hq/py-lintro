@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.177.24] - 2026-11-05
+
+### Changed
+
+- **ai**: tighten invalid ai config test coverage (#3232) (e9ae0a2)
+
+### Fixed
+
+- **tools**: retry a timed-out version probe once and make its timeout configurable
+  (#3235) (d311403)
+
 ## [0.177.23] - 2026-11-05
 
 ### Changed
