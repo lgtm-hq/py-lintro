@@ -1316,7 +1316,7 @@ def test_fallback_restore_deletes_a_target_in_a_normal_directory(
 
 _POSIX_SYMLINKS = pytest.mark.skipif(
     sys.platform == "win32",
-    reason="pins POSIX errno behaviour for symbolic link ancestors",
+    reason="needs POSIX symbolic link semantics",
 )
 
 
