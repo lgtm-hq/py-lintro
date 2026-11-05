@@ -1242,8 +1242,38 @@ def test_restore_reports_a_file_ancestor_as_a_checkpoint_error(
     with pytest.raises(CheckpointError, match="not a directory") as raised:
         restore_checkpoint(checkpoint)
 
-    assert_that(str(raised.value)).contains(blocked)
+    # Both access paths name the repo-relative target, never the absolute one.
+    assert_that(str(raised.value)).is_equal_to(
+        f"Cannot restore checkpoint target, an ancestor is not a directory: "
+        f"{blocked}",
+    )
     # Per-target, not transactional: the earlier target is already restored.
     assert_that((repo / "target.txt").read_bytes()).is_equal_to(b"committed\n")
     assert_that((repo / "zz").read_bytes()).is_equal_to(b"a file now\n")
-    assert_that([path.name for path in repo.glob("*.lintro-tmp")]).is_empty()
+    assert_that([str(path) for path in repo.rglob("*.lintro-tmp")]).is_empty()
+
+
+@pytest.mark.parametrize("created", ["zz/created.txt", "zz/deep/created.txt"])
+@pytest.mark.parametrize("dir_fd_access", [True, False])
+def test_restore_skips_deleting_below_a_file_ancestor(
+    byte_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    created: str,
+    dir_fd_access: bool,
+) -> None:
+    """A target to delete below a regular-file ancestor has nothing to delete."""
+    if dir_fd_access and not checkpoints._DIR_FD_ACCESS:
+        pytest.skip("descriptor-relative access needs dir_fd support")
+    monkeypatch.setattr(checkpoints, "_DIR_FD_ACCESS", dir_fd_access)
+    repo = byte_repo
+    # Absent at capture, so the rollback plans a deletion for it.
+    checkpoint = capture_checkpoint(["target.txt", created], workspace_root=repo)
+    assert checkpoint is not None
+    (repo / "target.txt").write_bytes(b"edited after capture\n")
+    (repo / "zz").write_bytes(b"a file now\n")
+
+    restore_checkpoint(checkpoint)
+
+    assert_that((repo / "target.txt").read_bytes()).is_equal_to(b"committed\n")
+    assert_that((repo / "zz").read_bytes()).is_equal_to(b"a file now\n")
+    assert_that([str(path) for path in repo.rglob("*.lintro-tmp")]).is_empty()
