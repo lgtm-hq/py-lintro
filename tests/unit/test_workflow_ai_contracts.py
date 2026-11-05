@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import importlib.util
 import re
+import sys
+from pathlib import Path
+from types import ModuleType
+from typing import Any
 from urllib.parse import urlparse
 
 import pytest
@@ -521,3 +526,109 @@ def test_provider_api_smoke_files_a_distinctly_labelled_tracker_issue() -> None:
         _REPO_ROOT / "scripts" / "ci" / "ai_provider_smoke" / "post_error_details.py"
     ).read_text(encoding="utf-8")
     assert_that(details).does_not_contain("issue create")
+
+
+#: Artifact name prefix of the AI review's state download and upload steps.
+_REVIEW_STATE_ARTIFACT_PREFIX = "lintro-review-state-pr-"
+
+
+def _review_state_artifact_steps() -> list[dict[str, Any]]:
+    """Return the ai-review job's review-state download and upload steps.
+
+    Returns:
+        Every ``actions/{download,upload}-artifact`` step whose artifact
+        name (or download pattern) is a review-state artifact.
+    """
+    job = _load_workflow(name=_AI_REVIEW_WORKFLOW)["jobs"][_AI_REVIEW_JOB]
+    steps: list[dict[str, Any]] = []
+    for step in job["steps"]:
+        uses = str(step.get("uses", ""))
+        if not uses.startswith(
+            ("actions/download-artifact@", "actions/upload-artifact@"),
+        ):
+            continue
+        inputs = step.get("with") or {}
+        artifact = str(inputs.get("pattern") or inputs.get("name") or "")
+        if artifact.startswith(_REVIEW_STATE_ARTIFACT_PREFIX):
+            steps.append(step)
+    return steps
+
+
+def _fresh_module(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    path: Path,
+    name: str,
+) -> ModuleType:
+    """Execute *path* as a new module, registered under *name* for the test.
+
+    Args:
+        monkeypatch: Pytest fixture that unregisters the module on teardown.
+        path: Source file to execute.
+        name: Module name to register it under.
+
+    Returns:
+        ModuleType: The freshly executed module, with its shipped defaults.
+    """
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, module)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_review_state_defaults_match_the_workflow_artifact_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The review-state store defaults to the directory the workflow ships.
+
+    ai-review downloads the prior run's state into one directory and uploads
+    the final state from it; ``lintro`` reads and writes ``ai-review-state``
+    when ``LINTRO_REVIEW_STATE_DIR`` is unset under GitHub Actions. If either
+    side moved alone, every review would start from empty state. The local
+    ledger, ``.lintro-cache/ai/review-state``, differs by design: CI never
+    imports a local ledger, so it must stay outside the artifact directory.
+
+    Args:
+        monkeypatch: Pytest fixture for the environment and module registry.
+    """
+    steps = _review_state_artifact_steps()
+    # One download of the prior state and one final upload.
+    assert_that([str(step["uses"]).split("@")[0] for step in steps]).is_equal_to(
+        ["actions/download-artifact", "actions/upload-artifact"],
+    )
+    artifact_dirs = {str(step["with"]["path"]).rstrip("/") for step in steps}
+    assert_that(artifact_dirs).is_length(1)
+    (artifact_dir,) = artifact_dirs
+
+    # The autouse ``_isolate_review_state`` fixture redirects the imported
+    # module's paths, so the shipped defaults come from a fresh copy.
+    state_store = _fresh_module(
+        monkeypatch,
+        path=_REPO_ROOT / "lintro" / "ai" / "review" / "state_store.py",
+        name="_fresh_review_state_store",
+    )
+    monkeypatch.delenv("LINTRO_REVIEW_STATE_DIR", raising=False)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    assert_that(state_store.state_dir(ci=True)).is_equal_to(Path(artifact_dir))
+    assert_that(state_store.state_dir(ci=False)).is_equal_to(Path(artifact_dir))
+
+    monkeypatch.delenv("GITHUB_ACTIONS")
+    local_dir = state_store.state_dir(ci=False)
+    assert_that(local_dir).is_equal_to(Path(".lintro-cache/ai/review-state"))
+    assert_that(local_dir.is_relative_to(artifact_dir)).is_false()
+
+    # The helpers that seed, export and upload the directory share the default.
+    artifacts_script = _fresh_module(
+        monkeypatch,
+        path=_REPO_ROOT / "scripts" / "ci" / "review_state_artifacts.py",
+        name="_fresh_review_state_artifacts",
+    )
+    assert_that(artifacts_script.DEFAULT_STATE_DIR).is_equal_to(artifact_dir)
+    runner = (_REPO_ROOT / "scripts" / "ci" / "run-ai-review.sh").read_text(
+        encoding="utf-8",
+    )
+    assert_that(
+        set(re.findall(r"\$\{LINTRO_REVIEW_STATE_DIR:-([^}]*)\}", runner)),
+    ).is_equal_to({artifact_dir})

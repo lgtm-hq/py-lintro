@@ -54,6 +54,7 @@ from pathlib import Path
 
 import yaml
 from loguru import logger
+from pydantic import ValidationError
 
 from lintro._tool_versions import (
     _NPM_PACKAGE_TO_TOOL,
@@ -78,6 +79,10 @@ _COMMITLINT_HINT_KEYS = {"commitlint", "@commitlint/cli"}
 #: retry doubles the first budget up to this value, and a first budget that
 #: already meets it is retried unchanged.
 VERSION_PROBE_RETRY_CAP: int = 120
+
+#: Longest config-error detail quoted in the fallback warning; a longer one
+#: is cut and ends in ``...``.
+_CONFIG_ERROR_DETAIL_LIMIT: int = 200
 
 
 def _warn_once(key: str, message: str) -> None:
@@ -107,7 +112,8 @@ def _env_version_timeout(*, warn: bool = True) -> int | None:
 
     Returns:
         int | None: Timeout in seconds, or None when the env var is unset or
-            invalid. An invalid value is logged once per process and ignored.
+            invalid. An invalid value is ignored; with ``warn`` it is also
+            logged, once per process per distinct value.
     """
     env_value = os.getenv("LINTRO_VERSION_TIMEOUT")
     if env_value is None:
@@ -180,16 +186,57 @@ def get_version_check_timeout() -> int:
     try:
         return get_config().execution.version_check_timeout
     except (OSError, TypeError, ValueError, yaml.YAMLError) as exc:
-        # A YAMLError renders as several lines (problem, then context and
-        # position); the first names the problem. Keying on it lets a
-        # different error later in the process (watch mode) still warn once.
-        detail = next(iter(str(exc).splitlines()), "") or type(exc).__name__
+        # Keying on the detail lets a different error later in the process
+        # (watch mode) still warn once.
+        detail = _config_error_detail(exc)
         _warn_once(
             f"version_timeout_config_unreadable:{detail}",
             "Could not read execution.version_check_timeout; using the "
             f"default version probe timeout: {detail}",
         )
         return _get_version_timeout()
+
+
+def _config_error_detail(exc: BaseException) -> str:
+    """Return a one-line description of why the config could not be read.
+
+    PyYAML renders a parse error as several lines that open with the context
+    (``while parsing a flow sequence``), and pydantic's opens with a count
+    (``1 validation error for ExecutionConfig``); neither first line names
+    the problem. The config loader re-raises a ``ValidationError`` as a
+    ``ConfigurationError``, so the exception's ``__cause__`` is checked too.
+
+    Args:
+        exc: Error raised while loading the config.
+
+    Returns:
+        str: For a ``MarkedYAMLError``, its problem and position; for a
+            ``ValidationError``, the first error's location and message;
+            otherwise the first non-empty line of the message. The result is
+            cut to :data:`_CONFIG_ERROR_DETAIL_LIMIT` characters, and is the
+            exception's type name when there is no text.
+    """
+    detail = ""
+    for error in (exc, exc.__cause__):
+        if isinstance(error, yaml.MarkedYAMLError) and error.problem:
+            detail = error.problem
+            mark = error.problem_mark
+            if mark is not None:
+                # Marks are 0-based; PyYAML reports them 1-based.
+                line, column = mark.line + 1, mark.column + 1
+                detail += f" ({mark.name}, line {line}, column {column})"
+            break
+        if isinstance(error, ValidationError) and error.errors():
+            first = error.errors()[0]
+            location = ".".join(str(part) for part in first["loc"])
+            detail = f"{location}: {first['msg']}" if location else first["msg"]
+            break
+    if not detail:
+        lines = (line.strip() for line in str(exc).splitlines())
+        detail = next((line for line in lines if line), "")
+    if len(detail) > _CONFIG_ERROR_DETAIL_LIMIT:
+        detail = detail[: _CONFIG_ERROR_DETAIL_LIMIT - 3].rstrip() + "..."
+    return detail or type(exc).__name__
 
 
 def version_probe_retry_timeout(timeout: float) -> float:
