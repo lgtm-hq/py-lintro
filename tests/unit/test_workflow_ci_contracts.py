@@ -1100,13 +1100,24 @@ def test_no_main_push_workflow_cancels_itself_on_ref() -> None:
 
 # Concurrency scopes on main-push workflows that are deliberate mutexes and so
 # keep a shared, non-run-scoped group. Keyed ``"<workflow>"`` for the
-# workflow-level block, ``"<workflow>:<job>"`` for a job-level one.
-_MAIN_PUSH_CONCURRENCY_MUTEXES: dict[str, str] = {
-    "docker-tools-promote.yml": "lintro-tools-registry GHCR mutex",
-    "release-auto-tag.yml": "one tag mint at a time per repository",
-    "release-version-pr.yml": "one release PR update at a time per repository",
-    "test-built-package.yml:test-package-install": "commit-keyed group (#1673)",
-    "docker-ci.yml:publish": "GHCR promotion mutex, queue: max",
+# workflow-level block, ``"<workflow>:<job>"`` for a job-level one. Each maps
+# to its expected ``cancel-in-progress`` and ``queue`` values (``None`` when
+# the key is absent), so a mutex cannot drift into cancelling or displacing.
+_MAIN_PUSH_CONCURRENCY_MUTEXES: dict[str, dict[str, object]] = {
+    # lintro-tools-registry GHCR mutex.
+    "docker-tools-promote.yml": {"cancel-in-progress": False, "queue": None},
+    # One tag mint at a time per repository.
+    "release-auto-tag.yml": {"cancel-in-progress": False, "queue": None},
+    # One release PR update at a time per repository.
+    "release-version-pr.yml": {"cancel-in-progress": False, "queue": None},
+    # Commit-keyed group (#1673): pushes never share it, so cancelling only
+    # supersedes a PR's stale head.
+    "test-built-package.yml:test-package-install": {
+        "cancel-in-progress": True,
+        "queue": None,
+    },
+    # GHCR promotion mutex: queue: max keeps every waiting promotion.
+    "docker-ci.yml:publish": {"cancel-in-progress": False, "queue": "max"},
 }
 
 _NON_PR_EVENTS = ("push", "merge_group", "schedule", "workflow_dispatch")
@@ -1170,6 +1181,27 @@ def _render_run_group(
             "github.run_attempt": run_attempt,
         },
     )
+
+
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    sorted(_MAIN_PUSH_CONCURRENCY_MUTEXES.items()),
+)
+def test_main_push_concurrency_mutexes_keep_their_values(
+    label: str,
+    expected: dict[str, object],
+) -> None:
+    """Every allowlisted mutex exists and keeps its cancel and queue values.
+
+    Args:
+        label: Mutex scope, ``"<workflow>"`` or ``"<workflow>:<job>"``.
+        expected: Expected ``cancel-in-progress`` and ``queue`` values.
+    """
+    scopes = _main_push_concurrency_scopes()
+    assert_that(scopes).contains_key(label)
+    concurrency = scopes[label]
+    actual = {key: concurrency.get(key) for key in expected}
+    assert_that(actual).described_as(label).is_equal_to(expected)
 
 
 def test_main_push_concurrency_is_run_scoped_outside_pull_requests() -> None:
