@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import importlib.util
+import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 from assertpy import assert_that
@@ -221,10 +224,109 @@ def test_malformed_config_falls_back_to_default_with_one_warning(
     timeouts = [get_version_check_timeout() for _ in range(3)]
 
     assert_that(timeouts).is_equal_to([30, 30, 30])
-    assert_that(logged_warnings).is_length(1)
-    assert_that(logged_warnings[0]).contains(
-        "Could not read execution.version_check_timeout",
-        "default version probe timeout",
+    # PyYAML's message spans several lines; only the problem line is kept.
+    assert_that(logged_warnings).is_equal_to(
+        [
+            "Could not read execution.version_check_timeout; using the default "
+            "version probe timeout: while parsing a flow sequence",
+        ],
+    )
+
+
+def test_a_different_config_error_later_still_warns_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    logged_warnings: list[str],
+) -> None:
+    """Each distinct config error warns once, so a later new one is not lost.
+
+    Watch mode resolves the timeout again after the config changes; a second,
+    different error must surface rather than hide behind the first one's key.
+
+    Args:
+        tmp_path: Temporary project directory.
+        monkeypatch: Pytest fixture for patching modules and attributes.
+        logged_warnings: Captured WARNING-level log messages.
+    """
+    monkeypatch.setattr(version_checking, "_logged_warnings", set())
+    monkeypatch.delenv("LINTRO_VERSION_TIMEOUT", raising=False)
+    timeouts: list[int] = []
+    for content in (
+        "execution: [version_check_timeout: 45\n",
+        "execution: {version_check_timeout: 45\n",
+        "execution: [version_check_timeout: 45\n",
+    ):
+        _use_project_config(
+            tmp_path,
+            monkeypatch,
+            file_name=".lintro-config.yaml",
+            content=content,
+        )
+        timeouts.extend(get_version_check_timeout() for _ in range(2))
+
+    assert_that(timeouts).is_equal_to([30] * 6)
+    assert_that([line.rsplit(": ", 1)[-1] for line in logged_warnings]).is_equal_to(
+        ["while parsing a flow sequence", "while parsing a flow mapping"],
+    )
+
+
+def _load_fresh_version_checking(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    """Execute ``version_checking``'s module body again, as a first import does.
+
+    The copy is registered under its own name, so the imported module (and
+    every reference to it) is left alone; ``monkeypatch`` drops it afterwards.
+
+    Args:
+        monkeypatch: Pytest fixture that unregisters the copy on teardown.
+
+    Returns:
+        ModuleType: A freshly executed copy with its own warn-once keys.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "_fresh_version_checking",
+        version_checking.__file__,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_import_time_read_leaves_the_invalid_env_warning_for_the_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    logged_warnings: list[str],
+) -> None:
+    """Importing with a bad env value stays quiet; the first run read warns.
+
+    At import the run's log sinks (``debug.log``) do not exist yet, so a
+    warning there, and the warn-once key it used up, would never reach them.
+
+    Args:
+        tmp_path: Temporary project directory.
+        monkeypatch: Pytest fixture for patching modules and attributes.
+        logged_warnings: Captured WARNING-level log messages.
+    """
+    monkeypatch.setenv("LINTRO_VERSION_TIMEOUT", "not-a-number")
+
+    fresh = _load_fresh_version_checking(monkeypatch)
+
+    assert_that(fresh.VERSION_CHECK_TIMEOUT).is_equal_to(30)
+    assert_that(logged_warnings).is_empty()
+    assert_that(fresh._logged_warnings).is_empty()
+
+    _use_project_config(
+        tmp_path,
+        monkeypatch,
+        file_name=".lintro-config.yaml",
+        content="execution:\n  version_check_timeout: 45\n",
+    )
+    timeouts = [fresh.get_version_check_timeout() for _ in range(2)]
+
+    assert_that(timeouts).is_equal_to([45, 45])
+    assert_that(logged_warnings).is_equal_to(
+        ["Invalid LINTRO_VERSION_TIMEOUT 'not-a-number'; ignoring it"],
     )
 
 
