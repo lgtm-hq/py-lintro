@@ -400,6 +400,7 @@ class OpenAIProvider(ApiStreamingProvider):
             max_tokens=max_tokens,
             base_url=base_url,
             transport=transport,
+            sdk_extra=OPENAI_METADATA.sdk_extra,
         )
 
     def _create_client(self, *, api_key: str) -> Any:

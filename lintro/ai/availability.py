@@ -23,6 +23,7 @@ from lintro.ai.liveness import (
     check_liveness_sync,
 )
 from lintro.ai.provider_enum import AIProvider, accepted_provider_values
+from lintro.ai.providers.protocol import DEFAULT_SDK_EXTRA, sdk_install_command
 from lintro.ai.registry import metadata_for
 
 __all__ = [
@@ -165,9 +166,29 @@ def require_ai() -> None:
             with installation instructions.
     """
     if not is_ai_available():
-        raise click.UsageError(
-            "AI features require lintro[ai]. Install with: uv pip install 'lintro[ai]'",
-        )
+        raise click.UsageError(_missing_ai_message())
+
+
+def _missing_ai_message() -> str:
+    """Name every extra that installs a provider SDK, from provider metadata.
+
+    Returns:
+        The ``require_ai`` error: the shared ``ai`` extra, then each provider
+        whose SDK ships in its own extra (Cursor's ``cursor``, #3253) as an
+        alternative.
+    """
+    message = (
+        f"AI features require lintro[{DEFAULT_SDK_EXTRA}]. "
+        f"Install with: {sdk_install_command(DEFAULT_SDK_EXTRA)}"
+    )
+    alternatives = [
+        f"'lintro[{metadata.sdk_extra}]' for {metadata.display_name}"
+        for metadata in (metadata_for(provider) for provider in AIProvider)
+        if metadata.sdk_extra not in (None, DEFAULT_SDK_EXTRA)
+    ]
+    if alternatives:
+        message += f" (or {', '.join(alternatives)})"
+    return message
 
 
 def reset_availability_cache() -> None:

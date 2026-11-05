@@ -82,6 +82,7 @@ def render_ai_status(
         provider_required_error,
     )
     from lintro.ai.providers import get_default_model
+    from lintro.ai.providers.protocol import sdk_install_command
     from lintro.ai.registry import metadata_for
 
     if ai_config.provider is None:
@@ -116,9 +117,11 @@ def render_ai_status(
             ai_parts.append(
                 "[red]enabled (SDK not installed)[/red]",
             )
-            ai_parts.append(
-                "  [yellow]run: uv pip install 'lintro\\[ai]'[/yellow]",
-            )
+            # Rich markup: escape the extra's opening bracket so it prints.
+            install = sdk_install_command(
+                metadata_for(provider_name).sdk_extra,
+            ).replace("[", "\\[")
+            ai_parts.append(f"  [yellow]run: {install}[/yellow]")
         elif not key_set:
             ai_parts.append(
                 "[yellow]enabled (API key missing)[/yellow]",

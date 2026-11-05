@@ -228,33 +228,85 @@ def check_ai_configuration(config: AIConfig) -> list[AICheckResult]:
                 message=(
                     f"Provider SDK for {provider.value} API transport is not installed"
                 ),
-                hint="Install with: uv pip install 'lintro[ai]'",
+                hint=metadata.sdk_install_hint,
             ),
         )
         return results
 
-    key_env = config.api_key_env or provider_api_key_env(provider)
+    results.extend(_check_api_credentials(config=config, metadata=metadata))
+    return results
+
+
+def _check_api_credentials(
+    *,
+    config: AIConfig,
+    metadata: ProviderMetadata,
+) -> list[AICheckResult]:
+    """Report the API transport's credential, worded for the provider.
+
+    A provider whose SDK takes no endpoint override (Cursor, #3253) declares
+    ``accepts_api_base_url=False``: ``ai.api_base_url`` is then reported as
+    unsupported rather than counted as a credential substitute, and the
+    missing-key hint does not offer it.
+
+    Args:
+        config: Effective AI configuration, with provider and API transport.
+        metadata: The configured provider's plugin metadata.
+
+    Returns:
+        The credential check, preceded by an incompatibility when a base URL
+        is set for a provider that cannot use one.
+    """
+    key_env = config.api_key_env or provider_api_key_env(metadata.provider)
+    name = f"ai.api.{key_env}"
+    if not metadata.accepts_api_base_url:
+        results: list[AICheckResult] = []
+        if config.api_base_url:
+            results.append(
+                AICheckResult(
+                    name="ai.api_base_url",
+                    status=ToolStatus.INCOMPATIBLE,
+                    message=(
+                        f"{metadata.provider.value} API transport does not "
+                        "accept ai.api_base_url"
+                    ),
+                    hint="Remove ai.api_base_url",
+                ),
+            )
+        if os.environ.get(key_env):
+            results.append(
+                AICheckResult(
+                    name=name,
+                    status=ToolStatus.OK,
+                    message=f"API credentials configured via {key_env}",
+                ),
+            )
+        else:
+            results.append(
+                AICheckResult(
+                    name=name,
+                    status=ToolStatus.MISSING,
+                    message=f"Environment variable {key_env} is not set",
+                    hint=f"Export {key_env}",
+                ),
+            )
+        return results
     if config.api_base_url or os.environ.get(key_env):
-        results.append(
+        return [
             AICheckResult(
-                name=f"ai.api.{key_env}",
+                name=name,
                 status=ToolStatus.OK,
                 message=f"API credentials configured via {key_env} or api_base_url",
             ),
-        )
-    else:
-        results.append(
-            AICheckResult(
-                name=f"ai.api.{key_env}",
-                status=ToolStatus.MISSING,
-                message=f"Environment variable {key_env} is not set",
-                hint=(
-                    f"Export {key_env} or set ai.api_base_url for a compatible endpoint"
-                ),
-            ),
-        )
-
-    return results
+        ]
+    return [
+        AICheckResult(
+            name=name,
+            status=ToolStatus.MISSING,
+            message=f"Environment variable {key_env} is not set",
+            hint=f"Export {key_env} or set ai.api_base_url for a compatible endpoint",
+        ),
+    ]
 
 
 def _check_provider_block(*, config: AIConfig) -> AICheckResult | None:

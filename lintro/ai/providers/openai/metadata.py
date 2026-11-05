@@ -43,6 +43,7 @@ OPENAI_METADATA = ProviderMetadata(
     supported_transports=frozenset({AITransport.API, AITransport.CLI}),
     default_transport=AITransport.API,
     sdk_package="openai",
+    sdk_extra="ai",
     cli_binary=OPENAI_CLI_BINARY,
     cli_contract_id=AIProvider.OPENAI.value,
     cli_contract=OPENAI_CLI_CONTRACT,

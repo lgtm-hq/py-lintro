@@ -32,6 +32,7 @@ from lintro.ai.providers.constants import (
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
+from lintro.ai.providers.protocol import sdk_install_command
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.providers.stream_result import AIStreamResult
 
@@ -74,6 +75,7 @@ class BaseAIProvider(ABC):
         max_tokens: int = DEFAULT_MAX_TOKENS,
         base_url: str | None = None,
         transport: AITransport | None = None,
+        sdk_extra: str | None = None,
     ) -> None:
         """Initialise the provider with shared parameters.
 
@@ -91,6 +93,9 @@ class BaseAIProvider(ABC):
             max_tokens: Provider-level cap on generated tokens.
             base_url: Custom API base URL.
             transport: Optional transport label for availability checks.
+            sdk_extra: The ``lintro`` extra that installs *sdk_package*, named
+                in the missing-SDK hint; ``None`` means the shared ``ai``
+                extra. Providers pass their metadata's ``sdk_extra`` (#3253).
 
         Raises:
             AINotAvailableError: If the SDK is not installed.
@@ -99,7 +104,7 @@ class BaseAIProvider(ABC):
             raise AINotAvailableError(
                 f"{provider_name.title()} provider requires the "
                 f"'{sdk_package}' package. "
-                "Install with: uv pip install 'lintro[ai]'",
+                f"Install with: {sdk_install_command(sdk_extra)}",
             )
 
         self._provider_name = provider_name
