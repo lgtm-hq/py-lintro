@@ -70,7 +70,7 @@ concurrency:
 jobs:
   tier1-flag-surface:
     name: 🧾 AI CLI Flag Surface (Tier 1)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # checkout the contract suite and the image pin
       packages: read # pull the pinned lintro-ai-tools image from GHCR
@@ -79,7 +79,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
@@ -117,7 +117,7 @@ jobs:
     # drives every lane in one job, so its egress is derived from the
     # manifest by the same resolver the dogfood review uses (ADR-0011 A).
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # sparse checkout of the manifest and the resolver
     timeout-minutes: 5
@@ -130,7 +130,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
@@ -162,7 +162,7 @@ jobs:
     # Gated on the free tier: there is no point spending quota to discover a
     # problem `--help` already proved. The lane job supplies the egress.
     needs: [tier1-flag-surface, lane]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # checkout the contract suite and the image pin
       packages: read # pull the pinned lintro-ai-tools image from GHCR
@@ -195,7 +195,7 @@ jobs:
         # GitHub, GHCR and PyPI. Exact hosts only: the resolver refuses a
         # wildcard host, and this job allows none.
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >

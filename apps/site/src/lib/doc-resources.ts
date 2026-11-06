@@ -42,10 +42,7 @@ function labelFromHref(href: string): string | undefined {
 }
 
 function normalizeResourceLabel(label: string, href: string): string {
-  let clean = label
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/^→\s*/, '');
+  let clean = label.replace(/\s+/g, ' ').trim().replace(/^→\s*/, '');
 
   const arrowMatch = clean.match(/^(.+?)\s*→\s*(.+)$/);
   if (arrowMatch?.[2]) {

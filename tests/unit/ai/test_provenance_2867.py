@@ -51,15 +51,22 @@ from lintro.ai.providers.anthropic.metadata import ANTHROPIC_MANAGED_SETTINGS_EN
 from lintro.ai.providers.reported_model import ReportedModel, parse_model_usage
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.transport import resolve_transport_settings
+from tests.unit.ai.providers.cli_replay import recordings
 
-_FIXTURE = (
-    Path(__file__).resolve().parents[2]
-    / "fixtures"
-    / "ai"
-    / "cli_replay"
-    / "claude"
-    / "2.1.286.jsonl"
-)
+
+def _claude_recording() -> Path:
+    """Return the Claude CLI recording for the pinned ``CLAUDE_CODE_VERSION``.
+
+    Derived rather than named: the recording is re-recorded, and renamed, on
+    every CLI pin bump, and ``test_cli_replay_fixtures`` already guarantees the
+    one committed recording matches the pin.
+
+    Returns:
+        Path of the single committed Claude recording.
+    """
+    claude = [path for cli, path in recordings() if cli == "claude"]
+    assert_that(claude).is_length(1)
+    return claude[0]
 
 
 def _reported(*names: str) -> tuple[ReportedModel, ...]:
@@ -393,7 +400,9 @@ def test_auth_mode_follows_the_credential(
 
 def test_the_pinned_envelope_names_the_model_that_answered() -> None:
     """The replay fixture's ``modelUsage`` parses with canonical and provider."""
-    envelope = json.loads(_FIXTURE.read_text(encoding="utf-8").splitlines()[0])
+    envelope = json.loads(
+        _claude_recording().read_text(encoding="utf-8").splitlines()[0],
+    )
 
     reported = parse_model_usage(envelope["modelUsage"])
 

@@ -1,12 +1,12 @@
-"""Keep the build-only OpenPGP advisory exception bound to absent packages."""
+"""Keep the Gitleaks build closure free of the OpenPGP packages (GO-2026-5932)."""
 
 from __future__ import annotations
 
+import re
 import runpy
 import shutil
 import tomllib
 from collections.abc import Callable, Sequence
-from datetime import date, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -62,14 +62,37 @@ def test_import_guard_rejects_incomplete_closures(imports: list[str]) -> None:
         validate(imports)
 
 
-def test_openpgp_exception_is_temporary_and_has_no_other_go_consumers() -> None:
-    """A global advisory exception must expire and cannot hide new modules."""
+def test_openpgp_advisory_is_fixed_in_the_closure_not_suppressed() -> None:
+    """GO-2026-5932 is closed by the x/crypto pin, not by an OSV exception.
+
+    x/crypto carved ``openpgp`` out into its own module in
+    ``v0.58.1-0.20261009181718-2f1f834330b2``, the version OSV lists as
+    fixed. The closure selects that commit or later, so the advisory-wide
+    exception that only recorded package absence is gone (#3281) and must not
+    come back; the import guard above stays as defence in depth.
+    """
     config = tomllib.loads((REPO_ROOT / ".osv-scanner.toml").read_text())
-    entries = [e for e in config["IgnoredVulns"] if e["id"] == "GO-2026-5932"]
-    assert_that(entries).is_length(1)
-    expiry = entries[0]["ignoreUntil"]
-    assert_that(expiry).is_greater_than(date.today())
-    assert_that(expiry).is_less_than_or_equal_to(date.today() + timedelta(days=31))
+    ids = [e["id"] for e in config.get("IgnoredVulns", [])]
+    assert_that(ids).does_not_contain("GO-2026-5932")
+    module = (GUARD.parent / "go.mod").read_text()
+    match = re.search(
+        r"^\s*golang\.org/x/crypto v(\d+)\.(\d+)\.(\d+)(?:-0\.(\d{14})-\w+)?",
+        module,
+        re.MULTILINE,
+    )
+    assert_that(match).is_not_none()
+    assert match is not None
+    major, minor, patch, stamp = match.groups()
+    # A pseudo-version sorts before its patch release; a tag counts as newest.
+    selected = (int(major), int(minor), int(patch), int(stamp or "9" * 14))
+    fixed = (0, 58, 1, 20261009181718)
+    assert_that(selected >= fixed).described_as(
+        f"x/crypto {match.group(0).split()[-1]} predates the fix {fixed}",
+    ).is_true()
+
+
+def test_gitleaks_closure_is_the_only_non_fixture_go_module() -> None:
+    """OSV and the import guard only cover the one reviewed Go module."""
     assert_that(list(GUARD.parent.rglob("*.go"))).is_empty()
     git = shutil.which("git")
     assert_that(git).is_not_none()

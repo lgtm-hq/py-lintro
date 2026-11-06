@@ -200,13 +200,14 @@ def test_gitleaks_build_uses_a_locked_security_dependency_closure() -> None:
     )
     assert versions["github.com/zricethezav/gitleaks/v8"] == "v8.30.1"
     for name, version in {
+        "github.com/andybalholm/brotli": "v1.2.8",
         "github.com/klauspost/compress": "v1.20.3",
         "github.com/nwaples/rardecode/v2": "v2.2.1",
         "github.com/ulikunitz/xz": "v0.5.15",
-        "golang.org/x/crypto": "v0.56.0",
-        "golang.org/x/sys": "v0.47.0",
-        "golang.org/x/sync": "v0.22.0",
-        "golang.org/x/text": "v0.41.0",
+        "golang.org/x/crypto": "v0.58.1-0.20261009181718-2f1f834330b2",
+        "golang.org/x/sys": "v0.49.0",
+        "golang.org/x/sync": "v0.24.0",
+        "golang.org/x/text": "v0.43.0",
     }.items():
         assert versions[name] == version
         assert re.search(rf"^{re.escape(name)} {version} h1:\S+$", sums, re.MULTILINE)

@@ -28,7 +28,7 @@ permissions: {}
 jobs:
   get-release-info:
     name: Get Release Info
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -39,7 +39,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           # Sparse checkout plus the gh CLI's API endpoint (unreached on the
@@ -69,7 +69,7 @@ jobs:
   homebrew-dispatch:
     name: Notify Homebrew Tap
     needs: [get-release-info]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -86,7 +86,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           # pipelines/results-receiver: actions/download-artifact reaches the
@@ -139,7 +139,7 @@ jobs:
 
       - name: Dispatch formula update
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+        uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@b830ca6972f0c9cbaeb1363283de594f68d66acf # v0.87.0
         with:
           formula: lintro
           version: ${{ steps.version.outputs.version }}
