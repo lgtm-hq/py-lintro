@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools==84.1.0", "wheel"]
+requires = ["setuptools==84.2.1", "wheel"]
 # In-tree PEP 517 shim: generates the derived version artifacts before
 # delegating to setuptools.build_meta (#2180). lintro_build never ships
 # in the wheel; the sdist carries it via MANIFEST.in.
@@ -122,7 +122,10 @@ dev = [
   "pytest-cov>=7.0.0",
   "pytest-xdist>=3.8.0",
   "twine>=6.2.0",
-  "assertpy>=1.1",
+  # assertpy 2.x (Nov 2026) is the assertpy2 fork merged upstream: it ships
+  # type stubs (440 new mypy errors across 149 test files) and raises
+  # AssertionFailure. Held below 2 until that migration lands; see #2437.
+  "assertpy>=1.1,<2",
   "pytest-mock>=3.15.1",
   "bandit>=1.9.4",
   "black>=26.10.1",
@@ -412,7 +415,7 @@ exclude = [
 # Additional MCP client/server advisories are unreachable in Semgrep scan;
 # their individual OSV rows carry evidence and the 2026-12-06 expiry.
 # GHSA-xcq7-p3pf-p88h / CVE-2026-114603: only Semgrep's telemetry 1.37.0
-# remains blocked; uv.lock is patched to 1.45.1. The paired OSV row carries
+# remains blocked; uv.lock is patched to 1.45.2. The paired OSV row carries
 # the 2026-11-06 re-verification (Semgrep 1.184.0) and 2026-12-06 expiry
 # (#2972).
 ignore_vulns = [

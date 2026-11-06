@@ -215,7 +215,7 @@ on npmjs (which lives outside this repo). The first two are pinned to each other
 or no longer calls `publish-npm.yml`; the npmjs side is not, so update it in the same
 change or every publish will start failing with `E404`.
 
-Trusted publishing requires **npm ≥ 11.5.1**. Both jobs use **Node 24**, which ships a
+Trusted publishing requires **npm ≥ 11.5.1**. Both jobs use **Node 26**, which ships a
 compatible bundled npm — do **not** run `npm install -g npm` (or any in-place
 self-upgrade) in CI. That mutates the Actions toolcache npm tree and breaks
 `npm publish --provenance` with `Cannot find module 'sigstore'`.

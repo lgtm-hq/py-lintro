@@ -227,12 +227,15 @@ def _default_shaped_values(tree: ast.AST) -> list[tuple[int, str, ast.expr]]:
                     (node.lineno, "default constant", value)
                     for value in _unpack_containers(value=node.value)
                 )
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            if _names_a_default(target=node.target):
-                found.extend(
-                    (node.lineno, "default constant", value)
-                    for value in _unpack_containers(value=node.value)
-                )
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and node.value is not None
+            and _names_a_default(target=node.target)
+        ):
+            found.extend(
+                (node.lineno, "default constant", value)
+                for value in _unpack_containers(value=node.value)
+            )
     return found
 
 

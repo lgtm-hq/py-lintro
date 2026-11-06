@@ -81,7 +81,7 @@ _MANIFEST_PATH = Path(__file__).parent / "tools" / "manifest.json"
 # ``_generated_versions.py`` (versions).
 TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.ACTIONLINT: "1.7.12",
-    ToolName.BUF: "1.73.0",
+    ToolName.BUF: "1.75.0",
     ToolName.CARGO_AUDIT: "0.22.0",
     ToolName.CARGO_DENY: "0.20.0",
     # checkov is a pypi distribution but deliberately not a pypi *seed*: it
@@ -91,9 +91,14 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     # repo's own osv-scanner dogfood. install-tools.sh installs this exact pin
     # with ``uv tool install`` into an isolated venv instead. Renovate tracks
     # it against the pypi datasource (see renovate.json).
-    ToolName.CHECKOV: "3.4.0",
+    ToolName.CHECKOV: "3.4.3",
     # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
-    ToolName.CLIPPY: "1.98.1",
+    # Recorded as clippy reads itself: ``cargo clippy --version`` prints
+    # ``clippy 0.1.<minor>`` with no patch level, which parses as
+    # ``1.<minor>.0``. Pinning rustc's patch here (1.98.1) made the runtime
+    # minimum unreachable, so clippy skipped inside the image (#3282). The
+    # toolchain install takes max(rustc, clippy), so it still installs RUSTC.
+    ToolName.CLIPPY: "1.99.0",
     # cppcheck ships no portable single binary, so both the tools image and the
     # app-image install-tools.sh bridge install Debian's package. This pin
     # therefore tracks the version in the python base image's Debian release
@@ -109,15 +114,15 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.GOLANGCI_LINT: "2.15.0",
     ToolName.HADOLINT: "2.15.1",
     ToolName.OSV_SCANNER: "2.7.0",
-    ToolName.RUSTC: "1.98.1",
+    ToolName.RUSTC: "1.99.1",
     # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
-    ToolName.RUSTFMT: "1.9.0",
+    ToolName.RUSTFMT: "1.10.0",
     ToolName.SHELLCHECK: "0.11.0",
     ToolName.SHFMT: "3.14.1",
     ToolName.TAPLO: "0.10.0",
-    ToolName.TRUFFLEHOG: "3.99.2",
+    ToolName.TRUFFLEHOG: "3.99.8",
     ToolName.TYPOS: "1.49.0",
-    ToolName.VALE: "3.24.0",
+    ToolName.VALE: "3.26.0",
 }
 
 _NPM_PACKAGE_TO_TOOL: dict[str, ToolName] = {

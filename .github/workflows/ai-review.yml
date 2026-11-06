@@ -159,7 +159,7 @@ jobs:
       || (github.event_name == 'issue_comment'
         && github.event.issue.pull_request
         && startsWith(github.event.comment.body, '@lintro review'))
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # sparse checkout of the manifest and the resolver
     timeout-minutes: 5
@@ -175,7 +175,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
@@ -213,7 +213,7 @@ jobs:
       github.event_name == 'issue_comment'
       && github.event.issue.pull_request
       && startsWith(github.event.comment.body, '@lintro review')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # No secrets in this job, and nothing it can write with.
     permissions:
       contents: read # sparse checkout of the gate script and the parser
@@ -229,7 +229,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
@@ -266,13 +266,13 @@ jobs:
     # constant usage text. A refused request never reaches this job.
     if: >-
       contains(fromJSON('["full","delta","paths","usage"]'), needs.request.outputs.mode)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions: {}
     timeout-minutes: 5
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
@@ -328,7 +328,7 @@ jobs:
   ai-review:
     name: AI Review
     needs: [lane, request]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # No job-level continue-on-error: that rewrites the conclusion to
     # `success`, which is precisely how a review that never ran kept
     # reading as a pass (#1826). Locate/download are the only step-level
@@ -484,7 +484,7 @@ jobs:
         # here: harden-runner v2.21.1 allows them from GitHub meta (#2352,
         # #2488). This job allows no wildcard endpoints at all.
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
@@ -615,12 +615,12 @@ jobs:
         run: scripts/ci/install-codex-cli.sh
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.14'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: 'latest'
 

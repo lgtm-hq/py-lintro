@@ -7,7 +7,13 @@ from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
 
+from lintro._tool_versions import TOOL_VERSIONS
+from lintro.enums.tool_name import ToolName
 from lintro.tools.clippy.definition import ClippyPlugin
+from lintro.tools.core.version_parsing import (
+    compare_versions,
+    extract_version_from_output,
+)
 
 
 def test_check_skips_when_rustc_banner_is_below_pin(tmp_path: Path) -> None:
@@ -44,3 +50,22 @@ def test_check_skips_when_rustc_banner_is_below_pin(tmp_path: Path) -> None:
     assert_that(result.output).contains("Skipping clippy")
     assert_that(result.output).contains("1.0.0")
     assert_that(result.output).contains("Minimum required")
+
+
+def test_pinned_toolchain_clippy_banner_meets_the_clippy_minimum() -> None:
+    """The clippy the pinned toolchain ships must satisfy clippy's own minimum.
+
+    ``cargo clippy --version`` prints ``clippy 0.1.<minor>``, which parses as
+    ``1.<minor>.0``. A clippy minimum carrying rustc's patch level (1.98.1)
+    was therefore unreachable and clippy skipped inside the tools image even
+    though the image shipped exactly the pinned toolchain (#3282).
+    """
+    minor = TOOL_VERSIONS[ToolName.RUSTC].split(".")[1]
+    banner = f"clippy 0.1.{minor} (48a229ceae 2026-09-01)"
+
+    installed = extract_version_from_output(banner, ToolName.CLIPPY)
+
+    assert_that(installed).is_not_none()
+    assert_that(
+        compare_versions(str(installed), TOOL_VERSIONS[ToolName.CLIPPY]),
+    ).is_greater_than_or_equal_to(0)
