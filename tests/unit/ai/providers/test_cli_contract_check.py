@@ -271,7 +271,7 @@ def test_contract_gate_still_checks_flags_without_a_version(
         test_cli_flag_surface.test_installed_cli_advertises_every_required_flag(
             AIProvider.ANTHROPIC,
         )
-    assert_that(failure.type).is_equal_to(AssertionError)
+    assert_that(failure.value).is_instance_of(AssertionError)
     assert_that(str(failure.value)).contains("dropped required flag")
 
 

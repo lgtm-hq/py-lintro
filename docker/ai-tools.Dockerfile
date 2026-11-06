@@ -26,15 +26,15 @@
 # =============================================================================
 
 # yamllint / hadolint: pin is immutable by digest; tag is informational.
-FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:eabaa1e9b26a48a2e613c07cf46bc8b53935fa0bea4999f844b73c4a3f3d33fb AS ai-tools
+FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:9584ac2434de9af4745ab876dc512a3b73110a9bb21ae6328ee68df9a5a3ef1b AS ai-tools
 
 # Renovate: npm datasource for the two published CLIs, node-version for the
 # runtime. CURSOR_AGENT_VERSION has no Renovate datasource -- Cursor ships the
 # agent CLI only as a tarball behind https://cursor.com/install, with no
 # registry or release feed to query -- so it is bumped by hand; the weekly
 # rebuild keeps everything around it fresh regardless.
-ARG NODE_VERSION=24.21.0
-ARG CLAUDE_CODE_VERSION=2.1.286
+ARG NODE_VERSION=26.13.0
+ARG CLAUDE_CODE_VERSION=2.1.318
 ARG CODEX_VERSION=0.159.2
 ARG CURSOR_AGENT_VERSION=2026.07.23-e383d2b
 # Cursor ships no checksum sidecar, so both architectures' hashes are pinned

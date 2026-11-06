@@ -28,6 +28,7 @@ from tests.unit.workflow_wiring_helpers import (
     _RELEASE_IMAGE_JOBS,
     _REPO_ROOT,
     _SIGSTORE_HOSTS,
+    _canonical_lgtm_ci_pin,
     _evaluate_github_if,
     _github_event_name_is_pull_request_token,
     _github_head_repo_not_fork_token,
@@ -2028,17 +2029,21 @@ def test_release_images_preserve_native_runners(job_id: str) -> None:
 
 @pytest.mark.parametrize("job_id", _RELEASE_IMAGE_JOBS)
 def test_release_images_select_the_verified_trivy_repair(job_id: str) -> None:
-    """All release image callers select the repaired workflow and tooling (#3200).
+    """Release image callers run the workflow and tooling of one commit (#3200).
+
+    The Trivy repair first shipped in lgtm-ci v0.83.11 and was adopted per
+    caller; since v0.87.0 it rides the canonical pin (#3047), so the caller
+    and its ``tooling-ref`` must both name that canonical commit.
 
     Args:
         job_id: Base, full or AI release image job.
     """
-    repair = "cade5e687630ce3208bf914d0b1590145f3d569e"  # lgtm-ci v0.83.11
+    canonical = _canonical_lgtm_ci_pin()
     job = _load_workflow(name="docker-build-publish.yml")["jobs"][job_id]
     assert_that(job["uses"]).is_equal_to(
-        f"lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@{repair}",
+        f"lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@{canonical}",
     )
-    assert_that(job["with"]["tooling-ref"]).is_equal_to(repair)
+    assert_that(job["with"]["tooling-ref"]).is_equal_to(canonical)
 
 
 def test_docker_build_runs_before_the_gate_in_staging_mode() -> None:

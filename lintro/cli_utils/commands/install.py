@@ -386,18 +386,22 @@ def _interactive_select(
         marker = " (default)" if name == default else ""
         console.print(f"    {idx}. {name}{marker} — {desc}")
 
-    choice = click.prompt(
-        "Profile number or name",
-        default=default,
-        show_default=True,
+    # A str default makes click infer a str prompt type, so the answer is
+    # always text; numbers arrive as digit strings.
+    choice = str(
+        click.prompt(
+            "Profile number or name",
+            default=default,
+            show_default=True,
+        ),
     )
     selected_profile: str | None = None
-    if isinstance(choice, int) or (isinstance(choice, str) and choice.isdigit()):
+    if choice.isdigit():
         idx = int(choice) - 1
         if 0 <= idx < len(profiles):
             selected_profile = profiles[idx]
     if selected_profile is None:
-        choice_str = str(choice).strip()
+        choice_str = choice.strip()
         if choice_str in profiles:
             selected_profile = choice_str
         else:

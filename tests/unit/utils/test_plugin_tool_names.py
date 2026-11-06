@@ -86,9 +86,6 @@ def test_broken_entry_point_metadata_degrades_to_empty(
     def boom(**_: object) -> list[object]:
         """Raise as a broken metadata finder would.
 
-        Args:
-            **_: Ignored keyword arguments (the group name).
-
         Returns:
             list[object]: Never returns.
 

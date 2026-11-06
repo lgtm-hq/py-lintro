@@ -282,7 +282,9 @@ def temp_astro_file_formatted(astro_project_dir: Path) -> str:
     """Create a temporary Astro file that is already formatted.
 
     Creates a file that conforms to Prettier's default formatting
-    with prettier-plugin-astro.
+    with prettier-plugin-astro. From 1.x the plugin wraps a JSX-returning
+    arrow callback in an expression block in parentheses on its own lines,
+    as Prettier does for JSX, instead of keeping it inline.
 
     Args:
         astro_project_dir: Temporary project with .prettierrc configured.
@@ -296,8 +298,8 @@ def temp_astro_file_formatted(astro_project_dir: Path) -> str:
         'const items = ["apple", "banana", "cherry"];\n'
         "---\n\n<html>\n  <head>\n    <title>Test</title>\n"
         "  </head>\n  <body>\n    <h1>{greeting}</h1>\n"
-        "    <ul>\n      {items.map((item) => <li>{item}</li>)}\n"
-        "    </ul>\n  </body>\n</html>\n",
+        "    <ul>\n      {items.map((item) => (\n        <li>{item}</li>\n"
+        "      ))}\n    </ul>\n  </body>\n</html>\n",
     )
     return str(file_path)
 

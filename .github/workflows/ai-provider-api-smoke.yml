@@ -56,7 +56,7 @@ env:
 jobs:
   resolve-table:
     name: 🧮 Resolve provider table
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # sparse checkout of the table and its loader
     timeout-minutes: 5
@@ -66,7 +66,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
@@ -97,7 +97,7 @@ jobs:
     # Job conditions run before matrix expansion. An all-parked table has no
     # provider verdict: skip the job instead of inventing a successful row.
     if: needs.resolve-table.outputs.has_active == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # checkout lintro and its provider code path
       statuses: write # report ai-provider-smoke/<name> on main's HEAD
@@ -114,7 +114,7 @@ jobs:
         # same pair); without them a failing row's own words never leave the
         # job, which is the whole point of the upload.
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
@@ -194,7 +194,7 @@ jobs:
     # `ai-provider-smoke` is what makes a provider alarm distinguishable from
     # a #2212-style main failure at a glance.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@b830ca6972f0c9cbaeb1363283de594f68d66acf # v0.87.0
     permissions:
       actions: read # read workflow/job metadata for the failure context
       contents: read # repository context for the issue body
@@ -203,7 +203,7 @@ jobs:
       egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       workflow-key: ai-provider-api-smoke
       failure-issue-labels: 'bug,ci,ai,ai-provider-smoke'
-      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      tooling-ref: 'b830ca6972f0c9cbaeb1363283de594f68d66acf' # v0.87.0
 
   annotate-failure-issue:
     name: 🧾 Quote provider errors on the tracker
@@ -212,7 +212,7 @@ jobs:
     # nothing itself: no issue, no second dedup key — it finds the notifier's
     # issue by the notifier's own title and comments the error text there.
     if: always() && needs.notify-failure.result != 'skipped'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # sparse checkout of the comment script
       issues: write # comment the provider error text on the tracker issue
@@ -222,7 +222,7 @@ jobs:
         # The actions.githubusercontent.com pair is the Actions results
         # service the error-text download talks to.
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >

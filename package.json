@@ -13,33 +13,33 @@
     "url": "git+https://github.com/lgtm-hq/py-lintro.git"
   },
   "engines": {
-    "node": ">=24"
+    "node": ">=26"
   },
   "devDependencies": {
-    "@astrojs/check": "0.9.10",
-    "@commitlint/cli": "21.2.3",
-    "@commitlint/config-conventional": "21.2.3",
+    "@astrojs/check": "0.9.12",
+    "@commitlint/cli": "21.2.4",
+    "@commitlint/config-conventional": "21.2.4",
     "@stoplight/spectral-cli": "6.17.0",
-    "astro": "7.3.8",
-    "html-validate": "11.16.2",
+    "astro": "7.4.5",
+    "html-validate": "11.18.0",
     "markdownlint-cli2": "0.24.0",
-    "oxfmt": "0.72.0",
-    "oxlint": "1.87.0",
+    "oxfmt": "0.75.0",
+    "oxlint": "1.90.0",
     "prettier": "3.9.4",
-    "prettier-plugin-astro": "0.14.1",
-    "stylelint": "17.16.0",
+    "prettier-plugin-astro": "1.1.2",
+    "stylelint": "18.0.0",
     "svelte": "5.57.3",
-    "svelte-check": "4.7.6",
+    "svelte-check": "4.7.8",
     "typescript": "6.0.3",
-    "vue-tsc": "3.3.13"
+    "vue-tsc": "3.3.14"
   },
   "overrides": {
     "defu": "6.1.7",
-    "devalue": "5.9.4",
+    "devalue": "6.0.3",
     "esbuild": "^0.28.1",
     "fast-uri": "4.2.3",
     "postcss": "^8.5.18",
-    "re2js": "2.8.7",
+    "re2js": "2.9.1",
     "svgo": "^4.0.2",
     "vite": "^8.0.16",
     "yaml": "2.9.1",
@@ -47,8 +47,8 @@
     "smol-toml": "1.9.1",
     "katex": "0.19.1",
     "source-map-js": "1.2.2",
-    "tinypool": "2.1.2",
-    "undici": "8.12.3",
+    "tinypool": "2.2.0",
+    "undici": "8.12.4",
     "zod": "4.6.7"
   }
 }
