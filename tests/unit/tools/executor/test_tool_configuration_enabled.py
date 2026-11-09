@@ -296,11 +296,9 @@ def test_execution_enabled_tools_filter(
         result = get_tools_to_run(tools=None, action="check")
 
     assert_that(result.to_run).is_equal_to(["ruff"])
-    # mypy and bandit should be in skipped with "not in enabled_tools" reason
-    skipped_names = [s.name for s in result.skipped]
-    assert_that(skipped_names).contains("mypy", "bandit")
-    for s in result.skipped:
-        assert_that(s.reason).is_equal_to("not in enabled_tools")
+    # Outsiders are counted, not listed as skip rows.
+    assert_that(result.skipped).is_empty()
+    assert_that(result.not_in_allowlist).is_equal_to(["mypy", "bandit"])
 
 
 def test_execution_enabled_tools_combined_with_tool_disabled(
@@ -383,11 +381,8 @@ def test_default_run_still_filters_by_enabled_tools(
         result = get_tools_to_run(tools=None, action="check")
 
     assert_that(result.to_run).is_equal_to(["yamllint"])
-    skipped_by_name = {s.name: s for s in result.skipped}
-    assert_that(skipped_by_name).contains_key("ruff")
-    assert_that(skipped_by_name["ruff"].reason).is_equal_to(
-        "not in enabled_tools",
-    )
+    assert_that(result.skipped).is_empty()
+    assert_that(result.not_in_allowlist).is_equal_to(["ruff"])
 
 
 def test_tools_all_still_filters_by_enabled_tools(
@@ -413,11 +408,8 @@ def test_tools_all_still_filters_by_enabled_tools(
         result = get_tools_to_run(tools="all", action="check")
 
     assert_that(result.to_run).is_equal_to(["yamllint"])
-    skipped_by_name = {s.name: s for s in result.skipped}
-    assert_that(skipped_by_name).contains_key("ruff")
-    assert_that(skipped_by_name["ruff"].reason).is_equal_to(
-        "not in enabled_tools",
-    )
+    assert_that(result.skipped).is_empty()
+    assert_that(result.not_in_allowlist).is_equal_to(["ruff"])
 
 
 def test_explicit_tools_still_honors_per_tool_disabled(

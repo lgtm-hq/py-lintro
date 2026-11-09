@@ -37,7 +37,6 @@ def mock_config() -> LintroConfig:
     """
     return LintroConfig(
         execution=ExecutionConfig(
-            enabled_tools=[],
             fail_fast=False,
         ),
         enforce=EnforceConfig(

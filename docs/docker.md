@@ -647,13 +647,13 @@ tools run. This table shows:
 
 Tools can be skipped for several reasons:
 
-| Reason                   | Description                                              |
-| ------------------------ | -------------------------------------------------------- |
-| `node_modules not found` | Node.js deps missing and auto-install is disabled        |
-| `disabled in config`     | Tool explicitly disabled via `tools.<name>.enabled`      |
-| `not in enabled_tools`   | Tool not listed in `execution.enabled_tools`             |
-| `deferred to <tool>`     | Framework-specific tool preferred (e.g., tsc to vue-tsc) |
-| `version check failed`   | Tool version below minimum required                      |
+| Reason                   | Description                                                                 |
+| ------------------------ | --------------------------------------------------------------------------- |
+| `node_modules not found` | Node.js deps missing and auto-install is disabled                           |
+| `disabled in config`     | Tool explicitly disabled via `tools.<name>.enabled`                         |
+| `not in enabled_tools`   | Tool not listed in `execution.enabled_tools` (counted, not listed per tool) |
+| `deferred to <tool>`     | Framework-specific tool preferred (e.g., tsc to vue-tsc)                    |
+| `version check failed`   | Tool version below minimum required                                         |
 
 Skipped tools appear in the summary table with a `SKIP` status and a note explaining
 why, so you always know what happened.

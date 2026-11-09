@@ -12,9 +12,9 @@ from lintro.config.execution_config import ExecutionConfig, _get_default_max_wor
 
 
 def test_execution_config_default_enabled_tools() -> None:
-    """ExecutionConfig has empty enabled_tools by default."""
+    """ExecutionConfig leaves enabled_tools unset (None) by default."""
     config = ExecutionConfig()
-    assert_that(config.enabled_tools).is_empty()
+    assert_that(config.enabled_tools).is_none()
 
 
 def test_execution_config_default_fail_fast() -> None:

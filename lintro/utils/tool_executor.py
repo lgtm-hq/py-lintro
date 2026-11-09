@@ -14,6 +14,7 @@ from lintro.enums.action import Action, normalize_action
 from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools import tool_manager, verify_pass
+from lintro.utils.console.pre_execution_summary import AllowlistNotice
 from lintro.utils.execution.exit_codes import (
     DEFAULT_EXIT_CODE_FAILURE,
     DEFAULT_EXIT_CODE_SUCCESS,
@@ -40,12 +41,14 @@ from lintro.utils.execution.run_aggregation import (
 )
 from lintro.utils.execution.run_context import RunContext
 from lintro.utils.execution.run_preflight import (
+    collect_per_tool_auto_install,
     confirm_pre_execution,
     report_skipped_tools,
     resolve_diff_scope,
 )
 from lintro.utils.execution.run_renderer import _write_artifacts, render_run
 from lintro.utils.execution.tool_configuration import (
+    SkippedTool,
     configure_tool_for_execution,
     get_tool_display_name,
     get_tools_to_run,
@@ -569,6 +572,7 @@ def execute_run(
 
     tools_to_run = tools_result.to_run
     skipped_tools = tools_result.skipped
+    not_in_allowlist = tools_result.not_in_allowlist
 
     # On a no-config first run the toolset is scoped to detected languages;
     # tell the user what was selected and how to customize. Suppressed for
@@ -662,12 +666,15 @@ def execute_run(
         proceed = confirm_pre_execution(
             tools_to_run=tools_to_run,
             skipped_tools=skipped_tools,
-            lintro_config=lintro_config,
+            per_tool_auto_install=collect_per_tool_auto_install(
+                tools_to_run=tools_to_run,
+                lintro_config=lintro_config,
+            ),
             effective_auto_install=effective_auto_install,
-            is_container=is_container,
             ai_status_lines=ai_status_lines,
             logger=logger,
             yes=yes,
+            allowlist=AllowlistNotice(names=not_in_allowlist, verbose=verbose),
         )
         if not proceed:
             return RunArtifact(
@@ -745,8 +752,16 @@ def execute_run(
             ctx.action,
         )
 
-    # Add skipped tool results for display in summary table
-    for st in skipped_tools:
+    # Add skipped tool results for display in summary table. Allowlist
+    # exclusions stay out of the console table (they are counted in the
+    # pre-execution summary) but JSON output still lists them by name.
+    reported_skips = list(skipped_tools)
+    if output_format.lower() == "json":
+        reported_skips.extend(
+            SkippedTool(name=name, reason="not in enabled_tools")
+            for name in not_in_allowlist
+        )
+    for st in reported_skips:
         all_results.append(
             ToolResult(
                 name=st.name,

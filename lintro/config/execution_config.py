@@ -24,11 +24,14 @@ class ExecutionConfig(BaseModel):
 
     Attributes:
         model_config: Pydantic model configuration.
-        enabled_tools: List of tool names to run on default (no ``--tools``)
-            and ``--tools all`` runs. If empty/None and a config file is
-            present, all tools run. A no-config first run is instead scoped
-            to detected languages (use ``--tools all`` or ``lintro init``
-            for the full set). An explicit comma-separated ``--tools`` list
+        enabled_tools: Strict allowlist of tool names to run on default
+            (no ``--tools``) and ``--tools all`` runs. ``None`` (key absent)
+            keeps the default selection: all tools when a config file is
+            present, or a language-scoped set on a no-config first run (use
+            ``--tools all`` or ``lintro init`` for the full set). A non-empty
+            list restricts the run to exactly those tools; tools outside it
+            are not reported individually. An explicit empty list is rejected
+            by the validator. An explicit comma-separated ``--tools`` list
             bypasses this allowlist.
         fail_fast: Stop on first tool failure.
         parallel: Run tools in parallel where possible.
@@ -64,7 +67,7 @@ class ExecutionConfig(BaseModel):
 
     model_config = ConfigDict(frozen=False, extra="forbid")
 
-    enabled_tools: list[str] = Field(default_factory=list)
+    enabled_tools: list[str] | None = None
     fail_fast: bool = False
     parallel: bool = True
     max_workers: int = Field(default_factory=_get_default_max_workers, ge=1, le=32)

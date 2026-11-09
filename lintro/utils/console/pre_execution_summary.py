@@ -7,6 +7,7 @@ lintro decided before it does anything.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from rich.console import Console
@@ -21,6 +22,42 @@ if TYPE_CHECKING:
 AI_STATUS_FALLBACK = "[dim]disabled (no config)[/dim]"
 
 
+@dataclass(frozen=True)
+class AllowlistNotice:
+    """Tools left out of a run by a non-empty ``execution.enabled_tools``.
+
+    Attributes:
+        names: Names of the excluded tools.
+        verbose: Whether to name the tools instead of only counting them.
+    """
+
+    names: list[str]
+    verbose: bool = False
+
+
+def format_allowlist_hidden_line(*, notice: AllowlistNotice) -> str:
+    """Render the dim line summarising tools outside ``enabled_tools``.
+
+    Args:
+        notice: The excluded tools and whether to name them.
+
+    Returns:
+        str: Rich-markup line, e.g. ``3 tools not in enabled_tools (hidden;
+        use --verbose to list)``.
+    """
+    names = notice.names
+    verbose = notice.verbose
+    noun = "tool" if len(names) == 1 else "tools"
+    if verbose:
+        return (
+            f"[dim]{len(names)} {noun} not in enabled_tools: {', '.join(names)}[/dim]"
+        )
+    return (
+        f"[dim]{len(names)} {noun} not in enabled_tools "
+        "(hidden; use --verbose to list)[/dim]"
+    )
+
+
 def print_pre_execution_summary(
     *,
     tools_to_run: list[str],
@@ -30,6 +67,7 @@ def print_pre_execution_summary(
     is_ci: bool,
     per_tool_auto_install: dict[str, bool | None] | None = None,
     ai_status_lines: list[str] | None = None,
+    allowlist: AllowlistNotice | None = None,
 ) -> None:
     """Print a pre-execution configuration summary table.
 
@@ -43,6 +81,9 @@ def print_pre_execution_summary(
         ai_status_lines: Pre-rendered AI status lines from the AI layer
             (``render_ai_status`` on the AI interface facade). When None or
             empty, the AI row reports a missing configuration.
+        allowlist: Tools left out of the run by a non-empty
+            ``execution.enabled_tools``. Summarised as one dim line instead
+            of one row per tool; names are shown only when ``verbose``.
     """
     console = Console()
 
@@ -113,4 +154,6 @@ def print_pre_execution_summary(
     table.add_row("AI", "\n".join(ai_parts))
 
     console.print(table)
+    if allowlist is not None and allowlist.names:
+        console.print(format_allowlist_hidden_line(notice=allowlist))
     console.print()

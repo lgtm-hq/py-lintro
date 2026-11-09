@@ -80,22 +80,26 @@ empty files or replace their contents with `{}`.
 The configuration system works in a specific order:
 
 1. **Execution Tier** - Determines which tools run and in what order
-   - `enabled_tools`: Empty list means all enabled tools run **when a config file is
-     present** (`.lintro-config.yaml` or a **non-empty** `[tool.lintro]` table in
-     `pyproject.toml`). A no-config first run scopes tools to languages detected from
-     manifests **and** source files (a directory of `*.py` / `*.js` with no
-     `pyproject.toml` / `package.json` still selects ruff/prettier). Use `--tools all`
-     or `lintro init` for the full registry. An empty `[tool.lintro]` table is not a
-     config, so language scoping still applies. An explicit named `--tools` list on the
-     CLI bypasses this allowlist; default runs and `--tools all` remain filtered by it.
-     This is a feat/minor default change: kitchen-sink CI that relied on the unscoped
-     no-config toolset should pass `--tools all` or add a config file. Detection uses
-     the chk/fmt scan paths (a file uses its parent directory; multiple paths are
-     unioned). When no paths are given the default is `.` (the current working
-     directory). Tools that are not in the language map (for example `commitlint`) are
-     still selected when their native config file is present at a scan root. Nested
-     YAML/Markdown/shell files count; a lone root `README.md` does not enable Markdown
-     tools.
+   - `enabled_tools`: A strict allowlist. When set to a non-empty list, only those tools
+     run on default and `--tools all` runs; tools outside it are not listed individually
+     (the summary shows one count line, and `--verbose` or JSON output names them). When
+     the key is **omitted**, all enabled tools run **when a config file is present**
+     (`.lintro-config.yaml` or a **non-empty** `[tool.lintro]` table in
+     `pyproject.toml`). An explicit empty list (`enabled_tools: []`) is a validation
+     error: omit the key to run all tools, or list the tools to run. A no-config first
+     run scopes tools to languages detected from manifests **and** source files (a
+     directory of `*.py` / `*.js` with no `pyproject.toml` / `package.json` still
+     selects ruff/prettier). Use `--tools all` or `lintro init` for the full registry.
+     An empty `[tool.lintro]` table is not a config, so language scoping still applies.
+     An explicit named `--tools` list on the CLI bypasses this allowlist; default runs
+     and `--tools all` remain filtered by it. This is a feat/minor default change:
+     kitchen-sink CI that relied on the unscoped no-config toolset should pass
+     `--tools all` or add a config file. Detection uses the chk/fmt scan paths (a file
+     uses its parent directory; multiple paths are unioned). When no paths are given the
+     default is `.` (the current working directory). Tools that are not in the language
+     map (for example `commitlint`) are still selected when their native config file is
+     present at a scan root. Nested YAML/Markdown/shell files count; a lone root
+     `README.md` does not enable Markdown tools.
    - `fail_fast`: Whether to stop on first tool failure
    - `parallel`: Whether to run tools in parallel (default: `true`)
    - `max_workers`: Maximum parallel workers, 1-32 (default: CPU count)
@@ -266,7 +270,8 @@ Create a `.lintro-config.yaml` in your project root:
 ```yaml
 # Tier 1: EXECUTION - What tools run and how
 execution:
-  enabled_tools: [] # Empty = all enabled tools (config present); no-config first run is language-scoped
+  # enabled_tools: [ruff, mypy] # Strict allowlist; omit to run all enabled tools
+  # (config present). A no-config first run is language-scoped. [] is an error.
   fail_fast: false
   parallel: true # Run tools in parallel (default: true)
   max_workers: 10 # Max parallel workers, 1-32 (default: CPU count)
@@ -802,13 +807,13 @@ This summary is shown for all output formats except JSON (`--output-format json`
 When tools are skipped, Lintro reports them in the summary table with a `SKIP` status
 and a note explaining the reason. Common skip reasons:
 
-| Reason                   | Description                                                                                            |
-| ------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `node_modules not found` | Node.js deps missing and auto-install is disabled                                                      |
-| `disabled in config`     | Tool disabled via `tools.<name>.enabled: false`                                                        |
-| `not in enabled_tools`   | Tool not in `execution.enabled_tools` allowlist (default/`--tools all` only; named `--tools` bypasses) |
-| `deferred to <tool>`     | Framework tool preferred (e.g., tsc to vue-tsc)                                                        |
-| Version check messages   | Tool version below minimum required                                                                    |
+| Reason                   | Description                                                                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node_modules not found` | Node.js deps missing and auto-install is disabled                                                                                                       |
+| `disabled in config`     | Tool disabled via `tools.<name>.enabled: false`                                                                                                         |
+| `not in enabled_tools`   | Tool not in `execution.enabled_tools`; summarised as a count (names under `--verbose` or in JSON). Default/`--tools all` only; named `--tools` bypasses |
+| `deferred to <tool>`     | Framework tool preferred (e.g., tsc to vue-tsc)                                                                                                         |
+| Version check messages   | Tool version below minimum required                                                                                                                     |
 
 Skipped tools do not affect exit codes — only tools that run and find issues contribute
 to a non-zero exit.
@@ -854,8 +859,9 @@ and verify tools.
 
 ### Doctor: Config-Aware Health Checks
 
-`lintro doctor` respects `execution.enabled_tools` and per-tool `tools.<name>.enabled`
-settings. By default, disabled tools are shown separately and not counted as failures:
+`lintro doctor` and `lintro config` treat `execution.enabled_tools` as the effective
+default selection and also respect per-tool `tools.<name>.enabled` settings. By default,
+disabled tools are shown separately and not counted as failures:
 
 ```bash
 lintro doctor                      # check enabled tools only
@@ -2888,7 +2894,7 @@ misspellings.
 >   `execution.enabled_tools` or `tools.typos.enabled: false`. `lintro init`'s
 >   recommended profile writes a language-based `enabled_tools` allowlist that does
 >   **not** include typos, so those projects do not start spell-checking on upgrade. An
->   existing **unscoped** `lintro check` (`enabled_tools: []` or omitted) will.
+>   existing **unscoped** `lintro check` (`enabled_tools` omitted) will.
 >
 > `lintro check --tools typos` selects it explicitly in either case.
 >
@@ -2896,9 +2902,9 @@ misspellings.
 >
 > - **Turning it off.** Do not create a Lintro config solely to disable typos on a
 >   no-config first run: that file is a resolved config, so language scoping is skipped
->   and an empty `enabled_tools` allowlist runs the full unscoped registry, including
->   typos. On a first run, omit `typos.toml` / `.typos.toml` / `_typos.toml` instead. On
->   a project that already has a Lintro config, disable the tool:
+>   and omitting `enabled_tools` runs the full unscoped registry, including typos. On a
+>   first run, omit `typos.toml` / `.typos.toml` / `_typos.toml` instead. On a project
+>   that already has a Lintro config, disable the tool:
 >
 >   ```yaml
 >   tools:

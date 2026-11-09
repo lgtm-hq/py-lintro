@@ -558,7 +558,7 @@ def test_unscoped_config_runs_typos_without_native_config(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """An empty enabled_tools allowlist unscope and includes typos.
+    """A config without enabled_tools is unscoped and includes typos.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
@@ -566,7 +566,7 @@ def test_unscoped_config_runs_typos_without_native_config(
     """
     _write_python_project(tmp_path)
     (tmp_path / ".lintro-config.yaml").write_text(
-        "execution:\n  enabled_tools: []\n",
+        "execution:\n  fail_fast: false\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
@@ -601,8 +601,7 @@ def test_recommended_allowlist_excludes_typos(
     assert_that(result.scoped_by_detection).is_false()
     assert_that(result.to_run).contains("ruff")
     assert_that(result.to_run).does_not_contain("typos")
-    skipped_names = [item.name for item in result.skipped]
-    assert_that(skipped_names).contains("typos")
+    assert_that(result.not_in_allowlist).contains("typos")
 
 
 def _isolate_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

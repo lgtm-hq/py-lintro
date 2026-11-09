@@ -220,7 +220,7 @@ def test_selection_docs_name_every_config_source_and_the_allowlist() -> None:
     assert_that(collapsed).contains("execution.enabled_tools")
     assert_that(collapsed).contains("recommended profile")
     assert_that(collapsed).contains("does **not** include typos")
-    assert_that(collapsed).contains("enabled_tools: []")
+    assert_that(collapsed).contains("`enabled_tools` omitted")
     assert_that(collapsed).contains("pyproject.toml")
     assert_that(collapsed).contains("Cargo.toml")
     assert_that(collapsed).contains("native_configs")
