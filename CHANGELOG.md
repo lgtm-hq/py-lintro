@@ -13,14 +13,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- **config**: `execution.enabled_tools` is now a strict allowlist. Tools outside a
-  non-empty list are no longer listed one per row as `SKIP | not in enabled_tools`; the
-  pre-execution summary prints one dim count line and `--verbose` (or JSON output) names
-  them. An explicit `enabled_tools: []` is deprecated: it behaves like an omitted key
-  (all tools run) and `lintro config validate` now warns. **Migration:** delete the
-  `enabled_tools: []` line, or list the tools to run. `lintro init` no longer writes
-  `enabled_tools: []`. Closes #3066.
-
 ### Deprecated
 
 ### Removed
@@ -28,6 +20,31 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Fixed
 
 ### Security
+
+## [0.179.0] - 2026-11-09
+
+### Added
+
+- **config**: make execution.enabled_tools a strict allowlist and reject an empty list
+  (#3287) (570788f)
+
+### Changed
+
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to af5fc6e
+  (#3292) (1ea6224)
+- **dogfood**: remove the unapproved stylelint and trufflehog skip tolerations (#3298)
+  (2c96f02)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to f4eddfc (#3299)
+  (7ba58b8)
+- **deps**: consolidated dependency catch-up (open and rate-limited Renovate updates)
+  (#3283) (94986fb)
+- **config**: `execution.enabled_tools` is now a strict allowlist. Tools outside a
+  non-empty list are no longer listed one per row as `SKIP | not in enabled_tools`; the
+  pre-execution summary prints one dim count line and `--verbose` (or JSON output) names
+  them. An explicit `enabled_tools: []` is deprecated: it behaves like an omitted key
+  (all tools run) and `lintro config validate` now warns. **Migration:** delete the
+  `enabled_tools: []` line, or list the tools to run. `lintro init` no longer writes
+  `enabled_tools: []`. Closes #3066.
 
 ## [0.178.2] - 2026-11-09
 
