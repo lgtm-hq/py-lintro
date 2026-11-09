@@ -85,21 +85,22 @@ The configuration system works in a specific order:
      (the summary shows one count line, and `--verbose` or JSON output names them). When
      the key is **omitted**, all enabled tools run **when a config file is present**
      (`.lintro-config.yaml` or a **non-empty** `[tool.lintro]` table in
-     `pyproject.toml`). An explicit empty list (`enabled_tools: []`) is a validation
-     error: omit the key to run all tools, or list the tools to run. A no-config first
-     run scopes tools to languages detected from manifests **and** source files (a
-     directory of `*.py` / `*.js` with no `pyproject.toml` / `package.json` still
-     selects ruff/prettier). Use `--tools all` or `lintro init` for the full registry.
-     An empty `[tool.lintro]` table is not a config, so language scoping still applies.
-     An explicit named `--tools` list on the CLI bypasses this allowlist; default runs
-     and `--tools all` remain filtered by it. This is a feat/minor default change:
-     kitchen-sink CI that relied on the unscoped no-config toolset should pass
-     `--tools all` or add a config file. Detection uses the chk/fmt scan paths (a file
-     uses its parent directory; multiple paths are unioned). When no paths are given the
-     default is `.` (the current working directory). Tools that are not in the language
-     map (for example `commitlint`) are still selected when their native config file is
-     present at a scan root. Nested YAML/Markdown/shell files count; a lone root
-     `README.md` does not enable Markdown tools.
+     `pyproject.toml`). An explicit empty list (`enabled_tools: []`) is deprecated: it
+     behaves like an omitted key and `lintro config validate` warns. Omit the key, or
+     list the tools to run. A no-config first run scopes tools to languages detected
+     from manifests **and** source files (a directory of `*.py` / `*.js` with no
+     `pyproject.toml` / `package.json` still selects ruff/prettier). Use `--tools all`
+     or `lintro init` for the full registry. An empty `[tool.lintro]` table is not a
+     config, so language scoping still applies. An explicit named `--tools` list on the
+     CLI bypasses this allowlist; default runs and `--tools all` remain filtered by it.
+     This is a feat/minor default change: kitchen-sink CI that relied on the unscoped
+     no-config toolset should pass `--tools all` or add a config file. Detection uses
+     the chk/fmt scan paths (a file uses its parent directory; multiple paths are
+     unioned). When no paths are given the default is `.` (the current working
+     directory). Tools that are not in the language map (for example `commitlint`) are
+     still selected when their native config file is present at a scan root. Nested
+     YAML/Markdown/shell files count; a lone root `README.md` does not enable Markdown
+     tools.
    - `fail_fast`: Whether to stop on first tool failure
    - `parallel`: Whether to run tools in parallel (default: `true`)
    - `max_workers`: Maximum parallel workers, 1-32 (default: CPU count)
@@ -271,7 +272,8 @@ Create a `.lintro-config.yaml` in your project root:
 # Tier 1: EXECUTION - What tools run and how
 execution:
   # enabled_tools: [ruff, mypy] # Strict allowlist; omit to run all enabled tools
-  # (config present). A no-config first run is language-scoped. [] is an error.
+  # (config present). A no-config first run is language-scoped. [] is deprecated
+  # (treated as omitted, with a warning).
   fail_fast: false
   parallel: true # Run tools in parallel (default: true)
   max_workers: 10 # Max parallel workers, 1-32 (default: CPU count)

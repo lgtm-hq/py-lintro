@@ -603,17 +603,14 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
         ExecutionConfig: Parsed execution configuration.
 
     Raises:
-        ValueError: If enabled_tools is an empty list, or max_fix_retries is not
-            a valid positive integer.
+        ValueError: If max_fix_retries is not a valid positive integer.
     """
     enabled_tools = data.get("enabled_tools")
     if isinstance(enabled_tools, str):
         enabled_tools = [enabled_tools]
     if isinstance(enabled_tools, list) and not enabled_tools:
-        raise ValueError(
-            "execution.enabled_tools must not be an empty list: omit the key "
-            "to run all tools, or list the tools to run",
-        )
+        # Deprecated spelling of "unset"; the validator warns about it.
+        enabled_tools = None
 
     # Validate max_fix_retries
     raw_retries = data.get("max_fix_retries")

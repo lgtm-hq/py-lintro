@@ -30,8 +30,8 @@ class ExecutionConfig(BaseModel):
             present, or a language-scoped set on a no-config first run (use
             ``--tools all`` or ``lintro init`` for the full set). A non-empty
             list restricts the run to exactly those tools; tools outside it
-            are not reported individually. An explicit empty list is rejected
-            by the validator. An explicit comma-separated ``--tools`` list
+            are not reported individually. An explicit empty list is deprecated:
+            the loader treats it as unset and the validator warns. An explicit comma-separated ``--tools`` list
             bypasses this allowlist.
         fail_fast: Stop on first tool failure.
         parallel: Run tools in parallel where possible.

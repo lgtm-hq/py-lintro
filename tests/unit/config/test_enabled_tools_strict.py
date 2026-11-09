@@ -11,7 +11,6 @@ from lintro.config.config_loader import _parse_execution_config, load_config
 from lintro.config.config_validator import validate_config_file
 from lintro.config.execution_config import ExecutionConfig
 from lintro.config.lintro_config import LintroConfig
-from lintro.exceptions.errors import ConfigurationError
 
 
 def _write(tmp_path: Path, content: str) -> Path:
@@ -41,26 +40,27 @@ def test_loader_passes_non_empty_list_through() -> None:
     assert_that(config.enabled_tools).is_equal_to(["ruff", "mypy"])
 
 
-def test_loader_rejects_explicit_empty_list() -> None:
-    """An explicit ``[]`` is an error with an actionable message."""
-    with pytest.raises(ValueError, match="omit the key to run all tools"):
-        _parse_execution_config({"enabled_tools": []})
+def test_loader_treats_explicit_empty_list_as_unset() -> None:
+    """An explicit ``[]`` behaves like an absent key (all tools)."""
+    assert_that(_parse_execution_config({"enabled_tools": []}).enabled_tools).is_none()
 
 
-def test_load_config_empty_list_is_configuration_error(tmp_path: Path) -> None:
-    """Loading a config with ``enabled_tools: []`` fails with ConfigurationError.
+def test_load_config_empty_list_does_not_raise(tmp_path: Path) -> None:
+    """Loading ``enabled_tools: []`` succeeds and leaves the allowlist unset.
 
     Args:
         tmp_path: Pytest temporary directory.
     """
     path = _write(tmp_path, "execution:\n  enabled_tools: []\n")
 
-    with pytest.raises(ConfigurationError, match="must not be an empty list"):
-        load_config(config_path=str(path))
+    config = load_config(config_path=str(path))
+
+    assert_that(config.execution.enabled_tools).is_none()
+    assert_that(config.is_tool_in_enabled_tools("ruff")).is_true()
 
 
-def test_validator_flags_empty_list_as_error(tmp_path: Path) -> None:
-    """The validator reports ``enabled_tools: []`` as an error.
+def test_validator_warns_on_empty_list(tmp_path: Path) -> None:
+    """The validator warns, without failing, on ``enabled_tools: []``.
 
     Args:
         tmp_path: Pytest temporary directory.
@@ -69,9 +69,14 @@ def test_validator_flags_empty_list_as_error(tmp_path: Path) -> None:
 
     result = validate_config_file(path)
 
-    assert_that(result.is_valid).is_false()
-    rendered = [e.render() for e in result.errors]
-    assert_that(any("omit the key to run all tools" in m for m in rendered)).is_true()
+    assert_that(result.is_valid).is_true()
+    rendered = [w.render() for w in result.warnings]
+    assert_that(
+        any("is an empty list; it runs all tools" in m for m in rendered),
+    ).is_true()
+    assert_that(
+        any("Omit the key, or list the tools to run." in m for m in rendered),
+    ).is_true()
 
 
 @pytest.mark.parametrize(

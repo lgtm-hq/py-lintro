@@ -312,6 +312,32 @@ def _check_named_tool_list(
         )
 
 
+def _warn_empty_enabled_tools(
+    execution: dict[str, Any],
+    warnings: list[ValidationMessage],
+) -> None:
+    """Warn that an explicit empty ``enabled_tools`` list is deprecated.
+
+    An empty list behaves like an absent key (all tools run).
+
+    Args:
+        execution: The ``execution`` mapping.
+        warnings: List to append the finding to.
+    """
+    value = execution.get("enabled_tools")
+    if isinstance(value, list) and not value:
+        warnings.append(
+            ValidationMessage(
+                code=ValidationCode.DEPRECATED_OPTION,
+                message=(
+                    "execution.enabled_tools is an empty list; it runs all "
+                    "tools. Omit the key, or list the tools to run."
+                ),
+                location="execution.enabled_tools",
+            ),
+        )
+
+
 def _check_section_types(
     parsed: dict[str, Any],
     errors: list[ValidationMessage],
@@ -596,6 +622,7 @@ def _schema_check_normalized(
                 "execution",
                 result.warnings,
             )
+        _warn_empty_enabled_tools(execution, result.warnings)
         _check_named_tool_list(
             execution,
             key="enabled_tools",

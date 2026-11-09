@@ -13,13 +13,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- **config** (BREAKING for `[]`): `execution.enabled_tools` is now a strict allowlist.
-  Tools outside a non-empty list are no longer listed one per row as
-  `SKIP | not in enabled_tools`; the pre-execution summary prints one dim count line and
-  `--verbose` (or JSON output) names them. An explicit `enabled_tools: []` is now a
-  validation error. **Migration:** delete the `enabled_tools: []` line to keep the "run
-  all tools" behaviour (omitting the key is unchanged), or list the tools to run.
-  `lintro init` no longer writes `enabled_tools: []`. Closes #3066.
+- **config**: `execution.enabled_tools` is now a strict allowlist. Tools outside a
+  non-empty list are no longer listed one per row as `SKIP | not in enabled_tools`; the
+  pre-execution summary prints one dim count line and `--verbose` (or JSON output) names
+  them. An explicit `enabled_tools: []` is deprecated: it behaves like an omitted key
+  (all tools run) and `lintro config validate` now warns. **Migration:** delete the
+  `enabled_tools: []` line, or list the tools to run. `lintro init` no longer writes
+  `enabled_tools: []`. Closes #3066.
 
 ### Deprecated
 
