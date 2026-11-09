@@ -31,27 +31,6 @@ allowlist:
       it stays disabled by design rather than being a regression.
 
 interim:
-  # TODO(3286): bump the lintro-tools image digest so stylelint and trufflehog
-  # meet the raised minimums and stop skipping on the version check.
-  - tool: stylelint
-    reason_class: other
-    issue: 3286
-    rationale: >-
-      TODO(3286): the pinned tools image ships stylelint 17.16.0, below the
-      18.0.0 minimum, so the version check skips it ("below minimum
-      requirement" classifies as other). Interim only — delete this entry when
-      the image digest bump lands.
-
-  # TODO(3286): same image digest bump as stylelint above.
-  - tool: trufflehog
-    reason_class: other
-    issue: 3286
-    rationale: >-
-      TODO(3286): the pinned tools image ships trufflehog 3.99.2, below the
-      3.99.8 minimum, so the version check skips it ("below minimum
-      requirement" classifies as other). Interim only — delete this entry when
-      the image digest bump lands.
-
   # TODO(1492): add a root .vale.ini so repo docs are prose-linted for real.
   - tool: vale
     reason_class: no_config
