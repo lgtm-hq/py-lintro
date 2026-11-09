@@ -146,6 +146,18 @@ ai:
   max_parallel_calls: 5 # 1-20, concurrent API calls for fix generation
   validate_after_group: false # interactive mode: re-check right after each group
   show_cost_estimate: true
+  # Lockfiles are regenerated, never hand-edited, and a dependency catch-up
+  # can push the raw diff past the CLI-transport review ceiling (#3283 hit
+  # 1.5 MB with two thirds of it lockfile churn). Keep them out of the diff
+  # the reviewer sees; the manifests they derive from stay in scope.
+  exclude_paths:
+    - uv.lock
+    - '**/uv.lock'
+    - bun.lock
+    - '**/bun.lock'
+    - bun.lockb
+    - '**/bun.lockb'
+    - requirements-semgrep.txt
 
 # AI diff review (`lintro review`).
 review:
