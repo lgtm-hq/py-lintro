@@ -7,23 +7,28 @@ against `get_tool_version('gitleaks')` before installing anything; it builds wit
 `gore2regex` tag and Version ldflag. No source fork, replacement module, floating
 build-time update is involved.
 
-The seven changed embedded dependencies are:
+The eight changed embedded dependencies are:
 
-| Module                            | Selected version |
-| --------------------------------- | ---------------- |
-| `github.com/klauspost/compress`   | `v1.20.3`        |
-| `github.com/nwaples/rardecode/v2` | `v2.2.1`         |
-| `github.com/ulikunitz/xz`         | `v0.5.15`        |
-| `golang.org/x/crypto`             | `v0.56.0`        |
-| `golang.org/x/sync`               | `v0.22.0`        |
-| `golang.org/x/sys`                | `v0.47.0`        |
-| `golang.org/x/text`               | `v0.41.0`        |
+| Module                            | Selected version                        |
+| --------------------------------- | --------------------------------------- |
+| `github.com/andybalholm/brotli`   | `v1.2.8`                                |
+| `github.com/klauspost/compress`   | `v1.20.3`                               |
+| `github.com/nwaples/rardecode/v2` | `v2.2.1`                                |
+| `github.com/ulikunitz/xz`         | `v0.5.15`                               |
+| `golang.org/x/crypto`             | `v0.58.1-0.20261009181718-2f1f834330b2` |
+| `golang.org/x/sync`               | `v0.24.0`                               |
+| `golang.org/x/sys`                | `v0.49.0`                               |
+| `golang.org/x/text`               | `v0.43.0`                               |
 
 RAR `v2.2.0` does not implement the `io.WriterTo` interface required by the unchanged
-`mholt/archives v0.1.2`; `v2.2.1` restores compatibility. The newer `x/crypto` requires
-`x/sys v0.47.0`, and `x/text` requires `x/sync v0.22.0`. Those two transitive upgrades
-are not independent feature updates. The other 58 embedded third-party dependency
-versions and checksums remain unchanged.
+`mholt/archives v0.1.2`; `v2.2.1` restores compatibility. `brotli v1.2.8` fixes
+`GO-2026-6888` (excessive allocation on crafted streams; `v1.2.8` also completes the
+short-read detection of the `v1.2.7` fix). The `x/crypto` pseudo-version is `v0.58.0`
+plus the single upstream commit that carves `openpgp` out into its own module, which is
+the version OSV lists as fixing `GO-2026-5932`; no tagged release carries it yet. The
+newer `x/crypto` requires `x/sys v0.49.0`, and `x/text` requires `x/sync v0.24.0`. Those
+two transitive upgrades are not independent feature updates. The other 57 embedded
+third-party dependency versions and checksums remain unchanged.
 
 ## Updating
 
@@ -42,16 +47,12 @@ automatically. Cache mounts keep Go source/build caches out of the image layers.
 
 ## Security scope
 
-The module-level, no-fixed-version `GO-2026-5932` advisory concerns
-`golang.org/x/crypto/openpgp`. The current `gore2regex`, CGO-disabled amd64 and arm64
-command builds do not import any of its affected packages. Keep that narrow
-package-absence evidence separate from saying the module is patched; recheck when
-source, flags, platform or dependencies change. Every image build now checks the actual
-target-specific import closure with `verify_imports.py` before installing Gitleaks and
-fails if an affected OpenPGP package is present. A time-limited root OSV exception
-expires on 2026-11-25; it records package absence, not a patched module. A regression
-rejects additional non-fixture Go modules so that advisory-wide exception cannot
-silently cover a new consumer. Reassess applicability and upstream status before expiry.
+`GO-2026-5932` concerns `golang.org/x/crypto/openpgp`. The selected `x/crypto` no longer
+contains that package (it is a separate module upstream), so the advisory is fixed in
+this closure and the former time-limited root OSV exception is gone. Every image build
+still checks the actual target-specific import closure with `verify_imports.py` before
+installing Gitleaks and fails if an OpenPGP package is present, and a regression still
+rejects additional non-fixture Go modules.
 
 This closure is not whole-image security clearance. Other installed binaries,
 pip-private dependency copies, distro packages, and the normal image
