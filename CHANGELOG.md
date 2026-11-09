@@ -25,8 +25,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- **config**: make execution.enabled_tools a strict allowlist and reject an empty list
-  (#3287) (570788f)
+- **config**: make execution.enabled_tools a strict allowlist; an explicit empty list
+  is deprecated and warns on validate (#3287) (570788f)
 
 ### Changed
 
