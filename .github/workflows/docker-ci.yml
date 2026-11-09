@@ -138,7 +138,7 @@ jobs:
         id: detect
         if: github.event_name == 'pull_request'
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/detect-changes@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+        uses: lgtm-hq/lgtm-ci/.github/actions/detect-changes@bfeaec696ae5831fb369c8840cdf0df401fd8f8b # v0.91.1
         with:
           # Pipeline relevance is NOT decided here (#1369): the resolve
           # step below computes it deny-by-default from the changed-file
@@ -575,12 +575,12 @@ jobs:
       needs.changes.outputs.lint-scope != 'changed' &&
       needs.docker-build.result == 'success'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@bfeaec696ae5831fb369c8840cdf0df401fd8f8b # v0.91.1
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      tooling-ref: 'bfeaec696ae5831fb369c8840cdf0df401fd8f8b' # v0.91.1
       job-name: '🛠️ Dogfooding Lint'
       # Disable Semgrep's startup update request; keep scan metrics auto (#2521).
       semgrep-enable-version-check: '0'
@@ -930,12 +930,12 @@ jobs:
       needs.dogfooding-lint.result == 'failure' &&
       needs.docker-build.result == 'success'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@bfeaec696ae5831fb369c8840cdf0df401fd8f8b # v0.91.1
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      tooling-ref: 'bfeaec696ae5831fb369c8840cdf0df401fd8f8b' # v0.91.1
       job-name: '🛠️ Dogfooding Lint (retry)'
       semgrep-enable-version-check: '0'
       # black:timeout=120: the 30s default timed out on the full repo (#2352).
@@ -1147,7 +1147,7 @@ jobs:
       github.event.pull_request.head.repo.fork == false &&
       github.event.pull_request.draft == false
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@bfeaec696ae5831fb369c8840cdf0df401fd8f8b # v0.91.1
     permissions:
       contents: read
       pull-requests: write # post lintro results as PR comment
@@ -1161,7 +1161,7 @@ jobs:
           needs.dogfooding_lint_retry.outputs.exit-code
         )
         || needs.dogfooding-lint.outputs.exit-code }}
-      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      tooling-ref: 'bfeaec696ae5831fb369c8840cdf0df401fd8f8b' # v0.91.1
       job-name: '🛠️ Dogfooding Lint PR Comment'
       egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
 
@@ -1181,11 +1181,11 @@ jobs:
         github.event.pull_request.draft == false
       )
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@bfeaec696ae5831fb369c8840cdf0df401fd8f8b # v0.91.1
     permissions:
       contents: read
     with:
-      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      tooling-ref: 'bfeaec696ae5831fb369c8840cdf0df401fd8f8b' # v0.91.1
       job-name: '🛠️ Lintro Code Quality'
       runner-image: ubuntu-24.04
       # Consumes the rolled-up gate verdict (#1313), which itself mirrors
@@ -1281,7 +1281,7 @@ jobs:
           github.event_name == 'pull_request'
         continue-on-error: true
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@bfeaec696ae5831fb369c8840cdf0df401fd8f8b # v0.91.1
         with:
           file: security-audit-comment.txt
           marker: security-audit-report

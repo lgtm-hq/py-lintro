@@ -65,7 +65,7 @@ jobs:
   ai-tools-image:
     name: 🤖 Lintro AI Tools Image
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@bfeaec696ae5831fb369c8840cdf0df401fd8f8b # v0.91.1
     permissions:
       contents: read
       packages: write # push image, cache, and staging tags to GHCR
@@ -101,7 +101,7 @@ jobs:
       cosign-sign: true
       scan: true
       scan-exit-code: '0'
-      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      tooling-ref: 'bfeaec696ae5831fb369c8840cdf0df401fd8f8b' # v0.91.1
       egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       egress-preset: docker
       # Full list (v0.50.0+ replace semantics): the reusable passes
