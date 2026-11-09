@@ -33,7 +33,6 @@ enforce:
   target_python: "py313"
 
 execution:
-  enabled_tools: []
   fail_fast: false
 
 defaults:
@@ -178,15 +177,11 @@ def _generate_config(
         lines.append("  line_length: 88")
         lines.append("")
 
-    lines.extend(
-        [
-            "execution:",
-            f"  enabled_tools: [{', '.join(sorted(tools))}]",
-            "  fail_fast: false",
-            "",
-            "tools:",
-        ],
-    )
+    lines.append("execution:")
+    # An empty allowlist is invalid; omit the key to run all tools instead.
+    if tools:
+        lines.append(f"  enabled_tools: [{', '.join(sorted(tools))}]")
+    lines.extend(["  fail_fast: false", "", "tools:"])
     for tool_name in sorted(tools):
         lines.append(f"  {tool_name}:")
         lines.append("    enabled: true")

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from lintro.utils.console.pre_execution_summary import AllowlistNotice
     from lintro.utils.execution.tool_configuration import SkippedTool
 
 # Substrings in a skip reason that mean "the tool is not installed".
@@ -174,29 +175,54 @@ def resolve_diff_scope(
     return DiffScope(base=resolved_base)
 
 
+def collect_per_tool_auto_install(
+    *,
+    tools_to_run: list[str],
+    lintro_config: Any,
+) -> dict[str, bool | None] | None:
+    """Collect per-tool ``auto_install`` overrides for the summary.
+
+    Args:
+        tools_to_run: Tools selected for the main phase.
+        lintro_config: Loaded Lintro configuration.
+
+    Returns:
+        dict[str, bool | None] | None: Overrides by tool name, or ``None``
+        when no selected tool sets one.
+    """
+    per_tool_auto: dict[str, bool | None] = {}
+    for name in tools_to_run:
+        tool_cfg = lintro_config.get_tool_config(name)
+        if tool_cfg.auto_install is not None:
+            per_tool_auto[name] = tool_cfg.auto_install
+    return per_tool_auto or None
+
+
 def confirm_pre_execution(
     *,
     tools_to_run: list[str],
     skipped_tools: list[SkippedTool],
-    lintro_config: Any,
+    per_tool_auto_install: dict[str, bool | None] | None,
     effective_auto_install: bool,
-    is_container: bool,
     ai_status_lines: list[str] | None,
     logger: Any,
     yes: bool,
+    allowlist: AllowlistNotice | None = None,
 ) -> bool:
     """Print the configuration summary and ask the user to proceed.
 
     Args:
         tools_to_run: Tools selected for the main phase.
         skipped_tools: Tools that will not run, with their reasons.
-        lintro_config: Loaded Lintro configuration.
+        per_tool_auto_install: Per-tool ``auto_install`` overrides, or ``None``
+            when no tool sets one (see :func:`collect_per_tool_auto_install`).
         effective_auto_install: Resolved auto-install setting for the run.
-        is_container: Whether Lintro is running inside a container.
         ai_status_lines: Pre-rendered AI rows for the summary table, or
             ``None`` when the caller supplied no AI layer.
         logger: Console logger used for the abort message.
         yes: Whether the caller pre-approved the run.
+        allowlist: Tools excluded by a non-empty ``execution.enabled_tools``;
+            summarised as a count (named only when verbose).
 
     Returns:
         bool: ``True`` when the run should proceed, ``False`` when the user
@@ -206,13 +232,7 @@ def confirm_pre_execution(
 
     from lintro.utils.console.pre_execution_summary import print_pre_execution_summary
     from lintro.utils.environment import detect_ci_environment
-
-    # Collect per-tool auto_install settings
-    per_tool_auto: dict[str, bool | None] = {}
-    for name in tools_to_run:
-        tool_cfg = lintro_config.get_tool_config(name)
-        if tool_cfg.auto_install is not None:
-            per_tool_auto[name] = tool_cfg.auto_install
+    from lintro.utils.environment.container_detection import is_container_environment
 
     ci_env = detect_ci_environment()
     is_ci = ci_env is not None and ci_env.is_ci
@@ -220,10 +240,11 @@ def confirm_pre_execution(
         tools_to_run=tools_to_run,
         skipped_tools=skipped_tools,
         effective_auto_install=effective_auto_install,
-        is_container=is_container,
+        is_container=is_container_environment(),
         is_ci=is_ci,
-        per_tool_auto_install=per_tool_auto if per_tool_auto else None,
+        per_tool_auto_install=per_tool_auto_install,
         ai_status_lines=ai_status_lines,
+        allowlist=allowlist,
     )
 
     # Confirmation prompt — skip when non-interactive

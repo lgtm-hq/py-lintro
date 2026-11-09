@@ -20,6 +20,7 @@ import pytest
 from assertpy import assert_that
 
 import lintro.utils.tool_executor as te
+from lintro.config.execution_config import ExecutionConfig
 from lintro.config.lintro_config import LintroConfig
 from lintro.enums.action import Action
 from lintro.models.core.run_artifact import RunArtifact
@@ -442,6 +443,35 @@ def test_execute_run_marks_an_unknown_tool_selection_as_early_exit(
     assert_that(artifact.early_exit).is_true()
     assert_that(artifact.exit_code).is_equal_to(1)
     assert_that(artifact.tool_results).is_empty()
+
+
+def test_execute_run_explains_an_allowlist_that_excluded_everything(
+    monkeypatch: pytest.MonkeyPatch,
+    executor_doubles: None,
+    tmp_path: Path,
+    fake_logger: Any,
+) -> None:
+    """Nothing running because of ``enabled_tools`` names the configured entries."""
+    monkeypatch.setattr(
+        te,
+        "get_tools_to_run",
+        lambda tools, action, **_kw: ToolsToRunResult(
+            not_in_allowlist=["ruff", "mypy"],
+        ),
+    )
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger)
+    ctx = replace(
+        ctx,
+        lintro_config=LintroConfig(
+            execution=ExecutionConfig(enabled_tools=["rufff"]),
+        ),
+    )
+
+    _run_execute(ctx=ctx)
+
+    text = _console_texts(fake_logger)
+    assert_that(text).contains("2 tools were excluded by execution.enabled_tools")
+    assert_that(text).contains("configured: rufff")
 
 
 def test_execute_run_records_skipped_tools_in_the_artifact(

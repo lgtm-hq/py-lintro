@@ -139,10 +139,10 @@ class LintroConfig(BaseModel):
             tool_name: Name of the tool.
 
         Returns:
-            bool: True when ``enabled_tools`` is empty or contains the tool name
-                using either hyphen or underscore spelling.
+            bool: True when ``enabled_tools`` is unset (``None``) or contains the
+                tool name using either hyphen or underscore spelling.
         """
-        if not self.execution.enabled_tools:
+        if self.execution.enabled_tools is None:
             return True
         return _contains_tool_name_alias(tool_name, self.execution.enabled_tools)
 
@@ -150,7 +150,7 @@ class LintroConfig(BaseModel):
         """Check if a tool is enabled.
 
         A tool is enabled if:
-        1. execution.enabled_tools is empty (all tools enabled), OR
+        1. execution.enabled_tools is unset (all tools enabled), OR
         2. tool_name is in execution.enabled_tools, AND
         3. The tool's config has enabled=True (default)
 

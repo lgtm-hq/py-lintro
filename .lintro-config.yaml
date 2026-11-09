@@ -10,7 +10,6 @@ enforce:
   # target_python omitted - let ruff infer from requires-python in pyproject.toml
 
 execution:
-  enabled_tools: []
   fail_fast: false
   parallel: true
   max_workers: 10 # 1-32, defaults to CPU count if omitted

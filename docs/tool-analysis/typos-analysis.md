@@ -116,7 +116,7 @@ splits selection in two:
   `PATH` **and** it is not filtered by `execution.enabled_tools` or
   `tools.typos.enabled: false`. `lintro init --profile recommended` writes a
   language-map `enabled_tools` allowlist that does not include typos. An unscoped config
-  (`enabled_tools: []` or omitted) will start spell-checking on upgrade.
+  (`enabled_tools` omitted) will start spell-checking on upgrade.
 
 Explicit selection (`--tools typos`) works in either case.
 
@@ -145,7 +145,7 @@ native JSON parser is the higher-fidelity choice.
 
 ## Configuration in this repository
 
-This repository keeps an unscoped `enabled_tools: []` config, so typos runs on
+This repository keeps an unscoped config (no `enabled_tools`), so typos runs on
 `lintro check` here. That is not universal: no-config first runs and
 `lintro init --profile recommended` do not select typos (see **When typos is
 selected**). The repo ships a `.typos.toml` (the project's spell-checker config,

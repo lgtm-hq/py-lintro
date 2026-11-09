@@ -145,6 +145,10 @@ class ToolsToRunResult:
     skipped: list[SkippedTool] = field(default_factory=list)
     detected_languages: list[str] = field(default_factory=list)
     scoped_by_detection: bool = False
+    not_in_allowlist: list[str] = field(default_factory=list)
+    """Tools left out of a default / ``all`` run by a non-empty
+    ``execution.enabled_tools``. Not part of ``skipped``: they are summarised
+    as a count rather than listed one per row."""
 
 
 def _apply_conflict_resolution(
@@ -657,7 +661,7 @@ def get_tools_to_run(
             tools is None
             and config.config_path is None
             and not config.tools
-            and not config.execution.enabled_tools
+            and config.execution.enabled_tools is None
         ):
             detected_languages, scoped_names = _detection_scoped_tool_names(
                 scan_roots=scan_roots,
@@ -666,6 +670,7 @@ def get_tools_to_run(
 
         to_run: list[str] = []
         skipped: list[SkippedTool] = []
+        not_in_allowlist: list[str] = []
         for name in available_tools:
             if name.lower() == "pytest":
                 continue
@@ -676,6 +681,10 @@ def get_tools_to_run(
                 continue
             # Silently drop tools that do not apply to detected languages.
             if scoped_names is not None and name.lower() not in scoped_names:
+                continue
+            # Outside a non-empty allowlist: counted, not listed row by row.
+            if not config.is_tool_in_enabled_tools(name):
+                not_in_allowlist.append(name)
                 continue
             if not config.is_tool_enabled(name):
                 reason = _get_disabled_reason(config, name)
@@ -694,6 +703,7 @@ def get_tools_to_run(
             skipped=skipped,
             detected_languages=detected_languages,
             scoped_by_detection=scoped_by_detection,
+            not_in_allowlist=not_in_allowlist,
         )
 
     # Parse specific tools (accept hyphen or underscore spellings)

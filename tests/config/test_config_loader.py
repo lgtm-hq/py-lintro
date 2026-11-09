@@ -41,7 +41,7 @@ def test_execution_config_empty_data() -> None:
     """Should return execution config defaults."""
     config = _parse_execution_config({})
 
-    assert_that(config.enabled_tools).is_equal_to([])
+    assert_that(config.enabled_tools).is_none()
     assert_that(config.fail_fast).is_false()
     assert_that(config.parallel).is_true()
 

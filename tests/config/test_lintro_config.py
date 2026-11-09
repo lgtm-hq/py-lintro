@@ -22,7 +22,7 @@ def test_execution_config_defaults() -> None:
     """ExecutionConfig should have sensible defaults."""
     config = ExecutionConfig()
 
-    assert_that(config.enabled_tools).is_equal_to([])
+    assert_that(config.enabled_tools).is_none()
     assert_that(config.fail_fast).is_false()
     assert_that(config.parallel).is_true()
 
