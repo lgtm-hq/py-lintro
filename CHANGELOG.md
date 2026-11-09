@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.178.2] - 2026-11-09
+
+### Fixed
+
+- **security,ai**: clear the red-main advisories and exclude lockfiles from the review
+  diff (#3289) (148551c)
+
 ## [0.178.1] - 2026-11-05
 
 ### Fixed
