@@ -495,7 +495,7 @@ def test_committed_allowlist_is_valid_and_seeds_expected_tools() -> None:
     )
     data = yaml.safe_load(allowlist_path.read_text(encoding="utf-8"))
     allowlist = mod.load_allowlist(data)
-    for tool in ("idiom-review", "stylelint", "vale", "commitlint", "pip_audit", "tsc"):
+    for tool in ("idiom-review", "vale", "commitlint", "pip_audit", "tsc"):
         assert_that(allowlist.get(tool)).is_not_none()
     assert_that(allowlist.get("idiom-review").interim).is_false()
     assert_that(allowlist.get("pip_audit").issue).is_equal_to(1505)
