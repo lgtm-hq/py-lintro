@@ -26,7 +26,7 @@
 # =============================================================================
 
 # yamllint / hadolint: pin is immutable by digest; tag is informational.
-FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:f4eddfcdae25bd46fbc4b3724db3163edacc1c0baa916efb6091b5a5fc68b1c6 AS ai-tools
+FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:57d436fb2dd28a4f2117eeb2ae8622e3638a1caf429f0e71633be1a74d60b265 AS ai-tools
 
 # Renovate: npm datasource for the two published CLIs, node-version for the
 # runtime. CURSOR_AGENT_VERSION has no Renovate datasource -- Cursor ships the
