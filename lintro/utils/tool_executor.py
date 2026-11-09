@@ -14,7 +14,10 @@ from lintro.enums.action import Action, normalize_action
 from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools import tool_manager, verify_pass
-from lintro.utils.console.pre_execution_summary import AllowlistNotice
+from lintro.utils.console.pre_execution_summary import (
+    AllowlistNotice,
+    format_no_tools_message,
+)
 from lintro.utils.execution.exit_codes import (
     DEFAULT_EXIT_CODE_FAILURE,
     DEFAULT_EXIT_CODE_SUCCESS,
@@ -589,7 +592,15 @@ def execute_run(
         )
 
     if not tools_to_run and not skipped_tools:
-        logger.console_output("No tools to run.")
+        if not_in_allowlist:
+            logger.console_output(
+                format_no_tools_message(
+                    excluded=len(not_in_allowlist),
+                    configured=ctx.lintro_config.execution.enabled_tools,
+                ),
+            )
+        else:
+            logger.console_output("No tools to run.")
         return finalize_artifact(
             ctx=ctx,
             all_results=[],

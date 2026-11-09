@@ -593,6 +593,33 @@ def _parse_enforce_config(data: dict[str, Any]) -> EnforceConfig:
     )
 
 
+def normalize_enabled_tools(raw: Any) -> Any:
+    """Normalize a raw ``execution.enabled_tools`` value.
+
+    A string becomes a one-element list. Blank strings (including blank list
+    entries) are dropped, and a value left with no entries is the deprecated
+    spelling of "unset" and becomes ``None``. Other types pass through so the
+    model reports them.
+
+    Args:
+        raw: The raw configuration value.
+
+    Returns:
+        Any: ``None`` when unset or blank, otherwise the cleaned list (or the
+        unchanged non-string, non-list value).
+    """
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return raw
+    cleaned = [
+        entry.strip() if isinstance(entry, str) else entry
+        for entry in raw
+        if not (isinstance(entry, str) and not entry.strip())
+    ]
+    return cleaned or None
+
+
 def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
     """Parse execution configuration section.
 
@@ -605,12 +632,7 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
     Raises:
         ValueError: If max_fix_retries is not a valid positive integer.
     """
-    enabled_tools = data.get("enabled_tools")
-    if isinstance(enabled_tools, str):
-        enabled_tools = [enabled_tools]
-    if isinstance(enabled_tools, list) and not enabled_tools:
-        # Deprecated spelling of "unset"; the validator warns about it.
-        enabled_tools = None
+    enabled_tools = normalize_enabled_tools(data.get("enabled_tools"))
 
     # Validate max_fix_retries
     raw_retries = data.get("max_fix_retries")

@@ -35,6 +35,24 @@ class AllowlistNotice:
     verbose: bool = False
 
 
+def format_no_tools_message(*, excluded: int, configured: list[str] | None) -> str:
+    """Explain why nothing ran when the allowlist excluded every candidate.
+
+    Args:
+        excluded: Number of tools excluded by ``execution.enabled_tools``.
+        configured: The configured ``enabled_tools`` entries.
+
+    Returns:
+        str: Plain-text message naming the configured entries.
+    """
+    noun = "tool was" if excluded == 1 else "tools were"
+    entries = ", ".join(configured or []) or "(none)"
+    return (
+        f"No tools to run: {excluded} {noun} excluded by execution.enabled_tools "
+        f"(configured: {entries}). Check the entries for typos."
+    )
+
+
 def format_allowlist_hidden_line(*, notice: AllowlistNotice) -> str:
     """Render the dim line summarising tools outside ``enabled_tools``.
 
