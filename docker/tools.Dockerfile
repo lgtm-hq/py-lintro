@@ -20,10 +20,10 @@
 # root Dockerfile until the FROM flip lands (see issue #1360).
 # =============================================================================
 
-FROM python:3.14-slim@sha256:cd89c30eda26ee911a4611b18680086e0ea42e6f5f8cbe653d07fa7958c9cec8 AS tools
+FROM python:3.14-slim@sha256:af8a5aa14780025dbfbcfbc81bd8a91ebd87711dd5b0f48ed71090949dd7cb1d AS tools
 
 ARG BUN_VERSION=1.4.4
-ARG UV_VERSION=0.13.6
+ARG UV_VERSION=0.13.7
 ARG PIP_VERSION=26.2.2
 ARG GO_VERSION=1.27.3
 

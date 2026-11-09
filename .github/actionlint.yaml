@@ -16,3 +16,11 @@ paths:
       # (#2506). Upstream rhysd/actionlint#657 is open and the PR adding the
       # key, #661, was closed unmerged, so the schema still rejects it.
       - 'unexpected key "queue" for "concurrency" section'
+self-hosted-runner:
+  # ubuntu-26.04 GitHub-hosted runners are GA, but actionlint <= 1.7.12 (the
+  # version in the Lintro tools image) does not know the labels yet
+  # (rhysd/actionlint#682). Remove these entries once the tools image ships an
+  # actionlint release that includes them.
+  labels:
+    - ubuntu-26.04
+    - ubuntu-26.04-arm

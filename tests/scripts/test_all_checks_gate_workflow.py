@@ -5,10 +5,30 @@ from typing import Any, cast
 
 import yaml
 
+from tests.scripts._action_pins import pinned_action_shas
+
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 GATE = WORKFLOWS / "all-checks-gate.yml"
-REPAIRED_GATE_REF = "8f0fd9339df5d30a529aa572ceb51345b8be33a0"
 DEFAULT_PR_TYPES = {"opened", "synchronize", "reopened"}
+
+
+def _canonical_lgtm_ci_ref() -> str:
+    """Return the one lgtm-ci commit every caller pins (#3047).
+
+    The gate adopted the #1197 retry recovery and #1207 block-egress repair
+    through its own pin (v0.79.2); since v0.87.0 both ride the canonical pin,
+    so the gate must match every other lgtm-ci caller rather than a literal.
+
+    Returns:
+        The 40-character lgtm-ci commit SHA shared by all callers.
+    """
+    shas = {
+        sha
+        for action, sha in pinned_action_shas().items()
+        if action.startswith("lgtm-hq/lgtm-ci/")
+    }
+    assert len(shas) == 1, f"lgtm-ci callers disagree: {sorted(shas)}"
+    return shas.pop()
 
 
 def _gate() -> dict[str, Any]:
@@ -46,7 +66,7 @@ def test_gate_uses_repaired_released_graph_without_bypasses() -> None:
     job = workflow["jobs"]["gate"]
     expected = (
         "lgtm-hq/lgtm-ci/.github/workflows/"
-        f"reusable-all-checks-gate.yml@{REPAIRED_GATE_REF}"
+        f"reusable-all-checks-gate.yml@{_canonical_lgtm_ci_ref()}"
     )
     assert job["uses"] == expected
     assert job["permissions"] == {

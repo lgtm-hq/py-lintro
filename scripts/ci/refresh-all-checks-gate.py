@@ -27,10 +27,10 @@ ran, and a recovery that finishes later sends its own event.
 The gate is never given a retry budget of its own: it is re-run only when one
 of its producers turned green, and the re-run gate re-judges every check from
 scratch, so a genuinely red producer keeps it red. Re-judging works because
-lgtm-ci's gate (``reusable-all-checks-gate.yml`` at the pinned v0.79.2) keeps
-only the latest attempt of each job's check run, so the failed attempt 1 no
-longer counts. Re-running gate 41776692371 by hand did exactly that: "All 131
-other check(s) passed".
+lgtm-ci's gate (``reusable-all-checks-gate.yml``, v0.79.2 and later, now on
+the canonical pin) keeps only the latest attempt of each job's check run, so
+the failed attempt 1 no longer counts. Re-running gate 41776692371 by hand did
+exactly that: "All 131 other check(s) passed".
 
 A ``pull_request`` gate is skipped once its PR has a newer head: the gate's
 concurrency group is per PR with ``cancel-in-progress``, so re-running the old

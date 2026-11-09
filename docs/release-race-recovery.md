@@ -71,7 +71,7 @@ its shared tag collision check and the publication workflows are unchanged.
 ## Required upstream change (lgtm-ci)
 
 The root implementation is pinned at
-`lgtm-hq/lgtm-ci@2097a900753e3e5ad0e336483501b278e99855ae` (`v0.78.1`), in
+`lgtm-hq/lgtm-ci@b830ca6972f0c9cbaeb1363283de594f68d66acf` (`v0.87.0`), in
 `.github/workflows/reusable-release-version-pr.yml`. This patch cannot place code
 between its last caller hook and its credentialed PR write. Main can still advance after
 the hook, so the repository defenses do not constitute an atomic fix.

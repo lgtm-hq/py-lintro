@@ -673,57 +673,29 @@ def test_every_attestation_verifying_job_allows_the_attestation_store() -> None:
 
 
 def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
-    """Keep canonical pins except the independently adopted repair callers.
+    """Every lgtm-ci reference uses the one canonical pin, without exceptions.
 
     Guards the repo-wide invariant from #1280: `uses:` refs,
     `tooling-ref:` inputs, and manual `actions/checkout` steps targeting
     lgtm-hq/lgtm-ci all point at the same lgtm-ci commit, so pins cannot
-    silently drift apart again. Only the named repair callers have independent
-    exact pins; tags, branches and short SHAs remain offenders.
+    silently drift apart again. The per-caller repair pins (#1197/#1207 gate,
+    #3093/#3089/#3200 Trivy) collapsed onto v0.87.0, which carries both
+    repairs, so the allowlist is gone (#3047). Tags, branches and short SHAs
+    are offenders.
     """
     canonical = _canonical_lgtm_ci_pin()
-    # Gate-only adoption needs the released #1197 retry recovery and #1207
-    # block-egress repair without migrating unrelated reusable callers.
-    independent_pins = {
-        "all-checks-gate.yml": "8f0fd9339df5d30a529aa572ceb51345b8be33a0",
-        # #3093: v0.83.11's verified Trivy acquisition, tools-image caller only.
-        "docker-tools-publish.yml": "cade5e687630ce3208bf914d0b1590145f3d569e",
-        # #3089: the ordinary-main publisher must select the same repair.
-        "docker-tools-promote.yml": "cade5e687630ce3208bf914d0b1590145f3d569e",
-    }
-    # #3200: only the release Docker workflow and its tooling adopt Trivy's
-    # verified acquisition. Other actions in this file keep the canonical pin.
-    release_repair_refs = {
-        (
-            ".github/workflows/docker-build-publish.yml",
-            action,
-            "cade5e687630ce3208bf914d0b1590145f3d569e",
-        )
-        for action in (
-            "lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml",
-            "tooling-ref",
-        )
-    }
     ref_pattern = re.compile(
         r"(lgtm-hq/lgtm-ci/[^@\s]+)@([^\s#]+)|tooling-ref:\s*[\"']?([^\"'\s#]+)",
     )
     offenders: list[str] = []
     for path in _workflow_paths():
-        expected_pin = independent_pins.get(path.name, canonical)
         for lineno, line in enumerate(
             path.read_text(encoding="utf-8").splitlines(),
             start=1,
         ):
             for match in ref_pattern.finditer(line):
                 ref = match.group(2) or match.group(3)
-                identity = (
-                    path.relative_to(_REPO_ROOT).as_posix(),
-                    match.group(1) or "tooling-ref",
-                    ref,
-                )
-                if identity in release_repair_refs:
-                    continue
-                if ref != expected_pin:
+                if ref != canonical:
                     offenders.append(f"{path.name}:{lineno}: {ref}")
 
         # Manual lgtm-ci tooling checkouts pin via a separate `ref:` field
@@ -735,7 +707,7 @@ def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
                 with_block = step.get("with") or {}
                 if with_block.get("repository") != "lgtm-hq/lgtm-ci":
                     continue
-                if with_block.get("ref") != expected_pin:
+                if with_block.get("ref") != canonical:
                     offenders.append(
                         f"{path.name}:{job_id}: checkout ref {with_block.get('ref')!r}",
                     )
@@ -1545,8 +1517,13 @@ def test_renovate_does_not_track_rustfmt_or_clippy_independently() -> None:
     assert_that(match_strings).does_not_contain("ToolName.CLIPPY")
     assert_that(match_strings).does_not_contain("ToolName.RUSTFMT")
 
+    # clippy reports ``0.1.<minor>`` (parsed as ``1.<minor>.0``) and cannot
+    # express rustc's patch level, so its record is the same toolchain's
+    # minor with a zero patch. Equal to rustc's full pin, the minimum was
+    # unreachable and clippy skipped inside the tools image (#3282).
+    rustc_major, rustc_minor, _ = TOOL_VERSIONS[ToolName.RUSTC].split(".")
     assert_that(TOOL_VERSIONS[ToolName.CLIPPY]).is_equal_to(
-        TOOL_VERSIONS[ToolName.RUSTC],
+        f"{rustc_major}.{rustc_minor}.0",
     )
 
     versions = (_REPO_ROOT / "lintro" / "_tool_versions.py").read_text(

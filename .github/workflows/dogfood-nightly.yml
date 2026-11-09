@@ -48,7 +48,7 @@ jobs:
   # is skipped, and classify-failure pings the tracker for the lost night.
   resolve-image:
     name: 🏷️ Resolve Dogfood Image
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # checkout the resolver script
       packages: read # read GHCR manifests/labels (no image pull)
@@ -64,7 +64,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
@@ -84,7 +84,7 @@ jobs:
           persist-credentials: false
       - name: Log in to GitHub Container Registry
         # yamllint disable-line rule:line-length
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -103,12 +103,12 @@ jobs:
     # Same reusable workflow and tool options as the docker-ci.yml full run
     # (dogfooding-lint) so nightly coverage matches the pre-merge gate.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@b830ca6972f0c9cbaeb1363283de594f68d66acf # v0.87.0
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      tooling-ref: 'b830ca6972f0c9cbaeb1363283de594f68d66acf' # v0.87.0
       job-name: '🌙 Nightly Dogfooding Lint'
       # Same startup protection as docker-ci; metrics stay auto (#2521).
       semgrep-enable-version-check: '0'
@@ -150,12 +150,12 @@ jobs:
         )
       )
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@b830ca6972f0c9cbaeb1363283de594f68d66acf # v0.87.0
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      tooling-ref: 'b830ca6972f0c9cbaeb1363283de594f68d66acf' # v0.87.0
       job-name: '🌙 Nightly Dogfooding Lint (retry)'
       semgrep-enable-version-check: '0'
       # black:timeout=120: the 30s default timed out on the full repo (#2352).
@@ -186,7 +186,7 @@ jobs:
     # reported from 2026-09-10 on. Kept in the nightly (not the required
     # docker-ci gate) so drift surfaces loudly without wedging every PR.
     needs: [resolve-image]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # checkout the verifier script + manifest
       packages: read # anonymous/authenticated GHCR pull of the resolved image
@@ -194,7 +194,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
@@ -213,7 +213,7 @@ jobs:
           persist-credentials: false
       - name: Log in to GitHub Container Registry
         # yamllint disable-line rule:line-length
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -243,7 +243,7 @@ jobs:
       always() &&
       !cancelled() &&
       needs.resolve-image.result == 'success'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: read # pull the resolved image from GHCR
@@ -259,7 +259,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
@@ -300,7 +300,7 @@ jobs:
           persist-credentials: false
       - name: Log in to GitHub Container Registry
         # yamllint disable-line rule:line-length
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -342,7 +342,7 @@ jobs:
         needs.dogfood-skip-gate.result == 'cancelled'
       ) &&
       needs.dogfood-skip-gate.outputs.status == ''
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: read # pull the resolved image from GHCR
@@ -358,7 +358,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
@@ -399,7 +399,7 @@ jobs:
           persist-credentials: false
       - name: Log in to GitHub Container Registry
         # yamllint disable-line rule:line-length
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -439,7 +439,7 @@ jobs:
       - dogfood-skip-gate
       - dogfood_skip_gate_retry
     if: always() && !cancelled()
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # sparse checkout of the classifier scripts below
     timeout-minutes: 5
@@ -451,7 +451,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
@@ -523,7 +523,7 @@ jobs:
     # first failure opens `fix(ci): main workflow failed: dogfood-nightly`,
     # repeat failures comment on the open issue instead of piling up.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@2097a900753e3e5ad0e336483501b278e99855ae # v0.78.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@b830ca6972f0c9cbaeb1363283de594f68d66acf # v0.87.0
     permissions:
       actions: read # read workflow/job metadata for the failure context
       contents: read # repository context for the issue body
@@ -531,4 +531,4 @@ jobs:
     with:
       egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       workflow-key: dogfood-nightly
-      tooling-ref: '2097a900753e3e5ad0e336483501b278e99855ae' # v0.78.1
+      tooling-ref: 'b830ca6972f0c9cbaeb1363283de594f68d66acf' # v0.87.0

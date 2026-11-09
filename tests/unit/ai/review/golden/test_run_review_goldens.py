@@ -85,13 +85,18 @@ def _stub_provider() -> MagicMock:
     return provider
 
 
-async def _replay_call_ai(*, user_prompt: str, budget: Any = None, **_: Any) -> Any:
+async def _replay_call_ai(
+    *,
+    user_prompt: str,
+    budget: Any = None,
+    **kwargs: Any,
+) -> Any:
     """Replay a fixed payload file based on which chunk the prompt covers.
 
     Args:
         user_prompt: Prompt the orchestrator built for this chunk.
         budget: Cost budget the orchestrator threads through ``call_ai``.
-        **_: Remaining ``call_ai`` keyword arguments, unused by the replay.
+        **kwargs: Remaining ``call_ai`` keyword arguments, unused by the replay.
 
     Returns:
         The fixed provider response for the matching chunk.

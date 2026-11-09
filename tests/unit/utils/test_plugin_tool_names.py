@@ -83,11 +83,11 @@ def test_broken_entry_point_metadata_degrades_to_empty(
         monkeypatch: Pytest monkeypatch fixture.
     """
 
-    def boom(**_: object) -> list[object]:
+    def boom(**kwargs: object) -> list[object]:
         """Raise as a broken metadata finder would.
 
         Args:
-            **_: Ignored keyword arguments (the group name).
+            **kwargs: Ignored keyword arguments (the group name).
 
         Returns:
             list[object]: Never returns.
