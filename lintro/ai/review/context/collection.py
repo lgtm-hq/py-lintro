@@ -18,6 +18,7 @@ from lintro.ai.review.context.git_ops import (
     _run_gh,
     _run_git,
 )
+from lintro.ai.review.context.pr_diff_fallback import build_local_pr_diff
 from lintro.ai.review.context.pr_metadata import (
     _parse_changed_files_from_diff,
     _parse_pr_view_json,
@@ -95,7 +96,11 @@ def collect_review_context(
         # ambient checkout is never the fallback, whatever commit it is at
         # — a matching commit says nothing about uncommitted edits.
         with known_review_head(context.head_ref):
-            worktree = checkout_pr_head(pr_number=pr_number, head_oid=context.head_ref)
+            worktree = checkout_pr_head(
+                pr_number=pr_number,
+                head_oid=context.head_ref,
+                head_fetched=context.diff_source == "local-git",
+            )
             checkout = ReviewCheckout.HEAD
             if worktree is None:
                 worktree = empty_workspace()
@@ -395,7 +400,7 @@ def _collect_pr_context(
         "view",
         str(pr_number),
         "--json",
-        "title,body,number,baseRefOid,headRefOid,headRepository,changedFiles",
+        "title,body,number,baseRefOid,headRefOid,headRepository,headRepositoryOwner,changedFiles",
     ]
     if repo is not None:
         diff_args.extend(["--repo", repo])
@@ -418,7 +423,17 @@ def _collect_pr_context(
             ) from exc
 
     with known_review_head(head_ref):
-        unified_diff = _run_gh(args=diff_args).stdout
+        try:
+            unified_diff = _run_gh(args=diff_args).stdout
+        except ReviewContextError as exc:
+            if exc.code is not ReviewContextErrorCode.GH_DIFF_SIZE_REFUSED:
+                raise
+            return build_local_pr_diff(
+                metadata=pr_metadata,
+                base=base_ref,
+                head=head_ref,
+                refusal=exc,
+            )
         changed_files = _parse_changed_files_from_diff(unified_diff=unified_diff)
         if pr_metadata.changed_files and not changed_files:
             raise ReviewContextError(
@@ -434,6 +449,7 @@ def _collect_pr_context(
             unified_diff=unified_diff,
             pr_metadata=pr_metadata,
             checkout=_probe_pr_checkout(base_ref=base_ref, head_ref=head_ref),
+            diff_source="github",
         )
 
 

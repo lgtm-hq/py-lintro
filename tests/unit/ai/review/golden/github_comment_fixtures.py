@@ -72,6 +72,7 @@ def golden_review_result() -> ReviewResult:
     """
     return ReviewResult(
         metadata=ReviewMetadata(
+            diff_source="github",
             model="claude-sonnet-4-20250514",
             provider="anthropic",
             transport="api",

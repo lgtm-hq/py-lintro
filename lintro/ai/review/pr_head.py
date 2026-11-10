@@ -1,16 +1,13 @@
 """A working tree at the pull request's head for the agent to read (#2733).
 
-On ``--pr`` the diff and refs come from ``gh`` and the CLI transport's agent
-(the question pass, every chunk call, the synthesis and verification passes)
-used to explore whatever tree the command ran in: today's ``main`` for a
-corpus replay of a merged PR, so questions and findings could cite code the
-PR never saw (#2732). This module pins that tree to the PR head: it fetches
-``refs/pull/<n>/head`` into a private ref and checks the head commit out in
-a temporary worktree under the cache directory, which becomes ``repo_root``
-for every provider call of the run and is removed when the run ends,
-whichever way it ends. When no repository is available the run is told so
-and every call goes out without tools (:attr:`ReviewCheckout.NONE`), never
-against the ambient tree.
+On ``--pr`` the CLI transport's agent reads a temporary worktree at the
+verified pull request head, rather than the ambient checkout. The shared
+head fetch also supplies the local diff fallback when GitHub refuses a diff
+for size. It fetches ``refs/pull/<n>/head`` into a private ref and requires
+it to match the head SHA reported by GitHub. The worktree becomes
+``repo_root`` for provider calls and is removed when the run ends. When a
+worktree is unavailable, the agent runs without tools
+(:attr:`ReviewCheckout.NONE`), never against the ambient tree.
 
 Ownership of the tree, from creation to removal, is split three ways:
 :class:`~lintro.ai.review.pr_head_guard.RemoveOnError` covers everything
@@ -44,6 +41,7 @@ from lintro.ai.review.context.git_ops import _run_git
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
+from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.models.coverage_degradation import (
     CARRIED_CHUNK_INDEX,
@@ -228,13 +226,42 @@ def _release(fh: IO[str] | None) -> None:
         fh.close()
 
 
-def checkout_pr_head(*, pr_number: int, head_oid: str) -> PrHeadWorktree | None:
+def fetch_pr_head(*, pr_number: int, head_oid: str) -> None:
+    """Fetch the private PR ref and require the metadata's exact head.
+
+    Args:
+        pr_number: Pull request whose private head ref is fetched.
+        head_oid: Expected head commit SHA.
+
+    Raises:
+        ReviewContextError: When fetch fails or the head moved.
+    """
+    ref = f"refs/lintro/pr/{pr_number}"
+    _run_git(
+        args=["fetch", "--no-tags", "origin", f"+refs/pull/{pr_number}/head:{ref}"],
+    )
+    resolved = _run_git(args=["rev-parse", "--verify", f"{ref}^{{commit}}"])
+    if resolved.stdout.strip() != head_oid:
+        raise ReviewContextError(
+            "The pull request head moved since metadata was read. "
+            "Retry the review to load the current head.",
+            code=ReviewContextErrorCode.PR_LOCAL_DIFF_FAILED,
+        )
+
+
+def checkout_pr_head(
+    *,
+    pr_number: int,
+    head_oid: str,
+    head_fetched: bool = False,
+) -> PrHeadWorktree | None:
     """Fetch the PR head and check it out in a temporary worktree.
 
     Args:
         pr_number: The pull request number, for ``refs/pull/<n>/head``.
         head_oid: The head commit ``gh`` reported; the fetched ref must
             resolve to it, or the worktree is not created.
+        head_fetched: Whether the diff fallback already verified the head fetch.
 
     Returns:
         The worktree, or ``None`` when the command does not run inside a
@@ -250,28 +277,9 @@ def checkout_pr_head(*, pr_number: int, head_oid: str) -> PrHeadWorktree | None:
         return None
     repo_root = root.stdout.strip()
     prune_stale_pr_worktrees(repo_root=repo_root)
-    ref = f"refs/lintro/pr/{pr_number}"
     try:
-        fetched = _run_git(
-            args=["fetch", "--no-tags", "origin", f"+refs/pull/{pr_number}/head:{ref}"],
-            check=False,
-        )
-        if fetched.returncode != 0:
-            logger.warning(
-                "Could not fetch refs/pull/{}/head; the review runs without a tree.",
-                pr_number,
-            )
-            return None
-        resolved = _run_git(args=["rev-parse", ref], check=False)
-        if resolved.returncode != 0 or resolved.stdout.strip() != head_oid:
-            logger.warning(
-                "refs/pull/{}/head resolved to {} but gh reported {}; the review "
-                "runs without a tree.",
-                pr_number,
-                resolved.stdout.strip()[:12],
-                head_oid[:12],
-            )
-            return None
+        if not head_fetched:
+            fetch_pr_head(pr_number=pr_number, head_oid=head_oid)
         base = _cache_dir(repo_root)
         if base is None:
             return None

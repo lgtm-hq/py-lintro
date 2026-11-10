@@ -63,7 +63,8 @@
     "fallback_reason": "",
     "shadow_price_model": "",
     "cost_reported": false,
-    "lint_facts_note": ""
+    "lint_facts_note": "",
+    "diff_source": ""
   },
   "summary": "",
   "findings": [

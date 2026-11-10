@@ -155,6 +155,7 @@ class ReviewMetadata:
             under the review header so a reader knows the model reviewed
             from the diff alone. Empty when facts were loaded or never asked
             for.
+        diff_source (str): Source of the diff (github, local-git, or git).
     """
 
     model: str
@@ -218,6 +219,7 @@ class ReviewMetadata:
     shadow_price_model: str = ""
     cost_reported: bool = False
     lint_facts_note: str = ""
+    diff_source: str = ""
 
     @property
     def findings_coverage_complete(self) -> bool:

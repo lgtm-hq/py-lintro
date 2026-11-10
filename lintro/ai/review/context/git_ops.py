@@ -189,7 +189,33 @@ def _run_gh(*, args: list[str]) -> subprocess.CompletedProcess[str]:
         stderr = result.stderr.strip() or result.stdout.strip() or "unknown gh error"
         raise ReviewContextError(
             f"gh {' '.join(args)} failed: {stderr}",
-            code=ReviewContextErrorCode.GH_COMMAND_FAILED,
+            code=(
+                ReviewContextErrorCode.GH_DIFF_SIZE_REFUSED
+                if args[:2] == ["pr", "diff"] and _is_diff_size_refusal(stderr)
+                else ReviewContextErrorCode.GH_COMMAND_FAILED
+            ),
         )
 
     return result
+
+
+def _is_diff_size_refusal(message: str) -> bool:
+    """Recognize GitHub's diff rendering size refusals only.
+
+    Args:
+        message: GitHub CLI failure output.
+
+    Returns:
+        Whether GitHub refused to render the diff for its size.
+    """
+    text = message.lower()
+    return any(
+        marker in text
+        for marker in (
+            "http 406",
+            "diff too large",
+            "diff is too large",
+            "diff exceeded",
+            "too many files",
+        )
+    )

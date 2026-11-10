@@ -311,6 +311,7 @@ _VALID_GH_PR_VIEW_FIELDS = frozenset(
         "baseRefOid",
         "headRefOid",
         "headRepository",
+        "headRepositoryOwner",
         "changedFiles",
     },
 )
@@ -1227,7 +1228,7 @@ def test_pr_raw_diff_cannot_skip_reported_changes(
         """Return a PR with changed files and a broken raw diff."""
         if args[1] == "view":
             assert_that(args).contains(
-                "title,body,number,baseRefOid,headRefOid,headRepository,changedFiles",
+                "title,body,number,baseRefOid,headRefOid,headRepository,headRepositoryOwner,changedFiles",
             )
             return _completed(
                 stdout=json.dumps(

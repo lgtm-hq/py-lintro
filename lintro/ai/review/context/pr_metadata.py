@@ -123,6 +123,8 @@ def _parse_pr_view_json(
         body = data.get("body")
         body_text = body if isinstance(body, str) else ""
 
+        owner = data.get("headRepositoryOwner")
+        login = owner.get("login") if isinstance(owner, dict) else None
         metadata = PRMetadata(
             changed_files=changed_files,
             title=title,
@@ -130,6 +132,7 @@ def _parse_pr_view_json(
             number=number,
             repo=repo_name,
             head_repo=parsed_head_repo,
+            head_owner=login if isinstance(login, str) else "",
         )
         return metadata, base_ref, head_ref
 
