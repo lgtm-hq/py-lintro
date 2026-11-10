@@ -177,6 +177,7 @@ failures without scraping human-readable stderr prose:
 {
   "error": {
     "kind": "auth_failed",
+    "code": null,
     "provider": "anthropic",
     "status": 401,
     "retryable": false,
@@ -188,26 +189,37 @@ failures without scraping human-readable stderr prose:
 | Field       | Type            | Meaning                                                                 |
 | ----------- | --------------- | ----------------------------------------------------------------------- |
 | `kind`      | string (enum)   | Canonical classification (see below). Stable across providers.          |
+| `code`      | string \| null  | Context error code, or `null` for provider failures.                    |
 | `provider`  | string          | Provider identifier, lowercased (e.g. `anthropic`, `openai`, `cursor`). |
-| `status`    | integer \| null | Extracted HTTP status (e.g. `401`, `429`, `529`), or `null` when none.  |
+| `status`    | integer \| null | Provider HTTP status, or `null` when absent or for context errors.      |
 | `retryable` | boolean         | `true` for transient conditions safe to retry unchanged.                |
 | `message`   | string          | The most specific underlying cause text.                                |
 
 `kind` is one of: `auth_failed`, `insufficient_credits`, `quota_exceeded`,
 `rate_limited`, `context_length`, `server_error`, `timeout`, `invalid_response`,
-`unknown`. `retryable` is `true` only for `rate_limited`, `server_error`, and `timeout`.
+`provider_unavailable`, `context_unavailable`, `unknown`. `retryable` is `true` only for
+`rate_limited`, `server_error`, and `timeout`.
 
 **Exit codes under `--output json`:**
 
-| Code | Meaning                                                            |
-| ---- | ------------------------------------------------------------------ |
-| `0`  | Review completed, no P1 findings. Success envelope on stdout.      |
-| `1`  | Review completed **with** P1 findings. Success envelope on stdout. |
-| `2`  | Provider/execution failure. **Error** envelope (above) on stdout.  |
+| Code | Meaning                                                                              |
+| ---- | ------------------------------------------------------------------------------------ |
+| `0`  | Review completed without P1 findings, or explicit no-changes skip.                   |
+| `1`  | Review completed **with** P1 findings. Success envelope on stdout.                   |
+| `2`  | Provider/execution/context collection failure. **Error** envelope (above) on stdout. |
 
-Exit `2` disambiguates a provider error from the P1-findings exit `1`, so consumers
-never have to guess whether stdout holds a review or an error — check for the top-level
-`error` key.
+Context failures carry `error.code` (the stable `ReviewContextErrorCode`) and the full
+command/cause in `error.message`. They are not provider-unavailable or provider fallback
+conditions. Exit 0 can instead carry a disclosed skip: `outcome: no_changes`,
+`review_ran: false`, and `skipped_files` with paths and reasons. No review ran, no
+coverage is claimed, and no state or findings are advanced. Under `--post`, stored
+findings are kept with a skip note when state is recoverable; otherwise nothing is
+posted. A raw PR diff missing despite GitHub reporting changed files is an exit-2
+context failure, checked before filters.
+
+Exit `2` disambiguates a provider or context error from the P1-findings exit `1`, so
+consumers never have to guess whether stdout holds a review or an error — check for the
+top-level `error` key.
 
 #### Requesting a review from a pull-request comment
 
@@ -774,3 +786,31 @@ Using Lintro in GitHub Actions provides:
 
 This integration transforms your repository into a high-quality, maintainable codebase
 with automated quality assurance! 🚀
+
+When finished prior review state is recoverable, a failed attempt re-renders the
+findings board with a failure banner and removes any separate failure notice. When state
+is unavailable, lintro leaves an existing board byte-for-byte unchanged and upserts a
+separate **latest review attempt did not complete** notice. That notice uses its own
+marker, gives the cause and head commit when known, and says the sticky findings board
+was not updated. Repeated failures attempt to update the existing notice, even when the
+board is at GitHub's comment size limit. A refused edit leaves it in place without a
+replacement. When duplicate notices are found, lintro keeps one and attempts to delete
+the rest.
+
+An older failure banner can remain inside the untouched board after a recoverable
+failure followed by an unrecoverable one. The separate notice names the latest attempt
+and its head commit when known; lintro cannot safely remove the older banner without
+recovering state. A successful sticky write removes all listed notices even when inline
+comments fail. Recoverable error and skip re-renders remove notices only after the
+sticky write succeeds. A nothing-to-review skip without recoverable state also attempts
+notice cleanup. Cleanup failures are logged and never fail the run; a skip with no
+recoverable state writes nothing else.
+
+If the sticky is confirmed absent, lintro posts the error-only sticky. An existing
+error-only page is replaced only when its complete layout is recognized. If listing
+comments fails, lintro writes nothing to the PR and logs a warning; the terminal or JSON
+error report and exit 2 still disclose the failure. Context failures do not name the AI
+provider as their cause.
+
+A PR review detected from the CI environment rejects `--base` and `--uncommitted`, just
+like an explicit `--pr`; these usage errors post nothing.

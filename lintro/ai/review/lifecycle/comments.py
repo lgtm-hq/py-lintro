@@ -17,7 +17,11 @@ from loguru import logger
 
 from lintro.ai.review.enums.comment_action import CommentAction
 from lintro.ai.review.enums.comment_kind import CommentKind
-from lintro.ai.review.github_constants import ARCHIVE_MARKER, STICKY_MARKER
+from lintro.ai.review.github_constants import (
+    ARCHIVE_MARKER,
+    FAILURE_NOTICE_MARKER,
+    STICKY_MARKER,
+)
 from lintro.ai.review.lifecycle.decision import (
     CommentPlan,
     ExistingComment,
@@ -28,6 +32,7 @@ from lintro.ai.review.sticky import parse_sticky_state
 
 __all__ = [
     "CommentClient",
+    "clear_failure_notice",
     "UpsertOutcome",
     "load_sticky_comment",
     "locate_comment",
@@ -38,19 +43,20 @@ __all__ = [
 #: Marker identifying each comment kind on the pull request. A kind is exactly
 #: "the comment carrying this marker", which is why one lookup serves them all.
 #:
-#: ``ERROR`` deliberately shares ``STICKY_MARKER``: a failed round is a *state
-#: of the board*, not a comment of its own, and ``format_error_comment``
+#: ``ERROR`` deliberately shares ``STICKY_MARKER`` for error-only pages and
+#: recoverable failure banners; ``format_error_comment``
 #: embeds the sticky marker in the body it renders. Giving it a marker of its
 #: own would make a superseded failure comment relocate by the wrong one.
 #:
 #: Every :class:`~lintro.ai.review.enums.comment_kind.CommentKind` must appear
 #: here — the lookups below index this map directly, so a missing kind is a
 #: ``KeyError`` at write time rather than a decision. The 2305 lifecycle tests
-#: assert the two sets are equal so a fourth kind cannot be added without one.
+#: assert the two sets are equal so a kind cannot be added without one.
 _MARKERS: dict[CommentKind, str] = {
     CommentKind.STICKY: STICKY_MARKER,
     CommentKind.ARCHIVE: ARCHIVE_MARKER,
     CommentKind.ERROR: STICKY_MARKER,
+    CommentKind.FAILURE_NOTICE: FAILURE_NOTICE_MARKER,
 }
 
 
@@ -165,12 +171,19 @@ def locate_comment(
         kind has not been posted yet.
     """
     found = reporter.find_issue_comment(marker=_MARKERS[kind])
+    if (
+        kind is CommentKind.FAILURE_NOTICE
+        and found is not None
+        and not found[1].startswith(FAILURE_NOTICE_MARKER)
+    ):
+        found = None
     return ExistingComment(comment_id=None if found is None else found[0])
 
 
 def load_sticky_comment(
     *,
     reporter: CommentClient,
+    notices: list[tuple[int, str]] | None = None,
 ) -> tuple[ExistingComment, ReviewState]:
     """Locate the sticky comment and decode any state left behind in it.
 
@@ -180,16 +193,29 @@ def load_sticky_comment(
 
     Args:
         reporter: GitHub client used to list the pull request's comments.
+        notices: Collect failure notices from the same listing.
 
     Returns:
         tuple[ExistingComment, ReviewState]: The live sticky comment and the
         state recovered from its body, both empty when there is no sticky.
     """
-    found = reporter.find_issue_comment(marker=STICKY_MARKER)
+    lookup = getattr(reporter, "lookup_issue_comments", None)
+    if notices is not None and callable(lookup):
+        comments = lookup(
+            markers=(STICKY_MARKER, FAILURE_NOTICE_MARKER),
+            anchored=(FAILURE_NOTICE_MARKER,),
+            strict=False,
+            all_matches=notices,
+        )
+        found = comments.get(STICKY_MARKER) if comments is not None else None
+    else:
+        found = reporter.find_issue_comment(marker=STICKY_MARKER)
     if found is None:
         return ExistingComment(), ReviewState()
     comment_id, body = found
-    return ExistingComment(comment_id=comment_id), parse_sticky_state(body=body)
+    return ExistingComment(comment_id=comment_id, body=body), parse_sticky_state(
+        body=body,
+    )
 
 
 def upsert_comment(
@@ -204,8 +230,8 @@ def upsert_comment(
     GitHub only lets the creating actor PATCH a comment, and after #2050 the
     poster is ``lintro-review[bot]``, so a leftover ``github-actions[bot]``
     comment answers ``403`` and has to be superseded rather than edited. That
-    answer is fed back through :func:`decide` instead of being branched on
-    here, so the fallback is the same decision the caller started from.
+    answer is fed back through :func:`decide`. Failure notices keep the
+    existing comment when an edit fails, avoiding duplicate failure reports.
 
     Args:
         reporter: GitHub client used to create, edit, or replace the
@@ -229,6 +255,12 @@ def upsert_comment(
         )
         if outcome is not None:
             return outcome
+        if kind is CommentKind.FAILURE_NOTICE:
+            logger.warning(
+                "Could not edit failure notice {}; leaving it in place",
+                plan.comment_id,
+            )
+            return UpsertOutcome(ok=False, comment_id=plan.comment_id)
         plan = decide(
             kind=kind,
             existing=replace(existing, editable=False),
@@ -413,3 +445,26 @@ def _post_with_retry(
         return created
     logger.warning("Failed to recreate the comment; retrying once")
     return _create(reporter=reporter, body=body, marker=marker)
+
+
+def clear_failure_notice(
+    *,
+    reporter: CommentClient,
+    notices: list[tuple[int, str]],
+) -> None:
+    """Remove all listed failure notices without failing the run.
+
+    Args:
+        reporter: Client used to delete the notices.
+        notices: Anchored notice matches from the posting path's listing.
+    """
+    for comment_id, _ in notices:
+        try:
+            if not reporter.delete_issue_comment(comment_id=comment_id):
+                logger.warning("Could not delete review failure notice {}", comment_id)
+        except Exception as exc:
+            logger.warning(
+                "Could not clear review failure notice {}: {}",
+                comment_id,
+                exc,
+            )

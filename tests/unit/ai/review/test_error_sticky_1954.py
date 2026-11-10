@@ -303,7 +303,10 @@ def _reporter(*, prior_body: str, bodies: list[str] | None = None) -> MagicMock:
 
     reporter = MagicMock()
     reporter.is_available.return_value = True
-    reporter.find_issue_comment.return_value = (9, prior_body)
+    reporter.find_issue_comment.side_effect = lambda *, marker: (
+        (9, prior_body) if marker == STICKY_MARKER else None
+    )
+    reporter.lookup_issue_comments.return_value = {STICKY_MARKER: (9, prior_body)}
     reporter.update_issue_comment.side_effect = _update
     reporter.repo = "owner/name"
     reporter.pr_number = 7
@@ -380,3 +383,99 @@ def test_render_state_sticky_omits_this_round_only_sections(
 
     assert_that(body).does_not_contain("**This run**")
     assert_that(body).does_not_contain("### Summary")
+
+
+@pytest.mark.parametrize("skip", [False, True])
+def test_preparation_preserves_stored_board_without_embedded_blob(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+    prior_state: ReviewState,
+    skip: bool,
+) -> None:
+    """Preparation loads the actual stored ledger before updating a modern sticky."""
+    from dataclasses import replace
+
+    from lintro.ai.review import github_status
+    from lintro.ai.review.exceptions import ReviewContextError
+    from lintro.ai.review.state_store import write_local_state
+    from lintro.cli_utils.commands import review as command
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv("LINTRO_REVIEW_STATE_DIR", raising=False)
+    stored = replace(prior_state, repo="owner/name", pr_number=7)
+    path = write_local_state(state=stored, key="pr-7")
+    before = path.read_bytes()
+    bodies: list[str] = []
+    sticky = render_state_sticky(state=stored)
+    assert_that(sticky).does_not_contain(STATE_MARKER_PREFIX)
+    reporter = _reporter(prior_body=sticky, bodies=bodies)
+    monkeypatch.setattr(github_status, "GitHubPRReporter", lambda **_: reporter)
+    options = MagicMock(post=True, output_format="json")
+    targets = command._ReviewTargets(
+        resolved_pr=7,
+        state_pr=7,
+        effective_repo="owner/name",
+    )
+    error = ReviewContextError(
+        "gh pr diff timed out",
+        code="no-changes" if skip else "gh-command-failed",
+    )
+    with pytest.raises(SystemExit) as caught:
+        command._finish_context_failure(
+            exc=error,
+            options=options,
+            targets=targets,
+            provider_label="anthropic",
+        )
+    assert_that(caught.value.code).is_equal_to(0 if skip else 2)
+    assert_that(bodies).is_length(1)
+    assert_that(bodies[0]).contains(
+        "### Findings ·",
+        "No reviewable changes, no review ran." if skip else "gh pr diff timed out",
+    )
+    assert_that(path.read_bytes()).is_equal_to(before)
+
+
+@pytest.mark.parametrize("load_fails", [False, True])
+def test_no_changes_without_stored_state_leaves_modern_sticky_untouched(
+    monkeypatch: pytest.MonkeyPatch,
+    prior_state: ReviewState,
+    load_fails: bool,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An unavailable ledger cannot erase a current sticky or turn a skip red."""
+    from lintro.ai.review import github_status
+    from lintro.ai.review.exceptions import ReviewContextError
+    from lintro.cli_utils.commands import review as command
+
+    bodies: list[str] = []
+    reporter = _reporter(
+        prior_body=render_state_sticky(state=prior_state),
+        bodies=bodies,
+    )
+    monkeypatch.setattr(github_status, "GitHubPRReporter", lambda **_: reporter)
+
+    def load(**_: object) -> ReviewState:
+        """Return no recoverable state, or simulate an unavailable store."""
+        if load_fails:
+            raise OSError("state store unavailable")
+        return ReviewState()
+
+    monkeypatch.setattr(command, "load_prior_review_state", load)
+    with pytest.raises(SystemExit) as caught:
+        command._finish_context_failure(
+            exc=ReviewContextError("No changes", code="no-changes"),
+            options=MagicMock(post=True, output_format="terminal"),
+            targets=command._ReviewTargets(
+                resolved_pr=7,
+                state_pr=7,
+                effective_repo="owner/name",
+            ),
+            provider_label="anthropic",
+        )
+    assert_that(caught.value.code).is_equal_to(0)
+    assert_that(capsys.readouterr().out).contains(
+        "No reviewable changes, no review ran.",
+    )
+    assert_that(bodies).is_empty()

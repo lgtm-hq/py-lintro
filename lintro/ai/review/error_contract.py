@@ -1,7 +1,7 @@
-"""Machine-readable JSON error contract for AI review provider failures.
+"""Machine-readable JSON error contract for AI review and context failures.
 
-When ``lintro review --output json`` cannot complete because the provider
-failed (invalid key, rate limit, depleted quota, 5xx, malformed response), a
+When ``lintro review --output json`` cannot collect its diff context or the
+provider fails (invalid key, rate limit, depleted quota, malformed response), a
 success envelope (``metadata``/``summary``/``checklist``/``findings``) can never
 be produced. This module builds a *stable* error envelope instead so CI
 consumers can classify the failure on ``error.kind``/``error.status`` rather
@@ -17,10 +17,13 @@ The envelope shape is::
         "retryable": false,                   # safe to retry unchanged?
         "provider_unavailable": true,         # provider served nothing at all?
         "message": "...",                     # most specific cause text
+        "code": null,                         # context error code when present
         "completed_chunks": 0                 # chunks reviewed before the
                                               # failure, or null when unknown
       }
     }
+
+``status`` is the provider HTTP status; it is always null for context errors.
 
 ``completed_chunks`` is what a fallback chain keys on (ADR-0011 D): a
 wrapper may restart the review on another lane only when it is ``0``. It is
@@ -30,7 +33,9 @@ and the wrapper must then stay on its lane.
 ``error.kind`` reuses the canonical :class:`ReviewErrorKind` taxonomy, so the
 set of values is the single source of truth shared with the PR error sticky.
 The envelope is emitted on stdout; the review command exits with
-:data:`REVIEW_ERROR_EXIT_CODE` so a provider error is distinguishable from the
+:data:`REVIEW_ERROR_EXIT_CODE` (2) for context and provider failures. Empty
+selections instead exit 0 with a disclosed ``no_changes`` skip and no coverage
+claim. Preparation failures and skips never advance state. Exit 2 differs from the
 exit code ``1`` that signals *P1 findings present* on a successful review.
 """
 
@@ -41,6 +46,7 @@ from typing import Any, Final
 from lintro.ai.review.errors_taxonomy import (
     ReviewErrorKind,
     _extract_status,
+    _iter_cause_chain,
     classify_provider_error,
     resolve_cause_text,
 )
@@ -133,16 +139,27 @@ def build_error_contract(*, provider: str, error: Exception) -> dict[str, Any]:
         ``kind``, the ``provider``, the extracted HTTP ``status`` (or ``None``),
         ``retryable`` and ``provider_unavailable`` flags, the most specific
         cause ``message``, and ``completed_chunks`` (or ``None`` when the
-        failure carries no count).
+        failure carries no count), plus a context ``code`` (otherwise ``None``).
     """
-    from lintro.ai.review.exceptions import completed_chunks_of
+    from lintro.ai.review.exceptions import ReviewContextError, completed_chunks_of
 
     kind = classify_provider_error(provider=provider, error=error)
     message = resolve_cause_text(error=error)
-    status = _extract_status(text=message.lower())
+    context_error = next(
+        (
+            current
+            for current in _iter_cause_chain(error=error)
+            if isinstance(current, ReviewContextError)
+        ),
+        None,
+    )
+    status = (
+        None if context_error is not None else _extract_status(text=message.lower())
+    )
     return {
         "error": {
             "kind": kind.value,
+            "code": context_error.code.value if context_error is not None else None,
             "provider": (provider or "").lower(),
             "status": status,
             "retryable": is_retryable_kind(kind=kind),

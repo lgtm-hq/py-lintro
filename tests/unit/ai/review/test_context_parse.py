@@ -425,6 +425,7 @@ def test_pr_metadata_missing_base_uses_head_repo() -> None:
             "number": 42,
             "title": "Example PR",
             "baseRefOid": "a" * 40,
+            "changedFiles": 1,
             "headRefOid": "b" * 40,
             "headRepository": {"nameWithOwner": "octo/head-fork"},
             "body": "Body text",
@@ -457,6 +458,7 @@ def test_pr_metadata_base_repo_resolves_from_repo_override() -> None:
             "number": 80,
             "title": "Fork PR",
             "baseRefOid": "c" * 40,
+            "changedFiles": 1,
             "headRefOid": "d" * 40,
             "headRepository": {"nameWithOwner": "fork-owner/py-lintro"},
             "body": "Body text",
@@ -472,3 +474,27 @@ def test_pr_metadata_base_repo_resolves_from_repo_override() -> None:
     assert_that(metadata.head_repo).is_equal_to("fork-owner/py-lintro")
     assert_that(base_ref).is_equal_to("c" * 40)
     assert_that(head_ref).is_equal_to("d" * 40)
+
+
+@pytest.mark.parametrize("count", [None, -1, True, "1"])
+def test_pr_metadata_rejects_invalid_changed_file_count(count: object) -> None:
+    """Missing or malformed GitHub counts cannot turn a broken diff into a skip."""
+    import json
+
+    from lintro.ai.review.context.pr_metadata import _parse_pr_view_json
+
+    payload = json.dumps(
+        {
+            "number": 7,
+            "title": "PR",
+            "baseRefOid": "base",
+            "headRefOid": "head",
+            "changedFiles": count,
+        },
+    )
+    with pytest.raises(ReviewContextError) as caught:
+        _parse_pr_view_json(payload=payload, repo_override="owner/name")
+    assert_that(caught.value.code).is_equal_to(
+        ReviewContextErrorCode.GH_METADATA_INVALID,
+    )
+    assert_that(str(caught.value)).contains("changedFiles")

@@ -51,6 +51,7 @@ from lintro.ai.review.github_status import (
     post_review_error_to_github,
 )
 from lintro.ai.review.lifecycle.comments import (
+    clear_failure_notice,
     load_sticky_comment,
     locate_comment,
     upsert_archive,
@@ -157,7 +158,8 @@ def post_review_to_github(
         logger.warning("GitHub PR context not available — skipping review posting")
         return False
 
-    existing, sticky_state = load_sticky_comment(reporter=gh_reporter)
+    notices: list[tuple[int, str]] = []
+    existing, sticky_state = load_sticky_comment(reporter=gh_reporter, notices=notices)
     prior_state = resolve_prior_state(
         prior_state=settings.prior_state,
         sticky_state=sticky_state,
@@ -313,6 +315,8 @@ def post_review_to_github(
 
     if settings.captured_comment_ids is not None and comment_ids:
         settings.captured_comment_ids.update(comment_ids)
+    if outcome.ok:
+        clear_failure_notice(reporter=gh_reporter, notices=notices)
     return success
 
 

@@ -266,6 +266,7 @@ class ReviewOutcome(StrEnum):
             the envelope's ``findings_coverage_complete`` is false (#2395).
         CONVERGED: The round was deliberately skipped by the convergence stop
             rule before any provider call (#2099).
+        NO_CHANGES: No reviewable changes remained; no review ran.
         ALREADY_REVIEWED: The round was skipped because the last finished
             round already covered this head, before any provider call
             (#2338); that round's review stands as posted.
@@ -282,6 +283,7 @@ class ReviewOutcome(StrEnum):
     DEGRADED = auto()
     CONVERGED = auto()
     ALREADY_REVIEWED = auto()
+    NO_CHANGES = auto()
     NO_CREDENTIAL = auto()
     PROVIDER_UNAVAILABLE = auto()
     BROKEN = auto()
@@ -738,8 +740,8 @@ def _already_reviewed_report(
 def _skipped_round_report(*, output: str, transport: str) -> OutcomeReport | None:
     """Report a round lintro deliberately skipped before any provider call.
 
-    Two envelopes share the contract: the convergence stop rule (#2099) and
-    an already-reviewed head (#2338). Each is its own green outcome.
+    Empty selections, convergence (#2099), and already-reviewed heads (#2338)
+    each disclose why no provider call ran. Each is its own green outcome.
 
     Args:
         output: Combined stdout/stderr captured from the run.
@@ -748,6 +750,18 @@ def _skipped_round_report(*, output: str, transport: str) -> OutcomeReport | Non
     Returns:
         The skip's report, or ``None`` when the round ran.
     """
+    for payload in _iter_json_objects(text=output):
+        if (
+            payload.get("outcome") == "no_changes"
+            and payload.get("review_ran") is False
+        ):
+            return OutcomeReport(
+                outcome=ReviewOutcome.NO_CHANGES,
+                headline="skipped — no reviewable changes, no review ran",
+                detail=str(payload.get("detail") or ""),
+                exit_code=0,
+                transport=transport,
+            )
     converged = _parse_converged_envelope(text=output)
     if converged is not None:
         return _converged_report(converged=converged, transport=transport)
@@ -1452,7 +1466,11 @@ def render_summary(*, report: OutcomeReport) -> str:
     """
     if report.outcome.partial_review:
         icon = "⚠️"
-    elif report.outcome in {ReviewOutcome.CONVERGED, ReviewOutcome.ALREADY_REVIEWED}:
+    elif report.outcome in {
+        ReviewOutcome.CONVERGED,
+        ReviewOutcome.ALREADY_REVIEWED,
+        ReviewOutcome.NO_CHANGES,
+    }:
         icon = "🔁"
     elif report.outcome.produced_review:
         icon = "✅"

@@ -24,6 +24,7 @@ from lintro.ai.exceptions import (
     AIProviderRequiredError,
     AIRateLimitError,
 )
+from lintro.ai.review.exceptions import ReviewContextError, ReviewExecutionError
 
 
 class ReviewErrorKind(StrEnum):
@@ -44,6 +45,7 @@ class ReviewErrorKind(StrEnum):
             error).
         PROVIDER_UNAVAILABLE: No provider is configured, so the review never
             reached a model. Distinct from a malformed response.
+        CONTEXT_UNAVAILABLE: The review diff context could not be collected.
         UNKNOWN: No signature matched; the surfaced cause text is shown as-is.
     """
 
@@ -56,6 +58,7 @@ class ReviewErrorKind(StrEnum):
     TIMEOUT = auto()
     INVALID_RESPONSE = auto()
     PROVIDER_UNAVAILABLE = auto()
+    CONTEXT_UNAVAILABLE = auto()
     UNKNOWN = auto()
 
 
@@ -333,6 +336,10 @@ KIND_COPY: dict[ReviewErrorKind, tuple[str, str]] = {
         "no AI provider is configured",
         "Set `ai.provider` in config, LINTRO_AI_PROVIDER, or --provider.",
     ),
+    ReviewErrorKind.CONTEXT_UNAVAILABLE: (
+        "the review context could not be collected",
+        "Check the git/gh command and diff range in the cause, then retry.",
+    ),
     ReviewErrorKind.UNKNOWN: (
         "the review could not be completed",
         "See the cause above and the workflow logs; retry if it looks transient.",
@@ -377,8 +384,8 @@ def resolve_cause_text(*, error: Exception) -> str:
     Returns:
         The most informative human-readable cause text available.
     """
-    from lintro.ai.review.exceptions import ReviewExecutionError
-
+    if isinstance(error, ReviewContextError):
+        return str(error)
     if isinstance(error, ReviewExecutionError) and error.cause_message:
         return error.cause_message
     cause = error.__cause__
@@ -430,13 +437,9 @@ def _chain_has(*, error: Exception, typ: type[BaseException]) -> bool:
 def classify_provider_error(*, provider: str, error: Exception) -> ReviewErrorKind:
     """Classify a review error into a canonical :class:`ReviewErrorKind`.
 
-    Resolves the underlying provider cause (unwrapping any
-    ``ReviewExecutionError`` wrapper), then tests it against the provider's
-    signature map (so credit/quota needles beat a typed rate-limit), the
-    lintro AI exception hierarchy, TimeoutError, SERVER_ERROR, and finally a
-    shared fallback set before defaulting to :attr:`ReviewErrorKind.UNKNOWN`.
-    When the error already carries a resolved kind (attached by the
-    orchestrator), that kind is authoritative.
+    Context failures take precedence over provider signatures. Otherwise a
+    resolved execution kind wins, followed by provider signatures, typed AI
+    exceptions, timeouts, server errors and shared signatures.
 
     Args:
         provider: Provider identifier (e.g. ``"anthropic"``); case-insensitive.
@@ -445,8 +448,8 @@ def classify_provider_error(*, provider: str, error: Exception) -> ReviewErrorKi
     Returns:
         The resolved canonical error kind.
     """
-    from lintro.ai.review.exceptions import ReviewExecutionError
-
+    if _chain_has(error=error, typ=ReviewContextError):
+        return ReviewErrorKind.CONTEXT_UNAVAILABLE
     if isinstance(error, ReviewExecutionError) and error.error_kind is not None:
         return error.error_kind
 

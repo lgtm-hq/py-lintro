@@ -229,3 +229,449 @@ def test_terminal_error_exits_two_not_one(patched_review: None) -> None:
     result = CliRunner().invoke(review_command, ["--output", "terminal"])
 
     assert_that(result.exit_code).is_equal_to(2)
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        ("gh-command-failed", "gh pr diff failed: unavailable"),
+        ("gh-command-failed", "gh pr diff timed out"),
+        ("gh-command-failed", "gh pr view failed: HTTP 401"),
+        ("gh-json-invalid", "Failed to parse gh pr view JSON"),
+        ("gh-metadata-invalid", "Invalid required PR metadata"),
+        ("diff-desync", "Changed files listed but unified diff is empty"),
+        ("no-parseable-diff", "No parseable diff sections"),
+    ],
+)
+@pytest.mark.parametrize("output_format", ["json", "terminal"])
+def test_preparation_context_failure_discloses_error(
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+    code: str,
+    message: str,
+    output_format: str,
+) -> None:
+    """A collection failure is an error, even when its text resembles a provider."""
+    from lintro.ai.review.exceptions import ReviewContextError
+
+    def fail(**_: object) -> None:
+        """Raise the context collection failure under test."""
+        raise ReviewContextError(message, code=code) from TimeoutError("timed out")
+
+    monkeypatch.setattr(preparation_module, "collect_review_context", fail)
+    result = CliRunner().invoke(review_command, ["--output", output_format])
+    assert_that(result.exit_code).is_equal_to(2)
+    assert_that(result.output).contains(message)
+    if output_format == "json":
+        error = json.loads(result.output[result.output.index("{") :])["error"]
+        assert_that(error).contains_entry(
+            kind="context_unavailable",
+            code=code,
+            message=message,
+            provider_unavailable=False,
+            retryable=False,
+        )
+
+
+@pytest.mark.parametrize("output_format", ["json", "terminal"])
+def test_no_changes_discloses_skipped_files(
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+    output_format: str,
+) -> None:
+    """An excluded selection exits successfully without claiming it was reviewed."""
+    from lintro.ai.review.enums.file_skip_reason import FileSkipReason
+    from lintro.ai.review.exceptions import ReviewContextError
+    from lintro.ai.review.models.skipped_file import SkippedFile
+
+    def empty(**_: object) -> None:
+        """Simulate collection retaining its deliberate exclusion records."""
+        raise ReviewContextError(
+            "No changes",
+            code="no-changes",
+            skipped_files=(
+                SkippedFile(path="generated.py", reason=FileSkipReason.CONFIG_EXCLUDED),
+            ),
+        )
+
+    monkeypatch.setattr(preparation_module, "collect_review_context", empty)
+    result = CliRunner().invoke(review_command, ["--output", output_format])
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).contains(
+        "No reviewable changes, no review ran.",
+        "generated.py",
+    )
+    if output_format == "json":
+        payload = json.loads(result.output[result.output.index("{") :])
+        assert_that(payload).contains_entry(outcome="no_changes", review_ran=False)
+        assert_that(payload).does_not_contain("metadata", "findings_coverage_complete")
+        assert_that(payload["skipped_files"][0]["reason"]).is_equal_to(
+            "config_excluded",
+        )
+
+
+def test_execution_context_failure_keeps_context_kind(
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The execution diff ceiling carries the same context error contract."""
+    from lintro.ai.review.exceptions import ReviewContextError
+
+    def too_large(*_: object, **__: object) -> None:
+        """Refuse the diff at the execution boundary."""
+        raise ReviewContextError("CLI diff ceiling exceeded", code="diff-too-large")
+
+    monkeypatch.setattr(preparation_module, "run_review", too_large)
+    result = CliRunner().invoke(review_command, ["--output", "json"])
+    assert_that(result.exit_code).is_equal_to(2)
+    payload = json.loads(result.output[result.output.index("{") :])
+    assert_that(payload["error"]).contains_entry(
+        kind="context_unavailable",
+        code="diff-too-large",
+    )
+
+
+@pytest.mark.parametrize("excluded", [False, True])
+def test_empty_collected_selection_exits_zero_without_reviewing(
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+    excluded: bool,
+) -> None:
+    """Real collection retains exclusions through NO_CHANGES into the CLI skip."""
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from lintro.ai.review.context import collection
+    from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
+    from lintro.ai.review.models.changed_file import ChangedFile
+    from lintro.ai.review.models.review_context import ReviewContext
+
+    context = ReviewContext(
+        base_ref="base",
+        head_ref="head",
+        changed_files=(
+            [
+                ChangedFile(
+                    path="a.py",
+                    status=ChangedFileStatus.MODIFIED,
+                    additions=1,
+                    deletions=0,
+                ),
+            ]
+            if excluded
+            else []
+        ),
+        unified_diff="diff --git a/a.py b/a.py\n+++ b/a.py\n+a\n" if excluded else "",
+    )
+    monkeypatch.setattr(
+        preparation_module,
+        "collect_review_context",
+        collection.collect_review_context,
+    )
+    monkeypatch.setattr(collection, "_ensure_git_repo", lambda: None)
+    monkeypatch.setattr(
+        collection,
+        "_run_git",
+        lambda **_: SimpleNamespace(stdout=str(Path.cwd())),
+    )
+    monkeypatch.setattr(collection, "_collect_branch_context", lambda **_: context)
+    args = ["--base", "main", "--output", "json"]
+    if excluded:
+        args.extend(["--path", "missing/"])
+    result = CliRunner().invoke(review_command, args)
+    assert_that(result.exit_code).is_equal_to(0)
+    payload = json.loads(result.output[result.output.index("{") :])
+    assert_that(payload).contains_entry(outcome="no_changes", review_ran=False)
+    if excluded:
+        assert_that(payload["skipped_files"][0]).contains_entry(
+            path="a.py",
+            reason="path_filter",
+        )
+    else:
+        assert_that(payload["skipped_files"]).is_empty()
+
+
+@pytest.mark.parametrize("load_mode", ["empty", "raises", "stored", "unknown"])
+def test_posted_context_failure_preserves_unrecoverable_board(
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+    load_mode: str,
+) -> None:
+    """The command preserves the live board across repeated state-load failures."""
+    from lintro.ai.review import github_status
+    from lintro.ai.review.exceptions import ReviewContextError
+    from lintro.ai.review.github_constants import STICKY_MARKER
+    from lintro.ai.review.models.finding_record import FindingRecord
+    from lintro.ai.review.models.review_state import ReviewState
+    from lintro.ai.review.models.run_identity import RunIdentity
+    from lintro.ai.review.models.run_record import RunRecord
+    from lintro.ai.review.sticky import render_state_sticky
+
+    stored = ReviewState(
+        runs=(RunRecord(identity=RunIdentity(round=1, sha="head")),),
+        findings=(FindingRecord(fingerprint="a" * 16, title="Keep this finding open"),),
+    )
+    board = f"{STICKY_MARKER}\n## Findings\n- P1: Keep this finding open"
+    if load_mode == "stored":
+        board = render_state_sticky(state=stored)
+    from tests.unit.ai.review.comment_reporter import CommentReporter
+
+    reporter = CommentReporter((board,))
+    reporter.lookup_unknown = load_mode == "unknown"
+
+    def reporter_factory(**kwargs: object) -> CommentReporter:
+        """Require the command's resolved posting target."""
+        assert_that(kwargs).contains_entry(pr_number=7, repo="owner/name")
+        return reporter
+
+    def load(**kwargs: object) -> ReviewState:
+        """Simulate unavailable persisted state."""
+        if load_mode == "raises":
+            raise OSError("state unreadable")
+        return stored if load_mode == "stored" else ReviewState()
+
+    def fail(**_: object) -> None:
+        """Fail before the provider is invoked."""
+        raise ReviewContextError(
+            "gh pr diff failed: HTTP 401",
+            code="gh-command-failed",
+        )
+
+    monkeypatch.setattr(github_status, "GitHubPRReporter", reporter_factory)
+    monkeypatch.setattr(review_module, "load_prior_review_state", load)
+    monkeypatch.setattr(preparation_module, "collect_review_context", fail)
+    for _ in range(2):
+        result = CliRunner().invoke(
+            review_command,
+            ["--pr", "7", "--repo", "owner/name", "--post", "--output", "json"],
+        )
+        assert_that(result.exit_code).is_equal_to(2)
+        payload = json.loads(result.output[result.output.index("{") :])
+        assert_that(payload["error"]).contains_entry(
+            kind="context_unavailable",
+            code="gh-command-failed",
+            status=None,
+        )
+        if load_mode == "unknown":
+            assert_that(reporter.comments).is_equal_to({1: board})
+            continue
+        body = reporter.comments[1 if load_mode == "stored" else 2]
+        assert_that(reporter.comments[1]).contains("Keep this finding open")
+        if load_mode != "stored":
+            assert_that(reporter.comments[1]).is_equal_to(board)
+        assert_that(body).contains("cause: gh pr diff failed: HTTP 401")
+        assert_that(body).does_not_contain(
+            "provider reported",
+            "`anthropic`",
+            "resolved",
+        )
+    assert_that(reporter.comments).is_length(
+        2 if load_mode in {"empty", "raises"} else 1,
+    )
+
+
+def test_pr_and_base_usage_error_does_not_post(
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Conflicting modes report usage without touching the PR."""
+    from lintro.ai.review import github
+
+    posted: list[object] = []
+    monkeypatch.setattr(
+        github,
+        "post_review_error_to_github",
+        lambda **kw: posted.append(kw),
+    )
+    result = CliRunner().invoke(
+        review_command,
+        ["--pr", "7", "--base", "main", "--repo", "owner/name", "--post"],
+    )
+    assert_that(result.exit_code).is_equal_to(2)
+    assert_that(result.output).contains("Usage:", "--pr and --base")
+    assert_that(posted).is_empty()
+
+
+def test_wrapped_context_error_retains_code_and_has_no_provider_status() -> None:
+    """A mid-run wrapper retains context identity without blaming provider HTTP."""
+    from lintro.ai.review.error_contract import build_error_contract
+    from lintro.ai.review.exceptions import ReviewContextError
+
+    error = RuntimeError("execution failed")
+    error.__cause__ = ReviewContextError(
+        "gh failed: HTTP 401",
+        code="gh-command-failed",
+    )
+    payload = build_error_contract(provider="anthropic", error=error)
+    assert_that(payload["error"]).contains_entry(
+        kind="context_unavailable",
+        code="gh-command-failed",
+        status=None,
+    )
+
+
+def test_pr_empty_raw_diff_with_zero_changed_files_is_disclosed_skip(
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GitHub reporting no changed files permits a successful disclosed skip."""
+    from types import SimpleNamespace
+
+    from lintro.ai.review.context import collection
+
+    def gh(*, args: list[str]) -> SimpleNamespace:
+        """Serve actual PR metadata and an empty raw diff."""
+        payload = (
+            json.dumps(
+                {
+                    "number": 7,
+                    "title": "Empty PR",
+                    "baseRefOid": "base",
+                    "headRefOid": "head",
+                    "changedFiles": 0,
+                },
+            )
+            if args[1] == "view"
+            else ""
+        )
+        return SimpleNamespace(stdout=payload)
+
+    monkeypatch.setattr(
+        preparation_module,
+        "collect_review_context",
+        collection.collect_review_context,
+    )
+    monkeypatch.setattr(collection, "_run_gh", gh)
+    monkeypatch.setattr(collection, "_probe_pr_checkout", lambda **_: None)
+    monkeypatch.setattr(collection, "checkout_pr_head", lambda **_: None)
+    result = CliRunner().invoke(
+        review_command,
+        ["--pr", "7", "--repo", "owner/name", "--output", "json"],
+    )
+    assert_that(result.exit_code).is_equal_to(0)
+    payload = json.loads(result.output[result.output.index("{") :])
+    assert_that(payload).contains_entry(outcome="no_changes", review_ran=False)
+    assert_that(payload["skipped_files"]).is_empty()
+
+
+@pytest.mark.parametrize("mode", [["--base", "main"], ["--uncommitted"]])
+def test_environment_pr_rejects_local_mode(
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: list[str],
+) -> None:
+    """An environment PR cannot turn a usage mistake into a posted error."""
+    from lintro.ai.review import github
+
+    posted: list[object] = []
+    monkeypatch.setenv("GITHUB_REF", "refs/pull/7/merge")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/name")
+    monkeypatch.setattr(
+        github,
+        "post_review_error_to_github",
+        lambda **kw: posted.append(kw),
+    )
+    result = CliRunner().invoke(review_command, ["--post", *mode])
+    assert_that(result.exit_code).is_equal_to(2)
+    assert_that(result.output).contains("Usage:", "--base or --uncommitted")
+    assert_that(posted).is_empty()
+
+
+def test_invalid_review_mode_is_usage_error_backstop(
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A collector mode rejection emits usage rather than a context envelope."""
+    from lintro.ai.review import github
+    from lintro.ai.review.exceptions import ReviewContextError
+
+    posted: list[object] = []
+
+    def reject(**_: object) -> None:
+        """Simulate a collector detecting an unsupported mode."""
+        raise ReviewContextError("invalid mode", code="invalid-review-mode")
+
+    monkeypatch.setattr(preparation_module, "collect_review_context", reject)
+    monkeypatch.setattr(
+        github,
+        "post_review_error_to_github",
+        lambda **kw: posted.append(kw),
+    )
+    result = CliRunner().invoke(
+        review_command,
+        ["--pr", "7", "--repo", "owner/name", "--post", "--output", "json"],
+    )
+    assert_that(result.exit_code).is_equal_to(2)
+    assert_that(result.output).contains("Usage:", "invalid mode").does_not_contain(
+        "context_unavailable",
+    )
+    assert_that(posted).is_empty()
+
+
+@pytest.mark.parametrize("stage", ["execution", "diff", "metadata", "before-metadata"])
+def test_failure_notice_names_head_when_known(
+    stage: str,
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The command names known heads for execution and preparation failures."""
+    from lintro.ai.review import github_status
+    from lintro.ai.review.github_constants import FAILURE_NOTICE_MARKER, STICKY_MARKER
+    from lintro.ai.review.models.review_state import ReviewState
+    from tests.unit.ai.review.comment_reporter import CommentReporter
+
+    board = STICKY_MARKER + "\nkeep this board"
+    reporter = CommentReporter((board,))
+    context = MagicMock(changed_files=[], head_ref="abcdef1234567890")
+    monkeypatch.setattr(
+        preparation_module,
+        "collect_review_context",
+        lambda **_: context,
+    )
+    if stage != "execution":
+        from lintro.ai.review.context import collection
+        from lintro.ai.review.exceptions import ReviewContextError
+
+        def run_gh(*, args: list[str]) -> MagicMock:
+            """Fail before or after real metadata parsing, as requested."""
+            if stage == "before-metadata" or args[1] == "diff":
+                raise ReviewContextError("gh unavailable", code="gh-command-failed")
+            payload = {
+                "title": "PR title",
+                "body": "",
+                "number": 7,
+                "baseRefOid": "base",
+                "headRefOid": "abcdef1234567890",
+                "headRepository": {"nameWithOwner": "owner/name"},
+                "changedFiles": "invalid" if stage == "metadata" else 1,
+            }
+            return MagicMock(stdout=json.dumps(payload))
+
+        monkeypatch.setattr(collection, "_run_gh", run_gh)
+        monkeypatch.setattr(
+            preparation_module,
+            "collect_review_context",
+            lambda **_: collection._collect_pr_context(pr_number=7, repo="owner/name"),
+        )
+    monkeypatch.setattr(github_status, "GitHubPRReporter", lambda **_: reporter)
+    monkeypatch.setattr(
+        review_module,
+        "load_prior_review_state",
+        lambda **_: ReviewState(),
+    )
+    result = CliRunner().invoke(
+        review_command,
+        ["--pr", "7", "--repo", "owner/name", "--post", "--output", "json"],
+    )
+    assert_that(result.exit_code).is_equal_to(2)
+    payload = json.loads(result.output[result.output.index("{") :])
+    assert_that(payload["error"]["kind"]).is_equal_to(
+        "auth_failed" if stage == "execution" else "context_unavailable",
+    )
+    assert_that(reporter.comments).is_length(2)
+    assert_that(reporter.comments[1]).is_equal_to(board)
+    assert_that(reporter.comments[2]).starts_with(FAILURE_NOTICE_MARKER)
+    if stage == "before-metadata":
+        assert_that(reporter.comments[2]).does_not_contain("Head commit:")
+    else:
+        assert_that(reporter.comments[2]).contains("Head commit: `abcdef1234567890`")

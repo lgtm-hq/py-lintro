@@ -46,6 +46,7 @@ from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
+from tests.unit.ai.review.comment_reporter import use_combined_comment_lookup
 
 
 @dataclass
@@ -86,6 +87,8 @@ def _fresh_reporter() -> MagicMock:
     reporter.log = log
     reporter.is_available.return_value = True
     reporter.find_issue_comment.return_value = None
+
+    use_combined_comment_lookup(reporter)
     reporter.fetch_pr_diff_lines.return_value = {"src/main.py": {10}}
     reporter.fetch_compare_lines.return_value = {"src/main.py": {10}}
     reporter.fetch_pr_commit_shas.return_value = []
@@ -600,7 +603,10 @@ def test_post_error_comment_updates_sticky(
 ) -> None:
     """Error posting reuses and updates the sticky comment when present."""
     reporter = _fresh_reporter()
-    reporter.find_issue_comment.return_value = (9, STICKY_MARKER)
+    reporter.find_issue_comment.return_value = (
+        9,
+        format_error_comment(error=RuntimeError("previous error")),
+    )
 
     posted = post_review_error_to_github(
         error=AIAuthenticationError("bad key"),

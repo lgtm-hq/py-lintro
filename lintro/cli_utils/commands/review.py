@@ -72,7 +72,11 @@ from lintro.ai.review.custom_agents import (
 )
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.error_display import render_review_error
-from lintro.ai.review.exceptions import ReviewContextError, ReviewPreparationError
+from lintro.ai.review.exceptions import (
+    REVIEW_HEAD_ATTR,
+    ReviewContextError,
+    ReviewPreparationError,
+)
 from lintro.ai.review.finding_matcher import count_blocking_findings
 from lintro.ai.review.lifecycle.state import (
     departed_paths,
@@ -80,6 +84,7 @@ from lintro.ai.review.lifecycle.state import (
     persist_review_state,
 )
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
+from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.orchestrator import guard_changed_paths
 from lintro.ai.review.output import (
@@ -254,6 +259,32 @@ class _ReviewRender:
     question_map: dict[int, str]
 
 
+def _failure_metadata(exc: Exception) -> ReviewMetadata | None:
+    """Build failure provenance only when a review head is known.
+
+    Args:
+        exc: Failure carrying the head read by preparation or execution.
+
+    Returns:
+        Metadata naming the head, or None before the head is known.
+    """
+    head_ref = getattr(exc, REVIEW_HEAD_ATTR, "")
+    if not isinstance(head_ref, str) or not head_ref:
+        return None
+    return ReviewMetadata(
+        model="",
+        provider="",
+        context_window=0,
+        depth=0,
+        chunks_total=0,
+        chunks_current=0,
+        files_reviewed=0,
+        files_total=0,
+        checklist_items=0,
+        head_ref=head_ref,
+    )
+
+
 def _fail_review_command(
     exc: AIError | ValueError,
     *,
@@ -281,8 +312,16 @@ def _fail_review_command(
         prior_state: Prior resume state forwarded to the error sticky.
 
     Raises:
-        SystemExit: Always, with the review-error exit code.
+        SystemExit: With the review-error exit code.
+        click.UsageError: When context collection rejected the review mode.
     """
+    from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
+
+    if (
+        isinstance(exc, ReviewContextError)
+        and exc.code == ReviewContextErrorCode.INVALID_REVIEW_MODE
+    ):
+        raise click.UsageError(str(exc))
     if post and resolved_pr is not None and effective_repo:
         from lintro.ai.review.github import post_review_error_to_github
 
@@ -293,6 +332,7 @@ def _fail_review_command(
                 pr_number=resolved_pr,
                 repo=effective_repo,
                 prior_state=prior_state,
+                metadata=_failure_metadata(exc),
             )
     from lintro.ai.review.error_contract import (
         REVIEW_ERROR_EXIT_CODE,
@@ -885,6 +925,8 @@ def _resolve_targets(*, options: ReviewCommandOptions) -> _ReviewTargets:
         raise click.UsageError(
             "--pr requires --repo or GITHUB_REPOSITORY environment variable.",
         )
+    if options.pr is not None and options.base is not None:
+        raise click.UsageError("--pr and --base cannot be used together.")
     if options.pr is not None and options.uncommitted:
         raise click.UsageError(
             "--pr and --uncommitted cannot be used together.",
@@ -902,6 +944,10 @@ def _resolve_targets(*, options: ReviewCommandOptions) -> _ReviewTargets:
             raise click.UsageError(
                 "--post requires --repo or GITHUB_REPOSITORY environment variable.",
             )
+    if resolved_pr is not None and (options.base is not None or options.uncommitted):
+        raise click.UsageError(
+            "A pull request review cannot use --base or --uncommitted.",
+        )
     return _ReviewTargets(
         effective_repo=effective_repo,
         resolved_pr=resolved_pr,
@@ -909,6 +955,64 @@ def _resolve_targets(*, options: ReviewCommandOptions) -> _ReviewTargets:
         # persisted; a bare --pr without --post still names the PR directly.
         state_pr=resolved_pr if resolved_pr is not None else options.pr,
     )
+
+
+def _finish_context_failure(
+    *,
+    exc: ReviewContextError,
+    options: ReviewCommandOptions,
+    targets: _ReviewTargets,
+    provider_label: str,
+) -> NoReturn:
+    """Disclose a preparation failure or skip without advancing stored state.
+
+    Args:
+        exc: Context collection failure.
+        options: Command options.
+        targets: Resolved PR and repository.
+        provider_label: Configured provider identifier.
+
+    Raises:
+        SystemExit: Zero for no changes, two for a context failure.
+    """
+    from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
+    from lintro.ai.review.github_status import post_review_no_changes_to_github
+    from lintro.ai.review.no_changes import no_changes_payload
+
+    prior_state = None
+    if options.post and targets.state_pr is not None:
+        with suppress(Exception):
+            prior_state = load_prior_review_state(
+                pr_number=targets.state_pr,
+                head_ref="",
+                repo=targets.effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
+                post=False,
+            )
+    if exc.code != ReviewContextErrorCode.NO_CHANGES:
+        _fail_review_command(
+            exc,
+            output_format=options.output_format,
+            provider_label=provider_label,
+            post=options.post,
+            resolved_pr=targets.resolved_pr,
+            effective_repo=targets.effective_repo,
+            prior_state=prior_state,
+        )
+    payload = no_changes_payload(exc)
+    if options.output_format == "json":
+        click.echo(json.dumps(payload, indent=2))
+    else:
+        click.echo(payload["detail"])
+        for skipped in exc.skipped_files:
+            click.echo(f"  {skipped.path}: {skipped.label}")
+    if options.post and targets.resolved_pr is not None:
+        with suppress(Exception):
+            post_review_no_changes_to_github(
+                pr_number=targets.resolved_pr,
+                repo=targets.effective_repo,
+                prior_state=prior_state,
+            )
+    raise SystemExit(0)
 
 
 def _prepare(
@@ -932,7 +1036,6 @@ def _prepare(
         PreparedReview: The prepared review both surfaces share.
 
     Raises:
-        click.ClickException: When the diff context cannot be collected.
         click.UsageError: When the request describes a review that would
             review nothing.
     """
@@ -957,7 +1060,12 @@ def _prepare(
     try:
         prepared = prepare_review(request, resolved=resolved_ai)
     except ReviewContextError as exc:
-        raise click.ClickException(str(exc)) from exc
+        _finish_context_failure(
+            exc=exc,
+            options=options,
+            targets=targets,
+            provider_label=str(resolved_ai.config.provider or "unset"),
+        )
     except ReviewPreparationError as exc:
         raise click.UsageError(str(exc)) from exc
     # The PR head tree's scope (#2733) opens at the first statement after
@@ -1333,6 +1441,7 @@ def _run_round(
                 "Could not persist review-resume state; next round re-reviews",
             )
     except (AIError, ValueError) as exc:
+        setattr(exc, REVIEW_HEAD_ATTR, prepared.context.head_ref)
         _fail_review_command(
             exc,
             output_format=options.output_format,

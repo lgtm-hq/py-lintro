@@ -22,6 +22,7 @@ from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.models.suggested_change import SuggestedChange
 from lintro.ai.review.review_state_codec import leftover_state_block
 from lintro.ai.review.sticky import advance_review_state
+from tests.unit.ai.review.comment_reporter import use_combined_comment_lookup
 
 _TEST_TOKEN = "ghp_test_fixture_token"  # nosec B105 — fake test fixture token
 
@@ -33,6 +34,7 @@ def _reporter() -> MagicMock:
         The stub reporter.
     """
     reporter = MagicMock()
+    use_combined_comment_lookup(reporter)
     reporter.is_available.return_value = True
     reporter.find_issue_comment.return_value = None
     reporter.fetch_pr_diff_lines.return_value = {"src/main.py": {9, 10, 11}}

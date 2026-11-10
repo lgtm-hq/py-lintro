@@ -256,7 +256,7 @@ def test_collect_pr_context_uses_gh(
         _completed(
             stdout=(
                 '{"title":"Fix bug","body":"Details","number":42,'
-                '"baseRefOid":"abc123","headRefOid":"deadbeef",'
+                '"changedFiles":1,"baseRefOid":"abc123","headRefOid":"deadbeef",'
                 '"headRepository":{"nameWithOwner":"lgtm-hq/py-lintro"}}'
             ),
         ),
@@ -311,6 +311,7 @@ _VALID_GH_PR_VIEW_FIELDS = frozenset(
         "baseRefOid",
         "headRefOid",
         "headRepository",
+        "changedFiles",
     },
 )
 
@@ -336,7 +337,7 @@ def test_collect_pr_context_requests_only_valid_gh_pr_view_fields(
         _completed(
             stdout=(
                 '{"title":"Fix bug","body":"Details","number":42,'
-                '"baseRefOid":"abc123","headRefOid":"deadbeef",'
+                '"changedFiles":1,"baseRefOid":"abc123","headRefOid":"deadbeef",'
                 '"headRepository":{"nameWithOwner":"lgtm-hq/py-lintro"}}'
             ),
         ),
@@ -388,7 +389,7 @@ def test_collect_pr_context_works_without_local_git_repo(
         _completed(
             stdout=(
                 '{"title":"Fix bug","body":"Details","number":42,'
-                '"baseRefOid":"abc123","headRefOid":"deadbeef",'
+                '"changedFiles":1,"baseRefOid":"abc123","headRefOid":"deadbeef",'
                 '"headRepository":{"nameWithOwner":"lgtm-hq/py-lintro"}}'
             ),
         ),
@@ -752,7 +753,7 @@ def test_collect_pr_context_accepts_repo_override_when_head_repository_null(
         _completed(
             stdout=(
                 '{"title":"Fix bug","body":"Details","number":42,'
-                '"baseRefOid":"abc123","headRefOid":"deadbeef",'
+                '"changedFiles":1,"baseRefOid":"abc123","headRefOid":"deadbeef",'
                 '"headRepository":null}'
             ),
         ),
@@ -792,7 +793,7 @@ def test_collect_pr_context_fetches_workflow_post_image_via_gh(
         _completed(
             stdout=(
                 '{"title":"CI","body":"","number":7,'
-                '"baseRefOid":"abc123","headRefOid":"deadbeef",'
+                '"changedFiles":1,"baseRefOid":"abc123","headRefOid":"deadbeef",'
                 '"headRepository":{"nameWithOwner":"lgtm-hq/py-lintro"}}'
             ),
         ),
@@ -844,7 +845,7 @@ def test_collect_pr_context_uses_head_repository_for_workflow_fetch(
         _completed(
             stdout=(
                 '{"title":"Fork PR","body":"","number":9,'
-                '"baseRefOid":"abc123","headRefOid":"forksha",'
+                '"changedFiles":1,"baseRefOid":"abc123","headRefOid":"forksha",'
                 '"headRepository":{"nameWithOwner":"fork-owner/py-lintro"}}'
             ),
         ),
@@ -902,7 +903,7 @@ def test_collect_pr_context_fetches_workflow_via_gh_when_git_show_raises(
         _completed(
             stdout=(
                 '{"title":"CI","body":"","number":8,'
-                '"baseRefOid":"abc123","headRefOid":"deadbeef",'
+                '"changedFiles":1,"baseRefOid":"abc123","headRefOid":"deadbeef",'
                 '"headRepository":{"nameWithOwner":"lgtm-hq/py-lintro"}}'
             ),
         ),
@@ -1212,3 +1213,40 @@ def test_collect_review_context_without_an_exclusion_match_skips_nothing(
         ["src/a.py"],
     )
     assert_that(context.skipped_files).is_empty()
+
+
+@pytest.mark.parametrize("raw_diff", ["", "not a unified diff"])
+def test_pr_raw_diff_cannot_skip_reported_changes(
+    monkeypatch: pytest.MonkeyPatch,
+    raw_diff: str,
+) -> None:
+    """The raw source is checked before exclusions can hide a broken PR diff."""
+    import json
+
+    def gh(*, args: list[str]) -> CompletedProcess[str]:
+        """Return a PR with changed files and a broken raw diff."""
+        if args[1] == "view":
+            assert_that(args).contains(
+                "title,body,number,baseRefOid,headRefOid,headRepository,changedFiles",
+            )
+            return _completed(
+                stdout=json.dumps(
+                    {
+                        "number": 7,
+                        "title": "PR",
+                        "baseRefOid": "base",
+                        "headRefOid": "head",
+                        "changedFiles": 1,
+                    },
+                ),
+            )
+        return _completed(stdout=raw_diff)
+
+    monkeypatch.setattr(collection, "_run_gh", gh)
+    with pytest.raises(ReviewContextError) as caught:
+        collect_review_context(pr_number=7, repo="owner/name", exclude_globs=["**"])
+    assert_that(caught.value.code).is_equal_to(ReviewContextErrorCode.DIFF_DESYNC)
+    assert_that(str(caught.value)).contains(
+        "GitHub reports changed files",
+        "raw PR diff",
+    )

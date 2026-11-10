@@ -26,7 +26,11 @@ from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
-from lintro.ai.review.exceptions import ReviewContextError
+from lintro.ai.review.exceptions import (
+    REVIEW_HEAD_ATTR,
+    ReviewContextError,
+    known_review_head,
+)
 from lintro.ai.review.glob_utils import path_matches_any_glob
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.pr_metadata import PRMetadata
@@ -84,17 +88,20 @@ def collect_review_context(
             pr_number=pr_number,
             repo=repo,
         )
+        with known_review_head(context.head_ref):
+            validate_review_context_diff(context=context)
         # The agent reads the PR's head, never the ambient tree (#2733): the
         # one decision is a verified head worktree or no tree at all. The
         # ambient checkout is never the fallback, whatever commit it is at
         # — a matching commit says nothing about uncommitted edits.
-        worktree = checkout_pr_head(pr_number=pr_number, head_oid=context.head_ref)
-        checkout = ReviewCheckout.HEAD
-        if worktree is None:
-            worktree = empty_workspace()
-            checkout = ReviewCheckout.NONE
-        repo_root = worktree.path
-        context = replace(context, checkout=checkout, head_worktree=worktree)
+        with known_review_head(context.head_ref):
+            worktree = checkout_pr_head(pr_number=pr_number, head_oid=context.head_ref)
+            checkout = ReviewCheckout.HEAD
+            if worktree is None:
+                worktree = empty_workspace()
+                checkout = ReviewCheckout.NONE
+            repo_root = worktree.path
+            context = replace(context, checkout=checkout, head_worktree=worktree)
     elif uncommitted:
         context = _collect_uncommitted_context()
     else:
@@ -103,7 +110,7 @@ def collect_review_context(
 
     # The tree exists from here on (#2733): whatever raises before the run
     # owns it — a filter, the validation, an interrupt — removes it.
-    with RemoveOnError(context.head_worktree):
+    with known_review_head(context.head_ref), RemoveOnError(context.head_worktree):
         context = _finish_context(
             context=context,
             paths=paths,
@@ -113,6 +120,7 @@ def collect_review_context(
             raise ReviewContextError(
                 "No changes found for review. Verify the diff range or path filters.",
                 code=ReviewContextErrorCode.NO_CHANGES,
+                skipped_files=tuple(context.skipped_files),
             )
         validate_review_context_diff(context=context)
     return replace(context, repo_root=repo_root)
@@ -387,7 +395,7 @@ def _collect_pr_context(
         "view",
         str(pr_number),
         "--json",
-        "title,body,number,baseRefOid,headRefOid,headRepository",
+        "title,body,number,baseRefOid,headRefOid,headRepository,changedFiles",
     ]
     if repo is not None:
         diff_args.extend(["--repo", repo])
@@ -403,22 +411,30 @@ def _collect_pr_context(
             repo_override=repo,
         )
     except ReviewContextError as exc:
-        raise ReviewContextError(
-            f"Failed to load pull request metadata for #{pr_number}: {exc}",
-            code=exc.code,
-        ) from exc
+        with known_review_head(getattr(exc, REVIEW_HEAD_ATTR, "")):
+            raise ReviewContextError(
+                f"Failed to load pull request metadata for #{pr_number}: {exc}",
+                code=exc.code,
+            ) from exc
 
-    unified_diff = _run_gh(args=diff_args).stdout
-    changed_files = _parse_changed_files_from_diff(unified_diff=unified_diff)
+    with known_review_head(head_ref):
+        unified_diff = _run_gh(args=diff_args).stdout
+        changed_files = _parse_changed_files_from_diff(unified_diff=unified_diff)
+        if pr_metadata.changed_files and not changed_files:
+            raise ReviewContextError(
+                "GitHub reports changed files but the raw PR diff has "
+                "no parseable file sections.",
+                code=ReviewContextErrorCode.DIFF_DESYNC,
+            )
 
-    return ReviewContext(
-        base_ref=base_ref,
-        head_ref=head_ref,
-        changed_files=changed_files,
-        unified_diff=unified_diff,
-        pr_metadata=pr_metadata,
-        checkout=_probe_pr_checkout(base_ref=base_ref, head_ref=head_ref),
-    )
+        return ReviewContext(
+            base_ref=base_ref,
+            head_ref=head_ref,
+            changed_files=changed_files,
+            unified_diff=unified_diff,
+            pr_metadata=pr_metadata,
+            checkout=_probe_pr_checkout(base_ref=base_ref, head_ref=head_ref),
+        )
 
 
 def _probe_pr_checkout(*, base_ref: str, head_ref: str) -> ReviewCheckout:

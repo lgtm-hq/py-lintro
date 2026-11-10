@@ -34,10 +34,12 @@ class ExistingComment:
         editable: Whether this actor may edit that comment. It starts
             optimistic — the only way to find out is to try — and is set
             false once GitHub answers ``403``.
+        body: Body captured during the lookup, when available.
     """
 
     comment_id: int | None = None
     editable: bool = True
+    body: str = ""
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)

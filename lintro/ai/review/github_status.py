@@ -10,23 +10,37 @@ comment from another actor is handled identically whichever one runs.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from loguru import logger
 
 from lintro.ai.integrations.github_pr import GitHubPRReporter
 from lintro.ai.review.enums.comment_kind import CommentKind
 from lintro.ai.review.finding_matcher import count_blocking_findings
-from lintro.ai.review.github_errors import format_error_comment
+from lintro.ai.review.github_constants import FAILURE_NOTICE_MARKER, STICKY_MARKER
+from lintro.ai.review.github_errors import (
+    format_error_comment,
+    format_failure_notice,
+    is_error_only_comment,
+)
 from lintro.ai.review.github_notes import format_convergence_banner
-from lintro.ai.review.lifecycle.comments import load_sticky_comment, upsert_comment
+from lintro.ai.review.lifecycle.comments import (
+    clear_failure_notice,
+    load_sticky_comment,
+    upsert_comment,
+)
+from lintro.ai.review.lifecycle.decision import ExistingComment
 from lintro.ai.review.lifecycle.state import resolve_prior_state
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_state import ReviewState
-from lintro.ai.review.sticky import render_state_sticky
+from lintro.ai.review.no_changes import NO_CHANGES_DETAIL
+from lintro.ai.review.sticky import parse_sticky_state, render_state_sticky
 
 __all__ = [
     "post_review_converged_to_github",
     "post_review_error_to_github",
+    "post_review_no_changes_to_github",
 ]
 
 
@@ -65,11 +79,43 @@ def post_review_error_to_github(
     if not gh_reporter.is_available():
         logger.warning("GitHub PR context not available — skipping error posting")
         return False
-    existing, sticky_state = load_sticky_comment(reporter=gh_reporter)
+    notices: list[tuple[int, str]] = []
+    comments = gh_reporter.lookup_issue_comments(
+        markers=(STICKY_MARKER, FAILURE_NOTICE_MARKER),
+        anchored=(FAILURE_NOTICE_MARKER,),
+        all_matches=notices,
+    )
+    if comments is None:
+        logger.warning(
+            "Could not list review comments — leaving the pull request untouched",
+        )
+        return False
+    existing = _comment_from_lookup(comments=comments, marker=STICKY_MARKER)
+    notice = _comment_from_lookup(comments=comments, marker=FAILURE_NOTICE_MARKER)
     state = resolve_prior_state(
         prior_state=prior_state,
-        sticky_state=sticky_state,
+        sticky_state=parse_sticky_state(body=existing.body),
     )
+    recoverable = any(not run.coverage.checkpoint for run in state.runs)
+    if (
+        not recoverable
+        and existing.comment_id is not None
+        and not is_error_only_comment(existing.body)
+    ):
+        # A previous recoverable failure may have left an older banner in the
+        # board. We cannot safely remove it without state: the separate notice
+        # names the latest attempt and head while the board remains untouched.
+        clear_failure_notice(reporter=gh_reporter, notices=notices[1:])
+        return upsert_comment(
+            reporter=gh_reporter,
+            kind=CommentKind.FAILURE_NOTICE,
+            existing=notice,
+            body=format_failure_notice(
+                error=error,
+                provider=provider,
+                metadata=metadata,
+            ),
+        ).ok
     body = format_error_comment(
         error=error,
         provider=provider,
@@ -78,12 +124,37 @@ def post_review_error_to_github(
         repo=repo or gh_reporter.repo or "",
         pr_number=pr_number if pr_number is not None else gh_reporter.pr_number,
     )
-    return upsert_comment(
+    outcome = upsert_comment(
         reporter=gh_reporter,
         kind=CommentKind.ERROR,
         existing=existing,
         body=body,
-    ).ok
+    )
+    if outcome.ok:
+        clear_failure_notice(reporter=gh_reporter, notices=notices)
+    return outcome.ok
+
+
+def _comment_from_lookup(
+    *,
+    comments: dict[str, tuple[int, str]],
+    marker: str,
+) -> ExistingComment:
+    """Describe one comment from a successful listing.
+
+    Args:
+        comments: Marker matches from the reporter.
+        marker: Marker to select.
+
+    Returns:
+        The existing comment, or a confirmed empty descriptor.
+    """
+    found = comments.get(marker)
+    return (
+        ExistingComment(comment_id=found[0], body=found[1])
+        if found
+        else ExistingComment()
+    )
 
 
 def post_review_converged_to_github(
@@ -114,36 +185,97 @@ def post_review_converged_to_github(
         True when posting succeeded; False when there is no pull request
         context or no recoverable prior state to re-render the board from.
     """
+    return _post_skipped_review(
+        banner=lambda state: format_convergence_banner(
+            decision=decision,
+            open_p1=count_blocking_findings(findings=state.findings),
+        ),
+        pr_number=pr_number,
+        repo=repo,
+        reporter=reporter,
+        prior_state=prior_state,
+    )
+
+
+def post_review_no_changes_to_github(
+    *,
+    pr_number: int | None = None,
+    repo: str | None = None,
+    reporter: GitHubPRReporter | None = None,
+    prior_state: ReviewState | None = None,
+) -> bool:
+    """Disclose an empty selection over the stored board without editing state.
+
+    Args:
+        pr_number: Pull request number.
+        repo: Repository slug.
+        reporter: Optional GitHub reporter.
+        prior_state: Stored state recovered before context collection completed.
+
+    Returns:
+        Whether a recoverable board was successfully re-rendered.
+    """
+    return _post_skipped_review(
+        banner=lambda _: f"> {NO_CHANGES_DETAIL}",
+        pr_number=pr_number,
+        repo=repo,
+        reporter=reporter,
+        prior_state=prior_state,
+    )
+
+
+def _post_skipped_review(
+    *,
+    banner: Callable[[ReviewState], str],
+    pr_number: int | None,
+    repo: str | None,
+    reporter: GitHubPRReporter | None,
+    prior_state: ReviewState | None,
+) -> bool:
+    """Re-render a recoverable board with a skip banner, preserving its state.
+
+    Args:
+        banner: Render the disclosure for the recovered state.
+        pr_number: Pull request number.
+        repo: Repository slug.
+        reporter: Optional GitHub reporter.
+        prior_state: Stored state recovered by the caller.
+
+    Returns:
+        Whether a board was recovered and posted.
+    """
     gh_reporter = reporter or GitHubPRReporter(pr_number=pr_number, repo=repo)
     if not gh_reporter.is_available():
-        logger.warning("GitHub PR context not available — skipping converged stamp")
+        logger.warning("GitHub PR context not available — skipping review skip stamp")
         return False
-    existing, sticky_state = load_sticky_comment(reporter=gh_reporter)
+    notices: list[tuple[int, str]] = []
+    existing, sticky_state = load_sticky_comment(reporter=gh_reporter, notices=notices)
     state = resolve_prior_state(
         prior_state=prior_state,
         sticky_state=sticky_state,
     )
-    if not state.runs:
+    if not any(not run.coverage.checkpoint for run in state.runs):
         # Nothing recoverable to re-render: overwriting the live board with
         # the empty-state page would erase the findings a reviewer is still
         # working from, so leave the sticky untouched and say so.
+        clear_failure_notice(reporter=gh_reporter, notices=notices)
         logger.warning(
             "No prior review state is recoverable — leaving the sticky "
-            "untouched instead of stamping a converged round over it",
+            "untouched instead of stamping a skipped round over it",
         )
         return False
     body = render_state_sticky(
         state=state,
-        banner=format_convergence_banner(
-            decision=decision,
-            open_p1=count_blocking_findings(findings=state.findings),
-        ),
+        banner=banner(state),
         repo=repo or gh_reporter.repo or "",
         pr_number=pr_number if pr_number is not None else gh_reporter.pr_number,
     )
-    return upsert_comment(
+    outcome = upsert_comment(
         reporter=gh_reporter,
         kind=CommentKind.STICKY,
         existing=existing,
         body=body,
-    ).ok
+    )
+    if outcome.ok:
+        clear_failure_notice(reporter=gh_reporter, notices=notices)
+    return outcome.ok

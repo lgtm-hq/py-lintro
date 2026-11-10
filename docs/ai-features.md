@@ -555,6 +555,10 @@ may go unreported.
   `metadata`). The MCP `lintro_review` payload carries all three on its `run` block and
   hoists only `findings_coverage_complete` to the tool-result root, next to `coverage`.
 
+A `lintro_review` result with no reviewable changes includes top-level
+`findings_coverage_complete: false`, `outcome: "no_changes"`, `review_ran: false` and
+`skipped_files` with exclusion reasons. No review ran; this is not clean coverage.
+
 **Coverage limitation is a separate axis from `partial`.** `partial` / `stopped_reason`
 mean the run _stopped early_ and planned review work was left undone (built-in chunks or
 custom-agent passes, on a cost cap or an interrupt). A degraded run finished its planned
@@ -2012,11 +2016,41 @@ lintro doctor --ai-liveness # adds the liveness probe (one minimal API call on `
 `lintro review` distinguishes the two red states by exit code, so a wrapper can never
 mistake one for the other:
 
-| Exit | Meaning                                                                                                                |
-| ---- | ---------------------------------------------------------------------------------------------------------------------- |
-| `0`  | A review was produced (clean, or findings below P1)                                                                    |
-| `1`  | A review was produced and contains P1 findings                                                                         |
-| `2`  | **No review was produced** — missing/dead credential, depleted balance, unreachable provider, or a lintro-side failure |
+| Exit | Meaning                                                                                                                                            |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | A review was produced (clean, or findings below P1), or an explicit no-changes skip                                                                |
+| `1`  | A review was produced and contains P1 findings                                                                                                     |
+| `2`  | **No review was produced** — missing/dead credential, depleted balance, unreachable provider, context collection failure, or a lintro-side failure |
+
+Context collection failures use `error.kind: context_unavailable` and an additive
+`error.code` carrying the stable `ReviewContextErrorCode` (for example
+`gh-command-failed` or `diff-desync`). The message retains the command and cause. This
+kind is neither provider-unavailable nor eligible for provider fallback. Other error
+kinds are `auth_failed`, `insufficient_credits`, `quota_exceeded`, `rate_limited`,
+`context_length`, `server_error`, `timeout`, `invalid_response`, `provider_unavailable`,
+and `unknown`.
+
+An empty diff or an intentionally excluded selection exits 0 with
+`{"outcome":"no_changes","review_ran":false,"detail":"No reviewable changes, no review ran.","skipped_files":[]}`.
+Excluded files are listed with reasons. This is no claim of clean coverage: no review
+state is written, round advanced, or prior finding resolved. With `--post`, recoverable
+stored findings are re-rendered with the skip note; otherwise no comment is written.
+After a successful board write, or a skip without recoverable state, separate
+latest-failure notices are removed (cleanup is best-effort). A missing or unparseable
+raw PR diff when GitHub reports changed files is an error (exit 2), even if filters
+would exclude everything.
+
+Under `--post`, failures re-render a recoverable board with a banner. If finished state
+cannot be recovered, an existing findings board stays unchanged and a separate
+latest-attempt failure notice is upserted, including the cause and head commit when
+known. A confirmed missing sticky gets an error-only page; a recognized error-only page
+is updated in place. Failed comment listing writes nothing to the PR. Successful board
+writes remove all listed notices even if inline posting fails. Recoverable error and
+skip re-renders clear notices only after the board write succeeds; a skip without
+recoverable state also attempts cleanup. Refused notice edits leave the existing notice
+in place without creating a replacement; duplicate notices are removed best-effort. See
+[GitHub integration](github-integration.md) for the older banner limitation when state
+becomes unavailable.
 
 ### CLI compatibility floors
 
