@@ -19,6 +19,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+### Security
+
+## [0.179.1] - 2026-11-10
+
+### Changed
+
+- **deps**: update python:3.14-slim docker digest to 9aaa474 (#3301) (8fc98b9)
+
+### Fixed
+
+- **ai/review**: exit 2 with an error report when the review context cannot be collected
+  (#3305) (9bde8d8)
 - Review context collection failures now exit 2 with a structured context error and
   preserve stored findings under `--post`. Nothing to review now exits 0 with an
   explicit skip and excluded-file reasons, instead of exit 1. Wrappers must distinguish
@@ -33,8 +45,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Failed comment lookup posts nothing; recognized error-only stickies update in place.
   Environment-detected PR reviews reject `--base` and `--uncommitted` as usage errors
   without posting.
-
-### Security
 
 ## [0.179.0] - 2026-11-09
 
