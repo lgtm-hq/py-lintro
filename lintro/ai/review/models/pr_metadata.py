@@ -17,6 +17,7 @@ class PRMetadata:
         changed_files: Number of changed files reported by GitHub.
         head_repo: Head repository in ``owner/name`` format when it differs from
             ``repo`` (for example fork pull requests).
+        head_owner: Login of the head repository owner from GitHub metadata.
     """
 
     title: str
@@ -25,3 +26,4 @@ class PRMetadata:
     repo: str
     changed_files: int = 0
     head_repo: str | None = None
+    head_owner: str = ""

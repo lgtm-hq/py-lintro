@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
+
+# Expose the process-boundary exception without requiring callers to import
+# subprocess execution APIs just to identify or simulate a timeout.
+TimeoutExpired = subprocess.TimeoutExpired
 
 _GIT_GH_TIMEOUT_SECONDS = 120.0
 
@@ -189,7 +194,64 @@ def _run_gh(*, args: list[str]) -> subprocess.CompletedProcess[str]:
         stderr = result.stderr.strip() or result.stdout.strip() or "unknown gh error"
         raise ReviewContextError(
             f"gh {' '.join(args)} failed: {stderr}",
-            code=ReviewContextErrorCode.GH_COMMAND_FAILED,
+            code=(
+                ReviewContextErrorCode.GH_DIFF_SIZE_REFUSED
+                if args[:2] == ["pr", "diff"] and _is_diff_size_refusal(stderr)
+                else ReviewContextErrorCode.GH_COMMAND_FAILED
+            ),
         )
 
     return result
+
+
+def _is_diff_size_refusal(message: str) -> bool:
+    """Recognize GitHub's diff rendering size refusals only.
+
+    Args:
+        message: GitHub CLI failure output.
+
+    Returns:
+        Whether GitHub refused to render the diff for its size.
+    """
+    return (
+        re.search(
+            r"\bHTTP 406\b:[^\r\n]*\bdiff exceeded the maximum number of "
+            r"(?:lines|files)\b",
+            message,
+            flags=re.IGNORECASE,
+        )
+        is not None
+    )
+
+
+def fetch_pr_head(
+    *,
+    pr_number: int,
+    head_oid: str,
+    fallback: bool = False,
+) -> None:
+    """Fetch the private PR ref and require the metadata's exact head.
+
+    Args:
+        pr_number: Pull request whose private head ref is fetched.
+        head_oid: Expected head commit SHA.
+        fallback: Whether failures belong to local diff reconstruction.
+
+    Raises:
+        ReviewContextError: When fetch fails or the head moved.
+    """
+    ref = f"refs/lintro/pr/{pr_number}"
+    _run_git(
+        args=["fetch", "--no-tags", "origin", f"+refs/pull/{pr_number}/head:{ref}"],
+    )
+    resolved = _run_git(args=["rev-parse", "--verify", f"{ref}^{{commit}}"])
+    if resolved.stdout.strip() != head_oid:
+        raise ReviewContextError(
+            "The pull request head moved since metadata was read. "
+            "Retry the review to load the current head.",
+            code=(
+                ReviewContextErrorCode.PR_LOCAL_DIFF_FAILED
+                if fallback
+                else ReviewContextErrorCode.GIT_COMMAND_FAILED
+            ),
+        )

@@ -20,6 +20,8 @@ class ReviewContext:
 
     Attributes:
         base_ref: Base commit OID or sentinel (``WORKTREE``) for the diff range.
+            In PR mode, local-git reports the merge base; github reports the
+            base branch tip from the metadata.
         head_ref: Head commit OID for the diff range.
         changed_files: Parsed changed file entries.
         unified_diff: Full unified diff text for the selected range.
@@ -36,6 +38,7 @@ class ReviewContext:
             a narrowed review scope is visible rather than implied (#1910).
         checkout: Which side of the range the working tree holds, so the
             git-native prompt can say what a disk read means (#2685).
+        diff_source: Source of the diff (github, local-git, or git).
     """
 
     base_ref: str
@@ -48,3 +51,4 @@ class ReviewContext:
     head_worktree: PrHeadWorktree | None = None
     skipped_files: list[SkippedFile] = field(default_factory=list)
     checkout: ReviewCheckout = ReviewCheckout.UNKNOWN
+    diff_source: str = "git"

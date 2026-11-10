@@ -2480,3 +2480,34 @@ Raw provider request/response traffic can be written as NDJSON under
 - See your provider's privacy policy for data retention:
   [Anthropic](https://www.anthropic.com/privacy),
   [OpenAI](https://openai.com/policies/privacy-policy)
+
+## Pull request diff size fallback
+
+When GitHub refuses a pull request diff for size (its line or file limit), review builds
+the diff locally from the compare API's merge-base commit and the verified pull request
+head. `gh pr diff` remains the primary source. JSON metadata records `diff_source`
+(`github` or `local-git`); the sticky comment displays the source. Exclusions
+(`ai.exclude_paths`) and path filters apply to either source, retaining excluded-file
+skip records and either-path rename matching.
+
+The fallback needs a git checkout whose `origin` can fetch `refs/pull/<n>/head` and the
+merge-base commit, using the checkout's existing git credentials. In GitHub Actions, use
+`actions/checkout` with `persist-credentials: true`; a `gh` token alone does not
+authenticate git fetch. No credential helper is installed. A moved head, failed compare
+lookup, missing commit, fetch failure or timeout exits 2 with both the GitHub size
+refusal and the local failure plus a remedy. Authentication failures, missing `gh`, and
+ordinary timeouts do not trigger the fallback. The CLI diff byte ceiling applies after
+exclusions; reduce the diff with `ai.exclude_paths` or use `--transport api` when it is
+exceeded.
+
+The reported base is the compare merge base for `local-git` and the base branch tip for
+`github`. Full clones remain full. In shallow checkouts, including depth-1 checkouts at
+the PR head, review progressively deepens the head until ancestry is proven or its
+history is complete. It stops after at most eight fetches and 4,096 additional
+generations, with a 120-second timeout per git command. If ancestry remains unverified,
+check out with full history (`actions/checkout` with `fetch-depth: 0`) and retry. A
+proven non-ancestor compare result is rejected separately and requires a fresh compare
+lookup. Git timeouts retain their retry remedy.
+
+MCP reports reconstruction failures as `execution_error` with
+`context_error: pr-local-diff-failed` and the combined failure message.

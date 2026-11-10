@@ -58,6 +58,7 @@ def empty_review_result(
         checklist_items=len(checklist_items),
         token_usage={"prompt": 0, "completion": 0, "total": 0},
         cost_estimate_usd=0.0,
+        diff_source=context.diff_source,
         base_ref=context.base_ref,
         head_ref=context.head_ref,
         timestamp=datetime.now(tz=UTC).isoformat(),

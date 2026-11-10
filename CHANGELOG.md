@@ -11,6 +11,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- AI pull request review reconstructs size-refused GitHub diffs from verified local
+  commits, retaining path exclusions and reporting the diff source (#3304).
+
 ### Changed
 
 ### Deprecated

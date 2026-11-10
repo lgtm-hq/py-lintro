@@ -233,6 +233,7 @@ def assemble_review_result(
             "context": sum(item.context_tokens for item in outcome.partials),
         },
         cost_estimate_usd=max(total_cost, plan.budget.spent),
+        diff_source=context.diff_source,
         base_ref=context.base_ref,
         head_ref=context.head_ref,
         timestamp=datetime.now(tz=UTC).isoformat(),

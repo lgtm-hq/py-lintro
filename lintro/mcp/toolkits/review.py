@@ -161,6 +161,9 @@ _INVALID_INPUT_CONTEXT_CODES: Final[frozenset[str]] = frozenset(
     },
 )
 
+# Size refusals and local reconstruction failures use EXECUTION_ERROR, retaining
+# their context_error codes and the full combined cause/remedy message.
+
 # Review context failures meaning this workspace cannot serve reviews at all.
 _UNAVAILABLE_CONTEXT_CODES: Final[frozenset[str]] = frozenset(
     {

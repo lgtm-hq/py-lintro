@@ -454,3 +454,10 @@ Point your MCP host at the lintro CLI (stdio):
   }
 }
 ```
+
+## Pull request diff size fallback
+
+When GitHub refuses a diff for size, review can reconstruct it from verified local
+commits. See
+[Pull request diff size fallback](ai-features.md#pull-request-diff-size-fallback) for
+requirements, shallow-checkout handling, metadata, and remedies.

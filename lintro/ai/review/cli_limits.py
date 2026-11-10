@@ -108,8 +108,8 @@ def assert_cli_diff_within_ceiling(
     raise ReviewContextError(
         "Diff is too large for CLI-transport review "
         f"({size.bytes:,} bytes > {cli_max_diff_bytes:,} byte ceiling). "
-        "Narrow with --paths, or re-run with --transport api when an API key "
-        "is available.",
+        "Narrow with ai.exclude_paths or --paths, or re-run with --transport api "
+        "when an API key is available.",
         code=ReviewContextErrorCode.DIFF_TOO_LARGE,
     )
 

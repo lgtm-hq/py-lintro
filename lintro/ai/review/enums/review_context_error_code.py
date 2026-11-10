@@ -18,6 +18,8 @@ class ReviewContextErrorCode(StrEnum):
     MERGE_BASE_FAILED = "merge-base-failed"
     GIT_OUTPUT_PARSE_FAILED = "git-output-parse-failed"
     GH_UNAVAILABLE = "gh-unavailable"
+    GH_DIFF_SIZE_REFUSED = "gh-diff-size-refused"
+    PR_LOCAL_DIFF_FAILED = "pr-local-diff-failed"
     GH_COMMAND_FAILED = "gh-command-failed"
     GH_JSON_INVALID = "gh-json-invalid"
     GH_METADATA_INVALID = "gh-metadata-invalid"

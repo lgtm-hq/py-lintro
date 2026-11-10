@@ -814,3 +814,10 @@ provider as their cause.
 
 A PR review detected from the CI environment rejects `--base` and `--uncommitted`, just
 like an explicit `--pr`; these usage errors post nothing.
+
+## Pull request diff size fallback
+
+When GitHub refuses a diff for size, review can reconstruct it from verified local
+commits. See
+[Pull request diff size fallback](ai-features.md#pull-request-diff-size-fallback) for
+requirements, shallow-checkout handling, metadata, and remedies.

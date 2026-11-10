@@ -18,6 +18,7 @@ from lintro.ai.review.github_contract import RenderLimits
 from lintro.ai.review.github_notes import format_partial_review_label
 from lintro.ai.review.github_render import (
     Section,
+    sanitize_comment_text,
 )
 from lintro.ai.review.models.agent_prompt_scope import AgentPromptScope
 from lintro.ai.review.models.sticky_plan import StickyPlan
@@ -217,6 +218,14 @@ def round_sections(
         Section(
             name="incomplete_banner",
             text=_incomplete_banner(result=result, verdict=plan.verdict),
+        ),
+        Section(
+            name="diff_source",
+            text=(
+                f"Diff source: `{sanitize_comment_text(result.metadata.diff_source)}`"
+                if result.metadata.diff_source
+                else ""
+            ),
         ),
         Section(
             name="coverage",
