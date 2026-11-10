@@ -2035,18 +2035,22 @@ An empty diff or an intentionally excluded selection exits 0 with
 Excluded files are listed with reasons. This is no claim of clean coverage: no review
 state is written, round advanced, or prior finding resolved. With `--post`, recoverable
 stored findings are re-rendered with the skip note; otherwise no comment is written.
-Either way, any separate latest-failure notice is removed (cleanup is best-effort). A
-missing or unparseable raw PR diff when GitHub reports changed files is an error (exit
-2), even if filters would exclude everything.
+After a successful board write, or a skip without recoverable state, separate
+latest-failure notices are removed (cleanup is best-effort). A missing or unparseable
+raw PR diff when GitHub reports changed files is an error (exit 2), even if filters
+would exclude everything.
 
 Under `--post`, failures re-render a recoverable board with a banner. If finished state
-cannot be recovered, an existing findings board stays unchanged and one separate
+cannot be recovered, an existing findings board stays unchanged and a separate
 latest-attempt failure notice is upserted, including the cause and head commit when
 known. A confirmed missing sticky gets an error-only page; a recognized error-only page
-is updated in place. Failed comment listing writes nothing to the PR. Successful
-reviews, recoverable error re-renders, and no-changes skips remove the separate notice.
-See [GitHub integration](github-integration.md) for the older banner limitation when
-state becomes unavailable.
+is updated in place. Failed comment listing writes nothing to the PR. Successful board
+writes remove all listed notices even if inline posting fails. Recoverable error and
+skip re-renders clear notices only after the board write succeeds; a skip without
+recoverable state also attempts cleanup. Refused notice edits leave the existing notice
+in place without creating a replacement; duplicate notices are removed best-effort. See
+[GitHub integration](github-integration.md) for the older banner limitation when state
+becomes unavailable.
 
 ### CLI compatibility floors
 

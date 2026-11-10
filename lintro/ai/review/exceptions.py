@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -137,3 +139,27 @@ def completed_chunks_of(error: BaseException) -> int | None:
     if isinstance(error, ReviewExecutionError) and error.completed_chunks is not None:
         return max(int(error.completed_chunks), 0)
     return None
+
+
+REVIEW_HEAD_ATTR = "review_head_ref"
+
+
+@contextmanager
+def known_review_head(head_ref: str) -> Iterator[None]:
+    """Carry a known head through a failed collection or preparation step.
+
+    Args:
+        head_ref: Head commit already read for this review.
+
+    Yields:
+        None: Control to the review step.
+
+    Raises:
+        AIError: Review failure with the known head attached.
+        ValueError: Invalid review data with the known head attached.
+    """
+    try:
+        yield
+    except (AIError, ValueError) as exc:
+        setattr(exc, REVIEW_HEAD_ATTR, head_ref)
+        raise

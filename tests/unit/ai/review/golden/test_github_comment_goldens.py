@@ -112,12 +112,16 @@ class _RecordingReporter:
         *,
         markers: tuple[str, ...],
         anchored: tuple[str, ...] = (),
+        strict: bool = True,
+        all_matches: list[tuple[int, str]] | None = None,
     ) -> dict[str, tuple[int, str]] | None:
         """Confirm that this first round has no existing comments.
 
         Args:
             markers: Markers requested by the poster.
             anchored: Markers that must lead their bodies.
+            strict: Whether malformed entries invalidate the listing.
+            all_matches: Collect all anchored matches when supplied.
 
         Returns:
             An empty successful lookup.

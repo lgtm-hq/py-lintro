@@ -183,6 +183,7 @@ def locate_comment(
 def load_sticky_comment(
     *,
     reporter: CommentClient,
+    notices: list[tuple[int, str]] | None = None,
 ) -> tuple[ExistingComment, ReviewState]:
     """Locate the sticky comment and decode any state left behind in it.
 
@@ -192,12 +193,23 @@ def load_sticky_comment(
 
     Args:
         reporter: GitHub client used to list the pull request's comments.
+        notices: Collect failure notices from the same listing.
 
     Returns:
         tuple[ExistingComment, ReviewState]: The live sticky comment and the
         state recovered from its body, both empty when there is no sticky.
     """
-    found = reporter.find_issue_comment(marker=STICKY_MARKER)
+    lookup = getattr(reporter, "lookup_issue_comments", None)
+    if notices is not None and callable(lookup):
+        comments = lookup(
+            markers=(STICKY_MARKER, FAILURE_NOTICE_MARKER),
+            anchored=(FAILURE_NOTICE_MARKER,),
+            strict=False,
+            all_matches=notices,
+        )
+        found = comments.get(STICKY_MARKER) if comments is not None else None
+    else:
+        found = reporter.find_issue_comment(marker=STICKY_MARKER)
     if found is None:
         return ExistingComment(), ReviewState()
     comment_id, body = found
@@ -218,8 +230,8 @@ def upsert_comment(
     GitHub only lets the creating actor PATCH a comment, and after #2050 the
     poster is ``lintro-review[bot]``, so a leftover ``github-actions[bot]``
     comment answers ``403`` and has to be superseded rather than edited. That
-    answer is fed back through :func:`decide` instead of being branched on
-    here, so the fallback is the same decision the caller started from.
+    answer is fed back through :func:`decide`. Failure notices keep the
+    existing comment when an edit fails, avoiding duplicate failure reports.
 
     Args:
         reporter: GitHub client used to create, edit, or replace the
@@ -243,6 +255,12 @@ def upsert_comment(
         )
         if outcome is not None:
             return outcome
+        if kind is CommentKind.FAILURE_NOTICE:
+            logger.warning(
+                "Could not edit failure notice {}; leaving it in place",
+                plan.comment_id,
+            )
+            return UpsertOutcome(ok=False, comment_id=plan.comment_id)
         plan = decide(
             kind=kind,
             existing=replace(existing, editable=False),
@@ -432,29 +450,21 @@ def _post_with_retry(
 def clear_failure_notice(
     *,
     reporter: CommentClient,
-    existing: ExistingComment | None = None,
+    notices: list[tuple[int, str]],
 ) -> None:
-    """Remove the separate failure notice without failing the run.
+    """Remove all listed failure notices without failing the run.
 
     Args:
-        reporter: Client used to locate and delete the notice.
-        existing: Notice already found during this invocation, if available.
+        reporter: Client used to delete the notices.
+        notices: Anchored notice matches from the posting path's listing.
     """
-    try:
-        notice = (
-            existing
-            if existing is not None
-            else locate_comment(
-                reporter=reporter,
-                kind=CommentKind.FAILURE_NOTICE,
-            )
-        )
-        if notice.comment_id is not None and not reporter.delete_issue_comment(
-            comment_id=notice.comment_id,
-        ):
+    for comment_id, _ in notices:
+        try:
+            if not reporter.delete_issue_comment(comment_id=comment_id):
+                logger.warning("Could not delete review failure notice {}", comment_id)
+        except Exception as exc:
             logger.warning(
-                "Could not delete the latest review failure notice {}",
-                notice.comment_id,
+                "Could not clear review failure notice {}: {}",
+                comment_id,
+                exc,
             )
-    except Exception as exc:
-        logger.warning("Could not clear the latest review failure notice: {}", exc)

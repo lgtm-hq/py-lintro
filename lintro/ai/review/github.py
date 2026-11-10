@@ -158,7 +158,8 @@ def post_review_to_github(
         logger.warning("GitHub PR context not available — skipping review posting")
         return False
 
-    existing, sticky_state = load_sticky_comment(reporter=gh_reporter)
+    notices: list[tuple[int, str]] = []
+    existing, sticky_state = load_sticky_comment(reporter=gh_reporter, notices=notices)
     prior_state = resolve_prior_state(
         prior_state=settings.prior_state,
         sticky_state=sticky_state,
@@ -314,8 +315,8 @@ def post_review_to_github(
 
     if settings.captured_comment_ids is not None and comment_ids:
         settings.captured_comment_ids.update(comment_ids)
-    if success:
-        clear_failure_notice(reporter=gh_reporter)
+    if outcome.ok:
+        clear_failure_notice(reporter=gh_reporter, notices=notices)
     return success
 
 

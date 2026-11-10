@@ -720,7 +720,7 @@ def test_the_error_surface_shares_the_boards_marker() -> None:
 def test_a_supersede_relocates_by_the_superseded_kinds_marker(
     kind: CommentKind,
 ) -> None:
-    """The replacement is found again by the marker the body actually carries.
+    """Replacements use their own marker; failure notices stay in place.
 
     Args:
         kind: The comment kind being superseded.
@@ -736,8 +736,14 @@ def test_a_supersede_relocates_by_the_superseded_kinds_marker(
         body=marker,
     )
 
-    assert_that(outcome.comment_id).is_equal_to(99)
-    reporter.find_issue_comment.assert_called_once_with(marker=marker)
+    if kind is CommentKind.FAILURE_NOTICE:
+        assert_that(outcome.ok).is_false()
+        assert_that(outcome.comment_id).is_equal_to(42)
+        reporter.post_issue_comment.assert_not_called()
+        reporter.delete_issue_comment.assert_not_called()
+    else:
+        assert_that(outcome.comment_id).is_equal_to(99)
+        reporter.find_issue_comment.assert_called_once_with(marker=marker)
 
 
 def test_a_replacement_that_cannot_be_posted_leaves_the_original_alone() -> None:

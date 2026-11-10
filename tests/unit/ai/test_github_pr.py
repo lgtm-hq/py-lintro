@@ -839,3 +839,36 @@ def test_issue_comment_lookup_preserves_uncertainty(
         else {} if listing == "absent" else None
     )
     assert_that(result).is_equal_to(expected)
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [{"id": "bad", "body": "text"}, {"id": 3, "body": None}],
+)
+def test_malformed_comment_is_tolerated_only_by_existing_lookups(
+    malformed: dict[str, object],
+    test_token: str,
+) -> None:
+    """Legacy lookups skip bad entries; error posting treats them as unknown."""
+    from lintro.ai.review.github_constants import STICKY_MARKER
+    from lintro.ai.review.github_status import post_review_error_to_github
+
+    board = STICKY_MARKER + "\nkeep this finding"
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+    payload = json.dumps([malformed, {"id": 9, "body": board}]).encode()
+    requests: list[str] = []
+
+    def respond(req: urllib.request.Request, **_: object) -> BytesIO:
+        """Record all HTTP operations while serving the malformed listing."""
+        requests.append(str(req.method))
+        return BytesIO(payload)
+
+    with patch("urllib.request.urlopen", side_effect=respond):
+        found = reporter.find_issue_comment(marker=STICKY_MARKER)
+        posted = post_review_error_to_github(
+            error=RuntimeError("new failure"),
+            reporter=reporter,
+        )
+    assert_that(found).is_equal_to((9, board))
+    assert_that(posted).is_false()
+    assert_that(requests).is_equal_to(["GET", "GET"])

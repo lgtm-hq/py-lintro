@@ -79,9 +79,11 @@ def post_review_error_to_github(
     if not gh_reporter.is_available():
         logger.warning("GitHub PR context not available — skipping error posting")
         return False
+    notices: list[tuple[int, str]] = []
     comments = gh_reporter.lookup_issue_comments(
         markers=(STICKY_MARKER, FAILURE_NOTICE_MARKER),
         anchored=(FAILURE_NOTICE_MARKER,),
+        all_matches=notices,
     )
     if comments is None:
         logger.warning(
@@ -103,6 +105,7 @@ def post_review_error_to_github(
         # A previous recoverable failure may have left an older banner in the
         # board. We cannot safely remove it without state: the separate notice
         # names the latest attempt and head while the board remains untouched.
+        clear_failure_notice(reporter=gh_reporter, notices=notices[1:])
         return upsert_comment(
             reporter=gh_reporter,
             kind=CommentKind.FAILURE_NOTICE,
@@ -113,7 +116,6 @@ def post_review_error_to_github(
                 metadata=metadata,
             ),
         ).ok
-    clear_failure_notice(reporter=gh_reporter, existing=notice)
     body = format_error_comment(
         error=error,
         provider=provider,
@@ -122,12 +124,15 @@ def post_review_error_to_github(
         repo=repo or gh_reporter.repo or "",
         pr_number=pr_number if pr_number is not None else gh_reporter.pr_number,
     )
-    return upsert_comment(
+    outcome = upsert_comment(
         reporter=gh_reporter,
         kind=CommentKind.ERROR,
         existing=existing,
         body=body,
-    ).ok
+    )
+    if outcome.ok:
+        clear_failure_notice(reporter=gh_reporter, notices=notices)
+    return outcome.ok
 
 
 def _comment_from_lookup(
@@ -243,8 +248,8 @@ def _post_skipped_review(
     if not gh_reporter.is_available():
         logger.warning("GitHub PR context not available — skipping review skip stamp")
         return False
-    clear_failure_notice(reporter=gh_reporter)
-    existing, sticky_state = load_sticky_comment(reporter=gh_reporter)
+    notices: list[tuple[int, str]] = []
+    existing, sticky_state = load_sticky_comment(reporter=gh_reporter, notices=notices)
     state = resolve_prior_state(
         prior_state=prior_state,
         sticky_state=sticky_state,
@@ -253,6 +258,7 @@ def _post_skipped_review(
         # Nothing recoverable to re-render: overwriting the live board with
         # the empty-state page would erase the findings a reviewer is still
         # working from, so leave the sticky untouched and say so.
+        clear_failure_notice(reporter=gh_reporter, notices=notices)
         logger.warning(
             "No prior review state is recoverable — leaving the sticky "
             "untouched instead of stamping a skipped round over it",
@@ -264,9 +270,12 @@ def _post_skipped_review(
         repo=repo or gh_reporter.repo or "",
         pr_number=pr_number if pr_number is not None else gh_reporter.pr_number,
     )
-    return upsert_comment(
+    outcome = upsert_comment(
         reporter=gh_reporter,
         kind=CommentKind.STICKY,
         existing=existing,
         body=body,
-    ).ok
+    )
+    if outcome.ok:
+        clear_failure_notice(reporter=gh_reporter, notices=notices)
+    return outcome.ok

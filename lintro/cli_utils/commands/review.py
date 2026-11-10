@@ -72,7 +72,11 @@ from lintro.ai.review.custom_agents import (
 )
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.error_display import render_review_error
-from lintro.ai.review.exceptions import ReviewContextError, ReviewPreparationError
+from lintro.ai.review.exceptions import (
+    REVIEW_HEAD_ATTR,
+    ReviewContextError,
+    ReviewPreparationError,
+)
 from lintro.ai.review.finding_matcher import count_blocking_findings
 from lintro.ai.review.lifecycle.state import (
     departed_paths,
@@ -80,6 +84,7 @@ from lintro.ai.review.lifecycle.state import (
     persist_review_state,
 )
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
+from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.orchestrator import guard_changed_paths
 from lintro.ai.review.output import (
@@ -254,6 +259,32 @@ class _ReviewRender:
     question_map: dict[int, str]
 
 
+def _failure_metadata(exc: Exception) -> ReviewMetadata | None:
+    """Build failure provenance only when a review head is known.
+
+    Args:
+        exc: Failure carrying the head read by preparation or execution.
+
+    Returns:
+        Metadata naming the head, or None before the head is known.
+    """
+    head_ref = getattr(exc, REVIEW_HEAD_ATTR, "")
+    if not isinstance(head_ref, str) or not head_ref:
+        return None
+    return ReviewMetadata(
+        model="",
+        provider="",
+        context_window=0,
+        depth=0,
+        chunks_total=0,
+        chunks_current=0,
+        files_reviewed=0,
+        files_total=0,
+        checklist_items=0,
+        head_ref=head_ref,
+    )
+
+
 def _fail_review_command(
     exc: AIError | ValueError,
     *,
@@ -301,6 +332,7 @@ def _fail_review_command(
                 pr_number=resolved_pr,
                 repo=effective_repo,
                 prior_state=prior_state,
+                metadata=_failure_metadata(exc),
             )
     from lintro.ai.review.error_contract import (
         REVIEW_ERROR_EXIT_CODE,
@@ -1409,6 +1441,7 @@ def _run_round(
                 "Could not persist review-resume state; next round re-reviews",
             )
     except (AIError, ValueError) as exc:
+        setattr(exc, REVIEW_HEAD_ATTR, prepared.context.head_ref)
         _fail_review_command(
             exc,
             output_format=options.output_format,

@@ -1,6 +1,7 @@
 """In-memory GitHub issue comments for posting lifecycle regressions."""
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from lintro.ai.integrations.github_pr import GitHubPRReporter
 
@@ -36,12 +37,16 @@ class CommentReporter(GitHubPRReporter):
         *,
         markers: tuple[str, ...],
         anchored: tuple[str, ...] = (),
+        strict: bool = True,
+        all_matches: list[tuple[int, str]] | None = None,
     ) -> dict[str, tuple[int, str]] | None:
         """Find comments by marker, or simulate an unavailable listing.
 
         Args:
             markers: Markers to locate.
             anchored: Markers that must lead the comment body.
+            strict: Whether malformed entries invalidate the listing.
+            all_matches: Collect all anchored matches when supplied.
 
         Returns:
             First match for each marker, or an unknown listing.
@@ -51,10 +56,10 @@ class CommentReporter(GitHubPRReporter):
         found: dict[str, tuple[int, str]] = {}
         for comment_id, body in self.comments.items():
             for marker in markers:
-                if marker not in found and (
-                    body.startswith(marker) if marker in anchored else marker in body
-                ):
-                    found[marker] = comment_id, body
+                if body.startswith(marker) if marker in anchored else marker in body:
+                    if marker in anchored and all_matches is not None:
+                        all_matches.append((comment_id, body))
+                    found.setdefault(marker, (comment_id, body))
         return found
 
     def post_issue_comment(self, body: str) -> bool:
@@ -104,3 +109,27 @@ class CommentReporter(GitHubPRReporter):
             Empty diff mapping.
         """
         return {}
+
+
+def use_combined_comment_lookup(reporter: MagicMock) -> None:
+    """Adapt a legacy reporter stub to the shared comment listing.
+
+    Args:
+        reporter: Stub whose single-marker lookup already models the board.
+    """
+
+    def lookup(**_kwargs: object) -> dict[str, tuple[int, str]]:
+        """Find the stub's sticky using its existing lookup sequence.
+
+        Args:
+            **_kwargs: Listing options unused by a stub without failure notices.
+
+        Returns:
+            The existing sticky match, or confirmed absence.
+        """
+        from lintro.ai.review.github_constants import STICKY_MARKER
+
+        found = reporter.find_issue_comment(marker=STICKY_MARKER)
+        return {STICKY_MARKER: found} if found else {}
+
+    reporter.lookup_issue_comments.side_effect = lookup

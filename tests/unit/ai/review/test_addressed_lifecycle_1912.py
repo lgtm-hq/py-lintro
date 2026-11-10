@@ -35,6 +35,7 @@ from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.review_state_codec import leftover_state_block
+from tests.unit.ai.review.comment_reporter import use_combined_comment_lookup
 
 _TEST_TOKEN = "ghp_test_fixture_token"  # nosec B105 — fake test fixture token
 _HEAD_SHA = "abc1234def5678"
@@ -620,6 +621,7 @@ def _posting_reporter(
         The stub reporter.
     """
     reporter = MagicMock()
+    use_combined_comment_lookup(reporter)
     reporter.is_available.return_value = True
     if prior is None:
         # Round 1: the sticky does not exist until this run posts it, and is

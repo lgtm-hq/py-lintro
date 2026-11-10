@@ -33,6 +33,7 @@ from lintro.ai.review.output import (
     render_inline_post_failure_json,
 )
 from lintro.ai.review.sticky import build_sticky_comment
+from tests.unit.ai.review.comment_reporter import use_combined_comment_lookup
 
 #: Message GitHub returns when it throttles content creation on a token.
 _RATE_LIMIT_MESSAGE = (
@@ -73,6 +74,7 @@ def _reporter(*, response: GitHubApiResponse) -> MagicMock:
         The configured mock reporter.
     """
     reporter = MagicMock()
+    use_combined_comment_lookup(reporter)
     reporter.is_available.return_value = True
     reporter.find_issue_comment.return_value = (77, "")
     diff_lines = {"src/main.py": {10}, "tests/test_main.py": {5}}

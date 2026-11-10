@@ -46,6 +46,7 @@ from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
+from tests.unit.ai.review.comment_reporter import use_combined_comment_lookup
 
 
 @dataclass
@@ -86,11 +87,8 @@ def _fresh_reporter() -> MagicMock:
     reporter.log = log
     reporter.is_available.return_value = True
     reporter.find_issue_comment.return_value = None
-    reporter.lookup_issue_comments.side_effect = lambda **_: (
-        {STICKY_MARKER: reporter.find_issue_comment.return_value}
-        if reporter.find_issue_comment.return_value
-        else {}
-    )
+
+    use_combined_comment_lookup(reporter)
     reporter.fetch_pr_diff_lines.return_value = {"src/main.py": {10}}
     reporter.fetch_compare_lines.return_value = {"src/main.py": {10}}
     reporter.fetch_pr_commit_shas.return_value = []

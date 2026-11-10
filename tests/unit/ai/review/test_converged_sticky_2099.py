@@ -18,6 +18,7 @@ from lintro.ai.review.sticky import (
     advance_review_state,
     build_sticky_comment,
 )
+from tests.unit.ai.review.comment_reporter import use_combined_comment_lookup
 
 # One real round persisted, so the skipped round is round 2.
 _DECISION = ConvergenceDecision(
@@ -67,6 +68,7 @@ def _reporter(*, prior_body: str, available: bool = True) -> MagicMock:
         The configured mock.
     """
     reporter = MagicMock()
+    use_combined_comment_lookup(reporter)
     reporter.is_available.return_value = available
     reporter.find_issue_comment.return_value = (9, prior_body)
     reporter.update_issue_comment.return_value = True

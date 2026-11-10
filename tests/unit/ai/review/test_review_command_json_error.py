@@ -606,3 +606,72 @@ def test_invalid_review_mode_is_usage_error_backstop(
         "context_unavailable",
     )
     assert_that(posted).is_empty()
+
+
+@pytest.mark.parametrize("stage", ["execution", "diff", "metadata", "before-metadata"])
+def test_failure_notice_names_head_when_known(
+    stage: str,
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The command names known heads for execution and preparation failures."""
+    from lintro.ai.review import github_status
+    from lintro.ai.review.github_constants import FAILURE_NOTICE_MARKER, STICKY_MARKER
+    from lintro.ai.review.models.review_state import ReviewState
+    from tests.unit.ai.review.comment_reporter import CommentReporter
+
+    board = STICKY_MARKER + "\nkeep this board"
+    reporter = CommentReporter((board,))
+    context = MagicMock(changed_files=[], head_ref="abcdef1234567890")
+    monkeypatch.setattr(
+        preparation_module,
+        "collect_review_context",
+        lambda **_: context,
+    )
+    if stage != "execution":
+        from lintro.ai.review.context import collection
+        from lintro.ai.review.exceptions import ReviewContextError
+
+        def run_gh(*, args: list[str]) -> MagicMock:
+            """Fail before or after real metadata parsing, as requested."""
+            if stage == "before-metadata" or args[1] == "diff":
+                raise ReviewContextError("gh unavailable", code="gh-command-failed")
+            payload = {
+                "title": "PR title",
+                "body": "",
+                "number": 7,
+                "baseRefOid": "base",
+                "headRefOid": "abcdef1234567890",
+                "headRepository": {"nameWithOwner": "owner/name"},
+                "changedFiles": "invalid" if stage == "metadata" else 1,
+            }
+            return MagicMock(stdout=json.dumps(payload))
+
+        monkeypatch.setattr(collection, "_run_gh", run_gh)
+        monkeypatch.setattr(
+            preparation_module,
+            "collect_review_context",
+            lambda **_: collection._collect_pr_context(pr_number=7, repo="owner/name"),
+        )
+    monkeypatch.setattr(github_status, "GitHubPRReporter", lambda **_: reporter)
+    monkeypatch.setattr(
+        review_module,
+        "load_prior_review_state",
+        lambda **_: ReviewState(),
+    )
+    result = CliRunner().invoke(
+        review_command,
+        ["--pr", "7", "--repo", "owner/name", "--post", "--output", "json"],
+    )
+    assert_that(result.exit_code).is_equal_to(2)
+    payload = json.loads(result.output[result.output.index("{") :])
+    assert_that(payload["error"]["kind"]).is_equal_to(
+        "auth_failed" if stage == "execution" else "context_unavailable",
+    )
+    assert_that(reporter.comments).is_length(2)
+    assert_that(reporter.comments[1]).is_equal_to(board)
+    assert_that(reporter.comments[2]).starts_with(FAILURE_NOTICE_MARKER)
+    if stage == "before-metadata":
+        assert_that(reporter.comments[2]).does_not_contain("Head commit:")
+    else:
+        assert_that(reporter.comments[2]).contains("Head commit: `abcdef1234567890`")

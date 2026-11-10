@@ -25,11 +25,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   these skips from completed clean reviews. Context errors include `error.code` and a
   null `error.status`; MCP skips retain `findings_coverage_complete: false` alongside
   `outcome`, `review_ran` and `skipped_files` (#3303). Failures leave live boards
-  unchanged when state is unavailable and upsert one separately marked latest-attempt
-  notice, cleared by a successful review, recoverable error re-render, or no-changes
-  skip. Failed comment lookup posts nothing; recognized error-only stickies update in
-  place. Environment-detected PR reviews reject `--base` and `--uncommitted` as usage
-  errors without posting.
+  unchanged when state is unavailable and upsert a separately marked latest-attempt
+  notice naming the head commit when known. Refused notice edits create no replacement;
+  duplicate notices are cleaned up best-effort. Successful sticky writes clear notices
+  even if inline posting fails; recoverable error and skip re-renders clear them only
+  after the sticky write succeeds. Skips without recoverable state also attempt cleanup.
+  Failed comment lookup posts nothing; recognized error-only stickies update in place.
+  Environment-detected PR reviews reject `--base` and `--uncommitted` as usage errors
+  without posting.
 
 ### Security
 

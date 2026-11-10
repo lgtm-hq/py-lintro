@@ -429,6 +429,7 @@ class GitHubPRReporter:
         """
         found = self.lookup_issue_comments(
             markers=(marker,),
+            strict=False,
             anchored=(marker,) if marker == FAILURE_NOTICE_MARKER else (),
         )
         return None if found is None else found.get(marker)
@@ -438,16 +439,21 @@ class GitHubPRReporter:
         *,
         markers: tuple[str, ...],
         anchored: tuple[str, ...] = (),
+        strict: bool = True,
+        all_matches: list[tuple[int, str]] | None = None,
     ) -> dict[str, tuple[int, str]] | None:
         """Look up several comment markers in one listing, preserving uncertainty.
 
         Args:
             markers: Comment markers to find.
             anchored: Markers that must lead the comment body.
+            strict: Treat malformed entries as an unknown listing.
+            all_matches: Collect every anchored match when provided.
 
         Returns:
             Matches keyed by marker; a missing key confirms absence. ``None``
             means the listing failed, so callers must not create replacements.
+            Tolerant lookups retain matches already found if a later page fails.
         """
         base_url = f"{self.api_base}/repos/{self.repo}/issues/{self.pr_number}/comments"
         parsed = urllib.parse.urlparse(base_url)
@@ -469,29 +475,23 @@ class GitHubPRReporter:
                     comments_page = json.loads(resp.read().decode())
             except (urllib.error.URLError, json.JSONDecodeError, OSError):
                 logger.debug("Failed to list PR comments; cannot find sticky comment")
-                return None
+                return None if strict else found or None
 
             if not isinstance(comments_page, list):
-                return None
+                return None if strict else found or None
             if not comments_page:
                 return found
-            for comment in comments_page:
-                if not isinstance(comment, dict):
-                    return None
-                body = comment.get("body", "")
-                comment_id = comment.get("id")
-                if not isinstance(comment_id, int) or not isinstance(body, str):
-                    return None
-                for marker in markers:
-                    matches = (
-                        body.startswith(marker)
-                        if marker in anchored
-                        else marker in body
-                    )
-                    if matches and marker not in found:
-                        found[marker] = comment_id, body
-                        if len(found) == len(markers):
-                            return found
+            if not _collect_comment_matches(
+                comments=comments_page,
+                markers=markers,
+                anchored=anchored,
+                strict=strict,
+                found=found,
+                all_matches=all_matches,
+            ):
+                return None
+            if len(found) == len(markers) and all_matches is None:
+                return found
             if len(comments_page) < 100:
                 return found
             page += 1
@@ -954,6 +954,46 @@ class GitHubPRReporter:
             stacklevel=2,
         )
         return self.api_request(method, url, payload)
+
+
+def _collect_comment_matches(
+    *,
+    comments: list[object],
+    markers: tuple[str, ...],
+    anchored: tuple[str, ...],
+    strict: bool,
+    found: dict[str, tuple[int, str]],
+    all_matches: list[tuple[int, str]] | None,
+) -> bool:
+    """Collect valid marker matches from one page.
+
+    Args:
+        comments: Raw API page entries.
+        markers: Markers to locate.
+        anchored: Markers required at the start of a body.
+        strict: Fail the lookup on malformed entries.
+        found: First match per marker, updated in place.
+        all_matches: Optional collection of every anchored match.
+
+    Returns:
+        Whether the page was usable under the selected tolerance.
+    """
+    for comment in comments:
+        body = comment.get("body", "") if isinstance(comment, dict) else None
+        comment_id = comment.get("id") if isinstance(comment, dict) else None
+        if not isinstance(comment_id, int) or not isinstance(body, str):
+            if strict:
+                return False
+            continue
+        for marker in markers:
+            matches = body.startswith(marker) if marker in anchored else marker in body
+            if matches:
+                found.setdefault(marker, (comment_id, body))
+                if marker in anchored and all_matches is not None:
+                    all_matches.append((comment_id, body))
+        if len(found) == len(markers) and all_matches is None:
+            break
+    return True
 
 
 def _error_message(*, body: str) -> str:

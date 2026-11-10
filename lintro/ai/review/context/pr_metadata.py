@@ -11,7 +11,7 @@ from lintro.ai.review.context.diff_parse import (
     split_unified_diff_by_file,
 )
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
-from lintro.ai.review.exceptions import ReviewContextError
+from lintro.ai.review.exceptions import ReviewContextError, known_review_head
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.pr_metadata import PRMetadata
 
@@ -76,60 +76,62 @@ def _parse_pr_view_json(
             code=ReviewContextErrorCode.GH_METADATA_INVALID,
         )
 
-    head_repository = data.get("headRepository")
+    with known_review_head(head_ref):
+        head_repository = data.get("headRepository")
 
-    parsed_head_repo: str | None = None
-    if isinstance(head_repository, dict):
-        raw_head_repo = head_repository.get("nameWithOwner")
-        if isinstance(raw_head_repo, str) and raw_head_repo.strip():
-            parsed_head_repo = raw_head_repo.strip()
+        parsed_head_repo: str | None = None
+        if isinstance(head_repository, dict):
+            raw_head_repo = head_repository.get("nameWithOwner")
+            if isinstance(raw_head_repo, str) and raw_head_repo.strip():
+                parsed_head_repo = raw_head_repo.strip()
 
-    # The base repository is derived from the caller-provided override
-    # (``--repo`` / ``GITHUB_REPOSITORY``), which the CLI always supplies in
-    # ``--pr`` mode. ``baseRepository`` is not a valid ``gh pr view --json``
-    # field, so it must never be read from the payload.
-    repo_name: str | None = None
-    if isinstance(repo_override, str) and repo_override.strip():
-        repo_name = repo_override.strip()
+        # The base repository is derived from the caller-provided override
+        # (``--repo`` / ``GITHUB_REPOSITORY``), which the CLI always supplies in
+        # ``--pr`` mode. ``baseRepository`` is not a valid ``gh pr view --json``
+        # field, so it must never be read from the payload.
+        repo_name: str | None = None
+        if isinstance(repo_override, str) and repo_override.strip():
+            repo_name = repo_override.strip()
 
-    if repo_name is None:
-        if repo_override is not None:
+        if repo_name is None:
+            if repo_override is not None:
+                raise ReviewContextError(
+                    "Could not determine repository for pull request review.",
+                    code=ReviewContextErrorCode.GH_METADATA_INVALID,
+                )
+            if not isinstance(head_repository, dict):
+                raise ReviewContextError(
+                    "gh pr view JSON missing or invalid required field: "
+                    "'headRepository'.",
+                    code=ReviewContextErrorCode.GH_METADATA_INVALID,
+                )
+            if parsed_head_repo is not None:
+                repo_name = parsed_head_repo
+            else:
+                raise ReviewContextError(
+                    "Could not determine repository for pull request review.",
+                    code=ReviewContextErrorCode.GH_METADATA_INVALID,
+                )
+
+        changed_files = data.get("changedFiles")
+        if type(changed_files) is not int or changed_files < 0:
             raise ReviewContextError(
-                "Could not determine repository for pull request review.",
+                "gh pr view JSON invalid field: changedFiles.",
                 code=ReviewContextErrorCode.GH_METADATA_INVALID,
             )
-        if not isinstance(head_repository, dict):
-            raise ReviewContextError(
-                "gh pr view JSON missing or invalid required field: 'headRepository'.",
-                code=ReviewContextErrorCode.GH_METADATA_INVALID,
-            )
-        if parsed_head_repo is not None:
-            repo_name = parsed_head_repo
-        else:
-            raise ReviewContextError(
-                "Could not determine repository for pull request review.",
-                code=ReviewContextErrorCode.GH_METADATA_INVALID,
-            )
 
-    changed_files = data.get("changedFiles")
-    if type(changed_files) is not int or changed_files < 0:
-        raise ReviewContextError(
-            "gh pr view JSON invalid field: changedFiles.",
-            code=ReviewContextErrorCode.GH_METADATA_INVALID,
+        body = data.get("body")
+        body_text = body if isinstance(body, str) else ""
+
+        metadata = PRMetadata(
+            changed_files=changed_files,
+            title=title,
+            body=body_text,
+            number=number,
+            repo=repo_name,
+            head_repo=parsed_head_repo,
         )
-
-    body = data.get("body")
-    body_text = body if isinstance(body, str) else ""
-
-    metadata = PRMetadata(
-        changed_files=changed_files,
-        title=title,
-        body=body_text,
-        number=number,
-        repo=repo_name,
-        head_repo=parsed_head_repo,
-    )
-    return metadata, base_ref, head_ref
+        return metadata, base_ref, head_ref
 
 
 def _parse_changed_files_from_diff(*, unified_diff: str) -> list[ChangedFile]:

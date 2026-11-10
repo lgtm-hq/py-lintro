@@ -45,6 +45,7 @@ from lintro.ai.review.models.suggested_change import SuggestedChange
 from lintro.ai.review.review_state_codec import leftover_state_block
 from lintro.ai.review.sticky import advance_review_state, build_sticky_comment
 from lintro.ai.review.verdict import VERDICT_RUBRIC_FINE_PRINT
+from tests.unit.ai.review.comment_reporter import use_combined_comment_lookup
 
 
 def _finding(
@@ -434,6 +435,7 @@ def test_regressed_thread_titles_say_regressed(
         state=_resolved_state(finding=finding),
     )
     reporter = MagicMock()
+    use_combined_comment_lookup(reporter)
     reporter.is_available.return_value = True
     reporter.find_issue_comment.return_value = (5, prior_body)
     reporter.fetch_pr_diff_lines.return_value = {"src/main.py": {10}}

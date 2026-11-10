@@ -789,18 +789,22 @@ with automated quality assurance! 🚀
 
 When finished prior review state is recoverable, a failed attempt re-renders the
 findings board with a failure banner and removes any separate failure notice. When state
-is unavailable, lintro leaves an existing board byte-for-byte unchanged and upserts one
+is unavailable, lintro leaves an existing board byte-for-byte unchanged and upserts a
 separate **latest review attempt did not complete** notice. That notice uses its own
 marker, gives the cause and head commit when known, and says the sticky findings board
-was not updated. Repeated failures update the same notice, even when the board is at
-GitHub's comment size limit.
+was not updated. Repeated failures attempt to update the existing notice, even when the
+board is at GitHub's comment size limit. A refused edit leaves it in place without a
+replacement. When duplicate notices are found, lintro keeps one and attempts to delete
+the rest.
 
 An older failure banner can remain inside the untouched board after a recoverable
 failure followed by an unrecoverable one. The separate notice names the latest attempt
-and its head commit; lintro cannot safely remove the older banner without recovering
-state. A successful review, a recoverable error re-render, or a nothing-to-review skip
-removes the separate notice. Cleanup failures are logged and never fail the run; a skip
-with no recoverable state writes nothing else.
+and its head commit when known; lintro cannot safely remove the older banner without
+recovering state. A successful sticky write removes all listed notices even when inline
+comments fail. Recoverable error and skip re-renders remove notices only after the
+sticky write succeeds. A nothing-to-review skip without recoverable state also attempts
+notice cleanup. Cleanup failures are logged and never fail the run; a skip with no
+recoverable state writes nothing else.
 
 If the sticky is confirmed absent, lintro posts the error-only sticky. An existing
 error-only page is replaced only when its complete layout is recognized. If listing

@@ -40,6 +40,7 @@ from lintro.ai.review import (
 )
 from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
+from lintro.ai.review.exceptions import known_review_head
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.pr_head_guard import RemoveOnError
 from lintro.ai.review.preparation_resolvers import (
@@ -304,7 +305,7 @@ def prepare_review(
     context_collection_seconds = time.monotonic() - context_started
     # The PR head tree (#2733) is live from here; a preparation step that
     # raises removes it rather than leaving it to the next sweep.
-    with RemoveOnError(context.head_worktree):
+    with known_review_head(context.head_ref), RemoveOnError(context.head_worktree):
         return _prepare_from_context(
             request=request,
             context=context,
