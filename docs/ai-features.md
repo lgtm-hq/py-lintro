@@ -2034,9 +2034,19 @@ An empty diff or an intentionally excluded selection exits 0 with
 `{"outcome":"no_changes","review_ran":false,"detail":"No reviewable changes, no review ran.","skipped_files":[]}`.
 Excluded files are listed with reasons. This is no claim of clean coverage: no review
 state is written, round advanced, or prior finding resolved. With `--post`, recoverable
-stored findings are re-rendered with the skip note; otherwise no comment is written. A
+stored findings are re-rendered with the skip note; otherwise no comment is written.
+Either way, any separate latest-failure notice is removed (cleanup is best-effort). A
 missing or unparseable raw PR diff when GitHub reports changed files is an error (exit
 2), even if filters would exclude everything.
+
+Under `--post`, failures re-render a recoverable board with a banner. If finished state
+cannot be recovered, an existing findings board stays unchanged and one separate
+latest-attempt failure notice is upserted, including the cause and head commit when
+known. A confirmed missing sticky gets an error-only page; a recognized error-only page
+is updated in place. Failed comment listing writes nothing to the PR. Successful
+reviews, recoverable error re-renders, and no-changes skips remove the separate notice.
+See [GitHub integration](github-integration.md) for the older banner limitation when
+state becomes unavailable.
 
 ### CLI compatibility floors
 

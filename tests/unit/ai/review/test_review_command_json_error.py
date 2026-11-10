@@ -391,7 +391,7 @@ def test_empty_collected_selection_exits_zero_without_reviewing(
         assert_that(payload["skipped_files"]).is_empty()
 
 
-@pytest.mark.parametrize("load_mode", ["empty", "raises", "stored"])
+@pytest.mark.parametrize("load_mode", ["empty", "raises", "stored", "unknown"])
 def test_posted_context_failure_preserves_unrecoverable_board(
     patched_review: None,
     monkeypatch: pytest.MonkeyPatch,
@@ -414,20 +414,12 @@ def test_posted_context_failure_preserves_unrecoverable_board(
     board = f"{STICKY_MARKER}\n## Findings\n- P1: Keep this finding open"
     if load_mode == "stored":
         board = render_state_sticky(state=stored)
-    bodies = [board]
-    reporter = MagicMock()
-    reporter.repo = "owner/name"
-    reporter.pr_number = 7
-    reporter.find_issue_comment.side_effect = lambda **_: (123, bodies[-1])
+    from tests.unit.ai.review.comment_reporter import CommentReporter
 
-    def update(*, comment_id: int, body: str) -> bool:
-        """Record the observable GitHub body."""
-        bodies.append(body)
-        return True
+    reporter = CommentReporter((board,))
+    reporter.lookup_unknown = load_mode == "unknown"
 
-    reporter.update_issue_comment.side_effect = update
-
-    def reporter_factory(**kwargs: object) -> MagicMock:
+    def reporter_factory(**kwargs: object) -> CommentReporter:
         """Require the command's resolved posting target."""
         assert_that(kwargs).contains_entry(pr_number=7, repo="owner/name")
         return reporter
@@ -454,24 +446,28 @@ def test_posted_context_failure_preserves_unrecoverable_board(
             ["--pr", "7", "--repo", "owner/name", "--post", "--output", "json"],
         )
         assert_that(result.exit_code).is_equal_to(2)
-        assert_that(bodies[-1]).contains("Keep this finding open")
+        payload = json.loads(result.output[result.output.index("{") :])
+        assert_that(payload["error"]).contains_entry(
+            kind="context_unavailable",
+            code="gh-command-failed",
+            status=None,
+        )
+        if load_mode == "unknown":
+            assert_that(reporter.comments).is_equal_to({1: board})
+            continue
+        body = reporter.comments[1 if load_mode == "stored" else 2]
+        assert_that(reporter.comments[1]).contains("Keep this finding open")
         if load_mode != "stored":
-            assert_that(bodies[-1]).starts_with(board)
-            assert_that(
-                bodies[-1].count("<!-- lintro-review-error-start -->"),
-            ).is_equal_to(
-                1,
-            )
-        assert_that(bodies[-1]).contains("cause: gh pr diff failed: HTTP 401")
-        assert_that(bodies[-1]).does_not_contain(
+            assert_that(reporter.comments[1]).is_equal_to(board)
+        assert_that(body).contains("cause: gh pr diff failed: HTTP 401")
+        assert_that(body).does_not_contain(
             "provider reported",
             "`anthropic`",
             "resolved",
         )
-    assert_that(len(bodies)).is_equal_to(3)
-    successful_body = render_state_sticky(state=stored)
-    assert_that(successful_body).contains("Keep this finding open")
-    assert_that(successful_body).does_not_contain("lintro-review-error-start", "cause:")
+    assert_that(reporter.comments).is_length(
+        2 if load_mode in {"empty", "raises"} else 1,
+    )
 
 
 def test_pr_and_base_usage_error_does_not_post(

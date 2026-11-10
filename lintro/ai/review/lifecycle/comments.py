@@ -17,7 +17,11 @@ from loguru import logger
 
 from lintro.ai.review.enums.comment_action import CommentAction
 from lintro.ai.review.enums.comment_kind import CommentKind
-from lintro.ai.review.github_constants import ARCHIVE_MARKER, STICKY_MARKER
+from lintro.ai.review.github_constants import (
+    ARCHIVE_MARKER,
+    FAILURE_NOTICE_MARKER,
+    STICKY_MARKER,
+)
 from lintro.ai.review.lifecycle.decision import (
     CommentPlan,
     ExistingComment,
@@ -28,6 +32,7 @@ from lintro.ai.review.sticky import parse_sticky_state
 
 __all__ = [
     "CommentClient",
+    "clear_failure_notice",
     "UpsertOutcome",
     "load_sticky_comment",
     "locate_comment",
@@ -38,19 +43,20 @@ __all__ = [
 #: Marker identifying each comment kind on the pull request. A kind is exactly
 #: "the comment carrying this marker", which is why one lookup serves them all.
 #:
-#: ``ERROR`` deliberately shares ``STICKY_MARKER``: a failed round is a *state
-#: of the board*, not a comment of its own, and ``format_error_comment``
+#: ``ERROR`` deliberately shares ``STICKY_MARKER`` for error-only pages and
+#: recoverable failure banners; ``format_error_comment``
 #: embeds the sticky marker in the body it renders. Giving it a marker of its
 #: own would make a superseded failure comment relocate by the wrong one.
 #:
 #: Every :class:`~lintro.ai.review.enums.comment_kind.CommentKind` must appear
 #: here — the lookups below index this map directly, so a missing kind is a
 #: ``KeyError`` at write time rather than a decision. The 2305 lifecycle tests
-#: assert the two sets are equal so a fourth kind cannot be added without one.
+#: assert the two sets are equal so a kind cannot be added without one.
 _MARKERS: dict[CommentKind, str] = {
     CommentKind.STICKY: STICKY_MARKER,
     CommentKind.ARCHIVE: ARCHIVE_MARKER,
     CommentKind.ERROR: STICKY_MARKER,
+    CommentKind.FAILURE_NOTICE: FAILURE_NOTICE_MARKER,
 }
 
 
@@ -165,6 +171,12 @@ def locate_comment(
         kind has not been posted yet.
     """
     found = reporter.find_issue_comment(marker=_MARKERS[kind])
+    if (
+        kind is CommentKind.FAILURE_NOTICE
+        and found is not None
+        and not found[1].startswith(FAILURE_NOTICE_MARKER)
+    ):
+        found = None
     return ExistingComment(comment_id=None if found is None else found[0])
 
 
@@ -415,3 +427,34 @@ def _post_with_retry(
         return created
     logger.warning("Failed to recreate the comment; retrying once")
     return _create(reporter=reporter, body=body, marker=marker)
+
+
+def clear_failure_notice(
+    *,
+    reporter: CommentClient,
+    existing: ExistingComment | None = None,
+) -> None:
+    """Remove the separate failure notice without failing the run.
+
+    Args:
+        reporter: Client used to locate and delete the notice.
+        existing: Notice already found during this invocation, if available.
+    """
+    try:
+        notice = (
+            existing
+            if existing is not None
+            else locate_comment(
+                reporter=reporter,
+                kind=CommentKind.FAILURE_NOTICE,
+            )
+        )
+        if notice.comment_id is not None and not reporter.delete_issue_comment(
+            comment_id=notice.comment_id,
+        ):
+            logger.warning(
+                "Could not delete the latest review failure notice {}",
+                notice.comment_id,
+            )
+    except Exception as exc:
+        logger.warning("Could not clear the latest review failure notice: {}", exc)

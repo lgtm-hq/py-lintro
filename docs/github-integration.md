@@ -787,8 +787,26 @@ Using Lintro in GitHub Actions provides:
 This integration transforms your repository into a high-quality, maintainable codebase
 with automated quality assurance! 🚀
 
-When review state cannot be recovered, failure disclosures preserve the live findings
-board and replace earlier failure disclosures. If the board has no room even for a
-compact notice, lintro leaves it untouched and posts the failure separately. A PR review
-detected from the CI environment rejects `--base` and `--uncommitted`, just like an
-explicit `--pr`; these usage errors post nothing.
+When finished prior review state is recoverable, a failed attempt re-renders the
+findings board with a failure banner and removes any separate failure notice. When state
+is unavailable, lintro leaves an existing board byte-for-byte unchanged and upserts one
+separate **latest review attempt did not complete** notice. That notice uses its own
+marker, gives the cause and head commit when known, and says the sticky findings board
+was not updated. Repeated failures update the same notice, even when the board is at
+GitHub's comment size limit.
+
+An older failure banner can remain inside the untouched board after a recoverable
+failure followed by an unrecoverable one. The separate notice names the latest attempt
+and its head commit; lintro cannot safely remove the older banner without recovering
+state. A successful review, a recoverable error re-render, or a nothing-to-review skip
+removes the separate notice. Cleanup failures are logged and never fail the run; a skip
+with no recoverable state writes nothing else.
+
+If the sticky is confirmed absent, lintro posts the error-only sticky. An existing
+error-only page is replaced only when its complete layout is recognized. If listing
+comments fails, lintro writes nothing to the PR and logs a warning; the terminal or JSON
+error report and exit 2 still disclose the failure. Context failures do not name the AI
+provider as their cause.
+
+A PR review detected from the CI environment rejects `--base` and `--uncommitted`, just
+like an explicit `--pr`; these usage errors post nothing.

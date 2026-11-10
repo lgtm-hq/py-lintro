@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
+from html import escape
 
 from lintro.ai.review.errors_taxonomy import (
     KIND_COPY,
@@ -12,7 +13,11 @@ from lintro.ai.review.errors_taxonomy import (
     classify_provider_error,
     resolve_cause_text,
 )
-from lintro.ai.review.github_constants import _FOOTER, STICKY_MARKER
+from lintro.ai.review.github_constants import (
+    _FOOTER,
+    FAILURE_NOTICE_MARKER,
+    STICKY_MARKER,
+)
 from lintro.ai.review.github_contract import sanitize_comment_text
 from lintro.ai.review.github_notes import format_run_mechanics
 from lintro.ai.review.github_render import Section, assemble
@@ -279,3 +284,75 @@ def condense_provider_error(*, text: str, limit: int) -> str:
     """
     flattened = _WHITESPACE_RE.sub(" ", text or "").strip()
     return sanitize_comment_text(flattened, limit=limit)
+
+
+def is_error_only_comment(body: str) -> bool:
+    """Recognize only the complete error-page layout, never text in findings.
+
+    Args:
+        body: Existing sticky body.
+
+    Returns:
+        Whether every section belongs to the error-only page we render.
+        Unrecognized or older layouts are conservatively treated as boards.
+    """
+    sections = body.split("\n\n")
+    if not sections or sections.pop(0) != f"{STICKY_MARKER}\n## 🔎 Lintro Review":
+        return False
+    if any("\n" in section for section in sections):
+        return False
+    if sections and sections[0].startswith(
+        (
+            "> ❌ **Model mismatch** — ",
+            "> ⚠️ **Model unverifiable** — ",
+            "> ℹ️ **Model unverified by the transport** — ",
+        ),
+    ):
+        sections.pop(0)
+    if not sections or not sections.pop(0).startswith(f"> {ERROR_ONLY_HEADLINE} — "):
+        return False
+    if not sections or sections.pop() != _FOOTER:
+        return False
+    if (
+        sections
+        and sections[-1].startswith("<sub>**Model:** ")
+        and sections[-1].endswith("</sub>")
+    ):
+        sections.pop()
+    guidance = {copy[1] for copy in KIND_COPY.values()}
+    return len(sections) == 1 and sections[0] in guidance
+
+
+def format_failure_notice(
+    *,
+    error: Exception,
+    provider: str | None = None,
+    metadata: ReviewMetadata | None = None,
+) -> str:
+    """Render the latest failed attempt without claiming to update the board.
+
+    Args:
+        error: Review failure.
+        provider: Provider identifier, omitted from context failure copy.
+        metadata: Attempt metadata, including the head commit when known.
+
+    Returns:
+        A bounded separate comment with its own marker.
+    """
+    resolved_provider = provider or (metadata.provider if metadata else "") or ""
+    kind = classify_provider_error(provider=resolved_provider, error=error)
+    detail, guidance = _render_error_copy(
+        kind=kind,
+        error=error,
+        provider=resolved_provider,
+    )
+    # Causes and head refs may quote the sticky marker. Keep it out of this
+    # separate comment so even the legacy substring lookup cannot adopt it.
+    detail = escape(detail, quote=False)
+    head_ref = sanitize_comment_text(metadata.head_ref, limit=80) if metadata else ""
+    head = f" Head commit: `{escape(head_ref, quote=False)}`." if head_ref else ""
+    return (
+        f"{FAILURE_NOTICE_MARKER}\n## Latest review attempt did not complete\n\n"
+        f"> {detail}\n\n{guidance}\n\n"
+        f"The findings board in the sticky comment was not updated.{head}"
+    )

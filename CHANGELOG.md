@@ -24,10 +24,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   explicit skip and excluded-file reasons, instead of exit 1. Wrappers must distinguish
   these skips from completed clean reviews. Context errors include `error.code` and a
   null `error.status`; MCP skips retain `findings_coverage_complete: false` alongside
-  `outcome`, `review_ran` and `skipped_files` (#3303). Repeated failures replace earlier
-  disclosures, preserve live findings when state is unavailable, and use a separate
-  comment when the board has no room. Environment-detected PR reviews reject `--base`
-  and `--uncommitted` as usage errors without posting.
+  `outcome`, `review_ran` and `skipped_files` (#3303). Failures leave live boards
+  unchanged when state is unavailable and upsert one separately marked latest-attempt
+  notice, cleared by a successful review, recoverable error re-render, or no-changes
+  skip. Failed comment lookup posts nothing; recognized error-only stickies update in
+  place. Environment-detected PR reviews reject `--base` and `--uncommitted` as usage
+  errors without posting.
 
 ### Security
 

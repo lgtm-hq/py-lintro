@@ -10,7 +10,6 @@ comment from another actor is handled identically whichever one runs.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable
 
 from loguru import logger
@@ -18,16 +17,25 @@ from loguru import logger
 from lintro.ai.integrations.github_pr import GitHubPRReporter
 from lintro.ai.review.enums.comment_kind import CommentKind
 from lintro.ai.review.finding_matcher import count_blocking_findings
-from lintro.ai.review.github_constants import GITHUB_COMMENT_HARD_LIMIT, STICKY_MARKER
-from lintro.ai.review.github_errors import ERROR_ONLY_HEADLINE, format_error_comment
+from lintro.ai.review.github_constants import FAILURE_NOTICE_MARKER, STICKY_MARKER
+from lintro.ai.review.github_errors import (
+    format_error_comment,
+    format_failure_notice,
+    is_error_only_comment,
+)
 from lintro.ai.review.github_notes import format_convergence_banner
-from lintro.ai.review.lifecycle.comments import load_sticky_comment, upsert_comment
+from lintro.ai.review.lifecycle.comments import (
+    clear_failure_notice,
+    load_sticky_comment,
+    upsert_comment,
+)
+from lintro.ai.review.lifecycle.decision import ExistingComment
 from lintro.ai.review.lifecycle.state import resolve_prior_state
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.no_changes import NO_CHANGES_DETAIL
-from lintro.ai.review.sticky import render_state_sticky
+from lintro.ai.review.sticky import parse_sticky_state, render_state_sticky
 
 __all__ = [
     "post_review_converged_to_github",
@@ -71,11 +79,41 @@ def post_review_error_to_github(
     if not gh_reporter.is_available():
         logger.warning("GitHub PR context not available — skipping error posting")
         return False
-    existing, sticky_state = load_sticky_comment(reporter=gh_reporter)
+    comments = gh_reporter.lookup_issue_comments(
+        markers=(STICKY_MARKER, FAILURE_NOTICE_MARKER),
+        anchored=(FAILURE_NOTICE_MARKER,),
+    )
+    if comments is None:
+        logger.warning(
+            "Could not list review comments — leaving the pull request untouched",
+        )
+        return False
+    existing = _comment_from_lookup(comments=comments, marker=STICKY_MARKER)
+    notice = _comment_from_lookup(comments=comments, marker=FAILURE_NOTICE_MARKER)
     state = resolve_prior_state(
         prior_state=prior_state,
-        sticky_state=sticky_state,
+        sticky_state=parse_sticky_state(body=existing.body),
     )
+    recoverable = any(not run.coverage.checkpoint for run in state.runs)
+    if (
+        not recoverable
+        and existing.comment_id is not None
+        and not is_error_only_comment(existing.body)
+    ):
+        # A previous recoverable failure may have left an older banner in the
+        # board. We cannot safely remove it without state: the separate notice
+        # names the latest attempt and head while the board remains untouched.
+        return upsert_comment(
+            reporter=gh_reporter,
+            kind=CommentKind.FAILURE_NOTICE,
+            existing=notice,
+            body=format_failure_notice(
+                error=error,
+                provider=provider,
+                metadata=metadata,
+            ),
+        ).ok
+    clear_failure_notice(reporter=gh_reporter, existing=notice)
     body = format_error_comment(
         error=error,
         provider=provider,
@@ -84,23 +122,6 @@ def post_review_error_to_github(
         repo=repo or gh_reporter.repo or "",
         pr_number=pr_number if pr_number is not None else gh_reporter.pr_number,
     )
-    if not any(not run.coverage.checkpoint for run in state.runs):
-        body = _preserve_live_board(board=existing.body, disclosure=body)
-        if len(body) > GITHUB_COMMENT_HARD_LIMIT:
-            # The board is already at the limit. A separate comment discloses
-            # the failure without removing a single finding from the sticky.
-            return gh_reporter.post_issue_comment(
-                _preserve_live_board(
-                    board="",
-                    disclosure=format_error_comment(
-                        error=error,
-                        provider=provider,
-                        metadata=metadata,
-                    ),
-                )
-                .replace(STICKY_MARKER, "")
-                .strip(),
-            )
     return upsert_comment(
         reporter=gh_reporter,
         kind=CommentKind.ERROR,
@@ -109,37 +130,26 @@ def post_review_error_to_github(
     ).ok
 
 
-_ERROR_START = "<!-- lintro-review-error-start -->"
-_ERROR_END = "<!-- lintro-review-error-end -->"
-
-
-def _preserve_live_board(*, board: str, disclosure: str) -> str:
-    """Replace failure disclosures while keeping an unrecoverable board intact.
+def _comment_from_lookup(
+    *,
+    comments: dict[str, tuple[int, str]],
+    marker: str,
+) -> ExistingComment:
+    """Describe one comment from a successful listing.
 
     Args:
-        board: Body from the first successful sticky lookup.
-        disclosure: Newly rendered error-only page.
+        comments: Marker matches from the reporter.
+        marker: Marker to select.
 
     Returns:
-        Combined body, possibly over budget when a separate comment is needed.
+        The existing comment, or a confirmed empty descriptor.
     """
-    board = re.sub(
-        re.escape(_ERROR_START) + r".*?(?:" + re.escape(_ERROR_END) + r"|\Z)",
-        "",
-        board,
-        flags=re.DOTALL,
+    found = comments.get(marker)
+    return (
+        ExistingComment(comment_id=found[0], body=found[1])
+        if found
+        else ExistingComment()
     )
-    # Older error-only pages had no boundary. They contain no findings board.
-    if ERROR_ONLY_HEADLINE in board:
-        board = ""
-    if not board.replace(STICKY_MARKER, "").strip():
-        board = STICKY_MARKER
-    detail = disclosure.replace(STICKY_MARKER, "").strip()
-    combined = f"{board}\n\n{_ERROR_START}\n{detail}\n{_ERROR_END}"
-    if len(combined) <= GITHUB_COMMENT_HARD_LIMIT:
-        return combined
-    compact = f"> {ERROR_ONLY_HEADLINE}. No review ran; retry the review."
-    return f"{board}\n\n{_ERROR_START}\n{compact}\n{_ERROR_END}"
 
 
 def post_review_converged_to_github(
@@ -233,12 +243,13 @@ def _post_skipped_review(
     if not gh_reporter.is_available():
         logger.warning("GitHub PR context not available — skipping review skip stamp")
         return False
+    clear_failure_notice(reporter=gh_reporter)
     existing, sticky_state = load_sticky_comment(reporter=gh_reporter)
     state = resolve_prior_state(
         prior_state=prior_state,
         sticky_state=sticky_state,
     )
-    if not state.runs:
+    if not any(not run.coverage.checkpoint for run in state.runs):
         # Nothing recoverable to re-render: overwriting the live board with
         # the empty-state page would erase the findings a reviewer is still
         # working from, so leave the sticky untouched and say so.

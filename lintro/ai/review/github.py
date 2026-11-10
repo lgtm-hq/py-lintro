@@ -51,6 +51,7 @@ from lintro.ai.review.github_status import (
     post_review_error_to_github,
 )
 from lintro.ai.review.lifecycle.comments import (
+    clear_failure_notice,
     load_sticky_comment,
     locate_comment,
     upsert_archive,
@@ -313,6 +314,8 @@ def post_review_to_github(
 
     if settings.captured_comment_ids is not None and comment_ids:
         settings.captured_comment_ids.update(comment_ids)
+    if success:
+        clear_failure_notice(reporter=gh_reporter)
     return success
 
 

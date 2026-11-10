@@ -7,6 +7,7 @@ import re
 from lintro.ai.review.models.review_finding import Severity
 
 STICKY_MARKER = "<!-- lintro-ai-review -->"
+FAILURE_NOTICE_MARKER = "<!-- lintro-ai-review-failure-notice -->"
 ARCHIVE_MARKER = "<!-- lintro-ai-review-archive -->"
 # Split history into a second comment before GitHub's hard cap.
 PRIMARY_SOFT_LIMIT = 56_000

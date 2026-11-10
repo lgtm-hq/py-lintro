@@ -23,6 +23,7 @@ from lintro.ai.enums import ConfidenceLevel
 from lintro.ai.models import AIFixSuggestion, AISummary
 from lintro.ai.models.github_api_response import GitHubApiResponse
 from lintro.ai.paths import OUTSIDE_WORKSPACE_SENTINEL, to_provider_path
+from lintro.ai.review.github_constants import FAILURE_NOTICE_MARKER
 from lintro.ai.review.models.review_thread import ReviewThread
 
 #: Lists every review thread with its root comment's REST id, so a stored
@@ -426,11 +427,34 @@ class GitHubPRReporter:
             Tuple of ``(comment_id, body)`` for the matching comment, or
             ``None`` when no match is found or the listing fails.
         """
+        found = self.lookup_issue_comments(
+            markers=(marker,),
+            anchored=(marker,) if marker == FAILURE_NOTICE_MARKER else (),
+        )
+        return None if found is None else found.get(marker)
+
+    def lookup_issue_comments(
+        self,
+        *,
+        markers: tuple[str, ...],
+        anchored: tuple[str, ...] = (),
+    ) -> dict[str, tuple[int, str]] | None:
+        """Look up several comment markers in one listing, preserving uncertainty.
+
+        Args:
+            markers: Comment markers to find.
+            anchored: Markers that must lead the comment body.
+
+        Returns:
+            Matches keyed by marker; a missing key confirms absence. ``None``
+            means the listing failed, so callers must not create replacements.
+        """
         base_url = f"{self.api_base}/repos/{self.repo}/issues/{self.pr_number}/comments"
         parsed = urllib.parse.urlparse(base_url)
         if parsed.scheme != "https":
             return None
 
+        found: dict[str, tuple[int, str]] = {}
         page = 1
         while True:
             url = f"{base_url}?per_page=100&page={page}"
@@ -447,15 +471,29 @@ class GitHubPRReporter:
                 logger.debug("Failed to list PR comments; cannot find sticky comment")
                 return None
 
-            if not comments_page:
+            if not isinstance(comments_page, list):
                 return None
+            if not comments_page:
+                return found
             for comment in comments_page:
+                if not isinstance(comment, dict):
+                    return None
                 body = comment.get("body", "")
                 comment_id = comment.get("id")
-                if isinstance(comment_id, int) and marker in body:
-                    return comment_id, body
+                if not isinstance(comment_id, int) or not isinstance(body, str):
+                    return None
+                for marker in markers:
+                    matches = (
+                        body.startswith(marker)
+                        if marker in anchored
+                        else marker in body
+                    )
+                    if matches and marker not in found:
+                        found[marker] = comment_id, body
+                        if len(found) == len(markers):
+                            return found
             if len(comments_page) < 100:
-                return None
+                return found
             page += 1
 
     def fetch_review_comments(self) -> list[dict[str, Any]] | None:

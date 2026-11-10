@@ -17,14 +17,15 @@ class CommentKind(StrEnum):
 
     Attributes:
         STICKY: The mission-control board, rewritten every round. The error
-            and converged surfaces write to this same comment, because a
-            failed round is a state of the board rather than a comment of its
-            own.
+            and converged surfaces re-render this comment when prior state
+            can be recovered.
         ARCHIVE: The run-history archive, split off when the board's history
             no longer fits the size budget.
         ERROR: A failure surface posted where no board can be re-rendered.
+        FAILURE_NOTICE: Latest failure when the board cannot be regenerated.
     """
 
     STICKY = auto()
     ARCHIVE = auto()
     ERROR = auto()
+    FAILURE_NOTICE = auto()

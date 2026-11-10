@@ -303,7 +303,10 @@ def _reporter(*, prior_body: str, bodies: list[str] | None = None) -> MagicMock:
 
     reporter = MagicMock()
     reporter.is_available.return_value = True
-    reporter.find_issue_comment.return_value = (9, prior_body)
+    reporter.find_issue_comment.side_effect = lambda *, marker: (
+        (9, prior_body) if marker == STICKY_MARKER else None
+    )
+    reporter.lookup_issue_comments.return_value = {STICKY_MARKER: (9, prior_body)}
     reporter.update_issue_comment.side_effect = _update
     reporter.repo = "owner/name"
     reporter.pr_number = 7

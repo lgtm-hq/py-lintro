@@ -86,6 +86,11 @@ def _fresh_reporter() -> MagicMock:
     reporter.log = log
     reporter.is_available.return_value = True
     reporter.find_issue_comment.return_value = None
+    reporter.lookup_issue_comments.side_effect = lambda **_: (
+        {STICKY_MARKER: reporter.find_issue_comment.return_value}
+        if reporter.find_issue_comment.return_value
+        else {}
+    )
     reporter.fetch_pr_diff_lines.return_value = {"src/main.py": {10}}
     reporter.fetch_compare_lines.return_value = {"src/main.py": {10}}
     reporter.fetch_pr_commit_shas.return_value = []
@@ -600,7 +605,10 @@ def test_post_error_comment_updates_sticky(
 ) -> None:
     """Error posting reuses and updates the sticky comment when present."""
     reporter = _fresh_reporter()
-    reporter.find_issue_comment.return_value = (9, STICKY_MARKER)
+    reporter.find_issue_comment.return_value = (
+        9,
+        format_error_comment(error=RuntimeError("previous error")),
+    )
 
     posted = post_review_error_to_github(
         error=AIAuthenticationError("bad key"),

@@ -791,3 +791,51 @@ def test_fetch_pr_commit_shas_returns_none_on_transport_error(
         shas = reporter.fetch_pr_commit_shas()
 
     assert_that(shas).is_none()
+
+
+@pytest.mark.parametrize(
+    "listing",
+    ["found", "absent", "failed", "malformed", "partial-failure"],
+)
+def test_issue_comment_lookup_preserves_uncertainty(
+    listing: str,
+    test_token: str,
+) -> None:
+    """Only a completed listing can confirm that a sticky or notice is absent."""
+    from lintro.ai.review.github_constants import FAILURE_NOTICE_MARKER, STICKY_MARKER
+
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+    board = STICKY_MARKER + "\nFindings mentioning " + FAILURE_NOTICE_MARKER
+    notice = FAILURE_NOTICE_MARKER + "\nLatest attempt failed"
+    pages: list[object] = []
+    if listing == "found":
+        pages = [[{"id": 1, "body": board}, {"id": 2, "body": notice}]]
+    elif listing == "absent":
+        pages = [[]]
+    elif listing == "malformed":
+        pages = [{"message": "not a comment listing"}]
+    elif listing == "partial-failure":
+        pages = [
+            [
+                {"id": i, "body": board if i == 1 else "unrelated"}
+                for i in range(1, 101)
+            ],
+        ]
+
+    def respond(*args: object, **kwargs: object) -> BytesIO:
+        """Serve a page or simulate GitHub becoming unavailable."""
+        if not pages:
+            raise urllib.error.URLError("listing unavailable")
+        return BytesIO(json.dumps(pages.pop(0)).encode())
+
+    with patch("urllib.request.urlopen", side_effect=respond):
+        result = reporter.lookup_issue_comments(
+            markers=(STICKY_MARKER, FAILURE_NOTICE_MARKER),
+            anchored=(FAILURE_NOTICE_MARKER,),
+        )
+    expected = (
+        {STICKY_MARKER: (1, board), FAILURE_NOTICE_MARKER: (2, notice)}
+        if listing == "found"
+        else {} if listing == "absent" else None
+    )
+    assert_that(result).is_equal_to(expected)

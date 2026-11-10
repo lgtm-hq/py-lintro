@@ -107,6 +107,23 @@ class _RecordingReporter:
         del marker
         return None
 
+    def lookup_issue_comments(
+        self,
+        *,
+        markers: tuple[str, ...],
+        anchored: tuple[str, ...] = (),
+    ) -> dict[str, tuple[int, str]] | None:
+        """Confirm that this first round has no existing comments.
+
+        Args:
+            markers: Markers requested by the poster.
+            anchored: Markers that must lead their bodies.
+
+        Returns:
+            An empty successful lookup.
+        """
+        return {}
+
     def post_issue_comment(self, body: str) -> bool:
         """Record a created comment body.
 
