@@ -820,7 +820,8 @@ like an explicit `--pr`; these usage errors post nothing.
 When GitHub refuses a pull request diff for size (its line or file limit), review builds
 the diff locally from the compare API's merge-base commit and the verified pull request
 head. `gh pr diff` remains the primary source. JSON metadata records `diff_source`
-(`github` or `local-git`); the sticky comment displays the source. Exclusions
+(`github` or `local-git`); the sticky comment displays the source. The reported base is
+the merge base for `local-git` and the base branch tip for `github`. Exclusions
 (`ai.exclude_paths`) and path filters apply to either source, retaining excluded-file
 skip records and either-path rename matching.
 

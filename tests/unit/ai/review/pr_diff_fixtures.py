@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
+from lintro.ai.review.context.git_ops import TimeoutExpired
 from tests.unit.ai.review.test_pr_head_2733 import _git
 
 
@@ -73,6 +74,8 @@ def github(
     def run(argv: list[str], **kwargs: Any) -> Any:
         """Serve GitHub data and leave git subprocesses intact."""
         if Path(argv[0]).name != "gh":
+            if state.get("git-timeout"):
+                raise TimeoutExpired(cmd=argv, timeout=120)
             return original(argv, **kwargs)
         if argv[1:3] == ["pr", "view"]:
             payload = {
@@ -87,6 +90,15 @@ def github(
             }
             return SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
         if argv[1:3] == ["pr", "diff"]:
+            if state.get("move-head"):
+                _git(
+                    pr_remote["origin"],
+                    "update-ref",
+                    "refs/pull/1/head",
+                    pr_remote["base"],
+                )
+            if isinstance(state["refusal"], Exception):
+                raise state["refusal"]
             return SimpleNamespace(
                 returncode=1,
                 stdout="",

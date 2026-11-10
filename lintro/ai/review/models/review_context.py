@@ -20,6 +20,8 @@ class ReviewContext:
 
     Attributes:
         base_ref: Base commit OID or sentinel (``WORKTREE``) for the diff range.
+            In PR mode, local-git reports the merge base; github reports the
+            base branch tip from the metadata.
         head_ref: Head commit OID for the diff range.
         changed_files: Parsed changed file entries.
         unified_diff: Full unified diff text for the selected range.

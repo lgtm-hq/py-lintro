@@ -167,6 +167,20 @@ def validate_review_context_diff(*, context: ReviewContext) -> None:
     Raises:
         ReviewContextError: When changed files and diff content are inconsistent.
     """
+    try:
+        _validate_context_diff(context=context)
+    except ReviewContextError as exc:
+        if context.diff_source != "local-git":
+            raise
+        raise ReviewContextError(
+            "GitHub refused the pull request diff for size. "
+            f"The local diff failed validation: {exc}",
+            code=ReviewContextErrorCode.PR_LOCAL_DIFF_FAILED,
+        ) from exc
+
+
+def _validate_context_diff(*, context: ReviewContext) -> None:
+    """Check that changed-file metadata matches the unified diff sections."""
     if not context.changed_files:
         if context.unified_diff.strip():
             per_file_diffs = split_unified_diff_by_file(

@@ -11,12 +11,11 @@ from assertpy import assert_that
 from click.testing import CliRunner
 
 from lintro.ai.review import preparation
-from lintro.ai.review.context import pr_diff_fallback
 from lintro.ai.review.context.collection import (
     _collect_branch_context,
     collect_review_context,
 )
-from lintro.ai.review.context.git_ops import _run_git
+from lintro.ai.review.context.git_ops import TimeoutExpired, _run_git
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.pr_head import remove_pr_head
@@ -117,6 +116,7 @@ def test_fallback_filters_preserve_rename_skips(
         "empty-local-diff",
         "git-timeout",
         "compare-timeout",
+        "non-ancestor",
     ],
 )
 def test_fallback_failure_discloses_both_causes(
@@ -133,9 +133,10 @@ def test_fallback_failure_discloses_both_causes(
     elif failure == "fetch-refused":
         _git(pr_remote["work"], "remote", "set-url", "origin", str(tmp_path / "absent"))
     elif failure == "head-mismatch":
-        github["head"] = pr_remote["base"]
-    elif failure == "empty-local-diff":
-        github["compare"] = {"merge_base_commit": {"sha": pr_remote["head"]}}
+        github["move-head"] = True
+    elif failure in {"non-ancestor", "empty-local-diff"}:
+        ref = "base" if failure == "non-ancestor" else "head"
+        github["compare"] = {"merge_base_commit": {"sha": pr_remote[ref]}}
     elif failure == "missing-owner":
         github["owner"] = ""
     elif failure == "compare":
@@ -149,20 +150,9 @@ def test_fallback_failure_discloses_both_causes(
             "http-error" if failure == "compare-http" else "invalid-json"
         )
     elif failure == "compare-timeout":
-        github["compare"] = ReviewContextError(
-            "gh api timed out after 120s",
-            code="gh-command-failed",
-        )
+        github["compare"] = TimeoutExpired(cmd=["gh", "api"], timeout=120)
     else:
-
-        def timeout(**kwargs: Any) -> Any:
-            """Expose the git helper's timeout contract during fallback."""
-            raise ReviewContextError(
-                "git command timed out after 120s",
-                code="git-command-failed",
-            )
-
-        monkeypatch.setattr(pr_diff_fallback, "_ensure_git_repo", timeout)
+        github["git-timeout"] = True
     monkeypatch.setattr(preparation, "collect_review_context", collect_review_context)
     result = CliRunner().invoke(
         review_command,
@@ -178,15 +168,34 @@ def test_fallback_failure_discloses_both_causes(
         "GitHub refused",
         "for size",
         "local diff could not be built",
-        "persist-credentials",
-        "git credentials",
-        "retry",
     )
+    remedy = {
+        "no-repository": "persist-credentials",
+        "fetch-refused": "git credentials",
+        "head-mismatch": "Retry with current pull request metadata",
+        "missing-merge-base": "checkout able to fetch the merge-base commit",
+        "empty-local-diff": "git diff can read both verified commits",
+        "git-timeout": "Retry the git command",
+        "non-ancestor": "must be an ancestor of the verified head",
+    }.get(failure, "Retry the compare lookup")
+    assert_that(error["message"]).contains(remedy)
+    if failure not in {"no-repository", "fetch-refused"}:
+        assert_that(error["message"]).does_not_contain("persist-credentials")
 
 
 @pytest.mark.parametrize(
     "message",
-    ["HTTP 401: Bad credentials", "HTTP 500: server error", "ordinary failure"],
+    [
+        "HTTP 401: Bad credentials",
+        "HTTP 500: server error",
+        "ordinary failure",
+        "HTTP 504: generating diff exceeded the processing time limit",
+        "HTTP 406: proxy rejected the requested media type",
+        "HTTP 406: Not Acceptable",
+        "HTTP 422: diff is taking too long to generate",
+        "diff exceeded",
+        "too many files",
+    ],
 )
 def test_non_size_failure_never_uses_local_diff(
     github: dict[str, Any],
@@ -198,14 +207,19 @@ def test_non_size_failure_never_uses_local_diff(
         collect_review_context(pr_number=1, repo="base/project")
     assert_that(raised.value.code).is_equal_to(ReviewContextErrorCode.GH_COMMAND_FAILED)
     assert_that(str(raised.value)).contains(message).does_not_contain("local diff")
+    assert_that(
+        _run_git(
+            args=["show-ref", "--verify", "refs/lintro/pr/1"],
+            check=False,
+        ).returncode,
+    ).is_not_equal_to(0)
 
 
 @pytest.mark.parametrize(
     "message",
     [
         "HTTP 406: diff exceeded the maximum number of files",
-        "diff too large",
-        "diff is too large",
+        "HTTP 406: diff exceeded the maximum number of lines",
     ],
 )
 def test_recognized_size_refusals(github: dict[str, Any], message: str) -> None:
@@ -397,3 +411,107 @@ def test_cli_ceiling_measures_filtered_fallback(github: dict[str, Any]) -> None:
         assert_that(str(raised.value)).contains("ai.exclude_paths", "--transport api")
     finally:
         remove_pr_head(selected.head_worktree)
+
+
+@pytest.mark.parametrize("failure", ["timeout", "missing-gh"])
+def test_unavailable_gh_preserves_primary_failure(
+    github: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    """Collection preserves subprocess timeout and missing executable failures."""
+    import shutil
+
+    if failure == "timeout":
+        github["refusal"] = TimeoutExpired(
+            cmd=["gh", "pr", "diff"],
+            timeout=120,
+        )
+        code = ReviewContextErrorCode.GH_COMMAND_FAILED
+        message = "gh pr diff 1 --repo base/project timed out"
+    else:
+        original = shutil.which
+        monkeypatch.setattr(
+            shutil,
+            "which",
+            lambda command: None if command == "gh" else original(command),
+        )
+        code = ReviewContextErrorCode.GH_UNAVAILABLE
+        message = "GitHub CLI (gh) is not installed"
+    with pytest.raises(ReviewContextError) as raised:
+        collect_review_context(pr_number=1, repo="base/project")
+    assert_that(raised.value.code).is_equal_to(code)
+    assert_that(str(raised.value)).contains(message).does_not_contain("local diff")
+    assert_that(
+        _run_git(
+            args=["show-ref", "--verify", "refs/lintro/pr/1"],
+            check=False,
+        ).returncode,
+    ).is_not_equal_to(0)
+
+
+def test_full_clone_fetches_missing_merge_base_without_becoming_shallow(
+    pr_remote: dict[str, Any],
+    github: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fetching an absent merge base preserves full history and the resulting diff."""
+    from lintro.ai.review.context.pr_diff_fallback import _ensure_merge_base
+
+    expected = _collect_branch_context(base=pr_remote["base"])
+    clone = tmp_path / "full-missing"
+    _git(tmp_path, "init", str(clone))
+    _git(clone, "remote", "add", "origin", str(pr_remote["origin"]))
+    monkeypatch.chdir(clone)
+    assert_that(
+        _run_git(
+            args=["cat-file", "-e", pr_remote["merge_base"]],
+            check=False,
+        ).returncode,
+    ).is_not_equal_to(0)
+    _ensure_merge_base(pr_remote["merge_base"])
+    context = collect_review_context(pr_number=1, repo="base/project")
+    try:
+        assert_that(
+            _run_git(args=["rev-parse", "--is-shallow-repository"]).stdout.strip(),
+        ).is_equal_to("false")
+        assert_that(context.unified_diff).is_equal_to(expected.unified_diff)
+    finally:
+        remove_pr_head(context.head_worktree)
+
+
+def test_local_validation_failure_retains_size_refusal(
+    github: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reconstructed snapshot rejected by validation retains both causes."""
+    monkeypatch.setattr(
+        "lintro.ai.review.context.pr_diff_fallback._git_diff_triple_snapshot",
+        lambda **kwargs: ("invalid patch", "A\0keep.py\0", "1\t0\tkeep.py\0"),
+    )
+    with pytest.raises(ReviewContextError) as raised:
+        collect_review_context(pr_number=1, repo="base/project")
+    assert_that(raised.value.code).is_equal_to(
+        ReviewContextErrorCode.PR_LOCAL_DIFF_FAILED,
+    )
+    assert_that(str(raised.value)).contains(
+        "GitHub refused",
+        "for size",
+        "No parseable diff sections",
+    )
+
+
+def test_ordinary_head_mismatch_keeps_git_error_and_no_tree(
+    pr_remote: dict[str, Any],
+) -> None:
+    """An ordinary worktree fetch keeps its git failure code and degrades safely."""
+    from lintro.ai.review.pr_head import checkout_pr_head, fetch_pr_head
+
+    _git(pr_remote["origin"], "update-ref", "refs/pull/1/head", pr_remote["base"])
+    with pytest.raises(ReviewContextError) as raised:
+        fetch_pr_head(pr_number=1, head_oid=pr_remote["head"])
+    assert_that(raised.value.code).is_equal_to(
+        ReviewContextErrorCode.GIT_COMMAND_FAILED,
+    )
+    assert_that(checkout_pr_head(pr_number=1, head_oid=pr_remote["head"])).is_none()

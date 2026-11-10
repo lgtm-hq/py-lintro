@@ -8,6 +8,10 @@ import subprocess  # nosec B404 - subprocess is the core mechanism for invoking 
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
 
+# Expose the process-boundary exception without requiring callers to import
+# subprocess execution APIs just to identify or simulate a timeout.
+TimeoutExpired = subprocess.TimeoutExpired
+
 _GIT_GH_TIMEOUT_SECONDS = 120.0
 
 # Shared ``git`` configuration and ``diff`` flags used for the three diff
@@ -209,13 +213,40 @@ def _is_diff_size_refusal(message: str) -> bool:
         Whether GitHub refused to render the diff for its size.
     """
     text = message.lower()
-    return any(
-        marker in text
-        for marker in (
-            "http 406",
-            "diff too large",
-            "diff is too large",
-            "diff exceeded",
-            "too many files",
-        )
+    return "http 406" in text and any(
+        f"diff exceeded the maximum number of {limit}" in text
+        for limit in ("lines", "files")
     )
+
+
+def fetch_pr_head(
+    *,
+    pr_number: int,
+    head_oid: str,
+    fallback: bool = False,
+) -> None:
+    """Fetch the private PR ref and require the metadata's exact head.
+
+    Args:
+        pr_number: Pull request whose private head ref is fetched.
+        head_oid: Expected head commit SHA.
+        fallback: Whether failures belong to local diff reconstruction.
+
+    Raises:
+        ReviewContextError: When fetch fails or the head moved.
+    """
+    ref = f"refs/lintro/pr/{pr_number}"
+    _run_git(
+        args=["fetch", "--no-tags", "origin", f"+refs/pull/{pr_number}/head:{ref}"],
+    )
+    resolved = _run_git(args=["rev-parse", "--verify", f"{ref}^{{commit}}"])
+    if resolved.stdout.strip() != head_oid:
+        raise ReviewContextError(
+            "The pull request head moved since metadata was read. "
+            "Retry the review to load the current head.",
+            code=(
+                ReviewContextErrorCode.PR_LOCAL_DIFF_FAILED
+                if fallback
+                else ReviewContextErrorCode.GIT_COMMAND_FAILED
+            ),
+        )

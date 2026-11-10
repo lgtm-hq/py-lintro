@@ -8,16 +8,17 @@ from urllib.parse import quote
 
 from lintro.ai.review.context.diff_parse import parse_changed_files
 from lintro.ai.review.context.git_ops import (
+    TimeoutExpired,
     _ensure_git_repo,
     _git_diff_triple_snapshot,
     _run_gh,
     _run_git,
+    fetch_pr_head,
 )
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.models.pr_metadata import PRMetadata
 from lintro.ai.review.models.review_context import ReviewContext
-from lintro.ai.review.pr_head import fetch_pr_head
 
 _FETCH_REMEDY = (
     "Use a git checkout with origin able to fetch the pull request and git "
@@ -77,7 +78,9 @@ def _ensure_merge_base(sha: str) -> None:
     """
     commit = f"{sha}^{{commit}}"
     if _run_git(args=["cat-file", "-e", commit], check=False).returncode != 0:
-        _run_git(args=["fetch", "--no-tags", "--depth", "1", "origin", sha])
+        shallow = _run_git(args=["rev-parse", "--is-shallow-repository"])
+        depth = ["--depth", "1"] if shallow.stdout.strip() == "true" else []
+        _run_git(args=["fetch", "--no-tags", *depth, "origin", sha])
     _run_git(args=["cat-file", "-e", commit])
 
 
@@ -102,11 +105,34 @@ def build_local_pr_diff(
     Raises:
         ReviewContextError: When any fallback step fails, with a remedy.
     """
+    remedy = _FETCH_REMEDY
     try:
         _ensure_git_repo()
+        remedy = (
+            "Retry the compare lookup when GitHub is reachable; ensure the response "
+            "contains a usable merge_base_commit.sha."
+        )
         merge_base = _compare_merge_base(metadata=metadata, base=base, head=head)
-        fetch_pr_head(pr_number=metadata.number, head_oid=head)
+        remedy = _FETCH_REMEDY
+        fetch_pr_head(pr_number=metadata.number, head_oid=head, fallback=True)
+        remedy = "Retry with a checkout able to fetch the merge-base commit."
         _ensure_merge_base(merge_base)
+        remedy = (
+            "Retry the compare lookup with current pull request metadata; "
+            "the merge base must be an ancestor of the verified head."
+        )
+        if (
+            _run_git(
+                args=["merge-base", "--is-ancestor", merge_base, head],
+                check=False,
+            ).returncode
+            != 0
+        ):
+            raise ReviewContextError(
+                "Compare merge base is not an ancestor of the PR head",
+                code=ReviewContextErrorCode.MERGE_BASE_FAILED,
+            )
+        remedy = "Retry with a checkout whose git diff can read both verified commits."
         unified_diff, name_status, numstat = _git_diff_triple_snapshot(
             diff_args=[merge_base, head],
         )
@@ -127,11 +153,18 @@ def build_local_pr_diff(
     except Exception as exc:
         # This boundary also converts unexpected reconstruction failures into the
         # context-error contract; no unverified diff may reach a review.
+        if isinstance(exc, ReviewContextError):
+            if exc.code is ReviewContextErrorCode.PR_LOCAL_DIFF_FAILED:
+                remedy = (
+                    "Retry with current pull request metadata after the head moved."
+                )
+            elif exc.code is ReviewContextErrorCode.GIT_COMMAND_FAILED and isinstance(
+                exc.__cause__,
+                TimeoutExpired,
+            ):
+                remedy = "Retry the git command when the repository and remote respond."
         raise ReviewContextError(
             f"GitHub refused the pull request diff for size ({refusal}). "
-            f"The local diff could not be built: {exc}. {_FETCH_REMEDY} "
-            "For a compare lookup failure or timeout, retry when GitHub and git "
-            "are reachable; ensure compare returns merge_base_commit.sha. "
-            "If the head moved, retry with current pull request metadata.",
+            f"The local diff could not be built: {exc}. {remedy}",
             code=ReviewContextErrorCode.PR_LOCAL_DIFF_FAILED,
         ) from None

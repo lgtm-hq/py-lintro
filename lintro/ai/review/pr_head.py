@@ -37,11 +37,10 @@ from typing import IO, TYPE_CHECKING
 from loguru import logger
 
 from lintro.ai.enums import AITransport
-from lintro.ai.review.context.git_ops import _run_git
+from lintro.ai.review.context.git_ops import _run_git, fetch_pr_head
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
-from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.models.coverage_degradation import (
     CARRIED_CHUNK_INDEX,
@@ -55,6 +54,7 @@ if TYPE_CHECKING:
 __all__ = [
     "PrHeadWorktree",
     "checkout_pr_head",
+    "fetch_pr_head",
     "no_tree_degradations",
     "prune_stale_pr_worktrees",
     "remove_pr_head",
@@ -224,29 +224,6 @@ def _release(fh: IO[str] | None) -> None:
             fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
     with contextlib.suppress(OSError):
         fh.close()
-
-
-def fetch_pr_head(*, pr_number: int, head_oid: str) -> None:
-    """Fetch the private PR ref and require the metadata's exact head.
-
-    Args:
-        pr_number: Pull request whose private head ref is fetched.
-        head_oid: Expected head commit SHA.
-
-    Raises:
-        ReviewContextError: When fetch fails or the head moved.
-    """
-    ref = f"refs/lintro/pr/{pr_number}"
-    _run_git(
-        args=["fetch", "--no-tags", "origin", f"+refs/pull/{pr_number}/head:{ref}"],
-    )
-    resolved = _run_git(args=["rev-parse", "--verify", f"{ref}^{{commit}}"])
-    if resolved.stdout.strip() != head_oid:
-        raise ReviewContextError(
-            "The pull request head moved since metadata was read. "
-            "Retry the review to load the current head.",
-            code=ReviewContextErrorCode.PR_LOCAL_DIFF_FAILED,
-        )
 
 
 def checkout_pr_head(
