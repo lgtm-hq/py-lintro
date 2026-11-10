@@ -247,6 +247,9 @@ def _render_error_copy(
     )
     label = f"`{sanitize_comment_text(provider, limit=40)}` " if provider else ""
 
+    if kind is ReviewErrorKind.CONTEXT_UNAVAILABLE:
+        return f"{message} (cause: {cause})" if cause else message, guidance
+
     if kind is ReviewErrorKind.UNKNOWN:
         detail = f"{label}{message}: {cause}" if cause else f"{label}{message}"
         return detail, guidance

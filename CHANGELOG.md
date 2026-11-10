@@ -22,7 +22,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Review context collection failures now exit 2 with a structured context error and
   preserve stored findings under `--post`. Nothing to review now exits 0 with an
   explicit skip and excluded-file reasons, instead of exit 1. Wrappers must distinguish
-  these skips from completed clean reviews (#3303).
+  these skips from completed clean reviews. Context errors include `error.code` and a
+  null `error.status`; MCP skips retain `findings_coverage_complete: false` alongside
+  `outcome`, `review_ran` and `skipped_files` (#3303).
 
 ### Security
 

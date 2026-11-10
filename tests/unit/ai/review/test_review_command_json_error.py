@@ -389,3 +389,170 @@ def test_empty_collected_selection_exits_zero_without_reviewing(
         )
     else:
         assert_that(payload["skipped_files"]).is_empty()
+
+
+@pytest.mark.parametrize("load_mode", ["empty", "raises", "stored"])
+def test_posted_context_failure_preserves_unrecoverable_board(
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+    load_mode: str,
+) -> None:
+    """The command preserves the live board across repeated state-load failures."""
+    from lintro.ai.review import github_status
+    from lintro.ai.review.exceptions import ReviewContextError
+    from lintro.ai.review.github_constants import STICKY_MARKER
+    from lintro.ai.review.models.finding_record import FindingRecord
+    from lintro.ai.review.models.review_state import ReviewState
+    from lintro.ai.review.models.run_identity import RunIdentity
+    from lintro.ai.review.models.run_record import RunRecord
+    from lintro.ai.review.sticky import render_state_sticky
+
+    stored = ReviewState(
+        runs=(RunRecord(identity=RunIdentity(round=1, sha="head")),),
+        findings=(FindingRecord(fingerprint="a" * 16, title="Keep this finding open"),),
+    )
+    board = f"{STICKY_MARKER}\n## Findings\n- P1: Keep this finding open"
+    if load_mode == "stored":
+        board = render_state_sticky(state=stored)
+    bodies = [board]
+    reporter = MagicMock()
+    reporter.repo = "owner/name"
+    reporter.pr_number = 7
+    reporter.find_issue_comment.side_effect = lambda **_: (123, bodies[-1])
+
+    def update(*, comment_id: int, body: str) -> bool:
+        """Record the observable GitHub body."""
+        bodies.append(body)
+        return True
+
+    reporter.update_issue_comment.side_effect = update
+
+    def reporter_factory(**kwargs: object) -> MagicMock:
+        """Require the command's resolved posting target."""
+        assert_that(kwargs).contains_entry(pr_number=7, repo="owner/name")
+        return reporter
+
+    def load(**kwargs: object) -> ReviewState:
+        """Simulate unavailable persisted state."""
+        if load_mode == "raises":
+            raise OSError("state unreadable")
+        return stored if load_mode == "stored" else ReviewState()
+
+    def fail(**_: object) -> None:
+        """Fail before the provider is invoked."""
+        raise ReviewContextError(
+            "gh pr diff failed: HTTP 401",
+            code="gh-command-failed",
+        )
+
+    monkeypatch.setattr(github_status, "GitHubPRReporter", reporter_factory)
+    monkeypatch.setattr(review_module, "load_prior_review_state", load)
+    monkeypatch.setattr(preparation_module, "collect_review_context", fail)
+    for _ in range(2):
+        result = CliRunner().invoke(
+            review_command,
+            ["--pr", "7", "--repo", "owner/name", "--post", "--output", "json"],
+        )
+        assert_that(result.exit_code).is_equal_to(2)
+        assert_that(bodies[-1]).contains("Keep this finding open")
+        if load_mode != "stored":
+            assert_that(bodies[-1]).starts_with(board)
+            assert_that(
+                bodies[-1].count("<!-- lintro-review-error-start -->"),
+            ).is_equal_to(
+                1,
+            )
+        assert_that(bodies[-1]).contains("cause: gh pr diff failed: HTTP 401")
+        assert_that(bodies[-1]).does_not_contain(
+            "provider reported",
+            "`anthropic`",
+            "resolved",
+        )
+    assert_that(len(bodies)).is_equal_to(3)
+    successful_body = render_state_sticky(state=stored)
+    assert_that(successful_body).contains("Keep this finding open")
+    assert_that(successful_body).does_not_contain("lintro-review-error-start", "cause:")
+
+
+def test_pr_and_base_usage_error_does_not_post(
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Conflicting modes report usage without touching the PR."""
+    from lintro.ai.review import github
+
+    posted: list[object] = []
+    monkeypatch.setattr(
+        github,
+        "post_review_error_to_github",
+        lambda **kw: posted.append(kw),
+    )
+    result = CliRunner().invoke(
+        review_command,
+        ["--pr", "7", "--base", "main", "--repo", "owner/name", "--post"],
+    )
+    assert_that(result.exit_code).is_equal_to(2)
+    assert_that(result.output).contains("Usage:", "--pr and --base")
+    assert_that(posted).is_empty()
+
+
+def test_wrapped_context_error_retains_code_and_has_no_provider_status() -> None:
+    """A mid-run wrapper retains context identity without blaming provider HTTP."""
+    from lintro.ai.review.error_contract import build_error_contract
+    from lintro.ai.review.exceptions import ReviewContextError
+
+    error = RuntimeError("execution failed")
+    error.__cause__ = ReviewContextError(
+        "gh failed: HTTP 401",
+        code="gh-command-failed",
+    )
+    payload = build_error_contract(provider="anthropic", error=error)
+    assert_that(payload["error"]).contains_entry(
+        kind="context_unavailable",
+        code="gh-command-failed",
+        status=None,
+    )
+
+
+def test_pr_empty_raw_diff_with_zero_changed_files_is_disclosed_skip(
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GitHub reporting no changed files permits a successful disclosed skip."""
+    from types import SimpleNamespace
+
+    from lintro.ai.review.context import collection
+
+    def gh(*, args: list[str]) -> SimpleNamespace:
+        """Serve actual PR metadata and an empty raw diff."""
+        payload = (
+            json.dumps(
+                {
+                    "number": 7,
+                    "title": "Empty PR",
+                    "baseRefOid": "base",
+                    "headRefOid": "head",
+                    "changedFiles": 0,
+                },
+            )
+            if args[1] == "view"
+            else ""
+        )
+        return SimpleNamespace(stdout=payload)
+
+    monkeypatch.setattr(
+        preparation_module,
+        "collect_review_context",
+        collection.collect_review_context,
+    )
+    monkeypatch.setattr(collection, "_run_gh", gh)
+    monkeypatch.setattr(collection, "_probe_pr_checkout", lambda **_: None)
+    monkeypatch.setattr(collection, "checkout_pr_head", lambda **_: None)
+    result = CliRunner().invoke(
+        review_command,
+        ["--pr", "7", "--repo", "owner/name", "--output", "json"],
+    )
+    assert_that(result.exit_code).is_equal_to(0)
+    payload = json.loads(result.output[result.output.index("{") :])
+    assert_that(payload).contains_entry(outcome="no_changes", review_ran=False)
+    assert_that(payload["skipped_files"]).is_empty()

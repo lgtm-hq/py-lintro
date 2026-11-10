@@ -177,6 +177,7 @@ failures without scraping human-readable stderr prose:
 {
   "error": {
     "kind": "auth_failed",
+    "code": null,
     "provider": "anthropic",
     "status": 401,
     "retryable": false,
@@ -188,8 +189,9 @@ failures without scraping human-readable stderr prose:
 | Field       | Type            | Meaning                                                                 |
 | ----------- | --------------- | ----------------------------------------------------------------------- |
 | `kind`      | string (enum)   | Canonical classification (see below). Stable across providers.          |
+| `code`      | string \| null  | Context error code, or `null` for provider failures.                    |
 | `provider`  | string          | Provider identifier, lowercased (e.g. `anthropic`, `openai`, `cursor`). |
-| `status`    | integer \| null | Extracted HTTP status (e.g. `401`, `429`, `529`), or `null` when none.  |
+| `status`    | integer \| null | Provider HTTP status, or `null` when absent or for context errors.      |
 | `retryable` | boolean         | `true` for transient conditions safe to retry unchanged.                |
 | `message`   | string          | The most specific underlying cause text.                                |
 

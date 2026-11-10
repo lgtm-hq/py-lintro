@@ -210,6 +210,10 @@ file at HEAD. Otherwise it names why the one-click patch was withheld — `stale
 can apply a hunk that no longer matches the file. The finding's prose (including its
 described fix) is always kept.
 
+A `lintro_review` result with no reviewable changes includes top-level
+`findings_coverage_complete: false`, `outcome: "no_changes"`, `review_ran: false` and
+`skipped_files` with exclusion reasons. No review ran; this is not clean coverage.
+
 Cost control:
 
 - The effective `ai.max_cost_usd` (after `LINTRO_AI_MAX_COST_USD` / CLI overlay and the

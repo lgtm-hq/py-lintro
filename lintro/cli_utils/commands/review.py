@@ -885,6 +885,8 @@ def _resolve_targets(*, options: ReviewCommandOptions) -> _ReviewTargets:
         raise click.UsageError(
             "--pr requires --repo or GITHUB_REPOSITORY environment variable.",
         )
+    if options.pr is not None and options.base is not None:
+        raise click.UsageError("--pr and --base cannot be used together.")
     if options.pr is not None and options.uncommitted:
         raise click.UsageError(
             "--pr and --uncommitted cannot be used together.",

@@ -423,6 +423,10 @@ def test_review_rejects_a_base_combined_with_uncommitted(
 
     assert_that(result.is_error).is_true()
     assert_that(payload["error"]["code"]).is_equal_to(McpErrorCode.INVALID_INPUT.value)
+    assert_that(payload["error"]["detail"]).contains_entry(
+        kind="context_unavailable",
+        code="invalid-review-mode",
+    )
     assert_that(payload["error"]["detail"]["context_error"]).is_equal_to(
         "invalid-review-mode",
     )
@@ -942,7 +946,20 @@ def test_review_reports_no_changes_for_a_path_matching_nothing(
     assert_that(result.is_error).is_false()
     assert_that(payload["findings"]).is_empty()
     assert_that(payload).contains_entry(outcome="no_changes", review_ran=False)
-    assert_that(payload).does_not_contain("findings_coverage_complete")
+    assert_that(payload["findings_coverage_complete"]).is_false()
+    assert_that(set(payload)).is_equal_to(
+        {
+            "summary",
+            "findings",
+            "run",
+            "budget",
+            "findings_coverage_complete",
+            "outcome",
+            "review_ran",
+            "skipped_files",
+            "detail",
+        },
+    )
     assert_that(payload["run"]["findings_coverage_complete"]).is_false()
     assert_that(payload["skipped_files"]).is_not_empty()
     assert_that(calls).is_empty()

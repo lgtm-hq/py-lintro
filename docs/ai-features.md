@@ -555,6 +555,10 @@ may go unreported.
   `metadata`). The MCP `lintro_review` payload carries all three on its `run` block and
   hoists only `findings_coverage_complete` to the tool-result root, next to `coverage`.
 
+A `lintro_review` result with no reviewable changes includes top-level
+`findings_coverage_complete: false`, `outcome: "no_changes"`, `review_ran: false` and
+`skipped_files` with exclusion reasons. No review ran; this is not clean coverage.
+
 **Coverage limitation is a separate axis from `partial`.** `partial` / `stopped_reason`
 mean the run _stopped early_ and planned review work was left undone (built-in chunks or
 custom-agent passes, on a cost cap or an interrupt). A degraded run finished its planned

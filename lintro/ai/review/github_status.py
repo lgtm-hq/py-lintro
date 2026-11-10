@@ -10,6 +10,7 @@ comment from another actor is handled identically whichever one runs.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 from loguru import logger
@@ -17,6 +18,7 @@ from loguru import logger
 from lintro.ai.integrations.github_pr import GitHubPRReporter
 from lintro.ai.review.enums.comment_kind import CommentKind
 from lintro.ai.review.finding_matcher import count_blocking_findings
+from lintro.ai.review.github_constants import STICKY_MARKER
 from lintro.ai.review.github_errors import format_error_comment
 from lintro.ai.review.github_notes import format_convergence_banner
 from lintro.ai.review.lifecycle.comments import load_sticky_comment, upsert_comment
@@ -82,6 +84,22 @@ def post_review_error_to_github(
         repo=repo or gh_reporter.repo or "",
         pr_number=pr_number if pr_number is not None else gh_reporter.pr_number,
     )
+    if existing.comment_id is not None and not any(
+        not run.coverage.checkpoint for run in state.runs
+    ):
+        found = gh_reporter.find_issue_comment(marker=STICKY_MARKER)
+        if found is not None:
+            start = "<!-- lintro-review-error-start -->"
+            end = "<!-- lintro-review-error-end -->"
+            board = re.sub(
+                re.escape(start) + r".*?" + re.escape(end),
+                "",
+                found[1],
+                flags=re.DOTALL,
+            ).rstrip()
+            body = (
+                f"{board}\n\n{start}\n{body.replace(STICKY_MARKER, '').strip()}\n{end}"
+            )
     return upsert_comment(
         reporter=gh_reporter,
         kind=CommentKind.ERROR,

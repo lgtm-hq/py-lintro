@@ -607,8 +607,9 @@ def _no_changes_payload(
     """Build the result for a diff with nothing in it.
 
     The metadata is assembled from the same :class:`ReviewMetadata` model a real
-    run produces, so the empty answer and a reviewed one carry an identical key
-    set and an agent needs no special case beyond ``findings == []``.
+    run produces. The result carries ``findings_coverage_complete=False``;
+    the caller adds ``outcome``, ``review_ran`` and ``skipped_files`` to disclose
+    that no review ran.
 
     Args:
         ai_config: Resolved AI configuration.
@@ -647,6 +648,7 @@ def _no_changes_payload(
     result = ReviewResult(metadata=metadata, summary="No changes to review.")
     return {
         "summary": result.summary,
+        "findings_coverage_complete": False,
         "findings": [],
         "run": {
             **_run_metadata(metadata=result.metadata),

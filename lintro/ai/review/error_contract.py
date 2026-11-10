@@ -23,6 +23,8 @@ The envelope shape is::
       }
     }
 
+``status`` is the provider HTTP status; it is always null for context errors.
+
 ``completed_chunks`` is what a fallback chain keys on (ADR-0011 D): a
 wrapper may restart the review on another lane only when it is ``0``. It is
 ``null`` when the failure happened outside the run, where no count exists,
@@ -44,6 +46,7 @@ from typing import Any, Final
 from lintro.ai.review.errors_taxonomy import (
     ReviewErrorKind,
     _extract_status,
+    _iter_cause_chain,
     classify_provider_error,
     resolve_cause_text,
 )
@@ -142,11 +145,21 @@ def build_error_contract(*, provider: str, error: Exception) -> dict[str, Any]:
 
     kind = classify_provider_error(provider=provider, error=error)
     message = resolve_cause_text(error=error)
-    status = _extract_status(text=message.lower())
+    context_error = next(
+        (
+            current
+            for current in _iter_cause_chain(error=error)
+            if isinstance(current, ReviewContextError)
+        ),
+        None,
+    )
+    status = (
+        None if context_error is not None else _extract_status(text=message.lower())
+    )
     return {
         "error": {
             "kind": kind.value,
-            "code": error.code.value if isinstance(error, ReviewContextError) else None,
+            "code": context_error.code.value if context_error is not None else None,
             "provider": (provider or "").lower(),
             "status": status,
             "retryable": is_retryable_kind(kind=kind),
