@@ -1,7 +1,7 @@
-"""Machine-readable JSON error contract for AI review provider failures.
+"""Machine-readable JSON error contract for AI review and context failures.
 
-When ``lintro review --output json`` cannot complete because the provider
-failed (invalid key, rate limit, depleted quota, 5xx, malformed response), a
+When ``lintro review --output json`` cannot collect its diff context or the
+provider fails (invalid key, rate limit, depleted quota, malformed response), a
 success envelope (``metadata``/``summary``/``checklist``/``findings``) can never
 be produced. This module builds a *stable* error envelope instead so CI
 consumers can classify the failure on ``error.kind``/``error.status`` rather
@@ -17,6 +17,7 @@ The envelope shape is::
         "retryable": false,                   # safe to retry unchanged?
         "provider_unavailable": true,         # provider served nothing at all?
         "message": "...",                     # most specific cause text
+        "code": null,                         # context error code when present
         "completed_chunks": 0                 # chunks reviewed before the
                                               # failure, or null when unknown
       }
@@ -30,7 +31,9 @@ and the wrapper must then stay on its lane.
 ``error.kind`` reuses the canonical :class:`ReviewErrorKind` taxonomy, so the
 set of values is the single source of truth shared with the PR error sticky.
 The envelope is emitted on stdout; the review command exits with
-:data:`REVIEW_ERROR_EXIT_CODE` so a provider error is distinguishable from the
+:data:`REVIEW_ERROR_EXIT_CODE` (2) for context and provider failures. Empty
+selections instead exit 0 with a disclosed ``no_changes`` skip and no coverage
+claim. Preparation failures and skips never advance state. Exit 2 differs from the
 exit code ``1`` that signals *P1 findings present* on a successful review.
 """
 
@@ -133,9 +136,9 @@ def build_error_contract(*, provider: str, error: Exception) -> dict[str, Any]:
         ``kind``, the ``provider``, the extracted HTTP ``status`` (or ``None``),
         ``retryable`` and ``provider_unavailable`` flags, the most specific
         cause ``message``, and ``completed_chunks`` (or ``None`` when the
-        failure carries no count).
+        failure carries no count), plus a context ``code`` (otherwise ``None``).
     """
-    from lintro.ai.review.exceptions import completed_chunks_of
+    from lintro.ai.review.exceptions import ReviewContextError, completed_chunks_of
 
     kind = classify_provider_error(provider=provider, error=error)
     message = resolve_cause_text(error=error)
@@ -143,6 +146,7 @@ def build_error_contract(*, provider: str, error: Exception) -> dict[str, Any]:
     return {
         "error": {
             "kind": kind.value,
+            "code": error.code.value if isinstance(error, ReviewContextError) else None,
             "provider": (provider or "").lower(),
             "status": status,
             "retryable": is_retryable_kind(kind=kind),

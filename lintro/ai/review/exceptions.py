@@ -10,6 +10,7 @@ from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorC
 
 if TYPE_CHECKING:
     from lintro.ai.review.errors_taxonomy import ReviewErrorKind
+    from lintro.ai.review.models.skipped_file import SkippedFile
 
 
 class ReviewContextError(AIError):
@@ -20,18 +21,21 @@ class ReviewContextError(AIError):
         message: str,
         *,
         code: ReviewContextErrorCode | str,
+        skipped_files: tuple[SkippedFile, ...] = (),
     ) -> None:
         """Initialize a review context error.
 
         Args:
             message: Human-readable error detail.
             code: Stable machine-readable error code.
+            skipped_files: Files deliberately excluded before an empty selection.
 
         Raises:
             TypeError: If ``code`` is not an enum member or valid code string.
             ValueError: If ``code`` is a string that is not a valid enum value.
         """
         super().__init__(message)
+        self.skipped_files = skipped_files
         if isinstance(code, ReviewContextErrorCode):
             self.code = code
         elif isinstance(code, str):

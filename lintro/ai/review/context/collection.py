@@ -84,6 +84,7 @@ def collect_review_context(
             pr_number=pr_number,
             repo=repo,
         )
+        validate_review_context_diff(context=context)
         # The agent reads the PR's head, never the ambient tree (#2733): the
         # one decision is a verified head worktree or no tree at all. The
         # ambient checkout is never the fallback, whatever commit it is at
@@ -113,6 +114,7 @@ def collect_review_context(
             raise ReviewContextError(
                 "No changes found for review. Verify the diff range or path filters.",
                 code=ReviewContextErrorCode.NO_CHANGES,
+                skipped_files=tuple(context.skipped_files),
             )
         validate_review_context_diff(context=context)
     return replace(context, repo_root=repo_root)
@@ -387,7 +389,7 @@ def _collect_pr_context(
         "view",
         str(pr_number),
         "--json",
-        "title,body,number,baseRefOid,headRefOid,headRepository",
+        "title,body,number,baseRefOid,headRefOid,headRepository,changedFiles",
     ]
     if repo is not None:
         diff_args.extend(["--repo", repo])
@@ -410,6 +412,12 @@ def _collect_pr_context(
 
     unified_diff = _run_gh(args=diff_args).stdout
     changed_files = _parse_changed_files_from_diff(unified_diff=unified_diff)
+    if pr_metadata.changed_files and not changed_files:
+        raise ReviewContextError(
+            "GitHub reports changed files but the raw PR diff has "
+            "no parseable file sections.",
+            code=ReviewContextErrorCode.DIFF_DESYNC,
+        )
 
     return ReviewContext(
         base_ref=base_ref,

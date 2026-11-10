@@ -88,6 +88,7 @@ def test_auth_401_envelope_shape(auth_error: AIAuthenticationError) -> None:
                     "authentication_error"
                 ),
                 "completed_chunks": None,
+                "code": None,
             },
         },
     )
@@ -109,6 +110,7 @@ def test_rate_limit_429_envelope_shape(rate_limit_error: AIRateLimitError) -> No
                     "Anthropic rate limit exceeded: Error code: 429 - rate_limit_error"
                 ),
                 "completed_chunks": None,
+                "code": None,
             },
         },
     )
@@ -140,6 +142,7 @@ def test_server_5xx_envelope_shape(server_error: AIProviderError) -> None:
                 "provider_unavailable": True,
                 "message": "Anthropic API error: Error code: 529 - overloaded_error",
                 "completed_chunks": None,
+                "code": None,
             },
         },
     )
@@ -161,6 +164,7 @@ def test_invalid_response_envelope_shape(
                 "provider_unavailable": False,
                 "message": "Expecting value: line 1 column 1 (char 0)",
                 "completed_chunks": None,
+                "code": None,
             },
         },
     )
@@ -200,6 +204,7 @@ def test_envelope_keys_are_stable(auth_error: AIAuthenticationError) -> None:
             "provider_unavailable",
             "message",
             "completed_chunks",
+            "code",
         },
     )
 
@@ -302,6 +307,7 @@ def test_retryable_kinds_membership() -> None:
         (ReviewErrorKind.CONTEXT_LENGTH, False),
         (ReviewErrorKind.INVALID_RESPONSE, False),
         (ReviewErrorKind.PROVIDER_UNAVAILABLE, True),
+        (ReviewErrorKind.CONTEXT_UNAVAILABLE, False),
         (ReviewErrorKind.UNKNOWN, False),
     ],
 )
@@ -329,6 +335,7 @@ def test_every_error_kind_is_covered_by_the_unavailable_partition() -> None:
         ReviewErrorKind.RATE_LIMITED,
         ReviewErrorKind.SERVER_ERROR,
         ReviewErrorKind.TIMEOUT,
+        ReviewErrorKind.CONTEXT_UNAVAILABLE,
         ReviewErrorKind.CONTEXT_LENGTH,
         ReviewErrorKind.INVALID_RESPONSE,
         ReviewErrorKind.PROVIDER_UNAVAILABLE,

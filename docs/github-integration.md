@@ -195,19 +195,29 @@ failures without scraping human-readable stderr prose:
 
 `kind` is one of: `auth_failed`, `insufficient_credits`, `quota_exceeded`,
 `rate_limited`, `context_length`, `server_error`, `timeout`, `invalid_response`,
-`unknown`. `retryable` is `true` only for `rate_limited`, `server_error`, and `timeout`.
+`provider_unavailable`, `context_unavailable`, `unknown`. `retryable` is `true` only for
+`rate_limited`, `server_error`, and `timeout`.
 
 **Exit codes under `--output json`:**
 
-| Code | Meaning                                                            |
-| ---- | ------------------------------------------------------------------ |
-| `0`  | Review completed, no P1 findings. Success envelope on stdout.      |
-| `1`  | Review completed **with** P1 findings. Success envelope on stdout. |
-| `2`  | Provider/execution failure. **Error** envelope (above) on stdout.  |
+| Code | Meaning                                                                              |
+| ---- | ------------------------------------------------------------------------------------ |
+| `0`  | Review completed without P1 findings, or explicit no-changes skip.                   |
+| `1`  | Review completed **with** P1 findings. Success envelope on stdout.                   |
+| `2`  | Provider/execution/context collection failure. **Error** envelope (above) on stdout. |
 
-Exit `2` disambiguates a provider error from the P1-findings exit `1`, so consumers
-never have to guess whether stdout holds a review or an error — check for the top-level
-`error` key.
+Context failures carry `error.code` (the stable `ReviewContextErrorCode`) and the full
+command/cause in `error.message`. They are not provider-unavailable or provider fallback
+conditions. Exit 0 can instead carry a disclosed skip: `outcome: no_changes`,
+`review_ran: false`, and `skipped_files` with paths and reasons. No review ran, no
+coverage is claimed, and no state or findings are advanced. Under `--post`, stored
+findings are kept with a skip note when state is recoverable; otherwise nothing is
+posted. A raw PR diff missing despite GitHub reporting changed files is an exit-2
+context failure, checked before filters.
+
+Exit `2` disambiguates a provider or context error from the P1-findings exit `1`, so
+consumers never have to guess whether stdout holds a review or an error — check for the
+top-level `error` key.
 
 #### Requesting a review from a pull-request comment
 

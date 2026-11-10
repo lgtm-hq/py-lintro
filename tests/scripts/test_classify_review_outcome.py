@@ -1739,3 +1739,42 @@ def test_a_status_two_after_the_already_reviewed_envelope_is_a_failure(
 
     assert_that(str(report.outcome)).is_not_equal_to("already_reviewed")
     assert_that(report.exit_code).is_equal_to(1)
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["gh pr diff timed out", "gh pr view failed: HTTP 401"],
+)
+def test_context_failure_is_broken_instead_of_provider_unavailable(
+    message: str,
+) -> None:
+    """Context errors are lintro failures even when their cause names HTTP or timeouts."""
+    from lintro.ai.review.exceptions import ReviewContextError
+
+    module = _load()
+    output = render_error_contract_json(
+        provider="anthropic",
+        error=ReviewContextError(message, code="gh-command-failed"),
+    )
+    report = module.classify(status=2, output=output)
+    assert_that(report.outcome).is_equal_to(module.ReviewOutcome.BROKEN)
+    assert_that(report.exit_code).is_equal_to(1)
+    assert_that(report.detail).contains(message)
+
+
+def test_no_changes_is_disclosed_as_a_skip_not_a_clean_review() -> None:
+    """The successful empty-selection envelope cannot turn into reviewed-clean."""
+    from lintro.ai.review.exceptions import ReviewContextError
+    from lintro.ai.review.no_changes import no_changes_payload
+
+    module = _load()
+    output = json.dumps(
+        no_changes_payload(ReviewContextError("Empty", code="no-changes")),
+    )
+    report = module.classify(status=0, output=output)
+    assert_that(report.outcome).is_equal_to(module.ReviewOutcome.NO_CHANGES)
+    assert_that(report.outcome.produced_review).is_false()
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that(module.render_summary(report=report)).contains(
+        "no review ran",
+    ).does_not_contain("reviewed, clean")

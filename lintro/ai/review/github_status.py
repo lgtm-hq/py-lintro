@@ -10,6 +10,8 @@ comment from another actor is handled identically whichever one runs.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from loguru import logger
 
 from lintro.ai.integrations.github_pr import GitHubPRReporter
@@ -22,11 +24,13 @@ from lintro.ai.review.lifecycle.state import resolve_prior_state
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.no_changes import NO_CHANGES_DETAIL
 from lintro.ai.review.sticky import render_state_sticky
 
 __all__ = [
     "post_review_converged_to_github",
     "post_review_error_to_github",
+    "post_review_no_changes_to_github",
 ]
 
 
@@ -114,9 +118,68 @@ def post_review_converged_to_github(
         True when posting succeeded; False when there is no pull request
         context or no recoverable prior state to re-render the board from.
     """
+    return _post_skipped_review(
+        banner=lambda state: format_convergence_banner(
+            decision=decision,
+            open_p1=count_blocking_findings(findings=state.findings),
+        ),
+        pr_number=pr_number,
+        repo=repo,
+        reporter=reporter,
+        prior_state=prior_state,
+    )
+
+
+def post_review_no_changes_to_github(
+    *,
+    pr_number: int | None = None,
+    repo: str | None = None,
+    reporter: GitHubPRReporter | None = None,
+    prior_state: ReviewState | None = None,
+) -> bool:
+    """Disclose an empty selection over the stored board without editing state.
+
+    Args:
+        pr_number: Pull request number.
+        repo: Repository slug.
+        reporter: Optional GitHub reporter.
+        prior_state: Stored state recovered before context collection completed.
+
+    Returns:
+        Whether a recoverable board was successfully re-rendered.
+    """
+    return _post_skipped_review(
+        banner=lambda _: f"> {NO_CHANGES_DETAIL}",
+        pr_number=pr_number,
+        repo=repo,
+        reporter=reporter,
+        prior_state=prior_state,
+    )
+
+
+def _post_skipped_review(
+    *,
+    banner: Callable[[ReviewState], str],
+    pr_number: int | None,
+    repo: str | None,
+    reporter: GitHubPRReporter | None,
+    prior_state: ReviewState | None,
+) -> bool:
+    """Re-render a recoverable board with a skip banner, preserving its state.
+
+    Args:
+        banner: Render the disclosure for the recovered state.
+        pr_number: Pull request number.
+        repo: Repository slug.
+        reporter: Optional GitHub reporter.
+        prior_state: Stored state recovered by the caller.
+
+    Returns:
+        Whether a board was recovered and posted.
+    """
     gh_reporter = reporter or GitHubPRReporter(pr_number=pr_number, repo=repo)
     if not gh_reporter.is_available():
-        logger.warning("GitHub PR context not available — skipping converged stamp")
+        logger.warning("GitHub PR context not available — skipping review skip stamp")
         return False
     existing, sticky_state = load_sticky_comment(reporter=gh_reporter)
     state = resolve_prior_state(
@@ -129,15 +192,12 @@ def post_review_converged_to_github(
         # working from, so leave the sticky untouched and say so.
         logger.warning(
             "No prior review state is recoverable — leaving the sticky "
-            "untouched instead of stamping a converged round over it",
+            "untouched instead of stamping a skipped round over it",
         )
         return False
     body = render_state_sticky(
         state=state,
-        banner=format_convergence_banner(
-            decision=decision,
-            open_p1=count_blocking_findings(findings=state.findings),
-        ),
+        banner=banner(state),
         repo=repo or gh_reporter.repo or "",
         pr_number=pr_number if pr_number is not None else gh_reporter.pr_number,
     )

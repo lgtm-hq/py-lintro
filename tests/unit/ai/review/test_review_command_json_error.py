@@ -229,3 +229,163 @@ def test_terminal_error_exits_two_not_one(patched_review: None) -> None:
     result = CliRunner().invoke(review_command, ["--output", "terminal"])
 
     assert_that(result.exit_code).is_equal_to(2)
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        ("gh-command-failed", "gh pr diff failed: unavailable"),
+        ("gh-command-failed", "gh pr diff timed out"),
+        ("gh-command-failed", "gh pr view failed: HTTP 401"),
+        ("gh-json-invalid", "Failed to parse gh pr view JSON"),
+        ("gh-metadata-invalid", "Invalid required PR metadata"),
+        ("diff-desync", "Changed files listed but unified diff is empty"),
+        ("no-parseable-diff", "No parseable diff sections"),
+    ],
+)
+@pytest.mark.parametrize("output_format", ["json", "terminal"])
+def test_preparation_context_failure_discloses_error(
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+    code: str,
+    message: str,
+    output_format: str,
+) -> None:
+    """A collection failure is an error, even when its text resembles a provider."""
+    from lintro.ai.review.exceptions import ReviewContextError
+
+    def fail(**_: object) -> None:
+        """Raise the context collection failure under test."""
+        raise ReviewContextError(message, code=code) from TimeoutError("timed out")
+
+    monkeypatch.setattr(preparation_module, "collect_review_context", fail)
+    result = CliRunner().invoke(review_command, ["--output", output_format])
+    assert_that(result.exit_code).is_equal_to(2)
+    assert_that(result.output).contains(message)
+    if output_format == "json":
+        error = json.loads(result.output[result.output.index("{") :])["error"]
+        assert_that(error).contains_entry(
+            kind="context_unavailable",
+            code=code,
+            message=message,
+            provider_unavailable=False,
+            retryable=False,
+        )
+
+
+@pytest.mark.parametrize("output_format", ["json", "terminal"])
+def test_no_changes_discloses_skipped_files(
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+    output_format: str,
+) -> None:
+    """An excluded selection exits successfully without claiming it was reviewed."""
+    from lintro.ai.review.enums.file_skip_reason import FileSkipReason
+    from lintro.ai.review.exceptions import ReviewContextError
+    from lintro.ai.review.models.skipped_file import SkippedFile
+
+    def empty(**_: object) -> None:
+        """Simulate collection retaining its deliberate exclusion records."""
+        raise ReviewContextError(
+            "No changes",
+            code="no-changes",
+            skipped_files=(
+                SkippedFile(path="generated.py", reason=FileSkipReason.CONFIG_EXCLUDED),
+            ),
+        )
+
+    monkeypatch.setattr(preparation_module, "collect_review_context", empty)
+    result = CliRunner().invoke(review_command, ["--output", output_format])
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).contains(
+        "No reviewable changes, no review ran.",
+        "generated.py",
+    )
+    if output_format == "json":
+        payload = json.loads(result.output[result.output.index("{") :])
+        assert_that(payload).contains_entry(outcome="no_changes", review_ran=False)
+        assert_that(payload).does_not_contain("metadata", "findings_coverage_complete")
+        assert_that(payload["skipped_files"][0]["reason"]).is_equal_to(
+            "config_excluded",
+        )
+
+
+def test_execution_context_failure_keeps_context_kind(
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The execution diff ceiling carries the same context error contract."""
+    from lintro.ai.review.exceptions import ReviewContextError
+
+    def too_large(*_: object, **__: object) -> None:
+        """Refuse the diff at the execution boundary."""
+        raise ReviewContextError("CLI diff ceiling exceeded", code="diff-too-large")
+
+    monkeypatch.setattr(preparation_module, "run_review", too_large)
+    result = CliRunner().invoke(review_command, ["--output", "json"])
+    assert_that(result.exit_code).is_equal_to(2)
+    payload = json.loads(result.output[result.output.index("{") :])
+    assert_that(payload["error"]).contains_entry(
+        kind="context_unavailable",
+        code="diff-too-large",
+    )
+
+
+@pytest.mark.parametrize("excluded", [False, True])
+def test_empty_collected_selection_exits_zero_without_reviewing(
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+    excluded: bool,
+) -> None:
+    """Real collection retains exclusions through NO_CHANGES into the CLI skip."""
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from lintro.ai.review.context import collection
+    from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
+    from lintro.ai.review.models.changed_file import ChangedFile
+    from lintro.ai.review.models.review_context import ReviewContext
+
+    context = ReviewContext(
+        base_ref="base",
+        head_ref="head",
+        changed_files=(
+            [
+                ChangedFile(
+                    path="a.py",
+                    status=ChangedFileStatus.MODIFIED,
+                    additions=1,
+                    deletions=0,
+                ),
+            ]
+            if excluded
+            else []
+        ),
+        unified_diff="diff --git a/a.py b/a.py\n+++ b/a.py\n+a\n" if excluded else "",
+    )
+    monkeypatch.setattr(
+        preparation_module,
+        "collect_review_context",
+        collection.collect_review_context,
+    )
+    monkeypatch.setattr(collection, "_ensure_git_repo", lambda: None)
+    monkeypatch.setattr(
+        collection,
+        "_run_git",
+        lambda **_: SimpleNamespace(stdout=str(Path.cwd())),
+    )
+    monkeypatch.setattr(collection, "_collect_branch_context", lambda **_: context)
+    args = ["--base", "main", "--output", "json"]
+    if excluded:
+        args.extend(["--path", "missing/"])
+    result = CliRunner().invoke(review_command, args)
+    assert_that(result.exit_code).is_equal_to(0)
+    payload = json.loads(result.output[result.output.index("{") :])
+    assert_that(payload).contains_entry(outcome="no_changes", review_ran=False)
+    if excluded:
+        assert_that(payload["skipped_files"][0]).contains_entry(
+            path="a.py",
+            reason="path_filter",
+        )
+    else:
+        assert_that(payload["skipped_files"]).is_empty()

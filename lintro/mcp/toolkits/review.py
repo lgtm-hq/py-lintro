@@ -44,6 +44,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, NoReturn
 
+from lintro.ai.review.errors_taxonomy import ReviewErrorKind
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.mcp.enums.mcp_error_code import McpErrorCode
 from lintro.mcp.errors import McpError, McpErrorEnvelope
@@ -393,7 +394,12 @@ def _raise_context_error(*, exc: ReviewContextError) -> NoReturn:
     raise McpError(
         code=mcp_code,
         message=str(exc),
-        detail={"tool": "lintro_review", "context_error": code},
+        detail={
+            "tool": "lintro_review",
+            "context_error": code,
+            "kind": ReviewErrorKind.CONTEXT_UNAVAILABLE.value,
+            "code": code,
+        },
     ) from exc
 
 
@@ -642,11 +648,11 @@ def _no_changes_payload(
     return {
         "summary": result.summary,
         "findings": [],
-        "run": _run_metadata(metadata=result.metadata),
+        "run": {
+            **_run_metadata(metadata=result.metadata),
+            "findings_coverage_complete": False,
+        },
         "budget": budget.to_dict(exceeded=False),
-        # Same top-level key as a real review (#2003): an empty run is
-        # trivially complete, and consumers should not need a special case.
-        "findings_coverage_complete": result.metadata.findings_coverage_complete,
     }
 
 
@@ -780,13 +786,17 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
         # code — including the diff-size ceiling (#1967) — is mapped.
         if str(exc.code.value) != _NO_CHANGES_CODE:
             _raise_context_error(exc=exc)
-        return _no_changes_payload(
+        payload = _no_changes_payload(
             ai_config=ai_config,
             depth=resolve_review_depth(request),
             strictness=resolve_review_strictness(request).value,
             budget=budget,
             context_collection_seconds=time.monotonic() - prepare_started,
         )
+        from lintro.ai.review.no_changes import no_changes_payload
+
+        payload.update(no_changes_payload(exc))
+        return payload
     # One ownership scope for the PR head tree (#2733), opened at the first
     # statement after preparation and held until the run owns the tree: any
     # exit before execute_review removes it; after a run the guard is a no-op.

@@ -111,10 +111,18 @@ def _parse_pr_view_json(
                 code=ReviewContextErrorCode.GH_METADATA_INVALID,
             )
 
+    changed_files = data.get("changedFiles")
+    if type(changed_files) is not int or changed_files < 0:
+        raise ReviewContextError(
+            "gh pr view JSON invalid field: changedFiles.",
+            code=ReviewContextErrorCode.GH_METADATA_INVALID,
+        )
+
     body = data.get("body")
     body_text = body if isinstance(body, str) else ""
 
     metadata = PRMetadata(
+        changed_files=changed_files,
         title=title,
         body=body_text,
         number=number,

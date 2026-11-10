@@ -911,6 +911,64 @@ def _resolve_targets(*, options: ReviewCommandOptions) -> _ReviewTargets:
     )
 
 
+def _finish_context_failure(
+    *,
+    exc: ReviewContextError,
+    options: ReviewCommandOptions,
+    targets: _ReviewTargets,
+    provider_label: str,
+) -> NoReturn:
+    """Disclose a preparation failure or skip without advancing stored state.
+
+    Args:
+        exc: Context collection failure.
+        options: Command options.
+        targets: Resolved PR and repository.
+        provider_label: Configured provider identifier.
+
+    Raises:
+        SystemExit: Zero for no changes, two for a context failure.
+    """
+    from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
+    from lintro.ai.review.github_status import post_review_no_changes_to_github
+    from lintro.ai.review.no_changes import no_changes_payload
+
+    prior_state = None
+    if options.post and targets.state_pr is not None:
+        with suppress(Exception):
+            prior_state = load_prior_review_state(
+                pr_number=targets.state_pr,
+                head_ref="",
+                repo=targets.effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
+                post=False,
+            )
+    if exc.code != ReviewContextErrorCode.NO_CHANGES:
+        _fail_review_command(
+            exc,
+            output_format=options.output_format,
+            provider_label=provider_label,
+            post=options.post,
+            resolved_pr=targets.resolved_pr,
+            effective_repo=targets.effective_repo,
+            prior_state=prior_state,
+        )
+    payload = no_changes_payload(exc)
+    if options.output_format == "json":
+        click.echo(json.dumps(payload, indent=2))
+    else:
+        click.echo(payload["detail"])
+        for skipped in exc.skipped_files:
+            click.echo(f"  {skipped.path}: {skipped.label}")
+    if options.post and targets.resolved_pr is not None:
+        with suppress(Exception):
+            post_review_no_changes_to_github(
+                pr_number=targets.resolved_pr,
+                repo=targets.effective_repo,
+                prior_state=prior_state,
+            )
+    raise SystemExit(0)
+
+
 def _prepare(
     *,
     options: ReviewCommandOptions,
@@ -932,7 +990,6 @@ def _prepare(
         PreparedReview: The prepared review both surfaces share.
 
     Raises:
-        click.ClickException: When the diff context cannot be collected.
         click.UsageError: When the request describes a review that would
             review nothing.
     """
@@ -957,7 +1014,12 @@ def _prepare(
     try:
         prepared = prepare_review(request, resolved=resolved_ai)
     except ReviewContextError as exc:
-        raise click.ClickException(str(exc)) from exc
+        _finish_context_failure(
+            exc=exc,
+            options=options,
+            targets=targets,
+            provider_label=str(resolved_ai.config.provider or "unset"),
+        )
     except ReviewPreparationError as exc:
         raise click.UsageError(str(exc)) from exc
     # The PR head tree's scope (#2733) opens at the first statement after

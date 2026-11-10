@@ -2012,11 +2012,27 @@ lintro doctor --ai-liveness # adds the liveness probe (one minimal API call on `
 `lintro review` distinguishes the two red states by exit code, so a wrapper can never
 mistake one for the other:
 
-| Exit | Meaning                                                                                                                |
-| ---- | ---------------------------------------------------------------------------------------------------------------------- |
-| `0`  | A review was produced (clean, or findings below P1)                                                                    |
-| `1`  | A review was produced and contains P1 findings                                                                         |
-| `2`  | **No review was produced** — missing/dead credential, depleted balance, unreachable provider, or a lintro-side failure |
+| Exit | Meaning                                                                                                                                            |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | A review was produced (clean, or findings below P1), or an explicit no-changes skip                                                                |
+| `1`  | A review was produced and contains P1 findings                                                                                                     |
+| `2`  | **No review was produced** — missing/dead credential, depleted balance, unreachable provider, context collection failure, or a lintro-side failure |
+
+Context collection failures use `error.kind: context_unavailable` and an additive
+`error.code` carrying the stable `ReviewContextErrorCode` (for example
+`gh-command-failed` or `diff-desync`). The message retains the command and cause. This
+kind is neither provider-unavailable nor eligible for provider fallback. Other error
+kinds are `auth_failed`, `insufficient_credits`, `quota_exceeded`, `rate_limited`,
+`context_length`, `server_error`, `timeout`, `invalid_response`, `provider_unavailable`,
+and `unknown`.
+
+An empty diff or an intentionally excluded selection exits 0 with
+`{"outcome":"no_changes","review_ran":false,"detail":"No reviewable changes, no review ran.","skipped_files":[]}`.
+Excluded files are listed with reasons. This is no claim of clean coverage: no review
+state is written, round advanced, or prior finding resolved. With `--post`, recoverable
+stored findings are re-rendered with the skip note; otherwise no comment is written. A
+missing or unparseable raw PR diff when GitHub reports changed files is an error (exit
+2), even if filters would exclude everything.
 
 ### CLI compatibility floors
 

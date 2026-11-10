@@ -14,6 +14,7 @@ class PRMetadata:
         body: PR description body.
         number: PR number.
         repo: Repository in ``owner/name`` format for PR metadata and gh calls.
+        changed_files: Number of changed files reported by GitHub.
         head_repo: Head repository in ``owner/name`` format when it differs from
             ``repo`` (for example fork pull requests).
     """
@@ -22,4 +23,5 @@ class PRMetadata:
     body: str
     number: int
     repo: str
+    changed_files: int = 0
     head_repo: str | None = None
