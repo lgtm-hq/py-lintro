@@ -817,20 +817,7 @@ like an explicit `--pr`; these usage errors post nothing.
 
 ## Pull request diff size fallback
 
-When GitHub refuses a pull request diff for size (its line or file limit), review builds
-the diff locally from the compare API's merge-base commit and the verified pull request
-head. `gh pr diff` remains the primary source. JSON metadata records `diff_source`
-(`github` or `local-git`); the sticky comment displays the source. The reported base is
-the merge base for `local-git` and the base branch tip for `github`. Exclusions
-(`ai.exclude_paths`) and path filters apply to either source, retaining excluded-file
-skip records and either-path rename matching.
-
-The fallback needs a git checkout whose `origin` can fetch `refs/pull/<n>/head` and the
-merge-base commit, using the checkout's existing git credentials. In GitHub Actions, use
-`actions/checkout` with `persist-credentials: true`; a `gh` token alone does not
-authenticate git fetch. No credential helper is installed. A moved head, failed compare
-lookup, missing commit, fetch failure or timeout exits 2 with both the GitHub size
-refusal and the local failure plus a remedy. Authentication failures, missing `gh`, and
-ordinary timeouts do not trigger the fallback. The CLI diff byte ceiling applies after
-exclusions; reduce the diff with `ai.exclude_paths` or use `--transport api` when it is
-exceeded.
+When GitHub refuses a diff for size, review can reconstruct it from verified local
+commits. See
+[Pull request diff size fallback](ai-features.md#pull-request-diff-size-fallback) for
+requirements, shallow-checkout handling, metadata, and remedies.

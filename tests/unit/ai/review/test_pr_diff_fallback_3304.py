@@ -192,6 +192,9 @@ def test_fallback_failure_discloses_both_causes(
         "HTTP 504: generating diff exceeded the processing time limit",
         "HTTP 406: proxy rejected the requested media type",
         "HTTP 406: Not Acceptable",
+        "HTTP 4060: diff exceeded the maximum number of lines",
+        "HTTP 406: diff exceeded the maximum number of filesystems",
+        "HTTP 406: Not Acceptable\ndiff exceeded the maximum number of lines",
         "HTTP 422: diff is taking too long to generate",
         "diff exceeded",
         "too many files",
@@ -218,6 +221,14 @@ def test_non_size_failure_never_uses_local_diff(
 @pytest.mark.parametrize(
     "message",
     [
+        "could not find pull request diff: HTTP 406: Sorry, the diff exceeded the "
+        "maximum number of files (300). Consider using 'List pull requests files' "
+        "API or locally cloning the repository instead. (https://example.com)\n"
+        "PullRequest.diff too_large",
+        "could not find pull request diff: HTTP 406: Sorry, the diff exceeded the "
+        "maximum number of lines (20000). Consider using 'List pull requests files' "
+        "API or locally cloning the repository instead. (https://example.com)\n"
+        "PullRequest.diff too_large",
         "HTTP 406: diff exceeded the maximum number of files",
         "HTTP 406: diff exceeded the maximum number of lines",
     ],
@@ -499,6 +510,8 @@ def test_local_validation_failure_retains_size_refusal(
         "GitHub refused",
         "for size",
         "No parseable diff sections",
+        "Retry with current pull request metadata",
+        "can read both verified commits",
     )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 
@@ -212,10 +213,14 @@ def _is_diff_size_refusal(message: str) -> bool:
     Returns:
         Whether GitHub refused to render the diff for its size.
     """
-    text = message.lower()
-    return "http 406" in text and any(
-        f"diff exceeded the maximum number of {limit}" in text
-        for limit in ("lines", "files")
+    return (
+        re.search(
+            r"\bHTTP 406\b:[^\r\n]*\bdiff exceeded the maximum number of "
+            r"(?:lines|files)\b",
+            message,
+            flags=re.IGNORECASE,
+        )
+        is not None
     )
 
 

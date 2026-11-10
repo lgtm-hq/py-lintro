@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from urllib.parse import quote
 
 from lintro.ai.review.context.diff_parse import parse_changed_files
@@ -84,6 +85,65 @@ def _ensure_merge_base(sha: str) -> None:
     _run_git(args=["cat-file", "-e", commit])
 
 
+# At most eight fetches and 4096 additional generations; each git command also
+# retains the shared 120-second timeout.
+_HEAD_DEEPEN_STEPS = (32, 64, 128, 256, 512, 1024, 2048, 32)
+
+
+def _head_history_is_shallow(head: str) -> bool:
+    """Check for a shallow boundary reachable from this head.
+
+    Args:
+        head: Verified PR head SHA.
+
+    Returns:
+        Whether head ancestry is truncated, ignoring unrelated shallow refs.
+    """
+    shallow_path = Path(
+        _run_git(args=["rev-parse", "--git-path", "shallow"]).stdout.strip(),
+    )
+    if not shallow_path.exists():
+        return False
+    boundaries = set(shallow_path.read_text().splitlines())
+    roots = _run_git(args=["rev-list", "--max-parents=0", head]).stdout.splitlines()
+    return bool(boundaries.intersection(roots))
+
+
+def _verify_head_ancestry(*, merge_base: str, head: str) -> None:
+    """Deepen truncated head history within a fixed budget before deciding.
+
+    Args:
+        merge_base: Compare API merge base.
+        head: Verified PR head SHA.
+
+    Raises:
+        ReviewContextError: If ancestry is disproven or remains unverified.
+    """
+    steps = iter(_HEAD_DEEPEN_STEPS)
+    while (
+        _run_git(
+            args=["merge-base", "--is-ancestor", merge_base, head],
+            check=False,
+        ).returncode
+        != 0
+    ):
+        if not _head_history_is_shallow(head):
+            raise ReviewContextError(
+                "Compare merge base is not an ancestor of the head. "
+                "Retry the compare lookup; the merge base must be an ancestor "
+                "of the verified head",
+                code=ReviewContextErrorCode.MERGE_BASE_FAILED,
+            )
+        depth = next(steps, None)
+        if depth is None:
+            raise ReviewContextError(
+                "Compare merge base: could not verify within the shallow "
+                "history available. Check out with full history (fetch-depth: 0)",
+                code=ReviewContextErrorCode.MERGE_BASE_FAILED,
+            )
+        _run_git(args=["fetch", "--no-tags", f"--deepen={depth}", "origin", head])
+
+
 def build_local_pr_diff(
     *,
     metadata: PRMetadata,
@@ -117,21 +177,8 @@ def build_local_pr_diff(
         fetch_pr_head(pr_number=metadata.number, head_oid=head, fallback=True)
         remedy = "Retry with a checkout able to fetch the merge-base commit."
         _ensure_merge_base(merge_base)
-        remedy = (
-            "Retry the compare lookup with current pull request metadata; "
-            "the merge base must be an ancestor of the verified head."
-        )
-        if (
-            _run_git(
-                args=["merge-base", "--is-ancestor", merge_base, head],
-                check=False,
-            ).returncode
-            != 0
-        ):
-            raise ReviewContextError(
-                "Compare merge base is not an ancestor of the PR head",
-                code=ReviewContextErrorCode.MERGE_BASE_FAILED,
-            )
+        remedy = "Check out with full history (fetch-depth: 0) and retry."
+        _verify_head_ancestry(merge_base=merge_base, head=head)
         remedy = "Retry with a checkout whose git diff can read both verified commits."
         unified_diff, name_status, numstat = _git_diff_triple_snapshot(
             diff_args=[merge_base, head],
@@ -158,6 +205,8 @@ def build_local_pr_diff(
                 remedy = (
                     "Retry with current pull request metadata after the head moved."
                 )
+            elif exc.code is ReviewContextErrorCode.MERGE_BASE_FAILED:
+                remedy = ""
             elif exc.code is ReviewContextErrorCode.GIT_COMMAND_FAILED and isinstance(
                 exc.__cause__,
                 TimeoutExpired,

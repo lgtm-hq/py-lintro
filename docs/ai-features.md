@@ -2499,3 +2499,15 @@ refusal and the local failure plus a remedy. Authentication failures, missing `g
 ordinary timeouts do not trigger the fallback. The CLI diff byte ceiling applies after
 exclusions; reduce the diff with `ai.exclude_paths` or use `--transport api` when it is
 exceeded.
+
+The reported base is the compare merge base for `local-git` and the base branch tip for
+`github`. Full clones remain full. In shallow checkouts, including depth-1 checkouts at
+the PR head, review progressively deepens the head until ancestry is proven or its
+history is complete. It stops after at most eight fetches and 4,096 additional
+generations, with a 120-second timeout per git command. If ancestry remains unverified,
+check out with full history (`actions/checkout` with `fetch-depth: 0`) and retry. A
+proven non-ancestor compare result is rejected separately and requires a fresh compare
+lookup. Git timeouts retain their retry remedy.
+
+MCP reports reconstruction failures as `execution_error` with
+`context_error: pr-local-diff-failed` and the combined failure message.

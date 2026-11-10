@@ -174,7 +174,9 @@ def validate_review_context_diff(*, context: ReviewContext) -> None:
             raise
         raise ReviewContextError(
             "GitHub refused the pull request diff for size. "
-            f"The local diff failed validation: {exc}",
+            f"The local diff failed validation: {exc}. "
+            "Retry with current pull request metadata and a checkout whose git diff "
+            "can read both verified commits.",
             code=ReviewContextErrorCode.PR_LOCAL_DIFF_FAILED,
         ) from exc
 
