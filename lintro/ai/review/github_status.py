@@ -18,8 +18,8 @@ from loguru import logger
 from lintro.ai.integrations.github_pr import GitHubPRReporter
 from lintro.ai.review.enums.comment_kind import CommentKind
 from lintro.ai.review.finding_matcher import count_blocking_findings
-from lintro.ai.review.github_constants import STICKY_MARKER
-from lintro.ai.review.github_errors import format_error_comment
+from lintro.ai.review.github_constants import GITHUB_COMMENT_HARD_LIMIT, STICKY_MARKER
+from lintro.ai.review.github_errors import ERROR_ONLY_HEADLINE, format_error_comment
 from lintro.ai.review.github_notes import format_convergence_banner
 from lintro.ai.review.lifecycle.comments import load_sticky_comment, upsert_comment
 from lintro.ai.review.lifecycle.state import resolve_prior_state
@@ -84,21 +84,22 @@ def post_review_error_to_github(
         repo=repo or gh_reporter.repo or "",
         pr_number=pr_number if pr_number is not None else gh_reporter.pr_number,
     )
-    if existing.comment_id is not None and not any(
-        not run.coverage.checkpoint for run in state.runs
-    ):
-        found = gh_reporter.find_issue_comment(marker=STICKY_MARKER)
-        if found is not None:
-            start = "<!-- lintro-review-error-start -->"
-            end = "<!-- lintro-review-error-end -->"
-            board = re.sub(
-                re.escape(start) + r".*?" + re.escape(end),
-                "",
-                found[1],
-                flags=re.DOTALL,
-            ).rstrip()
-            body = (
-                f"{board}\n\n{start}\n{body.replace(STICKY_MARKER, '').strip()}\n{end}"
+    if not any(not run.coverage.checkpoint for run in state.runs):
+        body = _preserve_live_board(board=existing.body, disclosure=body)
+        if len(body) > GITHUB_COMMENT_HARD_LIMIT:
+            # The board is already at the limit. A separate comment discloses
+            # the failure without removing a single finding from the sticky.
+            return gh_reporter.post_issue_comment(
+                _preserve_live_board(
+                    board="",
+                    disclosure=format_error_comment(
+                        error=error,
+                        provider=provider,
+                        metadata=metadata,
+                    ),
+                )
+                .replace(STICKY_MARKER, "")
+                .strip(),
             )
     return upsert_comment(
         reporter=gh_reporter,
@@ -106,6 +107,39 @@ def post_review_error_to_github(
         existing=existing,
         body=body,
     ).ok
+
+
+_ERROR_START = "<!-- lintro-review-error-start -->"
+_ERROR_END = "<!-- lintro-review-error-end -->"
+
+
+def _preserve_live_board(*, board: str, disclosure: str) -> str:
+    """Replace failure disclosures while keeping an unrecoverable board intact.
+
+    Args:
+        board: Body from the first successful sticky lookup.
+        disclosure: Newly rendered error-only page.
+
+    Returns:
+        Combined body, possibly over budget when a separate comment is needed.
+    """
+    board = re.sub(
+        re.escape(_ERROR_START) + r".*?(?:" + re.escape(_ERROR_END) + r"|\Z)",
+        "",
+        board,
+        flags=re.DOTALL,
+    )
+    # Older error-only pages had no boundary. They contain no findings board.
+    if ERROR_ONLY_HEADLINE in board:
+        board = ""
+    if not board.replace(STICKY_MARKER, "").strip():
+        board = STICKY_MARKER
+    detail = disclosure.replace(STICKY_MARKER, "").strip()
+    combined = f"{board}\n\n{_ERROR_START}\n{detail}\n{_ERROR_END}"
+    if len(combined) <= GITHUB_COMMENT_HARD_LIMIT:
+        return combined
+    compact = f"> {ERROR_ONLY_HEADLINE}. No review ran; retry the review."
+    return f"{board}\n\n{_ERROR_START}\n{compact}\n{_ERROR_END}"
 
 
 def post_review_converged_to_github(

@@ -281,8 +281,16 @@ def _fail_review_command(
         prior_state: Prior resume state forwarded to the error sticky.
 
     Raises:
-        SystemExit: Always, with the review-error exit code.
+        SystemExit: With the review-error exit code.
+        click.UsageError: When context collection rejected the review mode.
     """
+    from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
+
+    if (
+        isinstance(exc, ReviewContextError)
+        and exc.code == ReviewContextErrorCode.INVALID_REVIEW_MODE
+    ):
+        raise click.UsageError(str(exc))
     if post and resolved_pr is not None and effective_repo:
         from lintro.ai.review.github import post_review_error_to_github
 
@@ -904,6 +912,10 @@ def _resolve_targets(*, options: ReviewCommandOptions) -> _ReviewTargets:
             raise click.UsageError(
                 "--post requires --repo or GITHUB_REPOSITORY environment variable.",
             )
+    if resolved_pr is not None and (options.base is not None or options.uncommitted):
+        raise click.UsageError(
+            "A pull request review cannot use --base or --uncommitted.",
+        )
     return _ReviewTargets(
         effective_repo=effective_repo,
         resolved_pr=resolved_pr,

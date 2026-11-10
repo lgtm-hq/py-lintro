@@ -189,7 +189,9 @@ def load_sticky_comment(
     if found is None:
         return ExistingComment(), ReviewState()
     comment_id, body = found
-    return ExistingComment(comment_id=comment_id), parse_sticky_state(body=body)
+    return ExistingComment(comment_id=comment_id, body=body), parse_sticky_state(
+        body=body,
+    )
 
 
 def upsert_comment(

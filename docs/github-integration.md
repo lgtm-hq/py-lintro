@@ -786,3 +786,9 @@ Using Lintro in GitHub Actions provides:
 
 This integration transforms your repository into a high-quality, maintainable codebase
 with automated quality assurance! 🚀
+
+When review state cannot be recovered, failure disclosures preserve the live findings
+board and replace earlier failure disclosures. If the board has no room even for a
+compact notice, lintro leaves it untouched and posts the failure separately. A PR review
+detected from the CI environment rejects `--base` and `--uncommitted`, just like an
+explicit `--pr`; these usage errors post nothing.

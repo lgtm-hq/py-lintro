@@ -556,3 +556,57 @@ def test_pr_empty_raw_diff_with_zero_changed_files_is_disclosed_skip(
     payload = json.loads(result.output[result.output.index("{") :])
     assert_that(payload).contains_entry(outcome="no_changes", review_ran=False)
     assert_that(payload["skipped_files"]).is_empty()
+
+
+@pytest.mark.parametrize("mode", [["--base", "main"], ["--uncommitted"]])
+def test_environment_pr_rejects_local_mode(
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: list[str],
+) -> None:
+    """An environment PR cannot turn a usage mistake into a posted error."""
+    from lintro.ai.review import github
+
+    posted: list[object] = []
+    monkeypatch.setenv("GITHUB_REF", "refs/pull/7/merge")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/name")
+    monkeypatch.setattr(
+        github,
+        "post_review_error_to_github",
+        lambda **kw: posted.append(kw),
+    )
+    result = CliRunner().invoke(review_command, ["--post", *mode])
+    assert_that(result.exit_code).is_equal_to(2)
+    assert_that(result.output).contains("Usage:", "--base or --uncommitted")
+    assert_that(posted).is_empty()
+
+
+def test_invalid_review_mode_is_usage_error_backstop(
+    patched_review: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A collector mode rejection emits usage rather than a context envelope."""
+    from lintro.ai.review import github
+    from lintro.ai.review.exceptions import ReviewContextError
+
+    posted: list[object] = []
+
+    def reject(**_: object) -> None:
+        """Simulate a collector detecting an unsupported mode."""
+        raise ReviewContextError("invalid mode", code="invalid-review-mode")
+
+    monkeypatch.setattr(preparation_module, "collect_review_context", reject)
+    monkeypatch.setattr(
+        github,
+        "post_review_error_to_github",
+        lambda **kw: posted.append(kw),
+    )
+    result = CliRunner().invoke(
+        review_command,
+        ["--pr", "7", "--repo", "owner/name", "--post", "--output", "json"],
+    )
+    assert_that(result.exit_code).is_equal_to(2)
+    assert_that(result.output).contains("Usage:", "invalid mode").does_not_contain(
+        "context_unavailable",
+    )
+    assert_that(posted).is_empty()
