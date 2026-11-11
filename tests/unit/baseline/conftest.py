@@ -40,3 +40,7 @@ def isolate_native_processes(monkeypatch: pytest.MonkeyPatch) -> None:
         "lintro.plugins.execution_preparation.verify_tool_version",
         lambda *args, **kwargs: None,
     )
+    monkeypatch.setattr(
+        "lintro.plugins.base.verify_tool_version",
+        lambda *args, **kwargs: None,
+    )

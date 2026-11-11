@@ -1,7 +1,10 @@
 """Native exclusions and ambiguous Ruff output cannot erase acknowledged debt."""
 
 import json
+import re
+import tomllib
 from dataclasses import replace
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -72,16 +75,12 @@ def test_native_per_file_exclusion_retains_acknowledgements(
         **kwargs: Any,
     ) -> SubprocessResult:
         """Model each native report without invoking an installed tool."""
-        configured = (workspace / next(iter(native_exclusion))).exists()
-        if tool == "pydoclint":
-            configured = (
-                configured and "exclude" in (workspace / "pyproject.toml").read_text()
-            )
-        elif tool == "dotenv_linter":
-            configured = (
-                "--exclude" in cmd
-                and str(workspace / filename) in cmd[cmd.index("--exclude") + 1 :]
-            )
+        configured = _native_exclusion_applies(
+            tool=tool,
+            config_file=workspace / next(iter(native_exclusion)),
+            file=workspace / filename,
+            cmd=cmd,
+        )
         if configured:
             return subprocess_result(True, "[]" if tool == "sqlfluff" else "")
         payloads = {
@@ -105,10 +104,6 @@ def test_native_per_file_exclusion_retains_acknowledgements(
         return subprocess_result(False, payloads[tool])
 
     monkeypatch.setattr(BaseToolPlugin, "_run_subprocess_result", execute)
-    monkeypatch.setattr(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        lambda *args, **kwargs: None,
-    )
     monkeypatch.setattr(
         BaseToolPlugin,
         "_get_executable_command",
@@ -134,6 +129,13 @@ def test_native_per_file_exclusion_retains_acknowledgements(
     assert_that(read_baseline(baseline).entries).is_not_empty()
     before = baseline.read_bytes()
 
+    if tool == "dotenv_linter":
+        unrelated = ToolRegistry.get(tool).copy_for_execution()
+        unrelated.set_options(exclude=[str(workspace / "other.env")])
+        still_dirty = unrelated.check([str(file)], {})
+        assert_that(still_dirty.success).is_false()
+        assert_that(still_dirty.issues_count).is_equal_to(1)
+
     for name, content in native_exclusion.items():
         (workspace / name).write_text(
             content.replace("{file}", str(file)),
@@ -152,3 +154,30 @@ def test_native_per_file_exclusion_retains_acknowledgements(
     assert_that(result.findings_complete).is_false()
     assert_that(result.issues_count).is_zero()
     assert_that(result.inspected_paths).is_none()
+
+
+def test_direct_plugin_version_probe_is_isolated() -> None:
+    """The base plugin's imported verifier must not probe the machine either."""
+    assert_that(ToolRegistry.get("dotenv_linter")._verify_tool_version()).is_none()
+
+
+def _native_exclusion_applies(
+    *,
+    tool: str,
+    config_file: Path,
+    file: Path,
+    cmd: list[str],
+) -> bool:
+    """Match the actual exclusion values used by these native fixtures."""
+    if tool == "dotenv_linter":
+        return any(
+            flag == "--exclude" and value == str(file) for flag, value in pairwise(cmd)
+        )
+    if not config_file.exists():
+        return False
+    content = config_file.read_text(encoding="utf-8")
+    if tool == "pydoclint":
+        config = tomllib.loads(content)
+        pattern = config.get("tool", {}).get("pydoclint", {}).get("exclude")
+        return isinstance(pattern, str) and re.search(pattern, str(file)) is not None
+    return file.name in content.splitlines()
