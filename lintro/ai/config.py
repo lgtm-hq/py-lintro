@@ -948,31 +948,6 @@ class AIConfig(BaseModel):
         config, sources = apply_env_overrides(config, sources)
         return ResolvedAIConfig(config=config, sources=sources)
 
-    def with_model(self, model: str) -> AIConfig:
-        """Return a copy of this config selecting *model*, validated.
-
-        ``model_copy(update=...)`` skips validators, so a model swapped in
-        that way would bypass the retired-model check (#2277). This rebuilds
-        the config through validation instead. Diagnostics are suppressed:
-        the base config already reported its own migration hints.
-
-        Args:
-            model: The model identifier to select.
-
-        Returns:
-            A validated copy that differs from this config only in ``model``.
-            Pydantic's ``ValidationError`` propagates when *model* is refused,
-            for example because the selected provider retired it.
-        """
-        payload = self.model_dump()
-        payload.update({"model": model, "lint": self.lint, "review": self.review})
-        with _suppressed_diagnostics():
-            validated = AIConfig.model_validate(payload)
-        # A full dump marks every field as set; keep the base config's set
-        # fields so a default never reads as user-chosen downstream.
-        validated.__pydantic_fields_set__ = set(self.model_fields_set) | {"model"}
-        return validated
-
     # -- Effective feature state -------------------------------------------
 
     @property

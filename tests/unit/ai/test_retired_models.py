@@ -13,6 +13,7 @@ import asyncio
 import json
 from datetime import date
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -35,6 +36,7 @@ from lintro.ai.model_lifecycle import RetiredModel
 from lintro.ai.model_pricing import ModelPricing
 from lintro.ai.provider_blocks import format_invalid_ai_config
 from lintro.ai.providers import get_provider
+from lintro.ai.providers.base import AIResponse
 from lintro.ai.providers.protocol import ProviderMetadata
 from lintro.ai.registry import AIProvider, metadata_for, retired_model_error
 from lintro.ai.review.custom_agent_runner import (
@@ -46,7 +48,10 @@ from lintro.ai.review.custom_agents import SelectedCustomAgent, parse_custom_age
 from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.exceptions import ReviewPreparationError
 from lintro.ai.review.models.review_context import ReviewContext
-from lintro.ai.review.preparation_resolvers import resolve_custom_agents
+from lintro.ai.review.preparation_resolvers import (
+    apply_timeout,
+    resolve_custom_agents,
+)
 from lintro.cli import cli
 from lintro.parsers.base_issue import BaseIssue
 
@@ -160,6 +165,50 @@ def test_replacement_models_validate() -> None:
         assert_that(config.model).is_equal_to(replacement)
 
 
+def _run_doctor_json(
+    *,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    model: str,
+) -> tuple[int, str]:
+    """Run ``lintro doctor --json`` with only the AI section live.
+
+    The tool and oxlint sections are stubbed to report nothing, so the exit
+    code can only come from an AI check.
+
+    Args:
+        tmp_path: Pytest temporary directory holding the project config.
+        monkeypatch: Pytest monkeypatch fixture.
+        model: The ``ai.model`` the project config names.
+
+    Returns:
+        The exit code and the command output.
+    """
+    (tmp_path / ".lintro-config.yaml").write_text(
+        "ai:\n"
+        "  enabled: true\n"
+        "  provider: anthropic\n"
+        "  transport: api\n"
+        f"  model: {model}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "lintro.cli_utils.commands.doctor.collect_tool_checks",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "lintro.cli_utils.commands.doctor.check_oxlint_type_aware",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "lintro.cli_utils.commands.doctor.check_ai_configuration",
+        lambda _config: [],
+    )
+    result = CliRunner().invoke(cli, ["doctor", "--json"])
+    return result.exit_code, result.output
+
+
 def test_doctor_reports_a_retired_model_as_a_failed_check(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -173,29 +222,54 @@ def test_doctor_reports_a_retired_model_as_a_failed_check(
         tmp_path: Pytest temporary directory holding the project config.
         monkeypatch: Pytest monkeypatch fixture.
     """
-    (tmp_path / ".lintro-config.yaml").write_text(
-        "ai:\n"
-        "  enabled: true\n"
-        "  provider: anthropic\n"
-        "  transport: api\n"
-        "  model: claude-opus-4-20250514\n",
-        encoding="utf-8",
+    exit_code, output = _run_doctor_json(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        model="claude-opus-4-20250514",
     )
-    monkeypatch.chdir(tmp_path)
 
-    result = CliRunner().invoke(cli, ["doctor", "--tools", "ruff", "--json"])
-
-    assert_that(result.exit_code).is_equal_to(1)
-    assert_that(result.output).does_not_contain("Usage:")
-    payload = json.loads(result.output)
-    checks = {check["name"]: check for check in payload["ai"]}
-    assert_that(checks["ai.config"]["status"]).is_equal_to("incompatible")
-    assert_that(checks["ai.config"]["message"]).is_equal_to(
-        "invalid AI configuration: ai.model: 'claude-opus-4-20250514' was "
-        "retired by Anthropic on 2026-06-15 and requests to it fail; use "
-        "'claude-opus-4-8' instead",
+    assert_that(exit_code).is_equal_to(1)
+    assert_that(output).does_not_contain("Usage:")
+    payload = json.loads(output)
+    assert_that(payload["ai"]).is_equal_to(
+        [
+            {
+                "name": "ai.config",
+                "status": "incompatible",
+                "message": (
+                    "invalid AI configuration: ai.model: "
+                    "'claude-opus-4-20250514' was retired by Anthropic on "
+                    "2026-06-15 and requests to it fail; use "
+                    "'claude-opus-4-8' instead"
+                ),
+                "hint": "Fix the ai: section or the LINTRO_AI_* variable it names",
+            },
+        ],
     )
-    assert_that(payload["tools"]).contains_key("ruff")
+    assert_that(payload).contains_key("summary")
+
+
+def test_doctor_exit_code_comes_from_the_ai_config_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the same stubs, a current model leaves doctor green.
+
+    This pins the non-zero exit above to the ``ai.config`` check rather than
+    to a tool that happened to be missing on the machine.
+
+    Args:
+        tmp_path: Pytest temporary directory holding the project config.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    exit_code, output = _run_doctor_json(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        model="claude-opus-4-8",
+    )
+
+    assert_that(exit_code).is_equal_to(0)
+    assert_that(json.loads(output)["ai"]).is_empty()
 
 
 def _metadata(
@@ -326,17 +400,6 @@ def test_provider_factory_refuses_a_config_built_without_validation() -> None:
 
     with pytest.raises(AIRetiredModelError, match="use 'claude-sonnet-5-5' instead"):
         get_provider(unchecked)
-
-
-def test_validated_model_swap_refuses_a_retired_id() -> None:
-    """``AIConfig.with_model`` is the checked replacement for ``model_copy``."""
-    config = AIConfig(provider=AIProvider.ANTHROPIC, transport=AITransport.API)
-
-    assert_that(config.with_model("claude-opus-4-8").model).is_equal_to(
-        "claude-opus-4-8",
-    )
-    with pytest.raises(ValidationError):
-        config.with_model("claude-opus-4-20250514")
 
 
 # -- Fallback chains (round 1, item 2) -----------------------------------------
@@ -485,3 +548,76 @@ def test_runner_skips_a_retired_agent_without_invoking_a_provider(
     assert_that(failed).is_equal_to(["retired-model-agent"])
     assert_that(factory.call_args_list).is_empty()
     assert_that(provider.complete.await_args_list).is_empty()
+
+
+_CURRENT_MODEL_AGENT = """---
+name: current-model-agent
+model: claude-haiku-4-5-20251001
+include:
+  - "src/**/*.py"
+---
+
+Review the change.
+"""
+
+
+def test_runner_runs_a_current_agent_model_under_an_unvalidated_timeout(
+    tmp_path: Path,
+) -> None:
+    """Only the agent's model is checked, not the rest of the run config.
+
+    ``lintro review --timeout 0.5`` writes the timeout with an unvalidated
+    copy, below the ``>= 1`` bound a full re-validation would enforce. An
+    agent naming a current model must still run on it.
+
+    Args:
+        tmp_path: Directory used as the agent file location.
+    """
+    agent = parse_custom_agent(path=tmp_path / "agent.md", text=_CURRENT_MODEL_AGENT)
+    run_config = apply_timeout(
+        AIConfig(provider=AIProvider.ANTHROPIC, transport=AITransport.API),
+        timeout=0.5,
+    )
+    agent_provider = _anthropic_double(model="claude-haiku-4-5-20251001")
+    failed: list[str] = []
+    sent_models: list[str | None] = []
+
+    async def _call_ai(**kwargs: Any) -> AIResponse:
+        sent_models.append(kwargs["ai_config"].model)
+        return AIResponse(
+            content=json.dumps({"findings": []}),
+            model="claude-haiku-4-5-20251001",
+            input_tokens=10,
+            output_tokens=5,
+            cost_estimate=0.0,
+            provider="anthropic",
+        )
+
+    with (
+        patch("lintro.ai.providers.get_provider", return_value=agent_provider),
+        patch("lintro.ai.review.custom_agent_runner.call_ai", side_effect=_call_ai),
+    ):
+        results = asyncio.run(
+            run_custom_agent_passes(
+                request=CustomAgentPassRequest(
+                    selected=(SelectedCustomAgent(agent=agent, files=("src/a.py",)),),
+                    context=ReviewContext(
+                        base_ref="base",
+                        head_ref="head",
+                        changed_files=[],
+                        unified_diff="",
+                    ),
+                    provider=_anthropic_double(),
+                    ai_config=run_config,
+                    provider_cache={},
+                    budget=CostBudget(),
+                    on_agent_failed=failed.append,
+                ),
+            ),
+        )
+
+    assert_that(failed).is_empty()
+    assert_that([result.agent_name for result in results]).is_equal_to(
+        ["current-model-agent"],
+    )
+    assert_that(sent_models).is_equal_to(["claude-haiku-4-5-20251001"])

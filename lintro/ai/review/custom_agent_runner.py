@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
-from pydantic import ValidationError
 
 from lintro.ai.exceptions import (
     AICostBudgetExceededError,
@@ -37,7 +36,7 @@ from lintro.ai.prompts.review import (
     REVIEW_CUSTOM_AGENT_SYSTEM,
     REVIEW_CUSTOM_AGENT_USER_PROMPT_TEMPLATE,
 )
-from lintro.ai.provider_blocks import describe_config_error
+from lintro.ai.registry import retired_model_error
 from lintro.ai.review.context.diff_parse import split_unified_diff_by_file
 from lintro.ai.review.custom_agents import CustomAgentSpec, SelectedCustomAgent
 from lintro.ai.review.finding_parser import parse_findings
@@ -181,20 +180,22 @@ def _resolve_provider(
 
     Raises:
         AIRetiredModelError: When the override is a model the run's provider
-            has retired. Preparation refuses such an agent before any call;
-            this keeps a request that skipped preparation from running the
+            has retired. :func:`run_custom_agent_passes` catches it and skips
+            the agent, so a request that skipped preparation never runs the
             agent on the configured model instead of the one it named
             (#2277).
     """
     if not agent.model or agent.model == ai_config.model:
         return provider, ai_config
 
-    # Validated construction, not ``model_copy``: a copy skips the
-    # retired-model validator and would hand the id to the factory.
-    try:
-        agent_config = ai_config.with_model(agent.model)
-    except ValidationError as error:
-        raise AIRetiredModelError(describe_config_error(error)) from error
+    # Only the model changes, so only the model is checked. Re-validating
+    # the whole run config would also re-check fields the run set with an
+    # unvalidated copy (``apply_timeout``, the MCP cost clamp) and refuse an
+    # agent for a reason that has nothing to do with it.
+    retired = retired_model_error(agent.model, provider=ai_config.provider)
+    if retired is not None:
+        raise AIRetiredModelError(retired)
+    agent_config = ai_config.model_copy(update={"model": agent.model})
     cached = cache.get(agent.model)
     if cached is not None:
         return cached, agent_config
