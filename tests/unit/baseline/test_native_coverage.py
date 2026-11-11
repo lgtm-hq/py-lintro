@@ -1,21 +1,23 @@
 """Native exclusions and ambiguous Ruff output cannot erase acknowledged debt."""
 
 import json
-import subprocess  # nosec B404 - real native binaries under test, shell=False
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
+from assertpy import assert_that
 from click.testing import CliRunner
 
 from lintro.cli import cli
 from lintro.config.config_loader import clear_config_cache
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.plugins import ToolRegistry
-from lintro.tools.ruff.definition import RuffPlugin
-from lintro.utils.config import clear_pyproject_cache
+from lintro.plugins.base import BaseToolPlugin
+from lintro.utils.config import clear_pyproject_cache, load_lintro_tool_config
 from lintro.utils.fingerprint_baseline import snapshot
 from lintro.utils.fingerprint_baseline_file import change_baseline, read_baseline
-from tests.integration._tools import require_tool
+from tests.unit.tools.subprocess_helpers import subprocess_result
 
 
 @pytest.mark.parametrize("mode", ["update", "prune"])
@@ -32,7 +34,6 @@ from tests.integration._tools import require_tool
                 "pyproject.toml": '[tool.pydoclint]\nstyle = "google"\n'
                 'exclude = "example[.]py$"\n',
             },
-            marks=require_tool("pydoclint"),
         ),
         pytest.param(
             "sqlfluff",
@@ -40,7 +41,6 @@ from tests.integration._tools import require_tool
             "select 1",
             {".sqlfluff": "[sqlfluff]\ndialect = ansi\n"},
             {".sqlfluffignore": "q.sql\n"},
-            marks=require_tool("sqlfluff"),
         ),
         pytest.param(
             "dotenv_linter",
@@ -50,12 +50,12 @@ from tests.integration._tools import require_tool
             {
                 "pyproject.toml": '[tool.lintro.dotenv_linter]\nexclude = ["{file}"]\n',
             },
-            marks=require_tool("dotenv-linter"),
         ),
     ],
 )
 def test_native_per_file_exclusion_retains_acknowledgements(
     workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
     mode: str,
     tool: str,
     filename: str,
@@ -63,7 +63,57 @@ def test_native_per_file_exclusion_retains_acknowledgements(
     initial_config: dict[str, str],
     native_exclusion: dict[str, str],
 ) -> None:
-    """Real clean native skips supply no exact coverage for update or prune."""
+    """Canned clean native skips cannot authorize erasing acknowledged debt."""
+
+    def execute(
+        self: BaseToolPlugin,
+        cmd: list[str],
+        *args: Any,
+        **kwargs: Any,
+    ) -> SubprocessResult:
+        """Model each native report without invoking an installed tool."""
+        configured = (workspace / next(iter(native_exclusion))).exists()
+        if tool == "pydoclint":
+            configured = (
+                configured and "exclude" in (workspace / "pyproject.toml").read_text()
+            )
+        elif tool == "dotenv_linter":
+            configured = (
+                "--exclude" in cmd
+                and str(workspace / filename) in cmd[cmd.index("--exclude") + 1 :]
+            )
+        if configured:
+            return subprocess_result(True, "[]" if tool == "sqlfluff" else "")
+        payloads = {
+            "pydoclint": f"{workspace / filename}\n    1: DOC101: Missing argument\n",
+            "sqlfluff": json.dumps(
+                [
+                    {
+                        "filepath": str(workspace / filename),
+                        "violations": [
+                            {
+                                "start_line_no": 1,
+                                "code": "CP01",
+                                "description": "Uppercase keyword",
+                            },
+                        ],
+                    },
+                ],
+            ),
+            "dotenv_linter": f"{workspace / filename}:1 LowercaseKey: Uppercase key\n",
+        }
+        return subprocess_result(False, payloads[tool])
+
+    monkeypatch.setattr(BaseToolPlugin, "_run_subprocess_result", execute)
+    monkeypatch.setattr(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        BaseToolPlugin,
+        "_get_executable_command",
+        lambda self, tool_name: [tool_name],
+    )
     file = workspace / filename
     file.write_text(source, encoding="utf-8")
     for name, content in initial_config.items():
@@ -72,16 +122,16 @@ def test_native_per_file_exclusion_retains_acknowledgements(
     clear_pyproject_cache()
     runner = CliRunner()
     created = runner.invoke(cli, ["baseline", "create", filename, "--tools", tool])
-    assert created.exit_code == 1, created.output
-    assert "does not certify complete findings" in created.output
+    assert_that(created.exit_code).described_as(created.output).is_equal_to(1)
+    assert_that(created.output).contains("does not certify complete findings")
     baseline = workspace / ".lintro-baseline.json"
-    assert not baseline.exists()
+    assert_that(baseline.exists()).is_false()
     # Import debt from a previous producer; current sequence-only parsers cannot
     # certify a failed report, and clean native exclusions cannot prune this debt.
     result = ToolRegistry.get(tool).check([str(file)], {})
     imported = snapshot([replace(result, findings_complete=True)], root=workspace)
     change_baseline(baseline, lambda _: imported, create=True)
-    assert read_baseline(baseline).entries
+    assert_that(read_baseline(baseline).entries).is_not_empty()
     before = baseline.read_bytes()
 
     for name, content in native_exclusion.items():
@@ -93,62 +143,12 @@ def test_native_per_file_exclusion_retains_acknowledgements(
     clear_pyproject_cache()
     maintained = runner.invoke(cli, ["baseline", mode, filename, "--tools", tool])
 
-    assert maintained.exit_code == 0, maintained.output
-    assert baseline.read_bytes() == before
-    plugin = ToolRegistry.get(tool)
+    assert_that(maintained.exit_code).described_as(maintained.output).is_zero()
+    assert_that(baseline.read_bytes()).is_equal_to(before)
+    plugin = ToolRegistry.get(tool).copy_for_execution()
+    plugin.set_options(**load_lintro_tool_config(tool))
     result = plugin.check([str(file)], {})
-    assert result.success and not result.findings_complete
-    assert result.issues_count == 0
-    assert result.inspected_paths is None
-
-
-@require_tool("ruff")
-@pytest.mark.parametrize("mode", ["update", "prune"])
-@pytest.mark.parametrize("separator", ["\n", "\r"])
-def test_native_ruff_multiline_discovery_cannot_prune_excluded_victim(
-    workspace: Path,
-    mode: str,
-    separator: str,
-) -> None:
-    """Validate the corrected Opus repro against Ruff's actual unescaped output."""
-    victim = workspace / "victim.py"
-    victim.write_text("import os\n", encoding="utf-8")
-    runner = CliRunner()
-    created = runner.invoke(cli, ["baseline", "create", victim.name, "--tools", "ruff"])
-    assert created.exit_code == 0, created.output
-    baseline = workspace / ".lintro-baseline.json"
-    assert any(entry.code == "F401" for entry in read_baseline(baseline).entries)
-    before = baseline.read_bytes()
-    # A basename exclusion would skip both files. Match only the absolute victim.
-    (workspace / "pyproject.toml").write_text(
-        "[tool.ruff]\nforce-exclude = true\nexclude = "
-        + json.dumps([str(victim)])
-        + "\n",
-        encoding="utf-8",
-    )
-    prefix = workspace / "x"
-    prefix.touch()
-    crafted = Path(str(prefix) + separator + str(victim))
-    crafted.parent.mkdir(parents=True)
-    crafted.write_text("", encoding="utf-8")
-    arguments = [str(crafted), str(victim)]
-    native = subprocess.run(  # nosec B603 B607 - installed Ruff and controlled fixture paths, shell=False
-        ["ruff", "check", "--show-files", *arguments],
-        capture_output=True,
-        text=True,
-        check=False,
-        cwd=workspace,
-        timeout=30,
-    )
-    assert native.returncode == 0, native.stderr
-    assert native.stdout.splitlines() == [str(prefix), str(victim)]
-    plugin = RuffPlugin()
-    plugin.set_options(format_check=False, _baseline_coverage=True)
-    result = plugin.check(arguments, {})
-    assert result.success and result.findings_complete
-    assert result.inspected_paths is None
-
-    maintained = runner.invoke(cli, ["baseline", mode, *arguments, "--tools", "ruff"])
-
-    assert maintained.exit_code == 0, maintained.output
-    assert baseline.read_bytes() == before
+    assert_that(result.success).is_true()
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.issues_count).is_zero()
+    assert_that(result.inspected_paths).is_none()

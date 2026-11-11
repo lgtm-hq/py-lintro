@@ -1,11 +1,10 @@
 """Fixtures for fingerprint baseline behavior."""
 
-from pathlib import Path
-
 import pytest
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
+from tests.baseline_fixtures import workspace as workspace
 
 
 @pytest.fixture
@@ -27,15 +26,17 @@ def dirty_result(finding: RuffIssue) -> ToolResult:
     )
 
 
-@pytest.fixture
-def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Make the test workspace the invocation root and disable automatic installs."""
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / ".lintro-config.yaml").write_text(
-        "execution:\n  auto_install_deps: false\n  parallel: false\n",
-        encoding="utf-8",
-    )
-    from lintro.config.config_loader import clear_config_cache
+@pytest.fixture(autouse=True)
+def isolate_native_processes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reject native processes in baseline units, including version probes."""
 
-    clear_config_cache()
-    return tmp_path
+    def unexpected_process(*args: object, **kwargs: object) -> None:
+        """Fail immediately when a test has not supplied its subprocess double."""
+        pytest.fail("Baseline unit tests must double the subprocess boundary")
+
+    monkeypatch.setattr("subprocess.run", unexpected_process)
+    monkeypatch.setattr("subprocess.Popen", unexpected_process)
+    monkeypatch.setattr(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        lambda *args, **kwargs: None,
+    )

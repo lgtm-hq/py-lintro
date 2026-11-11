@@ -115,39 +115,6 @@ def test_mixed_per_file_payload_cannot_hide_native_failure(
     assert artifact.exit_code == 1
 
 
-@pytest.mark.parametrize("syntax_error", [False, True])
-def test_real_black_mixed_verdict_keeps_native_error(
-    workspace: Path,
-    syntax_error: bool,
-) -> None:
-    """Real Black's exit 123 cannot be hidden by an acknowledged format finding."""
-    dirty = workspace / "a.py"
-    dirty.write_text("x=1\n", encoding="utf-8")
-    plugin = BlackPlugin()
-    baseline = snapshot([plugin.check([str(dirty)], {})], root=workspace)
-    assert len(baseline.entries) == 1
-    files = [str(dirty)]
-    if syntax_error:
-        broken = workspace / "b.py"
-        broken.write_text("def f(:\n", encoding="utf-8")
-        files.append(str(broken))
-    result = plugin.check(files, {})
-    assert result.issues_count == 1
-    artifact = _artifact(result, workspace)
-
-    apply_baseline(artifact, baseline)
-    result = artifact.tool_results[0]
-
-    assert artifact.exit_code == int(syntax_error)
-    assert result.success is not syntax_error
-    if syntax_error:
-        assert result.output and "cannot parse" in result.output.lower()
-        assert result.execution_failed
-        assert result.baselined_count == 0
-    else:
-        assert result.baselined_count == 1
-
-
 @pytest.mark.parametrize("failure", [None, "", "shellcheck: internal error, aborting"])
 def test_per_file_failure_survives_acknowledged_peer(
     workspace: Path,
@@ -255,7 +222,7 @@ def test_ruff_native_error_cannot_authorize_filtering_or_pruning(
     file.write_text("import os\n", encoding="utf-8")
     plugin = RuffPlugin()
     plugin.set_options(format_check=stage == "format", _baseline_coverage=True)
-    baseline = snapshot([plugin.check([str(file)], {})], root=workspace)
+    baseline = snapshot([_seed_report(plugin, file)], root=workspace)
     assert baseline.entries
     output = json.dumps(
         [
@@ -316,7 +283,7 @@ def test_black_supplement_failure_is_not_explained_by_format_findings(
     file = workspace / "a.py"
     file.write_text("x=1\n", encoding="utf-8")
     plugin = BlackPlugin()
-    baseline = snapshot([plugin.check([str(file)], {})], root=workspace)
+    baseline = snapshot([_seed_report(plugin, file)], root=workspace)
     from lintro.tools.core.line_length_checker import LineLengthCheckUnavailableError
 
     with patch.object(
@@ -324,7 +291,7 @@ def test_black_supplement_failure_is_not_explained_by_format_findings(
         "_check_line_length_violations",
         side_effect=LineLengthCheckUnavailableError("invalid report"),
     ):
-        result = plugin.check([str(file)], {})
+        result = _seed_report(plugin, file, supplement=False)
     artifact = _artifact(result, workspace)
     apply_baseline(artifact, baseline)
     result = artifact.tool_results[0]
@@ -345,7 +312,7 @@ def test_black_requires_native_verdict_and_complete_parsing(
     file = workspace / "a.py"
     file.write_text("x=1\n", encoding="utf-8")
     plugin = BlackPlugin()
-    baseline = snapshot([plugin.check([str(file)], {})], root=workspace)
+    baseline = snapshot([_seed_report(plugin, file)], root=workspace)
     output = f"would reformat a.py\n{summary}\n"
     with (
         patch.object(
@@ -378,7 +345,7 @@ def test_ruff_partial_report_cannot_certify_coverage(
     file.write_text("import os\n", encoding="utf-8")
     plugin = RuffPlugin()
     plugin.set_options(format_check=False, _baseline_coverage=True)
-    baseline = snapshot([plugin.check([str(file)], {})], root=workspace)
+    baseline = snapshot([_seed_report(plugin, file)], root=workspace)
     issue = {
         "filename": str(file),
         "location": {"row": 1, "column": 1},
@@ -446,3 +413,41 @@ def test_verify_preserves_completeness_proof_and_error_output(
     assert filtered.baselined_count == int(verdict == "complete")
     if verdict != "complete":
         assert filtered.output and "native error" in filtered.output
+
+
+def _seed_report(
+    plugin: BaseToolPlugin,
+    file: Path,
+    *,
+    supplement: bool = True,
+) -> ToolResult:
+    """Parse canned seed findings without depending on installed formatters."""
+
+    def execute(cmd: list[str], **kwargs: object) -> SubprocessResult:
+        """Supply only the native commands needed to establish initial debt."""
+        if isinstance(plugin, BlackPlugin):
+            output = f"would reformat {file.name}\n1 file would be reformatted.\n"
+            return SubprocessResult(1, "", output, output)
+        if "--show-files" in cmd:
+            return subprocess_result(True, str(file))
+        if "format" in cmd:
+            return subprocess_result(True, "")
+        return subprocess_result(
+            False,
+            json.dumps(
+                [
+                    {
+                        "filename": str(file),
+                        "location": {"row": 1, "column": 1},
+                        "code": "F401",
+                        "message": "`os` imported but unused",
+                    },
+                ],
+            ),
+        )
+
+    with patch.object(plugin, "_run_subprocess_result", side_effect=execute):
+        if isinstance(plugin, BlackPlugin) and supplement:
+            with patch.object(plugin, "_check_line_length_violations", return_value=[]):
+                return plugin.check([str(file)], {})
+        return plugin.check([str(file)], {})

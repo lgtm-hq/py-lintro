@@ -66,6 +66,9 @@ more faithful than any SARIF ingestion would be.
 - **Documentation links**: `doc_url()` converts a CamelCase check name to the snake_case
   anchor used by the docs site, e.g. `LowercaseKey` →
   `https://dotenv-linter.github.io/#/checks/lowercase_key`.
+- **Configuration**: `[tool.lintro.dotenv_linter]` options are applied by the CLI
+  execution pipeline. Direct plugin callers must pass them to `set_options` before
+  calling `check` or `fix`; registry instances are unconfigured templates.
 - **Options**: `recursive`, `exclude`, `skip_checks` (maps to `--ignore-checks`), and
   `schema` (maps to `--schema`).
 
