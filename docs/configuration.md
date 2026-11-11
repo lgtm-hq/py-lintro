@@ -1913,9 +1913,14 @@ forbidden_modules = ["mypkg.cli"]
   a misconfigured contract, a crash), the run is an execution failure, not a finding. It
   fails with `execution_failed` set and no invented issue, and the console, Markdown and
   JSON output show `import-linter failed (exit N) running:` with the command and the
-  tool's own message. Chains printed before a crash are still reported. A timeout is
-  reported as a timed-out run instead. A `pyproject.toml` that cannot be parsed is
-  skipped during config discovery, before `lint-imports` runs.
+  tool's own message. Console and Markdown keep the first 20 and last 40 lines of a
+  longer message and say how many were omitted; JSON keeps all of it. Chains printed
+  before a crash are still reported. A timeout is reported as a timed-out run instead. A
+  `pyproject.toml` that cannot be parsed is skipped during config discovery, before
+  `lint-imports` runs.
+- Every built-in contract type is parsed into one issue per chain, including
+  `acyclic_siblings`, whose relative dependencies (`.b -> .a`) are reported as absolute
+  module paths. Contracts that share a name are reported separately.
 - Check-only. `lintro format` never runs import-linter.
 
 **Available `--tool-options`:**

@@ -29,8 +29,7 @@ from lintro.models.core.tool_outcome import Checked, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.import_linter.import_linter_issue import ImportLinterIssue
 from lintro.parsers.import_linter.import_linter_parser import (
-    is_complete_broken_report,
-    parse_import_linter_output,
+    parse_import_linter_report,
 )
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
@@ -262,21 +261,31 @@ class ImportLinterPlugin(BaseToolPlugin):
                 name=self.definition.name,
             )
 
-        output = run.output
-        issues = parse_import_linter_output(output=output)
-        if not run.success and not is_complete_broken_report(output, issues):
+        # The report is printed on stdout; stderr only ever adds warnings or a
+        # crash. Judging completeness from stdout keeps a warning traceback on
+        # stderr from discrediting a report that did complete, while a crash
+        # still shows up as a report with too few contract sections.
+        report = parse_import_linter_report(output=run.stdout)
+        issues = report.issues
+        if not run.success and not report.is_complete_broken_report:
             return self._execution_failure_result(run=run, cmd=cmd, issues=issues)
 
+        # A complete report stays a verdict even if one contract's section has
+        # a format the parser cannot read. That gap is counted as parse
+        # failures, as other plugins do, so the run's coverage is unknown and
+        # the raw report in ``output`` is shown next to the parsed chains.
+        unparsed = report.unparsed_sections
         return ToolResult.from_outcome(
             ToolOutcome(
                 execution=Checked(
-                    success=run.success and (not issues),
-                    inspected_files=True,
+                    success=run.success and not issues and not unparsed,
+                    inspected_files=None if unparsed else True,
                 ),
                 issues_count=len(issues),
             ),
             name=self.definition.name,
-            output=output,
+            parse_failures_count=unparsed or None,
+            output=run.output,
             issues=issues,
         )
 

@@ -39,6 +39,7 @@ from lintro.utils.json_output import serialize_tool_result, timed_out_tool_names
 from lintro.utils.output.helpers import sanitize_csv_value
 from lintro.utils.output.parser_registration import ParserError
 from lintro.utils.output.parser_registry import ParserRegistry
+from lintro.utils.output.text_blocks import bound_diagnostic, markdown_code_block
 
 try:
     import tabulate as _tabulate_module
@@ -280,10 +281,7 @@ def render_markdown_report(
             tool_output = result.output or ""
             if tool_output.strip():
                 lines.append("#### Tool output")
-                lines.append("```")
-                lines.append(tool_output.strip())
-                lines.append("```")
-                lines.append("")
+                lines.extend(markdown_code_block(tool_output.strip(), info=""))
         else:
             if result.issues:
                 lines.append(_MARKDOWN_ISSUES_HEADER)
@@ -314,7 +312,7 @@ def _render_markdown_execution_failure(result: ToolResult) -> list[str]:
     ]
     tool_output = (result.output or "").strip()
     if tool_output:
-        lines.extend(["```text", tool_output, "```", ""])
+        lines.extend(markdown_code_block(bound_diagnostic(tool_output)))
     return lines
 
 

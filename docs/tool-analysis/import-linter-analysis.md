@@ -41,8 +41,13 @@ Contracts live in `pyproject.toml` (`[tool.importlinter]`), `.importlinter`, or
 
 - The full contract set is read from the project's own native configuration. Lintro
   never synthesises or overrides contracts.
-- Every contract type is supported, because Lintro parses the reported import chains
-  rather than modelling contract semantics itself.
+- Every built-in contract type (`layers`, `forbidden`, `independence`, `protected`,
+  `acyclic_siblings`) is supported, because Lintro parses the reported import chains
+  rather than modelling contract semantics itself. `acyclic_siblings` prints its
+  dependencies relative to the package it checked (`- .b -> .a (1 import)` under
+  `No cycles are allowed in pkg.`); Lintro resolves them to absolute chains
+  (`pkg.b -> pkg.a`). A custom contract type whose report Lintro cannot read is still
+  counted (see "Unreadable sections" below), and its text is shown.
 
 ### Design decisions
 
@@ -68,11 +73,13 @@ Contracts live in `pyproject.toml` (`[tool.importlinter]`), `.importlinter`, or
   `unmatched_ignore_imports_alerting = "error"`, a root package that is not importable
   (`Could not find package 'x' in your Python path.`), a contract it rejects as
   misconfigured, or a crash. Lintro treats a non-zero exit as a lint verdict only when
-  the report is complete:
+  the report on stdout is structurally complete:
   - a `Contracts: N kept, M broken.` summary with `M` above zero;
   - the underlined `Broken contracts` heading;
-  - chains parsed for at least `M` contracts;
-  - no Python traceback.
+  - at least `M` contract sections beneath it, counted by heading, so two contracts that
+    share a name count as two;
+  - no Python traceback after the summary line. A traceback printed before the report,
+    or on stderr, does not discredit a report that then completed.
 
   Anything else is reported the way the black, ruff and clippy plugins report a failed
   run: `success` false, `execution_failed` true, `findings_complete` false, inspection
@@ -83,8 +90,16 @@ Contracts live in `pyproject.toml` (`[tool.importlinter]`), `.importlinter`, or
   the command, then the tool's stdout and stderr (or
   `lint-imports produced no output.`). The console prints that block, below the issue
   table when chains were recovered. The Markdown report adds a "could not complete its
-  check" note quoting it, and JSON carries `"execution_failed": true` with the block in
-  `output`.
+  check" note quoting it in a code block the text cannot close. Both keep the first 20
+  and last 40 lines of a longer block, with a notice saying how many lines were omitted
+  and that the full output is in the JSON report (`--output-format json`). JSON carries
+  `"execution_failed": true` with the whole block in `output`.
+
+- **Unreadable sections.** A structurally complete report stays a verdict even if one
+  contract's section has a format Lintro cannot parse. Each such section is counted in
+  `parse_failures_count`, inspection coverage is unknown (so the run cannot update a
+  severity baseline), and the console prints the raw report beneath the chains that were
+  parsed.
 
 - **Other failure shapes are reported elsewhere.** A timeout is reported as a timed-out
   run with zero issues, not as an execution failure. A `pyproject.toml` that cannot be
