@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.1] - 2026-11-11
+
+### Fixed
+
+- **import-linter**: surface lint-imports error output instead of a bare failure (#3375)
+  (46b8879)
+
 ## [0.180.0] - 2026-11-11
 
 ### Added
