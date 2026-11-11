@@ -200,6 +200,7 @@ def run_tools_parallel(
                             incremental=incremental,
                             action=action,
                             selected_tools=selected_tools,
+                            paths=paths,
                             auto_install=auto_install,
                             diff_base=diff_base,
                         )

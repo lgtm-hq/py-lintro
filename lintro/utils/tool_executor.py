@@ -53,11 +53,13 @@ from lintro.utils.execution.run_renderer import _write_artifacts, render_run
 from lintro.utils.execution.tool_configuration import (
     SkippedTool,
     configure_tool_for_execution,
+    get_python_formatting_root,
     get_tool_display_name,
     get_tools_to_run,
 )
 from lintro.utils.gates import execute_gates
 from lintro.utils.output import OutputManager
+from lintro.utils.python_formatting import python_formatting_notice
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
@@ -312,6 +314,7 @@ def _execute_tools_sequential(
                 incremental=incremental,
                 action=ctx.action,
                 selected_tools=selected_tools,
+                paths=paths,
                 auto_install=effective_auto_install,
                 lintro_config=ctx.lintro_config,
                 diff_base=diff_base,
@@ -445,6 +448,7 @@ def _run_verify_phase(
             incremental=False,
             action=Action.CHECK,
             selected_tools=set(tools_to_run),
+            paths=scope.targets,
             auto_install=effective_auto_install,
             lintro_config=ctx.lintro_config,
             diff_base=diff_base,
@@ -819,13 +823,24 @@ def execute_run(
         partial_scan=incremental or diff_base is not None,
     )
 
-    from lintro.utils.python_formatting import python_formatting_notice
-
     ruff_config = config_manager.get_tool_config("ruff").lintro_tool_config or {}
     artifact.python_formatting = python_formatting_notice(
         tools_to_run,
         action=ctx.action,
         ruff_options={**ruff_config, **tool_option_dict.get("ruff", {})},
+        cache_root=(
+            get_python_formatting_root(
+                paths=paths,
+                config_manager=config_manager,
+                tool_option_dict=tool_option_dict,
+                exclude=exclude,
+                include_venv=include_venv,
+                incremental=incremental,
+                diff_base=resolved_diff_base,
+            )
+            if {"ruff", "black"}.issubset(tools_to_run)
+            else None
+        ),
     )
     return artifact
 

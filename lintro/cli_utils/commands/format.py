@@ -8,6 +8,7 @@ from lintro.cli_utils.diff_option import validate_diff_base_ref
 from lintro.cli_utils.order_explain import emit_order_explanation
 from lintro.exceptions.errors import ConfigurationError
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
+from lintro.utils.tool_options import parse_tool_options
 
 # Constants
 DEFAULT_PATHS: list[str] = ["."]
@@ -230,6 +231,7 @@ def format_command(
             exclude=exclude,
             include_venv=include_venv,
             diff_base=diff_base,
+            tool_option_dict=parse_tool_options(tool_options),
         )
 
     # Run the AI-aware pipeline: execute, AI-enhance, render.

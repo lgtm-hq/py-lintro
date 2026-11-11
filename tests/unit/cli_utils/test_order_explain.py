@@ -434,3 +434,50 @@ def test_an_unresolvable_diff_base_explains_the_unnarrowed_run(
     assert_that(
         order_explain._explained_diff_base("nope", ["src"]),
     ).is_none()
+
+
+@pytest.mark.parametrize("unrelated", [False, True])
+@pytest.mark.parametrize(
+    ("notice", "has_owner"),
+    [
+        ("black owns Python formatting (available); ruff format_check not run", True),
+        ("ruff owns Python formatting (black: not installed)", True),
+        (
+            "Python formatting has no runnable owner (black: not installed; ruff disabled)",
+            False,
+        ),
+    ],
+    ids=["black", "ruff-fallback", "no-owner"],
+)
+def test_runtime_ownership_replaces_only_python_demotion_records(
+    unrelated: bool,
+    notice: str,
+    has_owner: bool,
+) -> None:
+    """Runtime evidence replaces both Python scopes without losing other owners.
+
+    Args:
+        unrelated: Include an independent formatter demotion.
+        notice: Runtime ownership wording to render.
+        has_owner: Whether the wording confirms an owner.
+    """
+    python_records = tuple(
+        FormatDemotion(winner="black", loser="ruff", scope=scope, rule="static rule")
+        for scope in ("*.py", "*.pyi")
+    )
+    other = FormatDemotion(
+        winner="prettier",
+        loser="oxfmt",
+        scope="*.js",
+        rule="precedence",
+    )
+    records = (*python_records, other) if unrelated else python_records
+    lines = format_order_report(_report(demotions=records), python_formatting=notice)
+    assert_that(lines).contains(
+        f"  Format ownership ({int(unrelated) + int(has_owner)}):",
+        f"    {notice}",
+    )
+    for record in python_records:
+        assert_that(lines).does_not_contain(f"    {record.reason}")
+    if unrelated:
+        assert_that(lines).contains(f"    {other.reason}")

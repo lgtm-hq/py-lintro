@@ -54,6 +54,8 @@ def _stub_logger(monkeypatch: pytest.MonkeyPatch) -> None:
             return _
 
     monkeypatch.setattr(cl, "create_logger", lambda *_a, **_k: SilentLogger())
+    # The tools here are minimal execution doubles, without probe metadata.
+    monkeypatch.setattr(te, "python_formatting_notice", lambda *args, **kwargs: None)
 
 
 def test_get_tools_to_run_unknown_tool_raises(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1264,7 +1264,7 @@ and it is printed by `lintro check --explain-order`, `lintro doctor` and `lintro
 
 ```text
   Format ownership (1):
-    *.py: black owns FORMAT; ruff(format) demoted (FIX runs before FORMAT; override with execution.precedence)
+    black owns Python formatting (available and version gate passed); ruff format_check not run
 ```
 
 What the record does today is set the **write order**: the owner runs last, so where two
@@ -1318,20 +1318,24 @@ when in doubt costs one batch while not splitting costs a lost edit.
 ### Ruff vs Black Policy (Python)
 
 Black owns Python layout whenever it is selected and runnable: its binary must resolve
-and pass the version gate. Ruff keeps linting and import sorting; both tools stay in the
-run.
+and pass the execution gate (including an explicit `LINTRO_ALLOW_VERSION_LAG`
+allowance). Module invocations such as `python -m black` also qualify. Ruff keeps
+linting and import sorting; both tools stay in the run.
 
 - `lintro format`: Ruff fixes lint issues with `format=False`; Black formats Python.
 - `lintro check`: Ruff checks lint with `format_check=False`; Black checks formatting.
 - If Black is missing, cannot run, or fails its version gate, Ruff's `format` and
   `format_check` stay enabled by default, so Python formatting still happens when Ruff
-  is runnable. Explicit Ruff options in config or `--tool-options` still win.
+  is runnable. Explicit Ruff options in config or `--tool-options` still control Ruff's
+  stages; enabling Ruff does not remove Black or change the final write order.
 
 The run summary and `lintro chk --explain-order` name the Python formatting owner and
-explain the fallback or demotion. Formatting ownership is reported for read-only checks
-too, independently of write-conflict scheduling. If neither selected formatter is
-runnable (or Ruff formatting is explicitly disabled without runnable Black), the summary
-reports that Python formatting has no runnable owner.
+explain the fallback or demotion, using the actual probe diagnosis. CLI overrides are
+reflected in the explanation as well as the run summary. Formatting ownership is
+reported for read-only checks too, independently of write-conflict scheduling. If
+neither selected formatter is runnable (or Ruff formatting is explicitly disabled
+without runnable Black), the summary reports that Python formatting has no runnable
+owner.
 
 Overrides when needed:
 

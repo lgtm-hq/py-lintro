@@ -70,7 +70,7 @@ def test_python_formatting_owner_checks_and_fixes(
     if black_available:
         assert_that(checked.output).contains("ruff format_check not run")
     else:
-        assert_that(checked.output).contains("black unavailable")
+        assert_that(checked.output).contains("black: not installed")
 
     explained = runner.invoke(check_command, [*args, "--explain-order"])
     assert_that(explained.exit_code).is_equal_to(0)
@@ -87,3 +87,81 @@ def test_python_formatting_owner_checks_and_fixes(
     again = runner.invoke(format_command, args)
     assert_that(again.exit_code).is_equal_to(0)
     assert_that(target.read_text()).is_equal_to('x = {"a": 1}\n')
+
+
+@require_tool("black")
+def test_explanation_reports_cli_format_check_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI options override a disabled config in both explanation and execution.
+
+    Args:
+        tmp_path: Isolated project directory.
+        monkeypatch: Working-directory isolation fixture.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.ruff.lint]\nselect = []\n[tool.lintro.ruff]\nformat_check = false\n",
+    )
+    (tmp_path / "example.py").write_text('x = {  "a":1 }\n')
+    args = [
+        ".",
+        "--tools",
+        "ruff,black",
+        "--tool-options",
+        "ruff:format_check=True",
+        "--yes",
+    ]
+    runner = CliRunner()
+    explanation = runner.invoke(check_command, [*args, "--explain-order"])
+    checked = runner.invoke(check_command, args)
+    assert_that(explanation.exit_code).is_equal_to(0)
+    assert_that(checked.exit_code).is_equal_to(1)
+    for output in (explanation.output, checked.output):
+        assert_that(output).contains("ruff format_check explicitly enabled")
+        assert_that(output).does_not_contain("ruff format_check not run")
+
+
+@require_tool("black")
+def test_external_python_path_uses_project_probe_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Formatting probes and execution share the target project's cache root.
+
+    Args:
+        tmp_path: Parent of unrelated cwd and target project.
+        monkeypatch: Environment and cache-location controls.
+    """
+    from lintro.tools.core import snapshots
+
+    project = tmp_path / "project"
+    unrelated = tmp_path / "unrelated"
+    project.mkdir()
+    unrelated.mkdir()
+    (project / "pyproject.toml").write_text("[tool.ruff.lint]\nselect = []\n")
+    target = project / "a.py"
+    target.write_text('x = {  "a":1 }\n')
+    monkeypatch.chdir(unrelated)
+
+    def cache_path(*, cache_root: Path | None = None) -> Path:
+        """Use production disk placement instead of the suite's isolated default.
+
+        Args:
+            cache_root: Explicit project root, or the process cwd.
+
+        Returns:
+            Production-equivalent cache file location inside the test directory.
+        """
+        return ((cache_root or Path.cwd()) / snapshots.SNAPSHOT_CACHE_RELPATH).resolve()
+
+    monkeypatch.setattr(snapshots, "_cache_file_path", cache_path)
+    result = CliRunner().invoke(
+        check_command,
+        [str(target), "--tools", "ruff,black", "--yes", "--no-art"],
+    )
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(result.output).contains("black owns Python formatting")
+    assert_that((unrelated / ".lintro-cache").exists()).is_false()
+    assert_that((project / snapshots.SNAPSHOT_CACHE_RELPATH).exists()).is_true()

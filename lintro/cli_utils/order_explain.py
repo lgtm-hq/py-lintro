@@ -189,7 +189,8 @@ def format_order_report(
             for record in demotions
             if {record.winner, record.loser} != {"black", "ruff"}
         )
-        lines.append(f"  Format ownership ({len(demotions) + 1}):")
+        owner_count = int(" owns Python formatting " in python_formatting)
+        lines.append(f"  Format ownership ({len(demotions) + owner_count}):")
         lines.append(f"    {python_formatting}")
         lines.extend(f"    {record.reason}" for record in demotions)
     else:
@@ -316,7 +317,7 @@ def explain_order_lines(
     action: str,
     paths: Sequence[str],
     *,
-    ignore_conflicts: bool = False,
+    tool_option_dict: dict[str, dict[str, object]] | None = None,
     dry_run: bool = False,
     exclude: str | None = None,
     include_venv: bool = False,
@@ -332,7 +333,7 @@ def explain_order_lines(
         tools: ``--tools`` value, or None for the configured/detected set.
         action: ``"check"`` or ``"fmt"``.
         paths: Paths the run would scan, used for language detection.
-        ignore_conflicts: Mirror of the run's ``--ignore-conflicts``.
+        tool_option_dict: Parsed CLI tool options, overriding file configuration.
         dry_run: Mirror of ``fmt --dry-run``. A dry run rewrites nothing, so
             it batches as a read-only run and must be explained as one.
         exclude: Mirror of the run's ``--exclude``.
@@ -342,12 +343,14 @@ def explain_order_lines(
     Returns:
         Plain-text lines, ready to print one per line.
     """
-    from lintro.utils.execution.tool_configuration import get_tools_to_run
+    from lintro.utils.execution.tool_configuration import (
+        get_python_formatting_root,
+        get_tools_to_run,
+    )
 
     selection = get_tools_to_run(
         tools,
         action,
-        ignore_conflicts=ignore_conflicts,
         scan_roots=list(paths),
     )
     # Explain what *this* invocation would do: a mutating action derives
@@ -363,22 +366,35 @@ def explain_order_lines(
     from lintro.utils.python_formatting import python_formatting_notice
     from lintro.utils.unified_config import UnifiedConfigManager
 
-    ruff_config = (
-        UnifiedConfigManager().get_tool_config("ruff").lintro_tool_config or {}
-    )
+    config_manager = UnifiedConfigManager()
+    ruff_config = config_manager.get_tool_config("ruff").lintro_tool_config or {}
+    tool_option_dict = tool_option_dict or {}
+    resolved_diff_base = _explained_diff_base(diff_base, paths)
     return format_order_report(
         build_order_report(
             selection.to_run,
             paths=list(paths) or None,
             exclude=exclude,
             include_venv=include_venv,
-            diff_base=_explained_diff_base(diff_base, paths),
+            diff_base=resolved_diff_base,
             write_conflicts=action != "check" and not dry_run,
         ),
         python_formatting=python_formatting_notice(
             selection.to_run,
             action=Action.CHECK if action == "check" or dry_run else Action.FIX,
-            ruff_options=ruff_config,
+            ruff_options={**ruff_config, **tool_option_dict.get("ruff", {})},
+            cache_root=(
+                get_python_formatting_root(
+                    paths=paths,
+                    config_manager=config_manager,
+                    tool_option_dict=tool_option_dict,
+                    exclude=exclude,
+                    include_venv=include_venv,
+                    diff_base=resolved_diff_base,
+                )
+                if {"ruff", "black"}.issubset(selection.to_run)
+                else None
+            ),
         ),
     )
 
@@ -388,7 +404,7 @@ def emit_order_explanation(
     tools: str | None,
     action: str,
     paths: Sequence[str],
-    ignore_conflicts: bool = False,
+    tool_option_dict: dict[str, dict[str, object]] | None = None,
     dry_run: bool = False,
     exclude: str | None = None,
     include_venv: bool = False,
@@ -400,7 +416,7 @@ def emit_order_explanation(
         tools: ``--tools`` value, or None for the configured/detected set.
         action: ``"check"`` or ``"fmt"``.
         paths: Paths the run would have scanned.
-        ignore_conflicts: Mirror of the run's ``--ignore-conflicts``.
+        tool_option_dict: Parsed CLI tool options, overriding file configuration.
         dry_run: Mirror of ``fmt --dry-run``, which rewrites nothing and
             therefore batches as a read-only run.
         exclude: Mirror of the run's ``--exclude``.
@@ -416,8 +432,8 @@ def emit_order_explanation(
             tools,
             action,
             paths,
-            ignore_conflicts=ignore_conflicts,
             dry_run=dry_run,
+            tool_option_dict=tool_option_dict,
             exclude=exclude,
             include_venv=include_venv,
             diff_base=diff_base,

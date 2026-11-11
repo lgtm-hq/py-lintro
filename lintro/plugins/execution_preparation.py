@@ -8,7 +8,6 @@ from __future__ import annotations
 import math
 import os
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 
 from loguru import logger
@@ -22,16 +21,25 @@ from lintro.plugins.file_discovery import (
     validate_paths,
 )
 from lintro.plugins.protocol import ToolDefinition
+from lintro.utils.tool_snapshots import (
+    ALLOW_VERSION_LAG_ENV,
+    snapshot_is_runnable,
+)
+from lintro.utils.tool_snapshots import (
+    VersionLagPolicy as VersionLagPolicy,
+)
+from lintro.utils.tool_snapshots import (
+    _parse_allow_version_lag as _parse_allow_version_lag,
+)
+from lintro.utils.tool_snapshots import (
+    _version_lag_allowed as _version_lag_allowed,
+)
 
 # Constants for default values
 DEFAULT_TIMEOUT: int = 30
 
-# Comma-separated tool names (or ``*``) whose below-minimum binaries may still
-# run. Mirrors CI ``--allow-version-lag`` (#1582): digest-pinned tools images
-# lag a Renovate manifest bump until the post-merge republish lands. Without
-# this, plugins skip the lagging binary and integration checks that expect
-# findings (e.g. trufflehog secrets) fail with ``issues_count == 0``.
-_ALLOW_VERSION_LAG_ENV: str = "LINTRO_ALLOW_VERSION_LAG"
+# Compatibility name retained for existing execution-gate consumers.
+_ALLOW_VERSION_LAG_ENV: str = ALLOW_VERSION_LAG_ENV
 
 
 @dataclass(frozen=True)
@@ -49,48 +57,6 @@ class PreparedExecution:
     rel_files: list[str]
     cwd: str
     timeout: float
-
-
-class VersionLagPolicy(Enum):
-    """Explicit wildcard policy for below-minimum tool versions."""
-
-    ALLOW_ALL = "*"
-
-
-def _parse_allow_version_lag(raw: str | None) -> set[str] | VersionLagPolicy:
-    """Parse ``LINTRO_ALLOW_VERSION_LAG`` into a tool-name set.
-
-    Args:
-        raw: Env value: comma-separated tool names, ``*`` for all, or empty.
-
-    Returns:
-        A set of lowercased tool names, ``VersionLagPolicy.ALLOW_ALL`` when
-        ``*``, or an empty set when unset/blank (full enforcement).
-    """
-    if raw is None:
-        return set()
-    text = raw.strip()
-    if not text:
-        return set()
-    if text == "*":
-        return VersionLagPolicy.ALLOW_ALL
-    names = {part.strip().lower() for part in text.split(",") if part.strip()}
-    return names
-
-
-def _version_lag_allowed(tool_name: str) -> bool:
-    """Return whether ``tool_name`` may run when below the minimum version.
-
-    Args:
-        tool_name: Tool name from the tool definition.
-
-    Returns:
-        True when the tool is listed in ``LINTRO_ALLOW_VERSION_LAG`` (or ``*``).
-    """
-    allow = _parse_allow_version_lag(os.environ.get(_ALLOW_VERSION_LAG_ENV))
-    if isinstance(allow, VersionLagPolicy):
-        return True
-    return tool_name.lower() in allow
 
 
 def get_effective_timeout(
@@ -210,8 +176,16 @@ def verify_tool_version(
             strict=is_strict_missing_tools(),
         )
 
-    if snapshot.version_check_passed:
-        if snapshot.below_recommended:
+    if snapshot_is_runnable(snapshot):
+        if not snapshot.version_check_passed:
+            logger.warning(
+                "{} {} is below minimum {} but allowed via {}; proceeding",
+                definition.name,
+                snapshot.version,
+                snapshot.min_version,
+                _ALLOW_VERSION_LAG_ENV,
+            )
+        elif snapshot.below_recommended:
             logger.warning(
                 "{} {} is below recommended version {} (minimum {} met)",
                 definition.name,
@@ -219,22 +193,6 @@ def verify_tool_version(
                 snapshot.recommended_version,
                 snapshot.min_version,
             )
-        return None
-
-    # Unparseable versions are encoded as version_check_passed=True with a
-    # live binary (see probe_tool), so they never reach this branch.
-
-    # Digest-pinned image lag after a manifest version bump: binary exists and
-    # is merely older than min_version. Allowlisted tools keep running so
-    # integration coverage is not silently reduced to a skip.
-    if snapshot.version is not None and _version_lag_allowed(definition.name):
-        logger.warning(
-            "{} {} is below minimum {} but allowed via {}; proceeding",
-            definition.name,
-            snapshot.version,
-            snapshot.min_version,
-            _ALLOW_VERSION_LAG_ENV,
-        )
         return None
 
     error = snapshot.probe_error or "version check failed"

@@ -6,7 +6,9 @@ can share snapshots and invalidate caches without importing the tool layer.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
+from enum import Enum
 from pathlib import Path
 from typing import Protocol
 
@@ -252,3 +254,63 @@ def snapshot_to_unavailable_result(
         Frozen unavailable execution result.
     """
     return _get_provider().snapshot_to_unavailable_result(snapshot, strict=strict)
+
+
+ALLOW_VERSION_LAG_ENV: str = "LINTRO_ALLOW_VERSION_LAG"
+
+
+class VersionLagPolicy(Enum):
+    """Explicit wildcard policy for below-minimum tool versions."""
+
+    ALLOW_ALL = "*"
+
+
+def _parse_allow_version_lag(raw: str | None) -> set[str] | VersionLagPolicy:
+    """Parse ``LINTRO_ALLOW_VERSION_LAG`` into a tool-name set.
+
+    Args:
+        raw: Env value: comma-separated tool names, ``*`` for all, or empty.
+
+    Returns:
+        A set of lowercased tool names, ``VersionLagPolicy.ALLOW_ALL`` when
+        ``*``, or an empty set when unset/blank (full enforcement).
+    """
+    if raw is None:
+        return set()
+    text = raw.strip()
+    if not text:
+        return set()
+    if text == "*":
+        return VersionLagPolicy.ALLOW_ALL
+    names = {part.strip().lower() for part in text.split(",") if part.strip()}
+    return names
+
+
+def _version_lag_allowed(tool_name: str) -> bool:
+    """Return whether ``tool_name`` may run when below the minimum version.
+
+    Args:
+        tool_name: Tool name from the tool definition.
+
+    Returns:
+        True when the tool is listed in ``LINTRO_ALLOW_VERSION_LAG`` (or ``*``).
+    """
+    allow = _parse_allow_version_lag(os.environ.get(ALLOW_VERSION_LAG_ENV))
+    if isinstance(allow, VersionLagPolicy):
+        return True
+    return tool_name.lower() in allow
+
+
+def snapshot_is_runnable(snapshot: ToolSnapshot) -> bool:
+    """Apply the execution gate, including allowed version lag and module commands.
+
+    Args:
+        snapshot: Capability evidence produced by the tool probe.
+
+    Returns:
+        Whether execution should proceed with this snapshot.
+    """
+    return snapshot.available and (
+        snapshot.version_check_passed
+        or (snapshot.version is not None and _version_lag_allowed(snapshot.name))
+    )
