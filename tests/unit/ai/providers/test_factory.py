@@ -73,12 +73,12 @@ def test_get_provider_passes_model():
     """Verify that get_provider forwards the configured model to the provider."""
     config = AIConfig(
         provider="anthropic",  # type: ignore[arg-type]  # Pydantic coerces str
-        model="claude-opus-4-20250514",
+        model="claude-opus-4-8",
     )
     with patch.object(anthropic_mod, "_has_anthropic", True):
         provider = get_provider(config)
         assert_that(provider.model_name).is_equal_to(
-            "claude-opus-4-20250514",
+            "claude-opus-4-8",
         )
 
 

@@ -41,6 +41,7 @@ __all__ = [
     "metadata_for",
     "model_pricing",
     "provider_config_models",
+    "retired_model_error",
 ]
 
 #: Fallback pricing for a model no provider publishes a price for.
@@ -94,6 +95,36 @@ def model_pricing() -> dict[str, ModelPricing]:
     for metadata in all_metadata().values():
         pricing.update(metadata.pricing)
     return pricing
+
+
+def retired_model_error(model: str) -> str | None:
+    """Return why *model* cannot be used, when a provider retired it.
+
+    Every surface that accepts a model id (config validation, the env and
+    flag overlays that revalidate through it, ``lintro doctor`` and the
+    review-efficacy matrix check) asks this one question, so a retired id is
+    refused with the same replacement everywhere, before any request is made
+    (#2277). Model identifiers are vendor-unique, so every provider's
+    retirement table is consulted whichever provider is selected.
+
+    Args:
+        model: The model identifier to check.
+
+    Returns:
+        A one-line refusal naming the retirement date and the replacement,
+        or ``None`` when no registered provider has retired *model*.
+    """
+    from lintro.ai.model_lifecycle import retired_model_message
+
+    for metadata in all_metadata().values():
+        retired = metadata.retired_models.get(model)
+        if retired is not None:
+            return retired_model_message(
+                model=model,
+                retired=retired,
+                vendor=metadata.display_name,
+            )
+    return None
 
 
 def default_models() -> dict[AIProvider, str]:

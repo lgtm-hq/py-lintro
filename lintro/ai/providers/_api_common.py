@@ -94,7 +94,7 @@ def finish_api_completion(
 
 
 #: A vendor's dated snapshot id for an undated alias: ``gpt-5-2026-01-01``
-#: or ``claude-sonnet-4-20250514`` for ``gpt-5`` / ``claude-sonnet-4``.
+#: or ``claude-haiku-4-5-20251001`` for ``gpt-5`` / ``claude-haiku-4-5``.
 _DATED_SNAPSHOT = re.compile(r"^(?P<base>.+?)-(?:\d{4}-\d{2}-\d{2}|\d{8})$")
 
 

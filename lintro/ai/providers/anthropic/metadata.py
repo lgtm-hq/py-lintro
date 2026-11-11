@@ -14,10 +14,12 @@ are stated once here and read everywhere else through
 from __future__ import annotations
 
 import sys
+from datetime import date
 from pathlib import Path
 from types import MappingProxyType
 
 from lintro.ai.enums import AITransport
+from lintro.ai.model_lifecycle import RetiredModel
 from lintro.ai.model_pricing import ModelPricing
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers.anthropic.cli_contract import ANTHROPIC_CLI_CONTRACT
@@ -112,8 +114,21 @@ ANTHROPIC_METADATA = ProviderMetadata(
     ),
     pricing={
         "claude-sonnet-4-6": ModelPricing(3.00, 15.00),
-        "claude-sonnet-4-20250514": ModelPricing(3.00, 15.00),
+        "claude-sonnet-5-5": ModelPricing(2.00, 10.00),
         "claude-haiku-4-5-20251001": ModelPricing(0.80, 4.00),
-        "claude-opus-4-20250514": ModelPricing(15.00, 75.00),
+        "claude-opus-4-8": ModelPricing(5.00, 25.00),
+    },
+    # Retirement dates and replacements as Anthropic's model deprecations page
+    # lists them (https://platform.claude.com/docs/en/about-claude/model-deprecations,
+    # checked 2026-11-11). Validation refuses these ids by name (#2277).
+    retired_models={
+        "claude-sonnet-4-20250514": RetiredModel(
+            retired_on=date(2026, 6, 15),
+            replacement="claude-sonnet-5-5",
+        ),
+        "claude-opus-4-20250514": RetiredModel(
+            retired_on=date(2026, 6, 15),
+            replacement="claude-opus-4-8",
+        ),
     },
 )

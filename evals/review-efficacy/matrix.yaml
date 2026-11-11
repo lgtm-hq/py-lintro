@@ -32,9 +32,9 @@ timeout_seconds: 1800
 # enforces this.
 #
 # The two anthropic cells pair a small model with a mid-size one so the matrix
-# still measures a within-provider difference. They deliberately avoid
-# claude-opus-4-20250514: the registry still prices it, but Anthropic retired
-# it, so a cell naming it would fail at the API rather than produce a run.
+# still measures a within-provider difference. A model its vendor has retired
+# is refused by the same test, with the replacement named (#2277), so a cell
+# cannot name one and fail at the API instead of producing a run.
 configs:
   - id: anthropic-haiku-api
     provider: anthropic

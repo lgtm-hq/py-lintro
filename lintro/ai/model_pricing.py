@@ -21,9 +21,9 @@ DEFAULT_CONTEXT_WINDOW = 128_000
 
 MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "claude-sonnet-4-6": 200_000,
-    "claude-sonnet-4-20250514": 200_000,
+    "claude-sonnet-5-5": 1_000_000,
     "claude-haiku-4-5-20251001": 200_000,
-    "claude-opus-4-20250514": 200_000,
+    "claude-opus-4-8": 1_000_000,
     "gpt-4o": 128_000,
     "gpt-4o-mini": 128_000,
     "gpt-4-turbo": 128_000,

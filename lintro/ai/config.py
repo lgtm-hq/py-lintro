@@ -55,7 +55,7 @@ from lintro.ai.provider_config import (
     migrate_legacy_provider_keys,
 )
 from lintro.ai.provider_enum import accepted_provider_values
-from lintro.ai.registry import AIProvider
+from lintro.ai.registry import AIProvider, retired_model_error
 from lintro.ai.resolved_ai_config import ResolvedAIConfig
 from lintro.enums.review_category import ReviewCategory
 
@@ -681,6 +681,55 @@ class AIConfig(BaseModel):
             if category not in canonical:
                 canonical.append(category)
         return canonical
+
+    @field_validator("model")
+    @classmethod
+    def _model_is_not_retired(cls, value: str | None) -> str | None:
+        """Refuse a model id its vendor has retired, naming the replacement.
+
+        Requests to a retired id fail at the vendor, so accepting it here
+        would only move the failure to the first request (#2277). The env and
+        flag overlays revalidate through this model, so ``LINTRO_AI_MODEL``
+        and ``--model`` are refused the same way.
+
+        Args:
+            value: The configured model, or ``None`` for the provider default.
+
+        Returns:
+            The value, when it is unset or not retired.
+
+        Raises:
+            ValueError: When a registered provider has retired the id.
+        """
+        if value is None:
+            return value
+        error = retired_model_error(value)
+        if error is not None:
+            raise ValueError(error)
+        return value
+
+    @field_validator("fallback_models")
+    @classmethod
+    def _fallback_models_are_not_retired(cls, value: list[str]) -> list[str]:
+        """Refuse a retired id in ``ai.fallback_models``.
+
+        A fallback is only tried after the primary model fails, so a retired
+        one would fail at exactly the moment it is needed (#2277).
+
+        Args:
+            value: The configured fallback chain.
+
+        Returns:
+            The chain, when none of its entries is retired.
+
+        Raises:
+            ValueError: When a registered provider has retired an entry.
+        """
+        for model in value:
+            error = retired_model_error(model)
+            if error is not None:
+                raise ValueError(error)
+        return value
 
     @field_validator("api_key_env")
     @classmethod

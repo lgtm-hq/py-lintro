@@ -321,7 +321,7 @@ def test_resolve_ai_config_is_the_single_typed_ai_seam() -> None:
         "enabled": True,
         "review": True,
         "provider": "anthropic",
-        "model": "claude-sonnet-4-20250514",
+        "model": "claude-sonnet-5-5",
         "transport": "api",
         "max_cost_usd": 1.25,
     }

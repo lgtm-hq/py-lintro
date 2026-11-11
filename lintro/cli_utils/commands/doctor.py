@@ -22,6 +22,7 @@ from dataclasses import asdict
 from functools import partial
 
 import click
+from pydantic import ValidationError
 from rich.console import Console
 from rich.text import Text
 
@@ -32,6 +33,7 @@ from lintro.ai.doctor_checks import (
 )
 from lintro.ai.exceptions import AIConfigOverrideError
 from lintro.ai.interface import resolve_ai_config
+from lintro.ai.provider_blocks import format_invalid_ai_config
 from lintro.cli_utils.install_output import (
     render_install_results,
     render_outcome_summary,
@@ -477,6 +479,11 @@ def doctor_command(
         ai_config = resolve_ai_config(config)
     except AIConfigOverrideError as exc:
         raise click.UsageError(str(exc)) from exc
+    except ValidationError as exc:
+        # The same one line ``chk``/``fmt`` and ``review`` print for a
+        # rejected ``ai:`` section (#3116), so a retired model reaches the
+        # user with its replacement instead of a traceback (#2277).
+        raise click.UsageError(format_invalid_ai_config(exc)) from exc
     ai_checks = check_ai_configuration(ai_config)
     if ai_liveness:
         # Appended after the presence checks so the chain reads in order:
