@@ -18,7 +18,9 @@ from lintro.ai.review.lint_bridge import (
     run_lint_on_changed_files,
 )
 from lintro.config.lintro_config import LintroConfig
+from lintro.models.core.python_formatting_decision import PythonFormattingDecision
 from lintro.models.core.tool_result import ToolResult
+from lintro.tools import tool_manager
 
 
 def test_run_lint_on_changed_files_returns_empty_for_no_paths() -> None:
@@ -387,3 +389,59 @@ def test_restrict_lint_results_honours_a_custom_report_root() -> None:
     )
 
     assert_that(_kept(restricted)).is_equal_to(["/workspace/lintro/x.py"])
+
+
+@pytest.mark.parametrize(
+    "with_result",
+    [True, False],
+    ids=["retained-error", "no-result"],
+)
+def test_lint_bridge_suppresses_black_from_recorded_decision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    with_result: bool,
+) -> None:
+    """Blocked Black is never built while its recorded result survives.
+
+    Args:
+        tmp_path: Isolated configuration root.
+        monkeypatch: Working-directory isolation.
+        with_result: Whether the decision contains a Black result.
+    """
+    monkeypatch.chdir(tmp_path)
+    black_result = ToolResult(name="black", success=False, execution_failed=True)
+    decision = PythonFormattingDecision(
+        owner=None,
+        reason="probe failed",
+        ruff_format=True,
+        ruff_format_check=True,
+        run_black=False,
+        black_result=black_result if with_result else None,
+        text="owner unconfirmed",
+    )
+    ruff = MagicMock()
+    ruff.check.return_value = ToolResult(name="ruff", success=True)
+    with (
+        patch.object(lint_bridge, "get_tools_to_run") as selection,
+        patch.object(lint_bridge, "resolve_python_formatting", return_value=decision),
+        patch.object(tool_manager, "get_tool", return_value=ruff) as build,
+        patch.object(
+            lint_bridge,
+            "configure_tool_for_execution",
+            side_effect=lambda *, tool, **kwargs: tool,
+        ) as configure,
+    ):
+        selection.return_value.to_run = ["ruff", "black"]
+        results = run_lint_on_changed_files(
+            changed_files=["a.py"],
+            lintro_config=LintroConfig(),
+        )
+    assert_that([result.name for result in results]).is_equal_to(
+        ["ruff", "black"] if with_result else ["ruff"],
+    )
+    if with_result:
+        assert_that(results[-1]).is_same_as(black_result)
+        assert_that(results[-1].execution_failed).is_true()
+    build.assert_called_once_with("ruff")
+    ruff.check.assert_called_once_with(paths=["a.py"], options={})
+    assert_that(configure.call_args.kwargs["formatting_decision"]).is_same_as(decision)

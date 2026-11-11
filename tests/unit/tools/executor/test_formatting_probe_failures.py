@@ -132,3 +132,63 @@ def test_ownership_probe_error_is_a_failing_artifact(
             else False
         ),
     ).is_true()
+
+
+@pytest.mark.parametrize("strict", [False, True], ids=["permissive", "strict"])
+def test_neither_formatter_available_preserves_gate_and_summary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    strict: bool,
+) -> None:
+    """Enabled Ruff stages cannot bypass its capability gate.
+
+    Args:
+        tmp_path: Isolated Python project.
+        monkeypatch: Capability evidence and environment controls.
+        strict: Whether unavailable tools make the run fail.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "a.py").write_text('x = {  "a":1 }\n')
+    (tmp_path / ".lintro-config.yaml").write_text(
+        "execution:\n  enabled_tools: [ruff, black]\n"
+        f"  strict_missing_tools: {str(strict).lower()}\n",
+    )
+    clear_config_cache()
+    with pytest.MonkeyPatch.context() as probes:
+        probes.setattr(
+            tool_snapshots,
+            "get_tool_snapshot",
+            lambda name, **kwargs: ToolSnapshot(
+                name=name,
+                probe_error=f"Tool not installed: {name}",
+            ),
+        )
+        artifact = execute_run(
+            ctx=build_run_context(action="check", output_format="json", no_art=True),
+            paths=[str(tmp_path)],
+            tools="ruff,black",
+            tool_options=None,
+            exclude=None,
+            include_venv=False,
+            group_by="auto",
+            output_format="json",
+            verbose=False,
+            yes=True,
+        )
+    assert_that(artifact.exit_code).is_equal_to(1 if strict else 0)
+    assert_that({result.name for result in artifact.tool_results}).is_equal_to(
+        {"ruff", "black"},
+    )
+    for result in artifact.tool_results:
+        assert_that(result.unavailable).is_true()
+        assert_that(result.success).is_equal_to(not strict)
+    decision = artifact.python_formatting
+    assert_that(decision).is_not_none()
+    if decision is None:
+        pytest.fail("The recorded formatting decision must survive aggregation")
+    assert_that(decision.owner).is_none()
+    assert_that(decision.ruff_format_check).is_true()
+    assert_that(decision.text).contains(
+        "no runnable owner",
+        "ruff format_check unavailable",
+    )
