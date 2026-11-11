@@ -276,16 +276,17 @@ def test_traceback_before_the_report_does_not_discredit_it(
     assert_that(result.issues_count).is_equal_to(1)
 
 
-def test_traceback_on_stderr_does_not_discredit_a_complete_report(
+def test_traceback_on_stderr_fails_a_complete_looking_report(
     import_linter_plugin: ImportLinterPlugin,
     project_with_contracts: Path,
     make_run: RunFactory,
     broken_output: str,
 ) -> None:
-    """A warning traceback on stderr is not read as a crash of the stdout report.
+    """Any traceback on stderr with a non-zero exit is an execution failure.
 
-    The streams are joined stdout-first for display, which would put the
-    stderr text after the summary; completeness is judged on stdout alone.
+    ``lint-imports`` prints its report from an unguarded call, so an uncaught
+    exception while printing it lands on stderr and exits 1 with the report on
+    stdout looking complete. The check fails closed on that signal.
 
     Args:
         import_linter_plugin: Plugin under test.
@@ -299,7 +300,7 @@ def test_traceback_on_stderr_does_not_discredit_a_complete_report(
         make_run(returncode=1, stdout=broken_output, stderr=WARNING_TRACEBACK),
     )
 
-    assert_that(result.execution_failed).is_false()
+    assert_that(result.execution_failed).is_true()
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.output).ends_with(WARNING_TRACEBACK)
 

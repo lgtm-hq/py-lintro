@@ -274,6 +274,30 @@ def _match_hop(chain: _Chain, hop_text: str) -> tuple[str, str] | None:
     return None
 
 
+def has_uncaught_exception(text: str | None) -> bool:
+    """Report whether text contains a Python traceback block.
+
+    ``lint-imports`` catches errors raised while it reads configuration and
+    builds the graph, and prints them on stdout itself. It does not catch errors
+    raised while it prints the report, so those reach Python's default handler,
+    which writes the traceback to stderr and exits 1, the same status as broken
+    contracts. A traceback on stderr is therefore the only sign that a report
+    which looks complete was cut short.
+
+    Args:
+        text: Captured stream, or None.
+
+    Returns:
+        True when a line starts a traceback block.
+    """
+    if not text:
+        return False
+    return any(
+        line.startswith(TRACEBACK_HEADER)
+        for line in strip_ansi_codes(text).splitlines()
+    )
+
+
 def _find_summary(lines: list[str]) -> tuple[int, int] | None:
     """Locate the summary line.
 

@@ -72,14 +72,23 @@ Contracts live in `pyproject.toml` (`[tool.importlinter]`), `.importlinter`, or
   `ignore_imports` entry that matches no import under
   `unmatched_ignore_imports_alerting = "error"`, a root package that is not importable
   (`Could not find package 'x' in your Python path.`), a contract it rejects as
-  misconfigured, or a crash. Lintro treats a non-zero exit as a lint verdict only when
-  the report on stdout is structurally complete:
-  - a `Contracts: N kept, M broken.` summary with `M` above zero;
-  - the underlined `Broken contracts` heading;
-  - at least `M` contract sections beneath it, counted by heading, so two contracts that
+  misconfigured, or a crash. The check fails closed: a non-zero exit is a lint verdict
+  only when all of these hold:
+  - the exit status is exactly 1 (`EXIT_STATUS_ERROR` in `importlinter.cli`). Any other
+    status, including a negative one from a signal, is an execution failure.
+  - stdout has a `Contracts: N kept, M broken.` summary with `M` above zero;
+  - stdout has the underlined `Broken contracts` heading;
+  - at least `M` contract sections follow it, counted by heading, so two contracts that
     share a name count as two;
-  - no Python traceback after the summary line. A traceback printed before the report,
-    or on stderr, does not discredit a report that then completed.
+  - stdout has no Python traceback after the summary line, and stderr has no
+    `Traceback (most recent call last):` block at all.
+
+  The stderr rule is what catches a crash in the last contract's section. The report is
+  printed from a call `lint-imports` does not guard, so an exception there leaves every
+  heading in place, writes its traceback to stderr and exits 1, exactly like a verdict.
+  Only a traceback-looking block on stdout _before_ the summary is tolerated, since the
+  report that follows it completed. Status 1 alone never proves a verdict, because the
+  tool also uses it for the errors it reports itself.
 
   Anything else is reported the way the black, ruff and clippy plugins report a failed
   run: `success` false, `execution_failed` true, `findings_complete` false, inspection

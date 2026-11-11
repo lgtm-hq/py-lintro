@@ -29,6 +29,8 @@ from lintro.models.core.tool_outcome import Checked, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.import_linter.import_linter_issue import ImportLinterIssue
 from lintro.parsers.import_linter.import_linter_parser import (
+    ImportLinterReport,
+    has_uncaught_exception,
     parse_import_linter_report,
 )
 from lintro.plugins.base import BaseToolPlugin
@@ -37,6 +39,13 @@ from lintro.plugins.registry import register_tool
 
 # Constants for import-linter configuration
 IMPORT_LINTER_DEFAULT_TIMEOUT: int = 60
+
+#: Exit status ``lint-imports`` uses when contracts are broken
+#: (``EXIT_STATUS_ERROR`` in ``importlinter.cli``). The same status covers
+#: errors it reports itself and uncaught exceptions, so it is necessary for a
+#: verdict but never sufficient; any other non-zero status, including a
+#: negative one from a signal, is an execution failure.
+LINT_IMPORTS_BROKEN_EXIT_CODE: int = 1
 IMPORT_LINTER_FILE_PATTERNS: list[str] = ["*.py"]
 
 #: Config file names import-linter reads, in the order it prefers them.
@@ -114,6 +123,35 @@ def _declares_import_linter(config_path: Path) -> bool:
     if config_path.name == "pyproject.toml":
         return _pyproject_declares_import_linter(config_path=config_path)
     return _ini_declares_import_linter(config_path=config_path)
+
+
+def _is_broken_contracts_verdict(
+    run: SubprocessResult,
+    report: ImportLinterReport,
+) -> bool:
+    """Decide whether a failing ``lint-imports`` run is a broken-contract verdict.
+
+    Fails closed: a run counts only when nothing suggests it stopped early.
+    That means the documented exit status, a structurally complete report on
+    stdout, and no uncaught exception on stderr. ``lint-imports`` prints the
+    report from inside an unguarded call, so a crash part-way through the last
+    contract's section leaves every heading in place and exits 1 like a real
+    verdict. Only the traceback on stderr gives it away. A traceback-looking
+    block printed on stdout *before* the summary is still tolerated, because
+    the report that follows it is the tool's own and completed.
+
+    Args:
+        run: Result of the ``lint-imports`` subprocess, which exited non-zero.
+        report: Report parsed from the run's stdout.
+
+    Returns:
+        True when the run is a broken-contract verdict.
+    """
+    return (
+        run.returncode == LINT_IMPORTS_BROKEN_EXIT_CODE
+        and report.is_complete_broken_report
+        and not has_uncaught_exception(run.stderr)
+    )
 
 
 def find_import_linter_config(paths: list[str]) -> Path | None:
@@ -261,13 +299,10 @@ class ImportLinterPlugin(BaseToolPlugin):
                 name=self.definition.name,
             )
 
-        # The report is printed on stdout; stderr only ever adds warnings or a
-        # crash. Judging completeness from stdout keeps a warning traceback on
-        # stderr from discrediting a report that did complete, while a crash
-        # still shows up as a report with too few contract sections.
+        # The report is printed on stdout, so its structure is judged there.
         report = parse_import_linter_report(output=run.stdout)
         issues = report.issues
-        if not run.success and not report.is_complete_broken_report:
+        if not run.success and not _is_broken_contracts_verdict(run, report):
             return self._execution_failure_result(run=run, cmd=cmd, issues=issues)
 
         # A complete report stays a verdict even if one contract's section has
