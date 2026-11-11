@@ -323,6 +323,7 @@ def configure_tool_for_execution(
                 action=action,
                 ruff_options={**ruff_config, **cli_overrides},
                 cache_root=Path(get_execution_cwd(list(paths or []))),
+                strict_missing_tools=lintro_config.execution.strict_missing_tools,
             )
         if formatting_decision is not None:
             tool.set_options(

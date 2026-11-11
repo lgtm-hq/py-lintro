@@ -115,6 +115,7 @@ def run_lint_on_changed_files(
             action=Action.CHECK,
             ruff_options=ruff_config,
             cache_root=Path(get_execution_cwd(changed_files)),
+            strict_missing_tools=lintro_config.execution.strict_missing_tools,
         )
     except Exception:
         logger.warning(
@@ -130,6 +131,8 @@ def run_lint_on_changed_files(
     # leave ruff's format_check on and duplicate black's findings.
     for tool_name in selection.to_run:
         if tool_name == "black" and decision is not None and not decision.run_black:
+            if decision.black_result is not None:
+                results.append(decision.black_result)
             continue
         try:
             tool = tool_manager.get_tool(tool_name)

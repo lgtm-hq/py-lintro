@@ -483,7 +483,7 @@ def test_runtime_ownership_replaces_only_python_demotion_records(
         ruff_format=owner == "ruff",
         ruff_format_check=owner == "ruff",
         run_black=owner == "black",
-        black_unavailable=False,
+        black_result=None,
         text=notice,
     )
     lines = format_order_report(_report(demotions=records), python_formatting=decision)

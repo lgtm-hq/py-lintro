@@ -1,6 +1,12 @@
 """Immutable execution policy for a run selecting Ruff and Black."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from lintro.models.core.tool_result import ToolResult
 
 
 @dataclass(frozen=True)
@@ -13,7 +19,7 @@ class PythonFormattingDecision:
         ruff_format: Whether Ruff's write stage is enabled.
         ruff_format_check: Whether Ruff's formatting check is enabled.
         run_black: Whether Black may execute in this invocation.
-        black_unavailable: Whether Black was confirmed absent or unrunnable.
+        black_result: Frozen failure or unavailable result when Black cannot run.
         text: Human-readable rendering of this recorded decision.
     """
 
@@ -22,5 +28,5 @@ class PythonFormattingDecision:
     ruff_format: bool
     ruff_format_check: bool
     run_black: bool
-    black_unavailable: bool
+    black_result: ToolResult | None
     text: str

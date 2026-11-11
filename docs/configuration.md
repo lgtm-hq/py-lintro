@@ -1331,15 +1331,18 @@ linting and import sorting; both tools stay in the run.
   is runnable. Explicit Ruff options in config or `--tool-options` still control Ruff's
   stages; enabling Ruff does not remove Black or change the final write order.
 
-The run summary and `lintro chk --explain-order` name the Python formatting owner and
+The run summary and `lintro check --explain-order` name the Python formatting owner and
 explain the fallback or demotion, using the actual probe diagnosis. The decision is
 resolved once per run without touching incremental file caches. If Black cannot be
-confirmed, Ruff remains enabled by default and Black is skipped for that invocation, so
-a later successful probe cannot enable a second writer. CLI overrides are reflected in
-the explanation as well as the run summary. Formatting ownership is reported for
-read-only checks too, independently of write-conflict scheduling. If neither selected
-formatter is runnable (or Ruff formatting is explicitly disabled without runnable
-Black), the summary reports that Python formatting has no runnable owner.
+confirmed because its probe raises, Ruff remains enabled by default and Black does not
+run for that invocation. The original probe error remains a failing Black result,
+including in permissive missing-tool mode, so a later successful probe cannot enable a
+second writer or hide the failure. Missing Black retains its install hint and follows
+the configured strict missing-tool policy. CLI overrides are reflected in the
+explanation as well as the run summary. Formatting ownership is reported for read-only
+checks too, independently of write-conflict scheduling. If neither selected formatter is
+runnable (or Ruff formatting is explicitly disabled without runnable Black), the summary
+reports that Python formatting has no runnable owner.
 
 Overrides when needed:
 

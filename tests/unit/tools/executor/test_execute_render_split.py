@@ -1734,7 +1734,7 @@ def test_refresh_preserves_python_formatting_while_recomputing_findings(
             ruff_format=True,
             ruff_format_check=True,
             run_black=False,
-            black_unavailable=True,
+            black_result=None,
             text="ruff owns Python formatting (black: not installed)",
         ),
     )

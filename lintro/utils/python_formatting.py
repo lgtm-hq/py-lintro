@@ -5,24 +5,10 @@ from pathlib import Path
 
 from lintro.enums.action import Action
 from lintro.models.core.python_formatting_decision import PythonFormattingDecision
+from lintro.models.core.tool_outcome import Skipped, ToolOutcome
+from lintro.models.core.tool_result import ToolResult
 from lintro.models.core.tool_snapshot import ToolSnapshot
 from lintro.utils import tool_snapshots
-
-
-def _confirmed_snapshot(name: str, cache_root: Path | None) -> ToolSnapshot | None:
-    """Read probe evidence without turning an unconfirmed probe into a demotion.
-
-    Args:
-        name: Tool to probe.
-        cache_root: Tool execution directory.
-
-    Returns:
-        Evidence, or None when the probe service or its I/O failed.
-    """
-    try:
-        return tool_snapshots.get_tool_snapshot(name, cache_root=cache_root)
-    except (OSError, RuntimeError):
-        return None
 
 
 def _unavailable_reason(snapshot: ToolSnapshot) -> str:
@@ -44,12 +30,13 @@ def _unavailable_reason(snapshot: ToolSnapshot) -> str:
     return f"{snapshot.name}: {snapshot.probe_error or 'version probe failed'}"
 
 
-def resolve_python_formatting(
+def _resolve_python_formatting(
     selected_tools: Collection[str],
     *,
     action: Action,
     ruff_options: Mapping[str, object],
     cache_root: Path | None = None,
+    strict_missing_tools: bool | None = None,
 ) -> PythonFormattingDecision | None:
     """Resolve ownership once, without discovering files or updating their caches.
 
@@ -58,14 +45,15 @@ def resolve_python_formatting(
         action: Executed check or format action.
         ruff_options: Explicit Ruff options with CLI overrides applied.
         cache_root: Directory anchoring the formatters' execution probes.
+        strict_missing_tools: Missing-tool policy for the canonical unavailable result.
 
     Returns:
         Immutable execution decision, or None when the pair is not selected.
     """
     if not {"ruff", "black"}.issubset(selected_tools):
         return None
-    black = _confirmed_snapshot("black", cache_root)
-    black_runs = black is not None and tool_snapshots.snapshot_is_runnable(black)
+    black = tool_snapshots.get_tool_snapshot("black", cache_root=cache_root)
+    black_runs = tool_snapshots.snapshot_is_runnable(black)
     ruff_format = bool(ruff_options.get("format", not black_runs))
     ruff_check = bool(ruff_options.get("format_check", not black_runs))
     option = "format" if action == Action.FIX else "format_check"
@@ -78,13 +66,18 @@ def resolve_python_formatting(
         ruff_format=ruff_format,
         ruff_format_check=ruff_check,
         run_black=black_runs,
-        black_unavailable=black is not None and not black.available,
+        black_result=_blocked_black_result(
+            black,
+            black_runs,
+            reason,
+            strict_missing_tools,
+        ),
         text=text,
     )
 
 
 def _format_owner(
-    black: ToolSnapshot | None,
+    black: ToolSnapshot,
     black_runs: bool,
     ruff_enabled: bool,
     cache_root: Path | None,
@@ -100,8 +93,6 @@ def _format_owner(
     Returns:
         Confirmed owner and the actual diagnosis.
     """
-    if black is None:
-        return None, "capability probe failed"
     if black_runs:
         reason = "available and version gate passed"
         if not black.version_check_passed:
@@ -110,9 +101,7 @@ def _format_owner(
     reason = _unavailable_reason(black)
     if not ruff_enabled:
         return None, reason
-    ruff = _confirmed_snapshot("ruff", cache_root)
-    if ruff is None:
-        return None, "capability probe failed"
+    ruff = tool_snapshots.get_tool_snapshot("ruff", cache_root=cache_root)
     if tool_snapshots.snapshot_is_runnable(ruff):
         return "ruff", reason
     return None, f"{reason}; {_unavailable_reason(ruff)}"
@@ -124,6 +113,7 @@ def _decision_text(
     option: str,
     stage_enabled: bool,
     black_runs: bool,
+    probe_failed: bool = False,
 ) -> str:
     """Render recorded policy without another capability probe.
 
@@ -133,6 +123,7 @@ def _decision_text(
         option: Ruff stage relevant to the requested action.
         stage_enabled: Whether that stage is enabled.
         black_runs: Whether Black is permitted to run.
+        probe_failed: Whether ownership resolution raised an internal exception.
 
     Returns:
         Human-readable ownership and stage state.
@@ -144,11 +135,11 @@ def _decision_text(
             else f"ruff {option} not run"
         )
         return f"black owns Python formatting ({reason}); {suffix}"
-    if reason == "capability probe failed":
+    if probe_failed:
         state = "enabled" if stage_enabled else "disabled"
         return (
             f"Python formatting owner could not be confirmed ({reason}); "
-            f"ruff {option} {state}; black skipped for this run"
+            f"ruff {option} {state}; black not run after probe error"
         )
     if owner == "ruff" and stage_enabled:
         return f"ruff owns Python formatting ({reason})"
@@ -156,3 +147,94 @@ def _decision_text(
     return (
         f"Python formatting has no runnable owner ({reason}; " f"ruff {option} {state})"
     )
+
+
+def _blocked_black_result(
+    snapshot: ToolSnapshot,
+    black_runs: bool,
+    reason: str,
+    strict: bool | None,
+) -> ToolResult | None:
+    """Preserve the native gate's result and remediation for blocked Black.
+
+    Args:
+        snapshot: Captured capability evidence.
+        black_runs: Runnability already captured for this invocation.
+        reason: Recorded version-gate diagnosis.
+        strict: Missing-tool policy, or None to read configuration.
+
+    Returns:
+        The canonical unavailable result, a version skip, or None when runnable.
+    """
+    if not snapshot.available:
+        return tool_snapshots.snapshot_to_unavailable_result(snapshot, strict=strict)
+    if black_runs:
+        return None
+    return ToolResult.from_outcome(
+        ToolOutcome(execution=Skipped(reason)),
+        name="black",
+        output=f"Skipping black: {reason}",
+    )
+
+
+def resolve_python_formatting(
+    selected_tools: Collection[str],
+    *,
+    action: Action,
+    ruff_options: Mapping[str, object],
+    cache_root: Path | None = None,
+    strict_missing_tools: bool | None = None,
+) -> PythonFormattingDecision | None:
+    """Contain ownership-resolution errors as failing Black results for every caller.
+
+    Args:
+        selected_tools: Tools selected for this invocation.
+        action: Executed check or format action.
+        ruff_options: Explicit Ruff options with CLI overrides applied.
+        cache_root: Directory anchoring execution probes.
+        strict_missing_tools: Missing-tool policy for canonical unavailable results.
+
+    Returns:
+        A frozen policy retaining any internal failure, never a successful error skip.
+    """
+    if not {"ruff", "black"}.issubset(selected_tools):
+        return None
+    try:
+        return _resolve_python_formatting(
+            selected_tools,
+            action=action,
+            ruff_options=ruff_options,
+            cache_root=cache_root,
+            strict_missing_tools=strict_missing_tools,
+        )
+    except Exception as error:
+        # This is the shared per-tool exception boundary: all entry points must
+        # preserve the failure while allowing Ruff and other tools to continue.
+        detail = f"{type(error).__name__}: {error}"
+        reason = f"capability probe failed: {detail}"
+        ruff_format = bool(ruff_options.get("format", True))
+        ruff_check = bool(ruff_options.get("format_check", True))
+        return PythonFormattingDecision(
+            owner=None,
+            reason=reason,
+            ruff_format=ruff_format,
+            ruff_format_check=ruff_check,
+            run_black=False,
+            black_result=ToolResult(
+                name="black",
+                success=False,
+                execution_failed=True,
+                output=f"Tool execution failed: {detail}",
+                inspected_files=False,
+                residual_unknown=action == Action.FIX,
+                residual_unknown_reason=reason if action == Action.FIX else None,
+            ),
+            text=_decision_text(
+                None,
+                reason,
+                "format" if action == Action.FIX else "format_check",
+                ruff_format if action == Action.FIX else ruff_check,
+                False,
+                probe_failed=True,
+            ),
+        )

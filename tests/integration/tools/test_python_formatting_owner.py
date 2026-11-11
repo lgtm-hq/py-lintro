@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import pytest
 from assertpy import assert_that
@@ -335,10 +335,10 @@ def test_unconfirmed_decision_is_not_replaced_by_a_later_success(
     monkeypatch.setattr(BlackPlugin, "fix", unexpected_black_write)
     command = check_command if action == "check" else format_command
     result = CliRunner().invoke(command, [".", "--tools", "ruff,black", "--yes"])
-    assert_that(result.exit_code).is_equal_to(1 if action == "check" else 0)
+    assert_that(result.exit_code).is_equal_to(1)
     assert_that(result.output).contains(
         "owner could not be confirmed",
-        "black skipped for this run",
+        "black not run after probe error",
     )
     assert_that(result.output).does_not_contain(
         "format_check not run",
@@ -348,3 +348,124 @@ def test_unconfirmed_decision_is_not_replaced_by_a_later_success(
     assert_that(target.read_text()).is_equal_to(
         'x = {  "a":1 }\n' if action == "check" else 'x = {"a": 1}\n',
     )
+
+
+@pytest.mark.parametrize("strict", [False, True], ids=["permissive", "strict"])
+def test_missing_black_retains_the_execution_gates_remediation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    strict: bool,
+) -> None:
+    """Missing Black keeps canonical JSON fields, console hints and exit policy.
+
+    Args:
+        tmp_path: Isolated fixture project.
+        monkeypatch: Hide Black without uninstalling it.
+        strict: Missing-tool policy applied by the native execution gate.
+    """
+    import json
+
+    from lintro.config.config_loader import clear_config_cache
+    from lintro.enums.action import Action
+    from lintro.utils.json_output import serialize_tool_result
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff.lint]\nselect = []\n")
+    (tmp_path / ".lintro-config.yaml").write_text(
+        f"execution:\n  strict_missing_tools: {str(strict).lower()}\n",
+    )
+    (tmp_path / "a.py").write_text('x = {"a": 1}\n')
+    clear_config_cache()
+    missing = ToolSnapshot(
+        name="black",
+        probe_error="Tool not installed: black",
+        remediation_hint="uv pip install black",
+    )
+    expected = tool_snapshots.snapshot_to_unavailable_result(missing, strict=strict)
+    expected_fields = serialize_tool_result(expected, action=Action.CHECK)
+    original_probe = tool_snapshots.get_tool_snapshot
+
+    def probe(
+        name: str,
+        *,
+        force: bool = False,
+        cache_root: Path | None = None,
+    ) -> ToolSnapshot:
+        """Return real Ruff evidence and missing Black evidence.
+
+        Args:
+            name: Requested tool.
+            force: Cache bypass flag.
+            cache_root: Execution directory.
+
+        Returns:
+            Native evidence or the synthetic missing Black snapshot.
+        """
+        if name == "black":
+            return missing
+        return original_probe(name, force=force, cache_root=cache_root)
+
+    monkeypatch.setattr(tool_snapshots, "get_tool_snapshot", probe)
+    runner = CliRunner()
+    args = [".", "--tools", "ruff,black", "--yes", "--no-art"]
+    encoded = runner.invoke(check_command, [*args, "--output-format", "json"])
+    assert_that(encoded.exit_code).is_equal_to(int(strict))
+    black = next(
+        row for row in json.loads(encoded.stdout)["results"] if row["tool"] == "black"
+    )
+    keys = (
+        "tool",
+        "success",
+        "status",
+        "skipped",
+        "skip_reason",
+        "output",
+        "unavailable",
+        "unavailable_reason",
+    )
+    assert_that({key: black[key] for key in keys}).is_equal_to(
+        {key: expected_fields[key] for key in keys},
+    )
+    console = runner.invoke(check_command, args)
+    assert_that(console.exit_code).is_equal_to(int(strict))
+    assert_that(console.output).contains(expected.output, "uv pip install black")
+
+
+def test_explain_order_contains_a_probe_error_without_a_traceback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The shared boundary contains non-I/O exceptions in read-only explanation.
+
+    Args:
+        tmp_path: Isolated project directory.
+        monkeypatch: Inject an unexpected Black probe failure.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "pyproject.toml").write_text("[tool.lintro]\n")
+    (tmp_path / "a.py").write_text("x = 1\n")
+
+    def fail(*args: object, **kwargs: object) -> NoReturn:
+        """Raise the internal error before any formatter runs.
+
+        Args:
+            *args: Ignored probe arguments.
+            **kwargs: Ignored probe options.
+
+        Raises:
+            AttributeError: Simulated internal probe bug.
+        """
+        raise AttributeError("broken probe internals")
+
+    monkeypatch.setattr(tool_snapshots, "get_tool_snapshot", fail)
+    result = CliRunner().invoke(
+        check_command,
+        [".", "--tools", "ruff,black", "--explain-order"],
+    )
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).contains(
+        "owner could not be confirmed",
+        "AttributeError",
+        "broken probe internals",
+    )
+    assert_that(result.output).does_not_contain("Traceback")

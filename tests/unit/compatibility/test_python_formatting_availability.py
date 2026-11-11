@@ -291,15 +291,19 @@ def test_notice_reports_the_actionable_reason(
     )
 
 
-def test_notice_does_not_hide_programming_errors() -> None:
-    """An invalid snapshot contract is not an expected probe-service failure."""
+def test_notice_preserves_unexpected_probe_errors_as_failures() -> None:
+    """An unexpected probe error becomes a failed result instead of a traceback."""
     with patch(
         "lintro.utils.tool_snapshots.get_tool_snapshot",
         side_effect=ValueError("invalid evidence"),
     ):
-        with pytest.raises(ValueError, match="invalid evidence"):
-            resolve_python_formatting(
-                {"ruff", "black"},
-                action=Action.CHECK,
-                ruff_options={},
-            )
+        decision = resolve_python_formatting(
+            {"ruff", "black"},
+            action=Action.CHECK,
+            ruff_options={},
+        )
+    if decision is None or decision.black_result is None:
+        pytest.fail("The ownership decision must retain its probe failure")
+    assert_that(decision.black_result.execution_failed).is_true()
+    assert_that(decision.black_result.output).contains("ValueError", "invalid evidence")
+    assert_that(decision.ruff_format_check).is_true()

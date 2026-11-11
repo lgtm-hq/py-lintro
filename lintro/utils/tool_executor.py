@@ -61,7 +61,6 @@ from lintro.utils.execution_paths import get_execution_cwd
 from lintro.utils.gates import execute_gates
 from lintro.utils.output import OutputManager
 from lintro.utils.python_formatting import resolve_python_formatting
-from lintro.utils.tool_snapshots import is_strict_missing_tools
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
@@ -708,6 +707,7 @@ def execute_run(
         action=ctx.action,
         ruff_options={**ruff_config, **tool_option_dict.get("ruff", {})},
         cache_root=Path(get_execution_cwd(paths)),
+        strict_missing_tools=ctx.lintro_config.execution.strict_missing_tools,
     )
     ctx = replace(ctx, python_formatting=decision)
     if decision is not None and not decision.run_black:
@@ -797,15 +797,16 @@ def execute_run(
             for name in not_in_allowlist
         )
     for st in reported_skips:
-        if st.name == "black" and decision is not None and decision.black_unavailable:
-            all_results.append(
-                ToolResult(
-                    name="black",
-                    success=not is_strict_missing_tools(),
-                    unavailable_reason=decision.reason,
-                    inspected_files=False,
-                ),
-            )
+        if (
+            st.name == "black"
+            and decision is not None
+            and decision.black_result is not None
+        ):
+            result = decision.black_result
+            all_results.append(result)
+            logger.print_tool_header(tool_name="black", action=ctx.action)
+            if on_tool_result is not None:
+                on_tool_result(result)
             continue
         all_results.append(
             ToolResult(
