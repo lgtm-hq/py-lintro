@@ -258,6 +258,7 @@ def check_command(
     if explain_order:
         emit_order_explanation(
             tools=tools,
+            ignore_conflicts=ignore_conflicts,
             action=DEFAULT_ACTION,
             paths=path_list,
             exclude=exclude,

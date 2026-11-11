@@ -49,6 +49,12 @@ DEFAULT_ACTION: str = "fmt"
     help="Comma-separated patterns to exclude from formatting.",
 )
 @click.option(
+    "--ignore-conflicts",
+    is_flag=True,
+    default=False,
+    help="Allow all selected tools through conflict resolution.",
+)
+@click.option(
     "--include-venv",
     is_flag=True,
     default=False,
@@ -177,6 +183,7 @@ def format_command(
     profile: bool,
     explain_order: bool,
     baseline: str | None,
+    ignore_conflicts: bool = False,
 ) -> None:
     """Format code using configured formatting tools.
 
@@ -212,6 +219,7 @@ def format_command(
         explain_order: bool: Print the derived execution order
             and exit without running tools.
         baseline: str | None: Override the configured fingerprint baseline.
+        ignore_conflicts: bool: Bypass tool conflict filtering.
 
     Raises:
         SystemExit: Process exit with the aggregated exit code from tools,
@@ -225,6 +233,7 @@ def format_command(
     if explain_order:
         emit_order_explanation(
             tools=tools,
+            ignore_conflicts=ignore_conflicts,
             action=DEFAULT_ACTION,
             paths=normalized_paths,
             dry_run=dry_run,
@@ -240,6 +249,7 @@ def format_command(
             action=DEFAULT_ACTION,
             paths=normalized_paths,
             tools=tools,
+            ignore_conflicts=ignore_conflicts,
             tool_options=tool_options,
             exclude=exclude,
             include_venv=include_venv,

@@ -1269,29 +1269,30 @@ formatting decision, including availability and explicit tool options:
     black owns Python formatting (available and version gate passed); ruff format_check not run
 ```
 
-What the record does today is set the **write order**: the owner runs last, so where two
-formatters both rewrite a file its layout is the one left on disk. The one place a
-demoted `FORMAT` is additionally switched off at the tool level is ruff when black is
-selected and runnable — the [Ruff vs Black policy](#ruff-vs-black-policy-python) below,
-which predates this rule and still lives in the executor's tool configuration rather
-than reading the record. Wiring every formatter's stages to the derived record is a
-follow-up; until it lands, treat the reported owner as the authority on **order and
-reporting**, and the ruff/black switch as unchanged.
+The static scheduler record sets the **write order**: the owner runs last, so where two
+formatters both rewrite a file its layout is the one left on disk. Python also has a
+runtime formatting decision: Ruff's `format` and `format_check` stages are switched off
+by default only when Black is selected **and runnable**, unless an explicit Ruff tool
+option enables them. This decision is resolved once per run and used by tool
+configuration, the run summary and `lintro check --explain-order`. Other formatters'
+demotion records control ordering and reporting; they do not switch off formatting
+stages.
 
-**Overriding it.** `execution.precedence` takes `[winner, loser]` pairs. The winner has
-authority on every scope the two share — it is ordered last, and it is the tool the
-reports name as the owner:
+**Overriding write order.** `execution.precedence` takes `[winner, loser]` pairs. The
+winner is ordered last on shared scopes and named as the owner in static scheduler
+reports, including those printed by `lintro doctor` and `lintro init`:
 
 ```yaml
 execution:
   precedence:
-    - [ruff, black] # order ruff last, and report ruff as the Python FORMAT owner
+    - [ruff, black] # Order Ruff last; this does not enable Ruff's formatter
 ```
 
-Note the limit that follows from the paragraph above: this reverses the order and the
-reported owner, but it does not by itself re-enable ruff's formatter — that switch still
-follows the ruff/black policy. Set ruff's `format` (and `format_check`) tool options
-explicitly if you want ruff to do the formatting.
+Precedence changes write order and the static scheduler record. It does not change the
+runtime Python formatting decision or re-enable Ruff's formatting stages. Set Ruff's
+`format` and `format_check` tool options explicitly to enable those stages; Black
+remains enabled when runnable. To use Ruff as the sole Python formatter, select Ruff
+without Black.
 
 Contradictory pairs are a hard error, never a silent fallback. That covers a pair and
 its reverse:

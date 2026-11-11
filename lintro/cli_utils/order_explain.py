@@ -13,7 +13,7 @@ each tool where it is.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, NoReturn, TypedDict, Unpack
 
 import click
 from rich.text import Text
@@ -50,6 +50,22 @@ MAX_DOCTOR_CONSTRAINTS: int = 5
 
 #: Cap on the format-owner demotions listed in the doctor section.
 MAX_DOCTOR_DEMOTIONS: int = 3
+
+
+class OrderScanOptions(TypedDict, total=False):
+    """Optional scan settings shared by explanation entry points.
+
+    Attributes:
+        dry_run: Whether formatting is a read-only preview.
+        exclude: CLI exclusion patterns.
+        include_venv: Whether virtual environments are included.
+        diff_base: Raw diff-base argument, if supplied.
+    """
+
+    dry_run: bool
+    exclude: str | None
+    include_venv: bool
+    diff_base: str | None
 
 
 def _predecessors(report: DerivedOrder) -> dict[str, list[OrderEdge]]:
@@ -319,10 +335,8 @@ def explain_order_lines(
     paths: Sequence[str],
     *,
     tool_option_dict: dict[str, dict[str, object]] | None = None,
-    dry_run: bool = False,
-    exclude: str | None = None,
-    include_venv: bool = False,
-    diff_base: str | None = None,
+    ignore_conflicts: bool = False,
+    **scope: Unpack[OrderScanOptions],
 ) -> list[str]:
     """Build the ``--explain-order`` output for a would-be run.
 
@@ -335,11 +349,8 @@ def explain_order_lines(
         action: ``"check"`` or ``"fmt"``.
         paths: Paths the run would scan, used for language detection.
         tool_option_dict: Parsed CLI tool options, overriding file configuration.
-        dry_run: Mirror of ``fmt --dry-run``. A dry run rewrites nothing, so
-            it batches as a read-only run and must be explained as one.
-        exclude: Mirror of the run's ``--exclude``.
-        include_venv: Mirror of the run's ``--include-venv``.
-        diff_base: Raw ``--diff`` value the run was given, or ``None``.
+        ignore_conflicts: Mirror of the run's conflict-selection flag.
+        **scope: Scan settings: dry_run, exclude, include_venv and diff_base.
 
     Returns:
         Plain-text lines, ready to print one per line.
@@ -352,10 +363,16 @@ def explain_order_lines(
     from lintro.utils.python_formatting import resolve_python_formatting
     from lintro.utils.unified_config import UnifiedConfigManager
 
+    dry_run = scope.get("dry_run", False)
+    exclude = scope.get("exclude")
+    include_venv = scope.get("include_venv", False)
+    diff_base = scope.get("diff_base")
+
     selection = get_tools_to_run(
         tools,
         action,
         scan_roots=list(paths),
+        ignore_conflicts=ignore_conflicts,
     )
     # Explain what *this* invocation would do: a mutating action derives
     # write-conflict edges, a read-only one does not, and overlap is decided
@@ -400,10 +417,8 @@ def emit_order_explanation(
     action: str,
     paths: Sequence[str],
     tool_option_dict: dict[str, dict[str, object]] | None = None,
-    dry_run: bool = False,
-    exclude: str | None = None,
-    include_venv: bool = False,
-    diff_base: str | None = None,
+    ignore_conflicts: bool = False,
+    **scope: Unpack[OrderScanOptions],
 ) -> NoReturn:
     """Print the ``--explain-order`` output and exit without running any tool.
 
@@ -412,11 +427,8 @@ def emit_order_explanation(
         action: ``"check"`` or ``"fmt"``.
         paths: Paths the run would have scanned.
         tool_option_dict: Parsed CLI tool options, overriding file configuration.
-        dry_run: Mirror of ``fmt --dry-run``, which rewrites nothing and
-            therefore batches as a read-only run.
-        exclude: Mirror of the run's ``--exclude``.
-        include_venv: Mirror of the run's ``--include-venv``.
-        diff_base: Raw ``--diff`` value the run was given, or ``None``.
+        ignore_conflicts: Mirror of the run's conflict-selection flag.
+        **scope: Scan settings: dry_run, exclude, include_venv and diff_base.
 
     Raises:
         SystemExit: Always. ``0`` once the order is printed, ``1`` when the
@@ -427,11 +439,9 @@ def emit_order_explanation(
             tools,
             action,
             paths,
-            dry_run=dry_run,
             tool_option_dict=tool_option_dict,
-            exclude=exclude,
-            include_venv=include_venv,
-            diff_base=diff_base,
+            ignore_conflicts=ignore_conflicts,
+            **scope,
         )
     except ValueError as exc:
         click.echo(str(exc), err=True)
