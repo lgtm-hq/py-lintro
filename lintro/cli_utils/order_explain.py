@@ -146,12 +146,17 @@ def _format_demotions(demotions: Sequence[FormatDemotion]) -> list[str]:
     return lines
 
 
-def format_order_report(report: DerivedOrder) -> list[str]:
+def format_order_report(
+    report: DerivedOrder,
+    *,
+    python_formatting: str | None = None,
+) -> list[str]:
     """Render the full execution-order explanation.
 
     Args:
         report: Report produced by
             :func:`lintro.tools.core.scheduler.build_order_report`.
+        python_formatting: Runtime Python ownership, independent of write conflicts.
 
     Returns:
         Plain-text lines, ready to print one per line.
@@ -177,7 +182,18 @@ def format_order_report(report: DerivedOrder) -> list[str]:
     else:
         lines.append("  Cycles (0): the derived graph is a DAG.")
     lines.append("")
-    lines.extend(_format_demotions(report.demotions))
+    demotions = report.demotions
+    if python_formatting:
+        demotions = tuple(
+            record
+            for record in demotions
+            if {record.winner, record.loser} != {"black", "ruff"}
+        )
+        lines.append(f"  Format ownership ({len(demotions) + 1}):")
+        lines.append(f"    {python_formatting}")
+        lines.extend(f"    {record.reason}" for record in demotions)
+    else:
+        lines.extend(_format_demotions(demotions))
     return lines
 
 
@@ -343,6 +359,13 @@ def explain_order_lines(
     # each tool would actually be handed, so an explanation that dropped the
     # excludes or the diff base would report conflicts and demotions for files
     # the run could never touch.
+    from lintro.enums.action import Action
+    from lintro.utils.python_formatting import python_formatting_notice
+    from lintro.utils.unified_config import UnifiedConfigManager
+
+    ruff_config = (
+        UnifiedConfigManager().get_tool_config("ruff").lintro_tool_config or {}
+    )
     return format_order_report(
         build_order_report(
             selection.to_run,
@@ -351,6 +374,11 @@ def explain_order_lines(
             include_venv=include_venv,
             diff_base=_explained_diff_base(diff_base, paths),
             write_conflicts=action != "check" and not dry_run,
+        ),
+        python_formatting=python_formatting_notice(
+            selection.to_run,
+            action=Action.CHECK if action == "check" or dry_run else Action.FIX,
+            ruff_options=ruff_config,
         ),
     )
 

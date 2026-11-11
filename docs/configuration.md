@@ -1109,9 +1109,10 @@ Execution order (derived from tool claims)
 
 `*.py` is the one pattern in the 42-tool set with two mutating claimants. Black holds
 `{FORMAT}` and ruff holds `{FIX, FORMAT}`, so black owns the format phase (fewest
-mutating capabilities wins) and ruff is demoted to its fix capability: when black is in
-the run, ruff's `format` / `format_check` stages are switched off unless you ask for
-them explicitly through `--tool-options` or `[tool.lintro.ruff]`.
+mutating capabilities wins) and ruff is demoted to its fix capability: when black is
+selected and its resolved binary passes the version gate, ruff's `format` /
+`format_check` stages are switched off unless you ask for them explicitly through
+`--tool-options` or `[tool.lintro.ruff]`.
 
 ### Mutate-then-verify (`lintro format`)
 
@@ -1269,9 +1270,9 @@ and it is printed by `lintro check --explain-order`, `lintro doctor` and `lintro
 What the record does today is set the **write order**: the owner runs last, so where two
 formatters both rewrite a file its layout is the one left on disk. The one place a
 demoted `FORMAT` is additionally switched off at the tool level is ruff when black is
-selected — the [Ruff vs Black policy](#ruff-vs-black-policy-python) below, which
-predates this rule and still lives in the executor's tool configuration rather than
-reading the record. Wiring every formatter's stages to the derived record is a
+selected and runnable — the [Ruff vs Black policy](#ruff-vs-black-policy-python) below,
+which predates this rule and still lives in the executor's tool configuration rather
+than reading the record. Wiring every formatter's stages to the derived record is a
 follow-up; until it lands, treat the reported owner as the authority on **order and
 reporting**, and the ruff/black switch as unchanged.
 
@@ -1316,23 +1317,21 @@ when in doubt costs one batch while not splitting costs a lost edit.
 
 ### Ruff vs Black Policy (Python)
 
-Lintro enforces Ruff-first linting and Black-first formatting when Black is configured
-as a post-check.
+Black owns Python layout whenever it is selected and runnable: its binary must resolve
+and pass the version gate. Ruff keeps linting and import sorting; both tools stay in the
+run.
 
-- Ruff: primary linter (keep strict rules like `COM812` trailing commas and `E501` line
-  length enabled for checks)
-- Black: primary formatter (applies formatting during post-checks; performs safe line
-  breaking where Ruff’s auto-format may be limited)
+- `lintro format`: Ruff fixes lint issues with `format=False`; Black formats Python.
+- `lintro check`: Ruff checks lint with `format_check=False`; Black checks formatting.
+- If Black is missing, cannot run, or fails its version gate, Ruff's `format` and
+  `format_check` stay enabled by default, so Python formatting still happens when Ruff
+  is runnable. Explicit Ruff options in config or `--tool-options` still win.
 
-Runtime behavior with Black as post-check:
-
-- lintro format
-  - Ruff fixes lint issues only (Ruff `format=False`) unless explicitly overridden
-  - Black performs formatting in the post-check phase
-
-- lintro check
-  - Ruff runs lint checks (Ruff `format_check=False`) unless explicitly overridden
-  - Black runs `--check` as a post-check to enforce formatting
+The run summary and `lintro chk --explain-order` name the Python formatting owner and
+explain the fallback or demotion. Formatting ownership is reported for read-only checks
+too, independently of write-conflict scheduling. If neither selected formatter is
+runnable (or Ruff formatting is explicitly disabled without runnable Black), the summary
+reports that Python formatting has no runnable owner.
 
 Overrides when needed:
 

@@ -809,7 +809,7 @@ def execute_run(
             ctx.action,
         )
 
-    return finalize_artifact(
+    artifact = finalize_artifact(
         ctx=ctx,
         all_results=all_results,
         total_issues=total_issues,
@@ -818,6 +818,16 @@ def execute_run(
         paths=paths,
         partial_scan=incremental or diff_base is not None,
     )
+
+    from lintro.utils.python_formatting import python_formatting_notice
+
+    ruff_config = config_manager.get_tool_config("ruff").lintro_tool_config or {}
+    artifact.python_formatting = python_formatting_notice(
+        tools_to_run,
+        action=ctx.action,
+        ruff_options={**ruff_config, **tool_option_dict.get("ruff", {})},
+    )
+    return artifact
 
 
 def run_lint_tools_simple(

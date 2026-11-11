@@ -53,6 +53,7 @@ class RunArtifact:
             measured file set can change between invocations.
         force_failure: A post-execution policy requires a failing exit code,
             independently of the findings (for example an AI policy gate).
+        python_formatting: Runtime explanation of Python formatting ownership.
     """
 
     tool_results: list[ToolResult] = field(default_factory=list)
@@ -69,6 +70,7 @@ class RunArtifact:
     paths: tuple[str, ...] = (".",)
     partial_scan: bool = False
     force_failure: bool = False
+    python_formatting: str | None = None
 
     @property
     def success(self) -> bool:

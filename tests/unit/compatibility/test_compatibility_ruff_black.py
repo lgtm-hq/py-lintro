@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 from lintro.enums.tool_name import ToolName
 from lintro.models.core.tool_result import ToolResult
+from lintro.models.core.tool_snapshot import ToolSnapshot
 from lintro.tools import tool_manager
 from lintro.utils.execution.tool_configuration import ToolsToRunResult
 from lintro.utils.output import OutputManager
@@ -150,6 +151,15 @@ def _setup_tools(monkeypatch: pytest.MonkeyPatch) -> tuple[FakeTool, FakeTool]:
     """
     import lintro.utils.tool_executor as te
 
+    monkeypatch.setattr(
+        "lintro.utils.tool_snapshots.get_tool_snapshot",
+        lambda name, **_kwargs: ToolSnapshot(
+            name=name,
+            available=True,
+            binary_path=f"/tools/{name}",
+            version_check_passed=True,
+        ),
+    )
     ruff = FakeTool(ToolName.RUFF, can_fix=True)
     black = FakeTool(ToolName.BLACK, can_fix=True)
     tool_map = {ToolName.RUFF: ruff, ToolName.BLACK: black}

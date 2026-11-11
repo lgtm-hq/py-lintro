@@ -17,6 +17,7 @@ from lintro.enums.action import Action, normalize_action
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tools_value import ToolsValue
 from lintro.tools import tool_manager
+from lintro.utils.python_formatting import black_owns_python_formatting
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
@@ -308,11 +309,14 @@ def configure_tool_for_execution(
     # capabilities wins — now lives in the scheduler (#1744, #2606), which
     # records the demotion and reports it through explain, doctor and init:
     # black owns FORMAT, so ruff is demoted to its FIX capability and its
-    # formatting stages are switched off unless the user explicitly asked for
-    # them. Applying that record here rather than repeating its conclusion is
+    # formatting stages are switched off only when black is runnable, unless
+    # the user explicitly asked for them. Applying that record here rather
+    # than repeating its conclusion is
     # blocked by layering (``lintro.utils`` may not import ``lintro.tools``)
     # and is left to the follow-up that lifts the executor into its own layer.
-    if "black" in selected_tools and tool_name == ToolName.RUFF.value:
+    if tool_name == ToolName.RUFF.value and black_owns_python_formatting(
+        selected_tools,
+    ):
         tool_config = config_manager.get_tool_config(tool_name)
         lintro_tool_cfg = tool_config.lintro_tool_config or {}
         if action == Action.FIX:
