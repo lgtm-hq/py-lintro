@@ -380,6 +380,7 @@ def _prepare_from_context(
         custom_agents=resolve_custom_agents(
             mode=custom_agent_mode,
             workspace_root=request.workspace_root,
+            provider=ai_config.provider,
         ),
         run_builtin_checklist=custom_agent_mode != CustomAgentMode.ONLY,
         synthesis=review_config.synthesis,

@@ -56,9 +56,17 @@ def test_matrix_cell_model_is_not_retired(config: MatrixConfig) -> None:
     Args:
         config: Matrix cell under test.
     """
-    assert_that(retired_model_error(config.model)).described_as(
+    retired = retired_model_error(config.model, provider=config.provider)
+    assert_that(retired).described_as(
         f"matrix cell {config.config_id!r}",
     ).is_none()
+
+
+def test_the_matrix_retirement_check_names_the_replacement() -> None:
+    """The check above fails with the replacement for a retired cell model."""
+    assert_that(
+        retired_model_error("claude-opus-4-20250514", provider="anthropic"),
+    ).contains("use 'claude-opus-4-8' instead")
 
 
 @pytest.mark.parametrize(

@@ -22,6 +22,18 @@ class AIConfigOverrideError(AIError):
     """
 
 
+class AIRetiredModelError(AIError):
+    """A model the selected provider has retired was about to be used.
+
+    Raised before any request by the provider factory and by the fallback
+    chain, the backstops behind config validation for a config or chain that
+    was built without it (#2277). The message names the retirement date and
+    the vendor's listed replacement. A configuration error, not a provider
+    failure, so the fallback chain never treats it as a reason to try the next
+    model.
+    """
+
+
 class AIProviderRequiredError(AIError):
     """AI is enabled but no provider was named.
 

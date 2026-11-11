@@ -7,7 +7,7 @@ Authentication errors are never retried.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import TypeVar
 
 from loguru import logger
@@ -16,6 +16,7 @@ from lintro.ai.exceptions import (
     AIAuthenticationError,
     AIProviderError,
     AIRateLimitError,
+    AIRetiredModelError,
     AITurnLimitError,
 )
 from lintro.ai.json_response import CliSchemaRequest
@@ -24,8 +25,40 @@ from lintro.ai.providers.base import (
     AsyncAIStreamResult,
     BaseAIProvider,
 )
+from lintro.ai.registry import retired_models_in_chain
 
 _T = TypeVar("_T")
+
+
+def ensure_chain_not_retired(
+    provider: BaseAIProvider,
+    fallback_models: Sequence[str] | None,
+) -> None:
+    """Refuse a model chain the provider would reject as retired.
+
+    The chain is the provider's current (primary) model followed by
+    *fallback_models*, exactly what :func:`_with_fallback` would try. Entry
+    points that swallow per-call failures (fix and summary generation) call
+    this before their first call so the refusal reaches the caller instead of
+    a debug log, and so a retired fallback stops the primary call too (#2277).
+
+    Args:
+        provider: The provider every model in the chain is sent to.
+        fallback_models: Fallback identifiers in the order they are tried.
+
+    Raises:
+        AIRetiredModelError: When any model in the chain is one the provider
+            has retired; the message names the replacement.
+    """
+    # The chain has only ever needed ``model_name`` and the call methods, so
+    # a provider object without a ``name`` keeps working: it names no
+    # provider, and no provider's retirements apply to it.
+    retired = retired_models_in_chain(
+        (provider.model_name, *(fallback_models or ())),
+        provider=getattr(provider, "name", None),
+    )
+    if retired is not None:
+        raise AIRetiredModelError(retired)
 
 
 async def _with_fallback(
@@ -48,6 +81,12 @@ async def _with_fallback(
 
     Each attempt passes an explicit ``model`` override to *attempt_fn*
     so concurrent callers can share one provider instance safely.
+
+    The whole chain is checked before the first attempt by
+    :func:`ensure_chain_not_retired`, whose ``AIRetiredModelError``
+    propagates: a programmatic caller can pass fallbacks that never went
+    through config validation, and a retired fallback would otherwise surface
+    only after the primary had been tried and paid for (#2277).
 
     Args:
         provider: AI provider instance.
@@ -77,6 +116,7 @@ async def _with_fallback(
     models_to_try: list[str | None] = [None]
     if fallback_models:
         models_to_try.extend(fallback_models)
+    ensure_chain_not_retired(provider, fallback_models)
 
     last_error: Exception | None = None
 

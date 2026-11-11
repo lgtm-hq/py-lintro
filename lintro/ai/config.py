@@ -34,6 +34,7 @@ from pydantic import (
     Field,
     SerializeAsAny,
     ValidationError,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -55,7 +56,11 @@ from lintro.ai.provider_config import (
     migrate_legacy_provider_keys,
 )
 from lintro.ai.provider_enum import accepted_provider_values
-from lintro.ai.registry import AIProvider, retired_model_error
+from lintro.ai.registry import (
+    AIProvider,
+    retired_model_error,
+    retired_models_in_chain,
+)
 from lintro.ai.resolved_ai_config import ResolvedAIConfig
 from lintro.enums.review_category import ReviewCategory
 
@@ -684,51 +689,62 @@ class AIConfig(BaseModel):
 
     @field_validator("model")
     @classmethod
-    def _model_is_not_retired(cls, value: str | None) -> str | None:
-        """Refuse a model id its vendor has retired, naming the replacement.
+    def _model_is_not_retired(
+        cls,
+        value: str | None,
+        info: ValidationInfo,
+    ) -> str | None:
+        """Refuse a model id the selected provider retired, naming the replacement.
 
         Requests to a retired id fail at the vendor, so accepting it here
         would only move the failure to the first request (#2277). The env and
         flag overlays revalidate through this model, so ``LINTRO_AI_MODEL``
-        and ``--model`` are refused the same way.
+        and ``--model`` are refused the same way. ``provider`` is declared
+        before ``model``, so it is already validated when this runs; only that
+        provider's retirements apply.
 
         Args:
             value: The configured model, or ``None`` for the provider default.
+            info: Validation info carrying the already-validated ``provider``.
 
         Returns:
-            The value, when it is unset or not retired.
+            The value, when it is unset or not retired by the provider.
 
         Raises:
-            ValueError: When a registered provider has retired the id.
+            ValueError: When the selected provider has retired the id.
         """
         if value is None:
             return value
-        error = retired_model_error(value)
+        error = retired_model_error(value, provider=info.data.get("provider"))
         if error is not None:
             raise ValueError(error)
         return value
 
     @field_validator("fallback_models")
     @classmethod
-    def _fallback_models_are_not_retired(cls, value: list[str]) -> list[str]:
-        """Refuse a retired id in ``ai.fallback_models``.
+    def _fallback_models_are_not_retired(
+        cls,
+        value: list[str],
+        info: ValidationInfo,
+    ) -> list[str]:
+        """Refuse an ``ai.fallback_models`` entry the selected provider retired.
 
         A fallback is only tried after the primary model fails, so a retired
         one would fail at exactly the moment it is needed (#2277).
 
         Args:
             value: The configured fallback chain.
+            info: Validation info carrying the already-validated ``provider``.
 
         Returns:
-            The chain, when none of its entries is retired.
+            The chain, when none of its entries is retired by the provider.
 
         Raises:
-            ValueError: When a registered provider has retired an entry.
+            ValueError: When the selected provider has retired an entry.
         """
-        for model in value:
-            error = retired_model_error(model)
-            if error is not None:
-                raise ValueError(error)
+        error = retired_models_in_chain(value, provider=info.data.get("provider"))
+        if error is not None:
+            raise ValueError(error)
         return value
 
     @field_validator("api_key_env")
@@ -931,6 +947,31 @@ class AIConfig(BaseModel):
         )
         config, sources = apply_env_overrides(config, sources)
         return ResolvedAIConfig(config=config, sources=sources)
+
+    def with_model(self, model: str) -> AIConfig:
+        """Return a copy of this config selecting *model*, validated.
+
+        ``model_copy(update=...)`` skips validators, so a model swapped in
+        that way would bypass the retired-model check (#2277). This rebuilds
+        the config through validation instead. Diagnostics are suppressed:
+        the base config already reported its own migration hints.
+
+        Args:
+            model: The model identifier to select.
+
+        Returns:
+            A validated copy that differs from this config only in ``model``.
+            Pydantic's ``ValidationError`` propagates when *model* is refused,
+            for example because the selected provider retired it.
+        """
+        payload = self.model_dump()
+        payload.update({"model": model, "lint": self.lint, "review": self.review})
+        with _suppressed_diagnostics():
+            validated = AIConfig.model_validate(payload)
+        # A full dump marks every field as set; keep the base config's set
+        # fields so a default never reads as user-chosen downstream.
+        validated.__pydantic_fields_set__ = set(self.model_fields_set) | {"model"}
+        return validated
 
     # -- Effective feature state -------------------------------------------
 

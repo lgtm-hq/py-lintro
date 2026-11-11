@@ -27,6 +27,8 @@ from lintro.ai.model_pricing import ModelPricing
 from lintro.ai.provider_enum import AIProvider
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from lintro.ai.provider_config import ProviderConfig
     from lintro.ai.providers.protocol import ProviderMetadata
 
@@ -42,6 +44,7 @@ __all__ = [
     "model_pricing",
     "provider_config_models",
     "retired_model_error",
+    "retired_models_in_chain",
 ]
 
 #: Fallback pricing for a model no provider publishes a price for.
@@ -97,33 +100,74 @@ def model_pricing() -> dict[str, ModelPricing]:
     return pricing
 
 
-def retired_model_error(model: str) -> str | None:
-    """Return why *model* cannot be used, when a provider retired it.
+def retired_model_error(
+    model: str,
+    *,
+    provider: AIProvider | str | None,
+) -> str | None:
+    """Return why *model* cannot be sent to *provider*, when it retired it.
 
-    Every surface that accepts a model id (config validation, the env and
-    flag overlays that revalidate through it, ``lintro doctor`` and the
+    Every surface that accepts a model id (config validation and the env and
+    flag overlays that revalidate through it, custom review agents, the
+    provider factory, the fallback chain, ``lintro doctor`` and the
     review-efficacy matrix check) asks this one question, so a retired id is
     refused with the same replacement everywhere, before any request is made
-    (#2277). Model identifiers are vendor-unique, so every provider's
-    retirement table is consulted whichever provider is selected.
+    (#2277).
+
+    Only the selected provider's own retirement table is consulted: the same
+    string sent to another provider, or to an OpenAI-compatible endpoint, is
+    that provider's business and is not refused here.
 
     Args:
         model: The model identifier to check.
+        provider: The provider the model would be sent to, as an enum member
+            or the string a user typed. ``None``, or a name no plugin is
+            registered under, has no retirement table and refuses nothing.
 
     Returns:
         A one-line refusal naming the retirement date and the replacement,
-        or ``None`` when no registered provider has retired *model*.
+        or ``None`` when *provider* has not retired *model*.
     """
+    from lintro.ai.exceptions import AIProviderNotRegisteredError
     from lintro.ai.model_lifecycle import retired_model_message
 
-    for metadata in all_metadata().values():
-        retired = metadata.retired_models.get(model)
-        if retired is not None:
-            return retired_model_message(
-                model=model,
-                retired=retired,
-                vendor=metadata.display_name,
-            )
+    if provider is None:
+        return None
+    try:
+        metadata = metadata_for(provider)
+    except (AIProviderNotRegisteredError, ValueError):
+        return None
+    retired = metadata.retired_models.get(model)
+    if retired is None:
+        return None
+    return retired_model_message(
+        model=model,
+        retired=retired,
+        vendor=metadata.display_name,
+    )
+
+
+def retired_models_in_chain(
+    models: Iterable[str | None],
+    *,
+    provider: AIProvider | str | None,
+) -> str | None:
+    """Return the refusal for the first retired model in *models*.
+
+    Args:
+        models: Model identifiers in the order they would be tried; ``None``
+            entries (the provider's own default) are skipped.
+        provider: The provider every model in the chain would be sent to.
+
+    Returns:
+        The first refusal, or ``None`` when no model in the chain is retired.
+    """
+    for model in models:
+        if model is None:
+            continue
+        error = retired_model_error(model, provider=provider)
+        if error is not None:
+            return error
     return None
 
 

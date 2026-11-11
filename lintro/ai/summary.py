@@ -19,6 +19,7 @@ from lintro.ai.cli_schemas import cli_schema_for_summary
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.enums.ai_call_kind import AICallKind
+from lintro.ai.fallback import ensure_chain_not_retired
 from lintro.ai.invoke import call_ai
 from lintro.ai.json_response import parse_summary_response_payload
 from lintro.ai.models import AISummary
@@ -254,6 +255,11 @@ async def _call_summary_provider(
 ) -> AISummary | None:
     """Shared call/parse helper for summary generation.
 
+    A retired model or fallback in the chain raises ``AIRetiredModelError``
+    (from :func:`~lintro.ai.fallback.ensure_chain_not_retired`) before any
+    call. A failed call is otherwise swallowed here, which would hide the
+    replacement in a debug log (#2277).
+
     Args:
         prompt: The fully built summary prompt.
         provider: AI provider instance.
@@ -264,6 +270,7 @@ async def _call_summary_provider(
     Returns:
         The parsed summary, or None when the call or parse fails.
     """
+    ensure_chain_not_retired(provider, ai_config.fallback_models)
     try:
         response = await call_ai(
             provider=provider,

@@ -1675,14 +1675,24 @@ enforceable on an `unpriceable` transport — see the Cursor section below.
 
 A model its vendor has retired is refused rather than priced. Each provider's metadata
 keeps the ids it once registered and the vendor has since retired, with the retirement
-date and the replacement the vendor's deprecations page lists. Naming one in `ai.model`
-or `ai.fallback_models`, `LINTRO_AI_MODEL`, or `--model` fails validation before any
-request. `lintro check`, `lintro review` and `lintro doctor` stop with the error, and
-`lintro config` prints it in place of the AI section:
+date and the replacement the vendor's deprecations page lists. The refusal applies only
+when that provider is the one selected: the same string sent through `openai` to an
+OpenAI-compatible endpoint is not refused.
+
+Naming a retired id in `ai.model` or `ai.fallback_models`, `LINTRO_AI_MODEL`, or
+`--model` fails validation before any request. `lintro check` and `lintro review` stop
+with the error. `lintro config` prints it in place of the AI section, and
+`lintro doctor` reports it as a failed `ai.config` check, prints the rest of its report,
+and exits non-zero:
 
 ```text
 invalid AI configuration: ai.model: 'claude-opus-4-20250514' was retired by Anthropic on 2026-06-15 and requests to it fail; use 'claude-opus-4-8' instead
 ```
+
+A custom review agent whose `model:` is retired stops `lintro review` while it prepares,
+before any review call. Code that calls lintro's Python API with a model or fallback
+chain that skipped validation is refused at the provider factory and before the first
+attempt of the fallback chain, with the same replacement named.
 
 <!-- BEGIN SNAPSHOT: retired-models-table -->
 

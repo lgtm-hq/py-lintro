@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.ai.registry import retired_model_error
 from lintro.ai.review.custom_agents import discover_custom_agents
 from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from lintro.ai.config import AIConfig
+    from lintro.ai.provider_enum import AIProvider
     from lintro.ai.review.custom_agents import CustomAgentSpec
     from lintro.ai.review.models import ReviewContext
     from lintro.ai.review.preparation import ReviewRunRequest
@@ -131,6 +133,7 @@ def resolve_custom_agents(
     *,
     mode: CustomAgentMode,
     workspace_root: Path,
+    provider: AIProvider | None,
 ) -> tuple[CustomAgentSpec, ...]:
     """Discover user-defined review agents for the configured mode.
 
@@ -140,6 +143,8 @@ def resolve_custom_agents(
     Args:
         mode: Configured ``review.custom_agents`` mode.
         workspace_root: Absolute workspace root to scan.
+        provider: The run's provider, which every agent ``model`` override
+            is sent to. Its retired models are refused here (#2277).
 
     Returns:
         tuple[CustomAgentSpec, ...]: The discovered agents, or an empty tuple
@@ -148,13 +153,23 @@ def resolve_custom_agents(
     Raises:
         ReviewPreparationError: When ``mode`` is ``only`` and no valid agents
             were discovered, since the built-in checklist is skipped in that
-            mode and running would silently review nothing.
+            mode and running would silently review nothing. Also raised
+            when an agent's ``model`` is one *provider* has retired: the
+            whole run is refused during preparation, before any review call,
+            so no other agent or checklist pass is paid for first (#2277).
     """
     if mode == CustomAgentMode.DISABLED:
         return ()
     discovery = discover_custom_agents(workspace_root=workspace_root)
     for issue in discovery.issues:
         logger.warning("Skipping invalid review agent — {issue}", issue=issue.format())
+    for agent in discovery.agents:
+        if agent.model is None:
+            continue
+        retired = retired_model_error(agent.model, provider=provider)
+        if retired is not None:
+            msg = f"review agent {agent.name!r} sets model: {retired}"
+            raise ReviewPreparationError(msg)
     if mode == CustomAgentMode.ONLY and not discovery.agents:
         msg = (
             "review.custom_agents is 'only' but no valid agents were found "

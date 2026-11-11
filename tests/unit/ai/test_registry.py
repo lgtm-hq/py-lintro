@@ -401,16 +401,15 @@ def test_no_retired_model_is_priced_or_has_a_context_window() -> None:
 
 def test_every_retired_model_is_refused_with_a_priced_replacement() -> None:
     """Each retirement resolves to a refusal naming a model lintro prices."""
-    pricing = model_pricing()
-    for record in all_metadata().values():
+    for provider, record in all_metadata().items():
         for model, retired in record.retired_models.items():
-            assert_that(pricing).contains_key(retired.replacement)
-            assert_that(retired_model_error(model)).contains(
+            assert_that(record.pricing).contains_key(retired.replacement)
+            assert_that(retired_model_error(model, provider=provider)).contains(
                 f"use {retired.replacement!r} instead",
             )
 
 
 def test_default_models_are_not_retired() -> None:
     """No provider defaults to a model its vendor no longer serves."""
-    for model in default_models().values():
-        assert_that(retired_model_error(model)).is_none()
+    for provider, model in default_models().items():
+        assert_that(retired_model_error(model, provider=provider)).is_none()

@@ -20,6 +20,7 @@ import json
 import sys
 from dataclasses import asdict
 from functools import partial
+from typing import TYPE_CHECKING
 
 import click
 from pydantic import ValidationError
@@ -62,6 +63,10 @@ from lintro.utils.environment import (
     collect_full_environment,
     render_environment_report,
 )
+
+if TYPE_CHECKING:
+    from lintro.ai.config import AIConfig
+    from lintro.config.lintro_config import LintroConfig
 
 
 def _render_category(
@@ -173,6 +178,47 @@ def _render_tool_line(
         console.print(line)
         if verbose and r.details:
             console.print(f"         [dim]{r.details}[/dim]")
+
+
+#: Check name for an ``ai:`` section doctor could not resolve.
+_AI_CONFIG_CHECK_NAME = "ai.config"
+
+
+def _resolve_doctor_ai_config(
+    config: LintroConfig,
+) -> tuple[AIConfig | None, AICheckResult | None]:
+    """Resolve ``ai:``, reporting a rejected section as a failed check.
+
+    Doctor is the diagnosis command, so a rejected ``ai:`` section is one
+    failed check in the report rather than the end of it.
+
+    Args:
+        config: The loaded project configuration.
+
+    Returns:
+        The resolved AI config and ``None``, or ``None`` and the failed check
+        naming why the section was rejected.
+    """
+    try:
+        return resolve_ai_config(config), None
+    except (AIConfigOverrideError, ValidationError) as exc:
+        # The same one line ``chk``/``fmt`` and ``review`` print for a
+        # rejected ``ai:`` section (#3116), so a retired model reaches the
+        # user with its replacement (#2277).
+        message = (
+            format_invalid_ai_config(exc)
+            if isinstance(exc, ValidationError)
+            else f"invalid AI configuration: {exc}"
+        )
+        return (
+            None,
+            AICheckResult(
+                name=_AI_CONFIG_CHECK_NAME,
+                status=ToolStatus.INCOMPATIBLE,
+                message=message,
+                hint="Fix the ai: section or the LINTRO_AI_* variable it names",
+            ),
+        )
 
 
 def _ai_check_is_failure(check: AICheckResult) -> bool:
@@ -475,20 +521,17 @@ def doctor_command(
     from lintro.config.config_loader import get_config
 
     config = get_config()
-    try:
-        ai_config = resolve_ai_config(config)
-    except AIConfigOverrideError as exc:
-        raise click.UsageError(str(exc)) from exc
-    except ValidationError as exc:
-        # The same one line ``chk``/``fmt`` and ``review`` print for a
-        # rejected ``ai:`` section (#3116), so a retired model reaches the
-        # user with its replacement instead of a traceback (#2277).
-        raise click.UsageError(format_invalid_ai_config(exc)) from exc
-    ai_checks = check_ai_configuration(ai_config)
-    if ai_liveness:
-        # Appended after the presence checks so the chain reads in order:
-        # present -> live. Opt-in because the API-transport probe is a real call.
-        ai_checks.extend(check_ai_liveness(ai_config))
+    ai_config, ai_config_check = _resolve_doctor_ai_config(config)
+    if ai_config is None:
+        # Liveness is skipped: there is no resolved configuration to probe.
+        ai_checks = [ai_config_check] if ai_config_check is not None else []
+    else:
+        ai_checks = check_ai_configuration(ai_config)
+        if ai_liveness:
+            # Appended after the presence checks so the chain reads in order:
+            # present -> live. Opt-in because the API-transport probe is a
+            # real call.
+            ai_checks.extend(check_ai_liveness(ai_config))
     ai_failure_count = sum(1 for check in ai_checks if _ai_check_is_failure(check))
 
     oxlint_type_aware = bool(config.get_tool_defaults("oxlint").get("type_aware"))
