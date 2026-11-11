@@ -284,13 +284,38 @@ def render_markdown_report(
                 lines.append(tool_output.strip())
                 lines.append("```")
                 lines.append("")
-        elif result.issues:
-            lines.append(_MARKDOWN_ISSUES_HEADER)
-            lines.extend(_render_markdown_issue_rows(result.issues))
-            lines.append("")
         else:
-            lines.append("No issues found.\n")
+            if result.issues:
+                lines.append(_MARKDOWN_ISSUES_HEADER)
+                lines.extend(_render_markdown_issue_rows(result.issues))
+                lines.append("")
+            elif not result.execution_failed:
+                lines.append("No issues found.\n")
+            if result.execution_failed:
+                lines.extend(_render_markdown_execution_failure(result))
     return "\n".join(lines)
+
+
+def _render_markdown_execution_failure(result: ToolResult) -> list[str]:
+    """Render the Markdown block for a tool that could not produce a verdict.
+
+    Without it, an execution failure with no parsed findings rendered as
+    "No issues found." and the tool's diagnostic was lost (#2371).
+
+    Args:
+        result: A result with ``execution_failed`` set.
+
+    Returns:
+        Markdown lines naming the failure and quoting the tool output.
+    """
+    lines = [
+        f"**{result.name} could not complete its check; findings are incomplete.**",
+        "",
+    ]
+    tool_output = (result.output or "").strip()
+    if tool_output:
+        lines.extend(["```text", tool_output, "```", ""])
+    return lines
 
 
 @dataclass(frozen=True)

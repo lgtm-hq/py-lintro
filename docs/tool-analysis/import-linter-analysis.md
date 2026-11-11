@@ -27,13 +27,13 @@ declared contract against it. The built-in contract types are:
 Contracts live in `pyproject.toml` (`[tool.importlinter]`), `.importlinter`, or
 `setup.cfg` (`[importlinter]`). Native exit codes are:
 
-| Situation                               | Native `lint-imports`            |
-| --------------------------------------- | -------------------------------- |
-| Contract broken                         | exit 1                           |
-| Config present, contracts all kept      | exit 0                           |
-| Config present, **zero** contracts      | exit 0                           |
-| **No config file at all**               | error (non-zero)                 |
-| Run aborted before checking (see below) | exit 1, diagnostic but no report |
+| Situation                               | Native `lint-imports`              |
+| --------------------------------------- | ---------------------------------- |
+| Contract broken                         | exit 1                             |
+| Config present, contracts all kept      | exit 0                             |
+| Config present, **zero** contracts      | exit 0                             |
+| **No config file at all**               | error (non-zero)                   |
+| Could not check, or crashed (see below) | exit 1, diagnostic, partial report |
 
 ## Lintro Implementation Analysis
 
@@ -62,18 +62,34 @@ Contracts live in `pyproject.toml` (`[tool.importlinter]`), `.importlinter`, or
   lets import-linter stay enabled by default for projects that declare no contracts.
   This is a _different_ case from a config that exists with zero contracts — there the
   native tool already exits 0 and Lintro simply passes that through.
-- **A run that aborts before checking is one labelled issue.** `lint-imports` exits
-  non-zero without a contract report when it cannot start: an `ignore_imports` entry
-  that matches no import under `unmatched_ignore_imports_alerting = "error"`, a root
-  package that is not importable (`Could not find package 'x' in your Python path.`), a
-  malformed configuration. Lintro detects this case (non-zero exit with neither the
-  `Contracts: N kept, M broken.` summary nor the `Broken contracts` section) and reports
-  it as a failure with exactly one issue, so the totals and the JSON report never show a
-  zero-issue failure. `ToolResult.output` names the exit code and the command, followed
-  by the tool's stdout and stderr (or `lint-imports produced no output.`). The issue
-  carries the same diagnostic in its message because the console and report formatters
-  render only the issue table once a result has issues. A non-zero exit that _did_ print
-  a contract report is parsed as usual.
+- **A run without a complete report is an execution failure, not a finding.**
+  `lint-imports` also exits 1 when it cannot check the contracts. Examples: an
+  `ignore_imports` entry that matches no import under
+  `unmatched_ignore_imports_alerting = "error"`, a root package that is not importable
+  (`Could not find package 'x' in your Python path.`), a contract it rejects as
+  misconfigured, or a crash. Lintro treats a non-zero exit as a lint verdict only when
+  the report is complete:
+  - a `Contracts: N kept, M broken.` summary with `M` above zero;
+  - the underlined `Broken contracts` heading;
+  - chains parsed for at least `M` contracts;
+  - no Python traceback.
+
+  Anything else is reported the way the black, ruff and clippy plugins report a failed
+  run: `success` false, `execution_failed` true, `findings_complete` false, inspection
+  coverage unknown. The issues are only the chains genuinely parsed before the run
+  stopped, usually none. No issue is invented for the failure, so severity counts and
+  SARIF stay truthful, and the unknown coverage keeps the run from updating a severity
+  baseline. `ToolResult.output` starts `import-linter failed (exit N) running:`, then
+  the command, then the tool's stdout and stderr (or
+  `lint-imports produced no output.`). The console prints that block, below the issue
+  table when chains were recovered. The Markdown report adds a "could not complete its
+  check" note quoting it, and JSON carries `"execution_failed": true` with the block in
+  `output`.
+
+- **Other failure shapes are reported elsewhere.** A timeout is reported as a timed-out
+  run with zero issues, not as an execution failure. A `pyproject.toml` that cannot be
+  parsed never reaches `lint-imports`: config discovery skips it, so the run reports "No
+  import-linter configuration found" unless another candidate file declares a section.
 - **`--no-cache` is always passed** so a check never writes a cache directory into the
   project being linted, and `--no-logo` keeps the ASCII banner out of parsed output.
 
@@ -91,18 +107,8 @@ issue fields are mapped accordingly:
 | `severity`   | `ERROR` — a broken contract fails the run                     |
 
 One issue is emitted per broken chain, so a contract broken by three distinct chains
-produces three issues.
-
-A run that aborts before checking any contract produces a single issue, mapped
-differently:
-
-| Lintro field | Value                                                                 |
-| ------------ | --------------------------------------------------------------------- |
-| `file`       | Path of the configuration file `lint-imports` was run with            |
-| `line`       | `0`                                                                   |
-| `code`       | `Execution error` (no documentation link)                             |
-| `message`    | `lint-imports exited <N> before checking contracts: <the diagnostic>` |
-| `severity`   | `ERROR`                                                               |
+produces three issues. A run that could not check its contracts adds no issue of its
+own; see the execution-failure entry under "Design decisions".
 
 ### Limitations
 

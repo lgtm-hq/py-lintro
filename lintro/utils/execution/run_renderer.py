@@ -146,6 +146,10 @@ def _display_fix_result(
             issues_count=outcome.issues_count,
             group_by=group_by,
         )
+        if result.execution_failed and result.issues and result.output:
+            # The issue table alone hides why the run's findings are
+            # incomplete, so keep the tool's diagnostic beneath it (#2371).
+            display_output = f"{display_output}\n\n{result.output.strip()}"
     if result.output and raw_output:
         display_output = result.output
 

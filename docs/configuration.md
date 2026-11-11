@@ -1907,11 +1907,15 @@ forbidden_modules = ["mypkg.cli"]
   from the config file's directory so the root package is importable.
 - A project with no import-linter configuration reports a clean result rather than an
   error, so the tool is safe to leave enabled.
-- When `lint-imports` stops before checking any contract (an `ignore_imports` entry that
-  matches nothing under `unmatched_ignore_imports_alerting = "error"`, a root package
-  that cannot be imported, a bad config), the run fails with one `Execution error` issue
-  anchored to the config file. Its message is the tool's own diagnostic, for example
-  `lint-imports exited 1 before checking contracts: No matches for ignored import ...`.
+- When `lint-imports` exits non-zero without a complete contract report (an
+  `ignore_imports` entry that matches nothing under
+  `unmatched_ignore_imports_alerting = "error"`, a root package that cannot be imported,
+  a misconfigured contract, a crash), the run is an execution failure, not a finding. It
+  fails with `execution_failed` set and no invented issue, and the console, Markdown and
+  JSON output show `import-linter failed (exit N) running:` with the command and the
+  tool's own message. Chains printed before a crash are still reported. A timeout is
+  reported as a timed-out run instead. A `pyproject.toml` that cannot be parsed is
+  skipped during config discovery, before `lint-imports` runs.
 - Check-only. `lintro format` never runs import-linter.
 
 **Available `--tool-options`:**

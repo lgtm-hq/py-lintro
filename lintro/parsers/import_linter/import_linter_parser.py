@@ -50,6 +50,10 @@ IMPORT_LINTER_SUMMARY_PATTERN = re.compile(
     r"^Contracts:\s*(?P<kept>\d+)\s+kept,\s*(?P<broken>\d+)\s+broken\.?$",
 )
 
+# First line of an uncaught Python exception report. Its presence means the
+# run crashed, whatever else it printed before the crash.
+TRACEBACK_HEADER: str = "Traceback (most recent call last):"
+
 # "mypkg.low -> mypkg.a (l.1)". The trailing parenthetical is optional (not every
 # contract type reports one) and import-linter renders it as a comma-separated
 # list, using "l.?" when the line number is unknown — e.g. "(l.1, l.5)", "(l.?)".
@@ -184,6 +188,46 @@ def parse_import_linter_summary(output: str | None) -> tuple[int, int] | None:
         if match:
             return int(match.group("kept")), int(match.group("broken"))
     return None
+
+
+def is_complete_broken_report(
+    output: str | None,
+    issues: list[ImportLinterIssue],
+) -> bool:
+    """Report whether a failing run printed a complete broken-contracts report.
+
+    ``lint-imports`` exits non-zero both when contracts are broken and when it
+    cannot check them at all (bad configuration, unimportable package, a crash
+    part-way through). Only the first is a lint verdict. It is recognised by
+    every part of the report being present and consistent:
+
+    * a ``Contracts: N kept, M broken.`` summary with ``M`` greater than zero;
+    * the underlined ``Broken contracts`` heading, found exactly as the parser
+      finds it;
+    * parsed chains for at least ``M`` distinct contracts;
+    * no Python traceback anywhere in the output.
+
+    Anything less (a lone heading, a summary followed by a traceback, a heading
+    with no chains) is not a verdict, and the caller reports the run as an
+    execution failure while keeping whatever chains were recovered.
+
+    Args:
+        output: Combined stdout and stderr of a run that exited non-zero.
+        issues: Chains already parsed from that output.
+
+    Returns:
+        True when the output is a complete broken-contracts report.
+    """
+    summary = parse_import_linter_summary(output)
+    if not output or summary is None or summary[1] == 0:
+        return False
+    lines = strip_ansi_codes(output).splitlines()
+    if any(line.startswith(TRACEBACK_HEADER) for line in lines):
+        return False
+    if _find_broken_section_start(lines) is None:
+        return False
+    broken_contracts = {issue.code for issue in issues if issue.code}
+    return len(broken_contracts) >= summary[1]
 
 
 def parse_import_linter_output(output: str | None) -> list[ImportLinterIssue]:
