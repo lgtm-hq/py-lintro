@@ -23,6 +23,7 @@ import lintro.utils.tool_executor as te
 from lintro.config.execution_config import ExecutionConfig
 from lintro.config.lintro_config import LintroConfig
 from lintro.enums.action import Action
+from lintro.models.core.python_formatting_decision import PythonFormattingDecision
 from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.severity_counts import SeverityCounts
 from lintro.models.core.tool_result import ToolResult
@@ -1727,7 +1728,15 @@ def test_refresh_preserves_python_formatting_while_recomputing_findings(
     ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger)
     artifact = RunArtifact(
         tool_results=[ToolResult(name="ruff", success=True, issues_count=0)],
-        python_formatting="ruff owns Python formatting (black: not installed)",
+        python_formatting=PythonFormattingDecision(
+            owner="ruff",
+            reason="black: not installed",
+            ruff_format=True,
+            ruff_format_check=True,
+            run_black=False,
+            black_unavailable=True,
+            text="ruff owns Python formatting (black: not installed)",
+        ),
     )
     refreshed = te.refresh_artifact(artifact, ctx=ctx)
     assert_that(refreshed.python_formatting).is_equal_to(artifact.python_formatting)
@@ -1738,4 +1747,6 @@ def test_refresh_preserves_python_formatting_while_recomputing_findings(
         for name, _, kwargs in fake_logger.calls
         if name == "console_output"
     ]
-    assert_that(messages).contains(artifact.python_formatting)
+    assert_that(messages).contains(
+        refreshed.python_formatting.text if refreshed.python_formatting else "",
+    )

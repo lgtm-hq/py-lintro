@@ -79,6 +79,10 @@ def test_run_lint_on_changed_files_invokes_tool_check() -> None:
                 return_value=mock_tool,
             ),
             patch(
+                "lintro.ai.review.lint_bridge.resolve_python_formatting",
+                return_value=None,
+            ),
+            patch(
                 "lintro.ai.review.lint_bridge.configure_tool_for_execution",
                 side_effect=lambda *, tool, **kwargs: tool,
             ) as mock_configure,
@@ -94,6 +98,7 @@ def test_run_lint_on_changed_files_invokes_tool_check() -> None:
     # would leave ruff formatting alongside black.
     for call in mock_configure.call_args_list:
         assert_that(call.kwargs["selected_tools"]).is_equal_to({"ruff", "black"})
+        assert_that(call.kwargs["paths"]).is_equal_to(["src/main.py"])
 
 
 def test_run_lint_on_changed_files_returns_empty_when_selection_fails() -> None:

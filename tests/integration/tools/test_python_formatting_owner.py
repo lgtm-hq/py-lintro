@@ -1,6 +1,8 @@
 """Exercise formatting fallback without changing the installed Black binary."""
 
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 from assertpy import assert_that
@@ -124,15 +126,18 @@ def test_explanation_reports_cli_format_check_override(
 
 
 @require_tool("black")
+@pytest.mark.parametrize("invocation", ["check", "review"])
 def test_external_python_path_uses_project_probe_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    invocation: str,
 ) -> None:
     """Formatting probes and execution share the target project's cache root.
 
     Args:
         tmp_path: Parent of unrelated cwd and target project.
         monkeypatch: Environment and cache-location controls.
+        invocation: CLI check or the AI review lint bridge.
     """
     from lintro.tools.core import snapshots
 
@@ -157,11 +162,189 @@ def test_external_python_path_uses_project_probe_cache(
         return ((cache_root or Path.cwd()) / snapshots.SNAPSHOT_CACHE_RELPATH).resolve()
 
     monkeypatch.setattr(snapshots, "_cache_file_path", cache_path)
-    result = CliRunner().invoke(
-        check_command,
-        [str(target), "--tools", "ruff,black", "--yes", "--no-art"],
-    )
-    assert_that(result.exit_code).is_equal_to(1)
-    assert_that(result.output).contains("black owns Python formatting")
+    if invocation == "check":
+        result = CliRunner().invoke(
+            check_command,
+            [str(target), "--tools", "ruff,black", "--yes", "--no-art"],
+        )
+        assert_that(result.exit_code).is_equal_to(1)
+        assert_that(result.output).contains("black owns Python formatting")
+    else:
+        from lintro.ai.review.lint_bridge import run_lint_on_changed_files
+        from lintro.config.execution_config import ExecutionConfig
+        from lintro.config.lintro_config import LintroConfig
+
+        results = run_lint_on_changed_files(
+            changed_files=[str(target)],
+            lintro_config=LintroConfig(
+                execution=ExecutionConfig(enabled_tools=["ruff", "black"]),
+            ),
+        )
+        assert_that({result.name for result in results}).is_equal_to({"ruff", "black"})
+        assert_that(sum(result.issues_count or 0 for result in results)).is_equal_to(1)
     assert_that((unrelated / ".lintro-cache").exists()).is_false()
     assert_that((project / snapshots.SNAPSHOT_CACHE_RELPATH).exists()).is_true()
+
+
+@require_tool("black")
+def test_incremental_check_does_not_consume_black_discovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ownership resolution must leave Black's incremental cache untouched.
+
+    Args:
+        tmp_path: Isolated fixture project.
+        monkeypatch: Working-directory isolation.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff.lint]\nselect = []\n")
+    (tmp_path / "a.py").write_text('x = {  "a":1 }\n')
+    result = CliRunner().invoke(
+        check_command,
+        [".", "--tools", "ruff,black", "--incremental", "--yes"],
+    )
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(result.output).contains(
+        "Would reformat file",
+        "black owns Python formatting",
+    )
+    assert_that(result.output).does_not_contain("No .py/.pyi files found to check")
+
+
+@require_tool("black")
+def test_common_check_adds_no_discovery_walks_or_subprocess_probes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One native discovery and one capability probe per tool suffice.
+
+    Args:
+        tmp_path: Isolated project.
+        monkeypatch: Observe native file walks and actual capability probes.
+    """
+    from lintro.tools.core import snapshots
+    from lintro.utils import path_filtering
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff.lint]\nselect = []\n")
+    (tmp_path / "a.py").write_text('x = {  "a":1 }\n')
+    walks: list[tuple[str, ...]] = []
+    probes: list[str] = []
+    original_anchors = path_filtering.resolve_exclude_anchors
+    original_probe = snapshots.probe_tool
+
+    def anchors(paths: Sequence[str] | None = None) -> tuple[str, ...]:
+        """Count the hook reached by every walk, including imported aliases.
+
+        Args:
+            paths: Native discovery scan paths.
+
+        Returns:
+            Real exclusion anchors for that walk.
+        """
+        walks.append(tuple(paths or []))
+        return original_anchors(paths)
+
+    def probe(name: str, **kwargs: Any) -> ToolSnapshot:
+        """Observe a real subprocess capability probe.
+
+        Args:
+            name: Tool under inspection.
+            **kwargs: Probe options.
+
+        Returns:
+            Real capability evidence.
+        """
+        probes.append(name)
+        return original_probe(name, **kwargs)
+
+    monkeypatch.setattr(path_filtering, "resolve_exclude_anchors", anchors)
+    monkeypatch.setattr(snapshots, "probe_tool", probe)
+    result = CliRunner().invoke(check_command, [".", "--tools", "ruff,black", "--yes"])
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(result.output).contains("Would reformat file")
+    # Main performs two native discoveries plus its existing module-size scan.
+    # The shared hook also sees any accidental ownership-resolution walk.
+    assert_that(walks).is_equal_to([(".",), (".",), (".",)])
+    assert_that(sorted(probes)).is_equal_to(["black", "ruff"])
+
+
+@require_tool("black")
+@pytest.mark.parametrize("action", ["check", "format"])
+def test_unconfirmed_decision_is_not_replaced_by_a_later_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    """An initial failed Black probe freezes Ruff on and Black off for this run.
+
+    Args:
+        tmp_path: Isolated project.
+        monkeypatch: Inject a transient probe failure before a healthy response.
+        action: Check or format invocation.
+    """
+    from lintro.tools.black.definition import BlackPlugin
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff.lint]\nselect = []\n")
+    target = tmp_path / "a.py"
+    target.write_text('x = {  "a":1 }\n')
+    original_probe = tool_snapshots.get_tool_snapshot
+    black_probes = 0
+
+    def probe(
+        name: str,
+        *,
+        force: bool = False,
+        cache_root: Path | None = None,
+    ) -> ToolSnapshot:
+        """Fail once, then expose the installed tool if incorrectly re-probed.
+
+        Args:
+            name: Tool to inspect.
+            force: Probe cache bypass flag.
+            cache_root: Execution directory.
+
+        Returns:
+            Real evidence on subsequent calls.
+
+        Raises:
+            RuntimeError: The first Black probe cannot be confirmed.
+        """
+        nonlocal black_probes
+        if name == "black":
+            black_probes += 1
+            if black_probes == 1:
+                raise RuntimeError("transient probe failure")
+        return original_probe(name, force=force, cache_root=cache_root)
+
+    def unexpected_black_write(*args: object, **kwargs: object) -> None:
+        """Reject a second writer after the run committed to Ruff.
+
+        Args:
+            *args: Ignored fix arguments.
+            **kwargs: Ignored fix options.
+
+        Raises:
+            AssertionError: Black was incorrectly allowed to write.
+        """
+        raise AssertionError("Black must not write after an unconfirmed decision")
+
+    monkeypatch.setattr(tool_snapshots, "get_tool_snapshot", probe)
+    monkeypatch.setattr(BlackPlugin, "fix", unexpected_black_write)
+    command = check_command if action == "check" else format_command
+    result = CliRunner().invoke(command, [".", "--tools", "ruff,black", "--yes"])
+    assert_that(result.exit_code).is_equal_to(1 if action == "check" else 0)
+    assert_that(result.output).contains(
+        "owner could not be confirmed",
+        "black skipped for this run",
+    )
+    assert_that(result.output).does_not_contain(
+        "format_check not run",
+        "format not run",
+    )
+    assert_that(black_probes).is_equal_to(1)
+    assert_that(target.read_text()).is_equal_to(
+        'x = {  "a":1 }\n' if action == "check" else 'x = {"a": 1}\n',
+    )

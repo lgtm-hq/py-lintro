@@ -16,10 +16,10 @@ from lintro.config.config_loader import get_config
 from lintro.enums.action import Action, normalize_action
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tools_value import ToolsValue
+from lintro.models.core.python_formatting_decision import PythonFormattingDecision
 from lintro.tools import tool_manager
 from lintro.utils.execution_paths import get_execution_cwd
-from lintro.utils.path_filtering import walk_files_with_excludes
-from lintro.utils.python_formatting import black_owns_python_formatting
+from lintro.utils.python_formatting import resolve_python_formatting
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
@@ -223,6 +223,7 @@ def configure_tool_for_execution(
     lintro_config: LintroConfig | None = None,
     diff_base: str | None = None,
     paths: Sequence[str] | None = None,
+    formatting_decision: PythonFormattingDecision | None = None,
 ) -> BaseToolPlugin:
     """Configure a tool for execution.
 
@@ -252,6 +253,7 @@ def configure_tool_for_execution(
         diff_base: Resolved git base ref for ``--diff`` scanning, or None to scan
             all discovered files.
         paths: Scan targets anchoring the formatting capability probe.
+        formatting_decision: Ownership already resolved for the entire invocation.
 
     Returns:
         The configured per-invocation tool copy to run.
@@ -309,118 +311,26 @@ def configure_tool_for_execution(
     if effective_tool_auto_install:
         tool.set_options(auto_install=True)
 
-    # Format authority on ``*.py``. The rule itself — fewest mutating
-    # capabilities wins — now lives in the scheduler (#1744, #2606), which
-    # records the demotion and reports it through explain, doctor and init:
-    # black owns FORMAT, so ruff is demoted to its FIX capability and its
-    # formatting stages are switched off only when black is runnable, unless
-    # the user explicitly asked for them. Applying that record here rather
-    # than repeating its conclusion is
-    # blocked by layering (``lintro.utils`` may not import ``lintro.tools``)
-    # and is left to the follow-up that lifts the executor into its own layer.
-    if tool_name == ToolName.RUFF.value and "black" in selected_tools:
-        cache_root = get_python_formatting_root(
-            paths=paths,
-            config_manager=config_manager,
-            tool_option_dict=tool_option_dict,
-            exclude=exclude,
-            include_venv=include_venv,
-            incremental=incremental,
-            diff_base=diff_base,
-        )
-        _apply_python_formatting_policy(
-            tool=tool,
-            action=action,
-            cli_overrides=cli_overrides,
-            config_manager=config_manager,
-            selected_tools=selected_tools,
-            cache_root=cache_root,
-        )
+    if tool_name == ToolName.RUFF.value and (
+        formatting_decision is not None or "black" in selected_tools
+    ):
+        if formatting_decision is None:
+            ruff_config = (
+                config_manager.get_tool_config("ruff").lintro_tool_config or {}
+            )
+            formatting_decision = resolve_python_formatting(
+                selected_tools,
+                action=action,
+                ruff_options={**ruff_config, **cli_overrides},
+                cache_root=Path(get_execution_cwd(list(paths or []))),
+            )
+        if formatting_decision is not None:
+            tool.set_options(
+                format=formatting_decision.ruff_format,
+                format_check=formatting_decision.ruff_format_check,
+            )
 
     return tool
-
-
-def _apply_python_formatting_policy(
-    *,
-    tool: BaseToolPlugin,
-    action: Action,
-    cli_overrides: dict[str, object],
-    config_manager: UnifiedConfigManager,
-    selected_tools: set[str],
-    cache_root: Path | None,
-) -> None:
-    """Demote Ruff only on confirmed Black capability evidence.
-
-    Args:
-        tool: Configured Ruff copy.
-        action: Check or format action.
-        cli_overrides: Explicit CLI options.
-        config_manager: Configuration sources.
-        selected_tools: Selected tool names.
-        cache_root: Black execution root for its capability probe.
-    """
-    if black_owns_python_formatting(selected_tools, cache_root=cache_root):
-        tool_config = config_manager.get_tool_config("ruff")
-        lintro_tool_cfg = tool_config.lintro_tool_config or {}
-        if action == Action.FIX:
-            if "format" not in cli_overrides and "format" not in lintro_tool_cfg:
-                tool.set_options(format=False)
-        else:  # check
-            if (
-                "format_check" not in cli_overrides
-                and "format_check" not in lintro_tool_cfg
-            ):
-                tool.set_options(format_check=False)
-
-
-def get_python_formatting_root(
-    *,
-    paths: Sequence[str] | None,
-    config_manager: UnifiedConfigManager,
-    tool_option_dict: dict[str, dict[str, object]],
-    exclude: str | None = None,
-    include_venv: bool = False,
-    incremental: bool = False,
-    diff_base: str | None = None,
-) -> Path:
-    """Resolve Black's probe root from the same candidates as its execution.
-
-    Args:
-        paths: Scan targets, or None for a standalone configuration call.
-        config_manager: Configuration sources used for this run.
-        tool_option_dict: CLI overrides used for this run.
-        exclude: CLI exclude patterns.
-        include_venv: Whether virtual environments are included.
-        incremental: Whether to restrict to changed files.
-        diff_base: Resolved diff base, if supplied.
-
-    Returns:
-        Black's project execution directory, without creating a cache in the cwd.
-    """
-    if paths is None:
-        return Path.cwd()
-    black = configure_tool_for_execution(
-        tool=tool_manager.get_tool("black"),
-        tool_name="black",
-        config_manager=config_manager,
-        tool_option_dict=tool_option_dict,
-        exclude=exclude,
-        include_venv=include_venv,
-        incremental=incremental,
-        action=Action.CHECK,
-        selected_tools=set(),
-        diff_base=diff_base,
-    )
-    files = walk_files_with_excludes(
-        paths=list(paths),
-        file_patterns=black.definition.file_patterns,
-        exclude_patterns=getattr(black, "exclude_patterns", []),
-        include_venv=include_venv,
-        incremental=incremental,
-        tool_name="black",
-        diff_base=diff_base,
-    )
-    return Path(get_execution_cwd(files or list(paths)))
 
 
 def get_tool_display_name(tool_name: str) -> str:

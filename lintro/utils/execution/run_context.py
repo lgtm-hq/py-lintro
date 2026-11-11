@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from lintro.enums.action import Action
+    from lintro.models.core.python_formatting_decision import PythonFormattingDecision
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,7 @@ class RunContext:
         profile: Whether to emit the human/JSON performance profile. Timings
             are recorded for main-phase tools regardless; this flag only
             gates rendering.
+        python_formatting: Immutable policy shared by all execution phases.
     """
 
     action: Action
@@ -54,3 +56,4 @@ class RunContext:
     clean_stdout_output: bool
     group_by: str = "auto"
     profile: bool = False
+    python_formatting: PythonFormattingDecision | None = None

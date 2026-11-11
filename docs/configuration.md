@@ -1260,7 +1260,9 @@ in order:
 `FORMAT`, the scheduler names one of them the owner and records every other tool's
 `FORMAT` as demoted **for that scope**. The demoted tool's `CHECK` stays enabled, so it
 keeps reporting. The decision is re-resolved on every run, not frozen at `lintro init`,
-and it is printed by `lintro check --explain-order`, `lintro doctor` and `lintro init`:
+and the static scheduler record is printed by `lintro doctor` and `lintro init`.
+`lintro check --explain-order` and the run summary instead show the runtime Python
+formatting decision, including availability and explicit tool options:
 
 ```text
   Format ownership (1):
@@ -1330,12 +1332,14 @@ linting and import sorting; both tools stay in the run.
   stages; enabling Ruff does not remove Black or change the final write order.
 
 The run summary and `lintro chk --explain-order` name the Python formatting owner and
-explain the fallback or demotion, using the actual probe diagnosis. CLI overrides are
-reflected in the explanation as well as the run summary. Formatting ownership is
-reported for read-only checks too, independently of write-conflict scheduling. If
-neither selected formatter is runnable (or Ruff formatting is explicitly disabled
-without runnable Black), the summary reports that Python formatting has no runnable
-owner.
+explain the fallback or demotion, using the actual probe diagnosis. The decision is
+resolved once per run without touching incremental file caches. If Black cannot be
+confirmed, Ruff remains enabled by default and Black is skipped for that invocation, so
+a later successful probe cannot enable a second writer. CLI overrides are reflected in
+the explanation as well as the run summary. Formatting ownership is reported for
+read-only checks too, independently of write-conflict scheduling. If neither selected
+formatter is runnable (or Ruff formatting is explicitly disabled without runnable
+Black), the summary reports that Python formatting has no runnable owner.
 
 Overrides when needed:
 

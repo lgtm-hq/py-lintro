@@ -10,7 +10,7 @@ from lintro.enums.action import Action
 from lintro.models.core.tool_snapshot import ToolSnapshot
 from lintro.tools.ruff.definition import RuffPlugin
 from lintro.utils.execution.tool_configuration import configure_tool_for_execution
-from lintro.utils.python_formatting import python_formatting_notice
+from lintro.utils.python_formatting import resolve_python_formatting
 from lintro.utils.unified_config import UnifiedConfigManager
 
 
@@ -108,7 +108,7 @@ def test_notice_does_not_invent_an_owner(
         "lintro.utils.tool_snapshots.get_tool_snapshot",
         return_value=ToolSnapshot(name="unavailable"),
     ):
-        notice = python_formatting_notice(
+        notice = resolve_python_formatting(
             selected,
             action=Action.CHECK,
             ruff_options=ruff_options,
@@ -116,7 +116,7 @@ def test_notice_does_not_invent_an_owner(
     if expected is None:
         assert_that(notice).is_none()
     else:
-        assert_that(notice).contains(expected)
+        assert_that(notice.text if notice else "").contains(expected)
 
 
 def test_notice_preserves_a_probe_failure_diagnostic() -> None:
@@ -125,12 +125,15 @@ def test_notice_preserves_a_probe_failure_diagnostic() -> None:
         "lintro.utils.tool_snapshots.get_tool_snapshot",
         side_effect=RuntimeError("internal probe crash"),
     ):
-        notice = python_formatting_notice(
+        notice = resolve_python_formatting(
             {"ruff", "black"},
             action=Action.CHECK,
             ruff_options={},
         )
-    assert_that(notice).contains("could not be confirmed", "capability probe failed")
+    assert_that(notice.text if notice else "").contains(
+        "could not be confirmed",
+        "capability probe failed",
+    )
 
 
 @pytest.mark.parametrize(
@@ -181,16 +184,16 @@ def test_format_ownership_and_execution_gate_agree(
             action=Action.CHECK,
             selected_tools={"ruff", "black"},
         )
-        notice = python_formatting_notice(
+        notice = resolve_python_formatting(
             {"ruff", "black"},
             action=Action.CHECK,
             ruff_options={},
         )
     assert_that(gate).is_none()
     assert_that(tool.options["format_check"]).is_false()
-    assert_that(notice).contains("black owns Python formatting")
+    assert_that(notice.text if notice else "").contains("black owns Python formatting")
     if not module_invocation:
-        assert_that(notice).contains("version lag allowed")
+        assert_that(notice.text if notice else "").contains("version lag allowed")
 
 
 @pytest.mark.parametrize(
@@ -223,13 +226,13 @@ def test_unconfirmed_black_probe_keeps_ruff_formatting(
             action=Action.FIX,
             selected_tools={"ruff", "black"},
         )
-        notice = python_formatting_notice(
+        notice = resolve_python_formatting(
             {"ruff", "black"},
             action=Action.FIX,
             ruff_options={},
         )
     assert_that(tool.options["format"]).is_true()
-    assert_that(notice).contains("owner could not be confirmed")
+    assert_that(notice.text if notice else "").contains("owner could not be confirmed")
 
 
 @pytest.mark.parametrize(
@@ -278,12 +281,14 @@ def test_notice_reports_the_actionable_reason(
         "lintro.utils.tool_snapshots.get_tool_snapshot",
         side_effect=[black, ruff],
     ):
-        notice = python_formatting_notice(
+        notice = resolve_python_formatting(
             {"ruff", "black"},
             action=Action.CHECK,
             ruff_options=options,
         )
-    assert_that(notice).contains(reason).does_not_contain("unavailable or")
+    assert_that(notice.text if notice else "").contains(reason).does_not_contain(
+        "unavailable or",
+    )
 
 
 def test_notice_does_not_hide_programming_errors() -> None:
@@ -293,7 +298,7 @@ def test_notice_does_not_hide_programming_errors() -> None:
         side_effect=ValueError("invalid evidence"),
     ):
         with pytest.raises(ValueError, match="invalid evidence"):
-            python_formatting_notice(
+            resolve_python_formatting(
                 {"ruff", "black"},
                 action=Action.CHECK,
                 ruff_options={},

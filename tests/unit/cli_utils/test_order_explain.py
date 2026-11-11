@@ -20,6 +20,7 @@ from lintro.cli_utils.order_explain import (
     format_ownership_notice,
 )
 from lintro.enums.capability import Cap
+from lintro.models.core.python_formatting_decision import PythonFormattingDecision
 from lintro.tools.core.scheduler import (
     DerivedOrder,
     FormatDemotion,
@@ -438,28 +439,32 @@ def test_an_unresolvable_diff_base_explains_the_unnarrowed_run(
 
 @pytest.mark.parametrize("unrelated", [False, True])
 @pytest.mark.parametrize(
-    ("notice", "has_owner"),
+    ("notice", "owner"),
     [
-        ("black owns Python formatting (available); ruff format_check not run", True),
-        ("ruff owns Python formatting (black: not installed)", True),
+        (
+            "black owns Python formatting (available); ruff format_check not run",
+            "black",
+        ),
+        ("ruff owns Python formatting (black: not installed)", "ruff"),
         (
             "Python formatting has no runnable owner (black: not installed; ruff disabled)",
-            False,
+            None,
         ),
+        ("Rendering can change independently of the owner field", "ruff"),
     ],
-    ids=["black", "ruff-fallback", "no-owner"],
+    ids=["black", "ruff-fallback", "no-owner", "changed-wording"],
 )
 def test_runtime_ownership_replaces_only_python_demotion_records(
     unrelated: bool,
     notice: str,
-    has_owner: bool,
+    owner: str | None,
 ) -> None:
     """Runtime evidence replaces both Python scopes without losing other owners.
 
     Args:
         unrelated: Include an independent formatter demotion.
         notice: Runtime ownership wording to render.
-        has_owner: Whether the wording confirms an owner.
+        owner: Structurally confirmed owner, independent of wording.
     """
     python_records = tuple(
         FormatDemotion(winner="black", loser="ruff", scope=scope, rule="static rule")
@@ -472,9 +477,18 @@ def test_runtime_ownership_replaces_only_python_demotion_records(
         rule="precedence",
     )
     records = (*python_records, other) if unrelated else python_records
-    lines = format_order_report(_report(demotions=records), python_formatting=notice)
+    decision = PythonFormattingDecision(
+        owner=owner,
+        reason="test evidence",
+        ruff_format=owner == "ruff",
+        ruff_format_check=owner == "ruff",
+        run_black=owner == "black",
+        black_unavailable=False,
+        text=notice,
+    )
+    lines = format_order_report(_report(demotions=records), python_formatting=decision)
     assert_that(lines).contains(
-        f"  Format ownership ({int(unrelated) + int(has_owner)}):",
+        f"  Format ownership ({int(unrelated) + int(owner is not None)}):",
         f"    {notice}",
     )
     for record in python_records:

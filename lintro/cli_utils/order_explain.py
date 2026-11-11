@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
     from rich.console import Console
 
+    from lintro.models.core.python_formatting_decision import PythonFormattingDecision
     from lintro.tools.core.scheduler import (
         DerivedOrder,
         FormatDemotion,
@@ -149,7 +150,7 @@ def _format_demotions(demotions: Sequence[FormatDemotion]) -> list[str]:
 def format_order_report(
     report: DerivedOrder,
     *,
-    python_formatting: str | None = None,
+    python_formatting: PythonFormattingDecision | None = None,
 ) -> list[str]:
     """Render the full execution-order explanation.
 
@@ -189,9 +190,9 @@ def format_order_report(
             for record in demotions
             if {record.winner, record.loser} != {"black", "ruff"}
         )
-        owner_count = int(" owns Python formatting " in python_formatting)
+        owner_count = int(python_formatting.owner is not None)
         lines.append(f"  Format ownership ({len(demotions) + owner_count}):")
-        lines.append(f"    {python_formatting}")
+        lines.append(f"    {python_formatting.text}")
         lines.extend(f"    {record.reason}" for record in demotions)
     else:
         lines.extend(_format_demotions(demotions))
@@ -343,10 +344,13 @@ def explain_order_lines(
     Returns:
         Plain-text lines, ready to print one per line.
     """
-    from lintro.utils.execution.tool_configuration import (
-        get_python_formatting_root,
-        get_tools_to_run,
-    )
+    from pathlib import Path
+
+    from lintro.enums.action import Action
+    from lintro.utils.execution.tool_configuration import get_tools_to_run
+    from lintro.utils.execution_paths import get_execution_cwd
+    from lintro.utils.python_formatting import resolve_python_formatting
+    from lintro.utils.unified_config import UnifiedConfigManager
 
     selection = get_tools_to_run(
         tools,
@@ -362,40 +366,31 @@ def explain_order_lines(
     # each tool would actually be handed, so an explanation that dropped the
     # excludes or the diff base would report conflicts and demotions for files
     # the run could never touch.
-    from lintro.enums.action import Action
-    from lintro.utils.python_formatting import python_formatting_notice
-    from lintro.utils.unified_config import UnifiedConfigManager
-
     config_manager = UnifiedConfigManager()
     ruff_config = config_manager.get_tool_config("ruff").lintro_tool_config or {}
     tool_option_dict = tool_option_dict or {}
     resolved_diff_base = _explained_diff_base(diff_base, paths)
+    decision = resolve_python_formatting(
+        selection.to_run,
+        action=Action.CHECK if action == "check" or dry_run else Action.FIX,
+        ruff_options={**ruff_config, **tool_option_dict.get("ruff", {})},
+        cache_root=Path(get_execution_cwd(list(paths))),
+    )
+    active = [
+        name
+        for name in selection.to_run
+        if name != "black" or decision is None or decision.run_black
+    ]
     return format_order_report(
         build_order_report(
-            selection.to_run,
+            active,
             paths=list(paths) or None,
             exclude=exclude,
             include_venv=include_venv,
             diff_base=resolved_diff_base,
             write_conflicts=action != "check" and not dry_run,
         ),
-        python_formatting=python_formatting_notice(
-            selection.to_run,
-            action=Action.CHECK if action == "check" or dry_run else Action.FIX,
-            ruff_options={**ruff_config, **tool_option_dict.get("ruff", {})},
-            cache_root=(
-                get_python_formatting_root(
-                    paths=paths,
-                    config_manager=config_manager,
-                    tool_option_dict=tool_option_dict,
-                    exclude=exclude,
-                    include_venv=include_venv,
-                    diff_base=resolved_diff_base,
-                )
-                if {"ruff", "black"}.issubset(selection.to_run)
-                else None
-            ),
-        ),
+        python_formatting=decision,
     )
 
 

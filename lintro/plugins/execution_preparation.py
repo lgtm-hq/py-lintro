@@ -25,15 +25,6 @@ from lintro.utils.tool_snapshots import (
     ALLOW_VERSION_LAG_ENV,
     snapshot_is_runnable,
 )
-from lintro.utils.tool_snapshots import (
-    VersionLagPolicy as VersionLagPolicy,
-)
-from lintro.utils.tool_snapshots import (
-    _parse_allow_version_lag as _parse_allow_version_lag,
-)
-from lintro.utils.tool_snapshots import (
-    _version_lag_allowed as _version_lag_allowed,
-)
 
 # Constants for default values
 DEFAULT_TIMEOUT: int = 30
