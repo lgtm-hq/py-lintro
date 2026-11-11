@@ -9,7 +9,10 @@ from typing import TYPE_CHECKING
 from assertpy import assert_that
 
 from lintro.enums.severity_level import SeverityLevel
-from lintro.parsers.import_linter.import_linter_issue import ImportLinterIssue
+from lintro.parsers.import_linter.import_linter_issue import (
+    IMPORT_LINTER_EXECUTION_ERROR_CODE,
+    ImportLinterIssue,
+)
 from tests.integration._tools import require_tool
 
 if TYPE_CHECKING:
@@ -123,3 +126,34 @@ def test_check_with_an_empty_contract_set_runs_the_tool(
     assert_that(result.skipped).is_false()
     # Proof the binary ran: only lint-imports emits the summary line.
     assert_that(result.output).contains("0 kept, 0 broken")
+
+
+def test_check_names_an_unmatched_ignore_failure(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    unmatched_ignore_project: str,
+) -> None:
+    """A run aborted by an unmatched ``ignore_imports`` entry carries its reason.
+
+    ``lint-imports`` exits 1 and prints only its diagnostic, with no contract
+    report. Lintro must label that failure and count it as one issue rather
+    than report a bare, zero-issue failure (#2371).
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        unmatched_ignore_project: Staged project with an unmatched ignore.
+    """
+    plugin = get_plugin("import-linter")
+    result = plugin.check([unmatched_ignore_project], {})
+
+    diagnostic = (
+        "No matches for ignored import unmatchedpkg.storage -> unmatchedpkg.api."
+    )
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.output).starts_with("import-linter failed (exit 1) running:")
+    assert_that(result.output).contains(diagnostic)
+    issue = result.issues[0]
+    assert isinstance(issue, ImportLinterIssue)  # nosec B101 - narrow type for mypy
+    assert_that(issue.code).is_equal_to(IMPORT_LINTER_EXECUTION_ERROR_CODE)
+    assert_that(issue.file).ends_with(".importlinter")
+    assert_that(issue.message).contains(diagnostic)

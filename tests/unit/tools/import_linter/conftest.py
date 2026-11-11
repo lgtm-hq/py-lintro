@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Protocol
 
 import pytest
 
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.tools.import_linter.definition import ImportLinterPlugin
 
 BROKEN_OUTPUT = """\
@@ -48,6 +50,65 @@ Layered architecture KEPT
 
 Contracts: 1 kept, 0 broken.
 """
+
+
+class RunFactory(Protocol):
+    """Callable building a fake ``lint-imports`` subprocess result."""
+
+    def __call__(
+        self,
+        *,
+        returncode: int,
+        stdout: str = "",
+        stderr: str = "",
+    ) -> SubprocessResult:
+        """Build a subprocess result.
+
+        Args:
+            returncode: Exit code of the fake run.
+            stdout: Captured standard output.
+            stderr: Captured standard error.
+
+        Returns:
+            The fake subprocess result.
+        """
+        ...
+
+
+@pytest.fixture
+def make_run() -> RunFactory:
+    """Provide a factory for fake ``lint-imports`` subprocess results.
+
+    The combined ``output`` mirrors ``run_subprocess``: stdout then stderr.
+
+    Returns:
+        Factory building ``SubprocessResult`` objects.
+    """
+
+    def _make(
+        *,
+        returncode: int,
+        stdout: str = "",
+        stderr: str = "",
+    ) -> SubprocessResult:
+        """Build one fake run.
+
+        Args:
+            returncode: Exit code of the fake run.
+            stdout: Captured standard output.
+            stderr: Captured standard error.
+
+        Returns:
+            The fake subprocess result.
+        """
+        return SubprocessResult(
+            returncode=returncode,
+            stdout=stdout,
+            stderr=stderr,
+            output=stdout + stderr,
+        )
+
+    return _make
 
 
 @pytest.fixture

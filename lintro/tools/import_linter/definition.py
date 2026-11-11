@@ -24,9 +24,17 @@ from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.models.core.tool_outcome import Checked, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_parser import strip_ansi_codes
+from lintro.parsers.import_linter.import_linter_issue import (
+    IMPORT_LINTER_EXECUTION_ERROR_CODE,
+    ImportLinterIssue,
+)
 from lintro.parsers.import_linter.import_linter_parser import (
+    BROKEN_CONTRACTS_HEADING,
+    IMPORT_LINTER_SUMMARY_PATTERN,
     parse_import_linter_output,
 )
 from lintro.plugins.base import BaseToolPlugin
@@ -112,6 +120,29 @@ def _declares_import_linter(config_path: Path) -> bool:
     if config_path.name == "pyproject.toml":
         return _pyproject_declares_import_linter(config_path=config_path)
     return _ini_declares_import_linter(config_path=config_path)
+
+
+def _has_contract_report(output: str) -> bool:
+    """Report whether ``lint-imports`` output contains a contract report.
+
+    A run that evaluated its contracts always prints the
+    ``Contracts: N kept, M broken.`` summary, and a run with broken contracts
+    also prints the ``Broken contracts`` section. Output with neither means the
+    tool stopped before checking anything.
+
+    Args:
+        output: Combined stdout and stderr of one ``lint-imports`` run.
+
+    Returns:
+        True when the summary line or the broken-contracts heading is present.
+    """
+    for line in strip_ansi_codes(output).splitlines():
+        stripped = line.strip()
+        if stripped == BROKEN_CONTRACTS_HEADING:
+            return True
+        if IMPORT_LINTER_SUMMARY_PATTERN.match(stripped):
+            return True
+    return False
 
 
 def find_import_linter_config(paths: list[str]) -> Path | None:
@@ -210,15 +241,18 @@ class ImportLinterPlugin(BaseToolPlugin):
         """Return the import-linter contract-types documentation URL.
 
         import-linter has one documentation page describing every contract
-        type, so all codes resolve to it.
+        type, so all contract names resolve to it. The synthetic
+        execution-failure code is not a contract, and that page would not
+        explain it, so it gets no link.
 
         Args:
             code: Contract name (e.g. ``"Layered architecture"``).
 
         Returns:
-            URL to the import-linter documentation, or None if code is empty.
+            URL to the import-linter documentation, or None if code is empty
+            or names the execution-failure issue.
         """
-        if not code:
+        if not code or code == IMPORT_LINTER_EXECUTION_ERROR_CODE:
             return None
         return DocUrlTemplate.IMPORT_LINTER
 
@@ -246,7 +280,7 @@ class ImportLinterPlugin(BaseToolPlugin):
 
         cmd = self._build_command(config_path=config_path)
         try:
-            success, output = self._run_subprocess(
+            run = self._run_subprocess_result(
                 cmd=cmd,
                 timeout=ctx.timeout,
                 cwd=str(config_path.parent),
@@ -259,11 +293,19 @@ class ImportLinterPlugin(BaseToolPlugin):
                 name=self.definition.name,
             )
 
+        output = run.output
+        if not run.success and not _has_contract_report(output=output):
+            return self._execution_failure_result(
+                run=run,
+                cmd=cmd,
+                config_path=config_path,
+            )
+
         issues = parse_import_linter_output(output=output)
         return ToolResult.from_outcome(
             ToolOutcome(
                 execution=Checked(
-                    success=success and (not issues),
+                    success=run.success and (not issues),
                     inspected_files=True,
                 ),
                 issues_count=len(issues),
@@ -271,6 +313,54 @@ class ImportLinterPlugin(BaseToolPlugin):
             name=self.definition.name,
             output=output,
             issues=issues,
+        )
+
+    def _execution_failure_result(
+        self,
+        *,
+        run: SubprocessResult,
+        cmd: list[str],
+        config_path: Path,
+    ) -> ToolResult:
+        """Build the result for a ``lint-imports`` run that aborted early.
+
+        The tool exited non-zero without evaluating any contract (see
+        :meth:`ImportLinterIssue.execution_failure`). The result names the
+        failure in ``output`` (exit code, command, captured diagnostic) and
+        carries one synthetic issue holding the same reason, so the issue
+        totals, the console table and the JSON report all show why the run
+        failed instead of a zero-issue failure (#2371).
+
+        Args:
+            run: Result of the ``lint-imports`` subprocess.
+            cmd: Command that was run.
+            config_path: Configuration file the command used.
+
+        Returns:
+            A failed ToolResult with exactly one execution-failure issue.
+        """
+        captured = [
+            stream.strip() for stream in (run.stdout, run.stderr) if stream.strip()
+        ]
+        reason = "\n".join(captured) or "lint-imports produced no output."
+        output = (
+            f"import-linter failed (exit {run.returncode}) running:\n"
+            f"  {' '.join(cmd)}\n"
+            f"{reason}"
+        )
+        issue = ImportLinterIssue.execution_failure(
+            config_path=str(config_path),
+            returncode=run.returncode,
+            reason=reason,
+        )
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=False, inspected_files=False),
+                issues_count=1,
+            ),
+            name=self.definition.name,
+            output=output,
+            issues=[issue],
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

@@ -9,10 +9,12 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.tools.import_linter.definition import (
     ImportLinterPlugin,
     find_import_linter_config,
 )
+from tests.unit.tools.import_linter.conftest import RunFactory
 
 _VERSION_PATCH = "lintro.plugins.execution_preparation.verify_tool_version"
 
@@ -21,6 +23,7 @@ def test_check_reports_broken_chain(
     import_linter_plugin: ImportLinterPlugin,
     project_with_contracts: Path,
     broken_output: str,
+    make_run: RunFactory,
 ) -> None:
     """A broken contract produces a failing result with the chain attached.
 
@@ -28,13 +31,14 @@ def test_check_reports_broken_chain(
         import_linter_plugin: Plugin under test.
         project_with_contracts: Project root carrying import contracts.
         broken_output: Output with one broken contract.
+        make_run: Factory for fake ``lint-imports`` runs.
     """
     with (
         patch(_VERSION_PATCH, return_value=None),
         patch.object(
             import_linter_plugin,
-            "_run_subprocess",
-            return_value=(False, broken_output),
+            "_run_subprocess_result",
+            return_value=make_run(returncode=1, stdout=broken_output),
         ),
     ):
         result = import_linter_plugin.check([str(project_with_contracts)], {})
@@ -49,6 +53,7 @@ def test_check_clean_project_succeeds(
     import_linter_plugin: ImportLinterPlugin,
     project_with_contracts: Path,
     kept_output: str,
+    make_run: RunFactory,
 ) -> None:
     """A kept contract set produces a passing result with no issues.
 
@@ -56,13 +61,14 @@ def test_check_clean_project_succeeds(
         import_linter_plugin: Plugin under test.
         project_with_contracts: Project root carrying import contracts.
         kept_output: Output where the only contract is kept.
+        make_run: Factory for fake ``lint-imports`` runs.
     """
     with (
         patch(_VERSION_PATCH, return_value=None),
         patch.object(
             import_linter_plugin,
-            "_run_subprocess",
-            return_value=(True, kept_output),
+            "_run_subprocess_result",
+            return_value=make_run(returncode=0, stdout=kept_output),
         ) as run,
     ):
         result = import_linter_plugin.check([str(project_with_contracts)], {})
@@ -79,6 +85,7 @@ def test_check_runs_once_regardless_of_file_count(
     import_linter_plugin: ImportLinterPlugin,
     project_with_contracts: Path,
     kept_output: str,
+    make_run: RunFactory,
 ) -> None:
     """The tool is invoked a single time even with many discovered files.
 
@@ -86,6 +93,7 @@ def test_check_runs_once_regardless_of_file_count(
         import_linter_plugin: Plugin under test.
         project_with_contracts: Project root carrying import contracts.
         kept_output: Output where the only contract is kept.
+        make_run: Factory for fake ``lint-imports`` runs.
     """
     package = project_with_contracts / "pkg"
     for name in ("api.py", "services.py", "storage.py"):
@@ -96,21 +104,25 @@ def test_check_runs_once_regardless_of_file_count(
 
     calls: list[dict[str, object]] = []
 
-    def fake_run(**kwargs: object) -> tuple[bool, str]:
+    def fake_run(**kwargs: object) -> SubprocessResult:
         """Record one lint-imports invocation and report a kept contract.
 
         Args:
-            **kwargs: Arguments the plugin passed to ``_run_subprocess``.
+            **kwargs: Arguments the plugin passed to ``_run_subprocess_result``.
 
         Returns:
             A successful run carrying the kept-contract output.
         """
         calls.append(dict(kwargs))
-        return (True, kept_output)
+        return make_run(returncode=0, stdout=kept_output)
 
     with (
         patch(_VERSION_PATCH, return_value=None),
-        patch.object(import_linter_plugin, "_run_subprocess", side_effect=fake_run),
+        patch.object(
+            import_linter_plugin,
+            "_run_subprocess_result",
+            side_effect=fake_run,
+        ),
     ):
         result = import_linter_plugin.check(paths, {})
 
@@ -142,7 +154,7 @@ def test_check_without_configuration_is_clean(
     """
     with (
         patch(_VERSION_PATCH, return_value=None),
-        patch.object(import_linter_plugin, "_run_subprocess") as run,
+        patch.object(import_linter_plugin, "_run_subprocess_result") as run,
     ):
         result = import_linter_plugin.check([str(project_without_contracts)], {})
 
@@ -171,7 +183,7 @@ def test_check_no_python_files_skips(
 
     with (
         patch(_VERSION_PATCH, return_value=None),
-        patch.object(import_linter_plugin, "_run_subprocess") as run,
+        patch.object(import_linter_plugin, "_run_subprocess_result") as run,
     ):
         result = import_linter_plugin.check([str(readme)], {})
 
@@ -198,7 +210,7 @@ def test_check_timeout_is_reported(
         patch(_VERSION_PATCH, return_value=None),
         patch.object(
             import_linter_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=subprocess.TimeoutExpired(cmd="lint-imports", timeout=60),
         ),
     ):

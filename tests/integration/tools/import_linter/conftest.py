@@ -16,8 +16,9 @@ IMPORT_LINTER_SAMPLES = SAMPLE_DIR / "tools" / "python" / "import_linter"
 
 VIOLATIONS_SAMPLE = IMPORT_LINTER_SAMPLES / "violations"
 CLEAN_SAMPLE = IMPORT_LINTER_SAMPLES / "clean"
+UNMATCHED_IGNORE_SAMPLE = IMPORT_LINTER_SAMPLES / "unmatched_ignore"
 
-for sample in (VIOLATIONS_SAMPLE, CLEAN_SAMPLE):
+for sample in (VIOLATIONS_SAMPLE, CLEAN_SAMPLE, UNMATCHED_IGNORE_SAMPLE):
     if not sample.is_dir():
         raise FileNotFoundError(f"import-linter sample project not found: {sample}")
 
@@ -49,6 +50,24 @@ def kept_contract_project(tmp_path: Path) -> str:
     """
     dst = tmp_path / "clean"
     shutil.copytree(CLEAN_SAMPLE, dst)
+    return str(dst)
+
+
+@pytest.fixture
+def unmatched_ignore_project(tmp_path: Path) -> str:
+    """Stage the sample whose ``ignore_imports`` entry matches no import.
+
+    Its config sets ``unmatched_ignore_imports_alerting = error``, so
+    ``lint-imports`` exits 1 before evaluating any contract (#2371).
+
+    Args:
+        tmp_path: Pytest fixture providing a temporary directory.
+
+    Returns:
+        Path to the staged project root as a string.
+    """
+    dst = tmp_path / "unmatched_ignore"
+    shutil.copytree(UNMATCHED_IGNORE_SAMPLE, dst)
     return str(dst)
 
 

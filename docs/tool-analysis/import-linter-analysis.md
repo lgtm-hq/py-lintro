@@ -27,12 +27,13 @@ declared contract against it. The built-in contract types are:
 Contracts live in `pyproject.toml` (`[tool.importlinter]`), `.importlinter`, or
 `setup.cfg` (`[importlinter]`). Native exit codes are:
 
-| Situation                          | Native `lint-imports` |
-| ---------------------------------- | --------------------- |
-| Contract broken                    | exit 1                |
-| Config present, contracts all kept | exit 0                |
-| Config present, **zero** contracts | exit 0                |
-| **No config file at all**          | error (non-zero)      |
+| Situation                               | Native `lint-imports`            |
+| --------------------------------------- | -------------------------------- |
+| Contract broken                         | exit 1                           |
+| Config present, contracts all kept      | exit 0                           |
+| Config present, **zero** contracts      | exit 0                           |
+| **No config file at all**               | error (non-zero)                 |
+| Run aborted before checking (see below) | exit 1, diagnostic but no report |
 
 ## Lintro Implementation Analysis
 
@@ -61,6 +62,18 @@ Contracts live in `pyproject.toml` (`[tool.importlinter]`), `.importlinter`, or
   lets import-linter stay enabled by default for projects that declare no contracts.
   This is a _different_ case from a config that exists with zero contracts — there the
   native tool already exits 0 and Lintro simply passes that through.
+- **A run that aborts before checking is one labelled issue.** `lint-imports` exits
+  non-zero without a contract report when it cannot start: an `ignore_imports` entry
+  that matches no import under `unmatched_ignore_imports_alerting = "error"`, a root
+  package that is not importable (`Could not find package 'x' in your Python path.`), a
+  malformed configuration. Lintro detects this case (non-zero exit with neither the
+  `Contracts: N kept, M broken.` summary nor the `Broken contracts` section) and reports
+  it as a failure with exactly one issue, so the totals and the JSON report never show a
+  zero-issue failure. `ToolResult.output` names the exit code and the command, followed
+  by the tool's stdout and stderr (or `lint-imports produced no output.`). The issue
+  carries the same diagnostic in its message because the console and report formatters
+  render only the issue table once a result has issues. A non-zero exit that _did_ print
+  a contract report is parsed as usual.
 - **`--no-cache` is always passed** so a check never writes a cache directory into the
   project being linted, and `--no-logo` keeps the ASCII banner out of parsed output.
 
@@ -79,6 +92,17 @@ issue fields are mapped accordingly:
 
 One issue is emitted per broken chain, so a contract broken by three distinct chains
 produces three issues.
+
+A run that aborts before checking any contract produces a single issue, mapped
+differently:
+
+| Lintro field | Value                                                                 |
+| ------------ | --------------------------------------------------------------------- |
+| `file`       | Path of the configuration file `lint-imports` was run with            |
+| `line`       | `0`                                                                   |
+| `code`       | `Execution error` (no documentation link)                             |
+| `message`    | `lint-imports exited <N> before checking contracts: <the diagnostic>` |
+| `severity`   | `ERROR`                                                               |
 
 ### Limitations
 

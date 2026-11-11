@@ -1907,6 +1907,11 @@ forbidden_modules = ["mypkg.cli"]
   from the config file's directory so the root package is importable.
 - A project with no import-linter configuration reports a clean result rather than an
   error, so the tool is safe to leave enabled.
+- When `lint-imports` stops before checking any contract (an `ignore_imports` entry that
+  matches nothing under `unmatched_ignore_imports_alerting = "error"`, a root package
+  that cannot be imported, a bad config), the run fails with one `Execution error` issue
+  anchored to the config file. Its message is the tool's own diagnostic, for example
+  `lint-imports exited 1 before checking contracts: No matches for ignored import ...`.
 - Check-only. `lintro format` never runs import-linter.
 
 **Available `--tool-options`:**

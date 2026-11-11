@@ -10,6 +10,9 @@ from assertpy import assert_that
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
+from lintro.parsers.import_linter.import_linter_issue import (
+    IMPORT_LINTER_EXECUTION_ERROR_CODE,
+)
 from lintro.tools.import_linter.definition import (
     IMPORT_LINTER_DEFAULT_TIMEOUT,
     ImportLinterPlugin,
@@ -102,6 +105,21 @@ def test_doc_url_empty_code_returns_none(
         import_linter_plugin: Plugin under test.
     """
     assert_that(import_linter_plugin.doc_url("")).is_none()
+
+
+def test_doc_url_execution_error_returns_none(
+    import_linter_plugin: ImportLinterPlugin,
+) -> None:
+    """The synthetic execution-failure code links nowhere.
+
+    It is not a contract, so the contract-types page would not explain it.
+
+    Args:
+        import_linter_plugin: Plugin under test.
+    """
+    url = import_linter_plugin.doc_url(IMPORT_LINTER_EXECUTION_ERROR_CODE)
+
+    assert_that(url).is_none()
 
 
 def test_fix_is_not_supported(import_linter_plugin: ImportLinterPlugin) -> None:
