@@ -1,0 +1,7 @@
+[importlinter]
+root_package = cyclic
+
+[importlinter:contract:acyclic]
+name = Acyclic siblings
+type = acyclic_siblings
+ancestors = cyclic

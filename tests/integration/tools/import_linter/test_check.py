@@ -123,3 +123,87 @@ def test_check_with_an_empty_contract_set_runs_the_tool(
     assert_that(result.skipped).is_false()
     # Proof the binary ran: only lint-imports emits the summary line.
     assert_that(result.output).contains("0 kept, 0 broken")
+
+
+def test_check_names_an_unmatched_ignore_failure(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    unmatched_ignore_project: str,
+) -> None:
+    """A run aborted by an unmatched ``ignore_imports`` entry carries its reason.
+
+    ``lint-imports`` exits 1 and prints only its diagnostic, with no contract
+    report. Lintro must report an execution failure that names the reason, not
+    a bare failure and not a fabricated finding (#2371).
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        unmatched_ignore_project: Staged project with an unmatched ignore.
+    """
+    plugin = get_plugin("import-linter")
+    result = plugin.check([unmatched_ignore_project], {})
+
+    diagnostic = (
+        "No matches for ignored import unmatchedpkg.storage -> unmatchedpkg.api."
+    )
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.issues).is_empty()
+    assert_that(result.output).starts_with("import-linter failed (exit 1) running:")
+    assert_that(result.output).contains(".importlinter --no-logo --no-cache")
+    assert_that(result.output).ends_with(diagnostic)
+
+
+def test_contracts_sharing_a_name_are_both_reported(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    duplicate_names_project: str,
+) -> None:
+    """Two broken contracts with the same name are a verdict with two chains.
+
+    Completeness is judged by contract sections, not by distinct names, so a
+    shared name must not turn a full report into an execution failure.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        duplicate_names_project: Staged project with two same-named contracts.
+    """
+    plugin = get_plugin("import-linter")
+    result = plugin.check([duplicate_names_project], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.inspected_files).is_true()
+    assert_that(sorted(issue.message for issue in result.issues)).is_equal_to(
+        [
+            "dupnames.services -> dupnames.api",
+            "dupnames.storage -> dupnames.api",
+        ],
+    )
+    assert_that({issue.get_code() for issue in result.issues}).is_equal_to(
+        {"No upward imports"},
+    )
+
+
+def test_acyclic_siblings_cycles_are_reported(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    acyclic_siblings_project: str,
+) -> None:
+    """``acyclic_siblings`` relative hops become absolute chains, one per cycle.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        acyclic_siblings_project: Staged project with two sibling cycles.
+    """
+    plugin = get_plugin("import-linter")
+    result = plugin.check([acyclic_siblings_project], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.parse_failures_count).is_none()
+    assert_that([issue.message for issue in result.issues]).is_equal_to(
+        ["cyclic.b -> cyclic.a", "cyclic.sub.y -> cyclic.sub.x"],
+    )
+    assert_that([issue.file for issue in result.issues]).is_equal_to(
+        ["cyclic.b", "cyclic.sub.y"],
+    )

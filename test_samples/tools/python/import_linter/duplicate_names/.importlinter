@@ -1,0 +1,14 @@
+[importlinter]
+root_package = dupnames
+
+[importlinter:contract:api-to-storage]
+name = No upward imports
+type = forbidden
+source_modules = dupnames.storage
+forbidden_modules = dupnames.api
+
+[importlinter:contract:services-to-api]
+name = No upward imports
+type = forbidden
+source_modules = dupnames.services
+forbidden_modules = dupnames.api

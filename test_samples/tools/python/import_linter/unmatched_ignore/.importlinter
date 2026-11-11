@@ -1,0 +1,12 @@
+[importlinter]
+root_package = unmatchedpkg
+unmatched_ignore_imports_alerting = error
+
+[importlinter:contract:layers]
+name = Layered architecture
+type = layers
+layers =
+    unmatchedpkg.api
+    unmatchedpkg.storage
+ignore_imports =
+    unmatchedpkg.storage -> unmatchedpkg.api

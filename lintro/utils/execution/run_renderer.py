@@ -73,6 +73,37 @@ def _write_stdout_verbatim(payload: str) -> None:
     buffer.flush()
 
 
+def _with_diagnostic(result: ToolResult, display_output: str) -> str:
+    """Keep a failed run's diagnostic visible, and bounded, on the console.
+
+    A result whose findings are incomplete (an execution failure, or a report
+    with parts the parser could not read) carries the tool's own text in
+    ``output``. When parsed issues exist the formatter shows only their table,
+    which hides that text, so it is appended beneath. When no issues exist the
+    formatter already falls back to the text. Either way it is shortened to its
+    head and tail, because one tool's runaway diagnostic must not bury the rest
+    of the run; JSON keeps the full text (#2371).
+
+    Args:
+        result: Result being displayed.
+        display_output: What the formatter produced for it.
+
+    Returns:
+        The text to print.
+    """
+    from lintro.utils.output.text_blocks import bound_diagnostic
+
+    incomplete = result.execution_failed or bool(result.parse_failures_count)
+    diagnostic = (result.output or "").strip()
+    if not incomplete or not diagnostic:
+        return display_output
+    if result.issues:
+        return f"{display_output}\n\n{bound_diagnostic(diagnostic)}"
+    if result.execution_failed:
+        return bound_diagnostic(display_output.strip())
+    return display_output
+
+
 def _display_fix_result(
     result: ToolResult,
     *,
@@ -146,6 +177,7 @@ def _display_fix_result(
             issues_count=outcome.issues_count,
             group_by=group_by,
         )
+        display_output = _with_diagnostic(result, display_output)
     if result.output and raw_output:
         display_output = result.output
 

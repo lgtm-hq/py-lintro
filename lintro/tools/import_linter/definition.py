@@ -24,10 +24,14 @@ from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.models.core.tool_outcome import Checked, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.import_linter.import_linter_issue import ImportLinterIssue
 from lintro.parsers.import_linter.import_linter_parser import (
-    parse_import_linter_output,
+    ImportLinterReport,
+    has_uncaught_exception,
+    parse_import_linter_report,
 )
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
@@ -35,6 +39,13 @@ from lintro.plugins.registry import register_tool
 
 # Constants for import-linter configuration
 IMPORT_LINTER_DEFAULT_TIMEOUT: int = 60
+
+#: Exit status ``lint-imports`` uses when contracts are broken
+#: (``EXIT_STATUS_ERROR`` in ``importlinter.cli``). The same status covers
+#: errors it reports itself and uncaught exceptions, so it is necessary for a
+#: verdict but never sufficient; any other non-zero status, including a
+#: negative one from a signal, is an execution failure.
+LINT_IMPORTS_BROKEN_EXIT_CODE: int = 1
 IMPORT_LINTER_FILE_PATTERNS: list[str] = ["*.py"]
 
 #: Config file names import-linter reads, in the order it prefers them.
@@ -112,6 +123,35 @@ def _declares_import_linter(config_path: Path) -> bool:
     if config_path.name == "pyproject.toml":
         return _pyproject_declares_import_linter(config_path=config_path)
     return _ini_declares_import_linter(config_path=config_path)
+
+
+def _is_broken_contracts_verdict(
+    run: SubprocessResult,
+    report: ImportLinterReport,
+) -> bool:
+    """Decide whether a failing ``lint-imports`` run is a broken-contract verdict.
+
+    Fails closed: a run counts only when nothing suggests it stopped early.
+    That means the documented exit status, a structurally complete report on
+    stdout, and no uncaught exception on stderr. ``lint-imports`` prints the
+    report from inside an unguarded call, so a crash part-way through the last
+    contract's section leaves every heading in place and exits 1 like a real
+    verdict. Only the traceback on stderr gives it away. A traceback-looking
+    block printed on stdout *before* the summary is still tolerated, because
+    the report that follows it is the tool's own and completed.
+
+    Args:
+        run: Result of the ``lint-imports`` subprocess, which exited non-zero.
+        report: Report parsed from the run's stdout.
+
+    Returns:
+        True when the run is a broken-contract verdict.
+    """
+    return (
+        run.returncode == LINT_IMPORTS_BROKEN_EXIT_CODE
+        and report.is_complete_broken_report
+        and not has_uncaught_exception(run.stderr)
+    )
 
 
 def find_import_linter_config(paths: list[str]) -> Path | None:
@@ -246,7 +286,7 @@ class ImportLinterPlugin(BaseToolPlugin):
 
         cmd = self._build_command(config_path=config_path)
         try:
-            success, output = self._run_subprocess(
+            run = self._run_subprocess_result(
                 cmd=cmd,
                 timeout=ctx.timeout,
                 cwd=str(config_path.parent),
@@ -259,17 +299,76 @@ class ImportLinterPlugin(BaseToolPlugin):
                 name=self.definition.name,
             )
 
-        issues = parse_import_linter_output(output=output)
+        # The report is printed on stdout, so its structure is judged there.
+        report = parse_import_linter_report(output=run.stdout)
+        issues = report.issues
+        if not run.success and not _is_broken_contracts_verdict(run, report):
+            return self._execution_failure_result(run=run, cmd=cmd, issues=issues)
+
+        # A complete report stays a verdict even if one contract's section has
+        # a format the parser cannot read. That gap is counted as parse
+        # failures, as other plugins do, so the run's coverage is unknown and
+        # the raw report in ``output`` is shown next to the parsed chains.
+        unparsed = report.unparsed_sections
         return ToolResult.from_outcome(
             ToolOutcome(
                 execution=Checked(
-                    success=success and (not issues),
-                    inspected_files=True,
+                    success=run.success and not issues and not unparsed,
+                    inspected_files=None if unparsed else True,
                 ),
                 issues_count=len(issues),
             ),
             name=self.definition.name,
-            output=output,
+            parse_failures_count=unparsed or None,
+            output=run.output,
+            issues=issues,
+        )
+
+    def _execution_failure_result(
+        self,
+        *,
+        run: SubprocessResult,
+        cmd: list[str],
+        issues: list[ImportLinterIssue],
+    ) -> ToolResult:
+        """Build the result for a ``lint-imports`` run that produced no verdict.
+
+        The tool exited non-zero without a complete contract report: it could
+        not start (unmatched ``ignore_imports`` entry, unimportable root
+        package, bad configuration) or it stopped part-way through. This is an
+        execution failure, not a finding, reported the way the black, ruff and
+        clippy plugins report theirs: ``execution_failed`` set, findings
+        incomplete, inspection coverage unknown (so the run can never update a
+        severity baseline), and only the chains that were really parsed as
+        issues. ``output`` names the failure (exit code and command) followed by
+        the tool's own stdout and stderr, so the reason is shown in every
+        output format (#2371).
+
+        Args:
+            run: Result of the ``lint-imports`` subprocess.
+            cmd: Command that was run.
+            issues: Chains recovered from the incomplete output, if any.
+
+        Returns:
+            A failed ToolResult flagged as an execution failure.
+        """
+        captured = [
+            stream.strip() for stream in (run.stdout, run.stderr) if stream.strip()
+        ]
+        reason = "\n".join(captured) or "lint-imports produced no output."
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=False, inspected_files=None),
+                issues_count=len(issues),
+            ),
+            name=self.definition.name,
+            findings_complete=False,
+            execution_failed=True,
+            output=(
+                f"import-linter failed (exit {run.returncode}) running:\n"
+                f"  {' '.join(cmd)}\n"
+                f"{reason}"
+            ),
             issues=issues,
         )
 
