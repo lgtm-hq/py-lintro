@@ -39,7 +39,7 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.html_validate.html_validate_parser import (
     parse_html_validate_output_with_stats,
 )
-from lintro.plugins.base import BaseToolPlugin
+from lintro.plugins.base import BaseToolPlugin, PreparedExecution
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.batch_runner import batch_timeout_result
@@ -51,6 +51,10 @@ from lintro.tools.core.incomplete_run import (
 from lintro.tools.core.node_fallback import (
     is_registry_fallback_command,
     registry_fallback_guidance,
+)
+from lintro.tools.core.readable_paths import (
+    run_on_readable_paths,
+    unread_paths_reason,
 )
 
 # Constants for html-validate configuration
@@ -82,9 +86,29 @@ _GLOB_METACHARACTERS: frozenset[str] = frozenset("*?[]{}")
 # with ``windowsPathsNoEscape: true`` (a backslash becomes a path separator),
 # extglobs enabled (``+(...)``, ``@(...)`` and the like need parentheses),
 # brace expansion and character classes, but with ``nonegate`` and
-# ``nocomment`` (``!`` and ``#`` stay literal). A path holding any of these is
-# never read as an ignored file (#3393).
+# ``nocomment`` (``!`` and ``#`` stay literal). Such a path can be dropped or
+# matched to a different file, so it is never passed to html-validate (#3393).
 _SELF_MATCH_BREAKERS: frozenset[str] = _GLOB_METACHARACTERS | frozenset("()\\")
+
+
+def _glob_reason(paths: list[str]) -> str:
+    """Name the paths withheld from html-validate because of glob syntax.
+
+    Args:
+        paths: Relative paths html-validate's glob expansion would misread.
+
+    Returns:
+        A one-line reason.
+    """
+    return unread_paths_reason(
+        tool="html-validate",
+        paths=paths,
+        why=(
+            "html-validate expands each path as a glob, and glob, extglob or "
+            "backslash characters in a name can make it skip the file or "
+            "validate a different one."
+        ),
+    )
 
 
 def _reported_inspection(output: str) -> bool | None:
@@ -274,7 +298,28 @@ class HtmlValidatePlugin(BaseToolPlugin):
         ctx = self.prepare(paths, options)
         if isinstance(ctx, ToolResult):
             return ctx
+        return run_on_readable_paths(
+            ctx,
+            readable=matches_itself,
+            reason=_glob_reason,
+            run=self._check_files,
+            unrun=lambda reason, cwd: incomplete_run_result(
+                name=self.definition.name,
+                reason=reason,
+                cwd=cwd,
+            ),
+        )
 
+    def _check_files(self, ctx: PreparedExecution) -> ToolResult:
+        """Check the prepared files with html-validate.
+
+        Args:
+            ctx: Prepared context holding only paths html-validate's glob
+                expansion maps to themselves.
+
+        Returns:
+            ToolResult with check results.
+        """
         logger.debug(
             f"[HtmlValidatePlugin] Discovered {len(ctx.files)} files matching "
             f"patterns: {self.definition.file_patterns}",

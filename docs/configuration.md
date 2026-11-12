@@ -2271,8 +2271,11 @@ instead of failing on Stylelint's `AllFilesIgnoredError`, and a run excluded by
 `ignoreFiles` reports every file as `"ignored": true`. Lintro reads both as "no files".
 When only some files are ignored, the run is an ordinary one. Stylelint reads glob
 characters in an existing path literally, so a name like `[slug].css` is linted as
-usual, but it turns a backslash into `/`, so a file named `dir\file.css` is never found.
-Its empty report is not taken as "no files": the run fails as an execution error. A
+usual, but it turns a backslash into `/`, so it would read `dir\file.css` as
+`dir/file.css`: it would skip the named file, or check and `--fix` a different one.
+Lintro never passes such a path to Stylelint. It runs Stylelint on the other files,
+keeps their findings and fixes, and fails the run as an execution error that names the
+files left uninspected. If every path holds a backslash, Stylelint is not run at all. A
 report holding malformed or non-empty ignored records also fails instead of being read
 as "no files".
 
@@ -2667,9 +2670,10 @@ from html-validate still fails the run.
 html-validate treats every path it is given as a glob, so a file whose name contains
 glob characters (`*?[]{}`, as in a routed site's `[slug].html`), parentheses (extglob
 syntax such as `+(a)`) or a backslash (read as a path separator) can fail to match
-itself and draw the same `No files matching patterns` error. Lintro cannot tell that
-apart from an ignored file, so when any path it passed contains one of these characters
-the run still fails as an execution error instead of being reported as "no files".
+itself, or match a different file (`[slug].html` matches `s.html`). Lintro never passes
+such a path to html-validate. It validates the other files, keeps their findings, and
+fails the run as an execution error that names the files left uninspected; if every path
+holds one of these characters, html-validate is not run at all.
 
 **Available Options via `--tool-options`:**
 

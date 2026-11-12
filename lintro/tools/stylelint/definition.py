@@ -35,7 +35,7 @@ from lintro.parsers.stylelint.stylelint_parser import (
     parse_stylelint_output_with_stats,
     stylelint_report_lints_no_file,
 )
-from lintro.plugins.base import BaseToolPlugin
+from lintro.plugins.base import BaseToolPlugin, PreparedExecution
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.incomplete_run import (
@@ -48,6 +48,10 @@ from lintro.tools.core.option_validators import (
     validate_bool,
     validate_positive_int,
     validate_str,
+)
+from lintro.tools.core.readable_paths import (
+    run_on_readable_paths,
+    unread_paths_reason,
 )
 
 # Constants for Stylelint configuration
@@ -74,6 +78,43 @@ STYLELINT_CONFIG_FILENAMES: tuple[str, ...] = (
     "stylelint.config.cjs",
     "stylelint.config.mjs",
 )
+
+
+def stylelint_reads_literally(path: str) -> bool:
+    r"""Report whether Stylelint reads a path as the file it names.
+
+    Stylelint 18 escapes glob syntax in a path that exists
+    (``escapePath(toUnixPath(entry))``), so ``[slug].css`` is read
+    literally. ``toUnixPath`` first turns every backslash into ``/``, so
+    ``dir\file.css`` is read as ``dir/file.css``: a missing file, or a
+    different file that ``--fix`` would rewrite (#3393).
+
+    Args:
+        path: A relative path lintro would pass to Stylelint.
+
+    Returns:
+        False when the path contains a backslash.
+    """
+    return "\\" not in path
+
+
+def _backslash_reason(paths: list[str]) -> str:
+    """Name the paths withheld from Stylelint because of a backslash.
+
+    Args:
+        paths: Relative paths holding a backslash.
+
+    Returns:
+        A one-line reason.
+    """
+    return unread_paths_reason(
+        tool="Stylelint",
+        paths=paths,
+        why=(
+            "Stylelint turns a backslash in a path into '/', so it would "
+            "read, or fix, a different path."
+        ),
+    )
 
 
 @register_tool
@@ -199,59 +240,39 @@ class StylelintPlugin(BaseToolPlugin):
         output: str | None,
         found_issues: bool,
         parse_failures: int,
-        files: list[str],
         fixing: bool,
         cwd: str | None = None,
     ) -> ToolResult | None:
-        r"""Return the result for a check that linted nothing, if it did.
+        """Return the result for a check that linted nothing, if it did.
 
         Two runs lint no file without failing: no configuration resolved
         (a skip), and Stylelint's own ignore configuration excluding every
         file given (no files, #3393). The second needs a clean, complete
-        report and paths Stylelint reads literally: it escapes glob syntax
-        in an existing path but first turns each backslash into ``/``, so a
-        file named ``dir\\file.css`` is never found and also leaves an empty
-        report.
+        report. Paths Stylelint would misread never reach it (see
+        ``stylelint_reads_literally``), so an empty report here means the
+        files were ignored.
 
         Args:
             run_success: Whether the check exited 0.
             output: The check's combined output.
             found_issues: Whether any finding was parsed.
             parse_failures: Malformed report containers or records.
-            files: The paths passed to Stylelint.
             fixing: Whether this check opens a fix run.
             cwd: Working directory Stylelint ran in.
 
         Returns:
-            The skip or no-files result, an execution failure when Stylelint
-            linted nothing because a path could not be read literally, or
-            None when Stylelint linted files.
+            The skip or no-files result, or None when Stylelint linted files.
         """
         if not found_issues and self._is_no_config_error(output):
             return self._create_no_config_result(cwd=cwd)
-        if not (
+        if (
             run_success
             and not found_issues
             and not parse_failures
             and stylelint_report_lints_no_file(output)
         ):
-            return None
-        unmatched = [path for path in files if "\\" in path]
-        if not unmatched:
             return self._create_all_ignored_result(fixing=fixing, cwd=cwd)
-        reason = (
-            "Stylelint linted none of the given files: it reads a backslash "
-            f"in a path as a separator, so {len(unmatched)} path(s) such as "
-            f"{unmatched[0]!r} could not be found."
-        )
-        if fixing:
-            return self._fix_failure_result(
-                reason=reason,
-                accounting=FixUnmeasured("Stylelint linted no file."),
-                issues=[],
-                cwd=cwd,
-            )
-        return incomplete_run_result(name=self.definition.name, reason=reason, cwd=cwd)
+        return None
 
     def _create_all_ignored_result(
         self,
@@ -456,7 +477,32 @@ class StylelintPlugin(BaseToolPlugin):
         )
         if isinstance(ctx, ToolResult):
             return ctx
+        return run_on_readable_paths(
+            ctx,
+            readable=stylelint_reads_literally,
+            reason=_backslash_reason,
+            run=lambda readable: self._check_files(readable, merged_options),
+            unrun=lambda reason, cwd: incomplete_run_result(
+                name=self.definition.name,
+                reason=reason,
+                cwd=cwd,
+            ),
+        )
 
+    def _check_files(
+        self,
+        ctx: PreparedExecution,
+        merged_options: dict[str, object],
+    ) -> ToolResult:
+        """Check the prepared files with Stylelint.
+
+        Args:
+            ctx: Prepared context holding only paths Stylelint reads literally.
+            merged_options: Options merged over the instance defaults.
+
+        Returns:
+            ToolResult with check results.
+        """
         cmd = [
             *self._base_command(merged_options, cwd=ctx.cwd),
             "--formatter",
@@ -480,7 +526,6 @@ class StylelintPlugin(BaseToolPlugin):
             output=output,
             found_issues=bool(issues),
             parse_failures=parse_failures,
-            files=ctx.rel_files,
             fixing=False,
             cwd=ctx.cwd,
         )
@@ -542,7 +587,33 @@ class StylelintPlugin(BaseToolPlugin):
         )
         if isinstance(ctx, ToolResult):
             return ctx
+        return run_on_readable_paths(
+            ctx,
+            readable=stylelint_reads_literally,
+            reason=_backslash_reason,
+            run=lambda readable: self._fix_files(readable, merged_options),
+            unrun=lambda reason, cwd: self._fix_failure_result(
+                reason=reason,
+                accounting=FixUnmeasured("Stylelint was not run."),
+                issues=[],
+                cwd=cwd,
+            ),
+        )
 
+    def _fix_files(
+        self,
+        ctx: PreparedExecution,
+        merged_options: dict[str, object],
+    ) -> ToolResult:
+        """Fix the prepared files with Stylelint.
+
+        Args:
+            ctx: Prepared context holding only paths Stylelint reads literally.
+            merged_options: Options merged over the instance defaults.
+
+        Returns:
+            ToolResult: Result object with counts and messages.
+        """
         base_cmd = self._base_command(merged_options, cwd=ctx.cwd)
         check_cmd = [*base_cmd, "--formatter", "json", *ctx.rel_files]
 
@@ -565,7 +636,6 @@ class StylelintPlugin(BaseToolPlugin):
             output=check_output,
             found_issues=bool(initial_issues),
             parse_failures=initial_failures,
-            files=ctx.rel_files,
             fixing=True,
             cwd=ctx.cwd,
         )

@@ -14,11 +14,11 @@ import pytest
 from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
+from lintro.plugins.base import PreparedExecution
 from lintro.tools.stylelint.definition import (
     STYLELINT_ALL_IGNORED_MESSAGE,
     StylelintPlugin,
 )
-from tests.unit.tools.stylelint.conftest import make_ctx
 
 
 def _run(
@@ -41,7 +41,13 @@ def _run(
     Returns:
         The result and the command of every Stylelint invocation.
     """
-    ctx = make_ctx(tmp_path, files or ["a.css"])
+    rel_files = files or ["a.css"]
+    ctx = PreparedExecution(
+        files=[f"{tmp_path}/{name}" for name in rel_files],
+        rel_files=rel_files,
+        cwd=str(tmp_path),
+        timeout=30,
+    )
     with (
         patch.object(plugin, "prepare", return_value=ctx),
         patch.object(plugin, "_get_executable_command", return_value=["stylelint"]),
@@ -183,12 +189,12 @@ def test_ignored_record_with_invalid_option_keeps_the_finding(
 
 
 @pytest.mark.parametrize("fix", [False, True], ids=["check", "fix"])
-def test_empty_report_for_a_backslash_path_is_an_execution_failure(
+def test_backslash_only_run_never_invokes_stylelint(
     stylelint_plugin: StylelintPlugin,
     tmp_path: Path,
     fix: bool,
 ) -> None:
-    r"""Stylelint reads ``dir\\file.css`` as ``dir/file.css``: not "no files".
+    r"""A ``dir\file.css`` Stylelint would misread is never passed to it.
 
     Args:
         stylelint_plugin: The plugin under test.
@@ -198,15 +204,43 @@ def test_empty_report_for_a_backslash_path_is_an_execution_failure(
     result, commands = _run(
         stylelint_plugin,
         tmp_path,
-        [(True, "[]")],
+        [],
         fix=fix,
-        files=["ok.css", "dir\\file.css"],
+        files=["dir\\file.css"],
     )
 
-    assert_that(commands).is_length(1)
+    assert_that(commands).is_empty()
     assert_that(result.no_files).is_false()
     assert_that(result.success).is_false()
     assert_that(result.execution_failed).is_true()
     assert_that(result.findings_complete).is_false()
+    assert_that(result.inspected_files).is_none()
     assert_that(result.issues).is_empty()
-    assert_that(result.output).contains("dir\\\\file.css")
+    assert_that(result.output).contains("'dir\\\\file.css'", "not inspected")
+
+
+def test_mixed_run_lints_only_readable_paths_and_stays_incomplete(
+    stylelint_plugin: StylelintPlugin,
+    tmp_path: Path,
+) -> None:
+    """The readable file is linted, its finding kept, and the run is incomplete."""
+    finding = (
+        f'[{{"source":"{tmp_path}/ok.css","warnings":[{{"line":1,"column":9,'
+        '"rule":"color-hex-length","severity":"error",'
+        '"text":"Expected \\"#ffffff\\" to be \\"#fff\\" (color-hex-length)"}]}]'
+    )
+    result, commands = _run(
+        stylelint_plugin,
+        tmp_path,
+        [(False, finding)],
+        files=["ok.css", "dir\\file.css"],
+    )
+
+    assert_that(commands).is_length(1)
+    assert_that(commands[0]).contains("ok.css").does_not_contain("dir\\file.css")
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.inspected_files).is_none()
+    assert_that(result.issues).extracting("code").is_equal_to(["color-hex-length"])
+    assert_that(result.output).starts_with("Stylelint was not run on 1 file(s)")

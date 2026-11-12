@@ -163,3 +163,66 @@ def test_html_validate_glob_named_file_with_findings_does_not_pass(
     assert_that(result.success).is_false()
     assert_that(result.execution_failed).is_true()
     assert_that(result.findings_complete).is_false()
+
+
+@pytest.mark.html_validate
+@pytest.mark.parametrize(
+    ("name", "neighbour"),
+    [
+        pytest.param("[slug].html", "s.html", id="class-matches-another-file"),
+        pytest.param("dir\\file.html", "dir/file.html", id="backslash-separator"),
+    ],
+)
+def test_html_validate_never_validates_the_file_a_name_resembles(
+    tmp_path: Path,
+    name: str,
+    neighbour: str,
+) -> None:
+    r"""A misread name is withheld, even when its glob matches a clean file.
+
+    html-validate would expand ``[slug].html`` to ``s.html`` and read
+    ``dir\\file.html`` as ``dir/file.html``, validate that clean file and
+    pass.
+
+    Args:
+        tmp_path: Pytest-managed temporary directory.
+        name: The file named on the command line.
+        neighbour: A clean file the misread name would match.
+    """
+    (tmp_path / neighbour).parent.mkdir(exist_ok=True)
+    (tmp_path / neighbour).write_text("<p>clean</p>\n", encoding="utf-8")
+    target = tmp_path / name
+    target.write_text("<p><div></p>\n", encoding="utf-8")
+    tool = ToolRegistry.get("html_validate")
+    tool.exclude_patterns = []
+    result = tool.check([str(target)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.inspected_files).is_none()
+    assert_that(result.output).contains("not inspected")
+
+
+@pytest.mark.html_validate
+def test_html_validate_mixed_run_validates_the_rest_and_fails(
+    tmp_path: Path,
+) -> None:
+    """The readable file keeps its findings; the withheld one fails the run.
+
+    Args:
+        tmp_path: Pytest-managed temporary directory.
+    """
+    withheld = tmp_path / "[slug].html"
+    withheld.write_text("<p><div></p>\n", encoding="utf-8")
+    readable = tmp_path / "page.html"
+    readable.write_text("<p><div></p>\n", encoding="utf-8")
+    tool = ToolRegistry.get("html_validate")
+    tool.exclude_patterns = []
+    result = tool.check([str(withheld), str(readable)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.findings_complete).is_false()
+    assert_that({Path(issue.file).name for issue in result.issues}).is_equal_to(
+        {"page.html"},
+    )

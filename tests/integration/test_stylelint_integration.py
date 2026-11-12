@@ -234,3 +234,62 @@ def test_bracket_named_file_is_linted_and_fixed(styled_project: Path) -> None:
     assert_that(fixed.execution_failed).is_false()
     assert_that(fixed.fixed_issues_count).is_greater_than(0)
     assert_that(target.read_text()).is_not_equal_to(original)
+
+
+def test_mixed_run_withholds_backslash_file_and_fails(styled_project: Path) -> None:
+    r"""``dir\file.css`` is withheld; ``normal.css`` is still linted and fixed.
+
+    Args:
+        styled_project: Temp project with a stylelint config.
+    """
+    unread = styled_project / "dir\\file.css"
+    normal = styled_project / "normal.css"
+    for target in (unread, normal):
+        shutil.copy(FIXTURES / "stylelint_violations.css", target)
+    original = unread.read_bytes()
+
+    plugin = StylelintPlugin()
+    checked = plugin.check([str(unread), str(normal)], {})
+    fixed = plugin.fix([str(unread), str(normal)], {})
+
+    assert_that(
+        {Path(issue.file).name for issue in checked.issues},
+    ).is_equal_to({"normal.css"})
+    for result in (checked, fixed):
+        assert_that(result.success).is_false()
+        assert_that(result.execution_failed).is_true()
+        assert_that(result.findings_complete).is_false()
+        assert_that(result.inspected_files).is_none()
+        assert_that(result.output).contains("not inspected")
+    assert_that(fixed.fixed_issues_count).is_greater_than(0)
+    assert_that(normal.read_text()).does_not_contain("#FFFFFF")
+    assert_that(unread.read_bytes()).is_equal_to(original)
+
+
+def test_backslash_path_never_rewrites_the_file_it_resembles(
+    styled_project: Path,
+) -> None:
+    r"""Asking for ``dir\file.css`` leaves an existing ``dir/file.css`` alone.
+
+    Stylelint would read ``dir\file.css`` as ``dir/file.css`` and ``--fix``
+    would rewrite that file, which the user never named.
+
+    Args:
+        styled_project: Temp project with a stylelint config.
+    """
+    lookalike = styled_project / "dir" / "file.css"
+    lookalike.parent.mkdir()
+    shutil.copy(FIXTURES / "stylelint_violations.css", lookalike)
+    named = styled_project / "dir\\file.css"
+    shutil.copy(FIXTURES / "stylelint_violations.css", named)
+    before = lookalike.read_bytes()
+
+    plugin = StylelintPlugin()
+    checked = plugin.check([str(named)], {})
+    fixed = plugin.fix([str(named)], {})
+
+    assert_that(lookalike.read_bytes()).is_equal_to(before)
+    for result in (checked, fixed):
+        assert_that(result.success).is_false()
+        assert_that(result.execution_failed).is_true()
+        assert_that(result.issues).is_empty()
