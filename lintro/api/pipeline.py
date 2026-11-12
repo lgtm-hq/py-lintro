@@ -87,12 +87,22 @@ class _RunAIConfig:
     that exits early, ``lintro test`` with machine output) does not validate
     ``ai:`` at all, exactly as before.
 
+    Diagnostics (the unknown-key warning and migration hints) follow
+    ``ai_enabled``, not whether the AI layer is eventually reached. Whether a
+    run exits early is only known after ``execute_run``, while the status row
+    resolves before it, so a human-output run that exits early (an unknown
+    ``--tools`` name, say) now reports a typo'd ``ai.*`` key too. Before
+    resolution was shared, only the post-run AI layer emitted diagnostics, so
+    that run was silent. Keeping it silent would take a second resolution,
+    which is what #2374 removed.
+
     Attributes:
         mapping: The raw ``ai:`` section the run's config holds.
         transport: The invocation's ``--transport`` value, or None.
         diagnostics: Whether the one resolution may emit the unknown-key
-            warning and migration hints. True when the AI layer may run, which
-            is the only path that reported them before resolution was shared.
+            warning and migration hints. The pipeline passes ``ai_enabled``,
+            so ``lintro test`` stays silent and ``check``/``fmt`` report them
+            once, from whichever seam resolves first.
     """
 
     mapping: Mapping[str, Any] | None

@@ -144,6 +144,31 @@ def resolve_ai_config(lintro_config: LintroConfig) -> AIConfig:
     return resolve_effective_ai_config(lintro_config).config
 
 
+def _reject_transport_with_resolved(
+    *,
+    transport: str | None,
+    resolved_ai_config: ResolvedAIConfig | None,
+) -> None:
+    """Refuse a ``transport`` override next to an already-resolved config.
+
+    A :class:`ResolvedAIConfig` already carries the invocation's transport
+    flag, so a second, separate ``transport`` argument would be silently
+    dropped. Passing both is a caller bug.
+
+    Args:
+        transport: The separate ``--transport`` override, or None.
+        resolved_ai_config: The already-resolved config, or None.
+
+    Raises:
+        ValueError: When both are given.
+    """
+    if transport is not None and resolved_ai_config is not None:
+        raise ValueError(
+            "pass either transport or resolved_ai_config, not both: "
+            "the resolved config already carries the transport flag",
+        )
+
+
 def _warn_ai_fix_disabled(
     *,
     action: Action,
@@ -222,13 +247,17 @@ def run_ai_layer(
         console_logger: Logger for console output.
         output_format: Output format string.
         ai_fix: Whether AI fix suggestions were requested via CLI.
-        transport: Optional CLI override for ``ai.transport``. Ignored when
+        transport: Optional CLI override for ``ai.transport``, used when this
+            function resolves the config itself. Must be None when
             ``resolved_ai_config`` is given, which already carries it.
         resolved_ai_config: The invocation's effective AI config, already
             resolved with its CLI flags. The run pipeline resolves once and
             passes it here, so the AI layer runs on exactly the value the
             pre-execution summary showed and never re-emits the unknown-key
             warning (#2374). When None, the config is resolved here.
+
+    Passing both ``transport`` and ``resolved_ai_config`` raises
+    :class:`ValueError`: the separate override would otherwise be dropped.
 
     Returns:
         An :class:`AIOutcome` with ``ran`` set when the AI layer executed and
@@ -237,6 +266,10 @@ def run_ai_layer(
     Raises:
         Exception: Re-raised when ``ai.fail_on_ai_error`` is enabled.
     """
+    _reject_transport_with_resolved(
+        transport=transport,
+        resolved_ai_config=resolved_ai_config,
+    )
     resolved = resolved_ai_config
     if resolved is None:
         from lintro.ai.effective_config import AICliOverrides
@@ -359,8 +392,8 @@ def enhance_artifact(
         ctx: Shared run context; supplies the console logger and config.
         output_format: Output format string.
         ai_fix: Whether AI fix suggestions were requested via CLI.
-        transport: Optional CLI override for ``ai.transport``. Ignored when
-            ``resolved_ai_config`` is given.
+        transport: Optional CLI override for ``ai.transport``. Must be None
+            when ``resolved_ai_config`` is given.
         fail_under: Health-score gate to re-apply after AI changed the results.
         resolved_ai_config: The invocation's already-resolved AI config, so
             the AI layer does not resolve ``ai:`` a second time (#2374).
@@ -368,8 +401,14 @@ def enhance_artifact(
     Returns:
         RunArtifact: The original artifact when AI did not run or the run
         exited early, otherwise a refreshed artifact whose totals, health
-        score, and exit code account for the AI layer's effect.
+        score, and exit code account for the AI layer's effect. Passing
+        both ``transport`` and ``resolved_ai_config`` raises
+        :class:`ValueError` instead, even for an early-exit artifact.
     """
+    _reject_transport_with_resolved(
+        transport=transport,
+        resolved_ai_config=resolved_ai_config,
+    )
     if artifact.early_exit:
         return artifact
 
