@@ -11,6 +11,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from lintro.models.core.issue_identity import union_issues
+from lintro.models.core.result_completeness import is_incomplete_result
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.execution.result_shaping import get_remaining_count
 
@@ -53,7 +54,7 @@ def _mark_incomplete_unknown(result: ToolResult) -> ToolResult:
         A validated replacement for incomplete passes, otherwise the input.
         A pass that already reports unknown accounting is returned as is.
     """
-    if not _is_incomplete(result):
+    if not is_incomplete_result(result):
         return result
     if (
         result.residual_unknown
@@ -69,24 +70,6 @@ def _mark_incomplete_unknown(result: ToolResult) -> ToolResult:
         remaining_issues_count=None,
         residual_unknown=True,
         residual_unknown_reason=_incomplete_reason(result),
-    )
-
-
-def _is_incomplete(result: ToolResult) -> bool:
-    """Report whether a fix pass left evidence a retry must not overwrite.
-
-    Args:
-        result: One normalized fix pass.
-
-    Returns:
-        True when the pass failed to execute, timed out, has unknown fix
-        accounting, or printed a report that could not be fully parsed.
-    """
-    return bool(
-        result.execution_failed
-        or result.timed_out
-        or result.residual_unknown
-        or result.parse_failures_count,
     )
 
 
@@ -117,7 +100,7 @@ def run_fix_with_retry(
     result = _mark_incomplete_unknown(result)
 
     # An incomplete first pass has no complete baseline to merge or retry.
-    if max_retries <= 1 or _is_incomplete(result):
+    if max_retries <= 1 or is_incomplete_result(result):
         return result
 
     initial_issues_count = result.initial_issues_count
@@ -128,7 +111,7 @@ def run_fix_with_retry(
         # An incomplete report or failed execution is not a convergence
         # measurement. Retrying must not replace its failure evidence with a
         # later clean result (#3352).
-        if _is_incomplete(result):
+        if is_incomplete_result(result):
             break
         if remaining == 0:
             break
@@ -149,7 +132,7 @@ def run_fix_with_retry(
     # record that measurement explicitly in initial_issues_count.
     if initial_issues_count is None and first_pass_initial_issues:
         initial_issues_count = len(first_pass_initial_issues)
-    if _is_incomplete(result):
+    if is_incomplete_result(result):
         # The same test that ended the loop: a pass that failed to execute,
         # timed out or reported incompletely measured no residual, so its
         # counts stay unknown rather than falling back to ``issues_count``

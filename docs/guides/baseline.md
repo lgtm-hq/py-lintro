@@ -230,7 +230,10 @@ These fail-closed checks also apply without a fingerprint baseline:
   could not measure its residual, or printed a malformed report, so a later clean pass
   cannot replace that failure. Such a pass, the first one included and with retries
   disabled, reports unknown fixed and remaining counts. Findings from a failed later
-  pass are kept beside the first pass's, each finding once.
+  pass are kept beside the first pass's, each finding once. The run-level verify pass
+  keeps them too: an unknown verification adds what a partial check reported instead of
+  cutting the findings back to the pre-fix ones, and a check that answers for some files
+  keeps the incomplete stage's findings on files it did not examine.
 - The shared per-file check runner accepts a nonzero exit as a complete lint verdict
   only when it is a declared findings exit status and has parsed findings. Other nonzero
   exits are execution errors even if some findings were parsed. This also applies to the
