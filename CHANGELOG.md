@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.3] - 2026-11-12
+
+### Fixed
+
+- **ai**: refuse retired Claude 4 dated model ids at validation (#3377) (06ab93d)
+
 ## [0.180.2] - 2026-11-12
 
 ### Fixed
