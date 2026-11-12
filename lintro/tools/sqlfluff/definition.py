@@ -270,6 +270,7 @@ class SqlfluffPlugin(BaseToolPlugin):
         so without this every concurrent execution would append to, and
         clear, one shared list (#3352).
         """
+        super()._isolate_execution_state()
         self._lint_diagnostics = []
 
     def _with_lint_diagnostics(self, result: ToolResult) -> ToolResult:

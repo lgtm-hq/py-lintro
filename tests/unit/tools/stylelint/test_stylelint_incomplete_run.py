@@ -181,6 +181,32 @@ def test_fix_malformed_recheck_names_the_reason_without_inspection(
     assert_that(result.residual_unknown).is_true()
     assert_that(result.parse_failures_count).is_equal_to(1)
     assert_that(result.output).is_equal_to(
-        "Stylelint printed a report that could not be fully parsed "
+        "Stylelint re-check printed a report that could not be fully parsed "
         "(1 malformed record(s) or container(s)); its findings are incomplete.",
+    )
+
+
+def test_fix_names_a_recheck_crash_behind_a_malformed_fix_report(
+    stylelint_plugin: StylelintPlugin,
+    tmp_path: Path,
+) -> None:
+    """A malformed --fix report does not hide a re-check that printed nothing."""
+    result, calls = _run(
+        stylelint_plugin,
+        tmp_path,
+        [(False, REPORT), (True, MALFORMED), (False, "")],
+        fix=True,
+    )
+
+    assert_that(calls).is_equal_to(3)
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.inspected_files).is_none()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(str(result.output).splitlines()).is_equal_to(
+        [
+            "Stylelint --fix printed a report that could not be fully parsed "
+            "(1 malformed record(s) or container(s)); its findings are incomplete.",
+            "Stylelint re-check exited with an error and printed no report.",
+        ],
     )

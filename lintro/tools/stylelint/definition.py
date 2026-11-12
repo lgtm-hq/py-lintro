@@ -261,6 +261,31 @@ class StylelintPlugin(BaseToolPlugin):
             cmd.extend(["--config", str(explicit)])
         return cmd
 
+    @staticmethod
+    def _fix_stage_reasons(
+        *,
+        fix_failures: int,
+        final_gap: tuple[str, int | None] | None,
+    ) -> str:
+        """Name every fix stage that left the verdict incomplete.
+
+        A malformed ``--fix`` report must not hide a re-check that crashed
+        or printed nothing, so each stage's reason is listed.
+
+        Args:
+            fix_failures: Malformed records in the ``--fix`` report.
+            final_gap: The re-check's own gap, if it had one.
+
+        Returns:
+            One reason per incomplete stage, one per line.
+        """
+        reasons: list[str] = []
+        if fix_failures:
+            reasons.append(malformed_report_reason("Stylelint --fix", fix_failures))
+        if final_gap is not None:
+            reasons.append(final_gap[0])
+        return "\n".join(reasons)
+
     def _fix_failure_result(
         self,
         *,
@@ -486,17 +511,18 @@ class StylelintPlugin(BaseToolPlugin):
             final_output,
         )
         parse_failures = fix_failures + final_failures
-        if fix_failures:
-            remaining_issues.extend(i for i in fix_issues if i not in remaining_issues)
-        # A failed verification with nothing parsed must not read as
-        # "all fixed" — keep the initial issues as remaining.
+        # Judge the re-check on its own report, before --fix findings join it.
         final_gap = report_gap(
             tool="Stylelint re-check",
             output=final_output,
             run_success=final_success,
             found_issues=bool(remaining_issues),
-            parse_failures=parse_failures,
+            parse_failures=final_failures,
         )
+        if fix_failures:
+            remaining_issues.extend(i for i in fix_issues if i not in remaining_issues)
+        # A failed verification with nothing parsed must not read as
+        # "all fixed" — keep the initial issues as remaining.
         if final_gap is not None and not parse_failures:
             return self._fix_failure_result(
                 reason=final_gap[0],
@@ -561,7 +587,7 @@ class StylelintPlugin(BaseToolPlugin):
             ),
             name=self.definition.name,
             output=(
-                malformed_report_reason("Stylelint", parse_failures)
+                self._fix_stage_reasons(fix_failures=fix_failures, final_gap=final_gap)
                 if parse_failures
                 else final_message
             ),
