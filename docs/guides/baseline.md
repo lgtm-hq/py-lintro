@@ -215,16 +215,20 @@ These fail-closed checks also apply without a fingerprint baseline:
   report. A missing Stylelint or Vale configuration is still a skip. Stylelint's report
   extraction treats JSON-like text inside a log line (a `[12:00:01]` timestamp, a
   `[1/3]` counter, a quoted `"["`) as log text unless it looks like a report record. A
-  Stylelint fix stage that measured nothing (a crashed `--fix`, an empty or crashed
-  re-check) leaves fixed and remaining counts unknown instead of guessing them.
-- SQLFluff treats empty lint stdout as no report, an execution failure rather than a
-  clean file, and keeps its lint diagnostics per execution instead of on the cached
-  plugin instance. A failed lint invocation that prints text instead of JSON (for
-  example `Error: Unknown dialect 'bogus'`) is an execution failure naming that message,
-  not a malformed report, and leaves fix accounting unknown.
-- Fix convergence retries stop at the first pass that failed to execute, could not
-  measure its residual, or printed a malformed report, so a later clean pass cannot
-  replace that failure.
+  Stylelint fix stage that measured nothing leaves fixed and remaining counts unknown
+  instead of guessing them. Stylelint prints a report from `--fix` and from the re-check
+  on every completed run, so empty output from either stage, at any exit code, counts as
+  measuring nothing, as does a crash with nothing parsed.
+- SQLFluff keeps its lint diagnostics per execution instead of on the cached plugin
+  instance. A lint invocation without a usable report or verdict is an execution failure
+  named with SQLFluff's own message (for a Python traceback, the exception line), not a
+  malformed report or a clean file, and it leaves fix accounting unknown. That covers
+  empty stdout at any exit (for example a `.sqlfluff` with a broken section header), a
+  failed exit that prints text instead of JSON (`Error: Unknown dialect 'bogus'`), any
+  exit other than 1 with violations, and a timeout.
+- Fix convergence retries stop at the first pass that failed to execute, timed out,
+  could not measure its residual, or printed a malformed report, so a later clean pass
+  cannot replace that failure.
 - The shared per-file check runner accepts a nonzero exit as a complete lint verdict
   only when it is a declared findings exit status and has parsed findings. Other nonzero
   exits are execution errors even if some findings were parsed. This also applies to the

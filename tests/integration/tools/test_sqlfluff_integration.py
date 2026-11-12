@@ -235,6 +235,41 @@ def test_unknown_dialect_is_an_execution_failure_not_a_malformed_report(
     assert_that(fixed.fixed_issues_count).is_none()
 
 
+def test_malformed_config_is_an_unmeasured_execution_failure(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """A config SQLFluff cannot load prints no report: nothing is measured.
+
+    SQLFluff 4.5.0 exits 1 with an empty stdout and a
+    ``MissingSectionHeaderError`` traceback on stderr when ``.sqlfluff`` has
+    a broken section header (#3352).
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Directory holding the broken config and a SQL file.
+    """
+    (tmp_path / ".sqlfluff").write_text("[sqlfluff\ndialect = ansi\n")
+    sql = tmp_path / "query.sql"
+    sql.write_text("select a from b\n")
+    sqlfluff_plugin = get_plugin("sqlfluff")
+
+    checked = sqlfluff_plugin.check([str(sql)], {})
+    fixed = sqlfluff_plugin.fix([str(sql)], {})
+
+    for result in (checked, fixed):
+        assert_that(result.success).is_false()
+        assert_that(result.execution_failed).is_true()
+        assert_that(result.parse_failures_count).is_zero()
+        assert_that(result.output).contains(
+            "SQLFluff printed no report (exit 1): configparser."
+            "MissingSectionHeaderError",
+        ).does_not_contain("Traceback")
+    assert_that(fixed.residual_unknown).is_true()
+    assert_that(fixed.fixed_issues_count).is_none()
+    assert_that(fixed.remaining_issues_count).is_none()
+
+
 def test_check_empty_directory(
     get_plugin: Callable[[str], BaseToolPlugin],
     tmp_path: Path,

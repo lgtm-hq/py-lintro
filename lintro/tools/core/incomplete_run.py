@@ -24,6 +24,30 @@ MAX_MESSAGE_LINES: int = 3
 MAX_MESSAGE_LINE_LENGTH: int = 200
 
 
+_TRACEBACK_HEADER: str = "Traceback (most recent call last):"
+
+
+def _after_python_traceback(lines: list[str]) -> list[str]:
+    """Drop the stack frames of the last Python traceback in ``lines``.
+
+    Args:
+        lines: A tool's output, one entry per line.
+
+    Returns:
+        The lines from the exception line on, or ``lines`` unchanged when they
+        hold no traceback or nothing follows its frames.
+    """
+    headers = [i for i, line in enumerate(lines) if line.strip() == _TRACEBACK_HEADER]
+    if not headers:
+        return lines
+    rest = lines[headers[-1] + 1 :]
+    # Frames and their source lines are indented; the exception is not.
+    for index, line in enumerate(rest):
+        if line.strip() and not line[0].isspace():
+            return rest[index:]
+    return lines
+
+
 def tool_message_excerpt(text: str | None) -> str:
     """Quote the first lines of what a tool printed when it failed.
 
@@ -32,9 +56,12 @@ def tool_message_excerpt(text: str | None) -> str:
 
     Returns:
         Up to ``MAX_MESSAGE_LINES`` non-empty lines joined by `` | ``, each cut
-        to ``MAX_MESSAGE_LINE_LENGTH`` characters, or ``"no output"``.
+        to ``MAX_MESSAGE_LINE_LENGTH`` characters, or ``"no output"``. For a
+        Python traceback the quote starts at the exception line, since its
+        first lines are only stack frames.
     """
-    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    raw = _after_python_traceback((text or "").splitlines())
+    lines = [line.strip() for line in raw if line.strip()]
     if not lines:
         return "no output"
     quoted = [

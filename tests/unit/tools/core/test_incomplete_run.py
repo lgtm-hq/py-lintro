@@ -116,3 +116,25 @@ def test_incomplete_result_keeps_real_findings_and_claims_nothing() -> None:
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.parse_failures_count).is_equal_to(1)
     assert_that(result.cwd).is_equal_to("/repo")
+
+
+def test_excerpt_of_a_python_traceback_starts_at_the_exception() -> None:
+    """Stack frames are skipped so the quote names the actual error."""
+    traceback = "\n".join(
+        [
+            "Traceback (most recent call last):",
+            '  File "/usr/local/bin/sqlfluff", line 6, in <module>',
+            "    sys.exit(cli())",
+            "             ~~~^^",
+            "configparser.MissingSectionHeaderError: File contains no section headers.",
+            "file: '<string>', line: 1",
+        ],
+    )
+
+    assert_that(tool_message_excerpt(traceback)).is_equal_to(
+        "configparser.MissingSectionHeaderError: File contains no section "
+        "headers. | file: '<string>', line: 1",
+    )
+    assert_that(tool_message_excerpt("Traceback (most recent call last):")).is_equal_to(
+        "Traceback (most recent call last):",
+    )

@@ -40,7 +40,6 @@ from lintro.tools.core.incomplete_run import (
     incomplete_run_result,
     malformed_report_reason,
     report_gap,
-    tool_message_excerpt,
 )
 from lintro.tools.core.option_validators import (
     filter_none_options,
@@ -477,23 +476,29 @@ class StylelintPlugin(BaseToolPlugin):
         except subprocess.TimeoutExpired:
             return self._create_timeout_result(timeout_val=ctx.timeout, cwd=ctx.cwd)
 
-        # A crashed --fix run (nothing parseable) must surface, not flow into
-        # a re-check that would misattribute the failure.
+        # Stylelint 18 prints a JSON report from --fix on every completed run,
+        # exit 0 included. No report (empty output at any exit) or a crash
+        # with nothing parsed is unmeasured: it must surface, not flow into a
+        # re-check that would credit it with a fix (#3352). A malformed but
+        # present report continues, so the re-check's own reason is kept too.
         fix_issues, fix_failures = parse_stylelint_output_with_stats(fix_output)
-        if not fix_success and not fix_issues:
+        fix_gap = report_gap(
+            tool="Stylelint --fix",
+            output=fix_output,
+            run_success=fix_success,
+            found_issues=bool(fix_issues),
+            parse_failures=fix_failures,
+        )
+        if fix_gap is not None and fix_gap[1] is None:
             return self._fix_failure_result(
-                reason=(
-                    "Stylelint --fix exited with an error and reported no "
-                    f"findings: {tool_message_excerpt(fix_output)}"
-                ),
-                # A crashed --fix may have rewritten files before failing,
-                # so what remains is unknown, not "everything".
+                reason=fix_gap[0],
+                # The fix may have rewritten files before failing, so what
+                # remains is unknown, not "everything".
                 accounting=FixUnmeasured(
-                    "Stylelint --fix failed without a report.",
+                    "Stylelint --fix printed no usable report.",
                     initial_count,
                 ),
                 issues=initial_issues,
-                parse_failures=fix_failures,
                 cwd=ctx.cwd,
             )
 

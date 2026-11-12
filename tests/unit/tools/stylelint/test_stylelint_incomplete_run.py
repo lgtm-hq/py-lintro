@@ -154,11 +154,19 @@ def test_fix_stops_when_the_initial_check_prints_no_report(
         ),
         (
             [(False, REPORT), (False, "")],
+            "Stylelint --fix exited with an error and printed no report.",
+        ),
+        (
+            [(False, REPORT), (True, "")],
+            "Stylelint --fix printed no report.",
+        ),
+        (
+            [(False, REPORT), (False, "Error: Cannot find module 'postcss'")],
             "Stylelint --fix exited with an error and reported no findings: "
-            "no output",
+            "Error: Cannot find module 'postcss'",
         ),
     ],
-    ids=["empty-recheck", "crashed-fix"],
+    ids=["empty-recheck", "empty-failed-fix", "empty-exit-zero-fix", "crashed-fix"],
 )
 def test_unmeasured_fix_stage_stays_incomplete_through_retries(
     stylelint_plugin: StylelintPlugin,

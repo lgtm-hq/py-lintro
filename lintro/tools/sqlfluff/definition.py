@@ -28,7 +28,10 @@ from lintro.tools.core.fix_runner import (
     PerFileFixPolicy,
     run_per_file_fix,
 )
-from lintro.tools.core.incomplete_run import tool_message_excerpt
+from lintro.tools.core.incomplete_run import (
+    malformed_report_reason,
+    tool_message_excerpt,
+)
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_list,
@@ -61,25 +64,20 @@ def _parse_report(output: str, failures: list[int]) -> list[SqlfluffIssue]:
     """Keep usable findings while recording incomplete per-file reports.
 
     Args:
-        output: One file's JSON report.
+        output: One file's JSON report, never empty: an empty one is no report
+            and is rejected before parsing.
         failures: Per-invocation failure counts for the enclosing run.
 
     Returns:
         All usable findings in the report.
 
     Raises:
-        ValueError: When SQLFluff printed no report, or no usable findings
-            survived an invalid one.
+        ValueError: When no usable findings survived an invalid report.
     """
-    if not output.strip():
-        # ``sqlfluff lint --format json`` prints a per-file record even for a
-        # clean file, so empty stdout is an execution failure, not a clean
-        # pass and not a malformed report (#3352).
-        raise ValueError("SQLFluff printed no report.")
     issues, count = parse_sqlfluff_output_with_stats(output)
     failures.append(count)
     if count and not issues:
-        raise ValueError(f"Malformed SQLFluff JSON report: {output[:500]}")
+        raise ValueError(malformed_report_reason("SQLFluff", count))
     return issues
 
 
@@ -273,29 +271,106 @@ class SqlfluffPlugin(BaseToolPlugin):
             input.
 
         Raises:
-            RuntimeError: When ``sqlfluff lint`` failed and printed text, not
-                a JSON report, so the per-file runner records an execution
-                error naming SQLFluff's own message.
+            RuntimeError: When ``sqlfluff lint`` printed no JSON report, so
+                the per-file runner records an execution error naming
+                SQLFluff's own message instead of parsing it.
         """
         result = super()._run_subprocess_result(cmd, timeout, cwd, env, stdin)
         if cmd[1:2] != ["lint"]:
             return result
-        no_report = not result.stdout.strip()
-        if (no_report or not result.success) and result.stderr.strip():
+        if not result.stdout.strip():
+            # ``sqlfluff lint --format json`` prints a per-file record even
+            # for a clean file, so empty stdout is no report at any exit,
+            # e.g. a malformed ``.sqlfluff`` raising a traceback (#3352).
+            detail = (
+                f": {tool_message_excerpt(result.stderr)}"
+                if result.stderr.strip()
+                else "."
+            )
+            raise RuntimeError(
+                self._record_run_error(
+                    f"SQLFluff printed no report (exit {result.returncode}){detail}",
+                ),
+            )
+        if not result.success and result.stderr.strip():
             self._lint_diagnostics.append(f"{cmd[-1]}:\n{result.stderr}")
-        if not result.success and not no_report and not _is_json(result.stdout):
+        if not result.success and not _is_json(result.stdout):
             # A configuration error such as an unknown dialect exits 2 with
             # its message on stdout. That is SQLFluff failing to run, not a
-            # malformed report, so it never reaches the parser (#3352).
-            error = (
-                f"SQLFluff could not run (exit {result.returncode}): "
-                f"{tool_message_excerpt(result.stdout)}"
+            # malformed report, so it never reaches the parser.
+            raise RuntimeError(
+                self._record_run_error(
+                    f"SQLFluff could not run (exit {result.returncode}): "
+                    f"{tool_message_excerpt(result.stdout)}",
+                ),
             )
-            self._lint_run_errors.append(error)
-            raise RuntimeError(error)
+        if not result.success and not (
+            result.returncode == 1
+            and parse_sqlfluff_output_with_stats(result.stdout)[0]
+        ):
+            # Only exit 1 with violations is a lint verdict; the per-file
+            # runner records anything else as an execution error, which the
+            # fix accounting must see too.
+            self._lint_run_errors.append(
+                f"SQLFluff lint exited {result.returncode} without a lint verdict.",
+            )
         # Only stdout is the report. Diagnostics stay out of the parser, so a
         # run that printed none is not counted as a malformed report.
         return replace(result, output=result.stdout)
+
+    def _parse_lint_report(
+        self,
+        output: str,
+        failures: list[int],
+    ) -> list[SqlfluffIssue]:
+        """Parse one lint report, treating an empty one as no report.
+
+        Args:
+            output: One lint invocation's stdout.
+            failures: Per-invocation failure counts for the enclosing run.
+
+        Returns:
+            All usable findings in the report.
+
+        Raises:
+            RuntimeError: When the invocation printed no report.
+        """
+        if not output.strip():
+            # ``sqlfluff lint --format json`` prints a per-file record even
+            # for a clean file, so empty stdout is an execution failure, not
+            # a clean pass and not a malformed report (#3352).
+            raise RuntimeError(self._record_run_error("SQLFluff printed no report."))
+        return _parse_report(output, failures)
+
+    def _record_run_error(self, message: str) -> str:
+        """Record a lint invocation that produced no usable report.
+
+        Args:
+            message: Named reason, quoting SQLFluff's own message.
+
+        Returns:
+            The message, for the error the per-file runner records.
+        """
+        self._lint_run_errors.append(message)
+        return message
+
+    def _unmeasured_reason(self, *, parse_failures: int, timed_out: bool) -> str | None:
+        """Name why this fix run's accounting was not measured, if it was not.
+
+        Args:
+            parse_failures: Malformed records across the lint reports.
+            timed_out: Whether any invocation timed out.
+
+        Returns:
+            The reason, or None when every lint pass gave a usable verdict.
+        """
+        if self._lint_run_errors:
+            return "SQLFluff could not run."
+        if parse_failures:
+            return "SQLFluff returned an incomplete report."
+        if timed_out:
+            return "SQLFluff timed out before reporting."
+        return None
 
     def _isolate_execution_state(self) -> None:
         """Give this execution copy its own lint diagnostics.
@@ -344,7 +419,7 @@ class SqlfluffPlugin(BaseToolPlugin):
             ctx,
             plugin=self,
             command=lambda f: self._build_lint_command(files=[str(f)]),
-            parse=lambda output: _parse_report(output, failures),
+            parse=lambda output: self._parse_lint_report(output, failures),
             policy=PerFileCheckPolicy(issues_imply_failure=True),
         )
         return self._with_lint_diagnostics(
@@ -378,7 +453,7 @@ class SqlfluffPlugin(BaseToolPlugin):
             plugin=self,
             check_command=lambda f: self._build_lint_command(files=[str(f)]),
             fix_command=lambda f: self._build_fix_command(files=[str(f)]),
-            parse=lambda output: _parse_report(output, failures),
+            parse=lambda output: self._parse_lint_report(output, failures),
             policy=PerFileFixPolicy(
                 check_failure_message="sqlfluff lint failed before fix",
                 # No self-verification. sqlfluff fix can partially apply fixes
@@ -391,21 +466,22 @@ class SqlfluffPlugin(BaseToolPlugin):
                 summarize=False,
             ),
         )
-        if any(failures) or self._lint_run_errors:
-            # A lint pass that could not run measured nothing, so its file
-            # is neither clean nor fixed (#3352).
+        unmeasured = self._unmeasured_reason(
+            parse_failures=sum(failures),
+            timed_out=result.timed_out,
+        )
+        if unmeasured is not None:
+            # A lint pass without a usable report or verdict measured
+            # nothing, so its file is neither clean nor fixed (#3352). The
+            # shared per-file runner reports measured counts regardless.
             result = replace(
                 result,
                 success=False,
                 parse_failures_count=sum(failures),
                 residual_unknown=True,
-                residual_unknown_reason=(
-                    "SQLFluff returned an incomplete report."
-                    if any(failures)
-                    else "SQLFluff could not run."
-                ),
+                residual_unknown_reason=unmeasured,
                 fixed_issues_count=None,
                 remaining_issues_count=None,
-                execution_failed=result.execution_failed or bool(self._lint_run_errors),
+                execution_failed=True,
             )
         return self._with_lint_diagnostics(result)

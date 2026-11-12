@@ -50,11 +50,12 @@ def _is_incomplete(result: ToolResult) -> bool:
         result: One normalized fix pass.
 
     Returns:
-        True when the pass failed to execute, has unknown fix accounting, or
-        printed a report that could not be fully parsed.
+        True when the pass failed to execute, timed out, has unknown fix
+        accounting, or printed a report that could not be fully parsed.
     """
     return bool(
         result.execution_failed
+        or result.timed_out
         or result.residual_unknown
         or result.parse_failures_count,
     )
@@ -119,11 +120,14 @@ def run_fix_with_retry(
     # record that measurement explicitly in initial_issues_count.
     if initial_issues_count is None and first_pass_initial_issues:
         initial_issues_count = len(first_pass_initial_issues)
-    if result.residual_unknown or result.parse_failures_count:
-        # Execution failures carry the original detected findings. Parse
-        # failures also retain the latest report's usable partial findings.
-        # An empty original list must not discard findings from a later pass,
-        # even when the first pass explicitly measured zero.
+    if _is_incomplete(result):
+        # The same test that ended the loop: a pass that failed to execute,
+        # timed out or reported incompletely measured no residual, so its
+        # counts stay unknown rather than falling back to ``issues_count``
+        # (#3352). Execution failures carry the original detected findings.
+        # Parse failures also retain the latest report's usable partial
+        # findings. An empty original list must not discard findings from a
+        # later pass, even when the first pass explicitly measured zero.
         issues = (
             first_pass_initial_issues
             if not result.parse_failures_count and first_pass_initial_issues
@@ -131,12 +135,18 @@ def run_fix_with_retry(
         )
         return replace(
             result,
+            success=False,
             issues=issues,
             issues_count=max(len(issues), result.issues_count),
             initial_issues_count=initial_issues_count,
             initial_issues=first_pass_initial_issues,
             fixed_issues_count=None,
             remaining_issues_count=None,
+            residual_unknown=True,
+            residual_unknown_reason=(
+                result.residual_unknown_reason
+                or "a fix pass failed before measuring what remains"
+            ),
         )
     if initial_issues_count is not None:
         result = replace(
