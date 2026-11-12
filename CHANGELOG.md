@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.8] - 2026-11-12
+
+### Fixed
+
+- **tools**: separate ruff and bandit execution failures from bad reports (#3387)
+  (bc6163a)
+
 ## [0.180.7] - 2026-11-12
 
 ### Fixed
