@@ -1411,10 +1411,13 @@ Rationale:
    under npm's own per-entry lock (`concurrency.lock`), so it never touches an entry
    while npx is installing it. An entry whose top-level package is not exactly the pin,
    is a symlink, is malformed, or whose `.bin/<binary>` points into another package is
-   deleted, and npx reinstalls the pin. A correct entry is reused as is. The tool is
-   **unavailable** if the cache resolves outside `~/.lintro/cache`, contains the
-   platform's `PATH` separator (`:` on Linux and macOS, `;` on Windows, so `C:\Users\…`
-   is fine), is not a directory, or cannot be locked or repaired.
+   deleted, and npx reinstalls the pin. A correct entry is reused as is. A bad entry is
+   first renamed aside under a short unique `.lintro-stale-…` name and then removed;
+   leftovers from an interrupted run are deleted on the next one. Several Lintro runs
+   can repair the same cache at once. The tool is **unavailable** if the cache resolves
+   outside `~/.lintro/cache`, contains the platform's `PATH` separator (`:` on Linux and
+   macOS, `;` on Windows, so `C:\Users\…` is fine), is not a directory, or cannot be
+   locked or repaired.
 
    **Trust model.** Lintro's npx cache (`~/.lintro/cache/npx/<package>@<pinned>`) is
    trusted the same way as Lintro's own installation. Lintro verifies that the installed

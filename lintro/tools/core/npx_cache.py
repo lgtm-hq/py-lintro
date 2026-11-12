@@ -12,12 +12,17 @@ reinstalls it.
 Validation takes npm's own per-entry lock (``<entry>/concurrency.lock``, a
 directory created with ``mkdir``, as in ``libnpmexec``'s ``with-lock.js``), so
 it never inspects or removes an entry while npx is reading or installing it.
-A bad entry is renamed aside atomically and then removed. Any failure to
-lock, validate or repair is reported, and the caller refuses the fallback.
+A bad entry is renamed aside atomically, under a bounded unique name built
+from its original name, and then removed. An entry that is already aside is
+deleted in place and never renamed again, so concurrent repairs cannot grow
+names (#3419); an entry another repair already moved or removed counts as
+repaired. Any failure to lock, validate or repair is reported, and the caller
+refuses the fallback.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -34,6 +39,9 @@ _LOCK_WAIT_SECONDS: float = 30.0
 
 #: Prefix for entries renamed aside before deletion.
 _STALE_PREFIX: str = ".lintro-stale-"
+
+#: Characters of the original name kept in an aside name, for debugging.
+_ASIDE_BASE_CHARS: int = 32
 
 
 class NpxCacheError(Exception):
@@ -203,6 +211,40 @@ def entry_runs_pin(entry: Path, *, package: str, pin: str, binary: str) -> bool:
     return _bin_belongs_to(entry, package_dir, binary, package)
 
 
+def _aside_name(name: str) -> str:
+    """Build a unique name, of bounded length, for an entry set aside.
+
+    Args:
+        name: The entry's current name.
+
+    Returns:
+        ``.lintro-stale-<base>-<uuid>``, where *base* is at most
+        :data:`_ASIDE_BASE_CHARS` characters of the original name with any
+        stale prefixes removed, so the result never grows with *name*.
+    """
+    base = name
+    while base.startswith(_STALE_PREFIX):
+        base = base[len(_STALE_PREFIX) :]
+    return f"{_STALE_PREFIX}{base[:_ASIDE_BASE_CHARS]}-{uuid.uuid4().hex}"
+
+
+def _delete(path: Path) -> None:
+    """Delete a path that nothing will use again, tolerating racing deleters.
+
+    A link is removed itself, never followed. Leftovers from a concurrent
+    deletion are removed by the next repair.
+
+    Args:
+        path: Entry already set aside, or a moved-aside name.
+    """
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        # A directory recreated in a race stays; the next repair removes it.
+        with contextlib.suppress(OSError):
+            path.unlink(missing_ok=True)
+
+
 def _discard(entry: Path) -> None:
     """Rename an entry aside atomically, then delete it.
 
@@ -210,19 +252,17 @@ def _discard(entry: Path) -> None:
         entry: Entry (or stray file) to remove.
 
     Raises:
-        NpxCacheError: The entry could not be moved aside.
+        NpxCacheError: The entry is still in place and could not be moved
+            aside.
     """
-    aside = entry.with_name(f"{_STALE_PREFIX}{entry.name}-{uuid.uuid4().hex}")
+    aside = entry.with_name(_aside_name(entry.name))
     try:
         os.replace(entry, aside)
-    except FileNotFoundError:
-        return
     except OSError as exc:
+        if not (entry.exists() or entry.is_symlink()):
+            return  # Moved or removed by a concurrent repair.
         raise NpxCacheError(f"cannot remove npm cache entry {entry}: {exc}") from exc
-    if aside.is_dir() and not aside.is_symlink():
-        shutil.rmtree(aside, ignore_errors=True)
-    else:
-        aside.unlink(missing_ok=True)
+    _delete(aside)
 
 
 def repair_npx_cache(
@@ -253,11 +293,11 @@ def repair_npx_cache(
     if not npx_root.is_dir():
         return
     for entry in sorted(npx_root.iterdir()):
-        if (
-            entry.name.startswith(_STALE_PREFIX)
-            or entry.is_symlink()
-            or not entry.is_dir()
-        ):
+        if entry.name.startswith(_STALE_PREFIX):
+            # Already aside, so no npx run uses it: delete it where it is.
+            _delete(entry)
+            continue
+        if entry.is_symlink() or not entry.is_dir():
             _discard(entry)
             continue
         lock = entry / "concurrency.lock"

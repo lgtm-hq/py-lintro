@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess  # nosec B404 - runs this interpreter with a fixed argv; shell=False
+import sys
 import threading
 import time
 from pathlib import Path
@@ -406,3 +408,220 @@ def test_concurrent_repairs_agree(cache: Path) -> None:
     assert_that(good.exists()).is_true()
     assert_that([entry.exists() for entry in bad]).does_not_contain(True)
     assert_that(_runs_pin(good)).is_true()
+
+
+# ---------------------------------------------------------------------------
+# Concurrent repair stress (#3419)
+# ---------------------------------------------------------------------------
+
+#: Longest ``_npx`` name a repair may create: the stale prefix, the original
+#: base name (at most 64 characters here) and a uuid, far below ``NAME_MAX``.
+_ASIDE_NAME_BOUND = 128
+
+#: Child repairer: waits for the start signal, then repairs a few times.
+_CHILD_REPAIRER = """
+import sys, time
+from pathlib import Path
+from lintro.utils import file_cache
+from lintro.tools.core.npx_cache import repair_npx_cache
+file_cache.CACHE_DIR = Path(sys.argv[1])
+go = Path(sys.argv[3])
+while not go.exists():
+    time.sleep(0.005)
+for _ in range(int(sys.argv[4])):
+    repair_npx_cache(
+        Path(sys.argv[2]), package="prettier", pin=sys.argv[5],
+        binary="prettier", pathsep=":",
+    )
+"""
+
+
+def _bulky_bad_entry(cache: Path, name: str, *, files: int = 150) -> Path:
+    """Create a wrong-version entry slow enough to delete to widen races.
+
+    Args:
+        cache: Per-pin cache.
+        name: Entry (hash) directory name.
+        files: Filler files written into the entry.
+
+    Returns:
+        The entry directory.
+    """
+    entry = _entry(cache, name, version="1.0.0")
+    filler = entry / "node_modules" / "filler"
+    filler.mkdir()
+    for index in range(files):
+        (filler / f"f{index}.js").write_text("x", encoding="utf-8")
+    return entry
+
+
+class _NameWatcher(threading.Thread):
+    """Record the longest name seen under ``_npx`` while repairs run."""
+
+    def __init__(self, npx_root: Path) -> None:
+        """Watch *npx_root* until stopped.
+
+        Args:
+            npx_root: ``<cache>/_npx``.
+        """
+        super().__init__(daemon=True)
+        self.npx_root = npx_root
+        self.longest = 0
+        self.done = threading.Event()
+
+    def run(self) -> None:
+        """Poll the directory listing until :attr:`done` is set."""
+        while not self.done.is_set():
+            try:
+                names = [entry.name for entry in self.npx_root.iterdir()]
+            except OSError:
+                names = []
+            self.longest = max([self.longest, *map(len, names)])
+
+
+class _Repairer(threading.Thread):
+    """Repair the cache a few times once released, keeping any error."""
+
+    def __init__(self, cache: Path, start: threading.Event, rounds: int) -> None:
+        """Prepare a repairer thread.
+
+        Args:
+            cache: Per-pin cache.
+            start: Released when every repairer is ready.
+            rounds: Repairs to run back to back.
+        """
+        super().__init__()
+        self.cache = cache
+        self.release = start
+        self.rounds = rounds
+        self.errors: list[Exception] = []
+
+    def run(self) -> None:
+        """Run the repairs, recording rather than raising failures."""
+        self.release.wait()
+        for _ in range(self.rounds):
+            try:
+                _repair(self.cache)
+            except Exception as exc:
+                self.errors.append(exc)
+
+
+def _remaining(cache: Path) -> list[str]:
+    """List what is left under ``_npx``.
+
+    Args:
+        cache: Per-pin cache.
+
+    Returns:
+        Sorted entry names.
+    """
+    return sorted(entry.name for entry in (cache / "_npx").iterdir())
+
+
+def test_many_threads_repairing_keep_names_bounded(cache: Path) -> None:
+    """Racing repairers in one process never grow a name or fail (#3419).
+
+    Args:
+        cache: Per-pin cache.
+    """
+    good = _entry(cache, "good")
+    for index in range(6):
+        _bulky_bad_entry(cache, f"bad{index}")
+    watcher = _NameWatcher(cache / "_npx")
+    watcher.start()
+    start = threading.Event()
+    repairers = [_Repairer(cache, start, rounds=4) for _ in range(16)]
+    for repairer in repairers:
+        repairer.start()
+    start.set()
+    for repairer in repairers:
+        repairer.join()
+    watcher.done.set()
+    watcher.join()
+
+    assert_that([e for r in repairers for e in r.errors]).is_empty()
+    assert_that(watcher.longest).is_less_than_or_equal_to(_ASIDE_NAME_BOUND)
+    assert_that(_remaining(cache)).is_equal_to([good.name])
+    assert_that(_runs_pin(good)).is_true()
+
+
+def test_many_processes_repairing_keep_names_bounded(
+    cache: Path,
+    tmp_path: Path,
+) -> None:
+    """Separate lintro runs repairing one cache never fail or leave debris.
+
+    Args:
+        cache: Per-pin cache.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    good = _entry(cache, "good")
+    for index in range(6):
+        _bulky_bad_entry(cache, f"bad{index}")
+    go = tmp_path / "go"
+    watcher = _NameWatcher(cache / "_npx")
+    watcher.start()
+    children = [
+        subprocess.Popen(  # nosec B603 - fixed argv, shell=False
+            [
+                sys.executable,
+                "-c",
+                _CHILD_REPAIRER,
+                str(file_cache.CACHE_DIR),
+                str(cache),
+                str(go),
+                "3",
+                _PIN,
+            ],
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for _ in range(8)
+    ]
+    time.sleep(0.5)
+    go.touch()
+    failures = [
+        stderr
+        for child in children
+        for _, stderr in [child.communicate(timeout=90)]
+        if child.returncode != 0
+    ]
+    watcher.done.set()
+    watcher.join()
+
+    assert_that(failures).is_empty()
+    assert_that(watcher.longest).is_less_than_or_equal_to(_ASIDE_NAME_BOUND)
+    assert_that(_remaining(cache)).is_equal_to([good.name])
+
+
+def test_stale_entry_is_deleted_without_another_rename(cache: Path) -> None:
+    """An entry already set aside is removed in place, however long its name.
+
+    Renaming it again would prepend the prefix once more; at the file name
+    limit that rename fails and the tool would be refused for nothing.
+
+    Args:
+        cache: Per-pin cache.
+    """
+    good = _entry(cache, "good")
+    stale = _entry(cache, ".lintro-stale-" + "a" * 230, version="1.0.0")
+
+    _repair(cache)
+
+    assert_that(stale.exists()).is_false()
+    assert_that(_remaining(cache)).is_equal_to([good.name])
+
+
+def test_entry_with_a_long_name_is_still_repaired(cache: Path) -> None:
+    """The aside name stays bounded whatever the original name's length.
+
+    Args:
+        cache: Per-pin cache.
+    """
+    long_bad = _entry(cache, "b" * 240, version="1.0.0")
+
+    _repair(cache)
+
+    assert_that(long_bad.exists()).is_false()
+    assert_that((cache / "_npx").is_dir()).is_true()
+    assert_that(_remaining(cache)).is_empty()
