@@ -395,6 +395,7 @@ def test_runner_pin_must_be_an_exact_semver_with_or_without_a_minimum(
     pin: str,
     min_version: str,
     expected_version: str | None,
+    tmp_path: Path,
 ) -> None:
     """The exact-pin check stands alone; the minimum applies only when set.
 
@@ -403,6 +404,7 @@ def test_runner_pin_must_be_an_exact_semver_with_or_without_a_minimum(
         min_version: Minimum the tool declares, empty for none.
         expected_version: Pinned version a runnable snapshot reports, or None
             when the pin must be refused.
+        tmp_path: Directory the runner would execute in.
     """
     from lintro.models.core.tool_snapshot import ToolCapabilities
     from lintro.tools.core import snapshots
@@ -410,6 +412,7 @@ def test_runner_pin_must_be_an_exact_semver_with_or_without_a_minimum(
     snapshot = snapshots._registry_fallback_snapshot(
         "prettier",
         command=["bunx", f"prettier@{pin}"],
+        search_root=tmp_path,
         min_version=min_version,
         capabilities=ToolCapabilities(),
         binary_path="",

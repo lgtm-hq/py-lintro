@@ -1,17 +1,18 @@
-"""The gate probes the hoisted binary npx would launch, not npx's pin (#2043).
+"""The npx-only gate follows npx's own decision, offline (#2043).
 
-``npx --package <pkg>@<pin> <bin>`` skips the install when any node in the
-workspace tree is exactly ``<pkg>@<pin>``, then runs ``<bin>`` from the first
-ancestor ``node_modules/.bin``. In a workspace whose root hoists an older
-copy, that older copy runs even though the pin is current. ``bunx`` never
-consults the local tree, so its pin stays the version evidence.
+``npx --package <pkg>@<pin> <bin>`` skips its install only when the pin is
+already installed somewhere in npm's project tree. It then runs ``<bin>`` by
+name from the nearest ancestor ``node_modules/.bin``, which may be another
+version, or exits 127 when there is none. Without an installed pin it runs
+the pin. ``bunx`` never consults the local tree.
 
-Real-runner coverage lives in
+These tests use shell-script stand-ins. Real-runner coverage is in
 ``tests/integration/test_registry_runner_hoisted_bin.py``.
 """
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -26,25 +27,26 @@ from lintro.tools.prettier.definition import PrettierPlugin
 
 _PIN = get_tool_version("prettier") or ""
 _MINIMUM = get_min_version(ToolName.PRETTIER)
+_OLDER = "1.0.0"
 
 
-def _fake_prettier(package_dir: Path, version: str, log: Path) -> Path:
-    """Install a fake ``prettier`` package that reports *version*.
+def _package(directory: Path, version: str, log: Path) -> Path:
+    """Install a fake ``prettier`` package whose binary reports *version*.
 
     Args:
-        package_dir: ``node_modules/prettier`` directory to create.
+        directory: Package directory to create.
         version: Version the package and its binary report.
         log: File each invocation of the binary appends its argv to.
 
     Returns:
         The package's executable.
     """
-    package_dir.mkdir(parents=True)
-    (package_dir / "package.json").write_text(
-        f'{{"name":"prettier","version":"{version}","bin":{{"prettier":"bin"}}}}\n',
+    directory.mkdir(parents=True)
+    (directory / "package.json").write_text(
+        json.dumps({"name": "prettier", "version": version}),
         encoding="utf-8",
     )
-    binary = package_dir / "bin"
+    binary = directory / "bin"
     binary.write_text(
         f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{log}"\nprintf "{version}\\n"\n',
         encoding="utf-8",
@@ -53,43 +55,76 @@ def _fake_prettier(package_dir: Path, version: str, log: Path) -> Path:
     return binary
 
 
-def _workspace(root: Path, *, hoisted: str, log: Path) -> tuple[Path, Path]:
-    """Build a workspace whose root hoists *hoisted* and nests the pin.
-
-    The workspace package has its own ``package.json`` and no ``.bin``, so
-    the project-local walk stops there and resolution reaches the runner.
+def _link_bin(bin_dir: Path, binary: Path) -> Path:
+    """Link *binary* as ``<bin_dir>/prettier``.
 
     Args:
-        root: Directory to build the workspace in.
-        hoisted: Version of the copy linked from the root ``.bin``.
-        log: Invocation log shared by both fake binaries.
+        bin_dir: ``node_modules/.bin`` directory.
+        binary: Executable to link.
 
     Returns:
-        The workspace package directory and the hoisted ``.bin`` entry.
+        The ``.bin`` entry.
     """
-    workspace = root / "ws"
-    (workspace / ".git").mkdir(parents=True)
-    (workspace / "package.json").write_text(
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    entry = bin_dir / "prettier"
+    entry.symlink_to(binary)
+    return entry
+
+
+def _project(root: Path) -> Path:
+    """Create a git workspace with one member package.
+
+    Args:
+        root: Workspace root to create.
+
+    Returns:
+        The member package directory, which has no ``node_modules``.
+    """
+    (root / ".git").mkdir(parents=True)
+    (root / "package.json").write_text(
         '{"name":"ws","private":true,"workspaces":["packages/*"]}\n',
         encoding="utf-8",
     )
-    app = workspace / "packages" / "app"
+    app = root / "packages" / "app"
     app.mkdir(parents=True)
     (app / "package.json").write_text('{"name":"app"}\n', encoding="utf-8")
-    hoisted_binary = _fake_prettier(
-        workspace / "node_modules" / "prettier",
-        hoisted,
-        log,
-    )
-    _fake_prettier(
-        workspace / "node_modules" / "other" / "node_modules" / "prettier",
-        _PIN,
-        log,
-    )
-    bin_dir = workspace / "node_modules" / ".bin"
-    bin_dir.mkdir()
-    (bin_dir / "prettier").symlink_to(hoisted_binary)
-    return app, bin_dir / "prettier"
+    return app
+
+
+def _layout(tmp_path: Path, name: str, log: Path) -> tuple[Path, Path | None]:
+    """Build one of the review's four layouts.
+
+    Args:
+        tmp_path: Directory to build in.
+        name: Layout identifier.
+        log: Invocation log for every fake binary.
+
+    Returns:
+        The directory lintro checks, and the ``.bin`` entry npx would run (or
+        None when npx would run the pin or nothing).
+    """
+    if name == "outside-bin-no-pin":
+        home = tmp_path / "home"
+        outside = _package(home / "node_modules" / "prettier", _OLDER, log)
+        _link_bin(home / "node_modules" / ".bin", outside)
+        project = home / "proj"
+        (project / ".git").mkdir(parents=True)
+        (project / "package.json").write_text('{"name":"proj"}\n', encoding="utf-8")
+        return project, None
+    workspace = tmp_path / "ws"
+    app = _project(workspace)
+    modules = workspace / "node_modules"
+    if name == "nested-pin-no-bin":
+        wrapper = modules / "wrapper"
+        nested = _package(wrapper / "node_modules" / "prettier", _PIN, log)
+        _link_bin(wrapper / "node_modules" / ".bin", nested)
+        return app, None
+    hoisted = _package(modules / "prettier", _OLDER, log)
+    entry = _link_bin(modules / ".bin", hoisted)
+    if name == "hoisted-older-pin-elsewhere":
+        _package(modules / "other" / "node_modules" / "prettier", _PIN, log)
+        return app, entry
+    return app, None
 
 
 def _only_runner(monkeypatch: pytest.MonkeyPatch, runner: str, tmp_path: Path) -> None:
@@ -110,60 +145,104 @@ def _only_runner(monkeypatch: pytest.MonkeyPatch, runner: str, tmp_path: Path) -
     monkeypatch.setattr(shutil, "which", which)
 
 
-@pytest.mark.parametrize(
-    ("hoisted", "runnable"),
-    [("1.0.0", False), (_PIN, True)],
-    ids=["hoisted-below-minimum", "hoisted-at-pin"],
-)
-def test_npx_gate_probes_the_hoisted_binary_npx_would_launch(
+def test_npx_runs_the_hoisted_binary_when_the_pin_is_installed_elsewhere(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    hoisted: str,
-    runnable: bool,
 ) -> None:
-    """With npx, a reachable hoisted binary is resolved, probed and gated.
+    """The pin in the tree makes npx run the hoisted older copy; it is refused.
 
     Args:
         tmp_path: Temporary directory provided by pytest.
         monkeypatch: Scoped PATH override.
-        hoisted: Version of the hoisted copy.
-        runnable: Whether that version meets the minimum.
     """
     log = tmp_path / "argv.log"
-    app, hoisted_bin = _workspace(tmp_path, hoisted=hoisted, log=log)
+    app, entry = _layout(tmp_path, "hoisted-older-pin-elsewhere", log)
+    assert entry is not None
     _only_runner(monkeypatch, "npx", tmp_path)
 
     snapshot = snapshots.probe_tool("prettier", search_root=app)
     verdict = verify_tool_version(PrettierPlugin().definition, cwd=str(app))
 
     assert_that(snapshot.command).is_equal_to(
-        ((hoisted_bin.parent.resolve() / hoisted_bin.name).as_posix(),),
+        ((entry.parent.resolve() / entry.name).as_posix(),),
     )
-    assert_that(snapshot.version).is_equal_to(hoisted)
-    assert_that(snapshot.version_check_passed).is_equal_to(runnable)
+    assert_that(snapshot.version).is_equal_to(_OLDER)
+    assert_that(snapshot.version_check_passed).is_false()
+    assert_that(snapshot.probe_error).contains(f"below minimum requirement {_MINIMUM}")
     assert_that(log.read_text(encoding="utf-8")).contains("--version")
-    if runnable:
-        assert_that(verdict).is_none()
-    else:
-        assert_that(snapshot.probe_error).contains(
-            f"below minimum requirement {_MINIMUM}",
-        )
-        assert verdict is not None
-        assert_that(verdict.skipped).is_true()
+    assert verdict is not None
+    assert_that(verdict.skipped).is_true()
 
 
-def test_bunx_keeps_its_pin_as_evidence_over_a_hoisted_binary(
+@pytest.mark.parametrize(
+    "layout",
+    ["hoisted-older-no-pin", "outside-bin-no-pin"],
+)
+def test_npx_keeps_the_pin_when_no_installed_package_matches_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    layout: str,
+) -> None:
+    """Without the pin in the tree npx installs it; local bins are not used.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped PATH override.
+        layout: Layout identifier.
+    """
+    log = tmp_path / "argv.log"
+    project, _entry = _layout(tmp_path, layout, log)
+    _only_runner(monkeypatch, "npx", tmp_path)
+
+    snapshot = snapshots.probe_tool("prettier", search_root=project)
+    verdict = verify_tool_version(PrettierPlugin().definition, cwd=str(project))
+
+    assert_that(snapshot.command[0]).is_equal_to("npx")
+    assert_that(snapshot.available).is_true()
+    assert_that(snapshot.version).is_equal_to(_PIN)
+    assert_that(log.exists()).is_false()
+    assert_that(verdict).is_none()
+
+
+def test_npx_with_the_pin_installed_but_no_reachable_bin_is_unavailable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Bunx never launches the local tree, so the pin stands and nothing runs.
+    """When npx would exit 127, the gate refuses instead of passing on the pin.
 
     Args:
         tmp_path: Temporary directory provided by pytest.
         monkeypatch: Scoped PATH override.
     """
     log = tmp_path / "argv.log"
-    app, _hoisted_bin = _workspace(tmp_path, hoisted="1.0.0", log=log)
+    app, _entry = _layout(tmp_path, "nested-pin-no-bin", log)
+    _only_runner(monkeypatch, "npx", tmp_path)
+
+    snapshot = snapshots.probe_tool("prettier", search_root=app)
+    verdict = verify_tool_version(PrettierPlugin().definition, cwd=str(app))
+
+    assert_that(snapshot.available).is_false()
+    assert_that(snapshot.version).is_none()
+    assert_that(snapshot.probe_error).contains(
+        f"npx would find prettier@{_PIN} installed",
+    ).contains("but no prettier on its PATH")
+    assert_that(log.exists()).is_false()
+    assert verdict is not None
+    assert_that(verdict.unavailable_reason).contains("no prettier on its PATH")
+
+
+def test_bunx_keeps_its_pin_as_evidence_over_a_hoisted_binary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With bunx, the pin stands and nothing in the local tree runs.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped PATH override.
+    """
+    log = tmp_path / "argv.log"
+    app, _entry = _layout(tmp_path, "hoisted-older-pin-elsewhere", log)
     _only_runner(monkeypatch, "bunx", tmp_path)
 
     snapshot = snapshots.probe_tool("prettier", search_root=app)

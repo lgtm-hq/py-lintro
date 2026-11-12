@@ -12,7 +12,6 @@ import contextlib
 import json
 import math
 import os
-import re
 import shutil
 import sys
 import sysconfig
@@ -33,6 +32,7 @@ from lintro.models.core.tool_snapshot import ToolCapabilities as ToolCapabilitie
 from lintro.models.core.tool_snapshot import ToolSnapshot as ToolSnapshot
 from lintro.tools.core.command_builders import CommandBuilderRegistry
 from lintro.tools.core.node_fallback import (
+    EXACT_SEMVER,
     is_registry_fallback_command,
     registry_fallback_install_hint,
     registry_fallback_spec,
@@ -515,6 +515,7 @@ def probe_tool(
         return _registry_fallback_snapshot(
             name,
             command=command,
+            search_root=root,
             min_version=definition.min_version or "",
             capabilities=capabilities,
             binary_path=binary_path,
@@ -540,16 +541,6 @@ def probe_tool(
     return _snapshot_from_version(snapshot, version_info, remediation)
 
 
-#: An exact npm pin: ``MAJOR.MINOR.PATCH`` with an optional prerelease and
-#: build suffix. Partial versions (``1.2``), wildcards (``1.x``), ranges
-#: (``^1.2.3``) and dist-tags (``latest``) all let the runner choose (#2043).
-_EXACT_SEMVER: re.Pattern[str] = re.compile(
-    r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
-    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
-    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?",
-)
-
-
 def _registry_fallback_refusal(
     package: str,
     pinned: str | None,
@@ -573,7 +564,7 @@ def _registry_fallback_refusal(
             f"registry fallback for {package} has no version pin; "
             "refusing to run an unpinned package"
         )
-    if not _EXACT_SEMVER.fullmatch(pinned):
+    if not EXACT_SEMVER.fullmatch(pinned):
         return (
             f"registry fallback pin {package}@{pinned} is not an exact "
             "version; refusing to run it"
@@ -595,10 +586,56 @@ def _registry_fallback_refusal(
     return None
 
 
+def _npx_refusal(
+    command: list[str],
+    *,
+    package: str,
+    pinned: str,
+    search_root: Path,
+) -> str | None:
+    """Refuse an npx command whose pin is not what npx would launch.
+
+    ``npx`` skips its install when the pin is already in the project tree and
+    then runs ``<bin>`` by name, which may be another version or nothing at
+    all (#2043). The resolver returns that binary itself when one exists, so
+    an npx command reaching the gate must predict ``PINNED``. Anything else
+    fails closed.
+
+    Args:
+        command: Resolved npx command.
+        package: npm package from the spec.
+        pinned: Exact pinned version from the spec.
+        search_root: Directory npx would run in.
+
+    Returns:
+        The refusal reason, or None when npx would run the pinned package.
+    """
+    from lintro.enums.npx_launch import NpxLaunch
+    from lintro.tools.core.npx_resolution import decide_npx_launch
+
+    if Path(command[0]).name != "npx":
+        return None
+    decision = decide_npx_launch(
+        package=package,
+        version=pinned,
+        binary=command[-1],
+        cwd=search_root,
+    )
+    if decision.launch is NpxLaunch.PINNED:
+        return None
+    if decision.launch is NpxLaunch.LOCAL:
+        return (
+            f"npx would run {decision.binary} instead of {package}@{pinned}; "
+            "the project tree changed after resolution"
+        )
+    return decision.reason
+
+
 def _registry_fallback_snapshot(
     name: str,
     *,
     command: list[str],
+    search_root: Path,
     min_version: str,
     capabilities: ToolCapabilities,
     binary_path: str,
@@ -617,6 +654,7 @@ def _registry_fallback_snapshot(
     Args:
         name: Canonical tool name.
         command: Resolved registry-runner command.
+        search_root: Directory the runner would execute in.
         min_version: Minimum version the tool requires, or empty when none.
         capabilities: Declared capability evidence.
         binary_path: Resolved runner executable.
@@ -629,6 +667,13 @@ def _registry_fallback_snapshot(
     hint = registry_fallback_install_hint(command)
     package, pinned = split_npm_spec(registry_fallback_spec(command) or "")
     refusal = _registry_fallback_refusal(package, pinned, min_version)
+    if refusal is None and pinned is not None:
+        refusal = _npx_refusal(
+            command,
+            package=package,
+            pinned=pinned,
+            search_root=search_root,
+        )
     if refusal is not None:
         return _unavailable_snapshot(
             name,

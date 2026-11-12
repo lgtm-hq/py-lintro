@@ -485,41 +485,37 @@ def find_local_node_binary(
     return None
 
 
-def find_npx_path_node_binary(
-    binary_name: str,
-    *,
-    start: Path | None = None,
-) -> str | None:
-    """Find the ancestor ``node_modules/.bin`` executable npx would launch.
-
-    ``npx --package <pkg>@<pin> <bin>`` skips the install whenever any node in
-    the project's dependency tree is exactly ``<pkg>@<pin>``, at any depth. It
-    then runs ``<bin>`` by name with a ``PATH`` built from ``node_modules/.bin``
-    in every ancestor of the project, up to the filesystem root
-    (``@npmcli/run-script`` ``set-path.js``). A hoisted ``<bin>`` from a
-    different version therefore runs instead of the pin, and the pin is no
-    evidence of what executes (#2043). Verified offline against npx 11.20.0.
-
-    Unlike :func:`find_local_node_binary`, this walk has no project boundary,
-    because npx's ``PATH`` has none. ``bunx <pkg>@<pin>`` never consults the
-    local tree, so this applies to npx only.
+def _npx_local_binary(spec: str, binary_name: str, start: Path | None) -> str | None:
+    """Return the ``node_modules/.bin`` entry npx would run instead of *spec*.
 
     Args:
-        binary_name: Executable name inside ``node_modules/.bin``.
-        start: Directory the tool will run in. Defaults to the process
-            working directory.
+        spec: Pinned ``package@version`` spec npx would be given.
+        binary_name: Executable passed to npx.
+        start: Directory npx would run in, or None for the process directory.
 
     Returns:
-        POSIX path to the first ancestor executable, or None when npx can only
-        launch the pinned package.
+        The binary npx would launch by name, or None when npx would run the
+        pin (or cannot run at all, which the version gate reports).
     """
-    origin = (start or Path.cwd()).resolve()
-    name = f"{binary_name}.cmd" if sys.platform == "win32" else binary_name
-    for directory in (origin, *origin.parents):
-        candidate = directory / "node_modules" / ".bin" / name
-        if candidate.is_file():
-            return candidate.as_posix()
-    return None
+    from lintro.enums.npx_launch import NpxLaunch
+    from lintro.tools.core.node_fallback import EXACT_SEMVER, split_npm_spec
+    from lintro.tools.core.npx_resolution import decide_npx_launch
+
+    package, version = split_npm_spec(spec)
+    if version is None or not EXACT_SEMVER.fullmatch(version):
+        return None
+    decision = decide_npx_launch(
+        package=package,
+        version=version,
+        binary=binary_name,
+        cwd=start or Path.cwd(),
+    )
+    if decision.launch is not NpxLaunch.LOCAL:
+        return None
+    logger.debug(
+        f"npx would run {decision.binary} instead of {spec}; using it directly",
+    )
+    return decision.binary
 
 
 def pinned_npm_spec(package_name: str) -> str:
@@ -700,14 +696,13 @@ class NodeJSBuilder(CommandBuilder):
         for runner in ("bunx", "npx"):
             if shutil.which(runner):
                 if runner == "npx":
-                    # npx may launch a hoisted binary instead of the pin;
-                    # resolve that binary so the gate probes what runs.
-                    reachable = find_npx_path_node_binary(binary_name, start=start)
-                    if reachable is not None:
-                        logger.debug(
-                            f"npx would launch {reachable}; using it for {binary_name}",
-                        )
-                        return [reachable]
+                    # npx skips its install when the pin is already in the
+                    # tree and runs ``binary_name`` by name, which may be a
+                    # different version; resolve that binary so the gate
+                    # probes what runs (#2043).
+                    local = _npx_local_binary(spec, binary_name, start)
+                    if local is not None:
+                        return [local]
                     command = ["npx", "--yes", "--package", spec, binary_name]
                 elif package_name == binary_name:
                     command = [runner, spec]

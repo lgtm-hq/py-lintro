@@ -14,9 +14,19 @@ itself (see issue #1767).
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 
 from loguru import logger
+
+#: An exact npm pin: ``MAJOR.MINOR.PATCH`` with an optional prerelease and
+#: build suffix. Partial versions (``1.2``), wildcards (``1.x``), ranges
+#: (``^1.2.3``) and dist-tags (``latest``) all let the runner choose (#2043).
+EXACT_SEMVER: re.Pattern[str] = re.compile(
+    r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?",
+)
 
 # Package runners used as the last-resort registry fallback for Node tools.
 REGISTRY_RUNNERS: frozenset[str] = frozenset({"bunx", "npx"})

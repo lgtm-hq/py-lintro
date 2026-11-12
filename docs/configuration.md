@@ -1388,14 +1388,24 @@ Rationale:
    (`bunx --package typescript@<pinned> tsc`). `npx` always uses `--yes --package` so it
    cannot hang waiting for a TTY prompt.
 
-   When only `npx` is available, Lintro first looks for `node_modules/.bin/<binary>` in
-   every directory from the one being checked up to the filesystem root, with no
-   `package.json` or `.git` boundary. `npx` skips its install whenever the pinned
-   version appears anywhere in the dependency tree. It then runs `<binary>` from the
-   first ancestor `node_modules/.bin`, so in a workspace whose root hoists an older
-   copy, that copy runs instead of the pin. If such a binary exists, Lintro uses it
-   directly, probes its real version locally and applies the minimum to it.
-   `bunx <pkg>@<pinned>` never runs the local tree, so it is unaffected.
+   `npx` does not always run the pin. It first looks for the pinned package in npm's
+   installed tree: the nearest directory with a `package.json` or `node_modules`,
+   promoted to its workspace root, including nested, aliased and symlinked packages. If
+   it finds the pin, it skips its install and runs `<binary>` by name from the nearest
+   `node_modules/.bin` above the checked directory, which may be an older hoisted copy.
+   Lintro makes the same check offline, without calling npm:
+
+   - **Pin installed, `<binary>` on that path:** Lintro runs that binary directly,
+     probes its real version locally and applies the minimum.
+   - **Pin installed, no `<binary>` on that path:** the tool is unavailable, because
+     `npx` would fail with `command not found`.
+   - **Pin not installed:** `npx` installs and runs the pin, so Lintro keeps the `npx`
+     command and uses the pin as the version. Any other `node_modules/.bin/<binary>` is
+     ignored, because `npx` will not run it.
+   - **Tree too large to inspect** (over 100,000 packages): the tool is unavailable
+     rather than guessed.
+
+   `bunx <pkg>@<pinned>` never runs the local tree, so it always runs the pin.
 
 4. **bare `<binary>`** — last resort, fails if nothing is installed.
 
