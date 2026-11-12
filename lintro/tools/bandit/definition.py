@@ -74,6 +74,38 @@ def _extract_bandit_json(raw_text: str) -> dict[str, Any]:
     return parsed
 
 
+#: Scan errors named individually before the rest are summarised as a count.
+MAX_NAMED_SCAN_ERRORS: int = 10
+
+
+def _scan_errors_reason(errors: list[Any]) -> str:
+    """Name the files Bandit could not scan and why.
+
+    Args:
+        errors: Bandit's ``errors`` list, normally ``{filename, reason}`` dicts.
+
+    Returns:
+        A one-line reason for a single file, otherwise a header followed by
+        one line per file, capped at ``MAX_NAMED_SCAN_ERRORS`` entries.
+    """
+    entries: list[str] = []
+    for error in errors[:MAX_NAMED_SCAN_ERRORS]:
+        if isinstance(error, dict):
+            filename = str(error.get("filename") or "<unknown file>")
+            reason = str(error.get("reason") or "no reason given")
+            entries.append(f"{filename}: {reason}")
+        else:
+            entries.append(str(error))
+    header = f"Bandit could not scan {len(errors)} file(s):"
+    if len(errors) == 1:
+        return f"{header} {entries[0]}"
+    hidden = len(errors) - len(entries)
+    lines = [header, *(f"  {entry}" for entry in entries)]
+    if hidden:
+        lines.append(f"  ... and {hidden} more")
+    return "\n".join(lines)
+
+
 def _failed_run_result(
     *,
     output: str,
@@ -480,21 +512,16 @@ class BanditPlugin(BaseToolPlugin):
             if ("{" not in output or "}" not in output) and execution_failure:
                 return _failed_run_result(output=output)
 
-            # Handle empty output (no JSON content to parse)
+            # Bandit in JSON mode always prints a report, even for an empty
+            # directory, and lintro never runs it without files. Empty stdout
+            # is therefore no report at all, whatever the exit code, and
+            # cannot prove a clean pass or any inspection (#3352).
             if not output:
-                # If Bandit exited non-zero with no output, treat as failure
-                if returncode != 0:
-                    return _failed_run_result(
-                        output=stderr_output or "Bandit failed with non-zero exit code",
-                    )
-                # Informational, non-JSON output. Keep ``output`` empty so a
-                # clean, zero-issue pass is never routed through the JSON
-                # parser and reported as parse-error noise (#1534).
-                logger.debug("[bandit] Empty output received; treating as clean pass")
-                return ToolResult.from_outcome(
-                    ToolOutcome(execution=Checked(success=True, inspected_files=True)),
-                    name=self.definition.name,
-                    output=None,
+                return _failed_run_result(
+                    output=(
+                        stderr_output
+                        or f"Bandit printed no report (exit {returncode})."
+                    ),
                 )
 
             bandit_data = _extract_bandit_json(raw_text=output)
@@ -506,7 +533,7 @@ class BanditPlugin(BaseToolPlugin):
             # report, not a clean one: count it as a parse failure (#3352).
             if not isinstance(errors, list):
                 logger.error(
-                    "Bandit 'errors' must be a list, got " f"{type(errors).__name__}",
+                    f"Bandit 'errors' must be a list, got {type(errors).__name__}",
                 )
                 return _failed_run_result(
                     output=output,
@@ -516,9 +543,10 @@ class BanditPlugin(BaseToolPlugin):
 
             # Files Bandit could not scan, or a run that failed to execute,
             # leave the findings incomplete and the inspected set unknown.
+            # Scan errors are named rather than dumping the whole report.
             if errors or execution_failure:
                 return _failed_run_result(
-                    output=output,
+                    output=output if execution_failure else _scan_errors_reason(errors),
                     issues=issues,
                     parse_failures=0,
                 )

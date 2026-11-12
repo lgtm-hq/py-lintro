@@ -58,8 +58,13 @@ def test_check_no_python_files_returns_empty_output(tmp_path: Path) -> None:
     assert_that(result.inspected_files).is_false()
 
 
-def test_check_empty_output_clean_pass_has_empty_output(tmp_path: Path) -> None:
-    """An empty-stdout clean bandit run must not carry informational output.
+def test_check_empty_output_is_not_a_clean_pass(tmp_path: Path) -> None:
+    """Empty stdout at exit 0 is a run with no report, not a clean pass (#3352).
+
+    Bandit in JSON mode prints a report even for an empty directory, and
+    lintro returns a no-files result before running it when nothing matched,
+    so empty stdout proves neither a clean verdict nor any inspection. It is
+    an execution failure that can never make a baseline eligible.
 
     Args:
         tmp_path: Temporary directory path for the target file.
@@ -87,7 +92,9 @@ def test_check_empty_output_clean_pass_has_empty_output(tmp_path: Path) -> None:
     ):
         result = plugin.check([str(py_file)], {})
 
-    assert_that(result.success).is_true()
-    assert_that(result.issues_count).is_equal_to(0)
-    assert_that(result.output).is_none()
-    assert_that(result_inspected_files(result)).is_true()
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.issues).is_empty()
+    assert_that(result.output).is_equal_to("Bandit printed no report (exit 0).")
+    assert_that(result_inspected_files(result)).is_none()

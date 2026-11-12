@@ -585,20 +585,24 @@ def test_badge_live_partial_timeout_prints_no_badge() -> None:
     assert_that(result.output).does_not_contain("img.shields.io")
 
 
-@pytest.mark.parametrize("scenario", ["empty-discovery", "ignored-by-bandit", "clean"])
+@pytest.mark.parametrize(
+    "scenario",
+    ["empty-discovery", "ignored-by-bandit", "empty-report", "clean"],
+)
 def test_badge_uses_bandit_inspection_signal(tmp_path: Path, scenario: str) -> None:
     """Only a completed Bandit inspection can publish a clean live badge.
 
     Args:
         tmp_path: Isolated scan directory.
-        scenario: Empty discovery, native no-files response, or clean inspection.
+        scenario: Empty discovery, native no-files response, a run that
+            printed no report (#3352), or a clean inspection.
     """
     if scenario != "empty-discovery":
         (tmp_path / "safe.py").write_text("value = 1\n")
     completed = CompletedProcess(
         args=["bandit"],
         returncode=0,
-        stdout="",
+        stdout='{"results": [], "errors": []}' if scenario == "clean" else "",
         stderr=(
             "No .py/.pyi files found to check."
             if scenario == "ignored-by-bandit"
