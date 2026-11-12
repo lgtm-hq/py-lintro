@@ -43,6 +43,11 @@ from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.batch_runner import batch_timeout_result
+from lintro.tools.core.incomplete_run import (
+    incomplete_run_result,
+    report_gap,
+    tool_message_excerpt,
+)
 from lintro.tools.core.node_fallback import (
     is_registry_fallback_command,
     registry_fallback_guidance,
@@ -282,24 +287,44 @@ class HtmlValidatePlugin(BaseToolPlugin):
             output=result.stdout,
         )
         issues_count: int = len(issues)
-        success_flag: bool = (
-            result.success and issues_count == 0 and parse_failures == 0
+
+        # html-validate prints a JSON array on every completed run (``[]``
+        # when clean) and exits non-zero whenever it reports issues. No report,
+        # a malformed one, or a failure with nothing parsed is no verdict and
+        # proves no coverage (#3352). A failure with nothing parsed is the case
+        # worth explaining: the registry fallback could not run.
+        # A complete report naming a file proves coverage even when that
+        # file has no messages, whatever the exit status.
+        gap = report_gap(
+            tool="html-validate",
+            output=result.stdout,
+            run_success=result.success,
+            found_issues=bool(issues)
+            or (not parse_failures and bool(_reported_inspection(result.stdout))),
+            parse_failures=parse_failures,
         )
-
-        # Suppress output when no issues found; otherwise surface the raw
-        # combined output for diagnostics (e.g. a crash producing no JSON).
-        final_output: str | None = None if success_flag else result.output
-
-        # html-validate exits non-zero whenever it reports issues, so a failure
-        # is only a *tool* failure when nothing was parsed out of stdout. That
-        # is the case worth explaining: the registry fallback could not run.
-        if not result.success and issues_count == 0:
-            final_output = self._append_fallback_guidance(
-                output=final_output,
-                used_registry_fallback=used_registry_fallback,
-                command=fallback_command,
+        if gap is not None:
+            reason, failures = gap
+            if not result.success and not issues:
+                if result.stderr.strip():
+                    reason = f"{reason}\n{tool_message_excerpt(result.stderr)}"
+                reason = (
+                    self._append_fallback_guidance(
+                        output=reason,
+                        used_registry_fallback=used_registry_fallback,
+                        command=fallback_command,
+                    )
+                    or reason
+                )
+            return incomplete_run_result(
+                name=self.definition.name,
+                reason=reason,
+                issues=issues,
+                parse_failures=failures,
+                cwd=ctx.cwd,
             )
 
+        success_flag: bool = result.success and issues_count == 0
         return ToolResult.from_outcome(
             ToolOutcome(
                 execution=Checked(
@@ -311,7 +336,7 @@ class HtmlValidatePlugin(BaseToolPlugin):
                 issues_count=issues_count,
             ),
             name=self.definition.name,
-            output=final_output,
+            output=None if success_flag else result.output,
             issues=issues,
             cwd=ctx.cwd,
             parse_failures_count=parse_failures,

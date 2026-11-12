@@ -443,3 +443,77 @@ def test_unrelated_json_array_before_payload_is_skipped() -> None:
     assert_that(failures).is_zero()
     assert_that(issues).is_length(1)
     assert_that(issues[0].code).is_equal_to("block-no-empty")
+
+
+@pytest.mark.parametrize(
+    "log_line",
+    [
+        "[2026-11-12T10:00:00Z] loading config",
+        "[12:00:01] start",
+        "[1/3] linting {files}",
+        'Config: {"extends": ["stylelint-config-standard"]}',
+        'warn: "[" opened',
+        'warn: "a [1, 2" here',
+    ],
+    ids=[
+        "timestamp",
+        "clock",
+        "progress",
+        "config-object",
+        "quoted-bracket",
+        "quoted-list",
+    ],
+)
+@pytest.mark.parametrize("report", [CLEAN, SINGLE_WARNING])
+def test_json_embedded_in_log_lines_is_log_text(log_line: str, report: str) -> None:
+    """JSON-like log openers neither fail the report nor swallow its findings."""
+    issues, failures = parse_stylelint_output_with_stats(f"{log_line}\n{report}")
+
+    assert_that(failures).is_zero()
+    assert_that(issues).extracting("code").is_equal_to(
+        ["color-hex-length"] if report == SINGLE_WARNING else [],
+    )
+
+
+@pytest.mark.parametrize(
+    "embedded",
+    [
+        'result: [{"source":"a.css","warnings":[',
+        'result: [{"source": bad}] done',
+    ],
+    ids=["truncated", "malformed"],
+)
+def test_report_shaped_text_in_a_log_line_still_fails_closed(embedded: str) -> None:
+    """A truncated or malformed report after a log prefix is still a failure."""
+    alone = parse_stylelint_output_with_stats(embedded)
+    with_report = parse_stylelint_output_with_stats(f"{embedded}\n{SINGLE_WARNING}")
+
+    assert_that(alone).is_equal_to(([], 1))
+    assert_that(with_report[1]).is_equal_to(1)
+    assert_that(with_report[0]).extracting("code").is_equal_to(["color-hex-length"])
+
+
+def test_many_embedded_spans_on_one_line_stay_linear(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Thousands of bracketed log tokens on one line are scanned once."""
+    output = "progress " + "[1/3] " * 5000 + "\n" + SINGLE_WARNING
+    original_decode = json.JSONDecoder.raw_decode
+    decoded_chars = 0
+
+    def counted_decode(
+        self: json.JSONDecoder,
+        document: str,
+        idx: int = 0,
+    ) -> tuple[object, int]:
+        nonlocal decoded_chars
+        decoded_chars += len(document) - idx
+        return original_decode(self, document, idx)
+
+    with monkeypatch.context() as context:
+        context.setattr(json.JSONDecoder, "raw_decode", counted_decode)
+        issues, failures = parse_stylelint_output_with_stats(output)
+
+    assert_that(failures).is_zero()
+    assert_that(issues).extracting("code").is_equal_to(["color-hex-length"])
+    assert_that(decoded_chars).is_less_than_or_equal_to(3 * len(output))

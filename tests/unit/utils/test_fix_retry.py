@@ -377,10 +377,20 @@ def test_fix_retry_merge_preserves_last_pass_payload(
     expected_initial_count = len(detected) if initial_count is None else initial_count
     assert_that(result.initial_issues_count).is_equal_to(expected_initial_count)
     assert_that(result.initial_issues).is_equal_to(detected)
-    assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.fixed_issues_count).is_equal_to(expected_initial_count - 1)
-    assert_that(result.remaining_issues_count).is_equal_to(1)
-    assert_that(result.issues).is_equal_to(last.issues)
+    if timed_out:
+        # A pass that timed out measured no complete residual: its counts
+        # stay unknown, and the finding only it reported joins the originally
+        # detected ones instead of being dropped (#3352).
+        assert_that(result.residual_unknown).is_true()
+        assert_that(result.fixed_issues_count).is_none()
+        assert_that(result.remaining_issues_count).is_none()
+        assert_that(result.issues).is_equal_to([*detected, *last.issues])
+        assert_that(result.issues_count).is_equal_to(len(detected) + 1)
+    else:
+        assert_that(result.issues_count).is_equal_to(1)
+        assert_that(result.fixed_issues_count).is_equal_to(expected_initial_count - 1)
+        assert_that(result.remaining_issues_count).is_equal_to(1)
+        assert_that(result.issues).is_equal_to(last.issues)
     assert_that(result.success).is_false()
     assert_that(result.output).is_equal_to("last pass")
     assert_that(result.formatted_output).is_equal_to("last formatted output")
@@ -487,8 +497,10 @@ def test_incomplete_fix_pass_is_preserved_without_more_retries(
         assert_that(result.initial_issues).is_equal_to(detected)
     assert_that(result.success).is_false()
     assert_that(result.output).is_equal_to("incomplete report")
+    # A later incomplete pass keeps its own findings and the first pass's
+    # detected ones together; nothing a failed pass reported is dropped.
     expected_findings = (
-        detected if failure_pass > 1 and failure_kind == "unknown" else partial_findings
+        [*detected, *partial_findings] if failure_pass > 1 else partial_findings
     )
     assert_that(result.issues).is_equal_to(expected_findings)
     assert_that(result.issues_count).is_equal_to(len(expected_findings))
@@ -511,3 +523,166 @@ def test_incomplete_fix_pass_is_preserved_without_more_retries(
     assert_that(result.metadata).is_equal_to({"stage": "incomplete"})
     assert_that(result.pytest_summary).is_equal_to({"passed": 1, "errors": 1})
     assert_that(replace(result)).is_equal_to(result)
+
+
+@pytest.mark.parametrize(
+    ("execution_failed", "timed_out"),
+    [(True, False), (False, True)],
+    ids=["execution-failed", "timed-out"],
+)
+def test_execution_failure_is_not_overwritten_by_a_clean_retry(
+    execution_failed: bool,
+    timed_out: bool,
+) -> None:
+    """A failed pass ends the retries; a later clean pass cannot replace it."""
+    failed = ToolResult(
+        name="formatter",
+        success=False,
+        output="re-check crashed",
+        issues_count=1,
+        initial_issues_count=1,
+        fixed_issues_count=0,
+        remaining_issues_count=1,
+        execution_failed=execution_failed,
+        timed_out=timed_out,
+    )
+    clean = ToolResult(
+        name="formatter",
+        success=True,
+        issues_count=0,
+        initial_issues_count=1,
+        fixed_issues_count=1,
+        remaining_issues_count=0,
+    )
+    tool = MagicMock()
+    tool.fix.side_effect = [failed, clean]
+
+    result = run_fix_with_retry(tool, ["."], {}, max_retries=3)
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed or result.timed_out).is_true()
+    assert_that(result.output).is_equal_to("re-check crashed")
+    assert_that(tool.fix.call_count).is_equal_to(1)
+
+
+def test_failed_retry_pass_keeps_counts_unknown_and_original_findings() -> None:
+    """A retry whose verification crashed is not "all fixed"."""
+    detected = [BaseIssue(file="a.txt", message="format a")]
+    first = ToolResult(
+        name="formatter",
+        success=False,
+        issues_count=1,
+        issues=detected,
+        initial_issues=detected,
+        initial_issues_count=1,
+        fixed_issues_count=0,
+        remaining_issues_count=1,
+    )
+    crashed = ToolResult(
+        name="formatter",
+        success=False,
+        output="verification crashed",
+        issues_count=0,
+        remaining_issues_count=None,
+        execution_failed=True,
+    )
+    tool = MagicMock()
+    tool.fix.side_effect = [first, crashed]
+
+    result = run_fix_with_retry(tool, ["."], {}, max_retries=3)
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.initial_issues_count).is_equal_to(1)
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(list(result.issues)).is_equal_to(detected)
+    assert_that(result.output).is_equal_to("verification crashed")
+
+
+@pytest.mark.parametrize(
+    ("execution_failed", "timed_out"),
+    [(True, False), (False, True)],
+    ids=["execution-failed", "timed-out"],
+)
+def test_failed_retry_keeps_its_new_findings_beside_the_detected_ones(
+    execution_failed: bool,
+    timed_out: bool,
+) -> None:
+    """A failed pass's genuine findings join the first pass's, once each."""
+    finding_a = BaseIssue(file="a.txt", line=1, message="format a")
+    finding_b = BaseIssue(file="b.txt", line=2, message="format b")
+    # A distinct object with finding A's identity: the same finding again.
+    finding_a_again = BaseIssue(file="a.txt", line=1, message="format a")
+    first = ToolResult(
+        name="formatter",
+        success=False,
+        issues_count=1,
+        issues=[finding_a],
+        initial_issues=[finding_a],
+        initial_issues_count=1,
+        fixed_issues_count=0,
+        remaining_issues_count=1,
+    )
+    failed = ToolResult(
+        name="formatter",
+        success=False,
+        output="second pass failed",
+        issues_count=2,
+        issues=[finding_a_again, finding_b],
+        execution_failed=execution_failed,
+        timed_out=timed_out,
+    )
+    tool = MagicMock()
+    tool.fix.side_effect = [first, failed]
+
+    result = run_fix_with_retry(tool, ["."], {}, max_retries=3)
+
+    assert_that(result.success).is_false()
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.initial_issues_count).is_equal_to(1)
+    assert_that(result.issues).extracting("file", "line", "message").is_equal_to(
+        [("a.txt", 1, "format a"), ("b.txt", 2, "format b")],
+    )
+    assert_that(result.issues_count).is_equal_to(2)
+
+
+@pytest.mark.parametrize("max_retries", [1, 3], ids=["no-retry", "retries"])
+def test_first_pass_timeout_is_normalized_to_unknown_counts(
+    max_retries: int,
+) -> None:
+    """A timed-out first pass never keeps counts nothing verified."""
+    detected = [BaseIssue(file="a.js", line=1, message="Code style issues found")]
+    timed_out = ToolResult(
+        name="formatter",
+        success=False,
+        output="write timed out",
+        issues_count=1,
+        issues=detected,
+        initial_issues=detected,
+        initial_issues_count=1,
+        fixed_issues_count=0,
+        remaining_issues_count=1,
+        timed_out=True,
+    )
+    tool = MagicMock()
+    tool.fix.side_effect = [timed_out, timed_out]
+
+    result = run_fix_with_retry(tool, ["."], {}, max_retries=max_retries)
+
+    assert_that(tool.fix.call_count).is_equal_to(1)
+    assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_true()
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.residual_unknown_reason).is_equal_to(
+        "the fix timed out before what remains was measured",
+    )
+    assert_that(result.initial_issues_count).is_equal_to(1)
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.issues).extracting("file", "message").is_equal_to(
+        [("a.js", "Code style issues found")],
+    )

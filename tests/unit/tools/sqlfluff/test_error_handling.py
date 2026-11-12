@@ -56,7 +56,7 @@ def test_check_with_empty_output(
     sqlfluff_plugin: SqlfluffPlugin,
     tmp_path: Path,
 ) -> None:
-    """Check handles empty output correctly.
+    """Empty exit-zero stdout is no report: a failed run, not a clean pass.
 
     Args:
         sqlfluff_plugin: The SqlfluffPlugin instance to test.
@@ -80,8 +80,12 @@ def test_check_with_empty_output(
     ):
         result = sqlfluff_plugin.check([str(test_file)], {})
 
-    assert_that(result.success).is_true()
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.inspected_files).is_none()
+    assert_that(result.parse_failures_count).is_zero()
     assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.output).contains("SQLFluff printed no report.")
 
 
 # Tests for fix method error handling

@@ -19,10 +19,11 @@ value is a list of alert objects with this shape::
       ]
     }
 
-When Vale cannot find a configuration file it emits a single top-level error
-object (with ``Code`` ``E100``) instead of the per-file mapping; that case is
-handled by the plugin (graceful skip), so this parser simply returns ``[]`` for
-any payload that is not the per-file mapping shape.
+When Vale cannot run (no configuration, a missing style, a bad flag) it emits
+a single top-level runtime-error object instead of the per-file mapping, with
+scalar ``Code`` (``E100``, ``E201``, ...) and ``Text`` keys. That object is one
+failed report, not one failure per key: :func:`vale_runtime_error` names it so
+the plugin can skip (``E100``) or report an execution failure (#3352).
 """
 
 from __future__ import annotations
@@ -46,6 +47,44 @@ def _coerce_int(value: object) -> int:
     if isinstance(value, int):
         return value if value > 0 else 0
     return 0
+
+
+def _runtime_error(data: object) -> str | None:
+    """Name Vale's runtime-error object, if ``data`` is one.
+
+    Args:
+        data: The decoded top-level JSON value.
+
+    Returns:
+        ``"<Code>: <Text>"`` for a runtime-error object, otherwise None. A
+        per-file mapping never has a scalar ``Code`` string beside ``Text``.
+    """
+    if not isinstance(data, dict):
+        return None
+    code = data.get("Code")
+    text = data.get("Text")
+    if not isinstance(code, str) or not code or not isinstance(text, str):
+        return None
+    return f"{code}: {text}" if text else code
+
+
+def vale_runtime_error(output: str | None) -> str | None:
+    """Name the runtime error Vale printed instead of a report.
+
+    Args:
+        output: Raw output from ``vale --output=JSON``.
+
+    Returns:
+        ``"<Code>: <Text>"`` when the output is Vale's runtime-error object,
+        otherwise None.
+    """
+    if not output or not output.strip():
+        return None
+    try:
+        data = json.loads(output)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return _runtime_error(data)
 
 
 def parse_vale_output(output: str | None) -> list[ValeIssue]:
@@ -83,9 +122,9 @@ def parse_vale_output_with_stats(
         return [], 1
 
     # Expected shape is an object mapping file paths to alert lists. Vale's
-    # runtime-error payload is a single object (not a mapping of lists), which
-    # we intentionally ignore here.
-    if not isinstance(data, dict):
+    # runtime-error object is one failed report, counted once rather than once
+    # per scalar key (#3352).
+    if not isinstance(data, dict) or _runtime_error(data) is not None:
         return [], 1
 
     issues: list[ValeIssue] = []

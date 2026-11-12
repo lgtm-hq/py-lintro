@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from lintro.models.core.issue_identity import union_issues
+from lintro.models.core.result_completeness import is_incomplete_result
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.execution.result_shaping import get_remaining_count
 
@@ -19,28 +21,56 @@ if TYPE_CHECKING:
 __all__ = ["run_fix_with_retry"]
 
 
-def _mark_parse_failure_unknown(result: ToolResult) -> ToolResult:
-    """Ensure an incomplete report carries explicit unknown fix accounting.
+def _incomplete_reason(result: ToolResult) -> str:
+    """Name why a fix pass measured no residual.
+
+    Args:
+        result: An incomplete fix pass.
+
+    Returns:
+        The producer's own reason when it gave one, otherwise one derived from
+        the failure evidence.
+    """
+    if result.residual_unknown_reason:
+        return result.residual_unknown_reason
+    if result.parse_failures_count:
+        return "tool output could not be fully parsed"
+    if result.execution_failed:
+        return "a fix pass failed before measuring what remains"
+    return "the fix timed out before what remains was measured"
+
+
+def _mark_incomplete_unknown(result: ToolResult) -> ToolResult:
+    """Ensure an incomplete pass carries explicit unknown fix accounting.
+
+    Every return path normalizes through here, the first pass and the
+    no-retry path included, so a pass that failed to execute, timed out or
+    reported incompletely never keeps counts it did not measure (#3352).
 
     Args:
         result: Fix result to normalize before returning or merging it.
 
     Returns:
-        A validated replacement for incomplete reports, otherwise the input.
+        A validated replacement for incomplete passes, otherwise the input.
+        A pass that already reports unknown accounting is returned as is.
     """
-    if result.parse_failures_count:
-        return replace(
-            result,
-            success=False,
-            fixed_issues_count=None,
-            remaining_issues_count=None,
-            residual_unknown=True,
-            residual_unknown_reason=(
-                result.residual_unknown_reason
-                or "tool output could not be fully parsed"
-            ),
-        )
-    return result
+    if not is_incomplete_result(result):
+        return result
+    if (
+        result.residual_unknown
+        and not result.success
+        and result.fixed_issues_count is None
+        and result.remaining_issues_count is None
+    ):
+        return result
+    return replace(
+        result,
+        success=False,
+        fixed_issues_count=None,
+        remaining_issues_count=None,
+        residual_unknown=True,
+        residual_unknown_reason=_incomplete_reason(result),
+    )
 
 
 def run_fix_with_retry(
@@ -67,10 +97,10 @@ def run_fix_with_retry(
 
     result = tool.fix(paths, options)
     ToolResult.validate_outcome(result)
-    result = _mark_parse_failure_unknown(result)
+    result = _mark_incomplete_unknown(result)
 
     # An incomplete first pass has no complete baseline to merge or retry.
-    if max_retries <= 1 or result.residual_unknown or result.parse_failures_count:
+    if max_retries <= 1 or is_incomplete_result(result):
         return result
 
     initial_issues_count = result.initial_issues_count
@@ -78,9 +108,10 @@ def run_fix_with_retry(
     remaining = get_remaining_count(result)
 
     for attempt in range(2, max_retries + 1):
-        # An incomplete report is not a convergence measurement. Retrying
-        # must not replace its failure evidence with a later clean result.
-        if result.residual_unknown or result.parse_failures_count:
+        # An incomplete report or failed execution is not a convergence
+        # measurement. Retrying must not replace its failure evidence with a
+        # later clean result (#3352).
+        if is_incomplete_result(result):
             break
         if remaining == 0:
             break
@@ -92,7 +123,7 @@ def run_fix_with_retry(
         )
         result = tool.fix(paths, options)
         ToolResult.validate_outcome(result)
-        result = _mark_parse_failure_unknown(result)
+        result = _mark_incomplete_unknown(result)
         remaining = get_remaining_count(result)
 
     # Merge: keep initial_issues_count and initial_issues from first pass,
@@ -101,24 +132,20 @@ def run_fix_with_retry(
     # record that measurement explicitly in initial_issues_count.
     if initial_issues_count is None and first_pass_initial_issues:
         initial_issues_count = len(first_pass_initial_issues)
-    if result.residual_unknown or result.parse_failures_count:
-        # Execution failures carry the original detected findings. Parse
-        # failures also retain the latest report's usable partial findings.
-        # An empty original list must not discard findings from a later pass,
-        # even when the first pass explicitly measured zero.
-        issues = (
-            first_pass_initial_issues
-            if not result.parse_failures_count and first_pass_initial_issues
-            else result.issues
-        )
+    if is_incomplete_result(result):
+        # The same test that ended the loop: a pass that failed to execute,
+        # timed out or reported incompletely measured no residual, so its
+        # counts stay unknown rather than falling back to ``issues_count``
+        # (#3352). Its findings are genuine even though the pass failed, so
+        # they join the originally detected ones; duplicates are matched by
+        # finding identity, not object equality.
+        issues = union_issues(first_pass_initial_issues, result.issues)
         return replace(
             result,
             issues=issues,
             issues_count=max(len(issues), result.issues_count),
             initial_issues_count=initial_issues_count,
             initial_issues=first_pass_initial_issues,
-            fixed_issues_count=None,
-            remaining_issues_count=None,
         )
     if initial_issues_count is not None:
         result = replace(

@@ -81,7 +81,8 @@ from loguru import logger
 from lintro.enums.action import Action
 from lintro.enums.capability import MUTATING_CAPABILITIES, Cap
 from lintro.enums.verify_status import VerifyStatus
-from lintro.formatters.formatter import merge_detected_and_remaining
+from lintro.models.core.issue_identity import union_issues
+from lintro.models.core.result_completeness import is_incomplete_result
 from lintro.models.core.tool_outcome import (
     FixUnmeasured,
     NoFiles,
@@ -649,6 +650,25 @@ def _pre_fix_issues(result: ToolResult) -> list[BaseIssue]:
     return list(result.issues) if result.issues else []
 
 
+def _carried_findings(mutation: ToolResult) -> list[BaseIssue]:
+    """Return the findings a mutation result carries into verification.
+
+    Args:
+        mutation: A mutation-phase result, before any fold.
+
+    Returns:
+        The pre-fix findings. An incomplete mutation (failed to execute,
+        timed out, unknown residual or a malformed report) also carries the
+        findings its later passes really reported, once each by finding
+        identity, so a file the verify pass does not re-examine keeps them
+        (#3352).
+    """
+    detected = _pre_fix_issues(mutation)
+    if not is_incomplete_result(mutation):
+        return detected
+    return union_issues(detected, mutation.issues)
+
+
 def run_verify_pass(
     *,
     tools_to_run: Sequence[str],
@@ -872,12 +892,16 @@ def _fold_unknown(
         reason=outcome.unknown_reason,
         detected=len(detected),
     )
-    if mutation.parse_failures_count:
-        verified = outcome.result.issues if outcome.result is not None else []
-        detected = merge_detected_and_remaining(
-            [],
-            [*verified, *mutation.issues, *detected],
-        )
+    # The verification is itself incomplete here, so findings a later stage
+    # really reported (a failed fix retry, a check that timed out part-way)
+    # are kept beside the detected ones rather than cut back to them (#3352).
+    verified = outcome.result.issues if outcome.result is not None else []
+    retained = union_issues(verified, mutation.issues, detected)
+    keeps_later = bool(mutation.parse_failures_count) or len(retained) > len(
+        union_issues(detected),
+    )
+    if keeps_later:
+        detected = retained
         note = (
             f"Verify pass: residual unknown — {outcome.unknown_reason}. "
             "Usable findings from the reports are retained; "
@@ -894,7 +918,7 @@ def _fold_unknown(
         issues_count=len(detected),
         initial_issues_count=(
             len(detected)
-            if accounting.initial is None and not mutation.parse_failures_count
+            if accounting.initial is None and not keeps_later
             else accounting.initial
         ),
         fixed_issues_count=None,
@@ -964,6 +988,7 @@ def _fold_one(
     mutation_outcome = mutation.outcome
     accounting = mutation_outcome.accounting
     verify = outcome.result
+    carried = _carried_findings(mutation)
     mutation = _fold_check_verdict(mutation, verify)
     if verify and verify.parse_failures_count:
         mutation = replace(
@@ -1021,7 +1046,7 @@ def _fold_one(
     project_check_answered = answered and project_check
     survivors: list[BaseIssue] = [
         issue
-        for issue in _pre_fix_issues(mutation)
+        for issue in carried
         if not project_check_answered
         and _issue_path(issue, cwd=mutation.cwd) not in verified_paths
     ]

@@ -509,7 +509,9 @@ def test_check_does_not_add_guidance_when_a_local_binary_failed(
         mock_prepare.return_value = _mock_ctx(tmp_path, ["index.html"])
         result = html_validate_plugin.check([str(tmp_path)], {})
 
-    assert_that(cast(str, result.output)).is_equal_to("boom")
+    assert_that(cast(str, result.output)).is_equal_to(
+        "html-validate exited with an error and printed no report.\nboom",
+    )
 
 
 def test_check_explains_a_fallback_timeout(

@@ -253,6 +253,33 @@ These fail-closed checks also apply without a fingerprint baseline:
   such a run never updates a baseline. Files Bandit could not scan are named with its
   reason instead of the raw report. When no Python files match, the result is still "no
   files", not a failure.
+- Stylelint, html-validate and Vale print a report on every completed run, even a clean
+  one (`[]`, or `{}` for Vale). Empty output, a failed exit with nothing parsed, Vale's
+  runtime-error object (one parse failure, not one per key) and a report with malformed
+  records are execution failures with unknown inspection. Real findings are kept, and
+  the output names the reason with the tool's first message lines instead of the raw
+  report. A missing Stylelint or Vale configuration is still a skip. Stylelint's report
+  extraction treats JSON-like text inside a log line (a `[12:00:01]` timestamp, a
+  `[1/3]` counter, a quoted `"["`) as log text unless it looks like a report record. A
+  Stylelint fix stage that measured nothing leaves fixed and remaining counts unknown
+  instead of guessing them. Stylelint prints a report from `--fix` and from the re-check
+  on every completed run, so empty output from either stage, at any exit code, counts as
+  measuring nothing, as does a crash with nothing parsed.
+- SQLFluff keeps its lint diagnostics per execution instead of on the cached plugin
+  instance. A lint invocation without a usable report or verdict is an execution failure
+  named with SQLFluff's own message (for a Python traceback, the exception line), not a
+  malformed report or a clean file, and it leaves fix accounting unknown. That covers
+  empty stdout at any exit (for example a `.sqlfluff` with a broken section header), a
+  failed exit that prints text instead of JSON (`Error: Unknown dialect 'bogus'`), any
+  exit other than 1 with violations, and a timeout.
+- Fix convergence retries stop at the first pass that failed to execute, timed out,
+  could not measure its residual, or printed a malformed report, so a later clean pass
+  cannot replace that failure. Such a pass, the first one included and with retries
+  disabled, reports unknown fixed and remaining counts. Findings from a failed later
+  pass are kept beside the first pass's, each finding once. The run-level verify pass
+  keeps them too: an unknown verification adds what a partial check reported instead of
+  cutting the findings back to the pre-fix ones, and a check that answers for some files
+  keeps the incomplete stage's findings on files it did not examine.
 - The shared per-file check runner accepts a nonzero exit as a complete lint verdict
   only when it is a declared findings exit status and has parsed findings. Other nonzero
   exits are execution errors even if some findings were parsed. This also applies to the
