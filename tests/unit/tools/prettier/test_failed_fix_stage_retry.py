@@ -74,3 +74,57 @@ def test_failed_stage_then_clean_retry_stays_unmeasured(
     assert_that(result.initial_issues_count).is_equal_to(1)
     assert_that(result.issues).extracting("file").is_equal_to(["test.js"])
     assert_that(result.output).contains("EACCES")
+
+
+@pytest.mark.parametrize(
+    ("check", "error", "initial", "message"),
+    [
+        (
+            SubprocessResult(1, _DIRTY, "", _DIRTY),
+            FileNotFoundError("node"),
+            1,
+            "Prettier not found",
+        ),
+        (_CLEAN, OSError("EACCES: prettier"), 0, "EACCES"),
+    ],
+    ids=["executable-missing-at-write", "write-raises-after-clean-check"],
+)
+def test_write_error_keeps_what_the_check_measured(
+    prettier_plugin: PrettierPlugin,
+    mock_execution_context_for_tool: Any,
+    check: SubprocessResult,
+    error: Exception,
+    initial: int,
+    message: str,
+) -> None:
+    """The check's findings and count survive a write that could not launch."""
+    with (
+        patch.object(
+            prettier_plugin,
+            "_prepare_execution",
+            return_value=mock_execution_context_for_tool(
+                files=["test.js"],
+                rel_files=["test.js"],
+                cwd="/tmp",
+            ),
+        ),
+        patch.object(
+            prettier_plugin,
+            "_get_executable_command",
+            return_value=["prettier"],
+        ),
+        patch.object(prettier_plugin, "_build_config_args", return_value=[]),
+        patch.object(
+            prettier_plugin,
+            "_run_subprocess_result",
+            side_effect=[check, error],
+        ),
+    ):
+        result = prettier_plugin.fix(["/tmp/test.js"], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.initial_issues_count).is_equal_to(initial)
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.issues).is_length(initial)
+    assert_that(result.output).contains(message)

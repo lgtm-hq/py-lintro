@@ -295,33 +295,37 @@ class PrettierPlugin(BaseToolPlugin):
         self,
         *,
         exc: Exception,
-        detected: Sequence[PrettierIssue],
+        detected: Sequence[PrettierIssue] | None,
         cwd: str | None = None,
     ) -> ToolResult:
         """Create the ToolResult for a fix stage that could not run.
 
         Args:
             exc: Exception raised while launching or running Prettier.
-            detected: Issues the pre-fix check found before the failure.
+            detected: Issues the pre-fix check found, or None when the error
+                happened in that check.
             cwd: Working directory for the tool result.
 
         Returns:
-            ToolResult: Not-found guidance when the binary is missing.
-            Otherwise an execution failure that keeps the detected issues and
-            leaves the fix counts unknown, so a clean convergence retry cannot
-            replace it (#3401).
+            ToolResult: An execution failure that keeps the detected issues
+            and leaves the fix counts unknown, so a clean convergence retry
+            cannot replace it (#3401). A missing executable adds the install
+            guidance to the reason.
         """
         if isinstance(exc, FileNotFoundError):
-            return self._create_not_found_result(cwd=cwd)
-        logger.error(f"Failed to run prettier: {exc}")
-        issues = list(detected)
-        output = f"Prettier execution failed: {exc}"
-        # Nothing detected may mean the pre-fix check itself raised, so an
-        # empty list is not a measured zero.
+            output = str(self._create_not_found_result(cwd=cwd).output)
+        else:
+            logger.error(f"Failed to run prettier: {exc}")
+            output = f"Prettier execution failed: {exc}"
+        issues = list(detected or [])
         return ToolResult.from_outcome(
             ToolOutcome(
                 execution=Checked(success=False),
-                accounting=FixUnmeasured(output, initial=len(issues) or None),
+                accounting=FixUnmeasured(
+                    output,
+                    # A check that completed measured its count, even zero.
+                    initial=None if detected is None else len(issues),
+                ),
                 issues_count=len(issues),
             ),
             name=self.definition.name,

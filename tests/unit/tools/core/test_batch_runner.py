@@ -12,6 +12,7 @@ from __future__ import annotations
 import subprocess  # nosec B404 - only TimeoutExpired is constructed here
 from collections.abc import Iterator
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 import pytest
@@ -361,7 +362,10 @@ def test_batch_fix_stops_on_any_failed_stage_without_parsed_issues(
     assert_that(result.output).is_equal_to(failure_output)
     assert_that(result.issues_count).is_equal_to(expected_remaining)
     assert_that(len(result.issues or [])).is_equal_to(expected_remaining)
-    assert_that(result.initial_issues_count).is_equal_to(expected_remaining)
+    # A failed pre-fix check measured no pre-fix count either (#3401).
+    assert_that(result.initial_issues_count).is_equal_to(
+        expected_remaining if failed_stage else None,
+    )
     assert_that(result.remaining_issues_count).is_none()
     assert_that(result.residual_unknown).is_true()
     assert_that(result.fixed_issues_count).is_none()
@@ -440,7 +444,10 @@ def test_failed_fix_preserves_initial_accounting_and_reporting(
     expected_initial = stage_issues if failed_stage == 0 else initial_issues
     assert_that(result.success).is_false()
     assert_that(result.output).is_equal_to(OXFMT_DIFFERENT)
-    assert_that(result.initial_issues_count).is_equal_to(len(expected_initial))
+    # A failed pre-fix check keeps its findings but measured no count (#3401).
+    assert_that(result.initial_issues_count).is_equal_to(
+        len(expected_initial) if failed_stage else None,
+    )
     assert_that(result.initial_issues).is_equal_to(
         expected_initial,
     )
@@ -795,3 +802,58 @@ def test_the_default_policy_demands_a_clean_exit_and_no_findings(
 
     assert_that(result.success).is_equal_to(expected_success)
     assert_that(result.output).is_equal_to(expected_output)
+
+
+@pytest.mark.parametrize("failed_stage", [0, 1], ids=["precheck", "fix"])
+def test_on_error_accepts_the_legacy_and_the_detected_forms(
+    failed_stage: int,
+    ts_file: Path,
+) -> None:
+    """One-argument hooks keep working; ``detected`` hooks see the findings.
+
+    Args:
+        failed_stage: Stage that raises: the pre-fix check or the fix.
+        ts_file: File identifying the execution directory.
+    """
+    plugin = OxfmtPlugin()
+    ctx = PreparedExecution(
+        files=[str(ts_file)],
+        rel_files=["app.ts"],
+        cwd=str(ts_file.parent),
+        timeout=plugin._get_effective_timeout(),
+    )
+    seen: list[object] = []
+
+    def legacy(exc: Exception) -> ToolResult:
+        return ToolResult(name="oxfmt", success=False, output=f"legacy: {exc}")
+
+    def keyword(exc: Exception, *, detected: object = "unset") -> ToolResult:
+        seen.append(detected)
+        return ToolResult(name="oxfmt", success=False, output=f"keyword: {exc}")
+
+    outputs: list[str | None] = []
+    for hook in (legacy, keyword):
+        processes: list[SubprocessResult | Exception] = [
+            SubprocessResult(1, "app.ts\n", "", "app.ts\n"),
+        ]
+        processes.insert(failed_stage, OSError("boom"))
+        with patch.object(plugin, "_run_subprocess_result", side_effect=processes):
+            result = run_batch_fix(
+                ctx,
+                plugin=plugin,
+                commands=BatchCommands(
+                    check=["oxfmt", "--list-different"],
+                    fix=["oxfmt"],
+                ),
+                parse=parse_oxfmt_output,
+                policy=BatchFixPolicy(findings_exit_codes=(1,)),
+                on_error=hook,
+            )
+        outputs.append(result.output)
+
+    assert_that(outputs).is_equal_to(["legacy: boom", "keyword: boom"])
+    if failed_stage == 0:
+        # The pre-fix check never finished, so nothing was detected.
+        assert_that(seen).is_equal_to([None])
+    else:
+        assert_that([len(cast(list[object], d)) for d in seen]).is_equal_to([1])

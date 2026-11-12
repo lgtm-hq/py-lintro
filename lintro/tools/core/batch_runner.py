@@ -26,6 +26,7 @@ Example:
 
 from __future__ import annotations
 
+import inspect
 import subprocess  # nosec B404 - commands are built by callers, shell disabled
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -554,7 +555,8 @@ def _batch_fix_failure_result(
 
     Returns:
         A failed result carrying the observed pre-fix findings. An execution
-        failure leaves no verified residual or fix count.
+        failure leaves no verified residual or fix count, and a failed
+        pre-fix check leaves the pre-fix count unknown too (#3401).
     """
     reported_issues = list(initial_issues)
     return ToolResult.from_outcome(
@@ -566,7 +568,7 @@ def _batch_fix_failure_result(
                     if initial_check
                     else "Batch execution failed after writes may have begun"
                 ),
-                initial=len(initial_issues),
+                initial=None if initial_check else len(initial_issues),
             ),
             issues_count=len(reported_issues),
         ),
@@ -581,6 +583,42 @@ def _batch_fix_failure_result(
     )
 
 
+def _call_on_error(
+    on_error: Callable[..., ToolResult],
+    exc: Exception,
+    detected: Sequence[IssueT] | None,
+) -> ToolResult:
+    """Call an ``on_error`` hook in whichever form it was written.
+
+    A hook that accepts a ``detected`` keyword (or ``**kwargs``) also receives
+    the issues the pre-fix check found. One written for the older
+    one-argument form receives only the exception.
+
+    Args:
+        on_error: The plugin's error hook.
+        exc: The launch or execution error.
+        detected: Issues the pre-fix check found, or None when the error
+            happened in that check.
+
+    Returns:
+        The hook's result.
+    """
+    try:
+        params = inspect.signature(on_error).parameters.values()
+    except (TypeError, ValueError):
+        return on_error(exc)
+    if any(
+        param.kind is inspect.Parameter.VAR_KEYWORD
+        or (
+            param.name == "detected"
+            and param.kind is not inspect.Parameter.POSITIONAL_ONLY
+        )
+        for param in params
+    ):
+        return on_error(exc, detected=detected)
+    return on_error(exc)
+
+
 def run_batch_fix(
     ctx: PreparedExecution,
     *,
@@ -590,7 +628,7 @@ def run_batch_fix(
     policy: BatchFixPolicy,
     cwd: str | None = None,
     on_timeout: Callable[[Sequence[IssueT]], ToolResult] | None = None,
-    on_error: Callable[[Exception, Sequence[IssueT]], ToolResult] | None = None,
+    on_error: Callable[..., ToolResult] | None = None,
 ) -> ToolResult:
     """Check, fix and re-check a whole file list in one pass each.
 
@@ -609,10 +647,11 @@ def run_batch_fix(
         on_timeout: Builds the result for a timeout, given the issues detected
             so far (empty for a timeout in the pre-fix check). Defaults to
             :func:`batch_fix_timeout_result`.
-        on_error: Builds the result for a launch or execution error, given
-            the exception and the issues detected so far (empty for an error
-            in the pre-fix check). When ``None`` (the default) such errors
-            propagate to the caller.
+        on_error: Builds the result for a launch or execution error from
+            the exception. A hook that accepts a ``detected`` keyword also
+            receives the issues the pre-fix check found, or None when the
+            error happened in that check. One-argument hooks keep working.
+            When ``None`` (the default) such errors propagate to the caller.
 
     Returns:
         ToolResult carrying the surviving issues and the fix counts.
@@ -670,7 +709,11 @@ def run_batch_fix(
         except (OSError, ValueError, RuntimeError) as exc:
             if on_error is None:
                 raise
-            return on_error(exc, initial_issues)
+            return _call_on_error(
+                on_error,
+                exc,
+                None if initial_check else initial_issues,
+            )
         if (
             initial_check
             and policy.no_files is not None

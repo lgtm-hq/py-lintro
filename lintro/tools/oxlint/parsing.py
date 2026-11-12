@@ -78,7 +78,9 @@ class OxlintOutputParser:
             return replace(result, parse_failures_count=failures)
 
         message = f"Failed to parse {failures} Oxlint report(s) or diagnostic(s)."
-        if result.initial_issues_count is not None:
+        # A fix result carries a pre-fix count, or is already unmeasured when
+        # its pre-fix check failed and left that count unknown (#3401).
+        if result.initial_issues_count is not None or result.residual_unknown:
             # Partial reports cannot measure fixes. Retain usable findings and
             # the actual baseline only when the initial report was complete.
             output = _without_fix_claims(result.output)

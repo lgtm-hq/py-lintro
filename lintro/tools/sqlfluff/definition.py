@@ -25,6 +25,8 @@ from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.check_runner import PerFileCheckPolicy, run_per_file_check
 from lintro.tools.core.fix_runner import (
+    FixStage,
+    FixStageError,
     PerFileFixPolicy,
     run_per_file_fix,
 )
@@ -328,27 +330,38 @@ class SqlfluffPlugin(BaseToolPlugin):
         return _parse_report(output, failures)
 
     @staticmethod
-    def _unmeasured_reason(result: ToolResult, *, parse_failures: int) -> str | None:
-        """Name why this fix run's accounting was not measured, if it was not.
+    def _unmeasured_reason(
+        result: ToolResult,
+        *,
+        errors: list[FixStageError],
+        malformed_reports: int,
+        parse_failures: int,
+    ) -> str | None:
+        """Name every reason this fix run's accounting was not measured.
 
         Args:
-            result: The per-file runner's aggregated fix result. The runner
-                flags an execution failure for any lint invocation that
-                printed no usable report or verdict (#3401).
+            result: The per-file runner's aggregated fix result.
+            errors: Files whose lint or fix stage stopped on an execution
+                error, as the runner recorded them (#3401).
+            malformed_reports: Lint reports so malformed that no finding
+                survived. The runner records each as a check error too.
             parse_failures: Malformed records across the lint reports.
 
         Returns:
-            The reason, or None when every lint pass gave a usable verdict.
+            The reasons, execution failures first, or None when every lint
+            pass gave a usable verdict and every fix completed.
         """
-        # A malformed findings report also fails its file in the runner, so
-        # it is named before the generic execution failure.
+        lint_errors = sum(1 for error in errors if error.stage is FixStage.CHECK)
+        reasons: list[str] = []
+        if lint_errors > malformed_reports:
+            reasons.append("SQLFluff could not run.")
+        if any(error.stage is FixStage.FIX for error in errors):
+            reasons.append("SQLFluff could not write its fixes.")
         if parse_failures:
-            return "SQLFluff returned an incomplete report."
-        if result.execution_failed:
-            return "SQLFluff could not run."
-        if result.timed_out:
-            return "SQLFluff timed out before reporting."
-        return None
+            reasons.append("SQLFluff returned an incomplete report.")
+        if not reasons and result.timed_out:
+            reasons.append("SQLFluff timed out before reporting.")
+        return " ".join(reasons) or None
 
     def _isolate_execution_state(self) -> None:
         """Give this execution copy its own lint diagnostics.
@@ -423,12 +436,34 @@ class SqlfluffPlugin(BaseToolPlugin):
             return ctx
 
         failures: list[int] = []
+        malformed: list[str] = []
+        errors: list[FixStageError] = []
+
+        def parse(output: str) -> list[SqlfluffIssue]:
+            """Parse one lint report, noting one too malformed to use.
+
+            Args:
+                output: One lint invocation's stdout.
+
+            Returns:
+                All usable findings in the report.
+
+            Raises:
+                ValueError: When no usable finding survived the report.
+            """
+            try:
+                return self._parse_lint_report(output, failures)
+            except ValueError:
+                malformed.append(output)
+                raise
+
         result = run_per_file_fix(
             ctx,
             plugin=self,
             check_command=lambda f: self._build_lint_command(files=[str(f)]),
             fix_command=lambda f: self._build_fix_command(files=[str(f)]),
-            parse=lambda output: self._parse_lint_report(output, failures),
+            parse=parse,
+            errors=errors,
             policy=PerFileFixPolicy(
                 check_failure_message="sqlfluff lint failed before fix",
                 # No self-verification. sqlfluff fix can partially apply fixes
@@ -439,15 +474,24 @@ class SqlfluffPlugin(BaseToolPlugin):
                 # initial issue as remaining, so the pre-verify number errs
                 # towards over-reporting rather than under-reporting.
                 summarize=False,
+                # ``sqlfluff fix`` exits 1 when unfixable violations remain.
+                # It also exits 1 with a traceback when it cannot write; the
+                # runner treats that output as a failed write (#3401).
+                fix_findings_exit_codes=frozenset({1}),
             ),
         )
-        unmeasured = self._unmeasured_reason(result, parse_failures=sum(failures))
+        unmeasured = self._unmeasured_reason(
+            result,
+            errors=errors,
+            malformed_reports=len(malformed),
+            parse_failures=sum(failures),
+        )
         if unmeasured is not None:
             # A lint pass without a usable report or verdict measured
             # nothing, so its file is neither clean nor fixed (#3352). The
             # runner already leaves an errored run unmeasured (#3401); this
-            # names the reason and covers malformed records and timeouts,
-            # which the runner cannot see.
+            # names every reason and covers malformed records, which the
+            # runner cannot see.
             result = replace(
                 result,
                 success=False,

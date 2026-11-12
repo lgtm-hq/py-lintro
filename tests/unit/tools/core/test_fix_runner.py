@@ -154,10 +154,12 @@ def test_check_step_execution_error_is_reported_as_a_failure(
     assert_that(result.inspected_files).is_false()
 
 
-def test_fix_command_timeout_reports_every_issue_as_remaining(
+def test_fix_command_timeout_keeps_issues_with_unknown_counts(
     shell_script: Path,
 ) -> None:
-    """A timeout during the fix leaves the detected issues outstanding.
+    """A timeout during the fix keeps the detected issues, counts unknown.
+
+    A timeout stays a timeout: it is not also an execution failure (#3401).
 
     Args:
         shell_script: Shell script the runner is pointed at.
@@ -175,10 +177,12 @@ def test_fix_command_timeout_reports_every_issue_as_remaining(
 
     assert_that(result.success).is_false()
     assert_that(result.timed_out).is_true()
+    assert_that(result.execution_failed).is_false()
     assert_that(result.inspected_files).is_false()
     assert_that(result.initial_issues_count).is_equal_to(1)
-    assert_that(result.fixed_issues_count).is_equal_to(0)
-    assert_that(result.remaining_issues_count).is_equal_to(1)
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.issues).is_length(1)
 
 
 def test_fix_command_execution_error_keeps_issues_with_unknown_counts(
@@ -209,10 +213,13 @@ def test_fix_command_execution_error_keeps_issues_with_unknown_counts(
     assert_that(result.inspected_files).is_true()
 
 
-def test_failed_fix_without_verification_keeps_the_initial_issues(
+def test_undeclared_fix_exit_is_an_execution_error(
     shell_script: Path,
 ) -> None:
-    """VerifyMode.NEVER trusts the fix exit status and reports no progress.
+    """A non-zero fix exit the policy does not declare is a failed fix.
+
+    shfmt declares no findings status, so its exit 1 measured nothing: the
+    detected issues are kept and the counts stay unknown (#3401).
 
     Args:
         shell_script: Shell script the runner is pointed at.
@@ -229,9 +236,11 @@ def test_failed_fix_without_verification_keeps_the_initial_issues(
         result = plugin.fix([str(shell_script)], {})
 
     assert_that(result.success).is_false()
-    assert_that(result.fixed_issues_count).is_equal_to(0)
-    assert_that(result.remaining_issues_count).is_equal_to(1)
-    assert_that(result.output).contains("cannot write")
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.issues).is_length(1)
+    assert_that(result.output).contains("cannot write", "exit code 1")
 
 
 def test_verification_failure_conservatively_keeps_the_initial_issues(

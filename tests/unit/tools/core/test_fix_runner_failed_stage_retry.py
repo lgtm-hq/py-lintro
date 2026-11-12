@@ -9,6 +9,7 @@ runner with canned subprocess results.
 
 from __future__ import annotations
 
+import subprocess  # nosec B404 - TimeoutExpired for a mocked re-check
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
@@ -17,6 +18,18 @@ import pytest
 from assertpy import assert_that
 
 from lintro.models.core.subprocess_result import SubprocessResult
+from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.dotenv_linter.dotenv_linter_parser import (
+    parse_dotenv_linter_output,
+)
+from lintro.tools.core.fix_runner import (
+    FixStage,
+    FixStageError,
+    PerFileFixPolicy,
+    VerifyMode,
+    run_per_file_fix,
+)
+from lintro.tools.dotenv_linter.definition import DotenvLinterPlugin
 from lintro.tools.shfmt.definition import ShfmtPlugin
 from lintro.utils.execution.fix_retry import run_fix_with_retry
 from tests.unit.tools.subprocess_helpers import subprocess_result
@@ -61,8 +74,34 @@ def _stub_version_check() -> Iterator[None]:
             1,
             "write failed",
         ),
+        (
+            [
+                subprocess_result(False, _SHFMT_DIFF),
+                SubprocessResult(
+                    1,
+                    "",
+                    "open .script.sh123: permission denied\n",
+                    "open .script.sh123: permission denied\n",
+                ),
+            ],
+            1,
+            1,
+            "Fix command reported a failed write (exit code 1)",
+        ),
+        (
+            [subprocess_result(False, _SHFMT_DIFF), SubprocessResult(-9, "", "", "")],
+            1,
+            1,
+            "Fix command was terminated by signal 9",
+        ),
     ],
-    ids=["initial-check-exits-without-verdict", "initial-check-raises", "fix-raises"],
+    ids=[
+        "initial-check-exits-without-verdict",
+        "initial-check-raises",
+        "fix-raises",
+        "fix-permission-denied",
+        "fix-killed",
+    ],
 )
 def test_errored_stage_then_clean_retry_stays_unmeasured(
     tmp_path: Path,
@@ -111,3 +150,123 @@ def test_one_errored_file_leaves_the_whole_run_unmeasured(tmp_path: Path) -> Non
     assert_that(result.fixed_issues_count).is_none()
     assert_that(result.outcome.accounting.initial).is_none()
     assert_that(result.output).contains("permission denied")
+
+
+_DOTENV_FINDING = ".env:1 LowercaseKey: The foo key should be in uppercase\n"
+
+
+def test_dotenv_linter_permission_denied_then_clean_retry_stays_unmeasured(
+    tmp_path: Path,
+) -> None:
+    """dotenv-linter exits 1 when it cannot write, which is not a finding."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("foo=1\n")
+    plugin = DotenvLinterPlugin()
+    denied = (
+        'Error: Os { code: 13, kind: PermissionDenied, message: "Permission denied" }'
+    )
+    with patch.object(
+        plugin,
+        "_run_subprocess_result",
+        side_effect=[
+            subprocess_result(False, _DOTENV_FINDING),
+            SubprocessResult(1, "Fixing .env\n", denied, f"Fixing .env\n{denied}"),
+            _CLEAN,
+            _CLEAN,
+        ],
+    ):
+        result = run_fix_with_retry(plugin, [str(env_file)], {}, 3)
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.initial_issues_count).is_equal_to(1)
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.issues).extracting("code").is_equal_to(["LowercaseKey"])
+
+
+def test_declared_findings_exit_stays_measured_and_reports_its_stage(
+    tmp_path: Path,
+) -> None:
+    """Only an undeclared exit is an error, and the caller learns its stage."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("foo=1\n")
+    plugin = DotenvLinterPlugin()
+    ctx = plugin.prepare(paths=[str(env_file)], options={}, no_files_message="none")
+    assert not isinstance(ctx, ToolResult)
+
+    def run(exit_codes: frozenset[int], errors: list[FixStageError]) -> ToolResult:
+        with patch.object(
+            plugin,
+            "_run_subprocess_result",
+            side_effect=[
+                subprocess_result(False, _DOTENV_FINDING),
+                SubprocessResult(3, "", "", ""),
+            ],
+        ):
+            return run_per_file_fix(
+                ctx,
+                plugin=plugin,
+                check_command=plugin._check_command,
+                fix_command=plugin._fix_command,
+                parse=lambda output: parse_dotenv_linter_output(output=output),
+                policy=PerFileFixPolicy(
+                    check_failure_message="dotenv-linter check failed",
+                    fix_findings_exit_codes=exit_codes,
+                ),
+                errors=errors,
+            )
+
+    declared_errors: list[FixStageError] = []
+    declared = run(frozenset({3}), declared_errors)
+    undeclared_errors: list[FixStageError] = []
+    undeclared = run(frozenset(), undeclared_errors)
+
+    assert_that(declared.execution_failed).is_false()
+    assert_that(declared.fixed_issues_count).is_zero()
+    assert_that(declared.remaining_issues_count).is_equal_to(1)
+    assert_that(declared_errors).is_empty()
+    assert_that(undeclared.execution_failed).is_true()
+    assert_that(undeclared.remaining_issues_count).is_none()
+    assert_that(undeclared_errors).extracting("stage", "message").is_equal_to(
+        [(FixStage.FIX, "Fix command failed (exit code 3)")],
+    )
+
+
+def test_verification_timeout_is_a_timeout_not_an_execution_failure(
+    tmp_path: Path,
+) -> None:
+    """A re-check that times out reads like a fix-command timeout."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("foo=1\n")
+    plugin = DotenvLinterPlugin()
+    ctx = plugin.prepare(paths=[str(env_file)], options={}, no_files_message="none")
+    assert not isinstance(ctx, ToolResult)
+    with patch.object(
+        plugin,
+        "_run_subprocess_result",
+        side_effect=[
+            subprocess_result(False, _DOTENV_FINDING),
+            _CLEAN,
+            subprocess.TimeoutExpired(cmd=["dotenv-linter"], timeout=1),
+        ],
+    ):
+        result = run_per_file_fix(
+            ctx,
+            plugin=plugin,
+            check_command=plugin._check_command,
+            fix_command=plugin._fix_command,
+            parse=lambda output: parse_dotenv_linter_output(output=output),
+            policy=PerFileFixPolicy(
+                check_failure_message="dotenv-linter check failed",
+                verify=VerifyMode.AFTER_SUCCESS,
+                verify_failure_message="dotenv-linter recheck failed",
+            ),
+        )
+
+    assert_that(result.timed_out).is_true()
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.initial_issues_count).is_equal_to(1)
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.issues).is_length(1)
