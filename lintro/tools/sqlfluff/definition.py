@@ -356,7 +356,7 @@ class SqlfluffPlugin(BaseToolPlugin):
         if lint_errors > malformed_reports:
             reasons.append("SQLFluff could not run.")
         if any(error.stage is FixStage.FIX for error in errors):
-            reasons.append("SQLFluff could not write its fixes.")
+            reasons.append("SQLFluff fix did not complete.")
         if parse_failures:
             reasons.append("SQLFluff returned an incomplete report.")
         if not reasons and result.timed_out:
@@ -475,8 +475,8 @@ class SqlfluffPlugin(BaseToolPlugin):
                 # towards over-reporting rather than under-reporting.
                 summarize=False,
                 # ``sqlfluff fix`` exits 1 when unfixable violations remain.
-                # It also exits 1 with a traceback when it cannot write; the
-                # runner treats that output as a failed write (#3401).
+                # It also exits 1 with a traceback on stderr when it cannot
+                # write; the runner reads that diagnostic as an error (#3401).
                 fix_findings_exit_codes=frozenset({1}),
             ),
         )

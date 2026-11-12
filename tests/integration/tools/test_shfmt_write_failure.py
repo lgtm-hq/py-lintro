@@ -88,3 +88,21 @@ def test_permission_denied_then_clean_retry_stays_unmeasured(tmp_path: Path) -> 
     assert_that(result.issues).is_not_empty()
     assert_that(result.output).contains("permission denied")
     assert_that(script.read_text()).is_equal_to(_DIRTY)
+
+
+@pytest.mark.parametrize("name", ["ENOSPC.sh", "PermissionError.sh"])
+def test_diagnostic_looking_name_is_fixed_and_measured(
+    tmp_path: Path,
+    name: str,
+) -> None:
+    """A clean ``shfmt -w`` is measured whatever the file is called."""
+    script = tmp_path / name
+    script.write_text(_DIRTY)
+
+    result = run_fix_with_retry(ShfmtPlugin(), [str(script)], {}, 3)
+
+    assert_that(result.success).is_true()
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.residual_unknown).is_false()
+    assert_that(result.fixed_issues_count).is_equal_to(result.initial_issues_count)
+    assert_that(script.read_text()).is_not_equal_to(_DIRTY)

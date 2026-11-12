@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.plugins.base import BaseToolPlugin
@@ -77,7 +78,7 @@ def test_failed_write_then_clean_retry_stays_unmeasured(
     assert_that(result.success).is_false()
     assert_that(result.execution_failed).is_true()
     assert_that(result.residual_unknown_reason).is_equal_to(
-        "SQLFluff could not write its fixes.",
+        "SQLFluff fix did not complete.",
     )
     assert_that(result.initial_issues_count).is_equal_to(1)
     assert_that(result.fixed_issues_count).is_none()
@@ -133,3 +134,47 @@ def test_reason_names_a_run_failure_beside_a_malformed_report(
     assert_that(result.residual_unknown_reason).is_equal_to(
         "SQLFluff could not run. SQLFluff returned an incomplete report.",
     )
+
+
+_DEPRECATION = (
+    "The -f/--force option is deprecated as it is now the default behaviour.\n"
+)
+
+
+@pytest.mark.parametrize("name", ["ENOSPC.sql", "PermissionError.sql"])
+@pytest.mark.parametrize(
+    ("fix_exit", "summary", "fixed"),
+    [
+        (0, "1 fixable linting violations found\n", 1),
+        (1, "  [3 unfixable linting violations found]\n", 0),
+    ],
+    ids=["fixed", "unfixable-remain"],
+)
+def test_paths_on_stdout_are_not_diagnostics(
+    sqlfluff_plugin: SqlfluffPlugin,
+    tmp_path: Path,
+    name: str,
+    fix_exit: int,
+    summary: str,
+    fixed: int,
+) -> None:
+    """Exit 0 and a findings exit stay measured whatever the file is called."""
+    sql = tmp_path / name
+    sql.write_text("select  1\n")
+    report = _VIOLATION.replace("query.sql", name)
+    stdout = f"== [{name}] FAIL\nL:   1 | P:   7 | LT01 | Extra space.\n{summary}"
+    with patch.object(
+        BaseToolPlugin,
+        "_run_subprocess_result",
+        side_effect=[
+            SubprocessResult(1, report, "", report),
+            SubprocessResult(fix_exit, stdout, _DEPRECATION, stdout + _DEPRECATION),
+        ],
+    ):
+        result = sqlfluff_plugin.fix([str(sql)], {})
+
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.residual_unknown).is_false()
+    assert_that(result.initial_issues_count).is_equal_to(1)
+    assert_that(result.fixed_issues_count).is_equal_to(fixed)
+    assert_that(result.remaining_issues_count).is_equal_to(1 - fixed)

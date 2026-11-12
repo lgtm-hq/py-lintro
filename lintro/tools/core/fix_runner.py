@@ -55,13 +55,14 @@ __all__ = [
     "run_per_file_fix",
 ]
 
-#: Output that names a failed write. A fix command that prints one of these
-#: did not finish rewriting the file, whatever its exit status says (#3401).
-_WRITE_FAILURE = re.compile(
-    r"permission denied|permissionerror|read-only file system|"
-    r"no space left on device|\b(?:EACCES|EPERM|EROFS|ENOSPC)\b|"
-    r"traceback \(most recent call last\)",
-    re.IGNORECASE,
+#: An error diagnostic on a fix command's stderr: a Python traceback header
+#: or an exception line such as ``PermissionError: [Errno 13] ...``. It is
+#: matched only at the start of a stderr line, never in stdout, where tools
+#: print the paths they fixed: a file named ``PermissionError.sql`` or
+#: ``ENOSPC.sql`` is not a diagnostic (#3401).
+_ERROR_DIAGNOSTIC = re.compile(
+    r"^(?:Traceback \(most recent call last\):|\w*(?:Error|Exception): )",
+    re.MULTILINE,
 )
 
 
@@ -138,11 +139,12 @@ class PerFileFixPolicy:
         label: Progress bar label for the fix pass.
         fix_findings_exit_codes: Non-zero exit statuses with which the fix
             command reports that it ran but unfixable findings remain. Such a
-            file keeps every initial issue as remaining, a measured result.
-            Any other non-zero status, a signal, or output naming a failed
-            write is an execution error that leaves the run unmeasured
-            (#3401). Empty by default: most fix commands exit non-zero only
-            when they fail.
+            file keeps every initial issue as remaining, a measured result,
+            unless its stderr carries an error diagnostic (a traceback header
+            or an exception line at the start of a line). Any other non-zero
+            status or a signal is an execution error that leaves the run
+            unmeasured (#3401); exit 0 never is. Empty by default: most fix
+            commands exit non-zero only when they fail.
     """
 
     check_failure_message: str
@@ -395,12 +397,20 @@ def _fix_exit_error(
         The execution error to record, or None when the exit is a clean fix
         or a declared "unfixable findings remain" status.
     """
-    if _WRITE_FAILURE.search(f"{process.stdout}\n{process.stderr}\n{process.output}"):
-        return f"Fix command reported a failed write (exit code {process.returncode})"
-    if process.returncode < 0:
-        return f"Fix command was terminated by signal {-process.returncode}"
-    if process.returncode and process.returncode not in policy.fix_findings_exit_codes:
-        return f"Fix command failed (exit code {process.returncode})"
+    returncode = process.returncode
+    if returncode == 0:
+        # Exit 0 is a completed fix. Its output is never searched: it lists
+        # the files the tool rewrote, whatever they are called.
+        return None
+    if returncode < 0:
+        return f"Fix command was terminated by signal {-returncode}"
+    if returncode not in policy.fix_findings_exit_codes:
+        return f"Fix command failed (exit code {returncode})"
+    # A declared findings status is shared with crashes by some tools
+    # (``sqlfluff fix`` exits 1 for both). Only an error diagnostic on stderr
+    # separates them; the exit code is the structured verdict otherwise.
+    if _ERROR_DIAGNOSTIC.search(process.stderr):
+        return f"Fix command reported an error (exit code {returncode})"
     return None
 
 

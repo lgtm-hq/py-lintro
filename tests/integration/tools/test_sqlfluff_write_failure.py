@@ -93,7 +93,7 @@ def test_permission_error_then_clean_retry_stays_unmeasured(project: Path) -> No
     assert_that(result.success).is_false()
     assert_that(result.execution_failed).is_true()
     assert_that(result.residual_unknown_reason).is_equal_to(
-        "SQLFluff could not write its fixes.",
+        "SQLFluff fix did not complete.",
     )
     assert_that(result.fixed_issues_count).is_none()
     assert_that(result.remaining_issues_count).is_none()
@@ -101,14 +101,39 @@ def test_permission_error_then_clean_retry_stays_unmeasured(project: Path) -> No
     assert_that(query.read_text()).is_equal_to("select  1\n")
 
 
-def test_unfixable_violations_stay_measured(project: Path) -> None:
-    """Exit 1 for violations ``sqlfluff fix`` cannot fix is a measured result."""
-    query = project / "query.sql"
-    query.write_text("SELECT * FROM t1 JOIN t2\n")
-    plugin = SqlfluffPlugin()
+_NAMES = ["query.sql", "ENOSPC.sql", "PermissionError.sql"]
 
-    result = run_fix_with_retry(plugin, [str(query)], {}, 3)
+
+@pytest.mark.parametrize("name", _NAMES)
+def test_fixable_violation_is_fixed_and_measured(project: Path, name: str) -> None:
+    """A clean ``sqlfluff fix`` is measured whatever the file is called.
+
+    ``sqlfluff fix`` prints the path on stdout; a name that looks like an
+    error class is not a diagnostic.
+    """
+    query = project / name
+    query.write_text("select  1;\n")
+
+    result = run_fix_with_retry(SqlfluffPlugin(), [str(query)], {}, 3)
+
+    assert_that(result.success).is_true()
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.residual_unknown).is_false()
+    assert_that(result.initial_issues_count).is_greater_than(0)
+    assert_that(result.fixed_issues_count).is_equal_to(result.initial_issues_count)
+    assert_that(result.remaining_issues_count).is_zero()
+    assert_that(query.read_text()).is_equal_to("select 1;\n")
+
+
+@pytest.mark.parametrize("name", _NAMES)
+def test_unfixable_violations_stay_measured(project: Path, name: str) -> None:
+    """Exit 1 for violations ``sqlfluff fix`` cannot fix is a measured result."""
+    query = project / name
+    query.write_text("SELECT * FROM t1 JOIN t2\n")
+
+    result = run_fix_with_retry(SqlfluffPlugin(), [str(query)], {}, 3)
 
     assert_that(result.execution_failed).is_false()
     assert_that(result.residual_unknown).is_false()
+    assert_that(result.residual_unknown_reason).is_none()
     assert_that(result.remaining_issues_count).is_greater_than(0)

@@ -587,10 +587,14 @@ The runner classifies each fix command's exit through the policy. Exit 0 is a cl
 ran but unfixable findings remain; such a file reports every initial issue as remaining,
 a measured result. `sqlfluff fix` exit 1 is the built-in case. The default is empty,
 because most fix commands (shfmt, dotenv-linter) exit non-zero only when they fail. Any
-other non-zero status, a negative status (the process was killed by a signal), and any
-fix output that names a failed write (`Permission denied`, `PermissionError`, a
-read-only file system, a Python traceback) is an execution error, whatever the exit
-status.
+other non-zero status and a negative status (the process was killed by a signal) is an
+execution error. A declared findings status is an execution error only when the fix
+command's stderr carries an error diagnostic at the start of a line: a Python
+`Traceback (most recent call last):` header or an exception line such as
+`PermissionError: ...`. `sqlfluff fix` needs this because it exits 1 both for unfixable
+violations and when it cannot write. Exit 0 is never an execution error, and stdout is
+never searched, since tools print the paths they fixed there and a file may be called
+`PermissionError.sql`.
 
 A file whose initial check, fix command or verification records an execution error
 measured nothing, so the runner keeps the findings it has but reports the run's fix

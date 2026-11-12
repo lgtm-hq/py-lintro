@@ -86,7 +86,7 @@ def _stub_version_check() -> Iterator[None]:
             ],
             1,
             1,
-            "Fix command reported a failed write (exit code 1)",
+            "Fix command failed (exit code 1)",
         ),
         (
             [subprocess_result(False, _SHFMT_DIFF), SubprocessResult(-9, "", "", "")],
@@ -270,3 +270,56 @@ def test_verification_timeout_is_a_timeout_not_an_execution_failure(
     assert_that(result.initial_issues_count).is_equal_to(1)
     assert_that(result.fixed_issues_count).is_none()
     assert_that(result.issues).is_length(1)
+
+
+@pytest.mark.parametrize(
+    ("fix", "failed"),
+    [
+        (SubprocessResult(0, "", "Traceback (most recent call last):\n", ""), False),
+        (SubprocessResult(1, "PermissionError: ENOSPC.env\n", "", ""), False),
+        (SubprocessResult(1, "", "warning: see PermissionError.env\n", ""), False),
+        (SubprocessResult(1, "", "PermissionError: [Errno 13] denied\n", ""), True),
+        (SubprocessResult(1, "", "Traceback (most recent call last):\n", ""), True),
+    ],
+    ids=[
+        "exit-0-ignores-output",
+        "stdout-is-never-read",
+        "mid-line-name-is-not-a-diagnostic",
+        "exception-line-on-stderr",
+        "traceback-header-on-stderr",
+    ],
+)
+def test_declared_findings_exit_reads_only_stderr_diagnostics(
+    tmp_path: Path,
+    fix: SubprocessResult,
+    failed: bool,
+) -> None:
+    """Only a line-start diagnostic on stderr turns a findings exit into an error."""
+    env_file = tmp_path / "PermissionError.env"
+    env_file.write_text("foo=1\n")
+    plugin = DotenvLinterPlugin()
+    ctx = plugin.prepare(paths=[str(env_file)], options={}, no_files_message="none")
+    assert not isinstance(ctx, ToolResult)
+    with patch.object(
+        plugin,
+        "_run_subprocess_result",
+        side_effect=[subprocess_result(False, _DOTENV_FINDING), fix],
+    ):
+        result = run_per_file_fix(
+            ctx,
+            plugin=plugin,
+            check_command=plugin._check_command,
+            fix_command=plugin._fix_command,
+            parse=lambda output: parse_dotenv_linter_output(output=output),
+            policy=PerFileFixPolicy(
+                check_failure_message="dotenv-linter check failed",
+                fix_findings_exit_codes=frozenset({1}),
+            ),
+        )
+
+    assert_that(result.execution_failed).is_equal_to(failed)
+    assert_that(result.residual_unknown).is_equal_to(failed)
+    assert_that(result.initial_issues_count).is_equal_to(1)
+    if not failed:
+        expected_fixed = int(fix.returncode == 0)
+        assert_that(result.fixed_issues_count).is_equal_to(expected_fixed)
