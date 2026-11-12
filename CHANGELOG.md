@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.4] - 2026-11-12
+
+### Fixed
+
+- **tools**: retain ruff formatting without black (#3374) (695cf9f)
+
 ## [0.180.3] - 2026-11-12
 
 ### Fixed
