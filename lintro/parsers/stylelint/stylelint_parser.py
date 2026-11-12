@@ -523,3 +523,28 @@ def _parse_warning(
         severity=severity,
         fixable=False,
     )
+
+
+def stylelint_report_is_empty(output: str | None) -> bool:
+    """Report whether Stylelint printed a well-formed report naming no file.
+
+    Stylelint's JSON report holds one record per file it linted. Run with
+    ``--allow-empty-input``, a run whose files were all ignored by Stylelint's
+    own configuration (``.stylelintignore`` or ``ignoreFiles``) prints ``[]``
+    instead of failing with ``AllFilesIgnoredError`` (#3393). Since lintro
+    always passes existing files, an empty report means none was inspected.
+
+    Args:
+        output: The combined stdout/stderr from stylelint ``--formatter json``.
+
+    Returns:
+        True only for a complete, empty report with no malformed sibling.
+    """
+    if not output or not output.strip():
+        return False
+    try:
+        data: Any = json.loads(output)
+    except json.JSONDecodeError:
+        data, failures = _extract_json_array(output)
+        return data == [] and failures == 0
+    return isinstance(data, list) and not data

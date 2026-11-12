@@ -34,7 +34,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
-from lintro.models.core.tool_outcome import Checked, ToolOutcome
+from lintro.models.core.tool_outcome import Checked, NoFiles, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.html_validate.html_validate_parser import (
     parse_html_validate_output_with_stats,
@@ -62,6 +62,14 @@ HTML_VALIDATE_CONFIG_FILENAMES: list[str] = [
     ".htmlvalidate.cjs",
     ".htmlvalidate.mjs",
 ]
+
+# What html-validate prints, and exits 1 on, when its own ignore configuration
+# (``.htmlvalidateignore``) excludes every file it was given (#3393).
+HTML_VALIDATE_NO_FILES_MATCHING: str = "No files matching patterns"
+HTML_VALIDATE_ALL_IGNORED_MESSAGE: str = (
+    "No files to validate: html-validate's own ignore configuration "
+    "(.htmlvalidateignore) excludes every file given; none was inspected."
+)
 
 # Characters html-validate's CLI treats as glob syntax. Passing any of them
 # would push its ``expandFiles`` helper down the directory-walking branch of
@@ -93,6 +101,28 @@ def _reported_inspection(output: str) -> bool | None:
     ):
         return True
     return None
+
+
+def ignored_every_file(*, success: bool, stdout: str, stderr: str) -> bool:
+    """Report whether html-validate's own config ignored every given file.
+
+    html-validate has no option to accept an empty input. When every file
+    is excluded by ``.htmlvalidateignore`` it prints no report, names the
+    unmatched patterns on stderr and exits 1. lintro passes only files it
+    discovered on disk, so that message means the files were ignored, not
+    missing.
+
+    Args:
+        success: Whether html-validate exited 0.
+        stdout: The JSON formatter's stdout.
+        stderr: html-validate's diagnostics.
+
+    Returns:
+        True for a failed run with no report whose stderr says no file matched.
+    """
+    return (
+        not success and not stdout.strip() and HTML_VALIDATE_NO_FILES_MATCHING in stderr
+    )
 
 
 def contains_glob_syntax(argument: str) -> bool:
@@ -280,6 +310,18 @@ class HtmlValidatePlugin(BaseToolPlugin):
                     used_registry_fallback=used_registry_fallback,
                     command=fallback_command,
                 ),
+            )
+
+        if ignored_every_file(
+            success=result.success,
+            stdout=result.stdout,
+            stderr=result.stderr,
+        ):
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=NoFiles()),
+                name=self.definition.name,
+                output=HTML_VALIDATE_ALL_IGNORED_MESSAGE,
+                cwd=ctx.cwd,
             )
 
         # JSON is written to stdout; stderr carries diagnostics only.

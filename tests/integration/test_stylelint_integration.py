@@ -122,3 +122,46 @@ def test_skips_without_config(tmp_path: Path) -> None:
 
     assert_that(result.success).is_true()
     assert_that(result.output).contains("no stylelint configuration")
+
+
+def test_files_ignored_by_stylelintignore_are_no_files(styled_project: Path) -> None:
+    """Files ``.stylelintignore`` excludes are "no files", not a failure (#3393).
+
+    Args:
+        styled_project: Temp project with a stylelint config.
+    """
+    target = styled_project / "bad.css"
+    shutil.copy(FIXTURES / "stylelint_violations.css", target)
+    (styled_project / ".stylelintignore").write_text("bad.css\n")
+
+    plugin = StylelintPlugin()
+    checked = plugin.check([str(target)], {})
+    fixed = plugin.fix([str(target)], {})
+
+    for result in (checked, fixed):
+        assert_that(result.success).is_true()
+        assert_that(result.no_files).is_true()
+        assert_that(result.inspected_files).is_false()
+        assert_that(result.execution_failed).is_false()
+    assert_that(target.read_text()).is_equal_to(
+        (FIXTURES / "stylelint_violations.css").read_text(),
+    )
+
+
+def test_broken_config_still_fails(tmp_path: Path) -> None:
+    """A config Stylelint cannot load is still an execution failure.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    target = tmp_path / "a.css"
+    target.write_text("a {\n  color: #fff;\n}\n")
+    (tmp_path / ".stylelintrc.json").write_text("{not json")
+
+    result = StylelintPlugin().check([str(target)], {})
+
+    assert_that(result.no_files).is_false()
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.issues).is_empty()

@@ -17,6 +17,7 @@ from lintro.parsers.stylelint.stylelint_issue import StylelintIssue
 from lintro.parsers.stylelint.stylelint_parser import (
     parse_stylelint_output,
     parse_stylelint_output_with_stats,
+    stylelint_report_is_empty,
 )
 
 # Real capture: one CSS file, single color-hex-length violation.
@@ -517,3 +518,29 @@ def test_many_embedded_spans_on_one_line_stay_linear(
     assert_that(failures).is_zero()
     assert_that(issues).extracting("code").is_equal_to(["color-hex-length"])
     assert_that(decoded_chars).is_less_than_or_equal_to(3 * len(output))
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        pytest.param("[]", True, id="empty-report"),
+        pytest.param("Deprecation notice\n[]\n", True, id="empty-report-after-log"),
+        pytest.param(SINGLE_WARNING, False, id="report-with-findings"),
+        pytest.param(
+            '[{"source":"/tmp/a.css","warnings":[]}]',
+            False,
+            id="clean-report-names-a-file",
+        ),
+        pytest.param("", False, id="no-output"),
+        pytest.param("[\n", False, id="truncated-report"),
+        pytest.param("{}", False, id="not-an-array"),
+    ],
+)
+def test_stylelint_report_is_empty(output: str, expected: bool) -> None:
+    """Only a complete report naming no file reads as an empty report (#3393).
+
+    Args:
+        output: Combined Stylelint output.
+        expected: Whether the report should read as empty.
+    """
+    assert_that(stylelint_report_is_empty(output)).is_equal_to(expected)

@@ -24,6 +24,7 @@ from lintro.models.core.tool_outcome import (
     Checked,
     FixMeasured,
     FixUnmeasured,
+    NoFiles,
     Skipped,
     TimedOut,
     ToolOutcome,
@@ -32,6 +33,7 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.stylelint.stylelint_issue import StylelintIssue
 from lintro.parsers.stylelint.stylelint_parser import (
     parse_stylelint_output_with_stats,
+    stylelint_report_is_empty,
 )
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
@@ -54,6 +56,11 @@ STYLELINT_FILE_PATTERNS: list[str] = ["*.css", "*.scss", "*.sass", "*.less"]
 # Rule codes that are not real stylelint rules (no documentation page).
 STYLELINT_PSEUDO_RULES: frozenset[str] = frozenset(
     {"CssSyntaxError", "parseError", "invalidOption", "TIMEOUT"},
+)
+STYLELINT_ALL_IGNORED_MESSAGE: str = (
+    "No files to lint: Stylelint's own ignore configuration "
+    "(.stylelintignore or ignoreFiles) excludes every file given; "
+    "none was inspected."
 )
 STYLELINT_CONFIG_FILENAMES: tuple[str, ...] = (
     ".stylelintrc",
@@ -185,6 +192,71 @@ class StylelintPlugin(BaseToolPlugin):
             cwd=cwd,
         )
 
+    def _no_lint_result(
+        self,
+        *,
+        run_success: bool,
+        output: str | None,
+        found_issues: bool,
+        fixing: bool,
+        cwd: str | None = None,
+    ) -> ToolResult | None:
+        """Return the result for a check that linted nothing, if it did.
+
+        Two runs lint no file without failing: no configuration resolved
+        (a skip), and Stylelint's own ignore configuration excluding every
+        file given (no files, #3393).
+
+        Args:
+            run_success: Whether the check exited 0.
+            output: The check's combined output.
+            found_issues: Whether any finding was parsed.
+            fixing: Whether this check opens a fix run.
+            cwd: Working directory Stylelint ran in.
+
+        Returns:
+            The skip or no-files result, or None when Stylelint linted files.
+        """
+        if not found_issues and self._is_no_config_error(output):
+            return self._create_no_config_result(cwd=cwd)
+        if run_success and stylelint_report_is_empty(output):
+            return self._create_all_ignored_result(fixing=fixing, cwd=cwd)
+        return None
+
+    def _create_all_ignored_result(
+        self,
+        *,
+        fixing: bool,
+        cwd: str | None = None,
+    ) -> ToolResult:
+        """Create the no-files result for a run Stylelint's config ignored.
+
+        Every file lintro passed was excluded by Stylelint's own ignore
+        configuration, so nothing was inspected: the run is "no files", not a
+        clean pass, and never an execution failure (#3393).
+
+        Args:
+            fixing: Whether this is a fix run, which records zero counters.
+            cwd: Working directory Stylelint ran in.
+
+        Returns:
+            ToolResult: A no-files result naming the reason.
+        """
+        outcome = (
+            ToolOutcome(
+                execution=NoFiles(),
+                accounting=FixMeasured(initial=0, fixed=0, remaining=0),
+            )
+            if fixing
+            else ToolOutcome(execution=NoFiles())
+        )
+        return ToolResult.from_outcome(
+            outcome,
+            name=self.definition.name,
+            output=STYLELINT_ALL_IGNORED_MESSAGE,
+            cwd=cwd,
+        )
+
     def _create_timeout_result(
         self,
         timeout_val: float,
@@ -241,6 +313,9 @@ class StylelintPlugin(BaseToolPlugin):
 
         Config discovery is otherwise delegated to stylelint itself, which
         resolves configuration per linted file (walking up from each file).
+        ``--allow-empty-input`` makes a run whose files are all ignored by
+        Stylelint's own configuration print an empty report instead of
+        failing with ``AllFilesIgnoredError`` (#3393).
 
         Args:
             merged_options: Per-call options merged over the instance
@@ -253,7 +328,10 @@ class StylelintPlugin(BaseToolPlugin):
         Returns:
             The base command list.
         """
-        cmd = [*self._get_executable_command(tool_name="stylelint", cwd=cwd)]
+        cmd = [
+            *self._get_executable_command(tool_name="stylelint", cwd=cwd),
+            "--allow-empty-input",
+        ]
         opts = merged_options if merged_options is not None else self.options
         explicit = opts.get("config")
         if explicit:
@@ -367,8 +445,15 @@ class StylelintPlugin(BaseToolPlugin):
             return self._create_timeout_result(timeout_val=ctx.timeout, cwd=ctx.cwd)
 
         issues, parse_failures = parse_stylelint_output_with_stats(output=output)
-        if not issues and self._is_no_config_error(output):
-            return self._create_no_config_result(cwd=ctx.cwd)
+        no_lint = self._no_lint_result(
+            run_success=run_success,
+            output=output,
+            found_issues=bool(issues),
+            fixing=False,
+            cwd=ctx.cwd,
+        )
+        if no_lint is not None:
+            return no_lint
         # Stylelint prints a JSON report on every completed run, ``[...]``
         # with empty ``warnings`` when clean, and exits 2 when violations
         # exist. No report, a malformed one, or any other failure with
@@ -443,8 +528,15 @@ class StylelintPlugin(BaseToolPlugin):
             check_output,
         )
         initial_count = len(initial_issues)
-        if not initial_issues and self._is_no_config_error(check_output):
-            return self._create_no_config_result(cwd=ctx.cwd)
+        no_lint = self._no_lint_result(
+            run_success=initial_success,
+            output=check_output,
+            found_issues=bool(initial_issues),
+            fixing=True,
+            cwd=ctx.cwd,
+        )
+        if no_lint is not None:
+            return no_lint
         # No initial report, a malformed one, or a failing check with
         # nothing parsed is a crash/config error, not a fixable state.
         initial_gap = report_gap(

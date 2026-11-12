@@ -92,3 +92,46 @@ def test_html_validate_clean_file_passes(tmp_path: Path) -> None:
     result = tool.check([str(clean_file)], {})
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.success).is_true()
+
+
+@pytest.mark.html_validate
+def test_html_validate_files_ignored_by_its_config_are_no_files(
+    tmp_path: Path,
+) -> None:
+    """Files ``.htmlvalidateignore`` excludes are "no files" (#3393).
+
+    Args:
+        tmp_path: Pytest-managed temporary directory.
+    """
+    target = tmp_path / "ignored.html"
+    shutil.copy(SAMPLE_FILE, target)
+    (tmp_path / ".htmlvalidateignore").write_text("ignored.html\n", encoding="utf-8")
+    tool = ToolRegistry.get("html_validate")
+    tool.exclude_patterns = []
+    result = tool.check([str(target)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.no_files).is_true()
+    assert_that(result.inspected_files).is_false()
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.issues_count).is_zero()
+
+
+@pytest.mark.html_validate
+def test_html_validate_broken_config_still_fails(tmp_path: Path) -> None:
+    """A config html-validate cannot load is still an execution failure.
+
+    Args:
+        tmp_path: Pytest-managed temporary directory.
+    """
+    target = tmp_path / "page.html"
+    target.write_text("<p>Hello world</p>\n", encoding="utf-8")
+    (tmp_path / ".htmlvalidate.json").write_text("{not json", encoding="utf-8")
+    tool = ToolRegistry.get("html_validate")
+    tool.exclude_patterns = []
+    result = tool.check([str(target)], {})
+
+    assert_that(result.no_files).is_false()
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.findings_complete).is_false()

@@ -2263,7 +2263,11 @@ Stylelint resolves configuration per file (walking upward). Lintro supports:
 - `stylelint.config.js`, `stylelint.config.cjs`, `stylelint.config.mjs`
 - a `stylelint` key in `package.json`
 
-`.stylelintignore` is honored by the underlying tool.
+`.stylelintignore` (and the `ignoreFiles` config key) is honored by the underlying tool.
+Lintro passes `--allow-empty-input`, so when Stylelint's own ignore configuration
+excludes every file it was given, the run is reported as "no files": it passes without
+claiming any file was inspected, instead of failing on Stylelint's
+`AllFilesIgnoredError`.
 
 **Installation:**
 
@@ -2647,6 +2651,11 @@ reaches the `bunx`/`npx` fallback, needs a Node runtime satisfying that range â€
 
 html-validate reads its rule configuration from the project's native config file when
 present. No additional configuration is required for Lintro.
+
+`.htmlvalidateignore` is honored by the underlying tool. When it excludes every file
+Lintro passed, html-validate exits 1 with `No files matching patterns`; Lintro reports
+that run as "no files", passing without claiming any file was inspected. Any other error
+from html-validate still fails the run.
 
 **Available Options via `--tool-options`:**
 
