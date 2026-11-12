@@ -14,8 +14,10 @@ itself (see issue #1767).
 
 from __future__ import annotations
 
+import os
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 from loguru import logger
 
@@ -118,6 +120,59 @@ def registry_fallback_spec(command: Sequence[str]) -> str | None:
         # shorter is a malformed command, not a fallback to report on.
         return command[index + 1] if len(command) >= index + 3 else None
     return command[index]
+
+
+#: npm config key that, when false, stops npx linking the pinned package's
+#: executable after installing it (env spellings are matched case-insensitively).
+_BIN_LINKS_ENV: str = "npm_config_bin_links"
+
+
+def npx_pin_refusal(
+    *,
+    cwd: Path,
+    package: str,
+    pin: str,
+    environ: Mapping[str, str] | None = None,
+) -> str | None:
+    """Refuse an npx-only fallback unless npx can only run the pinned package.
+
+    ``npx --package <pkg>@<pin> <bin>`` reuses whatever npm finds installed
+    and then runs ``<bin>`` by name from any ancestor ``node_modules/.bin``,
+    so a ``node_modules`` tree can make it launch a different version than the
+    pin (hoisted copies, pnpm stores, a stale hidden lockfile, workspace globs
+    npm resolves differently). With bin links disabled it installs the pin but
+    links no executable, and again falls back to whatever is on ``PATH``.
+    Predicting npm's choice is a moving target, so the pin is trusted only when
+    there is nothing for npx to reuse (#2043). ``bunx <pkg>@<pin>`` always
+    resolves from the registry and is not subject to this rule.
+
+    Args:
+        cwd: Directory npx would run in.
+        package: npm package the spec names.
+        pin: Exact pinned version.
+        environ: Environment npx would inherit; defaults to ``os.environ``.
+
+    Returns:
+        None when the pin is what npx runs, otherwise an actionable reason.
+    """
+    remedy = f"Install {package}@{pin} locally or install bun."
+    env = os.environ if environ is None else environ
+    for key, value in env.items():
+        # Unset or explicitly true is safe; anything else may disable links.
+        if key.lower() == _BIN_LINKS_ENV and value.strip().lower() != "true":
+            return (
+                f"only npx is available and npm bin links are disabled "
+                f"({key}={value}); npx may run an unpinned copy. {remedy}"
+            )
+    origin = cwd.resolve()
+    for directory in (origin, *origin.parents):
+        tree = directory / "node_modules"
+        if tree.exists():
+            return (
+                f"only npx is available and a node_modules tree exists at "
+                f"{tree.as_posix()}; npx may run an unpinned copy. {remedy}"
+            )
+    return None
 
 
 def is_registry_fallback_command(command: Sequence[str]) -> bool:

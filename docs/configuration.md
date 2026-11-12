@@ -1388,24 +1388,28 @@ Rationale:
    (`bunx --package typescript@<pinned> tsc`). `npx` always uses `--yes --package` so it
    cannot hang waiting for a TTY prompt.
 
-   `npx` does not always run the pin. It first looks for the pinned package in npm's
-   installed tree: the nearest directory with a `package.json` or `node_modules`,
-   promoted to its workspace root, including nested, aliased and symlinked packages. If
-   it finds the pin, it skips its install and runs `<binary>` by name from the nearest
-   `node_modules/.bin` above the checked directory, which may be an older hoisted copy.
-   Lintro makes the same check offline, without calling npm:
+   `npx` does not always run its pin. It reuses whatever npm finds installed and then
+   runs `<binary>` by name from any `node_modules/.bin` above the checked directory, so
+   a hoisted older copy, a pnpm store, a stale `node_modules/.package-lock.json` or a
+   workspace glob npm reads differently can make it run another version. With npm bin
+   links disabled, it installs the pin but links no executable and falls back to
+   whatever is on `PATH`. Lintro therefore trusts an npx pin only when **both** of these
+   hold:
 
-   - **Pin installed, `<binary>` on that path:** Lintro runs that binary directly,
-     probes its real version locally and applies the minimum.
-   - **Pin installed, no `<binary>` on that path:** the tool is unavailable, because
-     `npx` would fail with `command not found`.
-   - **Pin not installed:** `npx` installs and runs the pin, so Lintro keeps the `npx`
-     command and uses the pin as the version. Any other `node_modules/.bin/<binary>` is
-     ignored, because `npx` will not run it.
-   - **Tree too large to inspect** (over 100,000 packages): the tool is unavailable
-     rather than guessed.
+   - no `node_modules` directory exists in the checked directory or any directory above
+     it, up to the filesystem root;
+   - `NPM_CONFIG_BIN_LINKS` / `npm_config_bin_links` is unset or `true`.
 
-   `bunx <pkg>@<pinned>` never runs the local tree, so it always runs the pin.
+   In every other npx-only case the tool is **unavailable**. The reason names the
+   `node_modules` directory (or the bin-links setting) it found, says that
+   `npx may run an unpinned copy`, and ends with
+   `Install <pkg>@<pinned> locally or install bun.`
+
+   **Trade-off:** if `npx` is your only runner and a `node_modules` tree is in reach,
+   the automatic registry fallback no longer runs for a Node tool you have not
+   installed. Add the tool as a devDependency (branch 1), install it globally (branch
+   2), or install bun. `bunx <pkg>@<pinned>` always resolves from the registry and never
+   runs the local tree, so it is not restricted.
 
 4. **bare `<binary>`** — last resort, fails if nothing is installed.
 
@@ -1447,14 +1451,14 @@ same binary.
 
 The version check never runs the registry fallback (branch 3). Running
 `bunx <package>@<pinned> --version` would download the package before any file is
-checked. When resolution falls through to `bunx`/`npx`, the check reads the version from
-the runner's `<package>@<pinned>` spec and compares it with the tool's minimum, offline.
-The pin must be an exact version (`MAJOR.MINOR.PATCH`, optionally with a prerelease or
-build suffix), whether or not the tool declares a minimum. An exact pin that meets the
-minimum, or any exact pin when there is no minimum, lets the tool run through the
-runner. A pin below the minimum, or a spec that is unpinned, partial (`1.2`), a wildcard
-(`1.x`), a range (`^1.2.3`) or a dist-tag (`latest`), reports the tool as unavailable,
-and the runner is never started.
+checked. When resolution falls through to `bunx`, or to a trusted `npx` (see above), the
+check reads the version from the runner's `<package>@<pinned>` spec and compares it with
+the tool's minimum, offline. The pin must be an exact version (`MAJOR.MINOR.PATCH`,
+optionally with a prerelease or build suffix), whether or not the tool declares a
+minimum. An exact pin that meets the minimum, or any exact pin when there is no minimum,
+lets the tool run through the runner. A pin below the minimum, or a spec that is
+unpinned, partial (`1.2`), a wildcard (`1.x`), a range (`^1.2.3`) or a dist-tag
+(`latest`), reports the tool as unavailable, and the runner is never started.
 
 ### Python Tools
 

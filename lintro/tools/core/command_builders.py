@@ -485,39 +485,6 @@ def find_local_node_binary(
     return None
 
 
-def _npx_local_binary(spec: str, binary_name: str, start: Path | None) -> str | None:
-    """Return the ``node_modules/.bin`` entry npx would run instead of *spec*.
-
-    Args:
-        spec: Pinned ``package@version`` spec npx would be given.
-        binary_name: Executable passed to npx.
-        start: Directory npx would run in, or None for the process directory.
-
-    Returns:
-        The binary npx would launch by name, or None when npx would run the
-        pin (or cannot run at all, which the version gate reports).
-    """
-    from lintro.enums.npx_launch import NpxLaunch
-    from lintro.tools.core.node_fallback import EXACT_SEMVER, split_npm_spec
-    from lintro.tools.core.npx_resolution import decide_npx_launch
-
-    package, version = split_npm_spec(spec)
-    if version is None or not EXACT_SEMVER.fullmatch(version):
-        return None
-    decision = decide_npx_launch(
-        package=package,
-        version=version,
-        binary=binary_name,
-        cwd=start or Path.cwd(),
-    )
-    if decision.launch is not NpxLaunch.LOCAL:
-        return None
-    logger.debug(
-        f"npx would run {decision.binary} instead of {spec}; using it directly",
-    )
-    return decision.binary
-
-
 def pinned_npm_spec(package_name: str) -> str:
     """Build a version-pinned ``package@version`` npm spec.
 
@@ -696,13 +663,8 @@ class NodeJSBuilder(CommandBuilder):
         for runner in ("bunx", "npx"):
             if shutil.which(runner):
                 if runner == "npx":
-                    # npx skips its install when the pin is already in the
-                    # tree and runs ``binary_name`` by name, which may be a
-                    # different version; resolve that binary so the gate
-                    # probes what runs (#2043).
-                    local = _npx_local_binary(spec, binary_name, start)
-                    if local is not None:
-                        return [local]
+                    # The version gate refuses this unless npx can only run
+                    # the pin (``node_fallback.npx_pin_refusal``, #2043).
                     command = ["npx", "--yes", "--package", spec, binary_name]
                 elif package_name == binary_name:
                     command = [runner, spec]

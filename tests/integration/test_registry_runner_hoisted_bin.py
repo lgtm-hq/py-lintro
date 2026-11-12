@@ -1,14 +1,19 @@
-"""Real npx/bunx: which binary they launch, and whether lintro's gate agrees.
+"""Real npx/bunx: what they launch, and lintro never passing on a pin they skip.
 
-``npx --package <pkg>@<pin> <bin>`` skips its install only when the pin is
-already installed somewhere in npm's project tree, then runs ``<bin>`` by name
-from an ancestor ``node_modules/.bin``, or exits 127. Without the pin
-installed it runs the pin (#2043). Each npx test first runs real npx to show
-which binary it launches, then checks lintro's snapshot for the same layout.
+``npx --package <pkg>@<pin> <bin>`` may reuse anything npm finds installed and
+run ``<bin>`` by name from an ancestor ``node_modules/.bin``, so its pin is not
+reliable evidence once a ``node_modules`` tree is in reach (#2043). lintro
+therefore trusts an npx pin only when no ``node_modules`` exists in the
+execution directory or above it and npm bin links are not disabled; in every
+other npx-only case the tool is unavailable. ``bunx <pkg>@<pin>`` always
+resolves from the registry, so its pin stands.
+
+Each npx test first runs real npx to show what it launches, then checks that
+lintro either refuses or reports exactly what npx ran. A pin is never reported
+available while npx runs something else.
 
 Nothing reaches the internet. A localhost registry serves a fake pinned
-``prettier`` whose binary prints ``registry <pin>``, so "npx ran the pin" is
-observed rather than inferred. Caches start empty.
+``prettier`` whose binary prints ``registry <pin>``. Caches start empty.
 
 npx is gated with a plain skip, not ``require_command``: the tools image ships
 bun (with ``node`` linked to it) but no npm, and ``require_command`` turns an
@@ -25,7 +30,8 @@ import shutil
 import subprocess  # nosec B404 - runs real npx/bunx with fixed argv, offline
 import tarfile
 import threading
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -33,6 +39,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro._tool_versions import get_tool_version
+from lintro.models.core.tool_snapshot import ToolSnapshot
 from lintro.tools.core import snapshots
 from tests.integration._tools import NO_MIN_VERSION, require_command
 
@@ -41,6 +48,7 @@ _OLDER = "1.0.0"
 _UNREACHABLE_REGISTRY = "http://127.0.0.1:9"
 _NPX = shutil.which("npx")
 _NODE = shutil.which("node")
+_REFUSAL = "npx may run an unpinned copy"
 
 requires_npx = pytest.mark.skipif(
     _NPX is None or _NODE is None,
@@ -131,112 +139,196 @@ def registry() -> Iterator[str]:
     thread.join()
 
 
-def _package(directory: Path, version: str, label: str) -> Path:
-    """Install a fake ``prettier`` whose node binary prints *label* and version.
+# ---------------------------------------------------------------------------
+# Layout builders
+# ---------------------------------------------------------------------------
+
+
+def _package(
+    directory: Path,
+    version: str,
+    *,
+    label: str | None = None,
+    name: str = "prettier",
+    dependencies: dict[str, str] | None = None,
+) -> None:
+    """Write a fake package, optionally with a node binary printing *label*.
 
     Args:
         directory: Package directory to create.
         version: Version the package reports.
-        label: Word printed before the version, to identify the copy.
-
-    Returns:
-        The package's executable.
+        label: Text the binary prints, or None for a package without one.
+        name: Package name.
+        dependencies: Declared dependencies.
     """
-    directory.mkdir(parents=True)
-    (directory / "package.json").write_text(
-        json.dumps(
-            {"name": "prettier", "version": version, "bin": {"prettier": "bin.js"}},
-        ),
-        encoding="utf-8",
-    )
-    binary = directory / "bin.js"
-    binary.write_text(
-        f'#!/usr/bin/env node\nconsole.log("{label} {version}")\n',
-        encoding="utf-8",
-    )
-    binary.chmod(0o755)
-    return binary
+    directory.mkdir(parents=True, exist_ok=True)
+    manifest: dict[str, object] = {"name": name, "version": version}
+    if dependencies:
+        manifest["dependencies"] = dependencies
+    if label is not None:
+        manifest["bin"] = {name: "bin.js"}
+        binary = directory / "bin.js"
+        binary.write_text(
+            f'#!/usr/bin/env node\nconsole.log("{label}")\n',
+            encoding="utf-8",
+        )
+        binary.chmod(0o755)
+    (directory / "package.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
-def _link_bin(bin_dir: Path, target: str) -> None:
-    """Link ``<bin_dir>/prettier`` to *target*, as npm does.
+def _hoist_older(root: Path) -> None:
+    """Hoist an older ``prettier`` with its ``.bin`` link at *root*.
 
     Args:
-        bin_dir: ``node_modules/.bin`` directory.
-        target: Relative link target.
+        root: Directory owning the ``node_modules``.
     """
+    _package(root / "node_modules" / "prettier", _OLDER, label=f"hoisted {_OLDER}")
+    bin_dir = root / "node_modules" / ".bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
-    (bin_dir / "prettier").symlink_to(target)
+    (bin_dir / "prettier").symlink_to("../prettier/bin.js")
 
 
-def _workspace(root: Path) -> Path:
-    """Create a git workspace with one member and no member ``node_modules``.
+def _workspace(root: Path, pattern: str = "packages/*") -> Path:
+    """Create a git workspace with members ``app`` and ``lib``.
 
     Args:
         root: Workspace root.
+        pattern: The root's ``workspaces`` glob.
 
     Returns:
-        The member directory.
+        The ``app`` member, which has no ``node_modules`` of its own.
     """
     (root / ".git").mkdir(parents=True)
     (root / "package.json").write_text(
-        '{"name":"ws","private":true,"workspaces":["packages/*"]}\n',
+        json.dumps({"name": "ws", "private": True, "workspaces": [pattern]}),
         encoding="utf-8",
     )
+    _package(root / "packages" / "lib", "1.0.0", name="lib")
     app = root / "packages" / "app"
-    app.mkdir(parents=True)
-    (app / "package.json").write_text(
-        '{"name":"app","version":"1.0.0"}\n',
-        encoding="utf-8",
-    )
+    _package(app, "1.0.0", name="app")
     return app
 
 
-def _layout(tmp_path: Path, name: str) -> Path:
-    """Build one of the four review layouts.
-
-    Args:
-        tmp_path: Directory to build in.
-        name: Layout identifier.
-
-    Returns:
-        The directory npx and lintro run in.
-    """
-    if name == "outside-bin-no-pin":
-        home = tmp_path / "home"
-        _package(home / "node_modules" / "prettier", _OLDER, "outside")
-        _link_bin(home / "node_modules" / ".bin", "../prettier/bin.js")
-        project = home / "proj"
-        (project / ".git").mkdir(parents=True)
-        (project / "package.json").write_text(
-            '{"name":"proj","version":"1.0.0"}\n',
-            encoding="utf-8",
-        )
-        return project
+def _hoisted_with_pin_elsewhere(tmp_path: Path) -> Path:
     root = tmp_path / "ws"
     app = _workspace(root)
-    modules = root / "node_modules"
-    if name == "nested-pin-no-bin":
-        wrapper = modules / "wrapper"
-        wrapper.mkdir(parents=True)
-        (wrapper / "package.json").write_text(
-            json.dumps(
-                {
-                    "name": "wrapper",
-                    "version": "1.0.0",
-                    "dependencies": {"prettier": _PIN},
-                },
-            ),
-            encoding="utf-8",
-        )
-        _package(wrapper / "node_modules" / "prettier", _PIN, "nested")
-        _link_bin(wrapper / "node_modules" / ".bin", "../prettier/bin.js")
-        return app
-    _package(modules / "prettier", _OLDER, "hoisted")
-    _link_bin(modules / ".bin", "../prettier/bin.js")
-    if name == "hoisted-older-pin-elsewhere":
-        _package(modules / "other" / "node_modules" / "prettier", _PIN, "nested")
+    _hoist_older(root)
+    _package(root / "node_modules" / "other" / "node_modules" / "prettier", _PIN)
     return app
+
+
+def _hoisted_no_pin(tmp_path: Path) -> Path:
+    root = tmp_path / "ws"
+    app = _workspace(root)
+    _hoist_older(root)
+    return app
+
+
+def _nested_pin_no_bin(tmp_path: Path) -> Path:
+    root = tmp_path / "ws"
+    app = _workspace(root)
+    wrapper = root / "node_modules" / "wrapper"
+    _package(wrapper, "1.0.0", name="wrapper", dependencies={"prettier": _PIN})
+    _package(wrapper / "node_modules" / "prettier", _PIN, label=f"nested {_PIN}")
+    bin_dir = wrapper / "node_modules" / ".bin"
+    bin_dir.mkdir()
+    (bin_dir / "prettier").symlink_to("../prettier/bin.js")
+    return app
+
+
+def _outside_bin_no_pin(tmp_path: Path) -> Path:
+    home = tmp_path / "home"
+    _hoist_older(home)
+    project = home / "proj"
+    (project / ".git").mkdir(parents=True)
+    _package(project, "1.0.0", name="proj")
+    return project
+
+
+def _pnpm_transitive_pin(tmp_path: Path) -> Path:
+    root = tmp_path / "ws"
+    app = _workspace(root)
+    _hoist_older(root)
+    store = root / "node_modules" / ".pnpm"
+    _package(store / f"prettier@{_PIN}" / "node_modules" / "prettier", _PIN)
+    middle = store / "middle@1.0.0" / "node_modules"
+    _package(middle / "middle", "1.0.0", name="middle", dependencies={"prettier": _PIN})
+    (middle / "prettier").symlink_to(f"../../prettier@{_PIN}/node_modules/prettier")
+    wrapper = store / "wrapper@1.0.0" / "node_modules"
+    _package(
+        wrapper / "wrapper",
+        "1.0.0",
+        name="wrapper",
+        dependencies={"middle": "1.0.0"},
+    )
+    (wrapper / "middle").symlink_to("../../middle@1.0.0/node_modules/middle")
+    (root / "node_modules" / "wrapper").symlink_to(
+        ".pnpm/wrapper@1.0.0/node_modules/wrapper",
+    )
+    return app
+
+
+def _stale_hidden_lockfile(tmp_path: Path) -> Path:
+    root = tmp_path / "ws"
+    app = _workspace(root)
+    _hoist_older(root)
+    other = root / "node_modules" / "other"
+    _package(other, "1.0.0", name="other", dependencies={"prettier": _PIN})
+    _package(other / "node_modules" / "prettier", _OLDER)
+    lockfile = root / "node_modules" / ".package-lock.json"
+    lockfile.write_text(
+        json.dumps(
+            {
+                "name": "ws",
+                "lockfileVersion": 3,
+                "requires": True,
+                "packages": {
+                    "node_modules/prettier": {
+                        "version": _OLDER,
+                        "bin": {"prettier": "bin.js"},
+                    },
+                    "node_modules/other": {
+                        "version": "1.0.0",
+                        "dependencies": {"prettier": _PIN},
+                    },
+                    "node_modules/other/node_modules/prettier": {"version": _PIN},
+                },
+            },
+        ),
+        encoding="utf-8",
+    )
+    # npm trusts a hidden lockfile only when it is newer than every folder.
+    newer = time.time() + 60
+    os.utime(lockfile, (newer, newer))
+    return app
+
+
+def _brace_glob(tmp_path: Path) -> Path:
+    root = tmp_path / "ws"
+    app = _workspace(root, "packages/{app,lib}")
+    _hoist_older(root)
+    _package(root / "node_modules" / "other" / "node_modules" / "prettier", _PIN)
+    return app
+
+
+def _extglob(tmp_path: Path) -> Path:
+    root = tmp_path / "ws"
+    app = _workspace(root, "packages/@(app|lib)")
+    _hoist_older(root)
+    _package(root / "node_modules" / "other" / "node_modules" / "prettier", _PIN)
+    return app
+
+
+def _clean_project(tmp_path: Path) -> Path:
+    project = tmp_path / "proj"
+    (project / ".git").mkdir(parents=True)
+    _package(project, "1.0.0", name="proj")
+    return project
+
+
+# ---------------------------------------------------------------------------
+# Runner helpers
+# ---------------------------------------------------------------------------
 
 
 def _isolate(
@@ -244,6 +336,7 @@ def _isolate(
     tmp_path: Path,
     commands: dict[str, str],
     registry_url: str,
+    extra_env: dict[str, str],
 ) -> dict[str, str]:
     """Expose only *commands* on PATH, with a private registry and caches.
 
@@ -252,6 +345,7 @@ def _isolate(
         tmp_path: Directory for the PATH shim, HOME and caches.
         commands: Command name -> real executable to link into PATH.
         registry_url: Registry both runners use.
+        extra_env: Extra variables for the layout, such as bin links.
 
     Returns:
         The environment the real runner should use.
@@ -271,6 +365,8 @@ def _isolate(
     monkeypatch.setenv("npm_config_fund", "false")
     monkeypatch.setenv("BUN_CONFIG_REGISTRY", _UNREACHABLE_REGISTRY)
     monkeypatch.setenv("BUN_INSTALL_CACHE_DIR", str(tmp_path / "bun-cache"))
+    for key, value in extra_env.items():
+        monkeypatch.setenv(key, value)
     return dict(os.environ)
 
 
@@ -302,22 +398,30 @@ def _npx_then_probe(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     registry_url: str,
-    layout: str,
-) -> tuple[int, str, snapshots.ToolSnapshot]:
-    """Run real npx in *layout*, then lintro's probe for the same directory.
+    build: Callable[[Path], Path],
+    extra_env: dict[str, str] | None = None,
+) -> tuple[int, str, ToolSnapshot]:
+    """Run real npx in a layout, then lintro's probe for the same directory.
 
     Args:
         tmp_path: Temporary directory provided by pytest.
         monkeypatch: Scoped environment override.
         registry_url: Localhost registry URL.
-        layout: Layout identifier.
+        build: Layout builder returning the execution directory.
+        extra_env: Extra variables for both npx and lintro.
 
     Returns:
         npx's exit code, its last output line, and lintro's snapshot.
     """
     assert _NPX is not None and _NODE is not None
-    cwd = _layout(tmp_path, layout)
-    env = _isolate(monkeypatch, tmp_path, {"npx": _NPX, "node": _NODE}, registry_url)
+    cwd = build(tmp_path)
+    env = _isolate(
+        monkeypatch,
+        tmp_path,
+        {"npx": _NPX, "node": _NODE},
+        registry_url,
+        extra_env or {},
+    )
     code, launched = _run(
         ["npx", "--yes", "--package", f"prettier@{_PIN}", "prettier"],
         cwd,
@@ -326,85 +430,158 @@ def _npx_then_probe(
     return code, launched, snapshots.probe_tool("prettier", search_root=cwd)
 
 
+def _assert_never_a_false_pass(snapshot: ToolSnapshot, launched: str) -> None:
+    """Require lintro to refuse, or to report exactly the binary npx ran.
+
+    Args:
+        snapshot: lintro's probe result.
+        launched: What real npx printed.
+    """
+    if snapshot.available and snapshot.version_check_passed:
+        assert_that(snapshot.command[0]).is_equal_to("npx")
+        assert_that(launched).is_equal_to(f"registry {snapshot.version}")
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+_REFUSED_LAYOUTS: list[tuple[str, Callable[[Path], Path], dict[str, str], str]] = [
+    (
+        "hoisted-older-pin-elsewhere",
+        _hoisted_with_pin_elsewhere,
+        {},
+        f"hoisted {_OLDER}",
+    ),
+    ("hoisted-older-no-pin", _hoisted_no_pin, {}, f"registry {_PIN}"),
+    ("nested-pin-no-bin", _nested_pin_no_bin, {}, "not found"),
+    ("outside-bin-no-pin", _outside_bin_no_pin, {}, f"registry {_PIN}"),
+    ("pnpm-transitive-pin", _pnpm_transitive_pin, {}, f"hoisted {_OLDER}"),
+    ("stale-hidden-lockfile", _stale_hidden_lockfile, {}, f"hoisted {_OLDER}"),
+    (
+        "bin-links-off-hoisted",
+        _hoisted_no_pin,
+        {"NPM_CONFIG_BIN_LINKS": "false"},
+        f"hoisted {_OLDER}",
+    ),
+    ("workspace-brace-glob", _brace_glob, {}, f"hoisted {_OLDER}"),
+    ("workspace-extglob", _extglob, {}, f"hoisted {_OLDER}"),
+]
+
+
 @requires_npx
-def test_npx_runs_hoisted_older_when_pin_is_elsewhere_and_gate_refuses(
+@pytest.mark.parametrize(
+    ("build", "extra_env", "npx_ran"),
+    [(build, env, ran) for _name, build, env, ran in _REFUSED_LAYOUTS],
+    ids=[name for name, _build, _env, _ran in _REFUSED_LAYOUTS],
+)
+def test_npx_only_with_a_node_modules_tree_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+    build: Callable[[Path], Path],
+    extra_env: dict[str, str],
+    npx_ran: str,
+) -> None:
+    """Wherever npx could reuse something, lintro refuses instead of trusting the pin.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+        build: Layout builder.
+        extra_env: Extra variables for the layout.
+        npx_ran: What real npx prints in this layout.
+    """
+    _code, launched, snapshot = _npx_then_probe(
+        tmp_path,
+        monkeypatch,
+        registry,
+        build,
+        extra_env,
+    )
+
+    assert_that(launched).contains(npx_ran)
+    assert_that(snapshot.available).is_false()
+    assert_that(snapshot.version).is_none()
+    assert_that(snapshot.probe_error).contains(_REFUSAL)
+    _assert_never_a_false_pass(snapshot, launched)
+
+
+def _has_node_modules_above(directory: Path) -> bool:
+    """Report whether a ``node_modules`` exists in *directory* or an ancestor.
+
+    Args:
+        directory: Directory to start from.
+
+    Returns:
+        True when the clean-project precondition cannot hold on this machine.
+    """
+    origin = directory.resolve()
+    return any((d / "node_modules").exists() for d in (origin, *origin.parents))
+
+
+@requires_npx
+def test_npx_only_in_a_clean_project_trusts_the_pin_npx_runs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     registry: str,
 ) -> None:
-    """Pin installed elsewhere: npx runs the hoisted copy; lintro refuses it.
+    """With nothing to reuse, npx runs the pin and lintro reports exactly that.
 
     Args:
         tmp_path: Temporary directory provided by pytest.
         monkeypatch: Scoped environment override.
         registry: Localhost registry URL.
     """
+    if _has_node_modules_above(tmp_path):
+        pytest.skip("a node_modules directory exists above the temporary directory")
+
     code, launched, snapshot = _npx_then_probe(
         tmp_path,
         monkeypatch,
         registry,
-        "hoisted-older-pin-elsewhere",
+        _clean_project,
     )
-
-    assert_that(code).is_zero()
-    assert_that(launched).is_equal_to(f"hoisted {_OLDER}")
-    assert_that(snapshot.command[0]).ends_with("node_modules/.bin/prettier")
-    assert_that(snapshot.version).is_equal_to(_OLDER)
-    assert_that(snapshot.version_check_passed).is_false()
-    assert_that(snapshot.probe_error).contains("below minimum requirement")
-
-
-@requires_npx
-@pytest.mark.parametrize("layout", ["hoisted-older-no-pin", "outside-bin-no-pin"])
-def test_npx_runs_the_pin_without_one_installed_and_gate_keeps_it(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    registry: str,
-    layout: str,
-) -> None:
-    """No pin installed: npx installs and runs it; local bins are ignored.
-
-    Args:
-        tmp_path: Temporary directory provided by pytest.
-        monkeypatch: Scoped environment override.
-        registry: Localhost registry URL.
-        layout: Layout identifier.
-    """
-    code, launched, snapshot = _npx_then_probe(tmp_path, monkeypatch, registry, layout)
 
     assert_that(code).is_zero()
     assert_that(launched).is_equal_to(f"registry {_PIN}")
     assert_that(snapshot.command[0]).is_equal_to("npx")
     assert_that(snapshot.available).is_true()
     assert_that(snapshot.version).is_equal_to(_PIN)
-    assert_that(snapshot.probe_error).is_none()
+    _assert_never_a_false_pass(snapshot, launched)
 
 
 @requires_npx
-def test_npx_exits_127_with_pin_but_no_reachable_bin_and_gate_refuses(
+def test_npx_only_with_bin_links_off_is_refused_even_when_clean(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     registry: str,
 ) -> None:
-    """Pin installed but no ``.bin`` on npx's PATH: npx fails; lintro refuses.
+    """Bin links off: npx installs the pin but cannot run it; lintro refuses.
 
     Args:
         tmp_path: Temporary directory provided by pytest.
         monkeypatch: Scoped environment override.
         registry: Localhost registry URL.
     """
+    if _has_node_modules_above(tmp_path):
+        pytest.skip("a node_modules directory exists above the temporary directory")
+
     code, launched, snapshot = _npx_then_probe(
         tmp_path,
         monkeypatch,
         registry,
-        "nested-pin-no-bin",
+        _clean_project,
+        {"NPM_CONFIG_BIN_LINKS": "false"},
     )
 
     assert_that(code).is_equal_to(127)
     assert_that(launched).contains("not found")
     assert_that(snapshot.available).is_false()
-    assert_that(snapshot.version).is_none()
-    assert_that(snapshot.probe_error).contains("but no prettier on its PATH")
+    assert_that(snapshot.probe_error).contains("bin links are disabled")
+    _assert_never_a_false_pass(snapshot, launched)
 
 
 @require_command("bunx", ["bunx"], min_version=NO_MIN_VERSION)
@@ -420,8 +597,8 @@ def test_bunx_ignores_the_hoisted_binary_and_the_gate_keeps_the_pin(
     """
     bunx = shutil.which("bunx")
     assert bunx is not None
-    cwd = _layout(tmp_path, "hoisted-older-pin-elsewhere")
-    env = _isolate(monkeypatch, tmp_path, {"bunx": bunx}, _UNREACHABLE_REGISTRY)
+    cwd = _hoisted_with_pin_elsewhere(tmp_path)
+    env = _isolate(monkeypatch, tmp_path, {"bunx": bunx}, _UNREACHABLE_REGISTRY, {})
 
     _code, launched = _run(["bunx", f"prettier@{_PIN}"], cwd, env)
     snapshot = snapshots.probe_tool("prettier", search_root=cwd)

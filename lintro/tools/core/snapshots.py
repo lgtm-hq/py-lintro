@@ -34,6 +34,7 @@ from lintro.tools.core.command_builders import CommandBuilderRegistry
 from lintro.tools.core.node_fallback import (
     EXACT_SEMVER,
     is_registry_fallback_command,
+    npx_pin_refusal,
     registry_fallback_install_hint,
     registry_fallback_spec,
     split_npm_spec,
@@ -593,42 +594,20 @@ def _npx_refusal(
     pinned: str,
     search_root: Path,
 ) -> str | None:
-    """Refuse an npx command whose pin is not what npx would launch.
-
-    ``npx`` skips its install when the pin is already in the project tree and
-    then runs ``<bin>`` by name, which may be another version or nothing at
-    all (#2043). The resolver returns that binary itself when one exists, so
-    an npx command reaching the gate must predict ``PINNED``. Anything else
-    fails closed.
+    """Refuse an npx command unless npx can only run the pinned package.
 
     Args:
-        command: Resolved npx command.
+        command: Resolved registry-runner command.
         package: npm package from the spec.
         pinned: Exact pinned version from the spec.
         search_root: Directory npx would run in.
 
     Returns:
-        The refusal reason, or None when npx would run the pinned package.
+        The refusal reason, or None for a bunx command or a trusted npx pin.
     """
-    from lintro.enums.npx_launch import NpxLaunch
-    from lintro.tools.core.npx_resolution import decide_npx_launch
-
     if Path(command[0]).name != "npx":
         return None
-    decision = decide_npx_launch(
-        package=package,
-        version=pinned,
-        binary=command[-1],
-        cwd=search_root,
-    )
-    if decision.launch is NpxLaunch.PINNED:
-        return None
-    if decision.launch is NpxLaunch.LOCAL:
-        return (
-            f"npx would run {decision.binary} instead of {package}@{pinned}; "
-            "the project tree changed after resolution"
-        )
-    return decision.reason
+    return npx_pin_refusal(cwd=search_root, package=package, pin=pinned)
 
 
 def _registry_fallback_snapshot(
