@@ -23,6 +23,7 @@ tool produces sensible results out of the box.
 from __future__ import annotations
 
 import json
+import os
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass, replace
 
@@ -88,7 +89,9 @@ _GLOB_METACHARACTERS: frozenset[str] = frozenset("*?[]{}")
 # brace expansion and character classes, but with ``nonegate`` and
 # ``nocomment`` (``!`` and ``#`` stay literal). Such a path can be dropped or
 # matched to a different file, so it is never passed to html-validate (#3393).
-_SELF_MATCH_BREAKERS: frozenset[str] = _GLOB_METACHARACTERS | frozenset("()\\")
+# The backslash only matters on POSIX, where it can be part of a file name; on
+# Windows it is always a separator and the conversion is correct.
+_SELF_MATCH_BREAKERS: frozenset[str] = _GLOB_METACHARACTERS | frozenset("()")
 
 
 def _glob_reason(paths: list[str]) -> str:
@@ -173,17 +176,21 @@ def ignored_every_file(
     )
 
 
-def matches_itself(argument: str) -> bool:
+def matches_itself(argument: str, *, sep: str | None = None) -> bool:
     """Report whether html-validate's glob expansion maps a path to itself.
 
     Args:
         argument: A literal path passed to html-validate.
+        sep: The platform path separator; ``os.sep`` when omitted. A
+            backslash is unsafe only where it is not the separator.
 
     Returns:
-        False when the path holds a glob, extglob, brace or backslash
-        character that can change what it matches.
+        False when the path holds a glob, extglob or brace character, or a
+        backslash on POSIX, that can change what it matches.
     """
-    return not any(char in _SELF_MATCH_BREAKERS for char in argument)
+    if any(char in _SELF_MATCH_BREAKERS for char in argument):
+        return False
+    return (os.sep if sep is None else sep) == "\\" or "\\" not in argument
 
 
 def contains_glob_syntax(argument: str) -> bool:

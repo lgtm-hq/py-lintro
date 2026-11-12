@@ -7,6 +7,7 @@ Without the flag it exits 1 with ``AllFilesIgnoredError``.
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,6 +16,7 @@ from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import PreparedExecution
+from lintro.tools.stylelint import definition
 from lintro.tools.stylelint.definition import (
     STYLELINT_ALL_IGNORED_MESSAGE,
     StylelintPlugin,
@@ -186,6 +188,72 @@ def test_ignored_record_with_invalid_option_keeps_the_finding(
     assert_that(result.issues).extracting("message").contains(
         "Invalid option for rule x",
     )
+
+
+@pytest.mark.parametrize(
+    ("sep", "held_back"),
+    [pytest.param("/", True, id="posix"), pytest.param("\\", False, id="windows")],
+)
+def test_backslash_hold_back_applies_on_posix_only(
+    stylelint_plugin: StylelintPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    sep: str,
+    held_back: bool,
+) -> None:
+    r"""On Windows ``dir\file.css`` names a subdirectory file and reaches Stylelint.
+
+    Args:
+        stylelint_plugin: The plugin under test.
+        tmp_path: Working directory for the context.
+        monkeypatch: Pins the platform separator the plugin judges paths by.
+        sep: The platform path separator.
+        held_back: Whether the path is withheld from Stylelint.
+    """
+    monkeypatch.setattr(
+        definition,
+        "stylelint_reads_literally",
+        partial(definition.stylelint_reads_literally, sep=sep),
+    )
+    clean = f'[{{"source":"{tmp_path}/dir/file.css","warnings":[]}}]'
+    result, commands = _run(
+        stylelint_plugin,
+        tmp_path,
+        [(True, clean)],
+        files=["dir\\file.css"],
+    )
+
+    assert_that(bool(commands)).is_equal_to(not held_back)
+    assert_that(result.execution_failed).is_equal_to(held_back)
+    assert_that(result.success).is_equal_to(not held_back)
+    if not held_back:
+        assert_that(commands[0]).contains("dir\\file.css")
+
+
+@pytest.mark.parametrize(
+    ("path", "sep", "expected"),
+    [
+        pytest.param("dir\\file.css", "/", False, id="posix-backslash"),
+        pytest.param("dir\\file.css", "\\", True, id="windows-separator"),
+        pytest.param("[slug].css", "/", True, id="posix-brackets"),
+        pytest.param("[slug].css", "\\", True, id="windows-brackets"),
+    ],
+)
+def test_stylelint_reads_literally_by_platform(
+    path: str,
+    sep: str,
+    expected: bool,
+) -> None:
+    """Only a backslash on POSIX makes Stylelint misread a path.
+
+    Args:
+        path: A relative path.
+        sep: The platform path separator.
+        expected: Whether Stylelint reads the path literally.
+    """
+    assert_that(
+        definition.stylelint_reads_literally(path, sep=sep),
+    ).is_equal_to(expected)
 
 
 @pytest.mark.parametrize("fix", [False, True], ids=["check", "fix"])

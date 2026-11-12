@@ -2271,13 +2271,14 @@ instead of failing on Stylelint's `AllFilesIgnoredError`, and a run excluded by
 `ignoreFiles` reports every file as `"ignored": true`. Lintro reads both as "no files".
 When only some files are ignored, the run is an ordinary one. Stylelint reads glob
 characters in an existing path literally, so a name like `[slug].css` is linted as
-usual, but it turns a backslash into `/`, so it would read `dir\file.css` as
-`dir/file.css`: it would skip the named file, or check and `--fix` a different one.
-Lintro never passes such a path to Stylelint. It runs Stylelint on the other files,
-keeps their findings and fixes, and fails the run as an execution error that names the
-files left uninspected. If every path holds a backslash, Stylelint is not run at all. A
-report holding malformed or non-empty ignored records also fails instead of being read
-as "no files".
+usual, but it turns a backslash into `/`. On POSIX systems, where a backslash can be
+part of a file name, it would read `dir\file.css` as `dir/file.css`: it would skip the
+named file, or check and `--fix` a different one. On POSIX, Lintro never passes such a
+path to Stylelint. It runs Stylelint on the other files, keeps their findings and fixes,
+and fails the run as an execution error that names the files left uninspected. If every
+path holds a backslash, Stylelint is not run at all. On Windows a backslash is always a
+path separator, so these paths are passed to Stylelint as usual. A report holding
+malformed or non-empty ignored records also fails instead of being read as "no files".
 
 **Installation:**
 
@@ -2669,11 +2670,13 @@ from html-validate still fails the run.
 
 html-validate treats every path it is given as a glob, so a file whose name contains
 glob characters (`*?[]{}`, as in a routed site's `[slug].html`), parentheses (extglob
-syntax such as `+(a)`) or a backslash (read as a path separator) can fail to match
-itself, or match a different file (`[slug].html` matches `s.html`). Lintro never passes
-such a path to html-validate. It validates the other files, keeps their findings, and
-fails the run as an execution error that names the files left uninspected; if every path
-holds one of these characters, html-validate is not run at all.
+syntax such as `+(a)`) or, on POSIX systems, a backslash (read as a path separator) can
+fail to match itself, or match a different file (`[slug].html` matches `s.html`). Lintro
+never passes such a path to html-validate. It validates the other files, keeps their
+findings, and fails the run as an execution error that names the files left uninspected;
+if every path holds one of these characters, html-validate is not run at all. The glob
+characters are held back on every platform. The backslash is held back on POSIX only: on
+Windows it is always a path separator, so those paths are validated as usual.
 
 **Available Options via `--tool-options`:**
 

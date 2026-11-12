@@ -7,6 +7,7 @@ many of them via ``--fix``.
 
 from __future__ import annotations
 
+import os
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from pathlib import Path
@@ -80,21 +81,27 @@ STYLELINT_CONFIG_FILENAMES: tuple[str, ...] = (
 )
 
 
-def stylelint_reads_literally(path: str) -> bool:
+def stylelint_reads_literally(path: str, *, sep: str | None = None) -> bool:
     r"""Report whether Stylelint reads a path as the file it names.
 
     Stylelint 18 escapes glob syntax in a path that exists
     (``escapePath(toUnixPath(entry))``), so ``[slug].css`` is read
-    literally. ``toUnixPath`` first turns every backslash into ``/``, so
-    ``dir\file.css`` is read as ``dir/file.css``: a missing file, or a
-    different file that ``--fix`` would rewrite (#3393).
+    literally. ``toUnixPath`` first turns every backslash into ``/``. On
+    POSIX a backslash can be part of a file name, so ``dir\file.css`` is
+    read as ``dir/file.css``: a missing file, or a different file that
+    ``--fix`` would rewrite (#3393). On Windows a backslash is always a
+    separator, so that conversion is correct and the path is safe.
 
     Args:
         path: A relative path lintro would pass to Stylelint.
+        sep: The platform path separator; ``os.sep`` when omitted.
 
     Returns:
-        False when the path contains a backslash.
+        False when the path contains a backslash on a platform whose
+        separator is not a backslash.
     """
+    if (os.sep if sep is None else sep) == "\\":
+        return True
     return "\\" not in path
 
 

@@ -7,6 +7,7 @@ to stderr and exits 1.
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -15,6 +16,7 @@ from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.subprocess_executor import SubprocessResult
+from lintro.tools.html_validate import definition
 from lintro.tools.html_validate.definition import (
     HTML_VALIDATE_ALL_IGNORED_MESSAGE,
     HtmlValidatePlugin,
@@ -200,3 +202,77 @@ def test_ignored_every_file_anchors_message_and_rejects_glob_paths(
             file_args=file_args,
         ),
     ).is_equal_to(expected)
+
+
+@pytest.mark.parametrize(
+    ("sep", "held_back"),
+    [pytest.param("/", True, id="posix"), pytest.param("\\", False, id="windows")],
+)
+def test_backslash_hold_back_applies_on_posix_only(
+    html_validate_plugin: HtmlValidatePlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    sep: str,
+    held_back: bool,
+) -> None:
+    r"""On Windows ``dir\file.html`` names a subdirectory file and is validated.
+
+    Args:
+        html_validate_plugin: The plugin under test.
+        tmp_path: Working directory for the context.
+        monkeypatch: Pins the platform separator the plugin judges paths by.
+        sep: The platform path separator.
+        held_back: Whether the path is withheld from html-validate.
+    """
+    monkeypatch.setattr(
+        definition,
+        "matches_itself",
+        partial(definition.matches_itself, sep=sep),
+    )
+    ctx = MagicMock(should_skip=False, early_result=None, timeout=30)
+    ctx.cwd = str(tmp_path)
+    ctx.files = ctx.rel_files = ["dir\\file.html"]
+    clean = SubprocessResult(returncode=0, stdout="[]", stderr="", output="[]")
+    with (
+        patch.object(html_validate_plugin, "_prepare_execution", return_value=ctx),
+        patch.object(
+            html_validate_plugin,
+            "_get_executable_command",
+            return_value=["/pinned/html-validate"],
+        ),
+        patch.object(
+            html_validate_plugin,
+            "_run_subprocess_result",
+            return_value=clean,
+        ) as run,
+    ):
+        result = html_validate_plugin.check([str(tmp_path)], {})
+
+    commands = [call.kwargs["cmd"] for call in run.call_args_list]
+    assert_that(bool(commands)).is_equal_to(not held_back)
+    assert_that(result.execution_failed).is_equal_to(held_back)
+    assert_that(result.success).is_equal_to(not held_back)
+    if not held_back:
+        assert_that(commands[0]).contains("dir\\file.html")
+
+
+@pytest.mark.parametrize(
+    ("path", "sep", "expected"),
+    [
+        pytest.param("dir\\file.html", "/", False, id="posix-backslash"),
+        pytest.param("dir\\file.html", "\\", True, id="windows-separator"),
+        pytest.param("[slug].html", "\\", False, id="windows-brackets"),
+        pytest.param("a{1,2}.html", "\\", False, id="windows-braces"),
+        pytest.param("+(a).html", "\\", False, id="windows-extglob"),
+        pytest.param("pages\\index.html", "\\", True, id="windows-plain"),
+    ],
+)
+def test_matches_itself_by_platform(path: str, sep: str, expected: bool) -> None:
+    """Glob characters are unsafe everywhere; a backslash only on POSIX.
+
+    Args:
+        path: A relative path.
+        sep: The platform path separator.
+        expected: Whether html-validate's expansion maps the path to itself.
+    """
+    assert_that(definition.matches_itself(path, sep=sep)).is_equal_to(expected)
