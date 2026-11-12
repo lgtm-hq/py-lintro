@@ -579,15 +579,39 @@ exit status and is what every built-in uses: declare `CHECK` in the tool's claim
 run-level verify pass measures the residual once, after every mutating tool has run,
 discarding the tool's own post-fix opinion (#2607). `AFTER_SUCCESS` re-checks each file
 after a clean fix and is for an external plugin that declares no `CHECK` claim, since
-nothing else will measure its residual. There is no mode that re-checks after a failed
-fix: a failed fix reports every initial issue as remaining.
+nothing else will measure its residual. There is no mode that re-checks after a non-zero
+fix exit.
+
+The runner classifies each fix command's exit through the policy. Exit 0 is a clean fix.
+`fix_findings_exit_codes` lists the non-zero statuses with which the fix command says it
+ran but unfixable findings remain; such a file reports every initial issue as remaining,
+a measured result. `sqlfluff fix` exit 1 is the built-in case. The default is empty,
+because most fix commands (shfmt, dotenv-linter) exit non-zero only when they fail. Any
+other non-zero status and a negative status (the process was killed by a signal) is an
+execution error. A declared findings status is an execution error only when the fix
+command's stderr carries an error diagnostic at the start of a line: a Python
+`Traceback (most recent call last):` header or an exception line such as
+`PermissionError: ...`. `sqlfluff fix` needs this because it exits 1 both for unfixable
+violations and when it cannot write. Exit 0 is never an execution error, and stdout is
+never searched, since tools print the paths they fixed there and a file may be called
+`PermissionError.sql`.
+
+A file whose initial check, fix command or verification records an execution error
+measured nothing, so the runner keeps the findings it has but reports the run's fix
+counts as unknown (`FixUnmeasured`) and sets `execution_failed`. The convergence retry
+stops on such a result, so a clean later pass cannot replace the failure (#3401). An
+initial-check error also leaves the pre-fix total unknown. A timeout in any stage leaves
+the counts unknown too but stays a timeout: it sets `timed_out`, not `execution_failed`.
+Pass `errors=[]` to `run_per_file_fix()` to receive one `FixStageError` (file,
+`FixStage`, message) per errored file, for a tool that names its own reason.
 
 Both runners classify a single check-style invocation through the same
 `check_runner.check_one_file()` step, so a timeout, an execution error and a parser
 failure are reported identically whether the tool is checking or fixing. A non-zero exit
-that produced no parseable issue is the one outcome the two sides can differ on: it
-becomes an execution error only when a message is configured, and `failure_message` is
-optional on the check side while `check_failure_message` is mandatory on the fix side.
+that is not a findings status with parsed findings is always an execution error. The
+message is the configured one when there is one, otherwise `Check failed (exit code N)`.
+`failure_message` is optional on the check side; `check_failure_message` is mandatory on
+the fix side.
 
 ### Batch check and fix runs
 
@@ -648,7 +672,13 @@ was detected.
 Both entry points take `on_timeout` and `on_error` hooks. Leave `on_timeout` out to get
 the standard `batch_timeout_result()` / `batch_fix_timeout_result()` shape, and pass it
 only when the tool has its own timeout message. Leave `on_error` out to let a launch
-failure propagate. Those two result builders are exported on their own, so a tool whose
+failure propagate. In `run_batch_fix()` `on_timeout` receives the issues the pre-fix
+check detected. `on_error` is called with the exception alone, so a one-argument hook
+keeps working; a hook that accepts a `detected` keyword also receives the detected
+issues, or `None` when the error happened in the pre-fix check. A failed fix stage must
+report unknown fix counts and `execution_failed=True`, never a guessed `fixed=0`, as the
+runner's own failure result does. A failed pre-fix check leaves the pre-fix count
+unknown as well. Those two result builders are exported on their own, so a tool whose
 middle section is bespoke — a missing-config skip, a per-module loop, a dependency-error
 hint — can still share the timeout and result-construction shapes without adopting the
 whole runner.

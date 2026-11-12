@@ -9,6 +9,7 @@ re-printing code.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,7 +21,13 @@ from lintro.enums.capability import Cap
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
-from lintro.models.core.tool_outcome import Checked, FixMeasured, TimedOut, ToolOutcome
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixMeasured,
+    FixUnmeasured,
+    TimedOut,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.prettier.prettier_issue import PrettierIssue
 from lintro.parsers.prettier.prettier_parser import parse_prettier_output
@@ -284,6 +291,51 @@ class PrettierPlugin(BaseToolPlugin):
             cwd=cwd,
         )
 
+    def _fix_execution_error_result(
+        self,
+        *,
+        exc: Exception,
+        detected: Sequence[PrettierIssue] | None,
+        cwd: str | None = None,
+    ) -> ToolResult:
+        """Create the ToolResult for a fix stage that could not run.
+
+        Args:
+            exc: Exception raised while launching or running Prettier.
+            detected: Issues the pre-fix check found, or None when the error
+                happened in that check.
+            cwd: Working directory for the tool result.
+
+        Returns:
+            ToolResult: An execution failure that keeps the detected issues
+            and leaves the fix counts unknown, so a clean convergence retry
+            cannot replace it (#3401). A missing executable adds the install
+            guidance to the reason.
+        """
+        if isinstance(exc, FileNotFoundError):
+            output = str(self._create_not_found_result(cwd=cwd).output)
+        else:
+            logger.error(f"Failed to run prettier: {exc}")
+            output = f"Prettier execution failed: {exc}"
+        issues = list(detected or [])
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=False),
+                accounting=FixUnmeasured(
+                    output,
+                    # A check that completed measured its count, even zero.
+                    initial=None if detected is None else len(issues),
+                ),
+                issues_count=len(issues),
+            ),
+            name=self.definition.name,
+            output=output,
+            issues=issues,
+            initial_issues=issues,
+            cwd=cwd,
+            execution_failed=True,
+        )
+
     def _create_timeout_result(
         self,
         timeout_val: float,
@@ -540,8 +592,9 @@ class PrettierPlugin(BaseToolPlugin):
                 initial_count=len(detected),
                 cwd=ctx.cwd,
             ),
-            on_error=lambda exc: self._execution_error_result(
+            on_error=lambda exc, detected: self._fix_execution_error_result(
                 exc=exc,
+                detected=detected,
                 cwd=ctx.cwd,
             ),
         )

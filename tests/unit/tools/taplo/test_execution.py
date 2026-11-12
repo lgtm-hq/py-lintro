@@ -371,4 +371,5 @@ def test_fix_fails_when_the_format_command_fails(
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("failed to write test.toml")
-    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.fixed_issues_count).is_none()
