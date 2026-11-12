@@ -228,7 +228,9 @@ These fail-closed checks also apply without a fingerprint baseline:
   exit other than 1 with violations, and a timeout.
 - Fix convergence retries stop at the first pass that failed to execute, timed out,
   could not measure its residual, or printed a malformed report, so a later clean pass
-  cannot replace that failure.
+  cannot replace that failure. Such a pass, the first one included and with retries
+  disabled, reports unknown fixed and remaining counts. Findings from a failed later
+  pass are kept beside the first pass's, each finding once.
 - The shared per-file check runner accepts a nonzero exit as a complete lint verdict
   only when it is a declared findings exit status and has parsed findings. Other nonzero
   exits are execution errors even if some findings were parsed. This also applies to the

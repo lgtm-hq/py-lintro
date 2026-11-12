@@ -20,56 +20,15 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass
 
 from lintro.enums.display_column import STANDARD_COLUMNS, DisplayColumn
 from lintro.enums.issue_category import ISSUE_CATEGORY_ORDER
 from lintro.enums.output_format import OutputFormat, normalize_output_format
 from lintro.formatters.core.format_registry import TableDescriptor, get_style
+from lintro.models.core.issue_identity import IssueDedupKey
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.issue_category import enrich_issue_category
 from lintro.utils.path_utils import normalize_file_path_for_display
-
-
-@dataclass(frozen=True)
-class IssueDedupKey:
-    """Dedup key for merging detected and remaining issue lists.
-
-    Frozen so instances are hashable and usable in sets. Used by both
-    the CLI and file-artifact fix-mode renderers so their JSON outputs
-    stay consistent.
-
-    Attributes:
-        file: Source file the issue refers to.
-        line: 1-indexed line number (0 when absent).
-        column: 1-indexed column number (0 when absent).
-        code: Rule/code identifier.
-        message: Human-readable issue message.
-    """
-
-    file: str
-    line: int
-    column: int
-    code: str
-    message: str
-
-    @classmethod
-    def of(cls, issue: BaseIssue) -> IssueDedupKey:
-        """Build a key from a BaseIssue's attributes.
-
-        Args:
-            issue: The issue to extract key fields from.
-
-        Returns:
-            A hashable key representing the issue's identity.
-        """
-        return cls(
-            file=issue.file or "",
-            line=issue.line or 0,
-            column=issue.column or 0,
-            code=issue.get_code(),
-            message=issue.message or "",
-        )
 
 
 def merge_detected_and_remaining(

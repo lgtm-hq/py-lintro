@@ -176,3 +176,32 @@ def test_empty_report_is_tracked_even_past_the_subprocess_override(
     assert_that(result.residual_unknown).is_true()
     assert_that(result.fixed_issues_count).is_none()
     assert_that(result.output).contains("SQLFluff printed no report.")
+
+
+def test_malformed_findings_report_is_a_parse_failure_not_a_run_error(
+    sqlfluff_plugin: SqlfluffPlugin,
+    tmp_path: Path,
+) -> None:
+    """Exit 1 with malformed records is an incomplete report, not a run error."""
+    sql = tmp_path / "query.sql"
+    sql.write_text("SELECT 1\n")
+    malformed = '[{"filepath": "query.sql", "violations": "oops"}]'
+    with patch.object(
+        BaseToolPlugin,
+        "_run_subprocess_result",
+        return_value=_run(1, malformed),
+    ):
+        result = sqlfluff_plugin.fix([str(sql)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.residual_unknown_reason).is_equal_to(
+        "SQLFluff returned an incomplete report.",
+    )
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.output).contains(
+        "SQLFluff printed a report that could not be fully parsed",
+    ).does_not_contain("could not run")

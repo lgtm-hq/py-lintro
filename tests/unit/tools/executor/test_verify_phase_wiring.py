@@ -697,20 +697,24 @@ def test_a_timed_out_tool_is_not_asked_to_verify(
     # the only one that happened.
     assert_that(tool.fix_calls).is_equal_to(1)
     # And the fold leaves the timed-out result alone rather than clearing it:
-    # an unverified tool fails, it does not report zero. Asserting the carried
-    # *content* rather than the count matters — the count was written by the
-    # fixture, but a fold that rebuilt or cleared the result could not keep
-    # the pre-fix ``F401`` alongside ``fixed=0``.
+    # an unverified tool fails, it does not report zero. Nothing verified the
+    # fix, so its fixed and remaining counts are unknown rather than the
+    # fixture's ``fixed=0`` / ``remaining=1`` (#3352). Asserting the carried
+    # *content* matters: a fold that rebuilt or cleared the result could not
+    # keep the pre-fix ``F401`` beside the unknown accounting.
     folded = artifact.tool_results[0]
     assert_that(folded.timed_out).is_true()
     assert_that(folded.success).is_false()
-    assert_that(folded.remaining_issues_count).is_equal_to(1)
+    assert_that(folded.residual_unknown).is_true()
     assert_that(folded.initial_issues_count).is_equal_to(1)
-    assert_that(folded.fixed_issues_count).is_equal_to(0)
+    assert_that(folded.fixed_issues_count).is_none()
+    assert_that(folded.remaining_issues_count).is_none()
     assert_that(
         [getattr(issue, "code", None) for issue in folded.issues or []],
     ).is_equal_to(["F401"])
-    assert_that(artifact.total_remaining).is_equal_to(1)
+    # An unknown residual adds nothing to the measured totals (it renders as
+    # unknown), and the run still fails.
+    assert_that(artifact.total_remaining).is_zero()
     assert_that(artifact.exit_code).is_equal_to(1)
 
 

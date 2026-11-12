@@ -304,10 +304,7 @@ class SqlfluffPlugin(BaseToolPlugin):
                     f"{tool_message_excerpt(result.stdout)}",
                 ),
             )
-        if not result.success and not (
-            result.returncode == 1
-            and parse_sqlfluff_output_with_stats(result.stdout)[0]
-        ):
+        if not result.success and not self._is_findings_report(result):
             # Only exit 1 with violations is a lint verdict; the per-file
             # runner records anything else as an execution error, which the
             # fix accounting must see too.
@@ -317,6 +314,25 @@ class SqlfluffPlugin(BaseToolPlugin):
         # Only stdout is the report. Diagnostics stay out of the parser, so a
         # run that printed none is not counted as a malformed report.
         return replace(result, output=result.stdout)
+
+    @staticmethod
+    def _is_findings_report(result: SubprocessResult) -> bool:
+        """Report whether a failed lint invocation printed its findings report.
+
+        Exit 1 is SQLFluff's findings status. Its JSON is a report even when
+        some records are malformed: those count as parse failures with the
+        malformed-report reason, not as a run that could not execute.
+
+        Args:
+            result: A failed ``sqlfluff lint`` invocation with JSON stdout.
+
+        Returns:
+            True for exit 1 with violations or malformed records.
+        """
+        if result.returncode != 1:
+            return False
+        issues, failures = parse_sqlfluff_output_with_stats(result.stdout)
+        return bool(issues or failures)
 
     def _parse_lint_report(
         self,
