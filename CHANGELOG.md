@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.9] - 2026-11-12
+
+### Fixed
+
+- **baseline**: harden fingerprint baselines left over from #3084 (#3390) (ab4a7f3)
+
 ## [0.180.8] - 2026-11-12
 
 ### Fixed
