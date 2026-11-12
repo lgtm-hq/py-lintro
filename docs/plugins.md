@@ -582,6 +582,12 @@ after a clean fix and is for an external plugin that declares no `CHECK` claim, 
 nothing else will measure its residual. There is no mode that re-checks after a failed
 fix: a failed fix reports every initial issue as remaining.
 
+A file whose initial check, fix command or verification records an execution error
+measured nothing, so the runner keeps the findings it has but reports the run's fix
+counts as unknown (`FixUnmeasured`) and sets `execution_failed`. The convergence retry
+stops on such a result, so a clean later pass cannot replace the failure (#3401). An
+initial-check error also leaves the pre-fix total unknown.
+
 Both runners classify a single check-style invocation through the same
 `check_runner.check_one_file()` step, so a timeout, an execution error and a parser
 failure are reported identically whether the tool is checking or fixing. A non-zero exit
@@ -648,10 +654,13 @@ was detected.
 Both entry points take `on_timeout` and `on_error` hooks. Leave `on_timeout` out to get
 the standard `batch_timeout_result()` / `batch_fix_timeout_result()` shape, and pass it
 only when the tool has its own timeout message. Leave `on_error` out to let a launch
-failure propagate. Those two result builders are exported on their own, so a tool whose
-middle section is bespoke — a missing-config skip, a per-module loop, a dependency-error
-hint — can still share the timeout and result-construction shapes without adopting the
-whole runner.
+failure propagate. In `run_batch_fix()` both hooks also receive the issues the pre-fix
+check detected, so the result can keep them. A failed fix stage must report unknown fix
+counts and `execution_failed=True`, never a guessed `fixed=0`, as the runner's own
+failure result does. Those two result builders are exported on their own, so a tool
+whose middle section is bespoke — a missing-config skip, a per-module loop, a
+dependency-error hint — can still share the timeout and result-construction shapes
+without adopting the whole runner.
 
 ### Ecosystem preconditions
 

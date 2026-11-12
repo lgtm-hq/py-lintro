@@ -181,10 +181,13 @@ def test_fix_command_timeout_reports_every_issue_as_remaining(
     assert_that(result.remaining_issues_count).is_equal_to(1)
 
 
-def test_fix_command_execution_error_reports_every_issue_as_remaining(
+def test_fix_command_execution_error_keeps_issues_with_unknown_counts(
     shell_script: Path,
 ) -> None:
-    """An OS error during the fix leaves the detected issues outstanding.
+    """An OS error during the fix keeps the detected issues, counts unknown.
+
+    The fix may have written before it failed, so nothing measured what
+    remains (#3401).
 
     Args:
         shell_script: Shell script the runner is pointed at.
@@ -198,7 +201,10 @@ def test_fix_command_execution_error_reports_every_issue_as_remaining(
         result = plugin.fix([str(shell_script)], {})
 
     assert_that(result.success).is_false()
-    assert_that(result.remaining_issues_count).is_equal_to(1)
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.initial_issues_count).is_equal_to(1)
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.issues).is_length(1)
     assert_that(result.output).contains("write failed")
     assert_that(result.inspected_files).is_true()
 
@@ -231,7 +237,10 @@ def test_failed_fix_without_verification_keeps_the_initial_issues(
 def test_verification_failure_conservatively_keeps_the_initial_issues(
     tmp_path: Path,
 ) -> None:
-    """A broken verification run must not be read as "everything was fixed".
+    """A broken verification run is neither "all fixed" nor "nothing fixed".
+
+    It measured nothing, so the initial issues are kept and the fix counts
+    stay unknown (#3401).
 
     Args:
         tmp_path: Temporary directory for the dotenv file.
@@ -251,9 +260,11 @@ def test_verification_failure_conservatively_keeps_the_initial_issues(
         result = _fix_with_verification(plugin, env_file)
 
     assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
     assert_that(result.initial_issues_count).is_equal_to(1)
-    assert_that(result.fixed_issues_count).is_equal_to(0)
-    assert_that(result.remaining_issues_count).is_equal_to(1)
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.issues).extracting("code").is_equal_to(["LowercaseKey"])
 
 
 def test_verification_after_a_successful_fix_scores_the_survivors(

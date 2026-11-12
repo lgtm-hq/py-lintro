@@ -18,7 +18,13 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
-from lintro.models.core.tool_outcome import Checked, FixMeasured, TimedOut, ToolOutcome
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixMeasured,
+    FixUnmeasured,
+    TimedOut,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.taplo.taplo_issue import TaploIssue
 from lintro.parsers.taplo.taplo_parser import parse_taplo_output
@@ -394,16 +400,18 @@ class TaploPlugin(BaseToolPlugin):
         # the pre-fix measurement the verify pass subtracts from — and the exit
         # status of the mutation command itself, which no verify pass can
         # recover: a `taplo fmt` that could not write reports nothing to find
-        # afterwards, so a dropped failure would read as a clean run.
+        # afterwards, so a dropped failure would read as a clean run. The
+        # failed write may have formatted some files first, so what remains
+        # is unknown, and a clean convergence retry must not replace the
+        # failure (#3401).
         if not fix_success:
             failure_output = (fix_output or "").strip()
             return ToolResult.from_outcome(
                 ToolOutcome(
                     execution=Checked(success=False),
-                    accounting=FixMeasured(
+                    accounting=FixUnmeasured(
+                        "taplo fmt failed before what remains was measured.",
                         initial=initial_count,
-                        fixed=0,
-                        remaining=initial_count,
                     ),
                     issues_count=initial_count,
                 ),
@@ -412,6 +420,7 @@ class TaploPlugin(BaseToolPlugin):
                 issues=list(initial_issues),
                 initial_issues=initial_issues,
                 cwd=ctx.cwd,
+                execution_failed=True,
             )
 
         fixed_count = initial_count

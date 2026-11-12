@@ -16,7 +16,13 @@ from lintro.enums.capability import Cap
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
-from lintro.models.core.tool_outcome import Checked, FixMeasured, NoFiles, ToolOutcome
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixMeasured,
+    FixUnmeasured,
+    NoFiles,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.rustfmt.rustfmt_parser import parse_rustfmt_output
 from lintro.plugins.base import BaseToolPlugin
@@ -235,15 +241,16 @@ class RustfmtPlugin(BaseToolPlugin):
                 cwd=str(cargo_root),
             )
 
-        # If fix command failed, return early with the fix output
+        # A failed fix may have rewritten some files before it stopped, so
+        # what remains is unknown, not "everything". It is an execution
+        # failure a clean convergence retry cannot replace (#3401).
         if not fix_success:
             return ToolResult.from_outcome(
                 ToolOutcome(
                     execution=Checked(success=False),
-                    accounting=FixMeasured(
+                    accounting=FixUnmeasured(
+                        "cargo fmt failed before what remains was measured.",
                         initial=initial_count,
-                        fixed=0,
-                        remaining=initial_count,
                     ),
                     issues_count=initial_count,
                 ),
@@ -252,6 +259,7 @@ class RustfmtPlugin(BaseToolPlugin):
                 issues=initial_issues,
                 initial_issues=initial_issues,
                 cwd=str(cargo_root),
+                execution_failed=True,
             )
 
         # No private recheck: a successful `cargo fmt` resolved every diff the

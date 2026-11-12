@@ -292,8 +292,10 @@ def test_fix_write_failure_reports_error(
         result = typos_plugin.fix([str(target)], {})
 
     assert_that(result.success).is_false()
-    assert_that(result.fixed_issues_count).is_equal_to(0)
-    assert_that(result.remaining_issues_count).is_equal_to(1)
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.output).contains("read-only file system")
 
 
@@ -346,7 +348,8 @@ def test_fix_does_not_write_when_initial_check_fails(
     assert_that(commands).is_length(1)
     assert_that(commands[0]).does_not_contain("--write-changes")
     assert_that(result.success).is_false()
-    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.fixed_issues_count).is_none()
     assert_that(result.output).contains("invalid config")
 
 
@@ -497,7 +500,8 @@ def test_fix_does_not_write_when_one_detect_batch_fails(
 
     assert_that([c for c in commands if "--write-changes" in c]).is_empty()
     assert_that(result.success).is_false()
-    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.fixed_issues_count).is_none()
     assert_that(result.output).contains("unreadable path")
 
 
@@ -531,7 +535,8 @@ def test_fix_reports_a_failed_write_batch(
         result = typos_plugin.fix([str(good), str(bad)], {})
 
     assert_that(result.success).is_false()
-    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.fixed_issues_count).is_none()
     assert_that(result.output).contains("read-only file system")
 
 
@@ -681,7 +686,7 @@ def test_fix_write_pass_stops_after_a_failing_batch(
 
     assert_that(write_calls).is_length(1)
     assert_that(result.success).is_false()
-    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.fixed_issues_count).is_none()
     assert_that(result.output).contains("read-only file system")
     # --write-changes ran, so the caller must be told disk state is uncertain.
     assert_that(result.output).contains("may have been corrected on disk")
@@ -715,7 +720,8 @@ def test_fix_write_pass_timeout_flags_possible_disk_changes(
     assert_that(result.timed_out).is_true()
     assert_that(result.output).contains("timed out")
     assert_that(result.output).contains("may have been corrected on disk")
-    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
 
 
 def test_fix_failed_detect_keeps_sibling_findings(
@@ -743,9 +749,12 @@ def test_fix_failed_detect_keeps_sibling_findings(
         result = typos_plugin.fix(targets, {})
 
     assert_that(result.success).is_false()
-    assert_that(result.initial_issues_count).is_equal_to(2)
+    # The failed batch was never scanned, so the pre-fix total is unknown;
+    # the two findings the other batches reported are kept (#3401).
+    assert_that(result.initial_issues_count).is_none()
     assert_that(result.issues_count).is_equal_to(2)
-    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.initial_issues).is_length(2)
+    assert_that(result.fixed_issues_count).is_none()
     assert_that(result.output).contains("unreadable path")
 
 

@@ -22,6 +22,7 @@ from lintro.models.core.claim import Claim
 from lintro.models.core.tool_outcome import (
     Checked,
     FixMeasured,
+    FixUnmeasured,
     NoFiles,
     TimedOut,
     ToolOutcome,
@@ -457,6 +458,7 @@ class TyposPlugin(BaseToolPlugin):
                 initial_issues=initial_issues,
                 cwd=ctx.cwd,
                 timed_out=initial.timed_out,
+                initial_measured=False,
             )
 
         # Apply corrections in place. A clean ``--write-changes`` run prints
@@ -532,6 +534,7 @@ class TyposPlugin(BaseToolPlugin):
         cwd: str | None,
         after_write: bool = False,
         timed_out: bool = False,
+        initial_measured: bool = True,
     ) -> ToolResult:
         """Build the ToolResult for a failed fix pass.
 
@@ -542,9 +545,15 @@ class TyposPlugin(BaseToolPlugin):
             after_write: True when ``--write-changes`` already ran, so files
                 may have been corrected even though the counts say nothing was.
             timed_out: True when the failure was a timeout.
+            initial_measured: False when the failing pass was the detection
+                itself, so even the pre-fix count is incomplete.
 
         Returns:
-            ToolResult reporting the failure with nothing counted as fixed.
+            ToolResult reporting the failure with the detected issues kept and
+            the fix counts unknown. A failed pass measured nothing about what
+            remains, so it is never a guessed ``fixed=0``, and a non-timeout
+            failure is an execution failure a clean convergence retry cannot
+            replace (#3401).
         """
         initial_count = len(initial_issues)
         if after_write:
@@ -552,10 +561,9 @@ class TyposPlugin(BaseToolPlugin):
         return ToolResult.from_outcome(
             ToolOutcome(
                 execution=TimedOut(message) if timed_out else Checked(success=False),
-                accounting=FixMeasured(
-                    initial=initial_count,
-                    fixed=0,
-                    remaining=initial_count,
+                accounting=FixUnmeasured(
+                    "A typos pass failed before what remains was measured.",
+                    initial=initial_count if initial_measured else None,
                 ),
                 issues_count=initial_count,
             ),
@@ -564,6 +572,7 @@ class TyposPlugin(BaseToolPlugin):
             issues=initial_issues,
             initial_issues=initial_issues,
             cwd=cwd,
+            execution_failed=not timed_out,
         )
 
 

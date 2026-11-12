@@ -30,7 +30,13 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from lintro.models.core.tool_outcome import Checked, FixMeasured, TimedOut, ToolOutcome
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixMeasured,
+    FixUnmeasured,
+    TimedOut,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.file_processor import FileFixResult, FileProcessingResult
 from lintro.tools.core.check_runner import check_one_file
@@ -118,6 +124,10 @@ class _FixTally:
         fixed_files: Files where at least one issue was resolved.
         initial_issues: Every pre-fix issue, preserved for the two-table view.
         remaining_issues: Every issue that survived the fix attempt.
+        errored_files: Files where a check, fix or verification stage
+            recorded an execution error, so nothing was measured for them.
+        initial_unmeasured: Whether an initial check errored, which leaves
+            the pre-fix total unknown as well.
     """
 
     initial_total: int = 0
@@ -125,6 +135,8 @@ class _FixTally:
     fixed_files: list[str] = field(default_factory=list)
     initial_issues: list[BaseIssue] = field(default_factory=list)
     remaining_issues: list[BaseIssue] = field(default_factory=list)
+    errored_files: int = 0
+    initial_unmeasured: bool = False
 
     def record(self, file_path: str, result: FileFixResult) -> None:
         """Fold one file's fix result into the totals.
@@ -139,6 +151,13 @@ class _FixTally:
         self.remaining_issues.extend(result.remaining_issues)
         if result.fixed_count > 0:
             self.fixed_files.append(file_path)
+        if result.file_result.error:
+            self.errored_files += 1
+            # A fix or verification error happens only after the initial
+            # check found issues, so an error with none recorded comes from
+            # the initial check itself (#3401).
+            if not result.initial_issues:
+                self.initial_unmeasured = True
 
 
 def _run_check_step(
@@ -489,6 +508,25 @@ def run_per_file_fix(
         f"fixed={tally.fixed_total}, remaining={remaining_count}",
     )
 
+    # An errored stage measured nothing for its file: not what was there
+    # before, not what the fix resolved, not what remains. Its findings are
+    # kept, but the run's fix accounting is unknown and flagged as an
+    # execution failure, so a clean convergence retry cannot replace it
+    # (#3401).
+    accounting: FixMeasured | FixUnmeasured = (
+        FixUnmeasured(
+            f"{plugin.definition.name} failed to check or fix "
+            f"{tally.errored_files} file(s) before measuring what remains.",
+            initial=None if tally.initial_unmeasured else initial_total,
+        )
+        if tally.errored_files
+        else FixMeasured(
+            initial=initial_total,
+            fixed=tally.fixed_total,
+            remaining=remaining_count,
+        )
+    )
+
     return ToolResult.from_outcome(
         ToolOutcome(
             execution=(
@@ -499,11 +537,7 @@ def run_per_file_fix(
                     inspected_files=result.inspected_files,
                 )
             ),
-            accounting=FixMeasured(
-                initial=initial_total,
-                fixed=tally.fixed_total,
-                remaining=remaining_count,
-            ),
+            accounting=accounting,
             issues_count=remaining_count,
         ),
         name=plugin.definition.name,
@@ -518,4 +552,5 @@ def run_per_file_fix(
         # the anchor is unused, and an unresolved path keeps the pre-fix
         # finding rather than clearing it.
         cwd=ctx.cwd,
+        execution_failed=bool(tally.errored_files),
     )

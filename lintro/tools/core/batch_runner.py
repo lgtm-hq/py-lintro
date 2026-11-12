@@ -575,6 +575,9 @@ def _batch_fix_failure_result(
         issues=reported_issues,
         initial_issues=list(initial_issues),
         cwd=cwd,
+        # A failed stage is an execution failure, so the convergence retry
+        # stops on it rather than letting a clean pass replace it (#3401).
+        execution_failed=True,
     )
 
 
@@ -587,7 +590,7 @@ def run_batch_fix(
     policy: BatchFixPolicy,
     cwd: str | None = None,
     on_timeout: Callable[[Sequence[IssueT]], ToolResult] | None = None,
-    on_error: Callable[[Exception], ToolResult] | None = None,
+    on_error: Callable[[Exception, Sequence[IssueT]], ToolResult] | None = None,
 ) -> ToolResult:
     """Check, fix and re-check a whole file list in one pass each.
 
@@ -606,8 +609,10 @@ def run_batch_fix(
         on_timeout: Builds the result for a timeout, given the issues detected
             so far (empty for a timeout in the pre-fix check). Defaults to
             :func:`batch_fix_timeout_result`.
-        on_error: Builds the result for a launch or execution error. When
-            ``None`` (the default) such errors propagate to the caller.
+        on_error: Builds the result for a launch or execution error, given
+            the exception and the issues detected so far (empty for an error
+            in the pre-fix check). When ``None`` (the default) such errors
+            propagate to the caller.
 
     Returns:
         ToolResult carrying the surviving issues and the fix counts.
@@ -665,7 +670,7 @@ def run_batch_fix(
         except (OSError, ValueError, RuntimeError) as exc:
             if on_error is None:
                 raise
-            return on_error(exc)
+            return on_error(exc, initial_issues)
         if (
             initial_check
             and policy.no_files is not None

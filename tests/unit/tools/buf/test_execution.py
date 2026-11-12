@@ -498,7 +498,9 @@ def test_fix_write_failure_surfaces_error(
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("permission denied")
-    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.issues_count).is_equal_to(2)
 
 
 def _mixed_result(returncode: int, stdout: str, stderr: str) -> SubprocessResult:
@@ -546,7 +548,8 @@ def test_fix_aborts_when_initial_format_probe_fails(
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("invalid buf.yaml")
-    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.fixed_issues_count).is_none()
     assert_that(runner.call_count).is_equal_to(1)
 
 
@@ -579,8 +582,10 @@ def test_fix_aborts_when_initial_lint_probe_fails(
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("module resolution failed")
-    assert_that(result.fixed_issues_count).is_equal_to(0)
-    assert_that(result.remaining_issues_count).is_equal_to(1)
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.issues_count).is_equal_to(1)
     assert_that(runner.call_count).is_equal_to(2)
 
 

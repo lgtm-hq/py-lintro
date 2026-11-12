@@ -219,20 +219,23 @@ class BufPlugin(BaseToolPlugin):
             issues: Issues parsed before the failure, if any.
 
         Returns:
-            ToolResult describing the aborted fix run.
+            ToolResult describing the aborted fix run. The failed probe
+            measured nothing, so the fix counts are unknown and the run is
+            an execution failure a clean retry cannot replace (#3401).
         """
         collected = issues or []
-        count = len(collected)
+        reason = result.stderr.strip() or result.stdout.strip() or fallback
         return ToolResult.from_outcome(
             ToolOutcome(
                 execution=Checked(success=False),
-                accounting=FixMeasured(initial=count, fixed=0, remaining=count),
-                issues_count=count,
+                accounting=FixUnmeasured(reason=reason),
+                issues_count=len(collected),
             ),
             name=self.definition.name,
-            output=(result.stderr.strip() or result.stdout.strip() or fallback),
+            output=reason,
             issues=collected,
             cwd=cwd,
+            execution_failed=True,
         )
 
     def doc_url(self, code: str) -> str | None:
@@ -456,26 +459,29 @@ class BufPlugin(BaseToolPlugin):
 
         # A failed --write (permission error, invalid config) must surface:
         # silently rechecking would report the write failure only as
-        # mysteriously-remaining issues, hiding the actual cause.
+        # mysteriously-remaining issues, hiding the actual cause. It may have
+        # written some files first, so what remains is unknown (#3401).
         if not write_result.success:
+            write_error = (
+                write_result.stderr.strip()
+                or write_result.stdout.strip()
+                or "buf format --write exited with an error."
+            )
             return ToolResult.from_outcome(
                 ToolOutcome(
                     execution=Checked(success=False),
-                    accounting=FixMeasured(
+                    accounting=FixUnmeasured(
+                        reason=write_error,
                         initial=initial_count,
-                        fixed=0,
-                        remaining=initial_count,
                     ),
                     issues_count=initial_count,
                 ),
                 name=self.definition.name,
-                output=(
-                    write_result.stderr.strip()
-                    or write_result.stdout.strip()
-                    or "buf format --write exited with an error."
-                ),
+                output=write_error,
                 issues=initial_issues,
+                initial_issues=initial_issues,
                 cwd=ctx.cwd,
+                execution_failed=True,
             )
 
         # Re-check remaining formatting + lint issues.
@@ -555,6 +561,7 @@ class BufPlugin(BaseToolPlugin):
                 issues=issues,
                 initial_issues=initial_issues,
                 cwd=ctx.cwd,
+                execution_failed=True,
             )
 
         remaining_count = len(remaining_issues)

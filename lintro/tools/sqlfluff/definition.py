@@ -91,7 +91,6 @@ class SqlfluffPlugin(BaseToolPlugin):
     """
 
     _lint_diagnostics: list[str] = field(default_factory=list, init=False, repr=False)
-    _lint_run_errors: list[str] = field(default_factory=list, init=False, repr=False)
 
     @property
     def definition(self) -> ToolDefinition:
@@ -288,9 +287,7 @@ class SqlfluffPlugin(BaseToolPlugin):
                 else "."
             )
             raise RuntimeError(
-                self._record_run_error(
-                    f"SQLFluff printed no report (exit {result.returncode}){detail}",
-                ),
+                f"SQLFluff printed no report (exit {result.returncode}){detail}",
             )
         if not result.success and result.stderr.strip():
             self._lint_diagnostics.append(f"{cmd[-1]}:\n{result.stderr}")
@@ -299,40 +296,12 @@ class SqlfluffPlugin(BaseToolPlugin):
             # its message on stdout. That is SQLFluff failing to run, not a
             # malformed report, so it never reaches the parser.
             raise RuntimeError(
-                self._record_run_error(
-                    f"SQLFluff could not run (exit {result.returncode}): "
-                    f"{tool_message_excerpt(result.stdout)}",
-                ),
-            )
-        if not result.success and not self._is_findings_report(result):
-            # Only exit 1 with violations is a lint verdict; the per-file
-            # runner records anything else as an execution error, which the
-            # fix accounting must see too.
-            self._lint_run_errors.append(
-                f"SQLFluff lint exited {result.returncode} without a lint verdict.",
+                f"SQLFluff could not run (exit {result.returncode}): "
+                f"{tool_message_excerpt(result.stdout)}",
             )
         # Only stdout is the report. Diagnostics stay out of the parser, so a
         # run that printed none is not counted as a malformed report.
         return replace(result, output=result.stdout)
-
-    @staticmethod
-    def _is_findings_report(result: SubprocessResult) -> bool:
-        """Report whether a failed lint invocation printed its findings report.
-
-        Exit 1 is SQLFluff's findings status. Its JSON is a report even when
-        some records are malformed: those count as parse failures with the
-        malformed-report reason, not as a run that could not execute.
-
-        Args:
-            result: A failed ``sqlfluff lint`` invocation with JSON stdout.
-
-        Returns:
-            True for exit 1 with violations or malformed records.
-        """
-        if result.returncode != 1:
-            return False
-        issues, failures = parse_sqlfluff_output_with_stats(result.stdout)
-        return bool(issues or failures)
 
     def _parse_lint_report(
         self,
@@ -355,36 +324,29 @@ class SqlfluffPlugin(BaseToolPlugin):
             # ``sqlfluff lint --format json`` prints a per-file record even
             # for a clean file, so empty stdout is an execution failure, not
             # a clean pass and not a malformed report (#3352).
-            raise RuntimeError(self._record_run_error("SQLFluff printed no report."))
+            raise RuntimeError("SQLFluff printed no report.")
         return _parse_report(output, failures)
 
-    def _record_run_error(self, message: str) -> str:
-        """Record a lint invocation that produced no usable report.
-
-        Args:
-            message: Named reason, quoting SQLFluff's own message.
-
-        Returns:
-            The message, for the error the per-file runner records.
-        """
-        self._lint_run_errors.append(message)
-        return message
-
-    def _unmeasured_reason(self, *, parse_failures: int, timed_out: bool) -> str | None:
+    @staticmethod
+    def _unmeasured_reason(result: ToolResult, *, parse_failures: int) -> str | None:
         """Name why this fix run's accounting was not measured, if it was not.
 
         Args:
+            result: The per-file runner's aggregated fix result. The runner
+                flags an execution failure for any lint invocation that
+                printed no usable report or verdict (#3401).
             parse_failures: Malformed records across the lint reports.
-            timed_out: Whether any invocation timed out.
 
         Returns:
             The reason, or None when every lint pass gave a usable verdict.
         """
-        if self._lint_run_errors:
-            return "SQLFluff could not run."
+        # A malformed findings report also fails its file in the runner, so
+        # it is named before the generic execution failure.
         if parse_failures:
             return "SQLFluff returned an incomplete report."
-        if timed_out:
+        if result.execution_failed:
+            return "SQLFluff could not run."
+        if result.timed_out:
             return "SQLFluff timed out before reporting."
         return None
 
@@ -397,7 +359,6 @@ class SqlfluffPlugin(BaseToolPlugin):
         """
         super()._isolate_execution_state()
         self._lint_diagnostics = []
-        self._lint_run_errors = []
 
     def _with_lint_diagnostics(self, result: ToolResult) -> ToolResult:
         """Attach lint diagnostics without feeding them through the JSON parser.
@@ -425,7 +386,6 @@ class SqlfluffPlugin(BaseToolPlugin):
         """
         # Use shared preparation for version check, path validation, file discovery
         self._lint_diagnostics.clear()
-        self._lint_run_errors.clear()
         ctx = self.prepare(paths, options)
         if isinstance(ctx, ToolResult):
             return ctx
@@ -458,7 +418,6 @@ class SqlfluffPlugin(BaseToolPlugin):
         """
         # Use shared preparation for version check, path validation, file discovery
         self._lint_diagnostics.clear()
-        self._lint_run_errors.clear()
         ctx = self.prepare(paths, options)
         if isinstance(ctx, ToolResult):
             return ctx
@@ -482,14 +441,13 @@ class SqlfluffPlugin(BaseToolPlugin):
                 summarize=False,
             ),
         )
-        unmeasured = self._unmeasured_reason(
-            parse_failures=sum(failures),
-            timed_out=result.timed_out,
-        )
+        unmeasured = self._unmeasured_reason(result, parse_failures=sum(failures))
         if unmeasured is not None:
             # A lint pass without a usable report or verdict measured
             # nothing, so its file is neither clean nor fixed (#3352). The
-            # shared per-file runner reports measured counts regardless.
+            # runner already leaves an errored run unmeasured (#3401); this
+            # names the reason and covers malformed records and timeouts,
+            # which the runner cannot see.
             result = replace(
                 result,
                 success=False,
