@@ -275,6 +275,7 @@ def patch_plugin_for_check_test(
     mock_ctx.timeout = timeout
     mock_ctx.should_skip = False
     mock_ctx.early_result = None
+    mock_ctx.resolved_commands = {}
 
     with (
         patch.object(plugin, "_prepare_execution", return_value=mock_ctx),
@@ -319,6 +320,7 @@ def patch_plugin_for_fix_test(
     mock_ctx.timeout = timeout
     mock_ctx.should_skip = False
     mock_ctx.early_result = None
+    mock_ctx.resolved_commands = {}
 
     with (
         patch.object(plugin, "_prepare_execution", return_value=mock_ctx),

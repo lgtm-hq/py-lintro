@@ -276,6 +276,7 @@ class OxfmtPlugin(BaseToolPlugin):
         cmd: list[str] = self._get_executable_command(
             tool_name="oxfmt",
             cwd=ctx.cwd,
+            ctx=ctx,
         ) + [
             "--list-different",
         ]
@@ -347,6 +348,7 @@ class OxfmtPlugin(BaseToolPlugin):
         check_cmd: list[str] = self._get_executable_command(
             tool_name="oxfmt",
             cwd=ctx.cwd,
+            ctx=ctx,
         ) + [
             "--list-different",
         ]
@@ -362,6 +364,7 @@ class OxfmtPlugin(BaseToolPlugin):
         fix_cmd: list[str] = self._get_executable_command(
             tool_name="oxfmt",
             cwd=ctx.cwd,
+            ctx=ctx,
         ) + [
             "--write",
         ]

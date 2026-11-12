@@ -14,9 +14,22 @@ itself (see issue #1767).
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import json
+import os
+import re
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 from loguru import logger
+
+#: An exact npm pin: ``MAJOR.MINOR.PATCH`` with an optional prerelease and
+#: build suffix. Partial versions (``1.2``), wildcards (``1.x``), ranges
+#: (``^1.2.3``) and dist-tags (``latest``) all let the runner choose (#2043).
+EXACT_SEMVER: re.Pattern[str] = re.compile(
+    r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?",
+)
 
 # Package runners used as the last-resort registry fallback for Node tools.
 REGISTRY_RUNNERS: frozenset[str] = frozenset({"bunx", "npx"})
@@ -27,10 +40,38 @@ REGISTRY_RUNNERS: frozenset[str] = frozenset({"bunx", "npx"})
 # a boolean runner flag (see ``RUNNER_FLAGS``).
 PACKAGE_FLAGS: frozenset[str] = frozenset({"-p", "--package"})
 
+#: Flags on every npx fallback so npm configuration cannot change what runs
+#: (#2043). Verified with npx 11.20.0 against a localhost registry: each one
+#: overrides the same setting from the environment and from the project, user
+#: (``~/.npmrc`` or ``userconfig``) and global (``globalconfig``) npmrc files.
+#: ``--workspaces=false`` and ``--include-workspace-root=false`` stop workspace
+#: selection moving the run into a member with its own ``node_modules/.bin``;
+#: ``--bin-links=true`` makes the installed pin's executable exist;
+#: ``--global=false`` stops ``global=true`` breaking the run;
+#: ``--offline=false`` and ``--prefer-offline=false`` stop npx settling for
+#: whatever an existing cache holds. The cache itself is lintro's own per-pin
+#: directory, passed as ``--cache=<dir>`` by :func:`npx_runner_options` and
+#: repaired before each run (:mod:`lintro.tools.core.npx_cache`). A
+#: ``workspace=<name>`` set in an npmrc file conflicts with
+#: ``--workspaces=false`` and npm exits with an error, which lintro reports as
+#: an execution failure.
+NPX_ISOLATION_FLAGS: tuple[str, ...] = (
+    "--workspaces=false",
+    "--include-workspace-root=false",
+    "--bin-links=true",
+    "--global=false",
+    "--offline=false",
+    "--prefer-offline=false",
+)
+
+#: Prefix of the per-run npx cache option (see :func:`npx_runner_options`).
+NPX_CACHE_OPTION: str = "--cache="
+
 # Boolean runner flags that may precede the package spec or ``--package``.
 # Skipped when recovering the spec from a resolved command. ``--yes`` / ``-y``
-# is npx's non-interactive install flag, not a package selector.
-RUNNER_FLAGS: frozenset[str] = frozenset({"--yes", "-y"})
+# is npx's non-interactive install flag, not a package selector; the isolation
+# flags are fixed settings, not selectors either.
+RUNNER_FLAGS: frozenset[str] = frozenset({"--yes", "-y", *NPX_ISOLATION_FLAGS})
 
 # Node runtime floors that a pinned npm tool imposes on the consumer once the
 # registry fallback (or a local install) is used. These come from the pinned
@@ -99,7 +140,9 @@ def registry_fallback_spec(command: Sequence[str]) -> str | None:
     if len(command) < 2 or command[0] not in REGISTRY_RUNNERS:
         return None
     index = 1
-    while index < len(command) and command[index] in RUNNER_FLAGS:
+    while index < len(command) and (
+        command[index] in RUNNER_FLAGS or command[index].startswith(NPX_CACHE_OPTION)
+    ):
         index += 1
     if index >= len(command):
         return None
@@ -108,6 +151,182 @@ def registry_fallback_spec(command: Sequence[str]) -> str | None:
         # shorter is a malformed command, not a fallback to report on.
         return command[index + 1] if len(command) >= index + 3 else None
     return command[index]
+
+
+def npx_runner_options(spec: str) -> list[str]:
+    """Return the options every npx fallback carries before ``--package``.
+
+    Args:
+        spec: Pinned npm spec the command will run.
+
+    Returns:
+        The fixed isolation flags followed by ``--cache=<lintro cache for spec>``.
+    """
+    from lintro.tools.core.npx_cache import npx_cache_dir
+
+    return [*NPX_ISOLATION_FLAGS, f"{NPX_CACHE_OPTION}{npx_cache_dir(spec)}"]
+
+
+def _cache_reason(
+    command: Sequence[str],
+    *,
+    package: str,
+    pin: str,
+    pathsep: str,
+) -> str | None:
+    """Refuse unless the command's npx cache is lintro's and runs the pin.
+
+    The cache must be lintro's per-pin cache, resolve inside lintro's cache
+    root and hold no ``PATH`` separator. Every ``_npx`` entry in it is then
+    validated under npm's lock, and any entry that would not run the pin is
+    deleted so npx reinstalls it (see :mod:`lintro.tools.core.npx_cache`).
+
+    Args:
+        command: Resolved npx command.
+        package: npm package from the spec.
+        pin: Exact pinned version from the spec.
+        pathsep: ``PATH`` separator of the platform npx runs on.
+
+    Returns:
+        Why the cache cannot be trusted, or None.
+    """
+    from lintro.tools.core.npx_cache import (
+        NpxCacheError,
+        npx_cache_dir,
+        repair_npx_cache,
+    )
+
+    cache = npx_cache_dir(f"{package}@{pin}")
+    options = [arg for arg in command if arg.startswith(NPX_CACHE_OPTION)]
+    if options != [f"{NPX_CACHE_OPTION}{cache}"]:
+        return "the npx command does not use lintro's own npm cache"
+    try:
+        repair_npx_cache(
+            cache,
+            package=package,
+            pin=pin,
+            binary=command[-1],
+            pathsep=pathsep,
+        )
+    except (NpxCacheError, OSError) as exc:
+        return f"lintro's npm cache cannot be trusted ({exc})"
+    return None
+
+
+def _workspace_env_reason(env: Mapping[str, str]) -> str | None:
+    """Refuse when the environment selects an npm workspace.
+
+    ``workspace=<name>`` cannot be cleared by a flag. Only the environment is
+    checked: the same setting in an npmrc file conflicts with
+    ``--workspaces=false`` and npm fails loudly, which lintro reports as an
+    execution failure rather than a pass.
+
+    Args:
+        env: Environment npx would inherit.
+
+    Returns:
+        Why npx cannot be trusted, or None.
+    """
+    for key, value in env.items():
+        if key.lower() == "npm_config_workspace":
+            return f"npm workspace selection is configured ({key}={value})"
+    return None
+
+
+def _project_reason(cwd: Path, package: str) -> str | None:
+    """Refuse when npm's project tree could already hold something to run.
+
+    Args:
+        cwd: Directory npx would run in.
+        package: npm package the spec names.
+
+    Returns:
+        Why npx cannot be trusted, or None.
+    """
+    origin = cwd.resolve()
+    for directory in (origin, *origin.parents):
+        tree = directory / "node_modules"
+        if tree.exists():
+            return f"a node_modules tree exists at {tree.as_posix()}"
+        manifest = directory / "package.json"
+        if not manifest.exists():
+            continue
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return f"{manifest.as_posix()} cannot be read"
+        if not isinstance(data, dict):
+            return f"{manifest.as_posix()} cannot be read"
+        if "workspaces" in data:
+            # npm loads every member's node_modules from the workspace root.
+            return f"{manifest.as_posix()} declares npm workspaces"
+        if data.get("name") == package:
+            return f"{manifest.as_posix()} is the {package} package itself"
+    return None
+
+
+def npx_pin_refusal(
+    *,
+    cwd: Path,
+    package: str,
+    pin: str,
+    environ: Mapping[str, str] | None = None,
+    command: Sequence[str] | None = None,
+    pathsep: str = os.pathsep,
+) -> str | None:
+    """Refuse an npx-only fallback unless npx can only run the pinned package.
+
+    ``npx --package <pkg>@<pin> <bin>`` reuses whatever npm finds in its
+    project tree and then runs ``<bin>`` by name from any ancestor
+    ``node_modules/.bin``, so an installed tree can make it launch a different
+    version than the pin, or nothing (#2043). The generated command carries
+    :func:`npx_runner_options`: flags that neutralise workspace, bin-link,
+    global and offline settings from every config source, and a lintro-owned
+    ``--cache``. npm settings in npmrc files are otherwise left to npm: the
+    flags win, or npm fails loudly and the run is an execution failure. What
+    remains is refused here:
+
+    - a ``node_modules`` directory in *cwd* or any ancestor;
+    - a ``package.json`` in *cwd* or any ancestor that declares
+      ``workspaces`` (npm loads members' trees from the root), is the package
+      itself, or cannot be parsed;
+    - ``npm_config_workspace`` set in the environment, in any case;
+    - a command whose ``--cache`` is not lintro's per-pin cache, a cache
+      that resolves outside lintro's cache root, holds the platform's ``PATH``
+      separator or is not a directory, or a cache entry that would not run the
+      pin and cannot be repaired.
+
+    ``bunx <pkg>@<pin>`` always resolves from the registry and is not subject
+    to this rule.
+
+    Args:
+        cwd: Directory npx would run in.
+        package: npm package the spec names.
+        pin: Exact pinned version.
+        environ: Environment npx would inherit; defaults to ``os.environ``.
+        command: The generated npx command, to check and repair its cache.
+        pathsep: ``PATH`` separator of the platform npx runs on (injectable
+            for tests).
+
+    Returns:
+        None when the pin is what npx runs, otherwise an actionable reason.
+    """
+    env = os.environ if environ is None else environ
+    reason = (
+        _project_reason(cwd, package)
+        or _workspace_env_reason(env)
+        or (
+            _cache_reason(command, package=package, pin=pin, pathsep=pathsep)
+            if command is not None
+            else None
+        )
+    )
+    if reason is None:
+        return None
+    return (
+        f"only npx is available and {reason}; npx may run an unpinned copy. "
+        f"Install {package}@{pin} locally or install bun."
+    )
 
 
 def is_registry_fallback_command(command: Sequence[str]) -> bool:

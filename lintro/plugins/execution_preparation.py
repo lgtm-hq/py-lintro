@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from loguru import logger
@@ -32,6 +32,11 @@ DEFAULT_TIMEOUT: int = 30
 # Compatibility name retained for existing execution-gate consumers.
 _ALLOW_VERSION_LAG_ENV: str = ALLOW_VERSION_LAG_ENV
 
+#: Run-scoped memo of resolved command prefixes, keyed ``(tool, cwd)`` (#2043).
+#: The version gate records the command it probed; execution reads the same
+#: entry instead of walking ``node_modules`` and ``PATH`` again.
+ResolvedCommands = dict[tuple[str, str], tuple[str, ...]]
+
 
 @dataclass(frozen=True)
 class PreparedExecution:
@@ -42,12 +47,19 @@ class PreparedExecution:
         rel_files: File paths relative to the execution directory.
         cwd: Working directory for command execution.
         timeout: Resolved subprocess timeout in seconds.
+        resolved_commands: Command prefixes the version gate resolved for
+            this execution directory, keyed ``(tool, cwd)`` (#2043).
     """
 
     files: list[str]
     rel_files: list[str]
     cwd: str
     timeout: float
+    resolved_commands: ResolvedCommands = field(
+        default_factory=dict,
+        compare=False,
+        hash=False,
+    )
 
 
 def get_effective_timeout(
@@ -126,6 +138,8 @@ def get_executable_command(
 def verify_tool_version(
     definition: ToolDefinition,
     cwd: str | Path | None = None,
+    *,
+    resolved_commands: ResolvedCommands | None = None,
 ) -> ToolResult | None:
     """Verify that the tool meets minimum version requirements.
 
@@ -142,10 +156,14 @@ def verify_tool_version(
     The check must resolve the same binary the run will use. Verifying a
     different installation can skip the run even though the target project has
     a valid pinned binary, or pass on a binary that never executes (#1727).
+    When ``cwd`` and ``resolved_commands`` are both given, the probed command
+    is recorded under ``(definition.name, str(cwd))`` so execution reuses it
+    instead of resolving again (#2043).
 
     Args:
         definition: Tool definition with name.
         cwd: Directory the tool will execute in, when known.
+        resolved_commands: Run-scoped memo that receives the probed command.
 
     Returns:
         None if version check passes, or a skip/unavailable result if it fails.
@@ -160,6 +178,8 @@ def verify_tool_version(
         definition.name,
         cache_root=Path(cwd) if cwd is not None else None,
     )
+    if resolved_commands is not None and cwd is not None and snapshot.command:
+        resolved_commands[(definition.name, str(cwd))] = snapshot.command
 
     if not snapshot.available:
         return snapshot_to_unavailable_result(
@@ -285,8 +305,15 @@ def prepare_execution(
     # this directory (#1727).
     cwd = get_execution_cwd(files)
 
-    # Check version requirements (only when files exist to check)
-    version_result = verify_tool_version(definition, cwd=cwd)
+    # Check version requirements (only when files exist to check). The gate
+    # records the command it probed so execution runs that same binary
+    # without resolving it again (#2043).
+    resolved_commands: ResolvedCommands = {}
+    version_result = verify_tool_version(
+        definition,
+        cwd=cwd,
+        resolved_commands=resolved_commands,
+    )
     if version_result is not None:
         return version_result
 
@@ -308,6 +335,7 @@ def prepare_execution(
         rel_files=rel_files,
         cwd=cwd,
         timeout=timeout,
+        resolved_commands=resolved_commands,
     )
 
 

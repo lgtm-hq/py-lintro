@@ -128,6 +128,15 @@ class AsyncToolExecutor:
             )
         logger.debug(f"Completed async execution of {tool.definition.name}")
         ToolResult.validate_outcome(result)
+        from lintro.utils.execution.result_shaping import (
+            classify_runner_failure,
+            executed_command,
+        )
+
+        result = classify_runner_failure(
+            result,
+            command=executed_command(tool, result),
+        )
         return replace(result, duration_seconds=time.monotonic() - started)
 
     async def run_tools_parallel(

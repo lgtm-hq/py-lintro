@@ -32,8 +32,12 @@ from lintro.models.core.tool_snapshot import ToolCapabilities as ToolCapabilitie
 from lintro.models.core.tool_snapshot import ToolSnapshot as ToolSnapshot
 from lintro.tools.core.command_builders import CommandBuilderRegistry
 from lintro.tools.core.node_fallback import (
+    EXACT_SEMVER,
     is_registry_fallback_command,
+    npx_pin_refusal,
     registry_fallback_install_hint,
+    registry_fallback_spec,
+    split_npm_spec,
 )
 from lintro.utils.tool_snapshots import (
     SnapshotProvider,
@@ -508,9 +512,20 @@ def probe_tool(
             probe_failure=None if binary_path else ProbeFailure.BINARY_MISSING,
         )
 
+    if is_registry_fallback_command(command):
+        return _registry_fallback_snapshot(
+            name,
+            command=command,
+            search_root=root,
+            min_version=definition.min_version or "",
+            capabilities=capabilities,
+            binary_path=binary_path,
+            binary_mtime=binary_mtime,
+        )
+
     # Always run the version probe — do not gate on shutil.which alone.
-    # Wrappers (bunx/npx/python -m) and test mocks of subprocess.run can
-    # succeed even when the bare binary name is absent from PATH.
+    # Wrappers (python -m) and test mocks of subprocess.run can succeed even
+    # when the bare binary name is absent from PATH.
     version_info = check_tool_version(
         definition.name,
         command,
@@ -525,6 +540,147 @@ def probe_tool(
         command=tuple(command),
     )
     return _snapshot_from_version(snapshot, version_info, remediation)
+
+
+def _registry_fallback_refusal(
+    package: str,
+    pinned: str | None,
+    min_version: str,
+) -> str | None:
+    """Explain why a registry-runner pin must not run, if it must not.
+
+    Args:
+        package: npm package the runner would install.
+        pinned: Version the spec pins, or None when it carries none.
+        min_version: Minimum version the tool requires, or empty when none.
+
+    Returns:
+        The refusal reason, or None when the pin is exact and meets the
+        minimum.
+    """
+    from lintro.tools.core.version_parsing import compare_versions
+
+    if pinned is None:
+        return (
+            f"registry fallback for {package} has no version pin; "
+            "refusing to run an unpinned package"
+        )
+    if not EXACT_SEMVER.fullmatch(pinned):
+        return (
+            f"registry fallback pin {package}@{pinned} is not an exact "
+            "version; refusing to run it"
+        )
+    if not min_version:
+        return None
+    try:
+        below = compare_versions(pinned, min_version) < 0
+    except ValueError:
+        return (
+            f"minimum requirement {min_version} for {package} is not a "
+            "comparable version; refusing to run the registry fallback"
+        )
+    if below:
+        return (
+            f"registry fallback pin {package}@{pinned} is below "
+            f"minimum requirement {min_version}"
+        )
+    return None
+
+
+def _npx_refusal(
+    command: list[str],
+    *,
+    package: str,
+    pinned: str,
+    search_root: Path,
+) -> str | None:
+    """Refuse an npx command unless npx can only run the pinned package.
+
+    Args:
+        command: Resolved registry-runner command.
+        package: npm package from the spec.
+        pinned: Exact pinned version from the spec.
+        search_root: Directory npx would run in.
+
+    Returns:
+        The refusal reason, or None for a bunx command or a trusted npx pin.
+    """
+    if Path(command[0]).name != "npx":
+        return None
+    return npx_pin_refusal(
+        cwd=search_root,
+        package=package,
+        pin=pinned,
+        command=command,
+    )
+
+
+def _registry_fallback_snapshot(
+    name: str,
+    *,
+    command: list[str],
+    search_root: Path,
+    min_version: str,
+    capabilities: ToolCapabilities,
+    binary_path: str,
+    binary_mtime: float,
+) -> ToolSnapshot:
+    """Gate a ``bunx``/``npx`` registry-runner command on its pin, offline.
+
+    Nothing is installed locally or on ``PATH``, so the chain fell through to
+    a package runner. Running it for ``--version`` would fetch the package
+    from the registry during planning (#2043, #940). The version the runner
+    would install is the one its spec pins, so the gate reads it from the
+    spec instead and compares it with the minimum. A spec without an exact
+    pin would let the runner resolve ``@latest``; one pinned below the
+    minimum would run a version the gate rejects. Both are refused.
+
+    Args:
+        name: Canonical tool name.
+        command: Resolved registry-runner command.
+        search_root: Directory the runner would execute in.
+        min_version: Minimum version the tool requires, or empty when none.
+        capabilities: Declared capability evidence.
+        binary_path: Resolved runner executable.
+        binary_mtime: mtime of the runner executable.
+
+    Returns:
+        Runnable snapshot carrying the pinned version, or an unavailable one
+        naming why the runner was refused.
+    """
+    hint = registry_fallback_install_hint(command)
+    package, pinned = split_npm_spec(registry_fallback_spec(command) or "")
+    refusal = _registry_fallback_refusal(package, pinned, min_version)
+    if refusal is None and pinned is not None:
+        refusal = _npx_refusal(
+            command,
+            package=package,
+            pinned=pinned,
+            search_root=search_root,
+        )
+    if refusal is not None:
+        return _unavailable_snapshot(
+            name,
+            probe_error=refusal,
+            remediation_hint=hint,
+            binary_path=binary_path,
+            binary_mtime=binary_mtime,
+            capabilities=capabilities,
+            min_version=min_version,
+            command=tuple(command),
+        )
+    return ToolSnapshot(
+        name=name,
+        available=True,
+        version=pinned,
+        capabilities=capabilities,
+        remediation_hint=hint,
+        binary_path=binary_path,
+        binary_mtime=binary_mtime,
+        version_check_passed=True,
+        min_version=min_version,
+        command=tuple(command),
+    )
 
 
 def _snapshot_from_version(

@@ -29,6 +29,7 @@ from lintro.tools.core.node_fallback import (
     NODE_ENGINE_REQUIREMENTS,
     is_registry_fallback_command,
     notify_registry_fallback_selected,
+    npx_runner_options,
     registry_fallback_guidance,
     registry_fallback_spec,
     reset_registry_fallback_notices,
@@ -692,7 +693,7 @@ def test_html_validate_npx_fallback_is_version_pinned() -> None:
 
     spec = f"html-validate@{get_tool_version('html-validate')}"
     assert_that(cmd).is_equal_to(
-        ["npx", "--yes", "--package", spec, "html-validate"],
+        ["npx", "--yes", *npx_runner_options(spec), "--package", spec, "html-validate"],
     )
 
 
@@ -925,10 +926,11 @@ def test_prettier_falls_back_to_pinned_runner_spec(
     builder = NodeJSBuilder()
     with patch("shutil.which", _which_only("npx")):
         cmd = builder.get_command("prettier", ToolName.PRETTIER)
-    assert_that(cmd).is_length(5)
-    assert_that(cmd[:3]).is_equal_to(["npx", "--yes", "--package"])
-    assert_that(cmd[3]).starts_with("prettier@")
-    assert_that(cmd[4]).is_equal_to("prettier")
+    assert_that(cmd[:-2]).is_equal_to(
+        ["npx", "--yes", *npx_runner_options(cmd[-2]), "--package"],
+    )
+    assert_that(cmd[-2]).starts_with("prettier@")
+    assert_that(cmd[-1]).is_equal_to("prettier")
 
 
 def test_runner_fallback_names_package_when_binary_differs(
@@ -960,9 +962,11 @@ def test_commitlint_runner_fallback_uses_scoped_package(
     builder = NodeJSBuilder()
     with patch("shutil.which", _which_only("npx")):
         cmd = builder.get_command("commitlint", ToolName.COMMITLINT)
-    assert_that(cmd[:3]).is_equal_to(["npx", "--yes", "--package"])
-    assert_that(cmd[3]).starts_with("@commitlint/cli@")
-    assert_that(cmd[4]).is_equal_to("commitlint")
+    assert_that(cmd[:-2]).is_equal_to(
+        ["npx", "--yes", *npx_runner_options(cmd[-2]), "--package"],
+    )
+    assert_that(cmd[-2]).starts_with("@commitlint/cli@")
+    assert_that(cmd[-1]).is_equal_to("commitlint")
 
 
 def test_spectral_runner_fallback_uses_scoped_package(
@@ -977,9 +981,11 @@ def test_spectral_runner_fallback_uses_scoped_package(
     builder = NodeJSBuilder()
     with patch("shutil.which", _which_only("npx")):
         cmd = builder.get_command("spectral", ToolName.SPECTRAL)
-    assert_that(cmd[:3]).is_equal_to(["npx", "--yes", "--package"])
-    assert_that(cmd[3]).starts_with("@stoplight/spectral-cli@")
-    assert_that(cmd[4]).is_equal_to("spectral")
+    assert_that(cmd[:-2]).is_equal_to(
+        ["npx", "--yes", *npx_runner_options(cmd[-2]), "--package"],
+    )
+    assert_that(cmd[-2]).starts_with("@stoplight/spectral-cli@")
+    assert_that(cmd[-1]).is_equal_to("spectral")
 
 
 # =============================================================================

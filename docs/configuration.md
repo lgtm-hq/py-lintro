@@ -1387,6 +1387,72 @@ Rationale:
    name (`bunx prettier@<pinned>`); it uses `--package` when they differ
    (`bunx --package typescript@<pinned> tsc`). `npx` always uses `--yes --package` so it
    cannot hang waiting for a TTY prompt.
+
+   `npx` does not always run its pin. It reuses whatever npm finds installed or cached
+   and then runs `<binary>` by name from any `node_modules/.bin` above the checked
+   directory. A hoisted older copy, a pnpm store, a stale
+   `node_modules/.package-lock.json`, a workspace glob npm reads differently, a
+   pre-filled npm cache used offline, or npm config that selects a workspace can make it
+   run another version, or nothing. Lintro guards the npx branch in three ways.
+
+   **Flags on the generated command.** Every npx fallback runs as `npx --yes`, then
+   `--workspaces=false`, `--include-workspace-root=false`, `--bin-links=true`,
+   `--global=false`, `--offline=false`, `--prefer-offline=false` and
+   `--cache=~/.lintro/cache/npx/<package>@<pinned>`, then
+   `--package <package>@<pinned> <binary>`. Each flag overrides the same setting from
+   the environment (`npm_config_*`) and from the project, user and global npmrc files,
+   so `workspaces`, `bin-links`, `global`, `offline`, `prefer-offline` and `cache`
+   cannot change what runs.
+
+   **Lintro's own npm cache, checked before every run.** Each pinned package gets its
+   own cache directory, so a user cache that already holds something under npm's `_npx`
+   directory, or a `cache` value containing a `PATH` separator, is never used. Before
+   the version check trusts the pin, Lintro inspects every `_npx` entry in that cache
+   under npm's own per-entry lock (`concurrency.lock`), so it never touches an entry
+   while npx is installing it. An entry whose top-level package is not exactly the pin,
+   is a symlink, is malformed, or whose `.bin/<binary>` points into another package is
+   deleted, and npx reinstalls the pin. A correct entry is reused as is. The tool is
+   **unavailable** if the cache resolves outside `~/.lintro/cache`, contains the
+   platform's `PATH` separator (`:` on Linux and macOS, `;` on Windows, so `C:\Users\…`
+   is fine), is not a directory, or cannot be locked or repaired.
+
+   **Trust model.** Lintro's npx cache (`~/.lintro/cache/npx/<package>@<pinned>`) is
+   trusted the same way as Lintro's own installation. Lintro verifies that the installed
+   package is exactly the pinned version and repairs entries that do not match, but it
+   does not checksum the executable's contents. A local user who can write to that
+   directory can therefore change what runs, just as they could by editing Lintro itself
+   or the project's `node_modules`. Verifying package integrity is tracked in #3406.
+
+   **Refusal when npx could still reuse something.** The pin is trusted only when all of
+   these hold, and the tool is **unavailable** otherwise:
+
+   - no `node_modules` directory exists in the checked directory or any directory above
+     it, up to the filesystem root;
+   - no `package.json` there or above declares `workspaces` (npm loads every member's
+     own `node_modules` from the workspace root), is the package itself, or fails to
+     parse;
+   - `npm_config_workspace` is not set in the environment, in any letter case. No flag
+     clears that setting.
+
+   The reason names what it found, says that `npx may run an unpinned copy`, and ends
+   with `Install <pkg>@<pinned> locally or install bun.`
+
+   **npmrc conflicts fail loudly.** Lintro does not read npmrc files. A setting there
+   that no flag overrides, such as `workspace=<name>`, makes npm stop with its own error
+   (in npm 11, `Cannot use --no-workspaces and --workspace at the same time`; npm 10
+   words it slightly differently) before the tool runs. Lintro reports that run as an
+   **execution failure**: the result has `execution_failed` set, carries the runner's
+   message, and is never read as findings or as a pass. The same applies when the
+   `npx`/`bunx` command exits with a failure and no output, or with `command not found`.
+   Only runner commands are judged this way: a project-local or `PATH` binary whose own
+   output mentions `npm error` keeps its own result.
+
+   **Trade-off:** if `npx` is your only runner and a `node_modules` tree or a workspace
+   root is in reach, the automatic registry fallback no longer runs for a Node tool you
+   have not installed. Add the tool as a devDependency (branch 1), install it globally
+   (branch 2), or install bun. `bunx <pkg>@<pinned>` always resolves from the registry
+   and never runs the local tree, so it is not restricted.
+
 4. **bare `<binary>`** — last resort, fails if nothing is installed.
 
 `@latest` is never resolved at runtime, for any tool. Branch 3 emits a one-time warning
@@ -1418,9 +1484,23 @@ and is used whenever no project-local install is present.
 > a machine with npm but no bun a devDependency was unreachable and the tool reported a
 > skip. Both now resolve like every other Node tool.
 
-Because the version check (`verify_tool_version`) resolves through this same chain, the
-binary Lintro version-gates is now the binary Lintro runs, for every Node tool rather
-than just for `html-validate`.
+Because the version check (`verify_tool_version`) resolves through this same chain, from
+the same execution directory, the binary Lintro version-gates is the binary Lintro runs,
+for every Node tool rather than just for `html-validate`. For `prettier`, `oxlint` and
+`oxfmt`, execution reuses the command the check resolved instead of resolving it again.
+The other Node tools resolve again at execution, from the same directory, and get the
+same binary.
+
+The version check never runs the registry fallback (branch 3). Running
+`bunx <package>@<pinned> --version` would download the package before any file is
+checked. When resolution falls through to `bunx`, or to a trusted `npx` (see above), the
+check reads the version from the runner's `<package>@<pinned>` spec and compares it with
+the tool's minimum, offline. The pin must be an exact version (`MAJOR.MINOR.PATCH`,
+optionally with a prerelease or build suffix), whether or not the tool declares a
+minimum. An exact pin that meets the minimum, or any exact pin when there is no minimum,
+lets the tool run through the runner. A pin below the minimum, or a spec that is
+unpinned, partial (`1.2`), a wildcard (`1.x`), a range (`^1.2.3`) or a dist-tag
+(`latest`), reports the tool as unavailable, and the runner is never started.
 
 ### Python Tools
 

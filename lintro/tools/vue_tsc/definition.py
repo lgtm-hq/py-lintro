@@ -21,7 +21,6 @@ error-message copy.
 
 from __future__ import annotations
 
-import functools
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
@@ -90,7 +89,7 @@ class VueTscPlugin(TypeScriptCheckerPlugin):
             reads_tree=True,
             partitionable=False,
             native_configs=["tsconfig.json", "tsconfig.app.json"],
-            version_command=self._vue_tsc_cmd + ["--version"],
+            version_command=["vue-tsc", "--version"],
             min_version=get_min_version(ToolName.VUE_TSC),
             default_options={
                 "timeout": VUE_TSC_DEFAULT_TIMEOUT,
@@ -101,21 +100,6 @@ class VueTscPlugin(TypeScriptCheckerPlugin):
             },
             default_timeout=VUE_TSC_DEFAULT_TIMEOUT,
         )
-
-    @functools.cached_property
-    def _vue_tsc_cmd(self) -> list[str]:
-        """Get the command to run vue-tsc, resolved from the process directory.
-
-        Used for the ``version_command`` in :attr:`definition`, which is built
-        before any execution directory is known. The result is cached so that
-        repeated accesses reuse the stored command without repeating the
-        filesystem walk. :meth:`_command_prefix` re-resolves with the real
-        execution directory when running the checker.
-
-        Returns:
-            Command arguments for vue-tsc.
-        """
-        return self._resolve_binary_command("vue-tsc")
 
     def _command_prefix(self, cwd: Path | None = None) -> list[str]:
         """Return the vue-tsc command prefix.
@@ -129,8 +113,6 @@ class VueTscPlugin(TypeScriptCheckerPlugin):
         Returns:
             Command argument list for vue-tsc.
         """
-        if cwd is None:
-            return list(self._vue_tsc_cmd)
         return self._resolve_binary_command("vue-tsc", cwd=cwd)
 
     def _parse_output(self, output: str) -> list[Any]:
