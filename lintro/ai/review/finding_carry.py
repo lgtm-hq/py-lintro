@@ -10,7 +10,10 @@ surface can carry it as ``finding_id``.
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import replace
 from typing import TYPE_CHECKING
+
+from lintro.ai.review.enums.finding_status import FindingStatus
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -18,7 +21,7 @@ if TYPE_CHECKING:
     from lintro.ai.review.models.finding_record import FindingRecord
     from lintro.ai.review.models.review_finding import ReviewFinding
 
-__all__ = ["_carry_absent", "_finding_positions", "_line_unread"]
+__all__ = ["_carry_absent", "_finding_positions", "_line_unread", "_relocate"]
 
 
 def _finding_positions(
@@ -49,6 +52,28 @@ def _finding_positions(
         for position, record in zip(note_positions, note_records, strict=True)
     }
     return positions_by_fingerprint, finding_ids
+
+
+def _relocate(
+    *,
+    record: FindingRecord,
+    relocations: Mapping[str, tuple[str, int, str]] | None,
+) -> FindingRecord:
+    """Move a prior open record to where the delta round placed it (#3403).
+
+    Args:
+        record: A prior record.
+        relocations: ``{key: (path, line, line_sha)}`` from the delta round.
+
+    Returns:
+        The record at its mapped location and coordinate head; resolved
+        records and records the round did not map are returned unchanged.
+    """
+    moved = relocations.get(record.key) if relocations else None
+    if moved is None or record.status is not FindingStatus.OPEN:
+        return record
+    path, line, line_sha = moved
+    return replace(record, file=path, line=line, line_sha=line_sha)
 
 
 def _carry_absent(

@@ -27,6 +27,7 @@ from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.finding_carry import (
     _carry_absent,
     _finding_positions,
+    _relocate,
 )
 from lintro.ai.review.finding_identity import (
     FINGERPRINT_LENGTH,
@@ -250,6 +251,7 @@ def match_findings(
     reviewed_paths: frozenset[str] | None = None,
     departed_paths: frozenset[str] | None = None,
     reviewed_ranges: Mapping[str, tuple[tuple[int, int], ...]] | None = None,
+    relocations: Mapping[str, tuple[str, int, str]] | None = None,
 ) -> FindingMatchResult:
     """Match this round's findings against the previously persisted state.
 
@@ -302,11 +304,18 @@ def match_findings(
             open finding on such a file whose
             line falls outside every range was not re-read: it is carried,
             not resolved. Files absent from the mapping were read whole.
+        relocations: Where the delta round placed each prior open finding,
+            ``{key: (path, line, line_sha)}`` (#3403). A relocated record is
+            matched, carried or resolved at that location, and persisted
+            there, so a line an unread round moved is never judged stale.
 
     Returns:
         The per-round transitions plus the merged record set to persist.
     """
-    prior_records = list(previous.findings) if previous is not None else []
+    prior_records = [
+        _relocate(record=record, relocations=relocations)
+        for record in (previous.findings if previous is not None else ())
+    ]
     # A sighting's line is in this head's coordinates (#3403).
     inline_records = [
         replace(record, line_sha=head_sha)

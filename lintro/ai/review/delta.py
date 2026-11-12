@@ -50,7 +50,12 @@ from loguru import logger
 from lintro.ai.prompts.review import REVIEW_DELTA_SCOPE_NOTE
 from lintro.ai.review.context.diff_parse import split_unified_diff_by_file
 from lintro.ai.review.context.git_ops import _run_git
-from lintro.ai.review.delta_lines import open_finding_lines, shows_every_line
+from lintro.ai.review.delta_lines import (
+    PINNED_DIFF_FLAGS,
+    literal_pathspec,
+    map_open_findings,
+    shows_every_line,
+)
 from lintro.ai.review.enums.delta_reason import DeltaReason
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_checkout import ReviewCheckout
@@ -139,14 +144,17 @@ def plan_delta(
         prior_merge_base=last.merge_base,
     ):
         return DeltaPlan.full(reason=DeltaReason.BASE_MOVED)
+    mapped = map_open_findings(
+        prior=prior,
+        since_sha=since,
+        head_sha=head_sha,
+        repo_root=repo_root,
+    )
     return DeltaPlan(
         reason=DeltaReason.DELTA,
         since_sha=since,
-        open_lines=open_finding_lines(
-            prior=prior,
-            since_sha=since,
-            repo_root=repo_root,
-        ),
+        open_lines=mapped.lines,
+        relocations=mapped.relocations,
     )
 
 
@@ -270,11 +278,14 @@ def delta_hunks(
                 "-C",
                 repo_root,
                 "diff",
-                "--no-color",
-                "--no-ext-diff",
+                # Fixed text whatever the user's config says (#3403): old-side
+                # line numbers are compared with stored finding lines.
+                *PINNED_DIFF_FLAGS,
+                "--no-renames",
+                "--unified=3",
                 f"{since_sha}..{head_sha}",
                 "--",
-                *sorted(allowed),
+                *(literal_pathspec(path) for path in sorted(allowed)),
             ],
             check=False,
         )

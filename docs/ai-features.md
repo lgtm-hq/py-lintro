@@ -906,16 +906,22 @@ resolve; it never narrows what it may report.**
   would not show is read whole instead (`DeltaApplication.reread`, #3403). That applies
   whether or not the finding was ever posted inline. A record's line is in the
   coordinates of the head that last reported it (`FindingRecord.line_sha`). A round that
-  carried it unread leaves that head unchanged, so `plan_delta` maps the line forward
-  through `line_sha..<prior head>` before the check (`DeltaPlan.open_lines`). When the
-  line cannot be mapped (no recorded head, git cannot diff the range, or the range
-  edited the line itself), the file is read whole. A record still carried without being
-  read (its file was not read this round) is stored with `unverified: true`. The sticky,
-  including a board rebuilt from stored state, marks it **⏸ not re-verified**. Its
-  severity and its weight in the verdict do not change. The prompt says what range the
-  embedded text is ("the change since the previous review round … unchanged context
-  lines may still be earlier changes of this pull request"), and the depth-3 adversarial
-  sweep and an output-exhaustion split read the same delta text.
+  carried it unread leaves that head unchanged, so `plan_delta` maps the location
+  forward through `line_sha..<prior head>` before the check (`DeltaPlan.open_lines`),
+  following a rename git reports. The matcher then judges the finding at the mapped path
+  and line and stores it there (`DeltaPlan.relocations`, carried on the result as
+  `relocated_findings`). When a location cannot be mapped (no recorded head, git cannot
+  diff the range, the range edited the line itself, or a rename is ambiguous) the file
+  is read whole. Every diff behind this pins its format against user configuration:
+  literal pathspecs (`odd[1].py` is never a glob), `--no-textconv`, `--no-ext-diff`,
+  `--no-color`, `--no-relative` and fixed `a/`/`b/` prefixes. Only the section whose
+  headers name the intended file is read. A record still carried without being read (its
+  file was not read this round) is stored with `unverified: true`. The sticky, including
+  a board rebuilt from stored state, marks it **⏸ not re-verified**. Its severity and
+  its weight in the verdict do not change. The prompt says what range the embedded text
+  is ("the change since the previous review round … unchanged context lines may still be
+  earlier changes of this pull request"), and the depth-3 adversarial sweep and an
+  output-exhaustion split read the same delta text.
 - **What is reported and counted.** Findings are never filtered by delta location, and
   coverage identity stays the whole-PR patch hash, so a changed file the round did not
   read still forces `INCOMPLETE` (ADR-0007). The question pass and the synthesis call

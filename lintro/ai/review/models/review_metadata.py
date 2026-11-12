@@ -99,6 +99,10 @@ class ReviewMetadata:
             round's hunks showed for the files it narrowed; a prior finding on
             such a file outside them is carried, never resolved. Empty on a
             full round.
+        relocated_findings (tuple[tuple[str, str, int, str], ...]): ``(key,
+            path, line, line_sha)`` locations a delta round mapped prior open
+            findings to (#3403); the matcher judges and persists each record
+            there rather than at its stale stored location.
         custom_agents_run (int): Number of user-defined review agents that
             completed a pass in this run (issue #1245).
         custom_agents_skipped (int): Number of discovered agents that did not
@@ -198,6 +202,9 @@ class ReviewMetadata:
     delta_reason: str = ""
     merge_base: str = ""
     reviewed_ranges: tuple[tuple[str, int, int], ...] = field(default_factory=tuple)
+    relocated_findings: tuple[tuple[str, str, int, str], ...] = field(
+        default_factory=tuple,
+    )
     custom_agents_run: int = 0
     custom_agents_skipped: int = 0
     reviewed_paths: tuple[str, ...] = field(default_factory=tuple)

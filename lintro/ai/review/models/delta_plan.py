@@ -28,11 +28,15 @@ class DeltaPlan:
             file mapped to ``since_sha``'s coordinates, or ``None`` for a file
             holding a finding whose line could not be mapped there (#3403).
             A narrowed file must show every one of them or be read whole.
+        relocations: ``(key, path, line, line_sha)`` for each open record
+            whose stored location was not in ``since_sha``'s coordinates; the
+            matcher judges the record there and persists it (#3403).
     """
 
     reason: DeltaReason
     since_sha: str | None = None
     open_lines: Mapping[str, tuple[int, ...] | None] = field(default_factory=dict)
+    relocations: tuple[tuple[str, str, int, str], ...] = ()
 
     @property
     def is_delta(self) -> bool:

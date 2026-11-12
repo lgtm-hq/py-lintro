@@ -53,6 +53,7 @@
   "delta_reason": "first_round",
   "merge_base": "",
   "reviewed_ranges": [],
+  "relocated_findings": [],
   "custom_agents_run": 0,
   "custom_agents_skipped": 0,
   "reviewed_paths": [
