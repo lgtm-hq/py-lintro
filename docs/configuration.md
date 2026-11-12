@@ -1420,16 +1420,21 @@ and is used whenever no project-local install is present.
 
 Because the version check (`verify_tool_version`) resolves through this same chain, from
 the same execution directory, the binary Lintro version-gates is the binary Lintro runs,
-for every Node tool rather than just for `html-validate`. The check resolves once per
-tool and directory, and execution reuses that command instead of resolving it again.
+for every Node tool rather than just for `html-validate`. For `prettier`, `oxlint` and
+`oxfmt`, execution reuses the command the check resolved instead of resolving it again.
+The other Node tools resolve again at execution, from the same directory, and get the
+same binary.
 
 The version check never runs the registry fallback (branch 3). Running
 `bunx <package>@<pinned> --version` would download the package before any file is
 checked. When resolution falls through to `bunx`/`npx`, the check reads the version from
 the runner's `<package>@<pinned>` spec and compares it with the tool's minimum, offline.
-A pin at or above the minimum lets the tool run through the runner. A pin below the
-minimum, or a spec with no exact version pin, reports the tool as unavailable and the
-runner is never started.
+The pin must be an exact version (`MAJOR.MINOR.PATCH`, optionally with a prerelease or
+build suffix), whether or not the tool declares a minimum. An exact pin that meets the
+minimum, or any exact pin when there is no minimum, lets the tool run through the
+runner. A pin below the minimum, or a spec that is unpinned, partial (`1.2`), a wildcard
+(`1.x`), a range (`^1.2.3`) or a dist-tag (`latest`), reports the tool as unavailable,
+and the runner is never started.
 
 ### Python Tools
 

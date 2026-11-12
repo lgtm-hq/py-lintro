@@ -12,6 +12,7 @@ import contextlib
 import json
 import math
 import os
+import re
 import shutil
 import sys
 import sysconfig
@@ -539,6 +540,61 @@ def probe_tool(
     return _snapshot_from_version(snapshot, version_info, remediation)
 
 
+#: An exact npm pin: ``MAJOR.MINOR.PATCH`` with an optional prerelease and
+#: build suffix. Partial versions (``1.2``), wildcards (``1.x``), ranges
+#: (``^1.2.3``) and dist-tags (``latest``) all let the runner choose (#2043).
+_EXACT_SEMVER: re.Pattern[str] = re.compile(
+    r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?",
+)
+
+
+def _registry_fallback_refusal(
+    package: str,
+    pinned: str | None,
+    min_version: str,
+) -> str | None:
+    """Explain why a registry-runner pin must not run, if it must not.
+
+    Args:
+        package: npm package the runner would install.
+        pinned: Version the spec pins, or None when it carries none.
+        min_version: Minimum version the tool requires, or empty when none.
+
+    Returns:
+        The refusal reason, or None when the pin is exact and meets the
+        minimum.
+    """
+    from lintro.tools.core.version_parsing import compare_versions
+
+    if pinned is None:
+        return (
+            f"registry fallback for {package} has no version pin; "
+            "refusing to run an unpinned package"
+        )
+    if not _EXACT_SEMVER.fullmatch(pinned):
+        return (
+            f"registry fallback pin {package}@{pinned} is not an exact "
+            "version; refusing to run it"
+        )
+    if not min_version:
+        return None
+    try:
+        below = compare_versions(pinned, min_version) < 0
+    except ValueError:
+        return (
+            f"minimum requirement {min_version} for {package} is not a "
+            "comparable version; refusing to run the registry fallback"
+        )
+    if below:
+        return (
+            f"registry fallback pin {package}@{pinned} is below "
+            f"minimum requirement {min_version}"
+        )
+    return None
+
+
 def _registry_fallback_snapshot(
     name: str,
     *,
@@ -570,30 +626,9 @@ def _registry_fallback_snapshot(
         Runnable snapshot carrying the pinned version, or an unavailable one
         naming why the runner was refused.
     """
-    from lintro.tools.core.version_parsing import compare_versions
-
     hint = registry_fallback_install_hint(command)
     package, pinned = split_npm_spec(registry_fallback_spec(command) or "")
-    refusal: str | None = None
-    if pinned is None:
-        refusal = (
-            f"registry fallback for {package} has no version pin; "
-            "refusing to run an unpinned package"
-        )
-    else:
-        try:
-            below = bool(min_version) and compare_versions(pinned, min_version) < 0
-        except ValueError:
-            refusal = (
-                f"registry fallback pin {package}@{pinned} is not an exact "
-                "version; refusing to run it"
-            )
-        else:
-            if below:
-                refusal = (
-                    f"registry fallback pin {package}@{pinned} is below "
-                    f"minimum requirement {min_version}"
-                )
+    refusal = _registry_fallback_refusal(package, pinned, min_version)
     if refusal is not None:
         return _unavailable_snapshot(
             name,

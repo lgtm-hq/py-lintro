@@ -370,3 +370,56 @@ def test_runner_without_an_acceptable_pin_is_refused(
     assert_that(verdict).is_not_none()
     assert verdict is not None
     assert_that(verdict.unavailable_reason).contains(reason)
+
+
+@pytest.mark.parametrize(
+    ("pin", "min_version", "expected_version"),
+    [
+        ("1.2", "", None),
+        ("1.x", "", None),
+        ("^1.2.3", "", None),
+        ("latest", "", None),
+        ("1.2.3", "", "1.2.3"),
+        ("2.0.0-beta.1", "1.0.0", "2.0.0-beta.1"),
+    ],
+    ids=[
+        "partial",
+        "wildcard",
+        "range",
+        "dist-tag",
+        "exact-without-minimum",
+        "exact-prerelease",
+    ],
+)
+def test_runner_pin_must_be_an_exact_semver_with_or_without_a_minimum(
+    pin: str,
+    min_version: str,
+    expected_version: str | None,
+) -> None:
+    """The exact-pin check stands alone; the minimum applies only when set.
+
+    Args:
+        pin: Version the runner spec carries.
+        min_version: Minimum the tool declares, empty for none.
+        expected_version: Pinned version a runnable snapshot reports, or None
+            when the pin must be refused.
+    """
+    from lintro.models.core.tool_snapshot import ToolCapabilities
+    from lintro.tools.core import snapshots
+
+    snapshot = snapshots._registry_fallback_snapshot(
+        "prettier",
+        command=["bunx", f"prettier@{pin}"],
+        min_version=min_version,
+        capabilities=ToolCapabilities(),
+        binary_path="",
+        binary_mtime=0.0,
+    )
+
+    assert_that(snapshot.version).is_equal_to(expected_version)
+    assert_that(snapshot.available).is_equal_to(expected_version is not None)
+    if expected_version is None:
+        assert_that(snapshot.probe_error).contains("is not an exact version")
+    else:
+        assert_that(snapshot.probe_error).is_none()
+        assert_that(snapshot.version_check_passed).is_true()
