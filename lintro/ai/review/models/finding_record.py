@@ -94,6 +94,12 @@ class FindingRecord:
             reading it, so nothing re-judged it against that head (#3403).
             Persisted so a board rebuilt from state alone still labels it.
             Both fields are serialized only when set.
+        match_fingerprint: Fingerprint the record pairs on when it differs from
+            ``fingerprint`` (#3403): a record moved to a renamed file keeps its
+            stable key (``fingerprint#ordinal``, which its finding id and
+            inline thread marker carry) but is matched under the identity of
+            its current path. Empty for every record that never moved, and
+            serialized only when set.
     """
 
     fingerprint: str
@@ -124,11 +130,17 @@ class FindingRecord:
     evidence_style: EvidenceStyle = EvidenceStyle.DIFF_LOCAL
     line_sha: str = ""
     unverified: bool = False
+    match_fingerprint: str = ""
 
     @property
     def key(self) -> str:
         """Return the composite identity key ``fingerprint#ordinal``."""
         return f"{self.fingerprint}#{self.ordinal}"
+
+    @property
+    def pairing_fingerprint(self) -> str:
+        """Return the fingerprint a current finding must carry to pair."""
+        return self.match_fingerprint or self.fingerprint
 
     @property
     def is_question(self) -> bool:
@@ -224,6 +236,8 @@ class FindingRecord:
             payload["line_sha"] = self.line_sha
         if self.unverified:
             payload["unverified"] = True
+        if self.match_fingerprint:
+            payload["match_fingerprint"] = self.match_fingerprint
         return payload
 
     @classmethod
@@ -278,6 +292,7 @@ class FindingRecord:
             evidence_style=_parse_evidence_style(payload.get("evidence_style")),
             line_sha=str(payload.get("line_sha", "")),
             unverified=payload.get("unverified") is True,
+            match_fingerprint=str(payload.get("match_fingerprint", "")),
         )
 
 

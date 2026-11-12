@@ -28,13 +28,19 @@ from lintro.ai.review.delta import delta_hunks, plan_delta
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
+from lintro.ai.review.finding_identity import fingerprint_for
+from lintro.ai.review.finding_matcher import match_findings
+from lintro.ai.review.github_inline import record_keys
+from lintro.ai.review.lifecycle.threads import sync_addressed_lifecycle
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.delta_plan import DeltaPlan
+from lintro.ai.review.models.lifecycle_sync_request import LifecycleSyncRequest
 from lintro.ai.review.models.pr_metadata import PRMetadata
 from lintro.ai.review.models.review_context import ReviewContext
-from lintro.ai.review.models.review_finding import Severity
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.review_thread import ReviewThread
 from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
@@ -44,6 +50,7 @@ from lintro.ai.review.sticky.assembly import (
     advance_review_state,
     build_sticky_comment,
 )
+from lintro.ai.review.sticky.state import matcher_relocations, stamp_finding_ids
 from lintro.config.review_config import ReviewVerifyMode
 from tests.unit.ai.review.test_carried_reverify_3403 import (
     _git,
@@ -510,3 +517,236 @@ def test_a_carried_unread_finding_is_persisted_at_its_mapped_line(
     (x,) = after.findings
     assert_that((x.line, x.line_sha, x.unverified)).is_equal_to((91, h2, True))
     assert_that(x.status).is_equal_to(FindingStatus.OPEN)
+
+
+# --- a renamed finding keeps its key, its thread and its pairing -------------
+
+_THREAD_ID = 501
+
+
+class _ThreadHost:
+    """A pull request's inline comments and threads, edited in place.
+
+    Attributes:
+        bodies: Comment id to current body.
+        resolved: Thread node ids resolved so far.
+    """
+
+    bodies: dict[int, str]
+    resolved: list[str]
+
+    def __init__(self, *, bodies: dict[int, str]) -> None:
+        """Hold the comments.
+
+        Args:
+            bodies: Comment id to body.
+        """
+        self.bodies = dict(bodies)
+        self.resolved = []
+
+    def update_review_comment(self, *, comment_id: int, body: str) -> bool:
+        """Replace a comment's body.
+
+        Args:
+            comment_id: The comment.
+            body: Its new body.
+
+        Returns:
+            True: the edit always takes.
+        """
+        self.bodies[comment_id] = body
+        return True
+
+    def fetch_review_threads(self) -> dict[int, ReviewThread]:
+        """Return one open thread per comment.
+
+        Returns:
+            Comment id to thread.
+        """
+        return {
+            comment_id: ReviewThread(node_id=f"T{comment_id}")
+            for comment_id in self.bodies
+        }
+
+    def resolve_review_thread(self, *, thread_id: str) -> bool:
+        """Resolve a thread.
+
+        Args:
+            thread_id: The thread's node id.
+
+        Returns:
+            True: the resolution always takes.
+        """
+        self.resolved.append(thread_id)
+        return True
+
+
+def _x_finding(*, file: str, line: int) -> ReviewFinding:
+    """X as the reviewer reports it on ``file``.
+
+    Args:
+        file: The file.
+        line: The line.
+
+    Returns:
+        The finding.
+    """
+    return ReviewFinding(
+        severity=Severity.P2,
+        category="logic-bug",
+        file=file,
+        line=line,
+        title="X",
+        description="d",
+        cause="c",
+        fix="f",
+        confidence="high",
+    )
+
+
+def _renamed_round(tmp_path: Path) -> tuple[ReviewState, DeltaPlan, str]:
+    """X has a thread on ``old.py:81``; the next push renames the file.
+
+    Args:
+        tmp_path: Pytest temp dir.
+
+    Returns:
+        The prior state, round 2's delta plan, and round 2's head.
+    """
+    repo = tmp_path / "repo"
+    base, h1 = _repo(repo, ["old.py"])
+    prior = ReviewState(
+        findings=(
+            replace(
+                _record(
+                    file="old.py",
+                    line=81,
+                    title="X",
+                    severity=Severity.P2,
+                    line_sha=h1,
+                ),
+                inline_comment_id=_THREAD_ID,
+            ),
+        ),
+        runs=(RunRecord(identity=RunIdentity(round=1, sha=h1)),),
+        head_sha=h1,
+    )
+    _git(repo, "mv", "old.py", "new.py")
+    h2 = _commit(repo, "rename")
+    plan = plan_delta(
+        prior=prior,
+        context=_context(repo=repo, base=base, head=h2, paths=["new.py"]),
+        repo_root=str(repo),
+        force_full=False,
+    )
+    return prior, plan, h2
+
+
+def test_a_renamed_finding_reported_again_is_carried_with_its_thread(
+    tmp_path: Path,
+) -> None:
+    """X reported at ``new.py:81`` pairs with its ``old.py`` record."""
+    prior, plan, h2 = _renamed_round(tmp_path)
+    (original,) = prior.findings
+    result = replace(
+        _relocated(
+            result=_round_result(reviewed_paths=("new.py",), eligible=1),
+            plan=plan,
+        ),
+        findings=(
+            _x_finding(file="new.py", line=81),
+            # A fresh X on a file re-added at the old path must not take the
+            # moved record's key.
+            _x_finding(file="old.py", line=5),
+        ),
+    )
+    request = _sticky_request(prior=prior, result=result, head=h2)
+
+    match = match_findings(
+        previous=prior,
+        findings=result.findings,
+        round_number=2,
+        head_sha=h2,
+        reviewed_paths=frozenset({"new.py"}),
+        relocations=matcher_relocations(result=result),
+    )
+    stamped = stamp_finding_ids(result=result, prior_state=prior, head_sha=h2)
+    state = advance_review_state(request=request)
+    body = build_sticky_comment(request=request)
+
+    (carried,) = match.carried
+    assert_that(match.resolved).is_empty()
+    assert_that([record.file for record in match.new]).is_equal_to(["old.py"])
+    assert_that(match.new[0].key).is_not_equal_to(original.key)
+    assert_that((carried.key, carried.inline_comment_id, carried.file)).is_equal_to(
+        (original.key, _THREAD_ID, "new.py"),
+    )
+    # The finding id and the inline marker both name the original record.
+    assert_that(stamped.findings[0].finding_id).is_equal_to(original.key)
+    assert_that(
+        record_keys(findings=[result.findings[0]], match=match),
+    ).is_equal_to([original.key])
+    assert_that(body).does_not_contain("~~X~~")
+    stored = next(record for record in state.findings if record.key == original.key)
+    assert_that(stored.status).is_equal_to(FindingStatus.OPEN)
+    assert_that(stored.match_fingerprint).is_equal_to(
+        fingerprint_for(file="new.py", category="logic-bug", title="X"),
+    )
+
+    # Round 3 carries no relocation: the persisted identity pairs on new.py.
+    restored = ReviewState.from_artifact_dict(
+        json.loads(json.dumps(state.to_artifact_dict())),
+    )
+    again = match_findings(
+        previous=restored,
+        findings=[_x_finding(file="new.py", line=81)],
+        round_number=3,
+        head_sha="c" * 40,
+        reviewed_paths=frozenset({"new.py"}),
+    )
+    assert_that([record.key for record in again.carried]).contains(original.key)
+    assert_that(again.new).is_empty()
+    assert_that([record.key for record in again.resolved]).does_not_contain(
+        original.key,
+    )
+
+
+def test_a_renamed_finding_that_is_fixed_stamps_its_own_thread(
+    tmp_path: Path,
+) -> None:
+    """X not reported on ``new.py`` resolves, and its old thread is stamped."""
+    prior, plan, h2 = _renamed_round(tmp_path)
+    (original,) = prior.findings
+    result = _relocated(
+        result=_round_result(reviewed_paths=("new.py",), eligible=1),
+        plan=plan,
+    )
+    match = match_findings(
+        previous=prior,
+        findings=(),
+        round_number=2,
+        head_sha=h2,
+        reviewed_paths=frozenset({"new.py"}),
+        relocations=matcher_relocations(result=result),
+    )
+    host = _ThreadHost(bodies={_THREAD_ID: "**X** on old.py"})
+
+    report = sync_addressed_lifecycle(
+        reporter=host,
+        request=LifecycleSyncRequest(
+            comment_bodies=dict(host.bodies),
+            head_sha=h2,
+            round_number=2,
+            resolved=match.resolved,
+        ),
+    )
+
+    (fixed,) = match.resolved
+    assert_that((fixed.key, fixed.inline_comment_id, fixed.file)).is_equal_to(
+        (original.key, _THREAD_ID, "new.py"),
+    )
+    assert_that(match.new).is_empty()
+    assert_that(report.edited).is_equal_to((original.key,))
+    assert_that(report.resolved).is_equal_to((original.key,))
+    assert_that(host.bodies[_THREAD_ID]).contains("Addressed in")
+    assert_that(host.resolved).is_equal_to([f"T{_THREAD_ID}"])

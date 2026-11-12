@@ -14,6 +14,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from lintro.ai.review.enums.finding_status import FindingStatus
+from lintro.ai.review.finding_identity import fingerprint_for
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -73,7 +74,24 @@ def _relocate(
     if moved is None or record.status is not FindingStatus.OPEN:
         return record
     path, line, line_sha = moved
-    return replace(record, file=path, line=line, line_sha=line_sha)
+    if path == record.file:
+        return replace(record, line=line, line_sha=line_sha)
+    # A rename moves the record, not its stable key: it pairs under its new
+    # path's identity while keeping the key its thread marker carries.
+    moved_fingerprint = fingerprint_for(
+        file=path,
+        category=record.category,
+        title=record.title,
+    )
+    return replace(
+        record,
+        file=path,
+        line=line,
+        line_sha=line_sha,
+        match_fingerprint=(
+            "" if moved_fingerprint == record.fingerprint else moved_fingerprint
+        ),
+    )
 
 
 def _carry_absent(

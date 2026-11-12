@@ -373,7 +373,7 @@ def _post_round_findings(
                 head_sha=result.metadata.head_ref,
             ),
             carried_fingerprints=frozenset(
-                record.fingerprint for record in match.carried
+                record.pairing_fingerprint for record in match.carried
             ),
             finding_keys=record_keys(findings=findings, match=match),
             provenance=regression_notes(reporter=reporter, match=match),

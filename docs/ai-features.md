@@ -912,16 +912,20 @@ resolve; it never narrows what it may report.**
   and line and stores it there (`DeltaPlan.relocations`, carried on the result as
   `relocated_findings`). When a location cannot be mapped (no recorded head, git cannot
   diff the range, the range edited the line itself, or a rename is ambiguous) the file
-  is read whole. Every diff behind this pins its format against user configuration:
-  literal pathspecs (`odd[1].py` is never a glob), `--no-textconv`, `--no-ext-diff`,
-  `--no-color`, `--no-relative` and fixed `a/`/`b/` prefixes. Only the section whose
-  headers name the intended file is read. A record still carried without being read (its
-  file was not read this round) is stored with `unverified: true`. The sticky, including
-  a board rebuilt from stored state, marks it **⏸ not re-verified**. Its severity and
-  its weight in the verdict do not change. The prompt says what range the embedded text
-  is ("the change since the previous review round … unchanged context lines may still be
-  earlier changes of this pull request"), and the depth-3 adversarial sweep and an
-  output-exhaustion split read the same delta text.
+  is read whole. A finding moved to a renamed file keeps its key, finding id and inline
+  thread, and from then on pairs under its new path's identity
+  (`FindingRecord.match_fingerprint`), so reporting it again carries it rather than
+  resolving the old record and opening a new one. Every diff behind this pins its format
+  against user configuration: literal pathspecs (`odd[1].py` is never a glob),
+  `--no-textconv`, `--no-ext-diff`, `--no-color`, `--no-relative` and fixed `a/`/`b/`
+  prefixes. Only the section whose headers name the intended file is read. A record
+  still carried without being read (its file was not read this round) is stored with
+  `unverified: true`. The sticky, including a board rebuilt from stored state, marks it
+  **⏸ not re-verified**. Its severity and its weight in the verdict do not change. The
+  prompt says what range the embedded text is ("the change since the previous review
+  round … unchanged context lines may still be earlier changes of this pull request"),
+  and the depth-3 adversarial sweep and an output-exhaustion split read the same delta
+  text.
 - **What is reported and counted.** Findings are never filtered by delta location, and
   coverage identity stays the whole-PR patch hash, so a changed file the round did not
   read still forces `INCOMPLETE` (ADR-0007). The question pass and the synthesis call

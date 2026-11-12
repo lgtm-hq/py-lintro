@@ -158,7 +158,7 @@ def review_findings_from_unposted(
             continue
         if not is_inline_tier(severity=record.severity):
             continue
-        if record.fingerprint in seen:
+        if record.pairing_fingerprint in seen:
             continue
         path = normalize_file_path(record.file)
         if path in reviewed_paths or record.file in reviewed_paths:
@@ -228,18 +228,23 @@ def _index_prior_records(
     Args:
         records: The prior state's finding records, in stored order.
 
+    A record moved to a renamed file (#3403) is a candidate under the
+    identity of its current path (:attr:`FindingRecord.pairing_fingerprint`)
+    while its stable key keeps the fingerprint it was created with, so its
+    ordinal is held under that stored fingerprint too.
+
     Returns:
-        Pairing candidates by fingerprint (indices into ``records``), and the
-        ordinals archived records hold, by fingerprint.
+        Pairing candidates by pairing fingerprint (indices into ``records``),
+        and the ordinals every record holds, by stored fingerprint.
     """
     by_fingerprint: dict[str, list[int]] = defaultdict(list)
-    archived: dict[str, set[int]] = defaultdict(set)
+    held: dict[str, set[int]] = defaultdict(set)
     for index, record in enumerate(records):
+        held[record.fingerprint].add(record.ordinal)
         if record.status is FindingStatus.REBASELINED:
-            archived[record.fingerprint].add(record.ordinal)
             continue
-        by_fingerprint[record.fingerprint].append(index)
-    return by_fingerprint, archived
+        by_fingerprint[record.pairing_fingerprint].append(index)
+    return by_fingerprint, held
 
 
 def match_findings(
@@ -329,7 +334,7 @@ def match_findings(
         round_number=round_number,
     )
 
-    prior_by_fingerprint, archived_ordinals = _index_prior_records(
+    prior_by_fingerprint, held_ordinals = _index_prior_records(
         records=prior_records,
     )
     current_by_fingerprint: dict[str, list[FindingRecord]] = defaultdict(list)
@@ -356,10 +361,9 @@ def match_findings(
         prior_group = [prior_records[index] for index in prior_indices]
         pairs = pair_group(prior=prior_group, current=group)
         # Every prior record of this fingerprint stays in state (matched,
-        # carried as resolved, or archived), so their ordinals remain taken.
-        taken = {record.ordinal for record in prior_group} | archived_ordinals[
-            fingerprint
-        ]
+        # carried as resolved, archived, or moved to a renamed file under its
+        # original key), so their ordinals remain taken.
+        taken = {record.ordinal for record in prior_group} | held_ordinals[fingerprint]
         assigned: dict[int, FindingRecord] = {}
 
         for current_index, record in enumerate(group):
