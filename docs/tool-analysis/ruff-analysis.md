@@ -219,16 +219,31 @@ or first-party. It decides first-party by resolving the module against its
 table that path is relative to the directory Ruff runs in, so plain `ruff check` can
 give a different verdict depending on where you start it.
 
-Lintro runs every Ruff subprocess from the **project root** of the files being linted:
-the nearest ancestor that has `.git`, `pyproject.toml` or another project marker. That
-covers the check pass, the format pass and the `lintro format` fix path. As a result,
-`lintro check` and `lintro format` sort imports the same way whether they are started
-from the repository root or from a subdirectory such as `scripts/ci/`.
+Lintro does not run Ruff in the directory you start it from. It runs every Ruff
+subprocess (the check pass, the format pass and the `lintro format` fix path) from a
+**project root** worked out from the files being linted. Lintro takes the common
+ancestor of those files and walks up to the nearest directory with `.git`,
+`pyproject.toml` or another project marker. So `lintro check scripts/ci` and
+`lintro format scripts/ci` give the same result whether you start them at the repository
+root or inside `scripts/ci/`, and `lintro check` and `lintro format` agree with each
+other.
 
-A module that only imports correctly from a subdirectory, for example a helper in
-`scripts/ci/` imported by a sibling script, is therefore classified as third-party from
-the project root. To treat it as first-party, set `src` explicitly. Lintro does not
-override it:
+The root still depends on **which paths you pass**, because they decide the files and so
+their common ancestor. For example, take a repository with `.git` at the top and a
+nested `pkg_c/pyproject.toml` with no `[tool.ruff]` table:
+
+- `lintro check .` also covers files outside `pkg_c`, so it anchors at the outer
+  repository. A module at `pkg_c/helper.py` is not a top-level module from there.
+- `lintro check pkg_c` anchors at `pkg_c`, where `helper` is first-party. The same
+  import in `pkg_c/sub/use.py` can therefore get a different `I001` verdict.
+
+A run that covers several projects uses the root they have in common, which is the outer
+one. Lintro does not group files by project.
+
+To fix the classification regardless of which paths you pass, set `src` explicitly. Ruff
+resolves it against the config file that declares it, and Lintro does not override it.
+For example, to treat a helper in `scripts/ci/` that a sibling script imports as
+first-party:
 
 ```toml
 [tool.ruff]

@@ -17,13 +17,16 @@ top-level module (third-party); seen from ``scripts/ci/`` it is a sibling
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from assertpy import assert_that
+from click.testing import CliRunner
 
+from lintro.cli_utils.commands.format import format_command
 from tests.integration._tools import require_tool
 
 if TYPE_CHECKING:
@@ -169,3 +172,56 @@ def test_explicit_ruff_src_keeps_its_classification(
     assert_that(_import_sort_codes(ruff, tmp_path)).does_not_contain("I001")
     ruff.fix([str(tmp_path)], {})
     assert_that(script.read_text()).is_equal_to(SUBDIR_ANCHORED_IMPORTS)
+
+
+def test_format_reports_paths_and_fixes_against_the_directory_ruff_ran_in(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``ruff format --check`` paths resolve against the root ruff ran in.
+
+    Three sibling projects are formatted from inside one of them, so the
+    execution root (the outer repository) differs from the process cwd. Before
+    #2349 the format check ran in the process cwd while its ``Would reformat:``
+    paths were resolved against the execution root: ``pkg_b`` files were shown
+    as nonexistent ``../fmt.py`` / ``../m.py`` and, because the verify pass
+    could not find them, two of the seven fixes were reported as remaining.
+
+    Args:
+        tmp_path: Pytest fixture providing a temporary directory.
+        monkeypatch: Pytest fixture used to change the process cwd.
+    """
+    (tmp_path / ".git").mkdir()
+    for package in ("pkg_a", "pkg_b", "pkg_c"):
+        (tmp_path / package).mkdir()
+        (tmp_path / package / "pyproject.toml").write_text(
+            f'[project]\nname = "{package}"\nversion = "0.1.0"\n',
+        )
+    (tmp_path / "pkg_a" / "a.py").write_text("x=1\n")
+    (tmp_path / "pkg_b" / "fmt.py").write_text("y=2\n")
+    (tmp_path / "pkg_b" / "m.py").write_text("import sys\nimport os\nz=3\n")
+    (tmp_path / "pkg_c" / "c.py").write_text("w=4\n")
+    monkeypatch.chdir(tmp_path / "pkg_b")
+
+    result = CliRunner().invoke(
+        format_command,
+        [
+            "../pkg_a",
+            "../pkg_b",
+            "../pkg_c",
+            "--tools",
+            "ruff",
+            "--tool-options",
+            "ruff:format=True",
+            "--yes",
+            "--no-art",
+        ],
+    )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).contains("| ./fmt.py ", "| ./m.py ")
+    assert_that(result.output).does_not_contain("../fmt.py", "../m.py")
+    net_resolved = re.search(r"Net Resolved \(Native\)\s*\|\s*(\d+)", result.output)
+    assert_that(net_resolved).is_not_none()
+    assert_that(int(net_resolved.group(1)) if net_resolved else -1).is_equal_to(7)
+    assert_that((tmp_path / "pkg_b" / "fmt.py").read_text()).is_equal_to("y = 2\n")
