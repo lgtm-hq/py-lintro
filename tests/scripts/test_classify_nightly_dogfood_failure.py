@@ -480,20 +480,29 @@ _PROBE_TIMEOUT_GATE = {
 }
 
 
+def _probe_timeout_retry(tools: str) -> dict[str, str]:
+    """Build a skip-gate retry that failed only on version-probe timeouts.
+
+    Args:
+        tools: The retry's ``probe-timed-out-tools`` value.
+
+    Returns:
+        The retry's workflow environment values.
+    """
+    return {
+        "SKIP_GATE_RETRY_RESULT": "failure",
+        "SKIP_GATE_RETRY_STATUS": "failed",
+        "SKIP_GATE_RETRY_EXIT_CODE": "1",
+        "SKIP_GATE_RETRY_PROBE_TIMEOUT_FLAKE": "true",
+        "SKIP_GATE_RETRY_PROBE_TIMED_OUT_TOOLS": tools,
+    }
+
+
 @pytest.mark.parametrize(
     ("retry", "notify", "action_required"),
     [
         ({"SKIP_GATE_RETRY_RESULT": "success"}, False, False),
-        (
-            {
-                "SKIP_GATE_RETRY_RESULT": "failure",
-                "SKIP_GATE_RETRY_STATUS": "failed",
-                "SKIP_GATE_RETRY_EXIT_CODE": "1",
-                "SKIP_GATE_RETRY_PROBE_TIMEOUT_FLAKE": "true",
-            },
-            True,
-            False,
-        ),
+        (_probe_timeout_retry("osv-scanner"), True, False),
         (
             {
                 "SKIP_GATE_RETRY_RESULT": "failure",
@@ -506,7 +515,7 @@ _PROBE_TIMEOUT_GATE = {
         ),
         ({"SKIP_GATE_RETRY_RESULT": "skipped"}, True, True),
     ],
-    ids=["retry-passed", "retry-timed-out-again", "retry-genuine", "no-retry"],
+    ids=["retry-passed", "retry-timed-out-other-tool", "retry-genuine", "no-retry"],
 )
 def test_skip_gate_probe_timeout_is_infra_answered_by_its_retry(
     module: ModuleType,
@@ -516,12 +525,88 @@ def test_skip_gate_probe_timeout_is_infra_answered_by_its_retry(
 ) -> None:
     """A probe-timeout-only skip-gate failure is infra, not a regression (#3383).
 
-    A retry that passes clears the night, a second timeout is a coverage gap
-    with no action required, and a genuine retry failure or a missing retry
-    still demands action.
+    A retry that passes clears the night, a second timeout for a different
+    tool is a coverage gap with no action required, and a genuine retry
+    failure or a missing retry still demands action.
     """
     decision = _decide(module, **_PROBE_TIMEOUT_GATE, **retry)
 
     assert_that((decision.notify, decision.action_required)).is_equal_to(
         (notify, action_required),
     )
+
+
+def test_probe_timeout_for_different_tools_keeps_the_coverage_gap_annotation(
+    module: ModuleType,
+) -> None:
+    """Disjoint timeouts read as runner noise, so no tool is named."""
+    decision = _decide(
+        module,
+        **_PROBE_TIMEOUT_GATE,
+        **_probe_timeout_retry("osv-scanner"),
+    )
+
+    assert_that(decision.annotation).contains("no lint verdict tonight")
+    assert_that(decision.annotation).does_not_contain("Version probe")
+
+
+@pytest.mark.parametrize(
+    ("primary_tools", "retry_tools", "named"),
+    [
+        ("semgrep", "semgrep", "semgrep"),
+        ("semgrep,bandit", "Bandit , gitleaks", "bandit"),
+        ("osv-scanner", "osv_scanner", "osv-scanner"),
+    ],
+    ids=["same-tool", "partial-overlap", "hyphen-underscore"],
+)
+def test_repeated_probe_timeout_for_the_same_tool_demands_action(
+    module: ModuleType,
+    primary_tools: str,
+    retry_tools: str,
+    named: str,
+) -> None:
+    """The same tool hanging on --version on both attempts is an image suspect.
+
+    It must not hide under the no-action coverage-gap label night after night:
+    the ping demands action and names only the tools both attempts reported.
+    """
+    decision = _decide(
+        module,
+        **{
+            **_PROBE_TIMEOUT_GATE,
+            "SKIP_GATE_PROBE_TIMED_OUT_TOOLS": primary_tools,
+        },
+        **_probe_timeout_retry(retry_tools),
+    )
+
+    assert_that((decision.notify, decision.action_required)).is_equal_to(
+        (True, True),
+    )
+    assert_that(decision.annotation).is_equal_to(
+        f"Version probe timed out on both skip-gate attempts for: {named}. A "
+        "tool that hangs on --version every attempt is likely an image bug, "
+        "not runner noise. Action required.",
+    )
+    assert_that(decision.reason).contains(
+        f"dogfood-skip-gate: version probe timed out on both attempts ({named})",
+    )
+
+
+def test_repeated_probe_timeout_beside_a_lint_kill_pair_still_demands_action(
+    module: ModuleType,
+) -> None:
+    """A coverage-gap unit elsewhere cannot downgrade the probe-timeout ping."""
+    decision = _decide(
+        module,
+        LINT_RESULT="failure",
+        LINT_EXIT_CODE="143",
+        LINT_RETRY_RESULT="failure",
+        LINT_RETRY_EXIT_CODE="143",
+        **_PROBE_TIMEOUT_GATE,
+        **_probe_timeout_retry("semgrep"),
+    )
+
+    assert_that((decision.notify, decision.action_required)).is_equal_to(
+        (True, True),
+    )
+    assert_that(decision.annotation).contains("for: semgrep")

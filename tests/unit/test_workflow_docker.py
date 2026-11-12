@@ -1837,10 +1837,16 @@ def test_dogfood_nightly_wires_probe_timeout_flake_end_to_end() -> None:
             },
         )
 
+    # Pinned whole: the retry needs a failed/cancelled gate AND either no
+    # verdict OR a probe-timeout-only verdict. An && inside either group, or
+    # a dropped group, would silently change who gets retried.
     condition = _normalize_github_expr(nightly["jobs"]["dogfood_skip_gate_retry"]["if"])
-    assert_that(condition).contains(
-        "needs.dogfood-skip-gate.outputs.status == ''",
-        "needs.dogfood-skip-gate.outputs.probe-timeout-flake == 'true'",
+    assert_that(condition).is_equal_to(
+        "always() && !cancelled() && "
+        "( needs.dogfood-skip-gate.result == 'failure' || "
+        "needs.dogfood-skip-gate.result == 'cancelled' ) && "
+        "( needs.dogfood-skip-gate.outputs.status == '' || "
+        "needs.dogfood-skip-gate.outputs.probe-timeout-flake == 'true' )",
     )
 
     step = next(
