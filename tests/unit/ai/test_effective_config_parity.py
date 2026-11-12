@@ -14,11 +14,13 @@ per-call ``max_cost_usd`` argument may only lower the resolved ceiling.
 from __future__ import annotations
 
 import ast
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 from assertpy import assert_that
+from click.testing import CliRunner
 
 from lintro.ai.effective_config import (
     NO_CLI_OVERRIDES,
@@ -314,6 +316,78 @@ def test_status_rendering_consumes_the_resolved_value(
     assert_that(render_facade(ai_config=dict(RAW_AI_SECTION), is_ci=False)).is_equal_to(
         render_resolved(ai_config=resolved, is_ci=False),
     )
+
+
+def test_status_and_execution_agree_for_a_flag_overridden_transport(
+    monkeypatch: pytest.MonkeyPatch,
+    ai_config_project: Callable[[str], Path],
+) -> None:
+    """``check --transport cli``: the summary and the AI hook see one value.
+
+    The pre-execution status row used to resolve ``ai:`` without the
+    invocation's flags while execution resolved it with them, so the two
+    disagreed on transport (#2374). Both seams are recorded here through the
+    real ``check`` command: they must receive the very same resolved object,
+    carrying the flag's transport and ``flag`` provenance.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        ai_config_project: Writer for an isolated project config.
+    """
+    import lintro.ai.display.status as status_module
+    import lintro.ai.hook as hook_module
+    from lintro.cli import cli
+
+    root = ai_config_project(
+        "tools:\n  ruff:\n    enabled: true\n"
+        "ai:\n  enabled: true\n  lint: false\n  provider: anthropic\n"
+        "  transport: api\n",
+    )
+    (root / "a.py").write_text("x = 1\n", encoding="utf-8")
+    seen: dict[str, object] = {}
+    real_render = status_module.render_ai_status
+    real_hook = hook_module.AIPostExecutionHook
+
+    def _record_status(**kwargs: Any) -> list[str]:
+        """Record the config the status row renders, then render it.
+
+        Args:
+            **kwargs: Renderer keyword arguments.
+
+        Returns:
+            The real renderer's lines.
+        """
+        seen["status"] = kwargs["ai_config"]
+        return real_render(**kwargs)
+
+    def _record_hook(*args: Any, **kwargs: Any) -> Any:
+        """Record the config the AI hook executes with, then build it.
+
+        Args:
+            *args: Hook positional arguments.
+            **kwargs: Hook keyword arguments.
+
+        Returns:
+            The real hook.
+        """
+        seen["execution"] = kwargs["resolved_ai_config"]
+        return real_hook(*args, **kwargs)
+
+    monkeypatch.setattr(status_module, "render_ai_status", _record_status)
+    monkeypatch.setattr(hook_module, "AIPostExecutionHook", _record_hook)
+
+    result = CliRunner().invoke(
+        cli,
+        ["check", "--transport", "cli", "--tools", "ruff", "--no-art", "a.py"],
+    )
+
+    assert_that(result.exit_code).described_as(result.output).is_equal_to(0)
+    status = seen["status"]
+    assert_that(status).is_instance_of(ResolvedAIConfig)
+    assert_that(seen["execution"]).is_same_as(status)
+    assert isinstance(status, ResolvedAIConfig)
+    assert_that(status.config.transport).is_equal_to(AITransport.CLI)
+    assert_that(status.source_of("transport")).is_equal_to(ConfigSource.FLAG)
 
 
 # ---------------------------------------------------------------------------

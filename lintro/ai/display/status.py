@@ -35,13 +35,11 @@ def render_ai_status(
 
     This renderer never resolves configuration. It reports a value some
     caller already resolved (#2299):
-    :func:`lintro.ai.interface.render_ai_status` is the seam that turns the
-    core executor's raw ``ai:`` mapping into a
-    :class:`~lintro.ai.resolved_ai_config.ResolvedAIConfig`, through the same
-    resolver execution uses. What that seam can pass is limited by what the
-    core summary hands it: project and environment layers, without the
-    invocation's flags (see
-    `#2374 <https://github.com/lgtm-hq/py-lintro/issues/2374>`_).
+    :func:`lintro.ai.interface.render_ai_status` is the seam that hands it a
+    :class:`~lintro.ai.resolved_ai_config.ResolvedAIConfig`. The run pipeline
+    resolves that value once per invocation, with the invocation's CLI flags,
+    and gives the same value to the AI layer, so the status rows show what the
+    run executes with (#2374).
 
     Args:
         ai_config: A :class:`ResolvedAIConfig` carrying provenance, a bare

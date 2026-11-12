@@ -452,3 +452,45 @@ def test_interface_public_surface_stays_small():
             "sarif_enrichment_from_results",
         ],
     )
+
+
+# ---------------------------------------------------------------------------
+# transport vs. an already-resolved config (#2374)
+# ---------------------------------------------------------------------------
+
+
+def test_run_ai_layer_rejects_transport_next_to_a_resolved_config() -> None:
+    """A separate ``transport`` would be dropped, so passing both is refused."""
+    lintro_config = _config(enabled=True)
+    resolved = interface.resolve_effective_ai_config(lintro_config)
+
+    assert_that(run_ai_layer).raises(ValueError).when_called_with(
+        action=Action.CHECK,
+        all_results=[],
+        lintro_config=lintro_config,
+        console_logger=_RecordingLogger(),
+        output_format="grid",
+        transport="cli",
+        resolved_ai_config=resolved,
+    ).contains("not both")
+
+
+@dataclass
+class _EarlyExitArtifact:
+    """Artifact stand-in for a run that stopped before any tool ran."""
+
+    early_exit: bool = True
+
+
+def test_enhance_artifact_rejects_both_even_when_the_run_exited_early() -> None:
+    """The caller bug is reported before the early-exit shortcut hides it."""
+    resolved = interface.resolve_effective_ai_config(_config(enabled=True))
+    artifact: Any = _EarlyExitArtifact()
+
+    assert_that(interface.enhance_artifact).raises(ValueError).when_called_with(
+        artifact,
+        ctx=None,
+        output_format="grid",
+        transport="cli",
+        resolved_ai_config=resolved,
+    ).contains("resolved_ai_config")
