@@ -50,6 +50,25 @@ from lintro.tools.core.option_validators import (
 # Constants for Black configuration
 BLACK_DEFAULT_TIMEOUT: int = 30
 BLACK_FILE_PATTERNS: list[str] = ["*.py", "*.pyi"]
+BLACK_SILENT_EXIT_NOTE: str = (
+    "Black exited with code 1 but printed no report. Black prints nothing "
+    "when `quiet = true` is set in [tool.black]; lintro reads Black's "
+    "per-file report, so remove that setting to check or format with lintro."
+)
+
+
+def _report_output(process: SubprocessResult) -> str:
+    """Return Black's report, explaining a verdict that came without one.
+
+    Args:
+        process: Native Black result.
+
+    Returns:
+        Display output, with a note when exit 1 carried no report at all.
+    """
+    if process.returncode == 1 and not (process.stdout + process.stderr).strip():
+        return f"{process.output.rstrip()}\n{BLACK_SILENT_EXIT_NOTE}"
+    return process.output
 
 
 @dataclass
@@ -328,9 +347,14 @@ class BlackPlugin(BaseToolPlugin):
         except subprocess.TimeoutExpired:
             return self._handle_timeout_error(ctx.timeout, cwd=ctx.cwd)
 
-        output = process.output
+        output = _report_output(process)
         black_issues = parse_black_output(output=output)
-        parse_failures = black_report_parse_failures(output, black_issues)
+        parse_failures = black_report_parse_failures(
+            output,
+            black_issues,
+            files=ctx.rel_files,
+            cwd=ctx.cwd,
+        )
         execution_failed = process.returncode not in (0, 1) or (
             process.returncode == 1 and not black_issues
         )
@@ -382,9 +406,11 @@ class BlackPlugin(BaseToolPlugin):
         *,
         timeout: float,
         cwd: str | None,
+        files: list[str],
         initial_issues: list[BlackIssue],
         initial_count: int | None = None,
         check: bool = True,
+        retained: list[BlackIssue] | None = None,
     ) -> SubprocessResult | ToolResult:
         """Keep incomplete Black passes from certifying inspection or fix counts.
 
@@ -392,25 +418,35 @@ class BlackPlugin(BaseToolPlugin):
             cmd: Native Black command for this pass.
             timeout: Subprocess deadline in seconds.
             cwd: Working directory for the report's file identities.
+            files: Exact file arguments passed to Black, relative to cwd.
             initial_issues: Findings retained from a completed initial check.
             initial_count: Initial count, only when its measurement completed.
             check: Whether exit 1 with findings is a legitimate check verdict.
+            retained: Findings to keep if this pass fails, when they differ
+                from ``initial_issues`` (a completed diff preview).
 
         Returns:
             An unmeasured failure retaining native diagnostics and findings,
             or the native result when this pass completed without losing entries.
         """
+        kept = list(initial_issues if retained is None else retained)
         try:
             process = self._run_subprocess_result(cmd=cmd, timeout=timeout, cwd=cwd)
         except subprocess.TimeoutExpired:
             return replace(
                 self._handle_timeout_error(timeout, initial_count, cwd),
-                issues_count=len(initial_issues),
-                issues=initial_issues,
+                issues_count=len(kept),
+                issues=kept,
                 initial_issues=initial_issues,
             )
-        issues = parse_black_output(process.output)
-        parse_failures = black_report_parse_failures(process.output, issues)
+        output = _report_output(process)
+        issues = parse_black_output(output)
+        parse_failures = black_report_parse_failures(
+            output,
+            issues,
+            files=files,
+            cwd=cwd,
+        )
         execution_failed = not (
             process.success or (check and process.returncode == 1 and bool(issues))
         )
@@ -419,13 +455,16 @@ class BlackPlugin(BaseToolPlugin):
         # Unknown residuals still carry measured pre-fix findings. Mutation
         # reports describe applied changes, so only read-only reports can add
         # findings. Deduplicate formatting by file without collapsing E501s.
-        retained = list(initial_issues)
         if check or "--diff" in cmd:
-            files = {issue.file for issue in retained if not issue.code}
+            formatted = {issue.file for issue in kept if not issue.code}
+            # A summary-only report names no files, so its entries may be the
+            # retained ones. Count only what exceeds them: max(retained, N).
+            unknown = [issue for issue in issues if issue.file == "<unknown>"]
+            kept.extend(unknown[len(formatted) :])
             for issue in issues:
-                if issue.file == "<unknown>" or issue.file not in files:
-                    retained.append(issue)
-                    files.add(issue.file)
+                if issue.file not in formatted and issue.file != "<unknown>":
+                    kept.append(issue)
+                    formatted.add(issue.file)
         return ToolResult.from_outcome(
             ToolOutcome(
                 execution=Checked(success=False),
@@ -433,13 +472,13 @@ class BlackPlugin(BaseToolPlugin):
                     initial=initial_count,
                     reason="Black report incomplete; fix counts unavailable",
                 ),
-                issues_count=len(retained),
+                issues_count=len(kept),
             ),
             name=self.definition.name,
             execution_failed=execution_failed,
             parse_failures_count=parse_failures or None,
-            output=process.output,
-            issues=retained,
+            output=output,
+            issues=kept,
             initial_issues=initial_issues,
             cwd=cwd,
         )
@@ -490,6 +529,7 @@ class BlackPlugin(BaseToolPlugin):
                 check_cmd,
                 timeout=ctx.timeout,
                 cwd=ctx.cwd,
+                files=ctx.rel_files,
                 initial_issues=[],
                 initial_count=None,
             )
@@ -500,11 +540,9 @@ class BlackPlugin(BaseToolPlugin):
                 files=ctx.rel_files,
                 cwd=ctx.cwd,
             )
-            # Use preview wording when the supplement aborts before any writes.
-            initial_issues = parse_black_output(
-                output=check_output,
-                applied=not initial_supplement.failed,
-            )
+            # Pre-fix findings describe proposed changes. They are retained
+            # unchanged whenever a later pass fails, so never claim a write.
+            initial_issues = parse_black_output(output=check_output)
             initial_issues = initial_issues + initial_supplement.issues
             initial_count = len(initial_issues)
             if initial_supplement.failed:
@@ -522,6 +560,7 @@ class BlackPlugin(BaseToolPlugin):
                         issues_count=initial_count,
                     ),
                     name=self.definition.name,
+                    execution_failed=True,
                     output=failure_output,
                     issues=initial_issues,
                     cwd=ctx.cwd,
@@ -539,6 +578,7 @@ class BlackPlugin(BaseToolPlugin):
             fix_cmd,
             timeout=ctx.timeout,
             cwd=ctx.cwd,
+            files=ctx.rel_files,
             initial_issues=initial_issues,
             initial_count=None if self.options.get("diff") else initial_count,
             check=False,
@@ -546,14 +586,18 @@ class BlackPlugin(BaseToolPlugin):
         if isinstance(fix_process, ToolResult):
             return fix_process
         fix_output = fix_process.output
+        fixed_issues_parsed = parse_black_output(output=fix_output)
 
-        # Final check for remaining differences
+        # Final check for remaining differences. A completed diff preview is a
+        # measurement in its own right, so keep it if the final check fails.
         final_process = self._run_fix_pass(
             check_cmd,
             timeout=ctx.timeout,
             cwd=ctx.cwd,
+            files=ctx.rel_files,
             initial_issues=initial_issues,
             initial_count=None if self.options.get("diff") else initial_count,
+            retained=fixed_issues_parsed if self.options.get("diff") else None,
         )
         if isinstance(final_process, ToolResult):
             return final_process
@@ -574,7 +618,6 @@ class BlackPlugin(BaseToolPlugin):
         all_remaining_issues = remaining_issues + line_length_issues
         remaining_count = len(all_remaining_issues)
 
-        fixed_issues_parsed = parse_black_output(output=fix_output)
         fixed_count = max(0, initial_count - remaining_count)
 
         # Build summary

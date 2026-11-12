@@ -253,3 +253,37 @@ def test_intentionally_indented_pseudo_records_are_not_native_reports(
 
     assert_that(parse_black_output(output)).is_empty()
     assert_that(black_report_parse_failures(output, [])).is_zero()
+
+
+@pytest.mark.parametrize(
+    ("reported", "failures"),
+    [
+        ("pkg/mod.py", 0),
+        ("./pkg/mod.py", 0),
+        ("pkg/../pkg/mod.py", 0),
+        ("{root}/pkg/mod.py", 0),
+        ("pkg/mo", 1),
+        ("other.py", 1),
+    ],
+    ids=["exact", "dot", "parent", "absolute", "truncated", "foreign"],
+)
+def test_reported_names_must_match_an_input(
+    tmp_path: Path,
+    reported: str,
+    failures: int,
+) -> None:
+    """Only names that spell a Black input count as identified findings."""
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "mod.py").write_text("x=1\n", encoding="utf-8")
+    output = f"would reformat {reported.format(root=tmp_path)}\n"
+    issues = parse_black_output(output)
+
+    assert_that(
+        black_report_parse_failures(
+            output,
+            issues,
+            files=["pkg/mod.py"],
+            cwd=str(tmp_path),
+        ),
+    ).is_equal_to(failures)
+    assert_that(black_report_parse_failures(output, issues)).is_zero()

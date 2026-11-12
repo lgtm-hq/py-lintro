@@ -64,7 +64,8 @@ def test_black_coverage_validates_invocation_and_report(
     ):
         result = plugin.check([str(file)], {})
 
-    assert result.findings_complete is True
+    # A finding for a file Black was never given cannot be attributed (#3354).
+    assert result.findings_complete is ("would reformat victim.py" not in report)
     assert result.issues_count == returncode
     assert result.inspected_paths == (frozenset({str(file)}) if covered else None)
 
