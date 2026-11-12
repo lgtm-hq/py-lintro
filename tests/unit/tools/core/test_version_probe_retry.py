@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from assertpy import assert_that
 
+from lintro.enums.probe_failure import ProbeFailure
 from lintro.tools.core.version_parsing import (
     _run_probe_with_retry,
     check_tool_version,
@@ -88,6 +89,8 @@ def test_probe_timeout_then_success_parses_version_with_doubled_budget(
 
     assert_that(info.current_version).is_equal_to(semgrep_min)
     assert_that(info.probe_failed).is_false()
+    assert_that(info.probe_failure).is_none()
+    assert_that(info.probe_seconds).is_none()
     assert_that(info.error_message).is_none()
     assert_that(budgets).is_equal_to([30, 60])
     assert_that(logged_warnings).is_length(1)
@@ -98,11 +101,11 @@ def test_probe_timeout_then_success_parses_version_with_doubled_budget(
     )
 
 
-def test_probe_timing_out_twice_is_skipped_naming_both_budgets(
+def test_probe_timing_out_twice_is_a_probe_timeout_naming_both_budgets(
     monkeypatch: pytest.MonkeyPatch,
     scripted_run: Callable[[list[_Outcome]], list[float]],
 ) -> None:
-    """Two timeouts still fail the probe, and the message names both budgets.
+    """Two timeouts fail the probe as a timeout, naming both budgets (#2337).
 
     Args:
         monkeypatch: Pytest fixture for patching modules and attributes.
@@ -114,12 +117,11 @@ def test_probe_timing_out_twice_is_skipped_naming_both_budgets(
     info = check_tool_version("semgrep", ["semgrep"])
 
     assert_that(info.probe_failed).is_true()
+    assert_that(info.probe_failure).is_equal_to(ProbeFailure.PROBE_TIMEOUT)
+    assert_that(info.probe_seconds).is_not_none()
     assert_that(info.current_version).is_none()
-    assert_that(info.error_message).starts_with("Failed to run version check: ")
-    assert_that(info.error_message).contains(
-        "['semgrep', '--version']",
-        "timed out after 30 seconds",
-        "again after 60 seconds on retry",
+    assert_that(info.error_message).is_equal_to(
+        "version probe timed out twice (30 s, 60 s)",
     )
     assert_that(budgets).is_equal_to([30, 60])
 
@@ -143,6 +145,8 @@ def test_probe_missing_binary_fails_without_retry(
     info = check_tool_version("semgrep", ["semgrep"])
 
     assert_that(info.probe_failed).is_true()
+    assert_that(info.probe_failure).is_equal_to(ProbeFailure.BINARY_MISSING)
+    assert_that(info.probe_seconds).is_none()
     assert_that(info.current_version).is_none()
     assert_that(info.error_message).is_equal_to(
         f"Failed to run version check: {missing}",

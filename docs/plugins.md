@@ -341,6 +341,33 @@ does **not** mean the tool inspected files or passed a check, and unavailable to
 not count toward inspection coverage. In format results, `fixed`, `net_resolved` and
 `remaining` are `null`, not measured zeros.
 
+When the version probe knows why it failed, an unavailable result also carries a stable
+`probe_failure` code (#2337):
+
+| `probe_failure`  | Meaning                                                          |
+| ---------------- | ---------------------------------------------------------------- |
+| `binary_missing` | The executable was not found                                     |
+| `probe_timeout`  | The executable ran, but `--version` timed out twice (with retry) |
+
+A `probe_timeout` result adds `probe_seconds`, the wall-clock seconds both attempts
+took, and its `unavailable_reason` names both budgets:
+
+```json
+{
+  "status": "unavailable",
+  "unavailable": true,
+  "unavailable_reason": "version probe timed out twice (30 s, 60 s)",
+  "probe_failure": "probe_timeout",
+  "probe_seconds": 90.0,
+  "skipped": false,
+  "skip_reason": null
+}
+```
+
+Other probe failures, such as a non-zero exit or unparseable output, omit both keys. A
+slow probe is not a missing tool: CI can treat `probe_timeout` as infrastructure noise
+while still failing on `binary_missing`.
+
 Set `execution.strict_missing_tools: true` to require installed, runnable tools:
 unavailability then sets `success: false` and makes the run exit 1, while retaining
 `status: unavailable` and `skipped: false`. Ambiguous plugin definitions fail with
@@ -383,17 +410,19 @@ configuration guide.
 
 The `ToolResult` dataclass represents execution results:
 
-| Field                | Type                  | Description                                   |
-| -------------------- | --------------------- | --------------------------------------------- |
-| `name`               | `str`                 | Tool name                                     |
-| `success`            | `bool`                | Whether execution succeeded                   |
-| `output`             | `str \| None`         | Raw output (errors/warnings)                  |
-| `issues_count`       | `int`                 | Number of issues found                        |
-| `issues`             | `Sequence[BaseIssue]` | Parsed issues; defaults to `()`               |
-| `initial_issues`     | `Sequence[BaseIssue]` | Pre-fix issues; defaults to `()`              |
-| `metadata`           | `dict[str, Any]`      | Tool metadata; defaults to a new `{}`         |
-| `unavailable_reason` | `str \| None`         | Keyword-only reason execution could not start |
-| `unavailable`        | `bool` (read-only)    | Derived from the frozen `Unavailable` outcome |
+| Field                | Type                   | Description                                   |
+| -------------------- | ---------------------- | --------------------------------------------- |
+| `name`               | `str`                  | Tool name                                     |
+| `success`            | `bool`                 | Whether execution succeeded                   |
+| `output`             | `str \| None`          | Raw output (errors/warnings)                  |
+| `issues_count`       | `int`                  | Number of issues found                        |
+| `issues`             | `Sequence[BaseIssue]`  | Parsed issues; defaults to `()`               |
+| `initial_issues`     | `Sequence[BaseIssue]`  | Pre-fix issues; defaults to `()`              |
+| `metadata`           | `dict[str, Any]`       | Tool metadata; defaults to a new `{}`         |
+| `unavailable_reason` | `str \| None`          | Keyword-only reason execution could not start |
+| `probe_failure`      | `ProbeFailure \| None` | Keyword-only probe cause, unavailable only    |
+| `probe_seconds`      | `float \| None`        | Keyword-only timed-out probe duration         |
+| `unavailable`        | `bool` (read-only)     | Derived from the frozen `Unavailable` outcome |
 
 Omit empty collection arguments or pass an empty sequence or dictionary. Passing `None`
 for `issues`, `initial_issues` or `metadata` raises a `TypeError` naming the field when

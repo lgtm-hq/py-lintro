@@ -6,6 +6,8 @@ import sys
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from lintro.enums.probe_failure import ProbeFailure
+
 
 @dataclass(frozen=True)
 class ToolCapabilities:
@@ -79,6 +81,8 @@ class ToolSnapshot:
         below_recommended: True when installed version is below recommended.
         command: Executable command resolved from the probe directory.
         probed_at: Original probe time, preserved across subset cache writes.
+        probe_failure: Structured cause of a failed probe, when known.
+        probe_seconds: Wall-clock seconds a timed-out probe spent, or None.
     """
 
     name: str
@@ -95,6 +99,8 @@ class ToolSnapshot:
     below_recommended: bool = False
     command: tuple[str, ...] = ()
     probed_at: float = 0.0
+    probe_failure: ProbeFailure | None = None
+    probe_seconds: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the snapshot for JSON cache / API output.
@@ -117,6 +123,10 @@ class ToolSnapshot:
             "below_recommended": self.below_recommended,
             "command": list(self.command),
             "probed_at": self.probed_at,
+            "probe_failure": (
+                None if self.probe_failure is None else str(self.probe_failure)
+            ),
+            "probe_seconds": self.probe_seconds,
         }
 
     @classmethod
@@ -151,6 +161,16 @@ class ToolSnapshot:
                 or not 0 <= value <= sys.float_info.max
             ):
                 raise ValueError(f"{key} must be a finite nonnegative number")
+        probe_failure = values["probe_failure"]
+        if probe_failure is not None and probe_failure not in set(ProbeFailure):
+            raise ValueError("probe_failure must be a known probe failure or null")
+        probe_seconds = values["probe_seconds"]
+        if probe_seconds is not None and (
+            isinstance(probe_seconds, bool)
+            or not isinstance(probe_seconds, (int, float))
+            or not 0 <= probe_seconds <= sys.float_info.max
+        ):
+            raise ValueError("probe_seconds must be a finite nonnegative number")
         # Missing command evidence cannot establish a cache's binary identity.
         # Explicit in-process snapshots still serialize an empty command list.
         command = data.get("command")
@@ -173,6 +193,10 @@ class ToolSnapshot:
             below_recommended=values["below_recommended"],
             command=tuple(command),
             probed_at=float(values["probed_at"]),
+            probe_failure=(
+                None if probe_failure is None else ProbeFailure(probe_failure)
+            ),
+            probe_seconds=None if probe_seconds is None else float(probe_seconds),
         )
 
     def cache_key_matches(

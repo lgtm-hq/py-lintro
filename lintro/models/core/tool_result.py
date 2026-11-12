@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from lintro.enums.capability import Cap
+from lintro.enums.probe_failure import ProbeFailure
 from lintro.models.core.tool_outcome import ToolOutcome, outcome_from_result
 
 if TYPE_CHECKING:
@@ -108,6 +109,9 @@ class ToolResult:
 
     # Probe evidence for the frozen Unavailable outcome; success carries policy.
     unavailable_reason: str | None = field(default=None, kw_only=True)
+    # Structured probe cause and timed-out probe duration; unavailable only.
+    probe_failure: ProbeFailure | None = field(default=None, kw_only=True)
+    probe_seconds: float | None = field(default=None, kw_only=True)
 
     # Execution-timeout tracking. ``True`` when the tool's subprocess exceeded
     # its deadline and was killed. A timeout is an *execution failure*, not a

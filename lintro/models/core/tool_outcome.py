@@ -8,8 +8,11 @@ Issue objects, output and metadata remain on the frozen ToolResult envelope.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, TypeAlias
+
+from lintro.enums.probe_failure import ProbeFailure
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
@@ -93,15 +96,37 @@ class Unavailable:
     """A capability probe could not establish a runnable tool.
 
     Strict policy fails the run without turning unavailable tools into findings.
+    ``probe_failure`` is the structured cause when the probe knows it, and
+    ``probe_seconds`` is the time a timed-out probe spent (#2337).
     """
 
     reason: str
     strict: bool = False
+    probe_failure: ProbeFailure | None = None
+    probe_seconds: float | None = None
 
     def __post_init__(self) -> None:
-        """Validate the probe evidence and missing-tool policy."""
+        """Validate the probe evidence and missing-tool policy.
+
+        Raises:
+            ValueError: If the probe cause or timing is malformed or the timing
+                is supplied for anything other than a probe timeout.
+        """
         _validate_reason(self.reason)
         _validate_boolean(self.strict)
+        if self.probe_failure is not None and not isinstance(
+            self.probe_failure,
+            ProbeFailure,
+        ):
+            raise ValueError("probe_failure must be a ProbeFailure")
+        if self.probe_seconds is None:
+            return
+        if self.probe_failure is not ProbeFailure.PROBE_TIMEOUT:
+            raise ValueError("probe_seconds requires a probe_timeout failure")
+        if type(self.probe_seconds) not in (int, float) or not (
+            math.isfinite(self.probe_seconds) and self.probe_seconds >= 0
+        ):
+            raise ValueError("probe_seconds must be a finite nonnegative number")
 
 
 @dataclass(frozen=True)
@@ -281,6 +306,12 @@ class ToolOutcome:
             "unavailable_reason": (
                 execution.reason if isinstance(execution, Unavailable) else None
             ),
+            "probe_failure": (
+                execution.probe_failure if isinstance(execution, Unavailable) else None
+            ),
+            "probe_seconds": (
+                execution.probe_seconds if isinstance(execution, Unavailable) else None
+            ),
             "no_files": isinstance(execution, NoFiles),
             "timed_out": isinstance(execution, TimedOut),
             "inspected_files": (
@@ -297,6 +328,21 @@ class ToolOutcome:
         if isinstance(execution, TimedOut):
             fields["output"] = execution.output
         return fields
+
+
+def _reject_probe_evidence_without_unavailability(result: ToolResult) -> None:
+    """Keep probe cause and timing on unavailable results only.
+
+    Args:
+        result: The result to validate.
+
+    Raises:
+        ValueError: If probe evidence is present on a result that ran.
+    """
+    if result.unavailable_reason is None and (
+        result.probe_failure is not None or result.probe_seconds is not None
+    ):
+        raise ValueError("probe_failure and probe_seconds require unavailability")
 
 
 def _execution_from_result(result: ToolResult) -> ExecutionOutcome:
@@ -318,12 +364,18 @@ def _execution_from_result(result: ToolResult) -> ExecutionOutcome:
         raise ValueError("skipped, no_files and timed_out are mutually exclusive")
     if not result.skipped and result.skip_reason is not None:
         raise ValueError("skip_reason requires a skipped outcome")
+    _reject_probe_evidence_without_unavailability(result)
     if result.unavailable_reason is not None:
         if any(inactive) or result.inspected_files is not False:
             raise ValueError(
                 "unavailable execution cannot claim another outcome or inspection",
             )
-        return Unavailable(reason=result.unavailable_reason, strict=not result.success)
+        return Unavailable(
+            reason=result.unavailable_reason,
+            strict=not result.success,
+            probe_failure=result.probe_failure,
+            probe_seconds=result.probe_seconds,
+        )
     if any(inactive):
         if result.success != (not result.timed_out):
             raise ValueError("execution flags contradict success")
