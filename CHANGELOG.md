@@ -21,6 +21,15 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.11] - 2026-11-12
+
+### Fixed
+
+- **tools**: fail markup linter and sqlfluff runs that print no verdict (#3391)
+  (64c60b4)
+- **ci**: absorb a probe timeout in the dogfood skip gate only with a sibling verdict
+  (#3400) (c091f93)
+
 ## [0.180.10] - 2026-11-12
 
 ### Fixed
