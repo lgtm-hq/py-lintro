@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.12] - 2026-11-12
+
+### Fixed
+
+- **tools**: report all-ignored stylelint and html-validate runs as no files (#3395)
+  (4d9d496)
+
 ## [0.180.11] - 2026-11-12
 
 ### Fixed
