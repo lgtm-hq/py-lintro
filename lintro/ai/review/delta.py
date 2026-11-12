@@ -23,12 +23,16 @@ narrows what the remaining calls *read*:
   delta hunk that is not smaller than the whole hunk (a large change then a
   large revert) is not used; a file re-queued by an open thread with no
   change since keeps its whole hunk: the reviewer needs the code the thread
-  is about. The application also returns the old-side line ranges the delta
-  showed — the prior head's coordinates, which is what a prior finding's
-  line is in — so the matcher carries, never resolves, a prior finding on a
-  line the round did not re-read.
+  is about. A changed file that holds an open finding on a line its delta
+  hunk does not show is read whole too (#3403): otherwise a fix landing
+  elsewhere in the file would leave the finding unread, and so carried
+  unchanged, every round. The application also returns the old-side line
+  ranges the delta showed — the prior head's coordinates, which is what a
+  prior finding's line is in — so the matcher carries, never resolves, a
+  prior finding on a line the round did not re-read.
 - :func:`open_thread_paths` names the files with an open finding so the
-  resume queue re-reads them every delta round.
+  resume queue re-reads them every delta round;
+  :mod:`lintro.ai.review.delta_lines` names the lines a delta must show.
 
 The coverage identity of a file — its whole-PR patch hash — is never
 replaced by a delta hash, so ADR-0007's rule that coverage below 100% at
@@ -46,6 +50,7 @@ from loguru import logger
 from lintro.ai.prompts.review import REVIEW_DELTA_SCOPE_NOTE
 from lintro.ai.review.context.diff_parse import split_unified_diff_by_file
 from lintro.ai.review.context.git_ops import _run_git
+from lintro.ai.review.delta_lines import open_finding_lines, shows_every_line
 from lintro.ai.review.enums.delta_reason import DeltaReason
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_checkout import ReviewCheckout
@@ -297,11 +302,14 @@ class DeltaApplication:
             are absent: every line counts.
         larger: Files whose delta hunk was not smaller than the whole hunk
             and were read whole.
+        reread: Files read whole because their delta hunk would not show the
+            line of an open finding on them (#3403).
     """
 
     chunks: list[ReviewChunk]
     reviewed_ranges: tuple[tuple[str, int, int], ...] = ()
     larger: tuple[str, ...] = ()
+    reread: tuple[str, ...] = ()
 
 
 def _old_side_ranges(delta: str) -> list[tuple[int, int]]:
@@ -342,14 +350,22 @@ def apply_delta_hunks(
     chunks: list[ReviewChunk],
     hunks: Mapping[str, str],
     since_sha: str = "",
+    prior: ReviewState | None = None,
 ) -> DeltaApplication:
     """Give each chunk file a ``read_diff`` where its delta hunk is smaller.
+
+    A file whose delta would hide the line of an open finding keeps its whole
+    hunk, so the round re-judges that finding against the current head rather
+    than carrying it unread (#3403). That holds whether or not the finding
+    was ever posted inline.
 
     Args:
         chunks: The round's chunks after resume filtering.
         hunks: Output of :func:`delta_hunks`.
         since_sha: The prior round's head, stamped on narrowed chunks so the
             prompt can say what range the text is.
+        prior: State of the previous rounds, whose open findings name the
+            lines a narrowed file must still show.
 
     Returns:
         The application; chunks none of whose files narrowed are unchanged.
@@ -359,6 +375,8 @@ def apply_delta_hunks(
     rebuilt: list[ReviewChunk] = []
     ranges: list[tuple[str, int, int]] = []
     larger: list[str] = []
+    reread: list[str] = []
+    finding_lines = open_finding_lines(prior=prior)
     for chunk in chunks:
         per_file = split_unified_diff_by_file(unified_diff=chunk.diff)
         parts: list[str] = []
@@ -372,9 +390,16 @@ def apply_delta_hunks(
                 larger.append(path)
                 parts.append(whole)
                 continue
+            shown = _old_side_ranges(delta)
+            if not shows_every_line(
+                ranges=shown,
+                lines=finding_lines.get(path, ()),
+            ):
+                reread.append(path)
+                parts.append(whole)
+                continue
             narrowed = True
             parts.append(delta)
-            shown = _old_side_ranges(delta)
             # A delta of pure insertions shows no prior line: the file is still
             # narrowed, and the sentinel keeps it in the mapping so nothing on
             # it resolves, rather than reading as "read whole".
@@ -393,6 +418,7 @@ def apply_delta_hunks(
         chunks=rebuilt,
         reviewed_ranges=tuple(ranges),
         larger=tuple(larger),
+        reread=tuple(reread),
     )
 
 

@@ -14,6 +14,11 @@ The title carries the derived verdict:
 - **Incomplete** — coverage-at-HEAD is below 100%. The findings-based label is withheld
   so a partial round can never look clean.
 
+A finding the round carried forward without reading it shows **⏸ not re-verified** in
+the Δ column instead of **—** (re-checked and unchanged). Nothing compared it with this
+head, so it counts as a nit at most: it keeps the PR off **Ready** but cannot alone make
+the verdict **Blocked** or **Changes requested**.
+
 `~` on cost or tokens means the figure was estimated locally (subscription CLI, or a
 provider that returned no usage counters). Subscription runs still show “what this would
 have cost”; that figure is not a bill.

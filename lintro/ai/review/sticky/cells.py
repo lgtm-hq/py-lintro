@@ -120,13 +120,17 @@ def _delta_cell(*, record: FindingRecord, match: FindingMatchResult) -> str:
         match: Cross-round matching outcome for this round.
 
     Returns:
-        ``**new**``, ``↩ regressed``, or ``—`` for an unchanged finding.
+        ``**new**``, ``↩ regressed``, ``⏸ not re-verified`` for a finding this
+        round carried without reading it (#3403), or ``—`` for a finding the
+        round re-judged and found unchanged.
     """
     outcome = match.outcome_for(record=record)
     if outcome is FindingMatchOutcome.NEW:
         return "**new**"
     if outcome is FindingMatchOutcome.REGRESSED:
         return "↩ regressed"
+    if record.key in match.unverified_carries:
+        return "⏸ not re-verified"
     return "—"
 
 

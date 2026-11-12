@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import replace
 
 from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
@@ -61,19 +62,27 @@ __all__ = [
 ]
 
 
-def derive_verdict(*, findings: Iterable[FindingRecord]) -> ReviewVerdict:
+def derive_verdict(
+    *,
+    findings: Iterable[FindingRecord],
+    unverified: AbstractSet[str] = frozenset(),
+) -> ReviewVerdict:
     """Derive the merge-readiness verdict from open findings.
 
     Args:
         findings: Tracked finding records; resolved records are ignored.
+        unverified: Keys of open records this round carried without reading
+            them (:attr:`FindingMatchResult.unverified_carries`, #3403).
 
     Returns:
         The readiness verdict implied by the open findings' severities.
         Questions (#1925) are excluded: they carry no severity semantics and
-        must never move the verdict.
+        must never move the verdict. An unverified carry counts as a nit at
+        most: a finding nothing re-judged against this head keeps the PR off
+        ``READY`` but cannot by itself block it or request changes.
     """
     severities = {
-        record.severity
+        Severity.P3 if record.key in unverified else record.severity
         for record in findings
         if record.status is FindingStatus.OPEN and not record.is_question
     }
@@ -336,6 +345,7 @@ def match_findings(
     outcomes: dict[str, FindingMatchOutcome] = {}
     matched_prior: set[int] = set()
     range_carries: set[str] = set()
+    unverified_carries: set[str] = set()
 
     for fingerprint, group in current_by_fingerprint.items():
         prior_indices = prior_by_fingerprint.get(fingerprint, [])
@@ -413,6 +423,7 @@ def match_findings(
             departed_paths=departed_paths,
             reviewed_ranges=reviewed_ranges,
             range_carries=range_carries,
+            unverified_carries=unverified_carries,
         ):
             merged.append(record)
             carried.append(record)
@@ -437,5 +448,6 @@ def match_findings(
         outcomes=outcomes,
         note_carries=note_carries,
         range_carries=frozenset(range_carries),
+        unverified_carries=frozenset(unverified_carries),
         finding_ids=tuple(finding_ids[i] for i in range(len(findings))),
     )

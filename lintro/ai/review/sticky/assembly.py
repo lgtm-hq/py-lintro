@@ -99,7 +99,10 @@ def _round_outcome(*, request: StickyRequest) -> RoundOutcome:
             comment_ids=request.inline_comment_ids,
         ),
     )
-    findings_verdict = derive_verdict(findings=match.records)
+    findings_verdict = derive_verdict(
+        findings=match.records,
+        unverified=match.unverified_carries,
+    )
     if request.result.coverage is not None:
         verdict = apply_coverage_gate(
             findings_verdict=findings_verdict,

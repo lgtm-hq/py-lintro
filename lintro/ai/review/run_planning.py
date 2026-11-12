@@ -432,9 +432,9 @@ def plan_run(
                 chunks=chunks,
                 hunks=hunks,
                 since_sha=delta.since_sha or "",
+                prior=options.prior_state,
             )
-            chunks = applied.chunks
-            reviewed_ranges = applied.reviewed_ranges
+            chunks, reviewed_ranges = applied.chunks, applied.reviewed_ranges
             # The checkpoints match on the same ranges as the final round.
             resume = replace(resume, reviewed_ranges=reviewed_ranges)
     recorded_merge_base = (
