@@ -228,3 +228,145 @@ def test_vue_tsc_definition_does_not_resolve_from_the_process_directory(
 
     assert_that(version_command).is_equal_to(["vue-tsc", "--version"])
     assert_that(resolutions).is_empty()
+
+
+@pytest.fixture
+def runner_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Path:
+    """Leave ``bunx`` as the only way to run any Node tool, with no network.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped PATH, local-install and subprocess overrides.
+
+    Returns:
+        Project directory with no local Node installs.
+    """
+    from lintro.tools.core import command_builders
+
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    runner = tmp_path / "bunx"
+    runner.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
+    runner.chmod(0o755)
+
+    def which(command: str, *args: object, **kwargs: object) -> str | None:
+        return str(runner) if Path(command).name == "bunx" else None
+
+    def refuse_subprocess(argv: list[str], **kwargs: object) -> None:
+        raise AssertionError(f"version gate ran a subprocess: {argv}")
+
+    monkeypatch.setattr(shutil, "which", which)
+    monkeypatch.setattr(
+        command_builders,
+        "find_local_node_binary",
+        lambda name, *, start=None: None,
+    )
+    monkeypatch.setattr(subprocess, "run", refuse_subprocess)
+    return project
+
+
+def _registered_node_tools() -> dict[str, str]:
+    """Map every registered Node tool to the minimum its definition declares.
+
+    Returns:
+        Registered tool name -> ``definition.min_version`` (may be empty).
+    """
+    from lintro.enums.tool_name import normalize_tool_name
+    from lintro.plugins.discovery import discover_all_tools
+    from lintro.plugins.registry import ToolRegistry
+    from lintro.tools.core.command_builders import NodeJSBuilder
+
+    # Discovery is lazy and skipped once anything is registered, so a module
+    # that imported a plugin directly would otherwise see only that plugin.
+    discover_all_tools()
+    builder = NodeJSBuilder()
+    tools: dict[str, str] = {}
+    for name, definition in ToolRegistry.get_definitions().items():
+        try:
+            enum = normalize_tool_name(name)
+        except ValueError:
+            continue
+        if builder.can_handle(enum):
+            tools[name] = definition.min_version or ""
+    return tools
+
+
+def test_every_node_runner_spec_is_an_exact_pin_at_or_above_the_minimum(
+    runner_only: Path,
+) -> None:
+    """Each registered Node tool's runner fallback passes the gate on its pin.
+
+    Args:
+        runner_only: Project where only ``bunx`` can run Node tools.
+    """
+    from lintro.enums.tool_name import normalize_tool_name
+    from lintro.tools.core import snapshots
+    from lintro.tools.core.command_builders import NodeJSBuilder
+    from lintro.tools.core.node_fallback import (
+        registry_fallback_spec,
+        split_npm_spec,
+    )
+
+    tools = _registered_node_tools()
+    assert_that({normalize_tool_name(name) for name in tools}).is_equal_to(
+        set(NodeJSBuilder().package_names),
+    )
+
+    for name, min_version in tools.items():
+        snapshot = snapshots.probe_tool(name, search_root=runner_only)
+        _package, pinned = split_npm_spec(
+            registry_fallback_spec(snapshot.command) or "",
+        )
+        assert_that(snapshot.command[0]).described_as(name).is_equal_to("bunx")
+        assert_that(snapshot.probe_error).described_as(name).is_none()
+        assert_that(snapshot.available).described_as(name).is_true()
+        assert_that(snapshot.version).described_as(name).is_equal_to(pinned)
+        if min_version:
+            assert_that(snapshot.min_version).described_as(name).is_equal_to(
+                min_version,
+            )
+
+
+@pytest.mark.parametrize(
+    ("pin", "reason"),
+    [
+        ("0.0.1", "is below minimum requirement"),
+        (None, "has no version pin"),
+        ("^3.0.0", "is not an exact version"),
+    ],
+    ids=["below-minimum", "unpinned", "range"],
+)
+def test_runner_without_an_acceptable_pin_is_refused(
+    runner_only: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pin: str | None,
+    reason: str,
+) -> None:
+    """A runner that would install a rejected or unpinned version never runs.
+
+    Args:
+        runner_only: Project where only ``bunx`` can run Node tools.
+        monkeypatch: Scoped override of lintro's npm pins.
+        pin: Version the runner spec would carry, or None for no pin.
+        reason: Text the refusal must name.
+    """
+    import lintro._tool_versions as tool_versions
+    from lintro.tools.core import snapshots
+
+    monkeypatch.setattr(tool_versions, "get_tool_version", lambda _name: pin)
+
+    snapshot = snapshots.probe_tool("prettier", search_root=runner_only)
+    verdict = verify_tool_version(
+        PrettierPlugin().definition,
+        cwd=str(runner_only),
+    )
+
+    assert_that(snapshot.available).is_false()
+    assert_that(snapshot.version).is_none()
+    assert_that(snapshot.probe_error).contains(reason)
+    assert_that(verdict).is_not_none()
+    assert verdict is not None
+    assert_that(verdict.unavailable_reason).contains(reason)

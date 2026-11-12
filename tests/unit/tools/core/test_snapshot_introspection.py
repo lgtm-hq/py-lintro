@@ -12,6 +12,7 @@ import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
 
+from lintro._tool_versions import get_tool_version
 from lintro.cli_utils.commands.list_tools import list_tools_command
 from lintro.config.lintro_config import LintroConfig
 from lintro.enums.tool_status import ToolStatus
@@ -159,8 +160,8 @@ def test_introspection_diagnostics_do_not_replace_execution_fallback_evidence(
 ) -> None:
     """Listing and the execution gate both stay offline for a runner-only tool.
 
-    The gate keeps the runner as the execution command but reports an unknown
-    version instead of running ``bunx``/``npx <spec> --version`` (#2043).
+    The gate keeps the runner as the execution command and reads the version
+    from its pin instead of running ``bunx``/``npx <spec> --version`` (#2043).
     """
     for _ in range(2):
         before = len(probe_commands)
@@ -179,7 +180,7 @@ def test_introspection_diagnostics_do_not_replace_execution_fallback_evidence(
         executable = snapshots.get_tool_snapshot("stylelint", cache_root=tmp_path)
         assert_that(executable.available).is_true()
         assert_that(executable.version_check_passed).is_true()
-        assert_that(executable.version).is_none()
+        assert_that(executable.version).is_equal_to(get_tool_version("stylelint"))
         assert_that(executable.command[0]).is_in("bunx", "npx")
         assert_that(probe_commands[before:]).is_empty()
         if hydrate:

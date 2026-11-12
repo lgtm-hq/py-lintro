@@ -1425,9 +1425,11 @@ tool and directory, and execution reuses that command instead of resolving it ag
 
 The version check never runs the registry fallback (branch 3). Running
 `bunx <package>@<pinned> --version` would download the package before any file is
-checked. When resolution falls through to `bunx`/`npx`, the check reports the version as
-unknown and lets the tool run: the runner command already pins the version Lintro
-requires, and execution still uses it.
+checked. When resolution falls through to `bunx`/`npx`, the check reads the version from
+the runner's `<package>@<pinned>` spec and compares it with the tool's minimum, offline.
+A pin at or above the minimum lets the tool run through the runner. A pin below the
+minimum, or a spec with no exact version pin, reports the tool as unavailable and the
+runner is never started.
 
 ### Python Tools
 
