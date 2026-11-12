@@ -31,7 +31,9 @@ exists, so a slow runner can produce it for a working tool. It is still an
 image-dependency failure (``binary_missing``) for allowlist purposes, with one
 exception (#3383): it is absorbed, as a warning that names the timeout and its
 ``probe_seconds``, when the same tool reported a verdict (``status`` ``ok`` or
-``failed``) in a ``--sibling-report`` from another attempt of the same run.
+``failed``, and neither ``execution_failed`` nor ``timed_out``) in a
+``--sibling-report`` from another attempt of the same run. Siblings are read
+only when such a row exists, and an unreadable one counts as no evidence.
 Without that evidence it fails like any other unavailable row, and when every
 violation is such a timeout the checker says so on its ``gate-output:`` lines
 so CI can classify the failure as infrastructure. ``binary_missing`` rows and
@@ -346,13 +348,18 @@ def _has_verdict(result: dict[str, Any]) -> bool:
 
     Returns:
         True for a row whose ``status`` is ``ok`` or ``failed`` and that is
-        neither skipped, unavailable nor timed out.
+        neither skipped, unavailable, timed out nor an execution failure.
+        lintro reports every run that did not succeed as ``failed``, including
+        a crash or an unparseable tool output (``execution_failed: true``) and
+        a tool-execution timeout (``timed_out: true``); neither proves the
+        tool answered, so neither is a verdict.
     """
     return (
         result.get("status") in VERDICT_STATUSES
         and not result.get("skipped")
         and result.get("unavailable") is not True
         and result.get("timed_out") is not True
+        and result.get("execution_failed") is not True
     )
 
 
@@ -556,6 +563,55 @@ def evaluate_skips(
     return findings
 
 
+def has_probe_timeout(payload: Any) -> bool:
+    """Return whether a report holds an unavailable ``probe_timeout`` row.
+
+    Args:
+        payload: Parsed lintro JSON report.
+
+    Returns:
+        True when sibling evidence could change the verdict. A malformed
+        report returns False; :func:`evaluate_skips` reports it.
+    """
+    try:
+        results = _extract_results(payload)
+    except ValueError:
+        return False
+    return any(
+        result.get("probe_failure") == PROBE_TIMEOUT
+        and (result.get("status") == "unavailable" or result.get("unavailable") is True)
+        for result in results
+    )
+
+
+def load_sibling_payloads(paths: list[str]) -> list[Any]:
+    """Read sibling reports, dropping any that cannot serve as evidence.
+
+    A sibling is only evidence for absorbing a probe timeout, so one that is
+    missing, empty, not JSON or not a lintro report is skipped with a warning
+    naming the file. The timeout it might have answered then stays fatal.
+
+    Args:
+        paths: Paths to reports from other attempts of the same run.
+
+    Returns:
+        The readable sibling reports.
+    """
+    payloads: list[Any] = []
+    for path in paths:
+        try:
+            payload = _read_report(path)
+            _extract_results(payload)
+        except (OSError, ValueError) as exc:
+            print(
+                f"warning: ignoring sibling report {path} (no evidence): {exc}",
+                file=sys.stderr,
+            )
+            continue
+        payloads.append(payload)
+    return payloads
+
+
 def probe_timeout_only_tools(findings: list[SkipFinding]) -> list[str]:
     """Return the timed-out tools when probe timeouts are the only violations.
 
@@ -641,10 +697,14 @@ def run(
     """
     try:
         payload = _read_report(report_arg)
-        siblings = [_read_report(path) for path in sibling_args or []]
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"error: failed to read lintro report: {exc}", file=sys.stderr)
         return 2
+    # Siblings matter only to a probe_timeout row, so a report without one
+    # never reads them and a broken sibling can never fail a clean gate.
+    siblings = (
+        load_sibling_payloads(sibling_args or []) if has_probe_timeout(payload) else []
+    )
 
     try:
         allowlist_data = yaml.safe_load(
@@ -723,7 +783,8 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "Report from another attempt of the same run (repeatable). A "
             "probe_timeout row is absorbed only when one of these holds a "
-            "verdict for the same tool."
+            "verdict for the same tool. Read only when the report has such a "
+            "row; an unreadable sibling is ignored with a warning."
         ),
     )
     args = parser.parse_args(argv)

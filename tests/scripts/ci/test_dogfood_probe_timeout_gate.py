@@ -317,28 +317,166 @@ def test_a_missing_binary_beside_a_probe_timeout_is_not_a_flake(
     )
 
 
-def test_unreadable_sibling_report_is_a_configuration_error(tmp_path: Path) -> None:
-    """A sibling the caller named but that cannot be read is exit 2, no verdict."""
+def _run_with_sibling_text(
+    tmp_path: Path,
+    *,
+    report: dict[str, Any],
+    sibling_text: str | None,
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    """Run the checker with one sibling given as raw file content.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        report: The gate's own report.
+        sibling_text: Sibling file content, or None for a file that is absent.
+
+    Returns:
+        The completed checker process and the sibling path it was given.
+    """
     allowlist = tmp_path / "allowlist.yaml"
     allowlist.write_text("allowlist: []\n", encoding="utf-8")
+    sibling = tmp_path / "sibling.json"
+    if sibling_text is not None:
+        sibling.write_text(sibling_text, encoding="utf-8")
     result = subprocess.run(  # nosec B603 - fixed argv, shell=False
         [
             sys.executable,
             str(_CHECKER),
             "--report",
-            str(_write(tmp_path / "report.json", _report())),
+            str(_write(tmp_path / "report.json", report)),
             "--allowlist",
             str(allowlist),
             "--sibling-report",
-            str(tmp_path / "absent.json"),
+            str(sibling),
         ],
         capture_output=True,
         text=True,
         check=False,
     )
+    return result, sibling
 
-    assert_that(result.returncode).is_equal_to(2)
-    assert_that(_gate_outputs(result.stdout)).is_empty()
+
+_BROKEN_SIBLINGS = pytest.mark.parametrize(
+    "sibling_text",
+    [None, "", '{"results": [', "null", '{"summary": {}}', '{"results": 3}'],
+    ids=["absent", "empty", "truncated", "null", "no-results", "results-not-list"],
+)
+
+
+@_BROKEN_SIBLINGS
+def test_broken_sibling_is_never_read_without_a_probe_timeout(
+    tmp_path: Path,
+    sibling_text: str | None,
+) -> None:
+    """A clean report passes whatever state its sibling is in."""
+    result, _ = _run_with_sibling_text(
+        tmp_path,
+        report=_report(_verdict("ruff")),
+        sibling_text=sibling_text,
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stderr).does_not_contain("sibling")
+    assert_that(_gate_outputs(result.stdout)["probe-timeout-flake"]).is_equal_to(
+        "false",
+    )
+
+
+@_BROKEN_SIBLINGS
+def test_broken_sibling_is_no_evidence_and_keeps_the_timeout_fatal(
+    tmp_path: Path,
+    sibling_text: str | None,
+) -> None:
+    """An unreadable sibling is skipped with a warning naming the file."""
+    result, sibling = _run_with_sibling_text(
+        tmp_path,
+        report=_report(_probe_timeout("semgrep")),
+        sibling_text=sibling_text,
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stderr).contains(
+        f"warning: ignoring sibling report {sibling} (no evidence)",
+    )
+    assert_that(result.stderr).does_not_contain("failed to read lintro report")
+    assert_that(_gate_outputs(result.stdout)).is_equal_to(
+        {"probe-timeout-flake": "true", "probe-timed-out-tools": "semgrep"},
+    )
+
+
+# Real ``lintro chk --tools shellcheck --output-format json`` reports, with the
+# temporary project path replaced by /workspace. Generated with a stub
+# ``shellcheck`` on PATH: one that sleeps on ``--version`` under
+# LINTRO_VERSION_TIMEOUT=1 (probe_timeout), one that answers ``--version`` but
+# exits 2 with non-JSON output (execution_failed), one that answers
+# ``--version`` but hangs under ``shellcheck:timeout=1`` (timed_out), and the
+# real binary on a clean script (ok).
+_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "dogfood_probe_timeout"
+
+
+def _fixture(name: str) -> dict[str, Any]:
+    """Load one recorded lintro report.
+
+    Args:
+        name: Fixture file stem.
+
+    Returns:
+        The parsed report.
+    """
+    loaded: dict[str, Any] = json.loads(
+        (_FIXTURES / f"{name}.json").read_text(encoding="utf-8"),
+    )
+    return loaded
+
+
+def test_recorded_fixtures_have_the_shapes_the_gate_relies_on() -> None:
+    """The recorded rows carry the markers the verdict test reads."""
+    rows = {
+        name: _fixture(f"shellcheck_{name}")["results"][0]
+        for name in ("probe_timeout", "exec_failed", "timed_out", "ok")
+    }
+
+    assert_that(rows["probe_timeout"]).contains_entry(
+        {"status": "unavailable"},
+        {"probe_failure": "probe_timeout"},
+    )
+    assert_that(rows["exec_failed"]).contains_entry(
+        {"status": "failed"},
+        {"execution_failed": True},
+    )
+    assert_that(rows["timed_out"]).contains_entry(
+        {"status": "failed"},
+        {"timed_out": True},
+    )
+    assert_that(rows["ok"]).contains_entry({"status": "ok"})
+
+
+@pytest.mark.parametrize(
+    ("sibling", "expected_exit"),
+    [
+        ("shellcheck_exec_failed", 1),
+        ("shellcheck_timed_out", 1),
+        ("shellcheck_ok", 0),
+    ],
+)
+def test_only_a_real_verdict_absorbs_a_recorded_probe_timeout(
+    tmp_path: Path,
+    sibling: str,
+    expected_exit: int,
+) -> None:
+    """A run that crashed or timed out is ``status: failed`` but not a verdict.
+
+    lintro serializes every unsuccessful run as ``failed``; only a row without
+    ``execution_failed`` and ``timed_out`` proves the tool answered.
+    """
+    result = _run_checker(
+        tmp_path,
+        report=_fixture("shellcheck_probe_timeout"),
+        siblings=[_fixture(sibling)],
+    )
+
+    assert_that(result.returncode).is_equal_to(expected_exit)
+    assert_that(result.stderr).contains("shellcheck: unavailable (probe_timeout after")
 
 
 def test_sibling_tool_names_match_across_hyphen_and_underscore() -> None:

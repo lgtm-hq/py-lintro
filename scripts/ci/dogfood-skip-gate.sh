@@ -45,12 +45,13 @@ set -euo pipefail
 #   REPORT_JSON    Optional. Existing JSON report to consume. When set, the
 #                  container lint is skipped. When unset, the report is
 #                  written to dogfood-skip-report.json.
-#   SIBLING_REPORTS Optional. Space-separated JSON reports from other attempts
-#                  of the same run, inside the workspace. A tool whose version
+#   SIBLING_REPORTS Optional. Newline-separated JSON reports from other
+#                  attempts of the same run, inside the workspace (one path per
+#                  line, so a path may contain spaces). A tool whose version
 #                  probe timed out (probe_failure=probe_timeout) is absorbed
 #                  only when one of these holds a verdict for it (#3383).
-#                  Missing or empty files are ignored, which leaves the
-#                  timeout fatal.
+#                  Missing, empty or unreadable files are ignored, which leaves
+#                  the timeout fatal.
 #   MAP_HOST_USER  Optional. true maps host UID/GID into the container
 #                  (default: true on GitHub Actions).
 
@@ -73,9 +74,10 @@ Environment:
   ALLOWLIST      Optional. Allowlist YAML (default: scripts/ci/dogfood-skip-allowlist.yaml).
   REPORT_JSON    Optional. Existing JSON report to consume. When unset, lintro
                  derives a report in Docker at dogfood-skip-report.json.
-  SIBLING_REPORTS Optional. Space-separated reports from other attempts of the
-                 same run; a probe_timeout row is absorbed only when one of
-                 them has a verdict for the tool (#3383).
+  SIBLING_REPORTS Optional. Newline-separated reports (one path per line) from
+                 other attempts of the same run; a probe_timeout row is
+                 absorbed only when one of them has a verdict for the tool
+                 (#3383).
   MAP_HOST_USER  Optional. true maps host UID/GID into the container.
 
 Exit codes:
@@ -143,8 +145,8 @@ fi
 # probe_timeout row, so an absent one is logged and skipped: the timeout then
 # stays fatal, never silently passes.
 declare -a sibling_args=()
-read -r -a sibling_reports <<<"${SIBLING_REPORTS:-}"
-for sibling in "${sibling_reports[@]+"${sibling_reports[@]}"}"; do
+while IFS= read -r sibling; do
+	[[ -n "$sibling" ]] || continue
 	if [[ ! -s "$sibling" ]]; then
 		log_info "Sibling report not available, ignoring: ${sibling}"
 		continue
@@ -154,7 +156,7 @@ for sibling in "${sibling_reports[@]+"${sibling_reports[@]}"}"; do
 		exit 2
 	fi
 	sibling_args+=(--sibling-report "$sibling_in_container")
-done
+done <<<"${SIBLING_REPORTS:-}"
 
 # Pull explicitly so a registry failure surfaces as a clear gate error rather
 # than an empty report.
@@ -232,17 +234,19 @@ fi
 # needed. The workspace is mounted at /code, so the report and allowlist are
 # both visible there.
 log_info "Checking skips against ${ALLOWLIST}..."
+# The checker's stdout streams to the log through tee (unbuffered via -u, so
+# it keeps its order against the FAIL lines on stderr) and is also kept for
+# the gate-output lines published below.
 checker_stdout="$(mktemp)"
 trap 'rm -f "$checker_stdout"' EXIT
 set +e
 "${docker_args[@]}" --entrypoint python3 "${LINTRO_IMAGE}" \
-	/code/scripts/ci/check-dogfood-skips.py \
+	-u /code/scripts/ci/check-dogfood-skips.py \
 	--report "$report_in_container" \
 	--allowlist "/code/${ALLOWLIST}" \
-	"${sibling_args[@]+"${sibling_args[@]}"}" >"$checker_stdout"
-gate_exit_code=$?
+	"${sibling_args[@]+"${sibling_args[@]}"}" | tee "$checker_stdout"
+gate_exit_code=${PIPESTATUS[0]}
 set -e
-cat "$checker_stdout"
 
 # Publish this gate's own verdict (#2246). A consumer must be able to tell
 # "the gate ran and found non-allowlisted skips" from "the runner died before

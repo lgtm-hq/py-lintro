@@ -27,7 +27,7 @@ if [[ "$*" == *"--entrypoint python3"* && -n "${CHECKER_PYTHON:-}" ]]; then
 \tif [[ "$*" == *"--sibling-report /code/"* ]]; then
 \t\tsibling=(--sibling-report "$CHECKER_SIBLING")
 \tfi
-\texec "$CHECKER_PYTHON" "$CHECKER_SCRIPT" \\
+\texec "$CHECKER_PYTHON" -u "$CHECKER_SCRIPT" \\
 \t\t--report "$CHECKER_REPORT" --allowlist "$CHECKER_ALLOWLIST" \\
 \t\t"${sibling[@]+"${sibling[@]}"}"
 fi
@@ -529,10 +529,12 @@ def test_gate_absorbs_a_probe_timeout_only_with_a_sibling_verdict(
     report = tmp_path / "results.json"
     report.write_text(
         json.dumps(
-            {"results": [serialize_tool_result(timed_out, action=Action.CHECK)]}
+            {"results": [serialize_tool_result(timed_out, action=Action.CHECK)]},
         ),
     )
-    sibling = tmp_path / "sibling" / "results.json"
+    # One path per line, so a directory with a space is a single entry; the
+    # missing first entry is logged and skipped.
+    sibling = tmp_path / "sibling dir" / "results.json"
     if sibling_rows is not None:
         sibling.parent.mkdir()
         sibling.write_text(json.dumps({"results": sibling_rows}))
@@ -546,7 +548,7 @@ def test_gate_absorbs_a_probe_timeout_only_with_a_sibling_verdict(
         "CHECKER_REPORT": str(report),
         "CHECKER_ALLOWLIST": str(allowlist),
         "CHECKER_SIBLING": str(sibling),
-        "SIBLING_REPORTS": "sibling/results.json",
+        "SIBLING_REPORTS": "absent/results.json\n\nsibling dir/results.json\n",
     }.items():
         monkeypatch.setenv(key, value)
 
@@ -562,3 +564,23 @@ def test_gate_absorbs_a_probe_timeout_only_with_a_sibling_verdict(
     assert_that(result.returncode).is_equal_to(expected_exit)
     assert_that(output_path.read_text().splitlines()).contains(*expected_outputs)
     assert_that(result.stderr).contains("probe_timeout after 120s")
+    assert_that(result.stdout).contains(
+        "Sibling report not available, ignoring: absent/results.json",
+    )
+    checker_call = next(
+        line
+        for line in log_path.read_text().splitlines()
+        if "--entrypoint python3" in line
+    )
+    # Unbuffered, so the streamed summary keeps its order against stderr.
+    assert_that(checker_call).contains(
+        "ghcr.io/example/lintro:ci-test -u /code/scripts/ci/check-dogfood-skips.py",
+    )
+    # Streamed to the log as well as parsed for the published outputs.
+    assert_that(result.stdout).contains("Dogfood no-silent-skip gate")
+    if sibling_rows is None:
+        assert_that(checker_call).does_not_contain("--sibling-report")
+    else:
+        assert_that(checker_call).contains(
+            "--sibling-report /code/sibling dir/results.json",
+        )

@@ -469,3 +469,59 @@ def test_main_fails_when_the_shared_classifier_is_missing(
     monkeypatch.setenv("INFRA_FLAKE_SCRIPT", str(tmp_path / "absent.sh"))
 
     assert_that(module.main(argv=[])).is_equal_to(2)
+
+
+_PROBE_TIMEOUT_GATE = {
+    "SKIP_GATE_RESULT": "failure",
+    "SKIP_GATE_STATUS": "failed",
+    "SKIP_GATE_EXIT_CODE": "1",
+    "SKIP_GATE_PROBE_TIMEOUT_FLAKE": "true",
+    "SKIP_GATE_PROBE_TIMED_OUT_TOOLS": "semgrep",
+}
+
+
+@pytest.mark.parametrize(
+    ("retry", "notify", "action_required"),
+    [
+        ({"SKIP_GATE_RETRY_RESULT": "success"}, False, False),
+        (
+            {
+                "SKIP_GATE_RETRY_RESULT": "failure",
+                "SKIP_GATE_RETRY_STATUS": "failed",
+                "SKIP_GATE_RETRY_EXIT_CODE": "1",
+                "SKIP_GATE_RETRY_PROBE_TIMEOUT_FLAKE": "true",
+            },
+            True,
+            False,
+        ),
+        (
+            {
+                "SKIP_GATE_RETRY_RESULT": "failure",
+                "SKIP_GATE_RETRY_STATUS": "failed",
+                "SKIP_GATE_RETRY_EXIT_CODE": "1",
+                "SKIP_GATE_RETRY_PROBE_TIMEOUT_FLAKE": "false",
+            },
+            True,
+            True,
+        ),
+        ({"SKIP_GATE_RETRY_RESULT": "skipped"}, True, True),
+    ],
+    ids=["retry-passed", "retry-timed-out-again", "retry-genuine", "no-retry"],
+)
+def test_skip_gate_probe_timeout_is_infra_answered_by_its_retry(
+    module: ModuleType,
+    retry: dict[str, str],
+    notify: bool,
+    action_required: bool,
+) -> None:
+    """A probe-timeout-only skip-gate failure is infra, not a regression (#3383).
+
+    A retry that passes clears the night, a second timeout is a coverage gap
+    with no action required, and a genuine retry failure or a missing retry
+    still demands action.
+    """
+    decision = _decide(module, **_PROBE_TIMEOUT_GATE, **retry)
+
+    assert_that((decision.notify, decision.action_required)).is_equal_to(
+        (notify, action_required),
+    )

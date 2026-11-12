@@ -28,7 +28,8 @@ race is the very problem #2238 exists to fix. The structural infra signatures
 are not re-implemented here — each attempt is handed to
 ``scripts/ci/is-infra-flake-failure.sh``, the single source of truth the PR
 path already uses (exit 143, cancelled/timed_out, lint-passed-but-job-failed,
-tool-execution timeout on the attempt's own report).
+tool-execution timeout on the attempt's own report, and a skip gate failed only
+by version-probe timeouts with no sibling verdict, #3383).
 
 An attempt that failed while publishing no lint verdict at all (empty
 ``status``/``exit-code``, the signature of a runner killed mid-lint) is not
@@ -47,9 +48,11 @@ value is the workflow's ``needs.<job>.result`` / ``needs.<job>.outputs.<name>``)
     LINT_RETRY_RESULT, LINT_RETRY_CONCLUSION, LINT_RETRY_STATUS,
     LINT_RETRY_EXIT_CODE, LINT_RETRY_TIMEOUT_FLAKE, LINT_RETRY_TIMED_OUT_TOOLS
     SKIP_GATE_RESULT, SKIP_GATE_CONCLUSION, SKIP_GATE_STATUS,
-    SKIP_GATE_EXIT_CODE
+    SKIP_GATE_EXIT_CODE, SKIP_GATE_PROBE_TIMEOUT_FLAKE,
+    SKIP_GATE_PROBE_TIMED_OUT_TOOLS
     SKIP_GATE_RETRY_RESULT, SKIP_GATE_RETRY_CONCLUSION,
-    SKIP_GATE_RETRY_STATUS, SKIP_GATE_RETRY_EXIT_CODE
+    SKIP_GATE_RETRY_STATUS, SKIP_GATE_RETRY_EXIT_CODE,
+    SKIP_GATE_RETRY_PROBE_TIMEOUT_FLAKE, SKIP_GATE_RETRY_PROBE_TIMED_OUT_TOOLS
     VERIFY_RESULT, VERIFY_CONCLUSION
     RESOLVE_RESULT, RESOLVE_CONCLUSION
     INFRA_FLAKE_SCRIPT  Override for is-infra-flake-failure.sh (tests only).
@@ -139,6 +142,11 @@ class Attempt:
         timeout_flake: ``true`` when this attempt's own report proves its only
             failures were tool-execution timeouts with zero findings (#1653).
         timed_out_tools: Comma-separated tool names, for the log message.
+        probe_timeout_flake: ``true`` when this skip-gate attempt's only
+            violations were version-probe timeouts with no sibling verdict
+            (#3383).
+        probe_timed_out_tools: Comma-separated tool names, for the log
+            message.
     """
 
     result: str = ""
@@ -147,6 +155,8 @@ class Attempt:
     exit_code: str = ""
     timeout_flake: str = ""
     timed_out_tools: str = ""
+    probe_timeout_flake: str = ""
+    probe_timed_out_tools: str = ""
 
 
 @dataclass(frozen=True)
@@ -202,6 +212,8 @@ def _attempt_from_env(prefix: str, *, environ: dict[str, str]) -> Attempt:
         exit_code=value("EXIT_CODE"),
         timeout_flake=value("TIMEOUT_FLAKE"),
         timed_out_tools=value("TIMED_OUT_TOOLS"),
+        probe_timeout_flake=value("PROBE_TIMEOUT_FLAKE"),
+        probe_timed_out_tools=value("PROBE_TIMED_OUT_TOOLS"),
     )
 
 
@@ -232,6 +244,8 @@ def is_infra_flake(attempt: Attempt, *, script: Path) -> bool:
             "EXIT_CODE_OUTPUT": attempt.exit_code,
             "TIMEOUT_FLAKE": attempt.timeout_flake,
             "TIMED_OUT_TOOLS": attempt.timed_out_tools,
+            "PROBE_TIMEOUT_FLAKE": attempt.probe_timeout_flake,
+            "PROBE_TIMED_OUT_TOOLS": attempt.probe_timed_out_tools,
         },
     )
     completed = subprocess.run(  # nosec B603 - fixed argv, repo-local script

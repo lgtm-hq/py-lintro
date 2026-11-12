@@ -20,12 +20,18 @@
 # and on the retry (the row then carries `probe_seconds`). A probe timeout is
 # usually infrastructure noise, not an image bug. The gate (#3383) absorbs a
 # `probe_timeout` row, as a warning naming `probe_seconds`, only when the same
-# tool reported a verdict (`status` ok or failed) in another attempt of the
-# same run, passed as `--sibling-report` (`SIBLING_REPORTS` in
-# dogfood-skip-gate.sh). Without that verdict it stays a binary_missing
-# violation; when every violation is such a timeout the gate publishes
-# `probe-timeout-flake=true`, which is-infra-flake-failure.sh classifies as
-# infrastructure (the gate still fails). `binary_missing`
+# tool reported a verdict in another attempt of the same run, passed as
+# `--sibling-report` (`SIBLING_REPORTS` in dogfood-skip-gate.sh). A verdict is
+# `status` ok or failed with neither `execution_failed` nor `timed_out`; an
+# unreadable sibling is no evidence. Without that verdict the row stays a
+# binary_missing violation and the gate fails. When every violation is such a
+# timeout the gate also publishes `probe-timeout-flake=true`. Only
+# dogfood-nightly.yml consumes it today: there it reruns the gate
+# (dogfood_skip_gate_retry) and classify-failure passes it to
+# is-infra-flake-failure.sh, so a timeout the retry answers clears the night
+# and one it does not is a no-action coverage gap rather than a regression.
+# docker-ci.yml's gate has no sibling attempt and does not read the flag, so
+# a probe timeout there fails as any unavailable tool does. `binary_missing`
 # rows and unavailable rows with no `probe_failure` are never absorbed. No
 # allowlist entry can name `probe_timeout`: it is not a reason_class.
 #
