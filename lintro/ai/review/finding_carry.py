@@ -73,7 +73,8 @@ def _carry_absent(
             carry is a delta round leaving its line unread (#2627).
         unverified_carries: Receives the record's key when it is carried
             only because the round did not read it, so nothing re-judged it
-            against this head (#3403).
+            against this head (#3403). The matcher stores that on the record
+            as ``unverified``; it never changes the record's severity.
 
     Returns:
         True to carry it rather than resolve it.

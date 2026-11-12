@@ -139,7 +139,15 @@ def plan_delta(
         prior_merge_base=last.merge_base,
     ):
         return DeltaPlan.full(reason=DeltaReason.BASE_MOVED)
-    return DeltaPlan(reason=DeltaReason.DELTA, since_sha=since)
+    return DeltaPlan(
+        reason=DeltaReason.DELTA,
+        since_sha=since,
+        open_lines=open_finding_lines(
+            prior=prior,
+            since_sha=since,
+            repo_root=repo_root,
+        ),
+    )
 
 
 def _is_ancestor(*, repo_root: str, ancestor: str, descendant: str) -> bool:
@@ -350,7 +358,7 @@ def apply_delta_hunks(
     chunks: list[ReviewChunk],
     hunks: Mapping[str, str],
     since_sha: str = "",
-    prior: ReviewState | None = None,
+    open_lines: Mapping[str, tuple[int, ...] | None] | None = None,
 ) -> DeltaApplication:
     """Give each chunk file a ``read_diff`` where its delta hunk is smaller.
 
@@ -364,8 +372,9 @@ def apply_delta_hunks(
         hunks: Output of :func:`delta_hunks`.
         since_sha: The prior round's head, stamped on narrowed chunks so the
             prompt can say what range the text is.
-        prior: State of the previous rounds, whose open findings name the
-            lines a narrowed file must still show.
+        open_lines: :attr:`DeltaPlan.open_lines`, the prior open findings'
+            lines a narrowed file must still show (``None`` for a file whose
+            lines could not be mapped, which is read whole).
 
     Returns:
         The application; chunks none of whose files narrowed are unchanged.
@@ -376,7 +385,7 @@ def apply_delta_hunks(
     ranges: list[tuple[str, int, int]] = []
     larger: list[str] = []
     reread: list[str] = []
-    finding_lines = open_finding_lines(prior=prior)
+    finding_lines = open_lines or {}
     for chunk in chunks:
         per_file = split_unified_diff_by_file(unified_diff=chunk.diff)
         parts: list[str] = []

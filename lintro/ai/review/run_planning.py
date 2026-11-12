@@ -432,7 +432,7 @@ def plan_run(
                 chunks=chunks,
                 hunks=hunks,
                 since_sha=delta.since_sha or "",
-                prior=options.prior_state,
+                open_lines=delta.open_lines,
             )
             chunks, reviewed_ranges = applied.chunks, applied.reviewed_ranges
             # The checkpoints match on the same ranges as the final round.

@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
-from collections.abc import Set as AbstractSet
 from dataclasses import replace
 
 from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
@@ -62,27 +61,19 @@ __all__ = [
 ]
 
 
-def derive_verdict(
-    *,
-    findings: Iterable[FindingRecord],
-    unverified: AbstractSet[str] = frozenset(),
-) -> ReviewVerdict:
+def derive_verdict(*, findings: Iterable[FindingRecord]) -> ReviewVerdict:
     """Derive the merge-readiness verdict from open findings.
 
     Args:
         findings: Tracked finding records; resolved records are ignored.
-        unverified: Keys of open records this round carried without reading
-            them (:attr:`FindingMatchResult.unverified_carries`, #3403).
 
     Returns:
         The readiness verdict implied by the open findings' severities.
         Questions (#1925) are excluded: they carry no severity semantics and
-        must never move the verdict. An unverified carry counts as a nit at
-        most: a finding nothing re-judged against this head keeps the PR off
-        ``READY`` but cannot by itself block it or request changes.
+        must never move the verdict.
     """
     severities = {
-        Severity.P3 if record.key in unverified else record.severity
+        record.severity
         for record in findings
         if record.status is FindingStatus.OPEN and not record.is_question
     }
@@ -316,10 +307,14 @@ def match_findings(
         The per-round transitions plus the merged record set to persist.
     """
     prior_records = list(previous.findings) if previous is not None else []
-    inline_records = current_records(
-        findings=[finding for finding in findings if finding.posted_inline],
-        round_number=round_number,
-    )
+    # A sighting's line is in this head's coordinates (#3403).
+    inline_records = [
+        replace(record, line_sha=head_sha)
+        for record in current_records(
+            findings=[finding for finding in findings if finding.posted_inline],
+            round_number=round_number,
+        )
+    ]
     note_records = current_records(
         findings=[finding for finding in findings if not finding.posted_inline],
         round_number=round_number,
@@ -425,15 +420,19 @@ def match_findings(
             range_carries=range_carries,
             unverified_carries=unverified_carries,
         ):
-            merged.append(record)
-            carried.append(record)
-            outcomes[record.key] = FindingMatchOutcome.CARRIED
+            # Only a carry nothing re-judged is labelled; one a note or a
+            # merged duplicate re-asserted this round was re-verified (#3403).
+            kept = replace(record, unverified=record.key in unverified_carries)
+            merged.append(kept)
+            carried.append(kept)
+            outcomes[kept.key] = FindingMatchOutcome.CARRIED
             continue
         closed = replace(
             record,
             status=FindingStatus.RESOLVED,
             resolved_sha=head_sha,
             resolved_round=round_number,
+            unverified=False,
         )
         merged.append(closed)
         resolved.append(closed)
@@ -448,6 +447,5 @@ def match_findings(
         outcomes=outcomes,
         note_carries=note_carries,
         range_carries=frozenset(range_carries),
-        unverified_carries=frozenset(unverified_carries),
         finding_ids=tuple(finding_ids[i] for i in range(len(findings))),
     )

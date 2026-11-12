@@ -32,11 +32,6 @@ class FindingMatchResult:
         range_carries: Keys of prior open records carried because a delta
             round read their file but not their line (#2627); rendered
             as carried, never resolved.
-        unverified_carries: Keys of prior open records carried only because
-            the round did not read them (an unread file, or a line outside
-            every delta hunk), so nothing re-judged them against this head
-            (#3403). A superset of ``range_carries``; the sticky labels them
-            "not re-verified" and the verdict counts them as nits at most.
         finding_ids: The record key of each current finding, in the order
             the findings were given — the ``finding_id`` the JSON surface
             carries, taken from the match rather than recomputed.
@@ -50,7 +45,6 @@ class FindingMatchResult:
     outcomes: dict[str, FindingMatchOutcome] = field(default_factory=dict)
     note_carries: frozenset[tuple[str, int]] = field(default_factory=frozenset)
     range_carries: frozenset[str] = field(default_factory=frozenset)
-    unverified_carries: frozenset[str] = field(default_factory=frozenset)
     finding_ids: tuple[str, ...] = field(default_factory=tuple)
 
     def outcome_for(self, *, record: FindingRecord) -> FindingMatchOutcome | None:

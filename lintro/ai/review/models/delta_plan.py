@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 
 from lintro.ai.review.enums.delta_reason import DeltaReason
 
@@ -23,10 +24,15 @@ class DeltaPlan:
         reason: Why this scope was chosen; :attr:`DeltaReason.DELTA` is the
             only value under which ``since_sha`` is set.
         since_sha: The prior round's head commit, or ``None`` on a full round.
+        open_lines: On a delta round, the lines of the prior open findings per
+            file mapped to ``since_sha``'s coordinates, or ``None`` for a file
+            holding a finding whose line could not be mapped there (#3403).
+            A narrowed file must show every one of them or be read whole.
     """
 
     reason: DeltaReason
     since_sha: str | None = None
+    open_lines: Mapping[str, tuple[int, ...] | None] = field(default_factory=dict)
 
     @property
     def is_delta(self) -> bool:

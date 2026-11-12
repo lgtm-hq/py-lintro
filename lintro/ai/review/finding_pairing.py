@@ -114,6 +114,7 @@ def merge_pair(
         title=current.title,
         file=current.file,
         line=current.line,
+        line_sha=current.line_sha,
         status=FindingStatus.OPEN,
         since_round=prior.since_round,
         resolved_sha=prior.resolved_sha,
