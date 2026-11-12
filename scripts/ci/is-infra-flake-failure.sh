@@ -17,6 +17,10 @@
 #                         proves its only failures were tool-execution timeouts
 #                         with zero findings anywhere (#1653)
 #   TIMED_OUT_TOOLS     - Comma-separated tool names for the log message
+#   PROBE_TIMEOUT_FLAKE - 'true' when the dogfood skip gate's ONLY violations
+#                         were version probes that timed out twice with no
+#                         verdict for the tool in any other attempt (#3383)
+#   PROBE_TIMED_OUT_TOOLS - Comma-separated tool names for the log message
 
 set -euo pipefail
 
@@ -36,6 +40,9 @@ Environment variables:
   TIMEOUT_FLAKE         'true' when the same attempt's report proves a
                         tool-execution timeout with zero findings (#1653)
   TIMED_OUT_TOOLS       Comma-separated timed-out tool names (log only)
+  PROBE_TIMEOUT_FLAKE   'true' when the skip gate's only violations were
+                        version-probe timeouts with no sibling verdict (#3383)
+  PROBE_TIMED_OUT_TOOLS Comma-separated probe-timed-out tool names (log only)
 EOF
 	exit 0
 fi
@@ -64,6 +71,7 @@ is_infra_flake_failure() {
 	local status_output="${3:-}"
 	local exit_code_output="${4:-}"
 	local timeout_flake="${5:-}"
+	local probe_timeout_flake="${6:-}"
 
 	# Nothing to classify when the upstream job succeeded.
 	if [[ "${result}" == "success" ]]; then
@@ -96,6 +104,21 @@ is_infra_flake_failure() {
 	if [[ "${timeout_flake}" == "true" ]]; then
 		echo "Tool-execution timeout in the authoritative lint run" \
 			"(tools: ${TIMED_OUT_TOOLS:-unknown}); zero findings reported."
+		return 0
+	fi
+
+	# Version-probe timeout in the dogfood skip gate (#3383). The gate fails
+	# (status=failed / exit 1) when a tool's version probe timed out on both
+	# attempts and no other attempt of the run reported a verdict for it, so
+	# this must also sit above the lint-verdict guard. The flag is published
+	# by check-dogfood-skips.py from the gate's own report and is 'true' only
+	# when EVERY violation is such a timeout: a missing binary, an unavailable
+	# row with no probe_failure, or any other skip leaves it 'false' and the
+	# failure falls through and stays red. This classifies the failure for a
+	# retry; it never turns the gate green.
+	if [[ "${probe_timeout_flake}" == "true" ]]; then
+		echo "Version probe timed out with no verdict in another attempt" \
+			"(tools: ${PROBE_TIMED_OUT_TOOLS:-unknown}); retry can answer it."
 		return 0
 	fi
 
@@ -136,7 +159,8 @@ if is_infra_flake_failure \
 	"${UPSTREAM_CONCLUSION:-}" \
 	"${STATUS_OUTPUT:-}" \
 	"${EXIT_CODE_OUTPUT:-}" \
-	"${TIMEOUT_FLAKE:-}"; then
+	"${TIMEOUT_FLAKE:-}" \
+	"${PROBE_TIMEOUT_FLAKE:-}"; then
 	exit 0
 fi
 

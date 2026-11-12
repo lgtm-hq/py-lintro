@@ -1784,6 +1784,40 @@ def test_dogfood_nightly_skip_gate_publishes_and_retries_its_verdict() -> None:
     assert_that(condition).contains("needs.dogfood-skip-gate.outputs.status == ''")
 
 
+def test_dogfood_nightly_skip_gates_read_dogfood_full_as_sibling_evidence() -> None:
+    """Both nightly gate attempts get dogfood-full's report as a sibling (#3383).
+
+    A probe_timeout row is absorbed only when another attempt of the run
+    reported a verdict for the tool. dogfood-full is that attempt; its report
+    download must not fail the gate, because an absent report simply leaves the
+    timeout fatal.
+    """
+    nightly = _load_workflow(name="dogfood-nightly.yml")
+    for job_id in ("dogfood-skip-gate", "dogfood_skip_gate_retry"):
+        job = nightly["jobs"][job_id]
+        download = next(
+            step
+            for step in job["steps"]
+            if step.get("name") == "Download dogfood-full lint JSON report"
+        )
+        assert_that(download["continue-on-error"]).is_true()
+        assert_that(download["with"]).is_equal_to(
+            {"name": "linting-json-report", "path": ".lintro/sibling/dogfood-full"},
+        )
+        check = next(step for step in job["steps"] if step.get("id") == "skips")
+        assert_that(check["env"]["SIBLING_REPORTS"]).is_equal_to(
+            ".lintro/sibling/dogfood-full/results.json",
+        )
+        harden = next(
+            step
+            for step in job["steps"]
+            if str(step.get("uses", "")).startswith("step-security/harden-runner@")
+        )
+        assert_that(harden["with"]["allowed-endpoints"].split()).contains(
+            "results-receiver.actions.githubusercontent.com:443",
+        )
+
+
 def test_dogfood_nightly_skip_gate_retry_is_a_lockstep_copy() -> None:
     """The skip-gate retry must run exactly what the primary ran (#2246).
 

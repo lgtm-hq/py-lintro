@@ -18,10 +18,16 @@
 # (#2337): `binary_missing` when the executable was not found, or
 # `probe_timeout` when it exists but `--version` timed out on the first attempt
 # and on the retry (the row then carries `probe_seconds`). A probe timeout is
-# infrastructure noise, not an image bug. This gate does not read
-# `probe_failure` yet and still classifies every unavailable tool as
-# binary_missing; teaching it to absorb `probe_timeout` only when the same tool
-# reported a verdict in another attempt is a separate CI change.
+# usually infrastructure noise, not an image bug. The gate (#3383) absorbs a
+# `probe_timeout` row, as a warning naming `probe_seconds`, only when the same
+# tool reported a verdict (`status` ok or failed) in another attempt of the
+# same run, passed as `--sibling-report` (`SIBLING_REPORTS` in
+# dogfood-skip-gate.sh). Without that verdict it stays a binary_missing
+# violation; when every violation is such a timeout the gate publishes
+# `probe-timeout-flake=true`, which is-infra-flake-failure.sh classifies as
+# infrastructure (the gate still fails). `binary_missing`
+# rows and unavailable rows with no `probe_failure` are never absorbed. No
+# allowlist entry can name `probe_timeout`: it is not a reason_class.
 #
 # Two sections:
 #   allowlist  Permanent, intentional skips. Only `no_config` /

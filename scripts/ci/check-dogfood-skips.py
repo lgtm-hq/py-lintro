@@ -25,6 +25,18 @@ Skip reasons are classified into one of:
   (like ``binary_missing``); it must be explicitly tolerated via an
   ``interim`` entry with a tracking issue.
 
+An unavailable row that carries ``probe_failure: probe_timeout`` (#2337) is a
+version probe that timed out on its first attempt and on the retry. The binary
+exists, so a slow runner can produce it for a working tool. It is still an
+image-dependency failure (``binary_missing``) for allowlist purposes, with one
+exception (#3383): it is absorbed, as a warning that names the timeout and its
+``probe_seconds``, when the same tool reported a verdict (``status`` ``ok`` or
+``failed``) in a ``--sibling-report`` from another attempt of the same run.
+Without that evidence it fails like any other unavailable row, and when every
+violation is such a timeout the checker says so on its ``gate-output:`` lines
+so CI can classify the failure as infrastructure. ``binary_missing`` rows and
+unavailable rows with no ``probe_failure`` are never absorbed.
+
 Usage:
     python3 scripts/ci/check-dogfood-skips.py \
         --report results.json \
@@ -34,6 +46,17 @@ Usage:
     lintro chk --output-format json . | \
         python3 scripts/ci/check-dogfood-skips.py \
             --allowlist scripts/ci/dogfood-skip-allowlist.yaml
+
+    # absorb a probe timeout only when another attempt has a verdict
+    python3 scripts/ci/check-dogfood-skips.py \
+        --report results.json \
+        --sibling-report other-attempt.json
+
+Output:
+    Once a verdict (0 or 1) is reached the checker also prints two
+    ``gate-output: key=value`` lines on stdout for the CI wrapper:
+    ``probe-timeout-flake`` (``true`` only when every violation is a probe
+    timeout with no sibling verdict) and ``probe-timed-out-tools``.
 
 Exit codes:
     0 — no non-allowlisted skips (gate passes)
@@ -71,6 +94,19 @@ class SkipClass(StrEnum):
 PERMANENT_ALLOWLISTABLE: frozenset[SkipClass] = frozenset(
     {SkipClass.NO_CONFIG, SkipClass.OPT_IN_DISABLED},
 )
+
+# ``probe_failure`` value lintro writes when the version probe timed out on
+# both attempts (#2337). Mirrors ``lintro.enums.probe_failure``; this script
+# runs inside the image with only the stdlib and PyYAML, so it cannot import
+# lintro.
+PROBE_TIMEOUT = "probe_timeout"
+
+# Statuses that prove a tool ran and returned a verdict. ``skipped`` and
+# ``unavailable`` are not verdicts, and a row with no status is not evidence.
+VERDICT_STATUSES: frozenset[str] = frozenset({"ok", "failed"})
+
+# Prefix of the machine-readable lines the CI wrapper copies to GITHUB_OUTPUT.
+GATE_OUTPUT_PREFIX = "gate-output: "
 
 
 class AllowlistError(ValueError):
@@ -279,6 +315,7 @@ class SkipFinding:
     allowed: bool
     message: str
     is_warning: bool = False
+    probe_failure: str | None = None
 
 
 def _extract_results(payload: Any) -> list[dict[str, Any]]:
@@ -301,16 +338,147 @@ def _extract_results(payload: Any) -> list[dict[str, Any]]:
     return [entry for entry in results if isinstance(entry, dict)]
 
 
-def evaluate_skips(payload: Any, allowlist: Allowlist) -> list[SkipFinding]:
+def _has_verdict(result: dict[str, Any]) -> bool:
+    """Return whether a report row proves its tool ran to a verdict.
+
+    Args:
+        result: One per-tool row of a lintro JSON report.
+
+    Returns:
+        True for a row whose ``status`` is ``ok`` or ``failed`` and that is
+        neither skipped, unavailable nor timed out.
+    """
+    return (
+        result.get("status") in VERDICT_STATUSES
+        and not result.get("skipped")
+        and result.get("unavailable") is not True
+        and result.get("timed_out") is not True
+    )
+
+
+def tools_with_verdict(payloads: list[Any]) -> frozenset[str]:
+    """Collect the normalized names of tools that reported a verdict.
+
+    Args:
+        payloads: Parsed lintro JSON reports from other attempts of the run.
+
+    Returns:
+        Normalized tool names with at least one verdict row.
+    """
+    return frozenset(
+        normalize_tool_name(str(result.get("tool") or ""))
+        for payload in payloads
+        for result in _extract_results(payload)
+        if _has_verdict(result)
+    )
+
+
+def _probe_seconds_text(result: dict[str, Any]) -> str:
+    """Format a row's ``probe_seconds`` for a gate message.
+
+    Args:
+        result: One per-tool row of a lintro JSON report.
+
+    Returns:
+        The probe budget such as ``120s``, or ``unknown`` when absent.
+    """
+    seconds = result.get("probe_seconds")
+    if isinstance(seconds, bool) or not isinstance(seconds, int | float):
+        return "unknown"
+    return f"{seconds:g}s"
+
+
+def _allowlist_finding(
+    *,
+    tool: str,
+    reason: str,
+    skip_class: SkipClass,
+    label: str,
+    state: str,
+    entry: AllowlistEntry | None,
+) -> SkipFinding:
+    """Judge one skipped or unavailable row against its allowlist entry.
+
+    Args:
+        tool: Tool name as reported.
+        reason: Skip or unavailable reason (may be empty).
+        skip_class: Class the allowlist entry must match.
+        label: Class text shown in messages (adds probe evidence when known).
+        state: ``skipped`` or ``unavailable``.
+        entry: The tool's allowlist entry, or None.
+
+    Returns:
+        The finding for this row.
+    """
+    shown_reason = reason or "<none>"
+    if entry is None:
+        return SkipFinding(
+            tool=tool,
+            reason=reason,
+            skip_class=skip_class,
+            allowed=False,
+            message=(
+                f"{tool}: {state} ({label}) with no allowlist "
+                f"entry — reason: {shown_reason}"
+            ),
+        )
+
+    if entry.reason_class != skip_class:
+        return SkipFinding(
+            tool=tool,
+            reason=reason,
+            skip_class=skip_class,
+            allowed=False,
+            message=(
+                f"{tool}: {state} as {label} but allowlisted for "
+                f"{entry.reason_class.value} — re-triage the skip reason: "
+                f"{shown_reason}"
+            ),
+        )
+
+    # Allowlisted skip. Interim binary-missing tolerations are surfaced as
+    # loud warnings so an image bug can never be masked silently forever.
+    if entry.interim:
+        issue_ref = f" (see #{entry.issue})" if entry.issue is not None else ""
+        return SkipFinding(
+            tool=tool,
+            reason=reason,
+            skip_class=skip_class,
+            allowed=True,
+            is_warning=True,
+            message=(
+                f"{tool}: interim-allowlisted skip ({label})"
+                f"{issue_ref} — {entry.rationale}"
+            ),
+        )
+    return SkipFinding(
+        tool=tool,
+        reason=reason,
+        skip_class=skip_class,
+        allowed=True,
+        message=f"{tool}: allowlisted skip ({label}) — {entry.rationale}",
+    )
+
+
+def evaluate_skips(
+    payload: Any,
+    allowlist: Allowlist,
+    *,
+    sibling_payloads: list[Any] | None = None,
+) -> list[SkipFinding]:
     """Evaluate skipped and unavailable tools against the allowlist.
 
     Args:
         payload: Parsed lintro JSON report.
         allowlist: The parsed allowlist.
+        sibling_payloads: Parsed reports from other attempts of the same run.
+            A ``probe_timeout`` row is absorbed only when one of them holds a
+            verdict for the same tool.
 
     Returns:
         One :class:`SkipFinding` per skipped or unavailable tool, in report order.
     """
+    verdicts = tools_with_verdict(sibling_payloads or [])
     findings: list[SkipFinding] = []
     for result in _extract_results(payload):
         unavailable = (
@@ -328,45 +496,24 @@ def evaluate_skips(payload: Any, allowlist: Allowlist) -> list[SkipFinding]:
             if unavailable
             else classify_skip_reason(reason_str)
         )
-        state = "unavailable" if unavailable else "skipped"
-        entry = allowlist.get(tool)
-
-        if entry is None:
+        probe_failure = result.get("probe_failure") if unavailable else None
+        if probe_failure != PROBE_TIMEOUT:
             findings.append(
-                SkipFinding(
+                _allowlist_finding(
                     tool=tool,
                     reason=reason_str,
                     skip_class=skip_class,
-                    allowed=False,
-                    message=(
-                        f"{tool}: {state} ({skip_class.value}) with no allowlist "
-                        f"entry — reason: {reason_str or '<none>'}"
-                    ),
+                    label=skip_class.value,
+                    state="unavailable" if unavailable else "skipped",
+                    entry=allowlist.get(tool),
                 ),
             )
             continue
 
-        if entry.reason_class != skip_class:
-            findings.append(
-                SkipFinding(
-                    tool=tool,
-                    reason=reason_str,
-                    skip_class=skip_class,
-                    allowed=False,
-                    message=(
-                        f"{tool}: {state} as {skip_class.value} "
-                        "but allowlisted for "
-                        f"{entry.reason_class.value} — re-triage the skip reason: "
-                        f"{reason_str or '<none>'}"
-                    ),
-                ),
-            )
-            continue
-
-        # Allowlisted skip. Interim binary-missing tolerations are surfaced as
-        # loud warnings so an image bug can never be masked silently forever.
-        issue_ref = f" (see #{entry.issue})" if entry.issue is not None else ""
-        if entry.interim:
+        label = f"{PROBE_TIMEOUT} after {_probe_seconds_text(result)}"
+        if normalize_tool_name(tool) in verdicts:
+            # The binary answered in another attempt of this run, so the
+            # timeout here is runner noise, not an image regression (#3383).
             findings.append(
                 SkipFinding(
                     tool=tool,
@@ -374,26 +521,55 @@ def evaluate_skips(payload: Any, allowlist: Allowlist) -> list[SkipFinding]:
                     skip_class=skip_class,
                     allowed=True,
                     is_warning=True,
+                    probe_failure=PROBE_TIMEOUT,
                     message=(
-                        f"{tool}: interim-allowlisted skip ({skip_class.value})"
-                        f"{issue_ref} — {entry.rationale}"
+                        f"{tool}: unavailable ({label}) absorbed — the same "
+                        "tool reported a verdict in another attempt of this run"
                     ),
                 ),
             )
-        else:
-            findings.append(
-                SkipFinding(
-                    tool=tool,
-                    reason=reason_str,
-                    skip_class=skip_class,
-                    allowed=True,
-                    message=(
-                        f"{tool}: allowlisted skip ({skip_class.value}) — "
-                        f"{entry.rationale}"
-                    ),
+            continue
+
+        finding = _allowlist_finding(
+            tool=tool,
+            reason=reason_str,
+            skip_class=skip_class,
+            label=label,
+            state="unavailable",
+            entry=allowlist.get(tool),
+        )
+        findings.append(
+            SkipFinding(
+                tool=finding.tool,
+                reason=finding.reason,
+                skip_class=finding.skip_class,
+                allowed=finding.allowed,
+                is_warning=finding.is_warning,
+                probe_failure=PROBE_TIMEOUT,
+                message=(
+                    finding.message
+                    if finding.allowed
+                    else f"{finding.message} (no sibling verdict for this tool)"
                 ),
-            )
+            ),
+        )
     return findings
+
+
+def probe_timeout_only_tools(findings: list[SkipFinding]) -> list[str]:
+    """Return the timed-out tools when probe timeouts are the only violations.
+
+    Args:
+        findings: Findings from :func:`evaluate_skips`.
+
+    Returns:
+        The violating tools in report order, or an empty list when there is no
+        violation or any violation is not an unabsorbed probe timeout.
+    """
+    violations = [f for f in findings if not f.allowed]
+    if not violations or any(f.probe_failure != PROBE_TIMEOUT for f in violations):
+        return []
+    return [f.tool for f in violations]
 
 
 def _read_report(report_arg: str | None) -> Any:
@@ -437,18 +613,35 @@ def _print_report(findings: list[SkipFinding]) -> None:
         print(f"  FAIL  {finding.message}", file=sys.stderr)
 
 
-def run(report_arg: str | None, allowlist_arg: str) -> int:
+def _print_gate_outputs(probe_timeout_tools: list[str]) -> None:
+    """Print the machine-readable lines the CI wrapper publishes.
+
+    Args:
+        probe_timeout_tools: Result of :func:`probe_timeout_only_tools`.
+    """
+    flake = "true" if probe_timeout_tools else "false"
+    print(f"{GATE_OUTPUT_PREFIX}probe-timeout-flake={flake}")
+    print(f"{GATE_OUTPUT_PREFIX}probe-timed-out-tools={','.join(probe_timeout_tools)}")
+
+
+def run(
+    report_arg: str | None,
+    allowlist_arg: str,
+    sibling_args: list[str] | None = None,
+) -> int:
     """Run the gate and return the process exit code.
 
     Args:
         report_arg: Path to the lintro JSON report, or ``None``/``-`` for stdin.
         allowlist_arg: Path to the allowlist YAML file.
+        sibling_args: Paths to reports from other attempts of the same run.
 
     Returns:
         Exit code: 0 (pass), 1 (violations), or 2 (usage/config error).
     """
     try:
         payload = _read_report(report_arg)
+        siblings = [_read_report(path) for path in sibling_args or []]
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"error: failed to read lintro report: {exc}", file=sys.stderr)
         return 2
@@ -468,14 +661,26 @@ def run(report_arg: str | None, allowlist_arg: str) -> int:
         return 2
 
     try:
-        findings = evaluate_skips(payload, allowlist)
+        findings = evaluate_skips(payload, allowlist, sibling_payloads=siblings)
     except ValueError as exc:
         print(f"error: malformed lintro report: {exc}", file=sys.stderr)
         return 2
 
     _print_report(findings)
+    probe_timeout_tools = probe_timeout_only_tools(findings)
+    _print_gate_outputs(probe_timeout_tools)
 
     violations = [f for f in findings if not f.allowed]
+    if probe_timeout_tools:
+        print(
+            "\nGate failed: the version probe timed out for "
+            f"{', '.join(probe_timeout_tools)} and no other attempt of this run "
+            "reported a verdict for it. A timed-out probe is usually runner "
+            "slowness, but without a verdict nothing proves the tool is "
+            "installed, so the gate stays red until an attempt answers.",
+            file=sys.stderr,
+        )
+        return 1
     if violations:
         print(
             f"\nGate failed: {len(violations)} enabled tool(s) silently skipped. "
@@ -511,8 +716,18 @@ def main(argv: list[str] | None = None) -> int:
         default="scripts/ci/dogfood-skip-allowlist.yaml",
         help="Path to the skip allowlist YAML file.",
     )
+    parser.add_argument(
+        "--sibling-report",
+        action="append",
+        default=[],
+        help=(
+            "Report from another attempt of the same run (repeatable). A "
+            "probe_timeout row is absorbed only when one of these holds a "
+            "verdict for the same tool."
+        ),
+    )
     args = parser.parse_args(argv)
-    return run(args.report, args.allowlist)
+    return run(args.report, args.allowlist, args.sibling_report)
 
 
 if __name__ == "__main__":

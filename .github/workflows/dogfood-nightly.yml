@@ -263,6 +263,7 @@ jobs:
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
+            results-receiver.actions.githubusercontent.com:443
             github.com:443
             api.github.com:443
             codeload.github.com:443
@@ -298,6 +299,17 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Download dogfood-full lint JSON report
+        # Sibling evidence for a timed-out version probe (#3383): dogfood-full
+        # is another attempt of this run, and a verdict it reported for a tool
+        # lets the gate absorb that tool's probe_timeout. A missing artifact
+        # (lint killed before upload) just leaves the timeout fatal, so the
+        # download must not fail the gate on its own.
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: linting-json-report
+          path: .lintro/sibling/dogfood-full
       - name: Log in to GitHub Container Registry
         # yamllint disable-line rule:line-length
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
@@ -315,6 +327,9 @@ jobs:
             pydoclint:timeout=120,black:timeout=120,bandit:timeout=300,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
           # The same resolved image dogfood-full lints with (#2602).
           LINTRO_IMAGE: ${{ needs.resolve-image.outputs.image }}
+          # Absorb a probe_timeout only when dogfood-full reported a verdict
+          # for the same tool (#3383); absent file = no evidence = still fatal.
+          SIBLING_REPORTS: .lintro/sibling/dogfood-full/results.json
         # Memory trace (#1761): this job is repeatedly killed mid-lint with
         # "runner has received a shutdown signal" + container EOF, and memory
         # pressure is the leading hypothesis. Samples stream into this step's
@@ -362,6 +377,7 @@ jobs:
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
+            results-receiver.actions.githubusercontent.com:443
             github.com:443
             api.github.com:443
             codeload.github.com:443
@@ -397,6 +413,17 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Download dogfood-full lint JSON report
+        # Sibling evidence for a timed-out version probe (#3383): dogfood-full
+        # is another attempt of this run, and a verdict it reported for a tool
+        # lets the gate absorb that tool's probe_timeout. A missing artifact
+        # (lint killed before upload) just leaves the timeout fatal, so the
+        # download must not fail the gate on its own.
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: linting-json-report
+          path: .lintro/sibling/dogfood-full
       - name: Log in to GitHub Container Registry
         # yamllint disable-line rule:line-length
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
@@ -414,6 +441,9 @@ jobs:
             pydoclint:timeout=120,black:timeout=120,bandit:timeout=300,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
           # The same resolved image dogfood-full lints with (#2602).
           LINTRO_IMAGE: ${{ needs.resolve-image.outputs.image }}
+          # Absorb a probe_timeout only when dogfood-full reported a verdict
+          # for the same tool (#3383); absent file = no evidence = still fatal.
+          SIBLING_REPORTS: .lintro/sibling/dogfood-full/results.json
         # Memory trace (#1761): this job is repeatedly killed mid-lint with
         # "runner has received a shutdown signal" + container EOF, and memory
         # pressure is the leading hypothesis. Samples stream into this step's
