@@ -1387,6 +1387,16 @@ Rationale:
    name (`bunx prettier@<pinned>`); it uses `--package` when they differ
    (`bunx --package typescript@<pinned> tsc`). `npx` always uses `--yes --package` so it
    cannot hang waiting for a TTY prompt.
+
+   When only `npx` is available, Lintro first looks for `node_modules/.bin/<binary>` in
+   every directory from the one being checked up to the filesystem root, with no
+   `package.json` or `.git` boundary. `npx` skips its install whenever the pinned
+   version appears anywhere in the dependency tree. It then runs `<binary>` from the
+   first ancestor `node_modules/.bin`, so in a workspace whose root hoists an older
+   copy, that copy runs instead of the pin. If such a binary exists, Lintro uses it
+   directly, probes its real version locally and applies the minimum to it.
+   `bunx <pkg>@<pinned>` never runs the local tree, so it is unaffected.
+
 4. **bare `<binary>`** — last resort, fails if nothing is installed.
 
 `@latest` is never resolved at runtime, for any tool. Branch 3 emits a one-time warning

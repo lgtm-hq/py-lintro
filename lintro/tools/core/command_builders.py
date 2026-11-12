@@ -485,6 +485,43 @@ def find_local_node_binary(
     return None
 
 
+def find_npx_path_node_binary(
+    binary_name: str,
+    *,
+    start: Path | None = None,
+) -> str | None:
+    """Find the ancestor ``node_modules/.bin`` executable npx would launch.
+
+    ``npx --package <pkg>@<pin> <bin>`` skips the install whenever any node in
+    the project's dependency tree is exactly ``<pkg>@<pin>``, at any depth. It
+    then runs ``<bin>`` by name with a ``PATH`` built from ``node_modules/.bin``
+    in every ancestor of the project, up to the filesystem root
+    (``@npmcli/run-script`` ``set-path.js``). A hoisted ``<bin>`` from a
+    different version therefore runs instead of the pin, and the pin is no
+    evidence of what executes (#2043). Verified offline against npx 11.20.0.
+
+    Unlike :func:`find_local_node_binary`, this walk has no project boundary,
+    because npx's ``PATH`` has none. ``bunx <pkg>@<pin>`` never consults the
+    local tree, so this applies to npx only.
+
+    Args:
+        binary_name: Executable name inside ``node_modules/.bin``.
+        start: Directory the tool will run in. Defaults to the process
+            working directory.
+
+    Returns:
+        POSIX path to the first ancestor executable, or None when npx can only
+        launch the pinned package.
+    """
+    origin = (start or Path.cwd()).resolve()
+    name = f"{binary_name}.cmd" if sys.platform == "win32" else binary_name
+    for directory in (origin, *origin.parents):
+        candidate = directory / "node_modules" / ".bin" / name
+        if candidate.is_file():
+            return candidate.as_posix()
+    return None
+
+
 def pinned_npm_spec(package_name: str) -> str:
     """Build a version-pinned ``package@version`` npm spec.
 
@@ -663,6 +700,14 @@ class NodeJSBuilder(CommandBuilder):
         for runner in ("bunx", "npx"):
             if shutil.which(runner):
                 if runner == "npx":
+                    # npx may launch a hoisted binary instead of the pin;
+                    # resolve that binary so the gate probes what runs.
+                    reachable = find_npx_path_node_binary(binary_name, start=start)
+                    if reachable is not None:
+                        logger.debug(
+                            f"npx would launch {reachable}; using it for {binary_name}",
+                        )
+                        return [reachable]
                     command = ["npx", "--yes", "--package", spec, binary_name]
                 elif package_name == binary_name:
                     command = [runner, spec]
