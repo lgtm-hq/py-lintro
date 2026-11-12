@@ -198,7 +198,12 @@ These fail-closed checks also apply without a fingerprint baseline:
 
 - Ruff's lint check requires a structured report, including `[]` for a clean result.
   Empty stdout fails, and diagnostics without positive line and column locations count
-  as parse failures rather than a complete report.
+  as parse failures rather than a complete report. A run that prints no report (empty
+  stdout, or non-JSON output behind an exit other than 0 or 1) is logged as an execution
+  or configuration error with Ruff's own message, not as unparsed diagnostic records.
+- Bandit treats a run that could not execute, printed no usable JSON, listed files it
+  could not scan, or reported a non-list `errors` container (one parse failure) as an
+  execution failure. Inspection stays unknown, so such a run never updates a baseline.
 - The shared per-file check runner accepts a nonzero exit as a complete lint verdict
   only when it is a declared findings exit status and has parsed findings. Other nonzero
   exits are execution errors even if some findings were parsed. This also applies to the

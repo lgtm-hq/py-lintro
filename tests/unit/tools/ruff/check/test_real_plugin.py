@@ -282,3 +282,85 @@ def test_execute_ruff_check_with_real_plugin(
         assert_that(result.name).is_equal_to(ToolName.RUFF)
         assert_that(result.parse_failures_count).is_equal_to(expected_failures)
         assert_that(result.issues_count).is_zero()
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "stderr", "detail"),
+    [
+        (
+            2,
+            "",
+            "ruff failed\n  Cause: Failed to parse pyproject.toml\n",
+            "ruff failed",
+        ),
+        (2, "error: unexpected argument '--bogus'\n", "", "unexpected argument"),
+        (0, " \n", "", "no output"),
+    ],
+    ids=["config-error", "non-json-abnormal-exit", "empty-clean-exit"],
+)
+def test_ruff_missing_report_logs_execution_error(
+    ruff_plugin: RuffPlugin,
+    temp_python_file: str,
+    loguru_records: list[tuple[str, str]],
+    returncode: int,
+    stdout: str,
+    stderr: str,
+    detail: str,
+) -> None:
+    """A run with no JSON report is diagnosed as an execution error (#3352).
+
+    The verdict stays failed, the failure is flagged as an execution failure
+    with unknown inspection, and the log names the exit code and Ruff's own
+    message instead of a count of unparsed diagnostic records.
+    """
+    ruff_plugin.options["format_check"] = False
+    process = SubprocessResult(returncode, stdout, stderr, stdout + stderr)
+    with patch(
+        "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+        return_value=process,
+    ):
+        result = execute_ruff_check(ruff_plugin, [temp_python_file])
+
+    warnings = "\n".join(
+        message for level, message in loguru_records if level == "WARNING"
+    )
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.inspected_files).is_none()
+    assert_that(result.issues).is_empty()
+    assert_that(warnings).contains(
+        f"ruff check did not produce a report (exit {returncode})",
+    )
+    assert_that(warnings).contains(detail)
+    assert_that(warnings).does_not_contain("could not be parsed")
+
+
+# The summary claims two reformatted files but names none of them.
+FORMAT_REPORT = "2 files would be reformatted\n"
+
+
+def test_ruff_missing_lint_report_keeps_format_parse_warning(
+    ruff_plugin: RuffPlugin,
+    temp_python_file: str,
+    loguru_records: list[tuple[str, str]],
+) -> None:
+    """A lint execution error does not hide a malformed format report."""
+    ruff_plugin.options["format_check"] = True
+    with patch(
+        "lintro.tools.ruff.check.run_subprocess_result_with_timeout",
+        side_effect=[
+            SubprocessResult(2, "", "ruff failed\n", "ruff failed\n"),
+            SubprocessResult(1, FORMAT_REPORT, "", FORMAT_REPORT),
+        ],
+    ):
+        result = execute_ruff_check(ruff_plugin, [temp_python_file])
+
+    warnings = [message for level, message in loguru_records if level == "WARNING"]
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(warnings).is_length(2)
+    assert_that(warnings[0]).starts_with("ruff check did not produce a report")
+    assert_that(warnings[1]).is_equal_to(
+        "ruff: 2 diagnostic record(s) could not be parsed",
+    )

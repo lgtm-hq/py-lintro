@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.models.core.tool_outcome import Checked, TimedOut, ToolOutcome
 from lintro.parsers.ruff.ruff_format_coverage import (
     format_inspected_paths,
@@ -60,6 +61,47 @@ def _lint_parse_failures(output: str, issues: list[RuffIssue]) -> int:
         for issue in issues
     )
     return abs(len(records) - len(issues)) + invalid
+
+
+def _lint_execution_error(process: SubprocessResult) -> bool:
+    """Whether ``ruff check`` failed to run rather than printing a bad report.
+
+    Ruff always prints a JSON array with ``--output-format json`` (``[]`` on a
+    clean run) and exits 0 or 1. A configuration error, unknown flag or panic
+    exits 2 with nothing on stdout. Empty stdout, or non-JSON stdout behind an
+    abnormal exit, is therefore an execution error, not a malformed report.
+    Truncated or malformed JSON at a normal exit stays a parse failure.
+
+    Args:
+        process: Result of the ``ruff check`` subprocess.
+
+    Returns:
+        True when the run produced no report to parse.
+    """
+    if not process.stdout.strip():
+        return True
+    if process.returncode in (0, 1):
+        return False
+    try:
+        json.loads(process.stdout)
+    except (ValueError, TypeError):
+        return True
+    return False
+
+
+def _execution_error_detail(process: SubprocessResult) -> str:
+    """Summarise what Ruff printed when it failed to run.
+
+    Args:
+        process: Result of the failed ``ruff check`` subprocess.
+
+    Returns:
+        The first lines of stderr (or stdout), or a placeholder when empty.
+    """
+    text = process.stderr.strip() or process.stdout.strip()
+    if not text:
+        return "no output"
+    return " | ".join(line.strip() for line in text.splitlines()[:3])
 
 
 def _baseline_coverage(
@@ -177,6 +219,9 @@ def execute_ruff_check(
         parse_failures,
         _lint_parse_failures(lint_process.stdout, lint_issues),
     )
+    lint_failed_to_run = _lint_execution_error(lint_process)
+    # The failed verdict and failure count stay; only the diagnosis differs.
+    absent_report_failures = parse_failures if lint_failed_to_run else 0
     lint_complete = not parse_failures and (
         success_lint or (lint_process.returncode == 1 and bool(lint_issues))
     )
@@ -254,12 +299,21 @@ def execute_ruff_check(
     complete = lint_complete and format_complete
     success: bool = success_lint and success_format and issues_count == 0 and complete
 
-    if parse_failures:
+    if lint_failed_to_run:
+        # No report at all is an execution or configuration error, not a
+        # count of malformed records (#3352).
         logger.warning(
-            f"ruff: {parse_failures} diagnostic record(s) could not be parsed",
+            f"ruff check did not produce a report (exit {lint_process.returncode}); "
+            f"this indicates a ruff execution or configuration error: "
+            f"{_execution_error_detail(lint_process)}",
+        )
+    record_failures = parse_failures - absent_report_failures
+    if record_failures:
+        logger.warning(
+            f"ruff: {record_failures} diagnostic record(s) could not be parsed",
         )
     # A failed process with no findings needs an execution-error diagnostic.
-    elif not success and issues_count == 0:
+    elif not lint_failed_to_run and not success and issues_count == 0:
         logger.warning(
             f"ruff subprocess failed (lint={success_lint}, format={success_format}) "
             f"but no issues were parsed - this indicates a ruff execution error",

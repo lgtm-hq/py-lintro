@@ -26,6 +26,7 @@ from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
 from lintro.models.core.tool_outcome import Checked, NoFiles, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.bandit.bandit_issue import BanditIssue
 from lintro.parsers.bandit.bandit_parser import parse_bandit_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
@@ -71,6 +72,46 @@ def _extract_bandit_json(raw_text: str) -> dict[str, Any]:
     if not isinstance(parsed.get("results"), list):
         raise ValueError("Bandit output missing a valid 'results' list")
     return parsed
+
+
+def _failed_run_result(
+    *,
+    output: str,
+    issues: list[BanditIssue] | None = None,
+    parse_failures: int | None = None,
+) -> ToolResult:
+    """Build the result for a Bandit run that produced no complete verdict.
+
+    Bandit could not run, printed no usable report, or reported files it
+    could not scan. Neither the exit code nor a partial report proves which
+    files were read, so inspection is unknown and the run can never update a
+    severity baseline. The result is flagged as an execution failure, the way
+    the import-linter, black, ruff and clippy plugins report theirs (#2371,
+    #3352). Only findings Bandit really reported are kept; nothing synthetic
+    is added for the failure itself.
+
+    Args:
+        output: Diagnostic text naming why the run is incomplete.
+        issues: Findings parsed from a partial report, if any.
+        parse_failures: Malformed report containers, or None when the report
+            itself was well formed.
+
+    Returns:
+        A failed ToolResult flagged as an execution failure.
+    """
+    kept = issues or []
+    return ToolResult.from_outcome(
+        ToolOutcome(
+            execution=Checked(success=False, inspected_files=None),
+            issues_count=len(kept),
+        ),
+        name="bandit",
+        findings_complete=False,
+        execution_failed=True,
+        output=output,
+        issues=kept,
+        parse_failures_count=parse_failures,
+    )
 
 
 @register_tool
@@ -437,19 +478,13 @@ class BanditPlugin(BaseToolPlugin):
                 )
 
             if ("{" not in output or "}" not in output) and execution_failure:
-                return ToolResult.from_outcome(
-                    ToolOutcome(execution=Checked(success=False)),
-                    name=self.definition.name,
-                    output=output,
-                )
+                return _failed_run_result(output=output)
 
             # Handle empty output (no JSON content to parse)
             if not output:
                 # If Bandit exited non-zero with no output, treat as failure
                 if returncode != 0:
-                    return ToolResult.from_outcome(
-                        ToolOutcome(execution=Checked(success=False)),
-                        name=self.definition.name,
+                    return _failed_run_result(
                         output=stderr_output or "Bandit failed with non-zero exit code",
                     )
                 # Informational, non-JSON output. Keep ``output`` empty so a
@@ -464,19 +499,37 @@ class BanditPlugin(BaseToolPlugin):
 
             bandit_data = _extract_bandit_json(raw_text=output)
             issues = parse_bandit_output(bandit_data)
-            issues_count = len(issues)
+            errors = bandit_data.get("errors", [])
 
-            execution_success = (
-                len(bandit_data.get("errors", [])) == 0 and not execution_failure
-            )
+            # ``errors`` lists the files Bandit could not scan. Any other
+            # container (``null``, a string, an object) is a malformed
+            # report, not a clean one: count it as a parse failure (#3352).
+            if not isinstance(errors, list):
+                logger.error(
+                    "Bandit 'errors' must be a list, got " f"{type(errors).__name__}",
+                )
+                return _failed_run_result(
+                    output=output,
+                    issues=issues,
+                    parse_failures=1,
+                )
+
+            # Files Bandit could not scan, or a run that failed to execute,
+            # leave the findings incomplete and the inspected set unknown.
+            if errors or execution_failure:
+                return _failed_run_result(
+                    output=output,
+                    issues=issues,
+                    parse_failures=0,
+                )
 
             return ToolResult.from_outcome(
                 ToolOutcome(
-                    execution=Checked(success=execution_success, inspected_files=True),
-                    issues_count=issues_count,
+                    execution=Checked(success=True, inspected_files=True),
+                    issues_count=len(issues),
                 ),
                 name=self.definition.name,
-                output=output if execution_failure else None,
+                output=None,
                 issues=issues,
                 parse_failures_count=0,
             )
@@ -485,11 +538,9 @@ class BanditPlugin(BaseToolPlugin):
             # Bandit is a security scanner: unparseable output must never be
             # reported as a clean pass (see #1044).
             logger.error(f"Failed to parse bandit output: {e}")
-            return ToolResult.from_outcome(
-                ToolOutcome(execution=Checked(success=False)),
-                name=self.definition.name,
+            return _failed_run_result(
                 output=(output or f"Failed to parse bandit output: {e!s}"),
-                parse_failures_count=1,
+                parse_failures=1,
             )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
