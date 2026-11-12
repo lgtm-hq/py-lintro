@@ -43,6 +43,23 @@ def _mark_parse_failure_unknown(result: ToolResult) -> ToolResult:
     return result
 
 
+def _is_incomplete(result: ToolResult) -> bool:
+    """Report whether a fix pass left evidence a retry must not overwrite.
+
+    Args:
+        result: One normalized fix pass.
+
+    Returns:
+        True when the pass failed to execute, has unknown fix accounting, or
+        printed a report that could not be fully parsed.
+    """
+    return bool(
+        result.execution_failed
+        or result.residual_unknown
+        or result.parse_failures_count,
+    )
+
+
 def run_fix_with_retry(
     tool: BaseToolPlugin,
     paths: list[str],
@@ -70,7 +87,7 @@ def run_fix_with_retry(
     result = _mark_parse_failure_unknown(result)
 
     # An incomplete first pass has no complete baseline to merge or retry.
-    if max_retries <= 1 or result.residual_unknown or result.parse_failures_count:
+    if max_retries <= 1 or _is_incomplete(result):
         return result
 
     initial_issues_count = result.initial_issues_count
@@ -78,9 +95,10 @@ def run_fix_with_retry(
     remaining = get_remaining_count(result)
 
     for attempt in range(2, max_retries + 1):
-        # An incomplete report is not a convergence measurement. Retrying
-        # must not replace its failure evidence with a later clean result.
-        if result.residual_unknown or result.parse_failures_count:
+        # An incomplete report or failed execution is not a convergence
+        # measurement. Retrying must not replace its failure evidence with a
+        # later clean result (#3352).
+        if _is_incomplete(result):
             break
         if remaining == 0:
             break

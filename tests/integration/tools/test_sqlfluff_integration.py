@@ -204,6 +204,37 @@ def test_check_clean_file(
     assert_that(result.issues_count).is_equal_to(0)
 
 
+def test_unknown_dialect_is_an_execution_failure_not_a_malformed_report(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    temp_sql_file_clean: str,
+) -> None:
+    """SQLFluff's own configuration error is named, with no parse failure.
+
+    SQLFluff exits 2 and prints ``Error: Unknown dialect 'bogus'`` on stdout,
+    so neither check nor fix may call that a malformed JSON report (#3352).
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        temp_sql_file_clean: Path to a file SQLFluff would otherwise pass.
+    """
+    sqlfluff_plugin = get_plugin("sqlfluff")
+    sqlfluff_plugin.set_options(dialect="bogus")
+
+    checked = sqlfluff_plugin.check([temp_sql_file_clean], {})
+    fixed = sqlfluff_plugin.fix([temp_sql_file_clean], {})
+
+    for result in (checked, fixed):
+        assert_that(result.success).is_false()
+        assert_that(result.execution_failed).is_true()
+        assert_that(result.findings_complete).is_false()
+        assert_that(result.parse_failures_count).is_zero()
+        assert_that(result.output).contains(
+            "SQLFluff could not run (exit 2): Error: Unknown dialect 'bogus'",
+        ).does_not_contain("Malformed")
+    assert_that(fixed.residual_unknown).is_true()
+    assert_that(fixed.fixed_issues_count).is_none()
+
+
 def test_check_empty_directory(
     get_plugin: Callable[[str], BaseToolPlugin],
     tmp_path: Path,

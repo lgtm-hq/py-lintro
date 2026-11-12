@@ -290,7 +290,7 @@ class StylelintPlugin(BaseToolPlugin):
         self,
         *,
         reason: str,
-        accounting: FixMeasured | FixUnmeasured,
+        accounting: FixUnmeasured,
         issues: list[StylelintIssue],
         initial_issues: list[StylelintIssue] | None = None,
         parse_failures: int | None = None,
@@ -300,7 +300,10 @@ class StylelintPlugin(BaseToolPlugin):
 
         Args:
             reason: Named reason the run is incomplete.
-            accounting: Fix accounting known at the point of failure.
+            accounting: Why fix accounting is unmeasured. A stage without a
+                usable report measured nothing, so its counts are never
+                guessed, and the run stays incomplete even if a later
+                convergence retry is clean.
             issues: Findings Stylelint really reported, kept as they are.
             initial_issues: Pre-fix findings, when the fix never ran.
             parse_failures: Malformed report containers or records.
@@ -483,14 +486,11 @@ class StylelintPlugin(BaseToolPlugin):
                     "Stylelint --fix exited with an error and reported no "
                     f"findings: {tool_message_excerpt(fix_output)}"
                 ),
-                accounting=(
-                    FixUnmeasured("Invalid Stylelint fix report.", initial_count)
-                    if fix_failures
-                    else FixMeasured(
-                        initial=initial_count,
-                        fixed=0,
-                        remaining=initial_count,
-                    )
+                # A crashed --fix may have rewritten files before failing,
+                # so what remains is unknown, not "everything".
+                accounting=FixUnmeasured(
+                    "Stylelint --fix failed without a report.",
+                    initial_count,
                 ),
                 issues=initial_issues,
                 parse_failures=fix_failures,
@@ -521,15 +521,15 @@ class StylelintPlugin(BaseToolPlugin):
         )
         if fix_failures:
             remaining_issues.extend(i for i in fix_issues if i not in remaining_issues)
-        # A failed verification with nothing parsed must not read as
-        # "all fixed" — keep the initial issues as remaining.
+        # A failed verification with nothing parsed measured nothing: it is
+        # neither "all fixed" nor "nothing fixed". Keep the initial findings
+        # and leave the residual unknown (#3352).
         if final_gap is not None and not parse_failures:
             return self._fix_failure_result(
                 reason=final_gap[0],
-                accounting=FixMeasured(
-                    initial=initial_count,
-                    fixed=0,
-                    remaining=initial_count,
+                accounting=FixUnmeasured(
+                    "Stylelint re-check printed no usable report.",
+                    initial_count,
                 ),
                 issues=initial_issues,
                 cwd=ctx.cwd,

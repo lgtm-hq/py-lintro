@@ -511,3 +511,34 @@ def test_incomplete_fix_pass_is_preserved_without_more_retries(
     assert_that(result.metadata).is_equal_to({"stage": "incomplete"})
     assert_that(result.pytest_summary).is_equal_to({"passed": 1, "errors": 1})
     assert_that(replace(result)).is_equal_to(result)
+
+
+def test_execution_failure_is_not_overwritten_by_a_clean_retry() -> None:
+    """A failed pass ends the retries; a later clean pass cannot replace it."""
+    failed = ToolResult(
+        name="formatter",
+        success=False,
+        output="re-check crashed",
+        issues_count=1,
+        initial_issues_count=1,
+        fixed_issues_count=0,
+        remaining_issues_count=1,
+        execution_failed=True,
+    )
+    clean = ToolResult(
+        name="formatter",
+        success=True,
+        issues_count=0,
+        initial_issues_count=1,
+        fixed_issues_count=1,
+        remaining_issues_count=0,
+    )
+    tool = MagicMock()
+    tool.fix.side_effect = [failed, clean]
+
+    result = run_fix_with_retry(tool, ["."], {}, max_retries=3)
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.output).is_equal_to("re-check crashed")
+    assert_that(tool.fix.call_count).is_equal_to(1)

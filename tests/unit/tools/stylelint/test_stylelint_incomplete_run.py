@@ -15,6 +15,7 @@ from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools.stylelint.definition import StylelintPlugin
+from lintro.utils.execution.fix_retry import run_fix_with_retry
 from tests.unit.tools.stylelint.conftest import make_ctx
 
 FINDING = (
@@ -143,24 +144,67 @@ def test_fix_stops_when_the_initial_check_prints_no_report(
     assert_that(result.output).is_equal_to("Stylelint printed no report.")
 
 
-def test_fix_recheck_without_a_report_cannot_read_as_all_fixed(
+@pytest.mark.parametrize("max_retries", [1, 3], ids=["no-retry", "retries"])
+@pytest.mark.parametrize(
+    ("failed_pass", "reason"),
+    [
+        (
+            [(False, REPORT), (True, CLEAN), (True, "")],
+            "Stylelint re-check printed no report.",
+        ),
+        (
+            [(False, REPORT), (False, "")],
+            "Stylelint --fix exited with an error and reported no findings: "
+            "no output",
+        ),
+    ],
+    ids=["empty-recheck", "crashed-fix"],
+)
+def test_unmeasured_fix_stage_stays_incomplete_through_retries(
     stylelint_plugin: StylelintPlugin,
     tmp_path: Path,
+    max_retries: int,
+    failed_pass: list[tuple[bool, str]],
+    reason: str,
 ) -> None:
-    """An empty re-check keeps every initial finding as remaining."""
-    result, _ = _run(
-        stylelint_plugin,
-        tmp_path,
-        [(False, REPORT), (True, CLEAN), (True, "")],
-        fix=True,
-    )
+    """A stage that measured nothing is unknown, and no clean retry erases it."""
+    # A convergence retry would see a clean check, fix and re-check.
+    clean_pass = [(True, CLEAN)] * 3
+    with (
+        patch.object(
+            stylelint_plugin,
+            "prepare",
+            return_value=make_ctx(tmp_path, ["a.css"]),
+        ),
+        patch.object(
+            stylelint_plugin,
+            "_get_executable_command",
+            return_value=["stylelint"],
+        ),
+        patch.object(
+            stylelint_plugin,
+            "_run_subprocess",
+            side_effect=[*failed_pass, *clean_pass],
+        ) as run,
+    ):
+        result = run_fix_with_retry(
+            stylelint_plugin,
+            [str(tmp_path / "a.css")],
+            {},
+            max_retries,
+        )
 
+    assert_that(run.call_count).is_equal_to(len(failed_pass))
     assert_that(result.success).is_false()
     assert_that(result.execution_failed).is_true()
+    assert_that(result.findings_complete).is_false()
     assert_that(result.inspected_files).is_none()
-    assert_that(result.fixed_issues_count).is_zero()
-    assert_that(result.remaining_issues_count).is_equal_to(1)
-    assert_that(result.output).is_equal_to("Stylelint re-check printed no report.")
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.initial_issues_count).is_equal_to(1)
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.issues).extracting("code").is_equal_to(["color-hex-length"])
+    assert_that(result.output).is_equal_to(reason)
 
 
 def test_fix_malformed_recheck_names_the_reason_without_inspection(

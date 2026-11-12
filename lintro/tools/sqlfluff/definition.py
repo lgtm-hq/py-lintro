@@ -6,6 +6,7 @@ It parses SQL into an AST and performs linting rules on top of it.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -27,6 +28,7 @@ from lintro.tools.core.fix_runner import (
     PerFileFixPolicy,
     run_per_file_fix,
 )
+from lintro.tools.core.incomplete_run import tool_message_excerpt
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_list,
@@ -37,6 +39,22 @@ from lintro.tools.core.option_validators import (
 SQLFLUFF_DEFAULT_TIMEOUT: int = 60
 SQLFLUFF_FILE_PATTERNS: list[str] = ["*.sql"]
 SQLFLUFF_DEFAULT_FORMAT: str = "json"
+
+
+def _is_json(text: str) -> bool:
+    """Report whether text decodes as JSON.
+
+    Args:
+        text: A command's stdout.
+
+    Returns:
+        True when the whole text is one JSON value.
+    """
+    try:
+        json.loads(text)
+    except ValueError:
+        return False
+    return True
 
 
 def _parse_report(output: str, failures: list[int]) -> list[SqlfluffIssue]:
@@ -75,6 +93,7 @@ class SqlfluffPlugin(BaseToolPlugin):
     """
 
     _lint_diagnostics: list[str] = field(default_factory=list, init=False, repr=False)
+    _lint_run_errors: list[str] = field(default_factory=list, init=False, repr=False)
 
     @property
     def definition(self) -> ToolDefinition:
@@ -252,6 +271,11 @@ class SqlfluffPlugin(BaseToolPlugin):
         Returns:
             Native status and streams, with lint stdout alone as the parser
             input.
+
+        Raises:
+            RuntimeError: When ``sqlfluff lint`` failed and printed text, not
+                a JSON report, so the per-file runner records an execution
+                error naming SQLFluff's own message.
         """
         result = super()._run_subprocess_result(cmd, timeout, cwd, env, stdin)
         if cmd[1:2] != ["lint"]:
@@ -259,6 +283,16 @@ class SqlfluffPlugin(BaseToolPlugin):
         no_report = not result.stdout.strip()
         if (no_report or not result.success) and result.stderr.strip():
             self._lint_diagnostics.append(f"{cmd[-1]}:\n{result.stderr}")
+        if not result.success and not no_report and not _is_json(result.stdout):
+            # A configuration error such as an unknown dialect exits 2 with
+            # its message on stdout. That is SQLFluff failing to run, not a
+            # malformed report, so it never reaches the parser (#3352).
+            error = (
+                f"SQLFluff could not run (exit {result.returncode}): "
+                f"{tool_message_excerpt(result.stdout)}"
+            )
+            self._lint_run_errors.append(error)
+            raise RuntimeError(error)
         # Only stdout is the report. Diagnostics stay out of the parser, so a
         # run that printed none is not counted as a malformed report.
         return replace(result, output=result.stdout)
@@ -272,6 +306,7 @@ class SqlfluffPlugin(BaseToolPlugin):
         """
         super()._isolate_execution_state()
         self._lint_diagnostics = []
+        self._lint_run_errors = []
 
     def _with_lint_diagnostics(self, result: ToolResult) -> ToolResult:
         """Attach lint diagnostics without feeding them through the JSON parser.
@@ -299,6 +334,7 @@ class SqlfluffPlugin(BaseToolPlugin):
         """
         # Use shared preparation for version check, path validation, file discovery
         self._lint_diagnostics.clear()
+        self._lint_run_errors.clear()
         ctx = self.prepare(paths, options)
         if isinstance(ctx, ToolResult):
             return ctx
@@ -331,6 +367,7 @@ class SqlfluffPlugin(BaseToolPlugin):
         """
         # Use shared preparation for version check, path validation, file discovery
         self._lint_diagnostics.clear()
+        self._lint_run_errors.clear()
         ctx = self.prepare(paths, options)
         if isinstance(ctx, ToolResult):
             return ctx
@@ -354,14 +391,21 @@ class SqlfluffPlugin(BaseToolPlugin):
                 summarize=False,
             ),
         )
-        if any(failures):
+        if any(failures) or self._lint_run_errors:
+            # A lint pass that could not run measured nothing, so its file
+            # is neither clean nor fixed (#3352).
             result = replace(
                 result,
                 success=False,
                 parse_failures_count=sum(failures),
                 residual_unknown=True,
-                residual_unknown_reason="SQLFluff returned an incomplete report.",
+                residual_unknown_reason=(
+                    "SQLFluff returned an incomplete report."
+                    if any(failures)
+                    else "SQLFluff could not run."
+                ),
                 fixed_issues_count=None,
                 remaining_issues_count=None,
+                execution_failed=result.execution_failed or bool(self._lint_run_errors),
             )
         return self._with_lint_diagnostics(result)
