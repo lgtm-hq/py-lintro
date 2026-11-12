@@ -1416,6 +1416,13 @@ Rationale:
    platform's `PATH` separator (`:` on Linux and macOS, `;` on Windows, so `C:\Users\…`
    is fine), is not a directory, or cannot be locked or repaired.
 
+   **Trust model.** Lintro's npx cache (`~/.lintro/cache/npx/<package>@<pinned>`) is
+   trusted the same way as Lintro's own installation. Lintro verifies that the installed
+   package is exactly the pinned version and repairs entries that do not match, but it
+   does not checksum the executable's contents. A local user who can write to that
+   directory can therefore change what runs, just as they could by editing Lintro itself
+   or the project's `node_modules`. Verifying package integrity is tracked in #3406.
+
    **Refusal when npx could still reuse something.** The pin is trusted only when all of
    these hold, and the tool is **unavailable** otherwise:
 
