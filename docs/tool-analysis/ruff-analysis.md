@@ -211,6 +211,30 @@ The wrapper supports both configuration files and runtime options:
 - **Runtime options**: Override specific settings via `set_options()`
 - **Combined approach**: Configuration files provide defaults, runtime options override
 
+### First-party import detection
+
+Ruff's import sorting (`I001`) classifies each import as standard library, third-party
+or first-party. It decides first-party by resolving the module against its
+[`src`](https://docs.astral.sh/ruff/settings/#src) search path. Without a `[tool.ruff]`
+table that path is relative to the directory Ruff runs in, so plain `ruff check` can
+give a different verdict depending on where you start it.
+
+Lintro runs every Ruff subprocess from the **project root** of the files being linted:
+the nearest ancestor that has `.git`, `pyproject.toml` or another project marker. That
+covers the check pass, the format pass and the `lintro format` fix path. As a result,
+`lintro check` and `lintro format` sort imports the same way whether they are started
+from the repository root or from a subdirectory such as `scripts/ci/`.
+
+A module that only imports correctly from a subdirectory, for example a helper in
+`scripts/ci/` imported by a sibling script, is therefore classified as third-party from
+the project root. To treat it as first-party, set `src` explicitly. Lintro does not
+override it:
+
+```toml
+[tool.ruff]
+src = ["scripts/ci"]
+```
+
 ## Rule Categories
 
 Lintro preserves all Ruff rule categories:

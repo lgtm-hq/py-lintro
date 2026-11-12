@@ -104,9 +104,15 @@ def execute_ruff_fix(
         build_ruff_format_command,
     )
 
-    # Delegate file discovery, version checking, and timeout resolution to the
-    # shared preparation pipeline so ruff behaves consistently with every other
-    # tool plugin.
+    # Delegate file discovery, version checking, cwd computation, and timeout
+    # resolution to the shared preparation pipeline so ruff behaves
+    # consistently with every other tool plugin. Every ruff subprocess below
+    # runs in ``ctx.cwd`` -- the files' project root -- exactly as the check
+    # path does: ruff resolves its default ``src`` (and therefore first-party
+    # import classification for I001) against its working directory when no
+    # ``[tool.ruff]`` config anchors it, so running in the process cwd would
+    # make ``lintro fmt`` sort imports differently per invocation directory
+    # (#2349).
     ctx = tool.prepare(
         paths=paths,
         options={},
@@ -135,6 +141,7 @@ def execute_ruff_fix(
         success_check, output_check = tool._run_subprocess(
             cmd=cmd_check,
             timeout=timeout,
+            cwd=ctx.cwd,
         )
     except subprocess.TimeoutExpired:
         timeout_result = create_timeout_result(
@@ -173,6 +180,7 @@ def execute_ruff_fix(
             success_format_check, output_format_check = tool._run_subprocess(
                 cmd=format_cmd_check,
                 timeout=timeout,
+                cwd=ctx.cwd,
             )
         except subprocess.TimeoutExpired:
             timeout_msg = (
@@ -226,7 +234,11 @@ def execute_ruff_fix(
         )
         output: str = ""
         try:
-            success, output = tool._run_subprocess(cmd=cmd, timeout=timeout)
+            success, output = tool._run_subprocess(
+                cmd=cmd,
+                timeout=timeout,
+                cwd=ctx.cwd,
+            )
         except subprocess.TimeoutExpired:
             timeout_msg = (
                 f"Ruff execution timed out ({timeout}s limit exceeded).\n\n"
@@ -293,6 +305,7 @@ def execute_ruff_fix(
             success_unsafe, output_unsafe = tool._run_subprocess(
                 cmd=cmd_unsafe,
                 timeout=timeout,
+                cwd=ctx.cwd,
             )
         except subprocess.TimeoutExpired:
             # If unsafe check times out, just continue with current results
@@ -327,6 +340,7 @@ def execute_ruff_fix(
             format_success, format_output = tool._run_subprocess(
                 cmd=format_cmd,
                 timeout=timeout,
+                cwd=ctx.cwd,
             )
             # For ruff format, exit code 1 means files were formatted (success)
             # Only consider it a failure if there were no initial format issues
