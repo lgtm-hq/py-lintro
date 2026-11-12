@@ -26,6 +26,44 @@ CLASSIFY_SCRIPT = ROOT / "scripts" / "ci" / "classify-release-tag.py"
 MIRROR_WORKFLOW = ROOT / ".github" / "workflows" / "mirror-release.yml"
 
 
+def _script_env() -> dict[str, str]:
+    """Return the process environment for a repo script, with a fixed locale.
+
+    The scripts and their stubs run under ``#!/usr/bin/env bash``. On macOS
+    that resolves to Homebrew bash, which links gettext: with no locale
+    variable set, its startup ``setlocale`` asks CoreFoundation for the
+    preferred languages, and that crashes with SIGSEGV now and then when many
+    processes start at once, as they do under ``pytest -n auto`` (#3411).
+    Pinning ``LC_ALL`` keeps every bash in these tests off that path.
+
+    Returns:
+        dict[str, str]: A copy of ``os.environ`` with ``LC_ALL=C``.
+    """
+    env = os.environ.copy()
+    env["LC_ALL"] = "C"
+    return env
+
+
+def test_script_env_pins_the_locale_without_touching_the_caller(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A script env carries ``LC_ALL=C`` even when the caller sets no locale.
+
+    The crash in #3411 needs an environment with no locale variable at all,
+    so that is the case pinned here; the rest of the environment, and the
+    test process's own, are left as they were.
+    """
+    for name in [key for key in os.environ if key == "LANG" or key.startswith("LC_")]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("LINTRO_SCRIPT_ENV_PROBE", "kept")
+
+    env = _script_env()
+
+    assert_that(env).contains_entry({"LC_ALL": "C"})
+    assert_that(env).contains_entry({"LINTRO_SCRIPT_ENV_PROBE": "kept"})
+    assert_that(os.environ).does_not_contain_key("LC_ALL")
+
+
 def _load_bump_pin_module() -> Any:
     """Load bump_pin.py as an importable module."""
     spec = importlib.util.spec_from_file_location("bump_pin", BUMP_SCRIPT)
@@ -44,7 +82,7 @@ def _run_resolve(
     github_output: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run resolve-version.sh with the given release tag."""
-    env = os.environ.copy()
+    env = _script_env()
     env["RELEASE_TAG"] = release_tag
     if github_output is not None:
         env["GITHUB_OUTPUT"] = str(github_output)
@@ -286,7 +324,7 @@ def test_publish_script_requires_the_lgtm_ci_tooling_checkout(tmp_path: Path) ->
         (None, "LGTM_CI_TOOLING_DIR is not set"),
         (str(tmp_path / "no-such-dir"), "create-signed-commit script not found"),
     ):
-        env = os.environ.copy()
+        env = _script_env()
         env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
         env["GH_TOKEN"] = "stub"  # nosec B105 - placeholder for the stub gh
         env["MIRROR_DIR"] = str(mirror)
@@ -439,7 +477,7 @@ def _run_wait_wheel(
     extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run wait-for-pypi-wheel.sh with a stub curl ahead of PATH."""
-    env = os.environ.copy()
+    env = _script_env()
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
     if extra_env:
         env.update(extra_env)
@@ -608,7 +646,7 @@ def _setup_wheel_env(
     )
     (bin_dir / "curl").chmod(0o755)
 
-    env = os.environ.copy()
+    env = _script_env()
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
     env["VERSION"] = "1.2.3"
     env["ATTESTATION_REPO"] = "lgtm-hq/py-lintro"

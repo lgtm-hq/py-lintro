@@ -131,6 +131,39 @@ def test_the_shared_usage_error_prefixes_the_described_line() -> None:
     assert_that(message).does_not_contain(_PASTED_KEY, "\n")
 
 
+def _without_path(text: str, project: Path) -> str:
+    """Return *text* with whitespace removed and *project*'s path cut out.
+
+    Whitespace is dropped first so a path the report wrapped across lines is
+    whole again; both the path as given and its resolved form (``/tmp`` is
+    ``/private/tmp`` on macOS) are removed.
+
+    Args:
+        text: Rendered command output.
+        project: Project root whose path the output may print.
+
+    Returns:
+        str: The output, whitespace-free, with every copy of the path removed.
+    """
+    squashed = "".join(text.split())
+    for path in sorted({str(project), str(project.resolve())}, key=len, reverse=True):
+        squashed = squashed.replace("".join(path.split()), "<project>")
+    return squashed
+
+
+def test_without_path_cuts_a_wrapped_project_path(tmp_path: Path) -> None:
+    """A path wrapped across lines is still removed, and other text is kept."""
+    project = tmp_path / "pytest-712" / "project"
+    head, tail = str(project)[:12], str(project)[12:]
+
+    scrubbed = _without_path(
+        f"Source: {head}\n  {tail}/.lintro\n-config.yaml -7",
+        project,
+    )
+
+    assert_that(scrubbed).is_equal_to("Source:<project>/.lintro-config.yaml-7")
+
+
 @pytest.fixture
 def plain_field_project(ai_config_project: Callable[[str], Path]) -> Path:
     """Return a project whose ``ai:`` section has one out-of-range field.
@@ -147,9 +180,13 @@ def plain_field_project(ai_config_project: Callable[[str], Path]) -> Path:
 def test_lintro_config_rich_row_names_the_plain_field(
     plain_field_project: Path,
 ) -> None:
-    """The ``AI Settings`` row reads ``ai.<field>: <constraint>``."""
-    del plain_field_project
+    """The ``AI Settings`` row reads ``ai.<field>: <constraint>``.
 
+    The report also prints the config's absolute path, which Rich may wrap
+    mid-word, and pytest's temp root can itself contain ``-7``
+    (``pytest-712``). The rejected value is therefore looked for in the
+    report with that path removed, so only the report's own text can trip it.
+    """
     result = CliRunner().invoke(cli, ["config"])
 
     assert_that(result.exit_code).described_as(result.output).is_equal_to(0)
@@ -157,7 +194,10 @@ def test_lintro_config_rich_row_names_the_plain_field(
     assert_that(output).contains(
         "AI Settings ai.max_tokens: Input should be greater than or equal to 1",
     )
-    assert_that(output).does_not_contain("-7", "validation error for")
+    assert_that(output).does_not_contain("validation error for")
+    assert_that(_without_path(result.output, plain_field_project)).does_not_contain(
+        "-7",
+    )
 
 
 def test_lintro_config_json_error_names_the_plain_field(
