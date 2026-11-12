@@ -26,11 +26,11 @@ from lintro.plugins.execution_preparation import verify_tool_version
 from lintro.tools.core import snapshots
 from lintro.tools.core.node_fallback import (
     NPX_ISOLATION_FLAGS,
-    npx_cache_dir,
     npx_pin_refusal,
     npx_runner_options,
     registry_fallback_spec,
 )
+from lintro.tools.core.npx_cache import npx_cache_dir
 from lintro.tools.prettier.definition import PrettierPlugin
 from lintro.utils import file_cache
 
@@ -248,18 +248,24 @@ def test_npmrc_files_are_left_to_npm(clean_dir: Path, content: str) -> None:
 # lintro's own npm cache
 # ---------------------------------------------------------------------------
 
+_SPEC = f"prettier@{_PIN}"
 
-def test_runner_options_end_with_lintros_own_cache(clean_dir: Path) -> None:
-    """Every npx fallback names lintro's cache after the fixed flags.
+
+def test_runner_options_end_with_lintros_per_pin_cache(clean_dir: Path) -> None:
+    """Every npx fallback names lintro's cache for its spec after the flags.
 
     Args:
         clean_dir: Project without npm state above it (sets the cache root).
     """
     del clean_dir
-    options = npx_runner_options()
+    options = npx_runner_options(_SPEC)
 
     assert_that(options[:-1]).is_equal_to(list(NPX_ISOLATION_FLAGS))
-    assert_that(options[-1]).is_equal_to(f"--cache={npx_cache_dir()}")
+    assert_that(options[-1]).is_equal_to(f"--cache={npx_cache_dir(_SPEC)}")
+    assert_that(npx_cache_dir(_SPEC).name).is_equal_to(_SPEC)
+    assert_that(npx_cache_dir("@commitlint/cli@20.0.0").name).is_equal_to(
+        "@commitlint+cli@20.0.0",
+    )
     assert_that(NPX_ISOLATION_FLAGS).contains(
         "--offline=false",
         "--prefer-offline=false",
@@ -273,16 +279,9 @@ def test_spec_is_recovered_past_the_cache_option(clean_dir: Path) -> None:
         clean_dir: Project without npm state above it (sets the cache root).
     """
     del clean_dir
-    command = [
-        "npx",
-        "--yes",
-        *npx_runner_options(),
-        "--package",
-        f"prettier@{_PIN}",
-        "prettier",
-    ]
+    command = _npx_command(*npx_runner_options(_SPEC))
 
-    assert_that(registry_fallback_spec(command)).is_equal_to(f"prettier@{_PIN}")
+    assert_that(registry_fallback_spec(command)).is_equal_to(_SPEC)
 
 
 def _npx_command(*options: str) -> list[str]:
@@ -294,7 +293,32 @@ def _npx_command(*options: str) -> list[str]:
     Returns:
         The command.
     """
-    return ["npx", "--yes", *options, "--package", f"prettier@{_PIN}", "prettier"]
+    return ["npx", "--yes", *options, "--package", _SPEC, "prettier"]
+
+
+def _cache_refusal(
+    cwd: Path,
+    command: list[str] | None = None,
+    pathsep: str = ":",
+) -> str | None:
+    """Ask the rule about a command's cache.
+
+    Args:
+        cwd: Directory npx would run in.
+        command: npx command; defaults to lintro's generated one.
+        pathsep: ``PATH`` separator to check against.
+
+    Returns:
+        The refusal reason, or None.
+    """
+    return npx_pin_refusal(
+        cwd=cwd,
+        package="prettier",
+        pin=_PIN,
+        environ={},
+        command=command or _npx_command(*npx_runner_options(_SPEC)),
+        pathsep=pathsep,
+    )
 
 
 def test_command_with_lintros_cache_is_trusted(clean_dir: Path) -> None:
@@ -303,15 +327,7 @@ def test_command_with_lintros_cache_is_trusted(clean_dir: Path) -> None:
     Args:
         clean_dir: Project without npm state above it.
     """
-    reason = npx_pin_refusal(
-        cwd=clean_dir,
-        package="prettier",
-        pin=_PIN,
-        environ={},
-        command=_npx_command(*npx_runner_options()),
-    )
-
-    assert_that(reason).is_none()
+    assert_that(_cache_refusal(clean_dir)).is_none()
 
 
 @pytest.mark.parametrize(
@@ -332,43 +348,47 @@ def test_command_without_lintros_cache_is_refused(
         clean_dir: Project without npm state above it.
         options: Runner options lacking lintro's cache.
     """
-    reason = npx_pin_refusal(
-        cwd=clean_dir,
-        package="prettier",
-        pin=_PIN,
-        environ={},
-        command=_npx_command(*options),
-    )
+    reason = _cache_refusal(clean_dir, _npx_command(*options))
 
     assert_that(reason).contains("does not use lintro's own npm cache")
 
 
-@pytest.mark.parametrize("delimiter", [":", ";"])
-def test_cache_path_with_a_path_delimiter_is_refused(
+@pytest.mark.parametrize(
+    ("character", "pathsep", "refused"),
+    [
+        (":", ":", True),
+        (";", ";", True),
+        (":", ";", False),
+        (";", ":", False),
+    ],
+    ids=["posix-colon", "windows-semicolon", "windows-drive-colon", "posix-semicolon"],
+)
+def test_only_the_platform_path_separator_is_refused(
     clean_dir: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    delimiter: str,
+    character: str,
+    pathsep: str,
+    refused: bool,
 ) -> None:
-    """A cache path npm would split when it extends PATH is refused.
+    r"""``C:\\Users\\...`` is fine on Windows; ``:`` is refused only on POSIX.
 
     Args:
         clean_dir: Project without npm state above it.
         tmp_path: Temporary directory provided by pytest.
         monkeypatch: Scoped override of lintro's cache root.
-        delimiter: PATH delimiter in the cache path.
+        character: Character in the cache path.
+        pathsep: ``PATH`` separator of the simulated platform.
+        refused: Whether the cache must be refused.
     """
-    monkeypatch.setattr(file_cache, "CACHE_DIR", tmp_path / f"a{delimiter}b")
+    monkeypatch.setattr(file_cache, "CACHE_DIR", tmp_path / f"a{character}b")
 
-    reason = npx_pin_refusal(
-        cwd=clean_dir,
-        package="prettier",
-        pin=_PIN,
-        environ={},
-        command=_npx_command(*npx_runner_options()),
-    )
+    reason = _cache_refusal(clean_dir, pathsep=pathsep)
 
-    assert_that(reason).contains("contains a PATH delimiter")
+    if refused:
+        assert_that(reason).contains(f"contains the PATH separator {pathsep!r}")
+    else:
+        assert_that(reason).is_none()
 
 
 def test_cache_path_that_is_a_file_is_refused(clean_dir: Path) -> None:
@@ -377,18 +397,50 @@ def test_cache_path_that_is_a_file_is_refused(clean_dir: Path) -> None:
     Args:
         clean_dir: Project without npm state above it.
     """
-    npx_cache_dir().parent.mkdir(parents=True, exist_ok=True)
-    npx_cache_dir().write_text("", encoding="utf-8")
+    cache = npx_cache_dir(_SPEC)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text("", encoding="utf-8")
 
-    reason = npx_pin_refusal(
-        cwd=clean_dir,
-        package="prettier",
-        pin=_PIN,
-        environ={},
-        command=_npx_command(*npx_runner_options()),
+    assert_that(_cache_refusal(clean_dir)).contains("is not a directory")
+
+
+def test_cache_symlinked_outside_lintros_root_is_refused(
+    clean_dir: Path,
+    tmp_path: Path,
+) -> None:
+    """A per-pin cache that resolves elsewhere is not lintro's to vouch for.
+
+    Args:
+        clean_dir: Project without npm state above it.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    cache = npx_cache_dir(_SPEC)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.symlink_to(elsewhere)
+
+    assert_that(_cache_refusal(clean_dir)).contains("outside")
+
+
+def test_tampered_cache_entry_is_repaired_and_the_pin_trusted(clean_dir: Path) -> None:
+    """The gate deletes an entry that would run another version.
+
+    Args:
+        clean_dir: Project without npm state above it.
+    """
+    entry = npx_cache_dir(_SPEC) / "_npx" / "0123456789abcdef"
+    package = entry / "node_modules" / "prettier"
+    package.mkdir(parents=True)
+    (package / "package.json").write_text(
+        json.dumps({"name": "prettier", "version": "1.0.0"}),
+        encoding="utf-8",
     )
 
-    assert_that(reason).contains("is not a directory")
+    reason = _cache_refusal(clean_dir)
+
+    assert_that(reason).is_none()
+    assert_that(entry.exists()).is_false()
 
 
 @pytest.mark.parametrize(
@@ -448,7 +500,7 @@ def test_npx_only_in_a_clean_project_reports_the_pin(
     verdict = verify_tool_version(PrettierPlugin().definition, cwd=str(clean_dir))
 
     assert_that(snapshot.command[:-2]).is_equal_to(
-        ("npx", "--yes", *npx_runner_options(), "--package"),
+        ("npx", "--yes", *npx_runner_options(f"prettier@{_PIN}"), "--package"),
     )
     assert_that(snapshot.command[-2]).is_equal_to(f"prettier@{_PIN}")
     assert_that(snapshot.available).is_true()

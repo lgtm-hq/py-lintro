@@ -269,7 +269,7 @@ def test_get_tsc_command_with_npx_fallback(
     # ``--package`` to find the executable (#1811). npx is always
     # non-interactive (#2028) and isolated from npm configuration (#2043).
     assert_that(cmd[:-2]).is_equal_to(
-        ["npx", "--yes", *npx_runner_options(), "--package"],
+        ["npx", "--yes", *npx_runner_options(cmd[-2]), "--package"],
     )
     assert_that(cmd[-2]).starts_with("typescript@")
     assert_that(cmd[-1]).is_equal_to("tsc")

@@ -49,10 +49,12 @@ PACKAGE_FLAGS: frozenset[str] = frozenset({"-p", "--package"})
 #: ``--bin-links=true`` makes the installed pin's executable exist;
 #: ``--global=false`` stops ``global=true`` breaking the run;
 #: ``--offline=false`` and ``--prefer-offline=false`` stop npx settling for
-#: whatever an existing cache holds. The cache itself is lintro's own, passed
-#: as ``--cache=<dir>`` by :func:`npx_runner_options`. A ``workspace=<name>``
-#: set in an npmrc file conflicts with ``--workspaces=false`` and npm exits
-#: with an error, which lintro reports as an execution failure.
+#: whatever an existing cache holds. The cache itself is lintro's own per-pin
+#: directory, passed as ``--cache=<dir>`` by :func:`npx_runner_options` and
+#: repaired before each run (:mod:`lintro.tools.core.npx_cache`). A
+#: ``workspace=<name>`` set in an npmrc file conflicts with
+#: ``--workspaces=false`` and npm exits with an error, which lintro reports as
+#: an execution failure.
 NPX_ISOLATION_FLAGS: tuple[str, ...] = (
     "--workspaces=false",
     "--include-workspace-root=false",
@@ -151,53 +153,63 @@ def registry_fallback_spec(command: Sequence[str]) -> str | None:
     return command[index]
 
 
-#: Path separators that would split a cache path when npm prepends the npx
-#: cache's ``.bin`` to ``PATH``; a cache path containing one is refused.
-_PATH_DELIMITERS: frozenset[str] = frozenset({":", ";"})
-
-
-def npx_cache_dir() -> Path:
-    """Return the npm cache directory lintro owns for npx fallbacks.
-
-    npm derives the npx install directory (``<cache>/_npx``) from ``--cache``,
-    so a lintro-owned cache keeps a poisoned or pre-filled user cache, or a
-    ``cache`` value that injects a ``PATH`` entry, out of the run (#2043).
-
-    Returns:
-        ``<lintro cache root>/npx``.
-    """
-    from lintro.utils import file_cache
-
-    return file_cache.CACHE_DIR / "npx"
-
-
-def npx_runner_options() -> list[str]:
+def npx_runner_options(spec: str) -> list[str]:
     """Return the options every npx fallback carries before ``--package``.
 
+    Args:
+        spec: Pinned npm spec the command will run.
+
     Returns:
-        The fixed isolation flags followed by ``--cache=<lintro cache>``.
+        The fixed isolation flags followed by ``--cache=<lintro cache for spec>``.
     """
-    return [*NPX_ISOLATION_FLAGS, f"{NPX_CACHE_OPTION}{npx_cache_dir()}"]
+    from lintro.tools.core.npx_cache import npx_cache_dir
+
+    return [*NPX_ISOLATION_FLAGS, f"{NPX_CACHE_OPTION}{npx_cache_dir(spec)}"]
 
 
-def _cache_reason(command: Sequence[str]) -> str | None:
-    """Refuse when the command's npx cache is not one lintro can vouch for.
+def _cache_reason(
+    command: Sequence[str],
+    *,
+    package: str,
+    pin: str,
+    pathsep: str,
+) -> str | None:
+    """Refuse unless the command's npx cache is lintro's and runs the pin.
+
+    The cache must be lintro's per-pin cache, resolve inside lintro's cache
+    root and hold no ``PATH`` separator. Every ``_npx`` entry in it is then
+    validated under npm's lock, and any entry that would not run the pin is
+    deleted so npx reinstalls it (see :mod:`lintro.tools.core.npx_cache`).
 
     Args:
         command: Resolved npx command.
+        package: npm package from the spec.
+        pin: Exact pinned version from the spec.
+        pathsep: ``PATH`` separator of the platform npx runs on.
 
     Returns:
         Why the cache cannot be trusted, or None.
     """
-    expected = f"{NPX_CACHE_OPTION}{npx_cache_dir()}"
+    from lintro.tools.core.npx_cache import (
+        NpxCacheError,
+        npx_cache_dir,
+        repair_npx_cache,
+    )
+
+    cache = npx_cache_dir(f"{package}@{pin}")
     options = [arg for arg in command if arg.startswith(NPX_CACHE_OPTION)]
-    if options != [expected]:
+    if options != [f"{NPX_CACHE_OPTION}{cache}"]:
         return "the npx command does not use lintro's own npm cache"
-    cache = npx_cache_dir()
-    if any(delimiter in str(cache) for delimiter in _PATH_DELIMITERS):
-        return f"lintro's npm cache path {cache} contains a PATH delimiter"
-    if cache.exists() and not cache.is_dir():
-        return f"lintro's npm cache path {cache} is not a directory"
+    try:
+        repair_npx_cache(
+            cache,
+            package=package,
+            pin=pin,
+            binary=command[-1],
+            pathsep=pathsep,
+        )
+    except (NpxCacheError, OSError) as exc:
+        return f"lintro's npm cache cannot be trusted ({exc})"
     return None
 
 
@@ -260,6 +272,7 @@ def npx_pin_refusal(
     pin: str,
     environ: Mapping[str, str] | None = None,
     command: Sequence[str] | None = None,
+    pathsep: str = os.pathsep,
 ) -> str | None:
     """Refuse an npx-only fallback unless npx can only run the pinned package.
 
@@ -278,8 +291,10 @@ def npx_pin_refusal(
       ``workspaces`` (npm loads members' trees from the root), is the package
       itself, or cannot be parsed;
     - ``npm_config_workspace`` set in the environment, in any case;
-    - a command whose ``--cache`` is not lintro's own, or a lintro cache path
-      that contains a ``PATH`` delimiter or is not a directory.
+    - a command whose ``--cache`` is not lintro's per-pin cache, a cache
+      that resolves outside lintro's cache root, holds the platform's ``PATH``
+      separator or is not a directory, or a cache entry that would not run the
+      pin and cannot be repaired.
 
     ``bunx <pkg>@<pin>`` always resolves from the registry and is not subject
     to this rule.
@@ -289,7 +304,9 @@ def npx_pin_refusal(
         package: npm package the spec names.
         pin: Exact pinned version.
         environ: Environment npx would inherit; defaults to ``os.environ``.
-        command: The generated npx command, to check its cache option.
+        command: The generated npx command, to check and repair its cache.
+        pathsep: ``PATH`` separator of the platform npx runs on (injectable
+            for tests).
 
     Returns:
         None when the pin is what npx runs, otherwise an actionable reason.
@@ -298,7 +315,11 @@ def npx_pin_refusal(
     reason = (
         _project_reason(cwd, package)
         or _workspace_env_reason(env)
-        or (_cache_reason(command) if command is not None else None)
+        or (
+            _cache_reason(command, package=package, pin=pin, pathsep=pathsep)
+            if command is not None
+            else None
+        )
     )
     if reason is None:
         return None

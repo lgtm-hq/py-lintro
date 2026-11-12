@@ -32,7 +32,10 @@ from lintro.utils.execution.fix_retry import (
     run_fix_with_retry as _run_fix_with_retry,
 )
 from lintro.utils.execution.parallel_executor import run_tools_parallel
-from lintro.utils.execution.result_shaping import classify_runner_failure
+from lintro.utils.execution.result_shaping import (
+    classify_runner_failure,
+    executed_command,
+)
 from lintro.utils.execution.result_shaping import (
     enrich_issues_with_doc_urls as _enrich_issues_with_doc_urls,
 )
@@ -339,7 +342,10 @@ def _execute_tools_sequential(
             # Reject them before any consumer
             # (including the live callback) can lose the rest of the run.
             ToolResult.validate_outcome(result)
-            result = classify_runner_failure(result)
+            result = classify_runner_failure(
+                result,
+                command=executed_command(tool, result),
+            )
             result = replace(result, duration_seconds=time.monotonic() - started)
 
             # Populate doc_url on each issue from the plugin

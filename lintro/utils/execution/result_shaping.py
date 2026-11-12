@@ -34,37 +34,138 @@ if TYPE_CHECKING:
 #: (``npm error ...`` in npm 9+, ``npm ERR! ...`` before that).
 _NPM_ERROR_LINE: re.Pattern[str] = re.compile(r"^npm (?:error|ERR!) ", re.MULTILINE)
 
+#: A shell reporting that the runner's executable was missing (exit 127):
+#: ``sh: prettier: command not found`` or dash's ``sh: 1: prettier: not found``.
+_NOT_FOUND_LINE: re.Pattern[str] = re.compile(
+    r"(?:command not found|: not found)\s*$",
+    re.MULTILINE,
+)
 
-def classify_runner_failure(result: ToolResult) -> ToolResult:
+#: ANSI escape sequences, stripped before matching.
+_ANSI: re.Pattern[str] = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+#: Package runners whose own failures are not tool reports.
+_RUNNERS: frozenset[str] = frozenset({"npx", "bunx"})
+
+
+def _executable_name(arg: str) -> str:
+    """Return the file name of ``argv[0]`` for POSIX and Windows paths alike.
+
+    Args:
+        arg: ``argv[0]`` as resolved.
+
+    Returns:
+        The final path component.
+    """
+    return re.split(r"[\\/]", arg)[-1]
+
+
+def is_runner_command(command: Sequence[str] | None) -> bool:
+    """Report whether *command* starts with an ``npx`` or ``bunx`` runner.
+
+    Args:
+        command: Executed command prefix, if known.
+
+    Returns:
+        True for an ``npx``/``bunx`` command (with or without a Windows
+        ``.cmd``/``.exe`` suffix).
+    """
+    if not command:
+        return False
+    name = _executable_name(command[0]).lower()
+    for suffix in (".cmd", ".exe"):
+        name = name.removesuffix(suffix)
+    return name in _RUNNERS
+
+
+def executed_command(tool: BaseToolPlugin, result: ToolResult) -> list[str] | None:
+    """Recover the command prefix a failed result ran, from its directory.
+
+    Resolution is deterministic for a directory, so asking the plugin's own
+    resolver for the result's ``cwd`` names what ran. Only failed results are
+    resolved, and a result without a ``cwd`` is left unknown rather than
+    guessed from lintro's own directory.
+
+    Args:
+        tool: Plugin that produced *result*.
+        result: Its result.
+
+    Returns:
+        The command prefix, or None when the result passed or its directory
+        is unknown.
+    """
+    if result.success or result.cwd is None:
+        return None
+    try:
+        return list(tool._get_executable_command(tool.definition.name, cwd=result.cwd))
+    except (OSError, ValueError, RuntimeError, AttributeError):
+        return None
+
+
+def _runner_failure_reason(command: Sequence[str], output: str) -> str | None:
+    """Name a package-runner failure that left no tool report.
+
+    Args:
+        command: The runner command that ran.
+        output: Its output, with ANSI codes removed.
+
+    Returns:
+        A one-line reason, or None when the output may be the tool's own.
+    """
+    runner = _executable_name(command[0])
+    if not output.strip():
+        return f"{runner} exited with a failure and no output"
+    if _NPM_ERROR_LINE.search(output):
+        return "npm failed before the tool produced a report"
+    if _NOT_FOUND_LINE.search(output):
+        return f"{runner} could not find the tool's executable"
+    return None
+
+
+def classify_runner_failure(
+    result: ToolResult,
+    *,
+    command: Sequence[str] | None,
+) -> ToolResult:
     """Report a package-runner failure as an execution failure, not a verdict.
 
-    An ``npx`` fallback can fail inside npm before the tool runs, for example
-    when an npmrc ``workspace=<name>`` conflicts with ``--workspaces=false``
-    (#2043). The tool then reports nothing, so the result must never read as
-    findings or as a pass. A failed result with no issues whose output carries
-    npm's own error line is marked ``execution_failed`` with incomplete
-    findings; npm's message stays in ``output`` as the reason.
+    An ``npx`` or ``bunx`` fallback can fail before the tool runs: npm can
+    reject its configuration (an npmrc ``workspace=<name>`` against
+    ``--workspaces=false``), exit with no output, or fail to find the
+    executable (#2043). The tool then reports nothing, so the result must never
+    read as findings or as a pass. Only results whose executed command was a
+    runner are considered, so a local binary that happens to print
+    ``npm error`` keeps its own verdict. Such a failure, with no issues, is
+    marked ``execution_failed`` with incomplete findings, and the runner's
+    message stays in ``output`` as the reason.
 
     Args:
         result: Validated result straight from the plugin.
+        command: Command prefix the result ran, from :func:`executed_command`.
 
     Returns:
-        The result, marked as an execution failure when npm failed the run.
+        The result, marked as an execution failure when the runner failed.
     """
     execution = result.outcome.execution
     if (
-        result.success
+        not is_runner_command(command)
+        or result.success
         or result.execution_failed
         or result.issues_count
         or isinstance(execution, (Skipped, Unavailable, TimedOut, NoFiles))
-        or not _NPM_ERROR_LINE.search(result.output or "")
     ):
         return result
+    assert command is not None
+    output = _ANSI.sub("", result.output or "")
+    reason = _runner_failure_reason(command, output)
+    if reason is None:
+        return result
+    detail = f":\n{output}" if output.strip() else "."
     return replace(
         result,
         execution_failed=True,
         findings_complete=False,
-        output=("npm failed before the tool produced a report:\n" f"{result.output}"),
+        output=f"{reason}{detail}",
     )
 
 

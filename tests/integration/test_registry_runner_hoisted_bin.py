@@ -33,6 +33,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess  # nosec B404 - runs real npx/bunx with fixed argv, offline
 import sys
@@ -51,6 +52,7 @@ from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.models.core.tool_snapshot import ToolSnapshot
 from lintro.tools.core import snapshots
+from lintro.tools.core.npx_cache import npx_cache_dir
 from lintro.utils import file_cache
 from lintro.utils.execution.result_shaping import classify_runner_failure
 from tests.integration._tools import NO_MIN_VERSION, require_command
@@ -475,7 +477,7 @@ def _assert_never_a_false_pass(
         name="prettier",
         output=output if output is not None else launched,
     )
-    classified = classify_runner_failure(failed)
+    classified = classify_runner_failure(failed, command=snapshot.command)
     assert_that(classified.execution_failed).is_true()
     assert_that(classified.findings_complete).is_false()
 
@@ -1022,7 +1024,7 @@ def test_npx_cache_and_npmrc_hazards_still_run_the_pin(
     )
 
     assert_that(snapshot.command).contains(
-        f"--cache={tmp_path / 'lintro-cache' / 'npx'}",
+        f"--cache={tmp_path / 'lintro-cache' / 'npx' / f'prettier@{_PIN}'}",
     )
     assert_that(code).is_zero()
     assert_that(launched).is_equal_to(f"registry {_PIN}")
@@ -1092,9 +1094,14 @@ def test_lintro_check_reports_an_npm_failure_as_an_execution_failure(
     assert_that(rows[0]["success"]).is_false()
     assert_that(rows[0]["issues_count"]).is_zero()
     assert_that(rows[0]["status"]).is_equal_to("failed")
-    assert_that(rows[0]["output"]).contains(
-        "npm error Cannot use --no-workspaces and --workspace at the same time",
-    )
+    # lintro's reason is stable; npm's wording is not ("Cannot use" in npm 11,
+    # "Can not use" in npm 10), so only its shape is checked.
+    output = rows[0]["output"]
+    assert_that(output).starts_with("npm failed before the tool produced a report:")
+    assert_that(re.search(r"^npm (?:error|ERR!) ", output, re.MULTILINE)).is_not_none()
+    assert_that(
+        re.search(r"Can ?not use --no-workspaces and --workspace", output),
+    ).is_not_none()
 
 
 #: Settings the generated command's flags neutralise: lintro trusts the pin
@@ -1145,6 +1152,212 @@ def test_npx_only_in_a_clean_project_runs_the_pin_lintro_reports(
     assert_that(code).is_zero()
     assert_that(launched).is_equal_to(f"registry {_PIN}")
     assert_that(snapshot.available).is_true()
+    assert_that(snapshot.version).is_equal_to(_PIN)
+    _assert_never_a_false_pass(snapshot, launched, code)
+
+
+def test_lintro_check_keeps_a_local_binarys_own_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A local prettier that prints ``npm error`` is not blamed on npm.
+
+    Only runner commands are attributed to npm. The local binary reports the
+    pin for ``--version``, then fails its check with output that mentions npm,
+    as a config loading a missing plugin can.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+    """
+    project = _clean_project(tmp_path)
+    (project / "data.json").write_text("{}\n", encoding="utf-8")
+    binary = project / "node_modules" / ".bin" / "prettier"
+    binary.parent.mkdir(parents=True)
+    binary.write_text(
+        "#!/bin/sh\n"
+        f'case "$*" in *--version*) printf "{_PIN}\\n"; exit 0 ;; esac\n'
+        'printf "npm error could not load plugin\\n" >&2\n'
+        'printf "[error] Cannot find package prettier-plugin-x\\n" >&2\n'
+        "exit 2\n",
+        encoding="utf-8",
+    )
+    binary.chmod(0o755)
+    env = _isolate(monkeypatch, tmp_path, {}, "http://127.0.0.1:9/", {})
+
+    run = subprocess.run(  # nosec B603 - fixed argv, shell=False
+        [
+            sys.executable,
+            "-m",
+            "lintro",
+            "check",
+            str(project),
+            "--tools",
+            "prettier",
+            "--output-format",
+            "json",
+        ],
+        cwd=project,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    rows = [
+        row for row in json.loads(run.stdout)["results"] if row["tool"] == "prettier"
+    ]
+
+    assert_that(rows).is_length(1)
+    assert_that(rows[0]["success"]).is_false()
+    assert_that(rows[0]["output"] or "").does_not_contain(
+        "npm failed before the tool produced a report",
+    )
+    assert_that(rows[0]["output"] or "").contains("prettier-plugin-x")
+
+
+def _poison_cache_entry(cache: Path) -> Path:
+    """Tamper with the ``_npx`` entry for the pin, as in the round-10 review.
+
+    The top-level prettier becomes 1.0.0, a nested copy keeps the pin, and the
+    hidden lockfile is removed, so npm reads the disk and reuses the entry.
+
+    Args:
+        cache: lintro's per-pin npm cache.
+
+    Returns:
+        The entry's ``node_modules`` directory.
+    """
+    key = hashlib.sha512(f"prettier@{_PIN}".encode()).hexdigest()[:16]
+    tree = cache / "_npx" / key / "node_modules"
+    shutil.rmtree(tree / "prettier", ignore_errors=True)
+    _package(tree / "prettier", _OLDER, label=f"cache older {_OLDER}")
+    _package(tree / "other", "1.0.0", name="other", dependencies={"prettier": _PIN})
+    _package(tree / "other" / "node_modules" / "prettier", _PIN)
+    (tree / ".package-lock.json").unlink(missing_ok=True)
+    return tree
+
+
+def _warm(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry_url: str,
+) -> tuple[Path, dict[str, str], list[str]]:
+    """Run lintro's npx command once so its per-pin cache holds the pin.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry_url: Localhost registry URL.
+
+    Returns:
+        The project, the runner environment, and lintro's npx command.
+    """
+    assert _NPX is not None and _NODE is not None
+    project = _clean_project(tmp_path)
+    env = _isolate(
+        monkeypatch,
+        tmp_path,
+        {"npx": _NPX, "node": _NODE},
+        registry_url,
+        {},
+    )
+    command = list(snapshots.probe_tool("prettier", search_root=project).command)
+    assert_that(_run(command, project, env)).is_equal_to((0, f"registry {_PIN}"))
+    return project, env, command
+
+
+@requires_npx
+def test_tampered_lintro_cache_is_repaired_before_npx_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+) -> None:
+    """A tampered cache entry would run 1.0.0; the gate deletes it first.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+    """
+    _require_clean_ancestry(tmp_path)
+    project, env, command = _warm(tmp_path, monkeypatch, registry)
+    cache = npx_cache_dir(f"prettier@{_PIN}")
+
+    _poison_cache_entry(cache)
+    raw = _run(command, project, env)
+    _poison_cache_entry(cache)
+    snapshot = snapshots.probe_tool("prettier", search_root=project)
+    code, launched = _run(list(snapshot.command), project, env)
+
+    assert_that(raw).is_equal_to((0, f"cache older {_OLDER}"))
+    assert_that(snapshot.available).is_true()
+    assert_that(snapshot.version).is_equal_to(_PIN)
+    assert_that((code, launched)).is_equal_to((0, f"registry {_PIN}"))
+    _assert_never_a_false_pass(snapshot, launched, code)
+
+
+@requires_npx
+def test_symlinked_lintro_cache_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+) -> None:
+    """A cache that resolves outside lintro's cache root is not trusted.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+    """
+    _require_clean_ancestry(tmp_path)
+    project, env, command = _warm(tmp_path, monkeypatch, registry)
+    elsewhere = tmp_path / "elsewhere-cache"
+    shutil.copytree(npx_cache_dir(f"prettier@{_PIN}"), elsewhere, symlinks=True)
+    _poison_cache_entry(elsewhere)
+    shutil.rmtree(npx_cache_dir(f"prettier@{_PIN}"))
+    npx_cache_dir(f"prettier@{_PIN}").symlink_to(elsewhere)
+
+    snapshot = snapshots.probe_tool("prettier", search_root=project)
+    code, launched = _run(command, project, env)
+
+    assert_that(launched).is_equal_to(f"cache older {_OLDER}")
+    assert_that(snapshot.available).is_false()
+    assert_that(snapshot.probe_error).contains("outside")
+    _assert_never_a_false_pass(snapshot, launched, code)
+
+
+@requires_npx
+def test_clean_warm_lintro_cache_is_reused_without_reinstalling(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+) -> None:
+    """Validation keeps a good entry: the second run does not reinstall.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+    """
+    _require_clean_ancestry(tmp_path)
+    project, env, _command = _warm(tmp_path, monkeypatch, registry)
+    key = hashlib.sha512(f"prettier@{_PIN}".encode()).hexdigest()[:16]
+    manifest = (
+        npx_cache_dir(f"prettier@{_PIN}")
+        / "_npx"
+        / key
+        / "node_modules"
+        / "prettier"
+        / "package.json"
+    )
+    before = manifest.stat().st_ino
+
+    snapshot = snapshots.probe_tool("prettier", search_root=project)
+    code, launched = _run(list(snapshot.command), project, env)
+
+    assert_that(manifest.stat().st_ino).is_equal_to(before)
+    assert_that((code, launched)).is_equal_to((0, f"registry {_PIN}"))
     assert_that(snapshot.version).is_equal_to(_PIN)
     _assert_never_a_false_pass(snapshot, launched, code)
 

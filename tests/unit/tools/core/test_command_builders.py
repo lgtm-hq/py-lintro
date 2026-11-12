@@ -693,7 +693,7 @@ def test_html_validate_npx_fallback_is_version_pinned() -> None:
 
     spec = f"html-validate@{get_tool_version('html-validate')}"
     assert_that(cmd).is_equal_to(
-        ["npx", "--yes", *npx_runner_options(), "--package", spec, "html-validate"],
+        ["npx", "--yes", *npx_runner_options(spec), "--package", spec, "html-validate"],
     )
 
 
@@ -927,7 +927,7 @@ def test_prettier_falls_back_to_pinned_runner_spec(
     with patch("shutil.which", _which_only("npx")):
         cmd = builder.get_command("prettier", ToolName.PRETTIER)
     assert_that(cmd[:-2]).is_equal_to(
-        ["npx", "--yes", *npx_runner_options(), "--package"],
+        ["npx", "--yes", *npx_runner_options(cmd[-2]), "--package"],
     )
     assert_that(cmd[-2]).starts_with("prettier@")
     assert_that(cmd[-1]).is_equal_to("prettier")
@@ -963,7 +963,7 @@ def test_commitlint_runner_fallback_uses_scoped_package(
     with patch("shutil.which", _which_only("npx")):
         cmd = builder.get_command("commitlint", ToolName.COMMITLINT)
     assert_that(cmd[:-2]).is_equal_to(
-        ["npx", "--yes", *npx_runner_options(), "--package"],
+        ["npx", "--yes", *npx_runner_options(cmd[-2]), "--package"],
     )
     assert_that(cmd[-2]).starts_with("@commitlint/cli@")
     assert_that(cmd[-1]).is_equal_to("commitlint")
@@ -982,7 +982,7 @@ def test_spectral_runner_fallback_uses_scoped_package(
     with patch("shutil.which", _which_only("npx")):
         cmd = builder.get_command("spectral", ToolName.SPECTRAL)
     assert_that(cmd[:-2]).is_equal_to(
-        ["npx", "--yes", *npx_runner_options(), "--package"],
+        ["npx", "--yes", *npx_runner_options(cmd[-2]), "--package"],
     )
     assert_that(cmd[-2]).starts_with("@stoplight/spectral-cli@")
     assert_that(cmd[-1]).is_equal_to("spectral")

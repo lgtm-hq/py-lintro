@@ -671,7 +671,7 @@ class NodeJSBuilder(CommandBuilder):
                     command = [
                         "npx",
                         "--yes",
-                        *npx_runner_options(),
+                        *npx_runner_options(spec),
                         "--package",
                         spec,
                         binary_name,
