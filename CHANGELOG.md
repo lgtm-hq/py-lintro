@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.6] - 2026-11-12
+
+### Fixed
+
+- **tools**: report a timed-out version probe as `probe_timeout` (#3382) (7fe8986)
+
 ## [0.180.5] - 2026-11-12
 
 ### Changed
