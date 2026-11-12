@@ -163,6 +163,15 @@ def test_glob_named_file_with_no_files_matching_still_fails(
             id="message-inside-another-line",
         ),
         pytest.param(NO_FILES_MATCHING, ["a{1,2}.html"], False, id="brace-path"),
+        pytest.param(NO_FILES_MATCHING, ["dir\\file.html"], False, id="backslash"),
+        pytest.param(NO_FILES_MATCHING, ["+(a).html"], False, id="extglob-plus"),
+        pytest.param(NO_FILES_MATCHING, ["@(a).html"], False, id="extglob-at"),
+        pytest.param(
+            NO_FILES_MATCHING,
+            ["!a.html", "#b.html", "c,d.html"],
+            True,
+            id="literal-negation-comment-comma",
+        ),
         pytest.param(
             NO_FILES_MATCHING,
             ["index.html", "pages/[id].html"],

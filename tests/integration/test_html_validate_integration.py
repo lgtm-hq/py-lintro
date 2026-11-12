@@ -138,18 +138,22 @@ def test_html_validate_broken_config_still_fails(tmp_path: Path) -> None:
 
 
 @pytest.mark.html_validate
+@pytest.mark.parametrize("name", ["[slug].html", "dir\\file.html"])
 def test_html_validate_glob_named_file_with_findings_does_not_pass(
     tmp_path: Path,
+    name: str,
 ) -> None:
-    """A ``[slug].html`` html-validate cannot match itself must not pass (#3393).
+    """A file html-validate cannot match by its own name must not pass (#3393).
 
-    html-validate expands its arguments as globs and reports the literal
-    bracket name as unmatched, exactly as for an ignored file.
+    html-validate expands its arguments as globs: a bracket name is a
+    character class and a backslash becomes a path separator. Either way the
+    literal name is reported as unmatched, exactly as for an ignored file.
 
     Args:
         tmp_path: Pytest-managed temporary directory.
+        name: A file name that does not match itself as a glob.
     """
-    target = tmp_path / "[slug].html"
+    target = tmp_path / name
     target.write_text("<p><div></p>\n", encoding="utf-8")
     tool = ToolRegistry.get("html_validate")
     tool.exclude_patterns = []

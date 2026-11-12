@@ -77,6 +77,15 @@ HTML_VALIDATE_ALL_IGNORED_MESSAGE: str = (
 # run before any file is validated (see issue #1727).
 _GLOB_METACHARACTERS: frozenset[str] = frozenset("*?[]{}")
 
+# Characters that can stop a literal path from matching itself in
+# html-validate's ``fs.globSync`` expansion. Node builds its minimatch matcher
+# with ``windowsPathsNoEscape: true`` (a backslash becomes a path separator),
+# extglobs enabled (``+(...)``, ``@(...)`` and the like need parentheses),
+# brace expansion and character classes, but with ``nonegate`` and
+# ``nocomment`` (``!`` and ``#`` stay literal). A path holding any of these is
+# never read as an ignored file (#3393).
+_SELF_MATCH_BREAKERS: frozenset[str] = _GLOB_METACHARACTERS | frozenset("()\\")
+
 
 def _reported_inspection(output: str) -> bool | None:
     """Read coverage from JSON file reports, preserving absent evidence.
@@ -110,15 +119,16 @@ def ignored_every_file(
     stderr: str,
     file_args: list[str],
 ) -> bool:
-    """Report whether html-validate's own config ignored every given file.
+    r"""Report whether html-validate's own config ignored every given file.
 
     html-validate has no option to accept an empty input. When every file
     is excluded by ``.htmlvalidateignore`` it prints no report, names the
     unmatched patterns on stderr and exits 1. lintro passes only files it
     discovered on disk, so that message means the files were ignored, not
-    missing, but only when no argument holds glob syntax: html-validate
-    expands its arguments as globs, so a literal ``[slug].html`` does not
-    match itself and fails with the same message (#3393).
+    missing, but only when every argument matches itself: html-validate
+    expands its arguments as globs, so a literal ``[slug].html`` or
+    ``dir\\file.html`` does not match itself and fails with the same message
+    (#3393).
 
     Args:
         success: Whether html-validate exited 0.
@@ -127,16 +137,29 @@ def ignored_every_file(
         file_args: The paths passed to html-validate.
 
     Returns:
-        True for a failed run with no report, no glob-syntax argument, and a
-        stderr line that starts with the no-files-matching message.
+        True for a failed run with no report, only self-matching arguments,
+        and a stderr line that starts with the no-files-matching message.
     """
     if success or stdout.strip():
         return False
-    if any(contains_glob_syntax(path) for path in file_args):
+    if not all(matches_itself(path) for path in file_args):
         return False
     return any(
         line.startswith(HTML_VALIDATE_NO_FILES_MATCHING) for line in stderr.splitlines()
     )
+
+
+def matches_itself(argument: str) -> bool:
+    """Report whether html-validate's glob expansion maps a path to itself.
+
+    Args:
+        argument: A literal path passed to html-validate.
+
+    Returns:
+        False when the path holds a glob, extglob, brace or backslash
+        character that can change what it matches.
+    """
+    return not any(char in _SELF_MATCH_BREAKERS for char in argument)
 
 
 def contains_glob_syntax(argument: str) -> bool:

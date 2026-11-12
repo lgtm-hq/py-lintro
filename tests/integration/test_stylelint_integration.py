@@ -7,6 +7,7 @@ skip automatically when stylelint is not resolvable in the environment.
 
 from __future__ import annotations
 
+import json
 import shutil
 import tempfile
 from pathlib import Path
@@ -124,15 +125,29 @@ def test_skips_without_config(tmp_path: Path) -> None:
     assert_that(result.output).contains("no stylelint configuration")
 
 
-def test_files_ignored_by_stylelintignore_are_no_files(styled_project: Path) -> None:
-    """Files ``.stylelintignore`` excludes are "no files", not a failure (#3393).
+@pytest.mark.parametrize("mechanism", ["stylelintignore", "ignoreFiles"])
+def test_files_ignored_by_stylelint_config_are_no_files(
+    styled_project: Path,
+    mechanism: str,
+) -> None:
+    """Files Stylelint's own config ignores are "no files", not a failure (#3393).
+
+    ``.stylelintignore`` leaves the report empty; ``ignoreFiles`` reports each
+    file as a record flagged ``"ignored": true``.
 
     Args:
         styled_project: Temp project with a stylelint config.
+        mechanism: Which of Stylelint's ignore mechanisms excludes the file.
     """
     target = styled_project / "bad.css"
     shutil.copy(FIXTURES / "stylelint_violations.css", target)
-    (styled_project / ".stylelintignore").write_text("bad.css\n")
+    if mechanism == "stylelintignore":
+        (styled_project / ".stylelintignore").write_text("bad.css\n")
+    else:
+        config_path = styled_project / ".stylelintrc.json"
+        config = json.loads(config_path.read_text())
+        config["ignoreFiles"] = ["**/*.css"]
+        config_path.write_text(json.dumps(config))
 
     plugin = StylelintPlugin()
     checked = plugin.check([str(target)], {})

@@ -2264,10 +2264,12 @@ Stylelint resolves configuration per file (walking upward). Lintro supports:
 - a `stylelint` key in `package.json`
 
 `.stylelintignore` (and the `ignoreFiles` config key) is honored by the underlying tool.
-Lintro passes `--allow-empty-input`, so when Stylelint's own ignore configuration
-excludes every file it was given, the run is reported as "no files": it passes without
-claiming any file was inspected, instead of failing on Stylelint's
-`AllFilesIgnoredError`.
+When Stylelint's own ignore configuration excludes every file it was given, the run is
+reported as "no files": it passes without claiming any file was inspected. Lintro passes
+`--allow-empty-input`, so a run excluded by `.stylelintignore` prints an empty report
+instead of failing on Stylelint's `AllFilesIgnoredError`, and a run excluded by
+`ignoreFiles` reports every file as `"ignored": true`. Lintro reads both as "no files".
+When only some files are ignored, the run is an ordinary one.
 
 **Installation:**
 
@@ -2658,10 +2660,11 @@ that run as "no files", passing without claiming any file was inspected. Any oth
 from html-validate still fails the run.
 
 html-validate treats every path it is given as a glob, so a file whose name contains
-glob characters (`*?[]{}`, as in a routed site's `[slug].html`) does not match itself
-and draws the same `No files matching patterns` error. Lintro cannot tell that apart
-from an ignored file, so when any path it passed contains glob characters the run still
-fails as an execution error instead of being reported as "no files".
+glob characters (`*?[]{}`, as in a routed site's `[slug].html`), parentheses (extglob
+syntax such as `+(a)`) or a backslash (read as a path separator) can fail to match
+itself and draw the same `No files matching patterns` error. Lintro cannot tell that
+apart from an ignored file, so when any path it passed contains one of these characters
+the run still fails as an execution error instead of being reported as "no files".
 
 **Available Options via `--tool-options`:**
 

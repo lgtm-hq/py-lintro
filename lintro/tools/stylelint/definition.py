@@ -33,7 +33,7 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.stylelint.stylelint_issue import StylelintIssue
 from lintro.parsers.stylelint.stylelint_parser import (
     parse_stylelint_output_with_stats,
-    stylelint_report_is_empty,
+    stylelint_report_lints_no_file,
 )
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
@@ -219,7 +219,7 @@ class StylelintPlugin(BaseToolPlugin):
         """
         if not found_issues and self._is_no_config_error(output):
             return self._create_no_config_result(cwd=cwd)
-        if run_success and stylelint_report_is_empty(output):
+        if run_success and stylelint_report_lints_no_file(output):
             return self._create_all_ignored_result(fixing=fixing, cwd=cwd)
         return None
 
@@ -314,8 +314,8 @@ class StylelintPlugin(BaseToolPlugin):
         Config discovery is otherwise delegated to stylelint itself, which
         resolves configuration per linted file (walking up from each file).
         ``--allow-empty-input`` makes a run whose files are all ignored by
-        Stylelint's own configuration print an empty report instead of
-        failing with ``AllFilesIgnoredError`` (#3393).
+        ``.stylelintignore`` print an empty report instead of failing with
+        ``AllFilesIgnoredError`` (#3393).
 
         Args:
             merged_options: Per-call options merged over the instance

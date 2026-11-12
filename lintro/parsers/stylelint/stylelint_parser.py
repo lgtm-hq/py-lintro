@@ -525,20 +525,39 @@ def _parse_warning(
     )
 
 
-def stylelint_report_is_empty(output: str | None) -> bool:
-    """Report whether Stylelint printed a well-formed report naming no file.
+def _is_ignored_record(record: Any) -> bool:
+    """Report whether a source record is one Stylelint ignored.
 
-    Stylelint's JSON report holds one record per file it linted. Run with
-    ``--allow-empty-input``, a run whose files were all ignored by Stylelint's
-    own configuration (``.stylelintignore`` or ``ignoreFiles``) prints ``[]``
-    instead of failing with ``AllFilesIgnoredError`` (#3393). Since lintro
-    always passes existing files, an empty report means none was inspected.
+    Args:
+        record: One element of Stylelint's JSON report.
+
+    Returns:
+        True for a record flagged ``"ignored": true`` that carries no warning.
+    """
+    return (
+        isinstance(record, dict)
+        and record.get("ignored") is True
+        and not record.get("warnings")
+    )
+
+
+def stylelint_report_lints_no_file(output: str | None) -> bool:
+    """Report whether a well-formed Stylelint report shows no file was linted.
+
+    Stylelint's own ignore configuration can exclude every file lintro passes
+    (#3393). With ``--allow-empty-input``, files excluded by
+    ``.stylelintignore`` leave the report empty (``[]``), and files excluded by
+    the ``ignoreFiles`` config key appear as records flagged
+    ``"ignored": true``. A report holding only such records proves that
+    nothing was inspected. A report where only some records are ignored is an
+    ordinary run.
 
     Args:
         output: The combined stdout/stderr from stylelint ``--formatter json``.
 
     Returns:
-        True only for a complete, empty report with no malformed sibling.
+        True only for a complete report, with no malformed sibling, whose
+        records are all ignored (or that has none).
     """
     if not output or not output.strip():
         return False
@@ -546,5 +565,6 @@ def stylelint_report_is_empty(output: str | None) -> bool:
         data: Any = json.loads(output)
     except json.JSONDecodeError:
         data, failures = _extract_json_array(output)
-        return data == [] and failures == 0
-    return isinstance(data, list) and not data
+        if failures:
+            return False
+    return isinstance(data, list) and all(_is_ignored_record(r) for r in data)
