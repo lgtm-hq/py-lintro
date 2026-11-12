@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.7] - 2026-11-12
+
+### Fixed
+
+- **core**: show the --transport flag in the pre-execution AI status (#3386) (ab4a005)
+
 ## [0.180.6] - 2026-11-12
 
 ### Fixed
