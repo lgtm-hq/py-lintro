@@ -129,8 +129,10 @@ watch:
 ## Notes
 
 - A configured [fingerprint baseline](guides/baseline.md) filters every watch run. Watch
-  loads it once at startup and exits with an error, before watching, when the file is
-  missing or invalid. Pass `--no-baseline` to watch without it.
+  validates it once at startup and exits with an error, before watching, when the file
+  is missing or invalid. Each run then re-reads the file, so edits to it apply on the
+  next batch; a change to the `baseline` config key needs a restart. Pass
+  `--no-baseline` to watch without it.
 
 - Watching a single file watches its parent directory recursively so renames and
   re-creates are picked up.

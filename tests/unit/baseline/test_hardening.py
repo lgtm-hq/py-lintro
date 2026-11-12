@@ -346,7 +346,7 @@ def test_missing_global_baseline_error_names_global_config(
 
 @pytest.mark.parametrize(
     ("value", "actual"),
-    [(5, "int"), ("", "an empty string"), (None, "null"), (["a"], "list")],
+    [(5, "int"), ("", "an empty string"), (["a"], "list")],
 )
 def test_wrong_typed_baseline_value_is_a_one_line_error(
     value: object,
@@ -527,3 +527,65 @@ def test_baseline_errors_end_with_a_single_period(
     )
     for message in (missing.output, str(raised.value), str(elsewhere.value)):
         assert_that(message).does_not_contain("..")
+
+
+@pytest.mark.parametrize("value", ["", " null"])
+def test_null_baseline_key_means_no_baseline(
+    workspace: Path,
+    value: str,
+) -> None:
+    """YAML ``baseline:`` and ``baseline: null`` load as no baseline."""
+    (workspace / ".lintro-config.yaml").write_text(
+        f"baseline:{value}\n",
+        encoding="utf-8",
+    )
+    clear_config_cache()
+
+    config = load_config(allow_pyproject_fallback=False)
+
+    assert_that(config.baseline).is_none()
+    assert_that(load_run_baseline(None, config)).is_none()
+
+
+def test_each_simple_run_rereads_the_baseline_file(
+    workspace: Path,
+    dirty_result: ToolResult,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Watch batches pick up baseline file edits made after startup."""
+    from lintro.utils.tool_executor import run_lint_tools_simple
+
+    (workspace / ".lintro-config.yaml").write_text(
+        "baseline: .lintro-baseline.json\n",
+        encoding="utf-8",
+    )
+    clear_config_cache()
+    path = workspace / ".lintro-baseline.json"
+    change_baseline(path, lambda _: snapshot([], root=workspace), create=True)
+    monkeypatch.setattr(
+        "lintro.utils.tool_executor.execute_run",
+        lambda **_: RunArtifact(
+            tool_results=[dirty_result],
+            workspace_root=workspace,
+            exit_code=1,
+        ),
+    )
+    batch: dict[str, Any] = {
+        "action": "check",
+        "paths": ["."],
+        "tools": "ruff",
+        "tool_options": None,
+        "exclude": None,
+        "include_venv": False,
+        "group_by": "file",
+        "output_format": "json",
+        "verbose": False,
+        "render_summary": False,
+    }
+
+    before_edit = run_lint_tools_simple(**batch)
+    change_baseline(path, lambda _: snapshot([dirty_result], root=workspace))
+    after_edit = run_lint_tools_simple(**batch)
+
+    assert_that(before_edit).is_equal_to(1)
+    assert_that(after_edit).is_equal_to(0)

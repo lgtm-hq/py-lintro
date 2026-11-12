@@ -19,8 +19,9 @@ Use `--baseline PATH` on these commands to choose a different file. Alternativel
 the invocation directory; configured paths are relative to the project config. This also
 applies to a `baseline` value inherited from global user config: it resolves at the
 project config directory, or at cwd when there is no project config, rather than at the
-global config directory. A `baseline` value must be a non-empty string; any other value
-fails configuration loading with a one-line error.
+global config directory. A `baseline` value must be a non-empty string; an empty
+`baseline:` (null) means no baseline, and any other value fails configuration loading
+with a one-line error.
 
 A `baseline` key in the global user config opts every project into filtering. A project
 without that file fails `lintro check` with an error that names the global config file;
@@ -105,8 +106,9 @@ explicitly, as the badge does.
 The executor's `run_lint_tools_simple` also uses the configured baseline when its
 `baseline` argument is omitted, and accepts the same `baseline=False` opt-out as the
 public API. Watch mode passes `--no-baseline` through to it as `baseline=False`. Watch
-loads the baseline once at startup and exits with an error, before watching, when the
-file is missing or invalid; `--no-baseline` watches without it.
+validates the baseline once at startup and exits with an error, before watching, when
+the file is missing or invalid; `--no-baseline` watches without it. Each run then
+re-reads the file, so edits apply on the next batch.
 
 Version 1 matches the tuple `(tool, relative file, rule code, SHA-256(message))`. Line
 and column are excluded from identity; the stored line is only a hint. Messages

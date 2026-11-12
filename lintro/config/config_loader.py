@@ -1433,19 +1433,18 @@ def _baseline_value(data: dict[str, Any]) -> str | None:
         data: Normalized configuration mapping.
 
     Returns:
-        The configured path, or None when the key is absent.
+        The configured path, or None when the key is absent or null. YAML spells
+        an empty ``baseline:`` as null, which has always meant no baseline.
 
     Raises:
         ValueError: When a present value is not a non-empty string.
     """
-    if "baseline" not in data:
+    value = data.get("baseline")
+    if value is None:
         return None
-    value = data["baseline"]
     if isinstance(value, str) and value:
         return value
-    actual = "null" if value is None else type(value).__name__
-    if isinstance(value, str):
-        actual = "an empty string"
+    actual = "an empty string" if isinstance(value, str) else type(value).__name__
     raise ValueError(f"baseline must be a non-empty file path string, got {actual}")
 
 
