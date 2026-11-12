@@ -17,8 +17,7 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from loguru import logger
@@ -48,15 +47,23 @@ PACKAGE_FLAGS: frozenset[str] = frozenset({"-p", "--package"})
 #: ``--workspaces=false`` and ``--include-workspace-root=false`` stop workspace
 #: selection moving the run into a member with its own ``node_modules/.bin``;
 #: ``--bin-links=true`` makes the installed pin's executable exist;
-#: ``--global=false`` stops ``global=true`` breaking the run. A configured
-#: ``workspace=<name>`` cannot be cleared by any flag; see
-#: :func:`npx_pin_refusal`.
+#: ``--global=false`` stops ``global=true`` breaking the run;
+#: ``--offline=false`` and ``--prefer-offline=false`` stop npx settling for
+#: whatever an existing cache holds. The cache itself is lintro's own, passed
+#: as ``--cache=<dir>`` by :func:`npx_runner_options`. A ``workspace=<name>``
+#: set in an npmrc file conflicts with ``--workspaces=false`` and npm exits
+#: with an error, which lintro reports as an execution failure.
 NPX_ISOLATION_FLAGS: tuple[str, ...] = (
     "--workspaces=false",
     "--include-workspace-root=false",
     "--bin-links=true",
     "--global=false",
+    "--offline=false",
+    "--prefer-offline=false",
 )
+
+#: Prefix of the per-run npx cache option (see :func:`npx_runner_options`).
+NPX_CACHE_OPTION: str = "--cache="
 
 # Boolean runner flags that may precede the package spec or ``--package``.
 # Skipped when recovering the spec from a resolved command. ``--yes`` / ``-y``
@@ -131,7 +138,9 @@ def registry_fallback_spec(command: Sequence[str]) -> str | None:
     if len(command) < 2 or command[0] not in REGISTRY_RUNNERS:
         return None
     index = 1
-    while index < len(command) and command[index] in RUNNER_FLAGS:
+    while index < len(command) and (
+        command[index] in RUNNER_FLAGS or command[index].startswith(NPX_CACHE_OPTION)
+    ):
         index += 1
     if index >= len(command):
         return None
@@ -142,163 +151,73 @@ def registry_fallback_spec(command: Sequence[str]) -> str | None:
     return command[index]
 
 
-#: npm config that selects a workspace and cannot be cleared by a flag: with
-#: ``--workspaces=false`` npm 11 refuses to run at all.
-_WORKSPACE_KEY: str = "workspace"
+#: Path separators that would split a cache path when npm prepends the npx
+#: cache's ``.bin`` to ``PATH``; a cache path containing one is refused.
+_PATH_DELIMITERS: frozenset[str] = frozenset({":", ";"})
 
 
-def _env_value(env: Mapping[str, str], name: str) -> tuple[str, str] | None:
-    """Look up an ``npm_config_*`` variable as npm does, ignoring case.
+def npx_cache_dir() -> Path:
+    """Return the npm cache directory lintro owns for npx fallbacks.
 
-    Args:
-        env: Environment npx would inherit.
-        name: Config name, such as ``userconfig``.
+    npm derives the npx install directory (``<cache>/_npx``) from ``--cache``,
+    so a lintro-owned cache keeps a poisoned or pre-filled user cache, or a
+    ``cache`` value that injects a ``PATH`` entry, out of the run (#2043).
 
     Returns:
-        The matching key and its value, or None.
+        ``<lintro cache root>/npx``.
     """
-    wanted = f"npm_config_{name}"
-    for key, value in env.items():
-        if key.lower() == wanted:
-            return key, value
+    from lintro.utils import file_cache
+
+    return file_cache.CACHE_DIR / "npx"
+
+
+def npx_runner_options() -> list[str]:
+    """Return the options every npx fallback carries before ``--package``.
+
+    Returns:
+        The fixed isolation flags followed by ``--cache=<lintro cache>``.
+    """
+    return [*NPX_ISOLATION_FLAGS, f"{NPX_CACHE_OPTION}{npx_cache_dir()}"]
+
+
+def _cache_reason(command: Sequence[str]) -> str | None:
+    """Refuse when the command's npx cache is not one lintro can vouch for.
+
+    Args:
+        command: Resolved npx command.
+
+    Returns:
+        Why the cache cannot be trusted, or None.
+    """
+    expected = f"{NPX_CACHE_OPTION}{npx_cache_dir()}"
+    options = [arg for arg in command if arg.startswith(NPX_CACHE_OPTION)]
+    if options != [expected]:
+        return "the npx command does not use lintro's own npm cache"
+    cache = npx_cache_dir()
+    if any(delimiter in str(cache) for delimiter in _PATH_DELIMITERS):
+        return f"lintro's npm cache path {cache} contains a PATH delimiter"
+    if cache.exists() and not cache.is_dir():
+        return f"lintro's npm cache path {cache} is not a directory"
     return None
 
 
-def _read_npmrc(path: Path) -> dict[str, list[str]] | None:
-    """Read the keys of an npmrc file, as lower-cased names to values.
+def _workspace_env_reason(env: Mapping[str, str]) -> str | None:
+    """Refuse when the environment selects an npm workspace.
 
-    Only key names and values are needed, so the parse is permissive: comments
-    and blank lines are skipped, ``key[]`` is folded into ``key``, quotes are
-    stripped, and ``${VAR}`` and ``~`` are expanded in values. Keys inside
-    ``[section]`` blocks are kept too, which can only add matches.
-
-    Args:
-        path: File to read.
-
-    Returns:
-        The keys found (empty when the file does not exist), or None when the
-        file exists but cannot be read.
-    """
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return {}
-    except (OSError, UnicodeDecodeError):
-        return None
-    keys: dict[str, list[str]] = {}
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line[0] in ";#" or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        name = key.strip().strip("\"'").removesuffix("[]").lower()
-        cleaned = os.path.expanduser(os.path.expandvars(value.strip().strip("\"'")))
-        keys.setdefault(name, []).append(cleaned)
-    return keys
-
-
-def _npm_root() -> Path | None:
-    """Locate the npm package npx belongs to, for its builtin ``npmrc``.
-
-    Returns:
-        npm's package directory, or None when npx is not on ``PATH``.
-    """
-    npx = shutil.which("npx")
-    if npx is None:
-        return None
-    # npx is a link to ``<npm>/bin/npx-cli.js``.
-    return Path(npx).resolve().parent.parent
-
-
-def _global_prefixes(env: Mapping[str, str], configured: list[str]) -> Iterator[Path]:
-    """Yield every directory npm might use as its global prefix.
+    ``workspace=<name>`` cannot be cleared by a flag. Only the environment is
+    checked: the same setting in an npmrc file conflicts with
+    ``--workspaces=false`` and npm fails loudly, which lintro reports as an
+    execution failure rather than a pass.
 
     Args:
-        env: Environment npx would inherit.
-        configured: ``prefix`` values found in npmrc files.
-
-    Yields:
-        Path: Candidate prefixes (duplicates are harmless).
-    """
-    found = _env_value(env, "prefix")
-    if found is not None:
-        yield Path(os.path.expanduser(found[1]))
-    yield from (Path(value) for value in configured)
-    if env.get("PREFIX"):
-        yield Path(env["PREFIX"])
-    node = shutil.which("node")
-    if node is not None:
-        for binary in (Path(node), Path(node).resolve()):
-            prefix = binary.parent.parent
-            yield prefix
-            if env.get("DESTDIR"):
-                yield Path(env["DESTDIR"]) / prefix.relative_to(prefix.anchor)
-
-
-def _npmrc_candidates(cwd: Path, env: Mapping[str, str]) -> Iterator[Path]:
-    """Yield every npmrc file npm 11 could read for a run in *cwd*.
-
-    Follows ``@npmcli/config``: builtin ``<npm>/npmrc``, the project
-    ``.npmrc`` (every ancestor is checked, a superset of the project root),
-    ``userconfig`` (default ``~/.npmrc``) and ``globalconfig`` (default
-    ``<prefix>/etc/npmrc``). Locations configured inside earlier files are
-    followed, as npm does.
-
-    Args:
-        cwd: Directory npx would run in.
-        env: Environment npx would inherit.
-
-    Yields:
-        Path: Candidate files, some of which may not exist.
-    """
-    root = _npm_root()
-    early = [] if root is None else [root / "npmrc"]
-    origin = cwd.resolve()
-    early.extend(directory / ".npmrc" for directory in (origin, *origin.parents))
-    yield from early
-    settings: dict[str, list[str]] = {}
-    for path in early:
-        for key, values in (_read_npmrc(path) or {}).items():
-            settings.setdefault(key, []).extend(values)
-    users = [Path.home() / ".npmrc", *(Path(v) for v in settings.get("userconfig", []))]
-    found = _env_value(env, "userconfig")
-    if found is not None:
-        users.append(Path(os.path.expanduser(found[1])))
-    yield from users
-    for path in users:
-        for key, values in (_read_npmrc(path) or {}).items():
-            settings.setdefault(key, []).extend(values)
-    found = _env_value(env, "globalconfig")
-    if found is not None:
-        yield Path(os.path.expanduser(found[1]))
-    yield from (Path(value) for value in settings.get("globalconfig", []))
-    for prefix in _global_prefixes(env, settings.get("prefix", [])):
-        yield prefix / "etc" / "npmrc"
-
-
-def _workspace_config_reason(cwd: Path, env: Mapping[str, str]) -> str | None:
-    """Refuse when npm is configured to select a workspace.
-
-    Args:
-        cwd: Directory npx would run in.
         env: Environment npx would inherit.
 
     Returns:
         Why npx cannot be trusted, or None.
     """
-    found = _env_value(env, _WORKSPACE_KEY)
-    if found is not None:
-        return f"npm workspace selection is configured ({found[0]}={found[1]})"
-    seen: set[Path] = set()
-    for path in _npmrc_candidates(cwd, env):
-        if path in seen:
-            continue
-        seen.add(path)
-        keys = _read_npmrc(path)
-        if keys is None:
-            return f"{path.as_posix()} cannot be read"
-        if _WORKSPACE_KEY in keys:
-            return f"npm workspace selection is configured in {path.as_posix()}"
+    for key, value in env.items():
+        if key.lower() == "npm_config_workspace":
+            return f"npm workspace selection is configured ({key}={value})"
     return None
 
 
@@ -340,6 +259,7 @@ def npx_pin_refusal(
     package: str,
     pin: str,
     environ: Mapping[str, str] | None = None,
+    command: Sequence[str] | None = None,
 ) -> str | None:
     """Refuse an npx-only fallback unless npx can only run the pinned package.
 
@@ -347,15 +267,19 @@ def npx_pin_refusal(
     project tree and then runs ``<bin>`` by name from any ancestor
     ``node_modules/.bin``, so an installed tree can make it launch a different
     version than the pin, or nothing (#2043). The generated command carries
-    :data:`NPX_ISOLATION_FLAGS`, which neutralise workspace, bin-link and
-    global settings from every config source. What remains is refused here:
+    :func:`npx_runner_options`: flags that neutralise workspace, bin-link,
+    global and offline settings from every config source, and a lintro-owned
+    ``--cache``. npm settings in npmrc files are otherwise left to npm: the
+    flags win, or npm fails loudly and the run is an execution failure. What
+    remains is refused here:
 
     - a ``node_modules`` directory in *cwd* or any ancestor;
     - a ``package.json`` in *cwd* or any ancestor that declares
       ``workspaces`` (npm loads members' trees from the root), is the package
       itself, or cannot be parsed;
-    - ``workspace=<name>`` in the environment or in any npmrc npm would read,
-      or an npmrc that cannot be read.
+    - ``npm_config_workspace`` set in the environment, in any case;
+    - a command whose ``--cache`` is not lintro's own, or a lintro cache path
+      that contains a ``PATH`` delimiter or is not a directory.
 
     ``bunx <pkg>@<pin>`` always resolves from the registry and is not subject
     to this rule.
@@ -365,12 +289,17 @@ def npx_pin_refusal(
         package: npm package the spec names.
         pin: Exact pinned version.
         environ: Environment npx would inherit; defaults to ``os.environ``.
+        command: The generated npx command, to check its cache option.
 
     Returns:
         None when the pin is what npx runs, otherwise an actionable reason.
     """
     env = os.environ if environ is None else environ
-    reason = _project_reason(cwd, package) or _workspace_config_reason(cwd, env)
+    reason = (
+        _project_reason(cwd, package)
+        or _workspace_env_reason(env)
+        or (_cache_reason(command) if command is not None else None)
+    )
     if reason is None:
         return None
     return (

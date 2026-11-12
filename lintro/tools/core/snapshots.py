@@ -607,7 +607,12 @@ def _npx_refusal(
     """
     if Path(command[0]).name != "npx":
         return None
-    return npx_pin_refusal(cwd=search_root, package=package, pin=pinned)
+    return npx_pin_refusal(
+        cwd=search_root,
+        package=package,
+        pin=pinned,
+        command=command,
+    )
 
 
 def _registry_fallback_snapshot(

@@ -2,21 +2,24 @@
 
 ``npx --package <pkg>@<pin> <bin>`` may reuse anything npm finds installed and
 run ``<bin>`` by name from an ancestor ``node_modules/.bin``, so its pin is
-not reliable evidence once npm has a tree to reuse (#2043). lintro adds flags
-that neutralise npm's workspace, bin-link and global settings, and refuses an
-npx-only fallback when a ``node_modules`` directory or a ``package.json``
-declaring workspaces (or naming the package) sits in the execution directory
-or above it, or when ``workspace=<name>`` is configured. ``bunx <pkg>@<pin>``
-always resolves from the registry, so its pin stands.
+not reliable evidence once npm has a tree to reuse (#2043). lintro's npx
+command carries flags that neutralise npm's workspace, bin-link, global and
+offline settings, and its own ``--cache``. lintro refuses an npx-only
+fallback when a ``node_modules`` directory or a ``package.json`` declaring
+workspaces (or naming the package) sits in the execution directory or above
+it, or when ``npm_config_workspace`` is set in the environment. Anything else
+set in an npmrc file is left to npm: the flags win, or npm fails loudly and
+lintro reports an execution failure. ``bunx <pkg>@<pin>`` always resolves from
+the registry, so its pin stands.
 
 Each npx test probes with lintro and then runs the exact command lintro
-generated, so the observation is what would really execute. A shared check
-fails if lintro ever reports a pin as available while that command runs
-something else.
+generated. A shared check fails if lintro reports a pin as available while
+that command runs something else, unless npm failed loudly and lintro
+classifies that failure as an execution failure.
 
 Nothing reaches the internet. A localhost registry serves a fake pinned
 ``prettier`` whose binary prints ``registry <pin>``, to npm and bun alike.
-Caches and ``HOME`` are private to each test.
+Caches, lintro's npx cache and ``HOME`` are private to each test.
 
 npx is gated with a plain skip, not ``require_command``: the tools image ships
 bun (with ``node`` linked to it) but no npm, and ``require_command`` turns an
@@ -26,11 +29,13 @@ test uses ``require_command``.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
 import shutil
 import subprocess  # nosec B404 - runs real npx/bunx with fixed argv, offline
+import sys
 import tarfile
 import threading
 import time
@@ -42,8 +47,12 @@ import pytest
 from assertpy import assert_that
 
 from lintro._tool_versions import get_tool_version
+from lintro.models.core.tool_outcome import Checked, ToolOutcome
+from lintro.models.core.tool_result import ToolResult
 from lintro.models.core.tool_snapshot import ToolSnapshot
 from lintro.tools.core import snapshots
+from lintro.utils import file_cache
+from lintro.utils.execution.result_shaping import classify_runner_failure
 from tests.integration._tools import NO_MIN_VERSION, require_command
 
 _PIN = get_tool_version("prettier") or ""
@@ -358,6 +367,8 @@ def _isolate(
         (shim / name).symlink_to(target)
     home = tmp_path / "fake-home"
     home.mkdir(exist_ok=True)
+    # lintro's own npx cache, never the developer's real ``~/.lintro``.
+    monkeypatch.setattr(file_cache, "CACHE_DIR", tmp_path / "lintro-cache")
     monkeypatch.setenv("PATH", f"{shim}{os.pathsep}/bin")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("npm_config_registry", registry_url)
@@ -435,16 +446,38 @@ def _probe_then_npx(
     return code, launched, snapshot
 
 
-def _assert_never_a_false_pass(snapshot: ToolSnapshot, launched: str) -> None:
-    """Require lintro to refuse, or to report exactly the binary npx ran.
+def _assert_never_a_false_pass(
+    snapshot: ToolSnapshot,
+    launched: str,
+    code: int,
+    output: str | None = None,
+) -> None:
+    """Require lintro to refuse, report exactly what npx ran, or fail loudly.
+
+    A passing gate is acceptable only when the generated command ran the pin,
+    or when npm itself failed and lintro reports that run as an execution
+    failure rather than as findings or a pass.
 
     Args:
         snapshot: lintro's probe result.
-        launched: What the command lintro generated printed.
+        launched: Last line the command lintro generated printed.
+        code: That command's exit status.
+        output: Its full output, when the run failed.
     """
-    if snapshot.available and snapshot.version_check_passed:
-        assert_that(snapshot.command[0]).is_equal_to("npx")
+    if not (snapshot.available and snapshot.version_check_passed):
+        return
+    assert_that(snapshot.command[0]).is_equal_to("npx")
+    if code == 0:
         assert_that(launched).is_equal_to(f"registry {snapshot.version}")
+        return
+    failed = ToolResult.from_outcome(
+        ToolOutcome(execution=Checked(success=False)),
+        name="prettier",
+        output=output if output is not None else launched,
+    )
+    classified = classify_runner_failure(failed)
+    assert_that(classified.execution_failed).is_true()
+    assert_that(classified.findings_complete).is_false()
 
 
 def _require_clean_ancestry(tmp_path: Path) -> None:
@@ -765,7 +798,7 @@ def test_npx_only_with_reusable_npm_state_is_refused(
         npx_ran: What lintro's generated npx command launches here.
         reason: Text the refusal must contain.
     """
-    _code, launched, snapshot = _probe_then_npx(
+    code, launched, snapshot = _probe_then_npx(
         tmp_path,
         monkeypatch,
         registry,
@@ -777,42 +810,106 @@ def test_npx_only_with_reusable_npm_state_is_refused(
     assert_that(snapshot.available).is_false()
     assert_that(snapshot.version).is_none()
     assert_that(snapshot.probe_error).contains(_REFUSAL).contains(reason)
-    _assert_never_a_false_pass(snapshot, launched)
+    _assert_never_a_false_pass(snapshot, launched, code)
 
 
-#: ``workspace=<name>`` cannot be cleared by any npx flag, so each source is
-#: detected and refused; npx itself exits with an npm error.
-_WORKSPACE_SELECTED: list[tuple[str, Callable[[Path, Path], dict[str, str]], str]] = [
-    ("env", _env(npm_config_workspace="app"), "npm_config_workspace=app"),
-    ("env-upper", _env(NPM_CONFIG_WORKSPACE="app"), "NPM_CONFIG_WORKSPACE=app"),
-    ("project-npmrc", _project_rc("workspace=app\n"), "proj/.npmrc"),
-    ("user-npmrc", _user_rc("workspace=app\n"), "fake-home/.npmrc"),
-    ("userconfig", _userconfig_rc("workspace[]=app\n"), "custom-userrc"),
-    ("globalconfig", _globalconfig_rc("workspace=app\n"), "globalrc"),
+@requires_npx
+@pytest.mark.parametrize(
+    "key",
+    ["npm_config_workspace", "NPM_CONFIG_WORKSPACE"],
+)
+def test_npx_only_with_a_workspace_selected_in_the_environment_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+    key: str,
+) -> None:
+    """``npm_config_workspace`` in the environment is refused before npx runs.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+        key: Environment variable spelling.
+    """
+    _require_clean_ancestry(tmp_path)
+
+    code, launched, snapshot = _probe_then_npx(
+        tmp_path,
+        monkeypatch,
+        registry,
+        _clean_project,
+        _env(**{key: "app"}),
+    )
+
+    assert_that(code).is_not_zero()
+    assert_that(launched).contains("npm error")
+    assert_that(snapshot.available).is_false()
+    assert_that(snapshot.probe_error).contains(
+        f"npm workspace selection is configured ({key}=app)",
+    )
+    _assert_never_a_false_pass(snapshot, launched, code)
+
+
+def _relative_userconfig(_tmp: Path, cwd: Path) -> dict[str, str]:
+    """Config source: a relative ``npm_config_userconfig`` (review repro 3).
+
+    Args:
+        _tmp: Temporary directory (unused).
+        cwd: Execution directory, which the relative path is relative to.
+
+    Returns:
+        Extra environment naming the relative file.
+    """
+    _write(cwd / "customrc", "workspace=app\n")
+    return {"npm_config_userconfig": "customrc"}
+
+
+def _bom_project_rc(_tmp: Path, cwd: Path) -> dict[str, str]:
+    """Config source: a project ``.npmrc`` with a UTF-8 BOM (review repro 4).
+
+    Args:
+        _tmp: Temporary directory (unused).
+        cwd: Execution directory.
+
+    Returns:
+        No extra environment.
+    """
+    _write(cwd / ".npmrc", "\ufeffworkspace=app\n")
+    return {}
+
+
+#: ``workspace=<name>`` set in a file: lintro does not read npmrc files, so the
+#: gate passes and npm fails loudly against ``--workspaces=false``.
+_WORKSPACE_IN_A_FILE: list[tuple[str, Callable[[Path, Path], dict[str, str]]]] = [
+    ("project-npmrc", _project_rc("workspace=app\n")),
+    ("user-npmrc", _user_rc("workspace=app\n")),
+    ("userconfig", _userconfig_rc("workspace[]=app\n")),
+    ("globalconfig", _globalconfig_rc("workspace=app\n")),
+    ("relative-userconfig", _relative_userconfig),
+    ("bom-npmrc", _bom_project_rc),
 ]
 
 
 @requires_npx
 @pytest.mark.parametrize(
-    ("configure", "named"),
-    [(conf, named) for _id, conf, named in _WORKSPACE_SELECTED],
-    ids=[case[0] for case in _WORKSPACE_SELECTED],
+    "configure",
+    [conf for _id, conf in _WORKSPACE_IN_A_FILE],
+    ids=[case[0] for case in _WORKSPACE_IN_A_FILE],
 )
-def test_npx_only_with_a_selected_workspace_is_refused(
+def test_npx_only_with_a_workspace_selected_in_a_file_fails_loudly(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     registry: str,
     configure: Callable[[Path, Path], dict[str, str]],
-    named: str,
 ) -> None:
-    """A configured ``workspace`` makes npx fail, so lintro refuses it.
+    """Npm rejects the conflict with ``--workspaces=false``; nothing else runs.
 
     Args:
         tmp_path: Temporary directory provided by pytest.
         monkeypatch: Scoped environment override.
         registry: Localhost registry URL.
         configure: Where the setting comes from.
-        named: Text naming that source in the refusal.
     """
     _require_clean_ancestry(tmp_path)
 
@@ -826,10 +923,178 @@ def test_npx_only_with_a_selected_workspace_is_refused(
 
     assert_that(code).is_not_zero()
     assert_that(launched).contains("npm error")
-    assert_that(snapshot.available).is_false()
-    assert_that(snapshot.probe_error).contains("npm workspace selection is configured")
-    assert_that(snapshot.probe_error).contains(named)
-    _assert_never_a_false_pass(snapshot, launched)
+    assert_that(launched).does_not_contain("registry")
+    assert_that(launched).does_not_contain(_OLDER)
+    _assert_never_a_false_pass(snapshot, launched, code)
+
+
+def _poisoned_offline_cache(tmp: Path, _cwd: Path) -> dict[str, str]:
+    """Review repro 1: a pre-filled ``_npx`` cache npm would reuse offline.
+
+    The user cache's ``_npx`` entry for the pin holds prettier 1.0.0 beside a
+    nested pin, and ``offline`` is on.
+
+    Args:
+        tmp: Temporary directory.
+        _cwd: Execution directory (unused).
+
+    Returns:
+        Extra environment selecting the poisoned cache and offline mode.
+    """
+    key = hashlib.sha512(f"prettier@{_PIN}".encode()).hexdigest()[:16]
+    tree = tmp / "npm-cache" / "_npx" / key / "node_modules"
+    _package(tree / "prettier", _OLDER, label=f"cache older {_OLDER}")
+    _package(tree / "other", "1.0.0", name="other", dependencies={"prettier": _PIN})
+    _package(tree / "other" / "node_modules" / "prettier", _PIN)
+    (tree / ".bin").mkdir(parents=True)
+    (tree / ".bin" / "prettier").symlink_to("../prettier/bin.js")
+    return {
+        "npm_config_cache": str(tmp / "npm-cache"),
+        "npm_config_offline": "true",
+        "npm_config_prefer_offline": "true",
+    }
+
+
+def _cache_with_path_delimiter(tmp: Path, _cwd: Path) -> dict[str, str]:
+    """Review repro 2: a ``cache`` value whose ``:`` injects a PATH entry.
+
+    Args:
+        tmp: Temporary directory.
+        _cwd: Execution directory (unused).
+
+    Returns:
+        Extra environment with the hostile cache value.
+    """
+    _hoist_older(tmp / "outside")
+    hostile = f"{tmp / 'outside' / 'node_modules' / '.bin'}:{tmp / 'npm-cache'}"
+    return {"npm_config_cache": hostile}
+
+
+def _npmrc_with_nul_byte(_tmp: Path, cwd: Path) -> dict[str, str]:
+    """Review repro 5: an npmrc lintro once crashed on.
+
+    Args:
+        _tmp: Temporary directory (unused).
+        cwd: Execution directory.
+
+    Returns:
+        No extra environment.
+    """
+    (cwd / ".npmrc").write_bytes(b"userconfig=bad\x00path\n")
+    return {}
+
+
+_NPM_STATE_HAZARDS: list[tuple[str, Callable[[Path, Path], dict[str, str]]]] = [
+    ("poisoned-offline-cache", _poisoned_offline_cache),
+    ("cache-path-delimiter", _cache_with_path_delimiter),
+    ("npmrc-nul-byte", _npmrc_with_nul_byte),
+]
+
+
+@requires_npx
+@pytest.mark.parametrize(
+    "configure",
+    [conf for _id, conf in _NPM_STATE_HAZARDS],
+    ids=[case[0] for case in _NPM_STATE_HAZARDS],
+)
+def test_npx_cache_and_npmrc_hazards_still_run_the_pin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+    configure: Callable[[Path, Path], dict[str, str]],
+) -> None:
+    """Lintro's own ``--cache`` and offline flags keep the pin authoritative.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+        configure: The hostile npm state.
+    """
+    _require_clean_ancestry(tmp_path)
+
+    code, launched, snapshot = _probe_then_npx(
+        tmp_path,
+        monkeypatch,
+        registry,
+        _clean_project,
+        configure,
+    )
+
+    assert_that(snapshot.command).contains(
+        f"--cache={tmp_path / 'lintro-cache' / 'npx'}",
+    )
+    assert_that(code).is_zero()
+    assert_that(launched).is_equal_to(f"registry {_PIN}")
+    assert_that(snapshot.version).is_equal_to(_PIN)
+    _assert_never_a_false_pass(snapshot, launched, code)
+
+
+@requires_npx
+@pytest.mark.parametrize(
+    "configure",
+    [_project_rc("workspace=app\n"), _relative_userconfig, _bom_project_rc],
+    ids=["project-npmrc", "relative-userconfig", "bom-npmrc"],
+)
+def test_lintro_check_reports_an_npm_failure_as_an_execution_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+    configure: Callable[[Path, Path], dict[str, str]],
+) -> None:
+    """End to end, npm's own error is an execution failure, never a verdict.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+        configure: An npmrc ``workspace`` that npm rejects.
+    """
+    assert _NPX is not None and _NODE is not None
+    _require_clean_ancestry(tmp_path)
+    project = _clean_project(tmp_path)
+    (project / "data.json").write_text("{}\n", encoding="utf-8")
+    extra = configure(tmp_path, project)
+    env = _isolate(
+        monkeypatch,
+        tmp_path,
+        {"npx": _NPX, "node": _NODE},
+        registry,
+        extra,
+    )
+
+    run = subprocess.run(  # nosec B603 - fixed argv, shell=False
+        [
+            sys.executable,
+            "-m",
+            "lintro",
+            "check",
+            str(project),
+            "--tools",
+            "prettier",
+            "--output-format",
+            "json",
+        ],
+        cwd=project,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    rows = [
+        row for row in json.loads(run.stdout)["results"] if row["tool"] == "prettier"
+    ]
+
+    assert_that(run.returncode).is_not_zero()
+    assert_that(rows).is_length(1)
+    assert_that(rows[0]["execution_failed"]).is_true()
+    assert_that(rows[0]["success"]).is_false()
+    assert_that(rows[0]["issues_count"]).is_zero()
+    assert_that(rows[0]["status"]).is_equal_to("failed")
+    assert_that(rows[0]["output"]).contains(
+        "npm error Cannot use --no-workspaces and --workspace at the same time",
+    )
 
 
 #: Settings the generated command's flags neutralise: lintro trusts the pin
@@ -881,7 +1146,7 @@ def test_npx_only_in_a_clean_project_runs_the_pin_lintro_reports(
     assert_that(launched).is_equal_to(f"registry {_PIN}")
     assert_that(snapshot.available).is_true()
     assert_that(snapshot.version).is_equal_to(_PIN)
-    _assert_never_a_false_pass(snapshot, launched)
+    _assert_never_a_false_pass(snapshot, launched, code)
 
 
 @require_command("bun", ["bun"], min_version=NO_MIN_VERSION)

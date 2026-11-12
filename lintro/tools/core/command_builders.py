@@ -36,8 +36,8 @@ from loguru import logger
 
 from lintro.plugins.subprocess_executor import is_compiled_binary
 from lintro.tools.core.node_fallback import (
-    NPX_ISOLATION_FLAGS,
     notify_registry_fallback_selected,
+    npx_runner_options,
 )
 
 if TYPE_CHECKING:
@@ -671,7 +671,7 @@ class NodeJSBuilder(CommandBuilder):
                     command = [
                         "npx",
                         "--yes",
-                        *NPX_ISOLATION_FLAGS,
+                        *npx_runner_options(),
                         "--package",
                         spec,
                         binary_name,

@@ -9,9 +9,18 @@ them out of the executor lets the execute phase read as orchestration only
 
 from __future__ import annotations
 
+import re
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from lintro.models.core.tool_outcome import Checked, FixUnmeasured, NoFiles, Skipped
+from lintro.models.core.tool_outcome import (
+    Checked,
+    FixUnmeasured,
+    NoFiles,
+    Skipped,
+    TimedOut,
+    Unavailable,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -19,6 +28,44 @@ if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
     from lintro.parsers.base_issue import BaseIssue
     from lintro.plugins.base import BaseToolPlugin
+
+
+#: A line npm itself prints when it fails before or instead of running a tool
+#: (``npm error ...`` in npm 9+, ``npm ERR! ...`` before that).
+_NPM_ERROR_LINE: re.Pattern[str] = re.compile(r"^npm (?:error|ERR!) ", re.MULTILINE)
+
+
+def classify_runner_failure(result: ToolResult) -> ToolResult:
+    """Report a package-runner failure as an execution failure, not a verdict.
+
+    An ``npx`` fallback can fail inside npm before the tool runs, for example
+    when an npmrc ``workspace=<name>`` conflicts with ``--workspaces=false``
+    (#2043). The tool then reports nothing, so the result must never read as
+    findings or as a pass. A failed result with no issues whose output carries
+    npm's own error line is marked ``execution_failed`` with incomplete
+    findings; npm's message stays in ``output`` as the reason.
+
+    Args:
+        result: Validated result straight from the plugin.
+
+    Returns:
+        The result, marked as an execution failure when npm failed the run.
+    """
+    execution = result.outcome.execution
+    if (
+        result.success
+        or result.execution_failed
+        or result.issues_count
+        or isinstance(execution, (Skipped, Unavailable, TimedOut, NoFiles))
+        or not _NPM_ERROR_LINE.search(result.output or "")
+    ):
+        return result
+    return replace(
+        result,
+        execution_failed=True,
+        findings_complete=False,
+        output=("npm failed before the tool produced a report:\n" f"{result.output}"),
+    )
 
 
 def get_remaining_count(result: ToolResult) -> int:

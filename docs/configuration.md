@@ -1388,18 +1388,23 @@ Rationale:
    (`bunx --package typescript@<pinned> tsc`). `npx` always uses `--yes --package` so it
    cannot hang waiting for a TTY prompt.
 
-   `npx` does not always run its pin. It reuses whatever npm finds installed and then
-   runs `<binary>` by name from any `node_modules/.bin` above the checked directory, so
-   a hoisted older copy, a pnpm store, a stale `node_modules/.package-lock.json`, a
-   workspace glob npm reads differently, or npm config that selects a workspace can make
-   it run another version, or nothing. Lintro guards the npx branch in two ways.
+   `npx` does not always run its pin. It reuses whatever npm finds installed or cached
+   and then runs `<binary>` by name from any `node_modules/.bin` above the checked
+   directory. A hoisted older copy, a pnpm store, a stale
+   `node_modules/.package-lock.json`, a workspace glob npm reads differently, a
+   pre-filled npm cache used offline, or npm config that selects a workspace can make it
+   run another version, or nothing. Lintro guards the npx branch in three ways.
 
    **Flags on the generated command.** Every npx fallback runs as `npx --yes`, then
-   `--workspaces=false`, `--include-workspace-root=false`, `--bin-links=true` and
-   `--global=false`, then `--package <package>@<pinned> <binary>`. Each flag overrides
-   the same setting from the environment (`npm_config_*`) and from the project, user
-   (`~/.npmrc` or `userconfig`) and global (`globalconfig`) npmrc files. So
-   `workspaces=true`, `bin-links=false` and `global=true` cannot change what runs.
+   `--workspaces=false`, `--include-workspace-root=false`, `--bin-links=true`,
+   `--global=false`, `--offline=false`, `--prefer-offline=false` and
+   `--cache=~/.lintro/cache/npx`, then `--package <package>@<pinned> <binary>`. Each
+   flag overrides the same setting from the environment (`npm_config_*`) and from the
+   project, user and global npmrc files, so `workspaces`, `bin-links`, `global`,
+   `offline`, `prefer-offline` and `cache` cannot change what runs. The cache is
+   Lintro's own: a user cache that already holds something under npm's `_npx` directory,
+   or a `cache` value containing a `PATH` separator, is never used. If Lintro's cache
+   path contains `:` or `;`, or is not a directory, the tool is unavailable.
 
    **Refusal when npx could still reuse something.** The pin is trusted only when all of
    these hold, and the tool is **unavailable** otherwise:
@@ -1409,13 +1414,18 @@ Rationale:
    - no `package.json` there or above declares `workspaces` (npm loads every member's
      own `node_modules` from the workspace root), is the package itself, or fails to
      parse;
-   - `workspace=<name>` is not set in the environment or in any npmrc npm would read:
-     the project `.npmrc` (checked in every directory upward), the user file, the global
-     file and npm's builtin `npmrc`. No flag clears that setting, and npm refuses to run
-     with it, so Lintro refuses first. An npmrc that cannot be read also refuses.
+   - `npm_config_workspace` is not set in the environment, in any letter case. No flag
+     clears that setting.
 
    The reason names what it found, says that `npx may run an unpinned copy`, and ends
    with `Install <pkg>@<pinned> locally or install bun.`
+
+   **npmrc conflicts fail loudly.** Lintro does not read npmrc files. A setting there
+   that no flag overrides, such as `workspace=<name>`, makes npm stop with its own error
+   (`Cannot use --no-workspaces and --workspace at the same time`) before the tool runs.
+   Lintro reports that run as an **execution failure**: the result has
+   `execution_failed` set, carries npm's message, and is never read as findings or as a
+   pass.
 
    **Trade-off:** if `npx` is your only runner and a `node_modules` tree or a workspace
    root is in reach, the automatic registry fallback no longer runs for a Node tool you
