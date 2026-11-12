@@ -12,6 +12,7 @@ from pathlib import Path
 from loguru import logger
 from packaging.version import InvalidVersion, Version
 
+from lintro.enums.probe_failure import ProbeFailure
 from lintro.enums.tool_name import ToolName, normalize_tool_name
 
 # Import actual implementations from version_checking with aliases
@@ -132,25 +133,43 @@ class VersionProbeTimeoutError(subprocess.TimeoutExpired):
 
     Attributes:
         first_timeout: Budget, in seconds, of the first attempt.
+        elapsed: Wall-clock seconds spent across both attempts.
     """
 
     first_timeout: float
+    elapsed: float
 
     def __init__(
         self,
         cmd: Sequence[str],
         first_timeout: float,
         retry_timeout: float,
+        *,
+        elapsed: float,
     ) -> None:
-        """Record the command and both budgets.
+        """Record the command, both budgets and the time spent probing.
 
         Args:
             cmd: The version probe argv.
             first_timeout: Budget, in seconds, of the first attempt.
             retry_timeout: Budget, in seconds, of the retry.
+            elapsed: Wall-clock seconds spent across both attempts.
         """
         super().__init__(list(cmd), retry_timeout)
         self.first_timeout = first_timeout
+        self.elapsed = elapsed
+
+    @property
+    def summary(self) -> str:
+        """Describe the double timeout without the command line.
+
+        Returns:
+            str: For example ``version probe timed out twice (30 s, 60 s)``.
+        """
+        return (
+            "version probe timed out twice "
+            f"({self.first_timeout:g} s, {self.timeout:g} s)"
+        )
 
     def __str__(self) -> str:
         """Describe both timed-out attempts.
@@ -219,7 +238,12 @@ def _run_probe_with_retry(
             cwd=cwd,
         )
     except subprocess.TimeoutExpired as exc:
-        raise VersionProbeTimeoutError(cmd, timeout, retry_timeout) from exc
+        raise VersionProbeTimeoutError(
+            cmd,
+            timeout,
+            retry_timeout,
+            elapsed=time.monotonic() - started,
+        ) from exc
 
 
 @dataclass
@@ -238,6 +262,8 @@ class ToolVersionInfo:
     advisory: VersionAdvisory | None = field(default=None)
     probe_failed: bool = field(default=False, kw_only=True)
     parse_failed: bool = field(default=False, kw_only=True)
+    probe_failure: ProbeFailure | None = field(default=None, kw_only=True)
+    probe_seconds: float | None = field(default=None, kw_only=True)
 
 
 def parse_version(version_str: str) -> Version:
@@ -486,8 +512,18 @@ def check_tool_version(
                 channel_override=channel_override,
             )
 
+    except VersionProbeTimeoutError as e:
+        # The executable exists but answered too slowly twice; reporting it
+        # as a missing binary would read as an image bug (#2337).
+        info.probe_failed = True
+        info.probe_failure = ProbeFailure.PROBE_TIMEOUT
+        info.probe_seconds = round(e.elapsed, 3)
+        info.error_message = e.summary
+        logger.debug(f"[VersionCheck] Exception checking version for {tool_name}: {e}")
     except (subprocess.TimeoutExpired, OSError) as e:
         info.probe_failed = True
+        if isinstance(e, FileNotFoundError):
+            info.probe_failure = ProbeFailure.BINARY_MISSING
         info.error_message = f"Failed to run version check: {e}"
         logger.debug(f"[VersionCheck] Exception checking version for {tool_name}: {e}")
 

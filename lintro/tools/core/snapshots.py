@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, cast
 from loguru import logger
 
 from lintro import __version__
+from lintro.enums.probe_failure import ProbeFailure
 from lintro.enums.tool_name import normalize_tool_name, tool_name_aliases
 from lintro.models.core.tool_snapshot import ToolCapabilities as ToolCapabilities
 from lintro.models.core.tool_snapshot import ToolSnapshot as ToolSnapshot
@@ -504,6 +505,7 @@ def probe_tool(
             version_check_passed=bool(binary_path),
             probe_error=None if binary_path else "Executable not found in PATH",
             remediation_hint=remediation,
+            probe_failure=None if binary_path else ProbeFailure.BINARY_MISSING,
         )
 
     # Always run the version probe — do not gate on shutil.which alone.
@@ -551,7 +553,16 @@ def _snapshot_from_version(
         version_info.current_version is not None and not version_info.probe_failed
     )
     available = passed or unparseable or below_minimum
-    if not available and not snapshot.binary_path:
+    # Only the probe knows the cause: an empty binary_path alone does not
+    # prove a missing executable (``python -m X`` can launch and exit non-zero).
+    probe_failure = None if available else version_info.probe_failure
+    # A probe that timed out did launch something (a wrapper such as bunx or
+    # python -m), so it is not reported as a missing executable (#2337).
+    if (
+        not available
+        and not snapshot.binary_path
+        and probe_failure is not ProbeFailure.PROBE_TIMEOUT
+    ):
         main_cmd = snapshot.command[0] if snapshot.command else snapshot.name
         error = f"{main_cmd} not found in PATH. {error}".strip()
     return replace(
@@ -564,6 +575,12 @@ def _snapshot_from_version(
         min_version=version_info.min_version,
         recommended_version=version_info.recommended_version or "",
         below_recommended=version_info.below_recommended,
+        probe_failure=probe_failure,
+        probe_seconds=(
+            version_info.probe_seconds
+            if probe_failure is ProbeFailure.PROBE_TIMEOUT
+            else None
+        ),
     )
 
 
@@ -929,7 +946,14 @@ def snapshot_to_unavailable_result(
         message = f"{message}. {hint}"
 
     result = ToolResult.from_outcome(
-        ToolOutcome(execution=Unavailable(reason=error, strict=strict_missing)),
+        ToolOutcome(
+            execution=Unavailable(
+                reason=error,
+                strict=strict_missing,
+                probe_failure=snapshot.probe_failure,
+                probe_seconds=snapshot.probe_seconds,
+            ),
+        ),
         name=snapshot.name,
         output=message,
     )

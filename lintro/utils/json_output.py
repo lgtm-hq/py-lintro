@@ -118,6 +118,27 @@ def timed_out_tool_names(results: Sequence[ToolResult]) -> list[str]:
     return names
 
 
+def _unavailable_fields(execution: Unavailable) -> dict[str, Any]:
+    """Serialize the probe evidence of an unavailable result.
+
+    Args:
+        execution: The frozen unavailable outcome.
+
+    Returns:
+        ``unavailable`` and ``unavailable_reason``, plus ``probe_failure`` when
+        the probe knows its cause and ``probe_seconds`` when it timed out.
+    """
+    data: dict[str, Any] = {
+        "unavailable": True,
+        "unavailable_reason": execution.reason,
+    }
+    if execution.probe_failure is not None:
+        data["probe_failure"] = str(execution.probe_failure)
+    if execution.probe_seconds is not None:
+        data["probe_seconds"] = float(execution.probe_seconds)
+    return data
+
+
 def serialize_tool_result(
     result: ToolResult,
     *,
@@ -153,7 +174,9 @@ def serialize_tool_result(
         ``fixed``/``remaining`` in FIX mode, normalized ``metadata`` when
         present, and ``issues`` when any exist. ``status`` names the execution
         verdict; unavailable results also carry ``unavailable: true`` and
-        ``unavailable_reason`` separately from deliberate skip evidence.
+        ``unavailable_reason`` separately from deliberate skip evidence, plus
+        ``probe_failure`` (``binary_missing`` or ``probe_timeout``) when the
+        probe knows its cause and ``probe_seconds`` when it timed out.
     """
     outcome = result.outcome
     execution = outcome.execution
@@ -172,8 +195,7 @@ def serialize_tool_result(
     }
     data["status"] = status_for_tool_result(result)
     if isinstance(execution, Unavailable):
-        data["unavailable"] = True
-        data["unavailable_reason"] = execution.reason
+        data.update(_unavailable_fields(execution))
     if result.parse_failures_count is not None:
         data["parse_failures_count"] = result.parse_failures_count
     if result.baselined_count is not None:

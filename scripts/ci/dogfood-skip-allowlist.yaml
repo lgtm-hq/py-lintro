@@ -14,6 +14,15 @@
 #   opt_in_disabled - an opt-in tool is disabled by default.
 #   other           - unrecognised skip reason.
 #
+# lintro's JSON also reports a structured `probe_failure` on unavailable tools
+# (#2337): `binary_missing` when the executable was not found, or
+# `probe_timeout` when it exists but `--version` timed out on the first attempt
+# and on the retry (the row then carries `probe_seconds`). A probe timeout is
+# infrastructure noise, not an image bug. This gate does not read
+# `probe_failure` yet and still classifies every unavailable tool as
+# binary_missing; teaching it to absorb `probe_timeout` only when the same tool
+# reported a verdict in another attempt is a separate CI change.
+#
 # Two sections:
 #   allowlist  Permanent, intentional skips. Only `no_config` /
 #              `opt_in_disabled` are permitted here.
