@@ -198,30 +198,60 @@ class StylelintPlugin(BaseToolPlugin):
         run_success: bool,
         output: str | None,
         found_issues: bool,
+        parse_failures: int,
+        files: list[str],
         fixing: bool,
         cwd: str | None = None,
     ) -> ToolResult | None:
-        """Return the result for a check that linted nothing, if it did.
+        r"""Return the result for a check that linted nothing, if it did.
 
         Two runs lint no file without failing: no configuration resolved
         (a skip), and Stylelint's own ignore configuration excluding every
-        file given (no files, #3393).
+        file given (no files, #3393). The second needs a clean, complete
+        report and paths Stylelint reads literally: it escapes glob syntax
+        in an existing path but first turns each backslash into ``/``, so a
+        file named ``dir\\file.css`` is never found and also leaves an empty
+        report.
 
         Args:
             run_success: Whether the check exited 0.
             output: The check's combined output.
             found_issues: Whether any finding was parsed.
+            parse_failures: Malformed report containers or records.
+            files: The paths passed to Stylelint.
             fixing: Whether this check opens a fix run.
             cwd: Working directory Stylelint ran in.
 
         Returns:
-            The skip or no-files result, or None when Stylelint linted files.
+            The skip or no-files result, an execution failure when Stylelint
+            linted nothing because a path could not be read literally, or
+            None when Stylelint linted files.
         """
         if not found_issues and self._is_no_config_error(output):
             return self._create_no_config_result(cwd=cwd)
-        if run_success and stylelint_report_lints_no_file(output):
+        if not (
+            run_success
+            and not found_issues
+            and not parse_failures
+            and stylelint_report_lints_no_file(output)
+        ):
+            return None
+        unmatched = [path for path in files if "\\" in path]
+        if not unmatched:
             return self._create_all_ignored_result(fixing=fixing, cwd=cwd)
-        return None
+        reason = (
+            "Stylelint linted none of the given files: it reads a backslash "
+            f"in a path as a separator, so {len(unmatched)} path(s) such as "
+            f"{unmatched[0]!r} could not be found."
+        )
+        if fixing:
+            return self._fix_failure_result(
+                reason=reason,
+                accounting=FixUnmeasured("Stylelint linted no file."),
+                issues=[],
+                cwd=cwd,
+            )
+        return incomplete_run_result(name=self.definition.name, reason=reason, cwd=cwd)
 
     def _create_all_ignored_result(
         self,
@@ -449,6 +479,8 @@ class StylelintPlugin(BaseToolPlugin):
             run_success=run_success,
             output=output,
             found_issues=bool(issues),
+            parse_failures=parse_failures,
+            files=ctx.rel_files,
             fixing=False,
             cwd=ctx.cwd,
         )
@@ -532,6 +564,8 @@ class StylelintPlugin(BaseToolPlugin):
             run_success=initial_success,
             output=check_output,
             found_issues=bool(initial_issues),
+            parse_failures=initial_failures,
+            files=ctx.rel_files,
             fixing=True,
             cwd=ctx.cwd,
         )

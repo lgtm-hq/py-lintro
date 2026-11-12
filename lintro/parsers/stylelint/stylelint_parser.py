@@ -528,16 +528,26 @@ def _parse_warning(
 def _is_ignored_record(record: Any) -> bool:
     """Report whether a source record is one Stylelint ignored.
 
+    Stylelint 18 writes an ignored file as a full record: ``source``,
+    ``ignored: true``, an empty ``warnings`` list and empty
+    ``deprecations``, ``invalidOptionWarnings`` and ``parseErrors`` lists.
+    Anything else (missing, null or non-list ``warnings``, or any entry in
+    the metadata lists) is not a clean ignored record.
+
     Args:
         record: One element of Stylelint's JSON report.
 
     Returns:
-        True for a record flagged ``"ignored": true`` that carries no warning.
+        True for a record flagged ``"ignored": true`` whose ``warnings`` is
+        an empty list and whose metadata lists are empty or absent.
     """
-    return (
-        isinstance(record, dict)
-        and record.get("ignored") is True
-        and not record.get("warnings")
+    if not isinstance(record, dict) or record.get("ignored") is not True:
+        return False
+    if record.get("warnings") != []:
+        return False
+    return all(
+        record.get(key, []) == []
+        for key in ("deprecations", "invalidOptionWarnings", "parseErrors")
     )
 
 

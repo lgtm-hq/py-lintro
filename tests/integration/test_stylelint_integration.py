@@ -180,3 +180,57 @@ def test_broken_config_still_fails(tmp_path: Path) -> None:
     assert_that(result.execution_failed).is_true()
     assert_that(result.findings_complete).is_false()
     assert_that(result.issues).is_empty()
+
+
+def test_backslash_named_file_is_not_no_files(styled_project: Path) -> None:
+    r"""Stylelint reads ``dir\\file.css`` as ``dir/file.css``: it must fail (#3393).
+
+    With ``--allow-empty-input`` that run prints ``[]`` at exit 0, the same
+    report an ignored file leaves, so it must not read as "no files".
+
+    Args:
+        styled_project: Temp project with a stylelint config.
+    """
+    target = styled_project / "dir\\file.css"
+    shutil.copy(FIXTURES / "stylelint_violations.css", target)
+    original = target.read_text()
+
+    plugin = StylelintPlugin()
+    checked = plugin.check([str(target)], {})
+    fixed = plugin.fix([str(target)], {})
+
+    for result in (checked, fixed):
+        assert_that(result.no_files).is_false()
+        assert_that(result.success).is_false()
+        assert_that(result.execution_failed).is_true()
+        assert_that(result.findings_complete).is_false()
+    assert_that(target.read_text()).is_equal_to(original)
+
+
+def test_bracket_named_file_is_linted_and_fixed(styled_project: Path) -> None:
+    """Stylelint escapes glob syntax in an existing path, so it lints ``[slug]``.
+
+    Args:
+        styled_project: Temp project with a stylelint config.
+    """
+    target = styled_project / "[slug].css"
+    shutil.copy(FIXTURES / "stylelint_violations.css", target)
+    original = target.read_text()
+
+    plugin = StylelintPlugin()
+    checked = plugin.check([str(target)], {})
+    fixed = plugin.fix([str(target)], {})
+
+    assert_that(checked.no_files).is_false()
+    assert_that(checked.success).is_false()
+    assert_that(checked.inspected_files).is_true()
+    codes = {
+        issue.code
+        for issue in (checked.issues or [])
+        if isinstance(issue, StylelintIssue)
+    }
+    assert_that(codes).contains("color-hex-length")
+    assert_that(fixed.no_files).is_false()
+    assert_that(fixed.execution_failed).is_false()
+    assert_that(fixed.fixed_issues_count).is_greater_than(0)
+    assert_that(target.read_text()).is_not_equal_to(original)

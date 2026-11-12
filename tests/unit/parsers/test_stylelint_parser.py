@@ -556,6 +556,45 @@ def test_many_embedded_spans_on_one_line_stay_linear(
             False,
             id="record-explicitly-not-ignored",
         ),
+        pytest.param(
+            '[{"source":"/tmp/a.css","deprecations":[],"invalidOptionWarnings":[],'
+            '"parseErrors":[],"errored":false,"warnings":[],"ignored":true}]',
+            True,
+            id="stylelint-18-ignored-record",
+        ),
+        pytest.param(
+            '[{"source":"/tmp/a.css","ignored":true}]',
+            False,
+            id="ignored-record-missing-warnings",
+        ),
+        pytest.param(
+            '[{"source":"/tmp/a.css","ignored":true,"warnings":null}]',
+            False,
+            id="ignored-record-null-warnings",
+        ),
+        pytest.param(
+            '[{"source":"/tmp/a.css","ignored":true,"warnings":{}}]',
+            False,
+            id="ignored-record-object-warnings",
+        ),
+        pytest.param(
+            '[{"source":"/tmp/a.css","ignored":true,"warnings":[],'
+            '"invalidOptionWarnings":[{"text":"Invalid option"}]}]',
+            False,
+            id="ignored-record-with-invalid-option",
+        ),
+        pytest.param(
+            '[{"source":"/tmp/a.css","ignored":true,"warnings":[],'
+            '"deprecations":[{"text":"Deprecated rule"}]}]',
+            False,
+            id="ignored-record-with-deprecation",
+        ),
+        pytest.param(
+            '[{"source":"/tmp/a.css","ignored":true,"warnings":[],'
+            '"parseErrors":null}]',
+            False,
+            id="ignored-record-null-parse-errors",
+        ),
     ],
 )
 def test_stylelint_report_lints_no_file(output: str, expected: bool) -> None:
