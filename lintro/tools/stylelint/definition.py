@@ -29,12 +29,19 @@ from lintro.models.core.tool_outcome import (
     ToolOutcome,
 )
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.stylelint.stylelint_issue import StylelintIssue
 from lintro.parsers.stylelint.stylelint_parser import (
     parse_stylelint_output_with_stats,
 )
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.incomplete_run import (
+    incomplete_run_result,
+    malformed_report_reason,
+    report_gap,
+    tool_message_excerpt,
+)
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_bool,
@@ -254,6 +261,46 @@ class StylelintPlugin(BaseToolPlugin):
             cmd.extend(["--config", str(explicit)])
         return cmd
 
+    def _fix_failure_result(
+        self,
+        *,
+        reason: str,
+        accounting: FixMeasured | FixUnmeasured,
+        issues: list[StylelintIssue],
+        initial_issues: list[StylelintIssue] | None = None,
+        parse_failures: int | None = None,
+        cwd: str | None = None,
+    ) -> ToolResult:
+        """Build the result for a fix run that stopped without a verdict.
+
+        Args:
+            reason: Named reason the run is incomplete.
+            accounting: Fix accounting known at the point of failure.
+            issues: Findings Stylelint really reported, kept as they are.
+            initial_issues: Pre-fix findings, when the fix never ran.
+            parse_failures: Malformed report containers or records.
+            cwd: Working directory Stylelint ran in.
+
+        Returns:
+            A failed result flagged as an execution failure, with inspection
+            unknown (#3352).
+        """
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=False, inspected_files=None),
+                accounting=accounting,
+                issues_count=len(issues),
+            ),
+            name=self.definition.name,
+            output=reason,
+            issues=issues,
+            initial_issues=initial_issues or [],
+            cwd=cwd,
+            parse_failures_count=parse_failures,
+            execution_failed=True,
+            findings_complete=False,
+        )
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Stylelint without making changes.
 
@@ -295,19 +342,29 @@ class StylelintPlugin(BaseToolPlugin):
         issues, parse_failures = parse_stylelint_output_with_stats(output=output)
         if not issues and self._is_no_config_error(output):
             return self._create_no_config_result(cwd=ctx.cwd)
-        # Stylelint exits 2 when violations exist (parsed above); any other
-        # failure with nothing parsed (crash, invalid flag or config) must
-        # not read as a clean run.
-        if not issues and not run_success:
-            return ToolResult.from_outcome(
-                ToolOutcome(execution=Checked(success=False)),
+        # Stylelint prints a JSON report on every completed run, ``[...]``
+        # with empty ``warnings`` when clean, and exits 2 when violations
+        # exist. No report, a malformed one, or any other failure with
+        # nothing parsed (crash, invalid flag or config) is no verdict, and
+        # proves nothing about which files were read (#3352).
+        gap = report_gap(
+            tool="Stylelint",
+            output=output,
+            run_success=run_success,
+            found_issues=bool(issues),
+            parse_failures=parse_failures,
+        )
+        if gap is not None:
+            reason, failures = gap
+            return incomplete_run_result(
                 name=self.definition.name,
-                output=output or "Stylelint exited with an error and no results.",
+                reason=reason,
+                issues=issues,
+                parse_failures=failures,
                 cwd=ctx.cwd,
-                parse_failures_count=parse_failures,
             )
         issues_count = len(issues)
-        success = issues_count == 0 and parse_failures == 0
+        success = issues_count == 0
 
         return ToolResult.from_outcome(
             ToolOutcome(
@@ -361,23 +418,23 @@ class StylelintPlugin(BaseToolPlugin):
         initial_count = len(initial_issues)
         if not initial_issues and self._is_no_config_error(check_output):
             return self._create_no_config_result(cwd=ctx.cwd)
-        # A failing initial check with nothing parsed is a crash/config
-        # error, not a fixable state.
-        if initial_failures or (not initial_issues and not initial_success):
-            return ToolResult.from_outcome(
-                ToolOutcome(
-                    execution=Checked(success=False),
-                    accounting=FixUnmeasured("Invalid Stylelint initial report."),
-                    issues_count=initial_count,
-                ),
-                name=self.definition.name,
-                output=(
-                    check_output or "Stylelint exited with an error and no results."
-                ),
-                cwd=ctx.cwd,
+        # No initial report, a malformed one, or a failing check with
+        # nothing parsed is a crash/config error, not a fixable state.
+        initial_gap = report_gap(
+            tool="Stylelint",
+            output=check_output,
+            run_success=initial_success,
+            found_issues=bool(initial_issues),
+            parse_failures=initial_failures,
+        )
+        if initial_gap is not None:
+            return self._fix_failure_result(
+                reason=initial_gap[0],
+                accounting=FixUnmeasured("Invalid Stylelint initial report."),
                 issues=initial_issues,
                 initial_issues=initial_issues,
-                parse_failures_count=initial_failures,
+                parse_failures=initial_failures,
+                cwd=ctx.cwd,
             )
 
         # Apply fixes.
@@ -396,25 +453,23 @@ class StylelintPlugin(BaseToolPlugin):
         # a re-check that would misattribute the failure.
         fix_issues, fix_failures = parse_stylelint_output_with_stats(fix_output)
         if not fix_success and not fix_issues:
-            return ToolResult.from_outcome(
-                ToolOutcome(
-                    execution=Checked(success=False),
-                    accounting=(
-                        FixUnmeasured("Invalid Stylelint fix report.", initial_count)
-                        if fix_failures
-                        else FixMeasured(
-                            initial=initial_count,
-                            fixed=0,
-                            remaining=initial_count,
-                        )
-                    ),
-                    issues_count=initial_count,
+            return self._fix_failure_result(
+                reason=(
+                    "Stylelint --fix exited with an error and reported no "
+                    f"findings: {tool_message_excerpt(fix_output)}"
                 ),
-                name=self.definition.name,
-                output=fix_output or "Stylelint --fix exited with an error.",
+                accounting=(
+                    FixUnmeasured("Invalid Stylelint fix report.", initial_count)
+                    if fix_failures
+                    else FixMeasured(
+                        initial=initial_count,
+                        fixed=0,
+                        remaining=initial_count,
+                    )
+                ),
                 issues=initial_issues,
+                parse_failures=fix_failures,
                 cwd=ctx.cwd,
-                parse_failures_count=fix_failures,
             )
 
         # Re-check for remaining issues.
@@ -435,19 +490,21 @@ class StylelintPlugin(BaseToolPlugin):
             remaining_issues.extend(i for i in fix_issues if i not in remaining_issues)
         # A failed verification with nothing parsed must not read as
         # "all fixed" — keep the initial issues as remaining.
-        if not remaining_issues and not final_success and not parse_failures:
-            return ToolResult.from_outcome(
-                ToolOutcome(
-                    execution=Checked(success=False),
-                    accounting=FixMeasured(
-                        initial=initial_count,
-                        fixed=0,
-                        remaining=initial_count,
-                    ),
-                    issues_count=initial_count,
+        final_gap = report_gap(
+            tool="Stylelint re-check",
+            output=final_output,
+            run_success=final_success,
+            found_issues=bool(remaining_issues),
+            parse_failures=parse_failures,
+        )
+        if final_gap is not None and not parse_failures:
+            return self._fix_failure_result(
+                reason=final_gap[0],
+                accounting=FixMeasured(
+                    initial=initial_count,
+                    fixed=0,
+                    remaining=initial_count,
                 ),
-                name=self.definition.name,
-                output=(final_output or "Stylelint re-check exited with an error."),
                 issues=initial_issues,
                 cwd=ctx.cwd,
             )
@@ -483,7 +540,11 @@ class StylelintPlugin(BaseToolPlugin):
 
         return ToolResult.from_outcome(
             ToolOutcome(
-                execution=Checked(success=success, inspected_files=True),
+                # A malformed fix or re-check report proves no coverage.
+                execution=Checked(
+                    success=success,
+                    inspected_files=None if parse_failures else True,
+                ),
                 accounting=(
                     FixUnmeasured(
                         "Invalid Stylelint verification report.",
@@ -500,7 +561,7 @@ class StylelintPlugin(BaseToolPlugin):
             ),
             name=self.definition.name,
             output=(
-                (fix_output if fix_failures else final_output)
+                malformed_report_reason("Stylelint", parse_failures)
                 if parse_failures
                 else final_message
             ),
@@ -508,4 +569,5 @@ class StylelintPlugin(BaseToolPlugin):
             initial_issues=initial_issues,
             cwd=ctx.cwd,
             parse_failures_count=parse_failures,
+            execution_failed=bool(parse_failures),
         )

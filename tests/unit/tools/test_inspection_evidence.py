@@ -135,7 +135,8 @@ def test_selected_files_count_as_inspected_only_after_successful_execution(
         lambda *_, **__: None,
     )
     monkeypatch.setattr("shutil.which", lambda *_: "/mock/bin/tool")
-    stdout = '{"Issues": []}' if tool == "golangci_lint" else ""
+    # Tools that print a report even when clean get their real clean report.
+    stdout = {"golangci_lint": '{"Issues": []}', "html_validate": "[]"}.get(tool, "")
     completed = subprocess.CompletedProcess([tool], returncode, stdout, "")
     with patch("subprocess.run", return_value=completed):
         result = getattr(plugin, action)([str(tmp_path)], {})

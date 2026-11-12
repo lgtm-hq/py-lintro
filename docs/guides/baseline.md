@@ -207,6 +207,17 @@ These fail-closed checks also apply without a fingerprint baseline:
   such a run never updates a baseline. Files Bandit could not scan are named with its
   reason instead of the raw report. When no Python files match, the result is still "no
   files", not a failure.
+- Stylelint, html-validate and Vale print a report on every completed run, even a clean
+  one (`[]`, or `{}` for Vale). Empty output, a failed exit with nothing parsed, Vale's
+  runtime-error object (one parse failure, not one per key) and a report with malformed
+  records are execution failures with unknown inspection. Real findings are kept, and
+  the output names the reason with the tool's first message lines instead of the raw
+  report. A missing Stylelint or Vale configuration is still a skip. Stylelint's report
+  extraction treats JSON-like text inside a log line (a `[12:00:01]` timestamp, a
+  `[1/3]` counter, a quoted `"["`) as log text unless it looks like a report record.
+- SQLFluff treats empty lint stdout as no report, an execution failure rather than a
+  clean file, and keeps its lint diagnostics per execution instead of on the cached
+  plugin instance.
 - The shared per-file check runner accepts a nonzero exit as a complete lint verdict
   only when it is a declared findings exit status and has parsed findings. Other nonzero
   exits are execution errors even if some findings were parsed. This also applies to the

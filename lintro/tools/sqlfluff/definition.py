@@ -50,8 +50,14 @@ def _parse_report(output: str, failures: list[int]) -> list[SqlfluffIssue]:
         All usable findings in the report.
 
     Raises:
-        ValueError: When no usable findings survived an invalid report.
+        ValueError: When SQLFluff printed no report, or no usable findings
+            survived an invalid one.
     """
+    if not output.strip():
+        # ``sqlfluff lint --format json`` prints a per-file record even for a
+        # clean file, so empty stdout is an execution failure, not a clean
+        # pass and not a malformed report (#3352).
+        raise ValueError("SQLFluff printed no report.")
     issues, count = parse_sqlfluff_output_with_stats(output)
     failures.append(count)
     if count and not issues:
@@ -244,15 +250,27 @@ class SqlfluffPlugin(BaseToolPlugin):
             stdin: Optional stdin handle.
 
         Returns:
-            Native status and streams with lint stdout as the parser input,
-            or the display output for invocations that did not emit a report.
+            Native status and streams, with lint stdout alone as the parser
+            input.
         """
         result = super()._run_subprocess_result(cmd, timeout, cwd, env, stdin)
-        if cmd[1:2] == ["lint"] and not result.success and result.stderr.strip():
+        if cmd[1:2] != ["lint"]:
+            return result
+        no_report = not result.stdout.strip()
+        if (no_report or not result.success) and result.stderr.strip():
             self._lint_diagnostics.append(f"{cmd[-1]}:\n{result.stderr}")
-        if cmd[1:2] == ["lint"] and result.stdout.strip():
-            return replace(result, output=result.stdout)
-        return result
+        # Only stdout is the report. Diagnostics stay out of the parser, so a
+        # run that printed none is not counted as a malformed report.
+        return replace(result, output=result.stdout)
+
+    def _isolate_execution_state(self) -> None:
+        """Give this execution copy its own lint diagnostics.
+
+        ``copy_for_execution`` copies the cached registry instance shallowly,
+        so without this every concurrent execution would append to, and
+        clear, one shared list (#3352).
+        """
+        self._lint_diagnostics = []
 
     def _with_lint_diagnostics(self, result: ToolResult) -> ToolResult:
         """Attach lint diagnostics without feeding them through the JSON parser.

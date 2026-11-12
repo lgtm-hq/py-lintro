@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
@@ -86,50 +87,255 @@ def _standalone_scalar_spans(output: str) -> dict[int, int]:
     return spans
 
 
-def _outer_json_spans(output: str) -> Iterator[tuple[int, int | None]]:
+@dataclass(frozen=True)
+class _Span:
+    """One outer JSON candidate found in mixed formatter and log output.
+
+    Attributes:
+        start: Offset of the opener or scalar.
+        end: Offset just past the value, or where an unfinished one stopped.
+        complete: Whether the container closed.
+        embedded: Whether log text shares its line, before the opener or
+            after a single-line value.
+    """
+
+    start: int
+    end: int
+    complete: bool
+    embedded: bool
+
+
+def _text_after(output: str, end: int) -> bool:
+    """Report whether a single-line value is followed by text on its line.
+
+    Args:
+        output: Mixed formatter output and log text.
+        end: Offset just past the value.
+
+    Returns:
+        True when the next character other than a space or tab is neither a
+        line end nor the end of the output. Only that blank run is read, so
+        many values on one long line stay linear.
+    """
+    index = end
+    while index < len(output) and output[index] in " \t\r":
+        index += 1
+    return index < len(output) and output[index] != "\n"
+
+
+@dataclass
+class _Scanner:
+    """Delimiter state for one pass over mixed formatter and log output.
+
+    Attributes:
+        output: Mixed formatter output and log text.
+        depth: Nesting depth of the current outer container.
+        start: Offset of the current outer container's opener.
+        in_string: Whether the scan is inside a string in a container.
+        escaped: Whether the previous string character was a backslash.
+        line_text: Whether the current line has text outside containers.
+        opened_mid_line: Whether the current container opened after text.
+    """
+
+    output: str
+    depth: int = 0
+    start: int = 0
+    in_string: bool = False
+    escaped: bool = False
+    line_text: bool = False
+    opened_mid_line: bool = False
+
+    def _string_char(self, char: str) -> None:
+        """Advance string state by one character.
+
+        Args:
+            char: The character inside a string.
+        """
+        if self.escaped:
+            self.escaped = False
+        elif char == "\\":
+            self.escaped = True
+        elif char == '"':
+            self.in_string = False
+
+    def _line_end(self, index: int) -> _Span | None:
+        """Close the line, dropping a mid-line container that is still open.
+
+        Args:
+            index: Offset of the newline.
+
+        Returns:
+            The abandoned container, if one was open.
+        """
+        self.line_text = False
+        if not (self.depth and self.opened_mid_line):
+            return None
+        self.depth = 0
+        self.in_string = self.escaped = False
+        return _Span(start=self.start, end=index, complete=False, embedded=True)
+
+    def _close(self, index: int) -> _Span | None:
+        """Close one level, yielding the outer container when it ends.
+
+        Args:
+            index: Offset of the closing delimiter.
+
+        Returns:
+            The finished outer container, if this closed it.
+        """
+        self.depth -= 1
+        if self.depth:
+            return None
+        end = index + 1
+        single_line = "\n" not in self.output[self.start : end]
+        embedded = self.opened_mid_line or (
+            single_line and _text_after(self.output, end)
+        )
+        self.line_text = True
+        return _Span(start=self.start, end=end, complete=True, embedded=embedded)
+
+    def step(self, index: int) -> _Span | None:
+        """Advance over one character.
+
+        Args:
+            index: Offset of the character.
+
+        Returns:
+            A finished or abandoned outer container, if this ends one.
+        """
+        char = self.output[index]
+        if char == "\n":
+            return self._line_end(index)
+        if self.in_string:
+            self._string_char(char)
+        elif char == '"' and self.depth:
+            self.in_string = True
+        elif char in "[{" and (
+            self.depth or _starts_json_container(self.output, index)
+        ):
+            if not self.depth:
+                self.start = index
+                self.opened_mid_line = self.line_text
+            self.depth += 1
+        elif char in "]}" and self.depth:
+            return self._close(index)
+        elif not self.depth and char not in " \t\r":
+            self.line_text = True
+        return None
+
+
+def _outer_json_spans(output: str) -> Iterator[_Span]:
     """Locate outer containers and standalone scalars in bounded linear passes.
+
+    A container opened after log text on the same line must close on that
+    line: Stylelint prints its report on one line, so an opener inside a log
+    message (a quoted ``"["``, a ``[1/3]`` counter) that is still open at the
+    line end is log text, and is dropped there instead of swallowing the
+    report on the next line (#3352).
 
     Args:
         output: Mixed formatter output and log text.
 
     Yields:
-        tuple[int, int | None]: Start and end offsets of outer JSON values.
-        An unfinished trailing container has no end offset.
+        _Span: Outer JSON values, unfinished containers and abandoned
+        mid-line openers.
     """
     scalar_spans = _standalone_scalar_spans(output)
-    depth = 0
-    start = 0
-    in_string = False
-    escaped = False
+    scanner = _Scanner(output)
     index = 0
     while index < len(output):
-        char = output[index]
-        if not depth and index in scalar_spans:
+        if not scanner.depth and index in scalar_spans:
             end = scalar_spans[index]
-            yield index, end
+            yield _Span(start=index, end=end, complete=True, embedded=False)
             # Delimiters inside a scalar string cannot start another report.
             index = end
+            scanner.line_text = False
             continue
-        if in_string:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                in_string = False
-        elif char == '"' and depth:
-            in_string = True
-        elif char in "[{" and (depth or _starts_json_container(output, index)):
-            if not depth:
-                start = index
-            depth += 1
-        elif char in "]}" and depth:
-            depth -= 1
-            if not depth:
-                yield start, index + 1
+        span = scanner.step(index)
+        if span is not None:
+            yield span
         index += 1
-    if depth:
-        yield start, None
+    if scanner.depth:
+        yield _Span(
+            start=scanner.start,
+            end=len(output),
+            complete=False,
+            embedded=scanner.opened_mid_line,
+        )
+
+
+def _looks_like_report(text: str) -> bool:
+    """Report whether log-embedded JSON text could be a Stylelint report.
+
+    Args:
+        text: An embedded span that did not decode or did not close.
+
+    Returns:
+        True when it holds an object with a key, as every report record does,
+        so a truncated or malformed report still fails closed.
+    """
+    return '{"' in text.replace(" ", "")
+
+
+def _unusable_span_failures(span: _Span, text: str) -> int:
+    """Count an outer span that did not close or did not decode.
+
+    Args:
+        span: The span.
+        text: Its text.
+
+    Returns:
+        0 for JSON-like log text embedded in a line, otherwise 1.
+    """
+    return int(not span.embedded or _looks_like_report(text))
+
+
+def _is_log_array(data: Any) -> bool:
+    """Report whether decoded JSON is a string or typed-warning log array.
+
+    Args:
+        data: A decoded outer value that is not a Stylelint report.
+
+    Returns:
+        True for a non-empty array of strings or ``{"type": "warning"}``.
+    """
+    return (
+        isinstance(data, list)
+        and bool(data)
+        and all(
+            isinstance(item, str)
+            or (isinstance(item, dict) and item.get("type") == "warning")
+            for item in data
+        )
+    )
+
+
+def _classify(data: Any, span: _Span, empty_starts: set[int]) -> str:
+    """Classify a decoded outer value.
+
+    Args:
+        data: The decoded value.
+        span: Where it was found.
+        empty_starts: Offsets of ``[]`` lines that stand alone.
+
+    Returns:
+        ``"report"``, ``"empty"``, ``"log"`` (string or typed warning
+        arrays), ``"ignore"`` or ``"invalid"``.
+    """
+    if _looks_like_stylelint_payload(data):
+        return "report"
+    if span.embedded:
+        # Valid JSON inside a log line, e.g. "Config: {...}", is logging.
+        return "ignore"
+    if data == [] and span.start in empty_starts:
+        # An empty report must occupy its own line. Logging like
+        # "Plugins: []" is not a report, and must not hide a later one.
+        return "empty"
+    if _is_log_array(data):
+        # String and typed warning arrays can be logging, but cannot validate
+        # an empty fallback. Malformed source arrays still count as failures.
+        return "log"
+    return "ignore" if data == [] else "invalid"
 
 
 def _extract_json_array(output: str) -> tuple[list[Any] | None, int]:
@@ -140,6 +346,9 @@ def _extract_json_array(output: str) -> tuple[list[Any] | None, int]:
     bracketed log lines so the real payload is selected. Only decode balanced
     outer containers and standalone scalar lines, avoiding repeated scans of
     nested or truncated JSON. Scalar reports count as invalid outer siblings.
+    JSON embedded in a log line (a ``[2026-11-12T10:00:00Z]`` timestamp, a
+    ``[1/3]`` counter, a logged config object) is log text unless it looks
+    like a report record (#3352).
 
     Args:
         output: The combined stdout/stderr from stylelint.
@@ -158,40 +367,28 @@ def _extract_json_array(output: str) -> tuple[list[Any] | None, int]:
             empty_starts.add(offset + line.index("["))
         offset += len(line)
     reports: list[Any] = []
-    empty_report = False
+    kinds: set[str] = set()
     failures = 0
-    log_arrays = False
-    for start, end in _outer_json_spans(output):
-        if end is None:
-            failures += 1
+    for span in _outer_json_spans(output):
+        text = output[span.start : span.end]
+        if not span.complete:
+            failures += _unusable_span_failures(span, text)
+            if span.embedded:
+                continue
             break
         try:
-            data = decoder.decode(output[start:end])
+            data = decoder.decode(text)
         except (json.JSONDecodeError, ValueError):
-            failures += 1
+            failures += _unusable_span_failures(span, text)
             continue
-        if _looks_like_stylelint_payload(data):
+        kind = _classify(data, span, empty_starts)
+        kinds.add(kind)
+        if kind == "report":
             reports.extend(data)
-        elif data == [] and start in empty_starts:
-            # An empty report must occupy its own line. Logging like
-            # "Plugins: []" is not a report, and must not hide a later one.
-            empty_report = True
-        elif (
-            isinstance(data, list)
-            and data
-            and all(
-                isinstance(item, str)
-                or (isinstance(item, dict) and item.get("type") == "warning")
-                for item in data
-            )
-        ):
-            # String and typed warning arrays can be logging, but cannot validate
-            # an empty fallback. Malformed source arrays still count as failures.
-            log_arrays = True
-        elif data != []:
+        elif kind == "invalid":
             failures += 1
-    failures += int(log_arrays and not reports)
-    return (reports if reports or empty_report else None), failures
+    failures += int("log" in kinds and not reports)
+    return (reports if reports or "empty" in kinds else None), failures
 
 
 def parse_stylelint_output(output: str | None) -> list[StylelintIssue]:

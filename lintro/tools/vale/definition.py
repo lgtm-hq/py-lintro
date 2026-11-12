@@ -25,11 +25,18 @@ from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
 from lintro.models.core.tool_outcome import Checked, Skipped, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
-from lintro.parsers.vale.vale_parser import parse_vale_output_with_stats
+from lintro.parsers.vale.vale_parser import (
+    parse_vale_output_with_stats,
+    vale_runtime_error,
+)
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.batch_runner import batch_timeout_result
+from lintro.tools.core.incomplete_run import (
+    incomplete_run_result,
+    report_gap,
+)
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_positive_int,
@@ -174,6 +181,42 @@ class ValePlugin(BaseToolPlugin):
 
         return cmd
 
+    @staticmethod
+    def _incomplete_reason(
+        *,
+        output: str,
+        run_success: bool,
+        found_issues: bool,
+        parse_failures: int,
+    ) -> tuple[str, int | None] | None:
+        """Name why a Vale run has no complete verdict, if it has none.
+
+        Vale always prints a report: ``{}`` on a clean run (exit 0) and a
+        mapping of alerts on exit 1. Empty output, a runtime-error object or
+        a failed exit with nothing parsed means it did not run; a report with
+        malformed records is incomplete (#3352).
+
+        Args:
+            output: Combined Vale output.
+            run_success: Whether Vale exited 0.
+            found_issues: Whether any alert was parsed.
+            parse_failures: Malformed report containers or records.
+
+        Returns:
+            The reason and the parse-failure count to report, or None when
+            the report is complete.
+        """
+        runtime_error = vale_runtime_error(output)
+        if runtime_error is not None:
+            return f"Vale could not run: {runtime_error}", parse_failures
+        return report_gap(
+            tool="Vale",
+            output=output,
+            run_success=run_success,
+            found_issues=found_issues,
+            parse_failures=parse_failures,
+        )
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Vale.
 
@@ -208,20 +251,23 @@ class ValePlugin(BaseToolPlugin):
         if not issues and self._is_no_config_error(output):
             return self._create_no_config_result()
 
-        # Vale exits 0 on a clean run and 1 when alerts are found; any other
-        # non-zero exit with no parseable alerts is a runtime problem (invalid
-        # config, missing styles package, bad flag). Surface that as a failure
-        # instead of reporting a clean pass from a run that produced nothing.
-        if not issues and not _success:
-            return ToolResult.from_outcome(
-                ToolOutcome(execution=Checked(success=False)),
+        incomplete = self._incomplete_reason(
+            output=output,
+            run_success=_success,
+            found_issues=bool(issues),
+            parse_failures=parse_failures,
+        )
+        if incomplete is not None:
+            reason, failures = incomplete
+            return incomplete_run_result(
                 name=self.definition.name,
-                output=(output or "Vale exited with an error and produced no results."),
-                parse_failures_count=max(1, parse_failures),
+                reason=reason,
+                issues=issues,
+                parse_failures=failures,
             )
 
         issues_count = len(issues)
-        success = issues_count == 0 and parse_failures == 0
+        success = issues_count == 0
 
         return ToolResult.from_outcome(
             ToolOutcome(

@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from assertpy import assert_that
 
-from lintro.parsers.vale.vale_parser import parse_vale_output
+from lintro.parsers.vale.vale_parser import (
+    parse_vale_output,
+    parse_vale_output_with_stats,
+    vale_runtime_error,
+)
 
 
 def test_none_input_returns_empty() -> None:
@@ -54,3 +58,25 @@ def test_non_dict_alerts_are_skipped() -> None:
     output = '{"a.md": ["string", 42, null]}'
 
     assert_that(parse_vale_output(output=output)).is_empty()
+
+
+def test_runtime_error_object_counts_as_one_failure() -> None:
+    """Vale's runtime-error object is one failed report, not one per key."""
+    runtime_error = (
+        '{"Line": 3, "Path": "/repo/.vale.ini", "Text": "Style \'Nope\' '
+        'isn\'t on the StylesPath.", "Code": "E201", "Span": 17}'
+    )
+
+    assert_that(parse_vale_output_with_stats(runtime_error)).is_equal_to(([], 1))
+    assert_that(vale_runtime_error(runtime_error)).is_equal_to(
+        "E201: Style 'Nope' isn't on the StylesPath.",
+    )
+
+
+def test_alert_mapping_is_not_a_runtime_error() -> None:
+    """A per-file mapping, even one keyed ``Code``, is not a runtime error."""
+    mapping = '{"Code": [], "Text": []}'
+
+    assert_that(parse_vale_output_with_stats(mapping)).is_equal_to(([], 0))
+    assert_that(vale_runtime_error(mapping)).is_none()
+    assert_that(vale_runtime_error("not json")).is_none()
