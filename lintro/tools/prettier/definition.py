@@ -372,6 +372,7 @@ class PrettierPlugin(BaseToolPlugin):
         cmd: list[str] = self._get_executable_command(
             tool_name="prettier",
             cwd=ctx.cwd,
+            ctx=ctx,
         ) + [
             "--check",
         ]
@@ -488,6 +489,7 @@ class PrettierPlugin(BaseToolPlugin):
         check_cmd: list[str] = self._get_executable_command(
             tool_name="prettier",
             cwd=ctx.cwd,
+            ctx=ctx,
         ) + [
             "--check",
         ]
@@ -503,6 +505,7 @@ class PrettierPlugin(BaseToolPlugin):
         fix_cmd: list[str] = self._get_executable_command(
             tool_name="prettier",
             cwd=ctx.cwd,
+            ctx=ctx,
         ) + [
             "--write",
         ]

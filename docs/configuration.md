@@ -1418,9 +1418,16 @@ and is used whenever no project-local install is present.
 > a machine with npm but no bun a devDependency was unreachable and the tool reported a
 > skip. Both now resolve like every other Node tool.
 
-Because the version check (`verify_tool_version`) resolves through this same chain, the
-binary Lintro version-gates is now the binary Lintro runs, for every Node tool rather
-than just for `html-validate`.
+Because the version check (`verify_tool_version`) resolves through this same chain, from
+the same execution directory, the binary Lintro version-gates is the binary Lintro runs,
+for every Node tool rather than just for `html-validate`. The check resolves once per
+tool and directory, and execution reuses that command instead of resolving it again.
+
+The version check never runs the registry fallback (branch 3). Running
+`bunx <package>@<pinned> --version` would download the package before any file is
+checked. When resolution falls through to `bunx`/`npx`, the check reports the version as
+unknown and lets the tool run: the runner command already pins the version Lintro
+requires, and execution still uses it.
 
 ### Python Tools
 

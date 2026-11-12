@@ -342,6 +342,7 @@ class OxlintPlugin(BaseToolPlugin):
         cmd: list[str] = self._get_executable_command(
             tool_name="oxlint",
             cwd=ctx.cwd,
+            ctx=ctx,
         ) + [
             "--format",
             "json",
@@ -419,6 +420,7 @@ class OxlintPlugin(BaseToolPlugin):
         check_cmd: list[str] = self._get_executable_command(
             tool_name="oxlint",
             cwd=ctx.cwd,
+            ctx=ctx,
         ) + [
             "--format",
             "json",
@@ -441,6 +443,7 @@ class OxlintPlugin(BaseToolPlugin):
         fix_cmd: list[str] = self._get_executable_command(
             tool_name="oxlint",
             cwd=ctx.cwd,
+            ctx=ctx,
         ) + [
             "--fix",
             # Unfixable diagnostics still exit 1; keep them parseable so the

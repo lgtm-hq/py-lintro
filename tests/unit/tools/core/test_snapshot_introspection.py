@@ -157,7 +157,11 @@ def test_introspection_diagnostics_do_not_replace_execution_fallback_evidence(
     hydrate: bool,
     tmp_path: Path,
 ) -> None:
-    """Listing remains offline before and after an execution probe uses the runner."""
+    """Listing and the execution gate both stay offline for a runner-only tool.
+
+    The gate keeps the runner as the execution command but reports an unknown
+    version instead of running ``bunx``/``npx <spec> --version`` (#2043).
+    """
     for _ in range(2):
         before = len(probe_commands)
         rows = snapshots.probe_all_tools(
@@ -175,8 +179,8 @@ def test_introspection_diagnostics_do_not_replace_execution_fallback_evidence(
         executable = snapshots.get_tool_snapshot("stylelint", cache_root=tmp_path)
         assert_that(executable.available).is_true()
         assert_that(executable.version_check_passed).is_true()
-        assert_that(executable.version).is_equal_to("99.0.0")
+        assert_that(executable.version).is_none()
         assert_that(executable.command[0]).is_in("bunx", "npx")
-        assert_that(executable.command).is_equal_to(tuple(probe_commands[-1][:-1]))
+        assert_that(probe_commands[before:]).is_empty()
         if hydrate:
             snapshots.clear_snapshot_cache(include_disk=False)

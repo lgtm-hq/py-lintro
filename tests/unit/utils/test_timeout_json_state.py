@@ -86,7 +86,7 @@ def _assume_tool_installed(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setattr(
         "lintro.plugins.execution_preparation.verify_tool_version",
-        lambda definition, cwd=None: None,
+        lambda definition, cwd=None, *, resolved_commands=None: None,
     )
 
 

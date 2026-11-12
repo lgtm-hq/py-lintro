@@ -35,6 +35,7 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.execution_preparation import (
     DEFAULT_TIMEOUT,
     PreparedExecution,
+    ResolvedCommands,
     build_config_args,
     get_defaults_config_args,
     get_effective_timeout,
@@ -81,6 +82,10 @@ class ExecutionContext:
             directory for legacy callers that construct a context directly.
         early_result: If set, return this result immediately.
         timeout: Timeout value for subprocess execution.
+        resolved_commands: Run-scoped memo of command prefixes keyed
+            ``(tool, cwd)``. The version gate seeds it with the command it
+            probed, and :meth:`BaseToolPlugin._get_executable_command` reads
+            and fills it, so probe and execution share one resolution (#2043).
     """
 
     files: list[str] = field(default_factory=list)
@@ -88,6 +93,7 @@ class ExecutionContext:
     cwd: str = field(default_factory=lambda: str(Path.cwd()))
     early_result: ToolResult | None = None
     timeout: float = DEFAULT_TIMEOUT
+    resolved_commands: ResolvedCommands = field(default_factory=dict)
 
     @property
     def should_skip(self) -> bool:
@@ -584,6 +590,7 @@ class BaseToolPlugin(ABC):
             rel_files=result.rel_files,
             cwd=result.cwd,
             timeout=result.timeout,
+            resolved_commands=dict(result.resolved_commands),
         )
 
     def prepare(
@@ -626,6 +633,7 @@ class BaseToolPlugin(ABC):
             rel_files=ctx.rel_files,
             cwd=ctx.cwd,
             timeout=ctx.timeout,
+            resolved_commands=ctx.resolved_commands,
         )
 
     def _process_files_with_progress(
@@ -704,29 +712,53 @@ class BaseToolPlugin(ABC):
         self,
         tool_name: str,
         cwd: str | Path | None = None,
+        *,
+        ctx: ExecutionContext | PreparedExecution | None = None,
     ) -> list[str]:
         """Get the command prefix to execute a tool.
 
         Delegates to CommandBuilderRegistry for language-specific logic.
         This satisfies ISP by keeping BaseToolPlugin language-agnostic.
 
+        With ``ctx``, the result is memoised on the context per
+        ``(tool_name, cwd)``: the version gate's probed command is reused and
+        later calls in the same invocation skip the filesystem walk (#2043).
+
         Args:
             tool_name: Name of the tool executable.
             cwd: Directory the tool will execute in, when known. Project-local
                 ecosystems resolve their binary relative to it (#1727).
+                Defaults to ``ctx.cwd`` when a context is given.
+            ctx: Prepared execution whose run-scoped memo to use.
 
         Returns:
             Command prefix list.
         """
-        return get_executable_command(tool_name, cwd=cwd)
+        if ctx is None:
+            return get_executable_command(tool_name, cwd=cwd)
+        run_cwd = cwd if cwd is not None else ctx.cwd
+        key = (tool_name, str(run_cwd))
+        command = ctx.resolved_commands.get(key)
+        if command is None:
+            command = tuple(get_executable_command(tool_name, cwd=run_cwd))
+            ctx.resolved_commands[key] = command
+        return list(command)
 
-    def _verify_tool_version(self) -> ToolResult | None:
+    def _verify_tool_version(
+        self,
+        cwd: str | Path | None = None,
+    ) -> ToolResult | None:
         """Verify that the tool meets minimum version requirements.
+
+        Args:
+            cwd: Directory the tool will execute in. Pass the same directory
+                execution resolves from, so the gate checks the binary that
+                will run (#2043).
 
         Returns:
             None if version check passes, or a skip result if it fails.
         """
-        return verify_tool_version(self.definition)
+        return verify_tool_version(self.definition, cwd=cwd)
 
     # -------------------------------------------------------------------------
     # Lintro Config Support

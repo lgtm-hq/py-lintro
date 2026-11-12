@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from lintro._tool_versions import get_min_version
@@ -178,10 +179,17 @@ class ClippyPlugin(BaseToolPlugin):
             default_timeout=CLIPPY_DEFAULT_TIMEOUT,
         )
 
-    def _verify_tool_version(self) -> ToolResult | None:
+    def _verify_tool_version(
+        self,
+        cwd: str | Path | None = None,
+    ) -> ToolResult | None:
         """Verify that Rust toolchain meets minimum version requirements.
 
         Clippy version is tied to Rust version, so we check rustc version instead.
+
+        Args:
+            cwd: Directory clippy will run in; a ``rust-toolchain`` file there
+                selects the rustc that answers.
 
         Returns:
             Optional[ToolResult]: None if version check passes, or a skip result
@@ -190,7 +198,7 @@ class ClippyPlugin(BaseToolPlugin):
         from lintro.tools.core.version_requirements import check_tool_version
 
         # Check Rust version instead of clippy version
-        version_info = check_tool_version("clippy", ["rustc"])
+        version_info = check_tool_version("clippy", ["rustc"], cwd=cwd)
 
         if version_info.version_check_passed:
             return None  # Version check passed

@@ -508,9 +508,27 @@ def probe_tool(
             probe_failure=None if binary_path else ProbeFailure.BINARY_MISSING,
         )
 
+    if is_registry_fallback_command(command):
+        # Nothing is installed locally or on PATH, so the chain fell through
+        # to a pinned ``bunx``/``npx`` runner. Running it for ``--version``
+        # would fetch the package from the registry during planning (#2043,
+        # #940). Report an unknown version instead: execution keeps the
+        # runner fallback, and the runner's spec carries lintro's own pin.
+        return ToolSnapshot(
+            name=name,
+            available=True,
+            capabilities=capabilities,
+            remediation_hint=registry_fallback_install_hint(command),
+            binary_path=binary_path,
+            binary_mtime=binary_mtime,
+            version_check_passed=True,
+            min_version=definition.min_version or "",
+            command=tuple(command),
+        )
+
     # Always run the version probe — do not gate on shutil.which alone.
-    # Wrappers (bunx/npx/python -m) and test mocks of subprocess.run can
-    # succeed even when the bare binary name is absent from PATH.
+    # Wrappers (python -m) and test mocks of subprocess.run can succeed even
+    # when the bare binary name is absent from PATH.
     version_info = check_tool_version(
         definition.name,
         command,

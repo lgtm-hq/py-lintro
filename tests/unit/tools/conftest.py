@@ -259,6 +259,7 @@ def mock_execution_context_factory() -> Callable[..., MagicMock]:
         ctx.cwd = cwd
         ctx.early_result = early_result
         ctx.timeout = timeout if timeout is not None else 30
+        ctx.resolved_commands = {}
         # should_skip is True if explicitly set OR if early_result is provided
         ctx.should_skip = should_skip or (early_result is not None)
         return ctx
