@@ -23,6 +23,8 @@ tool produces sensible results out of the box.
 from __future__ import annotations
 
 import json
+import os
+import re
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass, replace
 
@@ -34,12 +36,12 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
-from lintro.models.core.tool_outcome import Checked, ToolOutcome
+from lintro.models.core.tool_outcome import Checked, NoFiles, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.html_validate.html_validate_parser import (
     parse_html_validate_output_with_stats,
 )
-from lintro.plugins.base import BaseToolPlugin
+from lintro.plugins.base import BaseToolPlugin, PreparedExecution
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.batch_runner import batch_timeout_result
@@ -52,6 +54,10 @@ from lintro.tools.core.node_fallback import (
     is_registry_fallback_command,
     registry_fallback_guidance,
 )
+from lintro.tools.core.readable_paths import (
+    run_on_readable_paths,
+    unread_paths_reason,
+)
 
 # Constants for html-validate configuration
 HTML_VALIDATE_DEFAULT_TIMEOUT: int = 30
@@ -63,11 +69,70 @@ HTML_VALIDATE_CONFIG_FILENAMES: list[str] = [
     ".htmlvalidate.mjs",
 ]
 
+# What html-validate prints, and exits 1 on, when its own ignore configuration
+# (``.htmlvalidateignore``) excludes every file it was given (#3393).
+HTML_VALIDATE_NO_FILES_MATCHING: str = "No files matching patterns"
+HTML_VALIDATE_ALL_IGNORED_MESSAGE: str = (
+    "No files to validate: html-validate's own ignore configuration "
+    "(.htmlvalidateignore) excludes every file given; none was inspected."
+)
+
 # Characters html-validate's CLI treats as glob syntax. Passing any of them
 # would push its ``expandFiles`` helper down the directory-walking branch of
 # ``fs.globSync``, which is not implemented on every Bun release and aborts the
 # run before any file is validated (see issue #1727).
 _GLOB_METACHARACTERS: frozenset[str] = frozenset("*?[]{}")
+
+# Shapes that can stop a literal path from matching itself in html-validate's
+# ``fs.globSync`` expansion. Node builds its minimatch matcher with
+# ``windowsPathsNoEscape: true`` (a backslash becomes a path separator),
+# extglobs, brace expansion and character classes, but with ``nonegate`` and
+# ``nocomment`` (``!`` and ``#`` stay literal). Such a path can be dropped or
+# matched to a different file, so it is never passed to html-validate (#3393).
+# Each shape was checked against html-validate 11.21.0, and each is broader
+# than what it misreads, never narrower:
+#
+# - ``*`` and ``?`` anywhere (``?(...)`` and ``*(...)`` extglobs included).
+# - ``+(``, ``@(`` and ``!(`` extglobs. A bare parenthesis is literal, so
+#   SvelteKit route groups like ``(app)/+page.svelte`` and ``page (1).html``
+#   are read as written.
+# - A ``[`` with any later ``]`` (a character class). A lone ``[`` or ``]``
+#   is literal; ``[].html`` is also literal but is held back anyway.
+# - A ``{`` with a later ``}`` and a ``,`` or ``..`` anywhere between them
+#   (brace expansion). ``{a}`` and a lone brace are literal.
+# - Any control character (C0, DEL or C1), outright. A POSIX file name can
+#   hold one, and a newline or tab inside ``[...]`` still forms a class that
+#   matches other files. Such names are pathological, so they are held back
+#   wherever the character appears.
+#
+# Every span check runs with ``re.DOTALL``, so a delimiter pair is found
+# across a newline. The backslash only matters on POSIX, where it can be part
+# of a file name; on Windows it is always a separator and the conversion is
+# correct.
+_SELF_MATCH_BREAKER: re.Pattern[str] = re.compile(
+    r"[*?]|[+@!]\(|\[.*\]|\{.*(?:,|\.\.).*\}|[\x00-\x1f\x7f-\x9f]",
+    re.DOTALL,
+)
+
+
+def _glob_reason(paths: list[str]) -> str:
+    """Name the paths withheld from html-validate because of glob syntax.
+
+    Args:
+        paths: Relative paths html-validate's glob expansion would misread.
+
+    Returns:
+        A one-line reason.
+    """
+    return unread_paths_reason(
+        tool="html-validate",
+        paths=paths,
+        why=(
+            "html-validate expands each path as a glob, and glob, extglob or "
+            "backslash characters in a name can make it skip the file or "
+            "validate a different one."
+        ),
+    )
 
 
 def _reported_inspection(output: str) -> bool | None:
@@ -93,6 +158,61 @@ def _reported_inspection(output: str) -> bool | None:
     ):
         return True
     return None
+
+
+def ignored_every_file(
+    *,
+    success: bool,
+    stdout: str,
+    stderr: str,
+    file_args: list[str],
+) -> bool:
+    r"""Report whether html-validate's own config ignored every given file.
+
+    html-validate has no option to accept an empty input. When every file
+    is excluded by ``.htmlvalidateignore`` it prints no report, names the
+    unmatched patterns on stderr and exits 1. lintro passes only files it
+    discovered on disk, so that message means the files were ignored, not
+    missing, but only when every argument matches itself: html-validate
+    expands its arguments as globs, so a literal ``[slug].html`` or
+    ``dir\\file.html`` does not match itself and fails with the same message
+    (#3393).
+
+    Args:
+        success: Whether html-validate exited 0.
+        stdout: The JSON formatter's stdout.
+        stderr: html-validate's diagnostics.
+        file_args: The paths passed to html-validate.
+
+    Returns:
+        True for a failed run with no report, only self-matching arguments,
+        and a stderr line that starts with the no-files-matching message.
+    """
+    if success or stdout.strip():
+        return False
+    if not all(matches_itself(path) for path in file_args):
+        return False
+    return any(
+        line.startswith(HTML_VALIDATE_NO_FILES_MATCHING) for line in stderr.splitlines()
+    )
+
+
+def matches_itself(argument: str, *, sep: str | None = None) -> bool:
+    """Report whether html-validate's glob expansion maps a path to itself.
+
+    Args:
+        argument: A literal path passed to html-validate.
+        sep: The platform path separator; ``os.sep`` when omitted. A
+            backslash is unsafe only where it is not the separator.
+
+    Returns:
+        False when the path holds a glob, extglob, character-class or brace
+        expansion shape, or a backslash on POSIX, that can change what it
+        matches.
+    """
+    if _SELF_MATCH_BREAKER.search(argument):
+        return False
+    return (os.sep if sep is None else sep) == "\\" or "\\" not in argument
 
 
 def contains_glob_syntax(argument: str) -> bool:
@@ -207,7 +327,28 @@ class HtmlValidatePlugin(BaseToolPlugin):
         ctx = self.prepare(paths, options)
         if isinstance(ctx, ToolResult):
             return ctx
+        return run_on_readable_paths(
+            ctx,
+            readable=matches_itself,
+            reason=_glob_reason,
+            run=self._check_files,
+            unrun=lambda reason, cwd: incomplete_run_result(
+                name=self.definition.name,
+                reason=reason,
+                cwd=cwd,
+            ),
+        )
 
+    def _check_files(self, ctx: PreparedExecution) -> ToolResult:
+        """Check the prepared files with html-validate.
+
+        Args:
+            ctx: Prepared context holding only paths html-validate's glob
+                expansion maps to themselves.
+
+        Returns:
+            ToolResult with check results.
+        """
         logger.debug(
             f"[HtmlValidatePlugin] Discovered {len(ctx.files)} files matching "
             f"patterns: {self.definition.file_patterns}",
@@ -280,6 +421,19 @@ class HtmlValidatePlugin(BaseToolPlugin):
                     used_registry_fallback=used_registry_fallback,
                     command=fallback_command,
                 ),
+            )
+
+        if ignored_every_file(
+            success=result.success,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            file_args=file_args,
+        ):
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=NoFiles()),
+                name=self.definition.name,
+                output=HTML_VALIDATE_ALL_IGNORED_MESSAGE,
+                cwd=ctx.cwd,
             )
 
         # JSON is written to stdout; stderr carries diagnostics only.

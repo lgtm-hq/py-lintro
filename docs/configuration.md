@@ -2263,7 +2263,22 @@ Stylelint resolves configuration per file (walking upward). Lintro supports:
 - `stylelint.config.js`, `stylelint.config.cjs`, `stylelint.config.mjs`
 - a `stylelint` key in `package.json`
 
-`.stylelintignore` is honored by the underlying tool.
+`.stylelintignore` (and the `ignoreFiles` config key) is honored by the underlying tool.
+When Stylelint's own ignore configuration excludes every file it was given, the run is
+reported as "no files": it passes without claiming any file was inspected. Lintro passes
+`--allow-empty-input`, so a run excluded by `.stylelintignore` prints an empty report
+instead of failing on Stylelint's `AllFilesIgnoredError`, and a run excluded by
+`ignoreFiles` reports every file as `"ignored": true`. Lintro reads both as "no files".
+When only some files are ignored, the run is an ordinary one. Stylelint reads glob
+characters in an existing path literally, so a name like `[slug].css` is linted as
+usual, but it turns a backslash into `/`. On POSIX systems, where a backslash can be
+part of a file name, it would read `dir\file.css` as `dir/file.css`: it would skip the
+named file, or check and `--fix` a different one. On POSIX, Lintro never passes such a
+path to Stylelint. It runs Stylelint on the other files, keeps their findings and fixes,
+and fails the run as an execution error that names the files left uninspected. If every
+path holds a backslash, Stylelint is not run at all. On Windows a backslash is always a
+path separator, so these paths are passed to Stylelint as usual. A report holding
+malformed or non-empty ignored records also fails instead of being read as "no files".
 
 **Installation:**
 
@@ -2647,6 +2662,26 @@ reaches the `bunx`/`npx` fallback, needs a Node runtime satisfying that range â€
 
 html-validate reads its rule configuration from the project's native config file when
 present. No additional configuration is required for Lintro.
+
+`.htmlvalidateignore` is honored by the underlying tool. When it excludes every file
+Lintro passed, html-validate exits 1 with `No files matching patterns`; Lintro reports
+that run as "no files", passing without claiming any file was inspected. Any other error
+from html-validate still fails the run.
+
+html-validate treats every path it is given as a glob, so a path holding a glob shape
+can fail to match itself, or match a different file (`[slug].html` matches `s.html`).
+The shapes are `*` or `?` anywhere, an extglob such as `+(a)`, `@(a)` or `!(a)`, a
+character class (`[` with a later `]`, as in a routed site's `[slug].html`), brace
+expansion (`{` and a later `}` with a `,` or `..` between them, even across a newline),
+any control character such as a newline or tab, and, on POSIX systems, a backslash (read
+as a path separator). A bare parenthesis is literal, so SvelteKit route groups such as
+`src/routes/(app)/+page.svelte` and names such as `page (1).html` are validated as
+usual. Lintro never passes a path with one of these shapes to html-validate. It
+validates the other files, keeps their findings, and fails the run as an execution error
+that names the files left uninspected; if every path holds one of these shapes,
+html-validate is not run at all. The glob shapes are held back on every platform. The
+backslash is held back on POSIX only: on Windows it is always a path separator, so those
+paths are validated as usual.
 
 **Available Options via `--tool-options`:**
 

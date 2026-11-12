@@ -17,6 +17,7 @@ from lintro.parsers.stylelint.stylelint_issue import StylelintIssue
 from lintro.parsers.stylelint.stylelint_parser import (
     parse_stylelint_output,
     parse_stylelint_output_with_stats,
+    stylelint_report_lints_no_file,
 )
 
 # Real capture: one CSS file, single color-hex-length violation.
@@ -517,3 +518,93 @@ def test_many_embedded_spans_on_one_line_stay_linear(
     assert_that(failures).is_zero()
     assert_that(issues).extracting("code").is_equal_to(["color-hex-length"])
     assert_that(decoded_chars).is_less_than_or_equal_to(3 * len(output))
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        pytest.param("[]", True, id="empty-report"),
+        pytest.param("Deprecation notice\n[]\n", True, id="empty-report-after-log"),
+        pytest.param(SINGLE_WARNING, False, id="report-with-findings"),
+        pytest.param(
+            '[{"source":"/tmp/a.css","warnings":[]}]',
+            False,
+            id="clean-report-names-a-file",
+        ),
+        pytest.param("", False, id="no-output"),
+        pytest.param("[\n", False, id="truncated-report"),
+        pytest.param("{}", False, id="not-an-array"),
+        pytest.param(
+            '[{"source":"/tmp/a.css","warnings":[],"ignored":true},'
+            '{"source":"/tmp/b.css","warnings":[],"ignored":true}]',
+            True,
+            id="every-record-ignored",
+        ),
+        pytest.param(
+            '[{"source":"/tmp/a.css","warnings":[],"ignored":true},'
+            '{"source":"/tmp/b.css","warnings":[]}]',
+            False,
+            id="mixed-ignored-and-linted",
+        ),
+        pytest.param(
+            '[{"source":"/tmp/a.css","warnings":[],"ignored":true},null]',
+            False,
+            id="ignored-record-beside-malformed-record",
+        ),
+        pytest.param(
+            '[{"source":"/tmp/a.css","warnings":[],"ignored":false}]',
+            False,
+            id="record-explicitly-not-ignored",
+        ),
+        pytest.param(
+            '[{"source":"/tmp/a.css","deprecations":[],"invalidOptionWarnings":[],'
+            '"parseErrors":[],"errored":false,"warnings":[],"ignored":true}]',
+            True,
+            id="stylelint-18-ignored-record",
+        ),
+        pytest.param(
+            '[{"source":"/tmp/a.css","ignored":true}]',
+            False,
+            id="ignored-record-missing-warnings",
+        ),
+        pytest.param(
+            '[{"source":"/tmp/a.css","ignored":true,"warnings":null}]',
+            False,
+            id="ignored-record-null-warnings",
+        ),
+        pytest.param(
+            '[{"source":"/tmp/a.css","ignored":true,"warnings":{}}]',
+            False,
+            id="ignored-record-object-warnings",
+        ),
+        pytest.param(
+            '[{"source":"/tmp/a.css","ignored":true,"warnings":[],'
+            '"invalidOptionWarnings":[{"text":"Invalid option"}]}]',
+            False,
+            id="ignored-record-with-invalid-option",
+        ),
+        pytest.param(
+            '[{"source":"/tmp/a.css","ignored":true,"warnings":[],'
+            '"deprecations":[{"text":"Deprecated rule"}]}]',
+            False,
+            id="ignored-record-with-deprecation",
+        ),
+        pytest.param(
+            '[{"source":"/tmp/a.css","ignored":true,"warnings":[],'
+            '"parseErrors":null}]',
+            False,
+            id="ignored-record-null-parse-errors",
+        ),
+    ],
+)
+def test_stylelint_report_lints_no_file(output: str, expected: bool) -> None:
+    """Only a complete report with no linted record reads as linting nothing.
+
+    Every record must be flagged ``"ignored": true`` (or there are none);
+    a mix of ignored and linted records is an ordinary run (#3393).
+
+    Args:
+        output: Combined Stylelint output.
+        expected: Whether the report should read as empty.
+    """
+    assert_that(stylelint_report_lints_no_file(output)).is_equal_to(expected)

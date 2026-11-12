@@ -138,6 +138,9 @@ NO_JSON_REPORT: dict[str, str] = {
 CLEAN_OUTPUTS = {name: reports[1] for name, reports in JSON_REPORTS.items()} | {
     "gitleaks": "[]",
     "semgrep": '{"results": [], "errors": [], "paths": {"scanned": ["test.py"]}}',
+    # Stylelint's clean report names each linted file; ``[]`` means its own
+    # ignore configuration excluded every file, a no-files run (#3393).
+    "stylelint": '[{"source":"a.css","warnings":[]}]',
 }
 CLEAN_SUCCESS_EXCLUSIONS: dict[str, str] = {}
 
