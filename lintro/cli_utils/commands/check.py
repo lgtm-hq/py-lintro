@@ -17,6 +17,7 @@ from lintro.cli_utils.diff_option import validate_diff_base_ref
 from lintro.cli_utils.order_explain import emit_order_explanation
 from lintro.exceptions.errors import ConfigurationError
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
+from lintro.utils.tool_options import parse_tool_options
 
 # Constants
 DEFAULT_PATHS: list[str] = ["."]
@@ -257,12 +258,13 @@ def check_command(
     if explain_order:
         emit_order_explanation(
             tools=tools,
+            ignore_conflicts=ignore_conflicts,
             action=DEFAULT_ACTION,
             paths=path_list,
-            ignore_conflicts=ignore_conflicts,
             exclude=exclude,
             include_venv=include_venv,
             diff_base=diff_base,
+            tool_option_dict=parse_tool_options(tool_options),
         )
 
     # Build tool-specific options string

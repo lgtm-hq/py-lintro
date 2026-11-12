@@ -117,6 +117,7 @@ def test_invoke_with_comma_separated_commands() -> None:
             action="fmt",
             paths=["."],
             tools=None,
+            ignore_conflicts=False,
             tool_options=None,
             exclude=None,
             include_venv=False,

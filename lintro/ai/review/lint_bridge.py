@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 from loguru import logger
@@ -17,10 +18,11 @@ from lintro.utils.execution.tool_configuration import (
     configure_tool_for_execution,
     get_tools_to_run,
 )
+from lintro.utils.execution_paths import get_execution_cwd
+from lintro.utils.python_formatting import resolve_python_formatting
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
-    from pathlib import Path
 
     from lintro.config.lintro_config import LintroConfig
 
@@ -106,6 +108,15 @@ def run_lint_on_changed_files(
         if not selection.to_run:
             return []
         config_manager = UnifiedConfigManager()
+        selected_tools = set(selection.to_run)
+        ruff_config = config_manager.get_tool_config("ruff").lintro_tool_config or {}
+        decision = resolve_python_formatting(
+            selected_tools,
+            action=Action.CHECK,
+            ruff_options=ruff_config,
+            cache_root=Path(get_execution_cwd(changed_files)),
+            strict_missing_tools=lintro_config.execution.strict_missing_tools,
+        )
     except Exception:
         logger.warning(
             "Lint bridge skipped: could not select or configure tools",
@@ -118,9 +129,11 @@ def run_lint_on_changed_files(
     # from the run's selection (#1742), so passing the real set keeps the
     # bridge's ruff/black split identical to `lintro chk`; an empty set would
     # leave ruff's format_check on and duplicate black's findings.
-    selected_tools = set(selection.to_run)
-
     for tool_name in selection.to_run:
+        if tool_name == "black" and decision is not None and not decision.run_black:
+            if decision.black_result is not None:
+                results.append(decision.black_result)
+            continue
         try:
             tool = tool_manager.get_tool(tool_name)
         except (KeyError, ValueError):
@@ -137,6 +150,8 @@ def run_lint_on_changed_files(
                 incremental=False,
                 action=Action.CHECK,
                 selected_tools=selected_tools,
+                paths=changed_files,
+                formatting_decision=decision,
                 auto_install=False,
                 lintro_config=lintro_config,
             )

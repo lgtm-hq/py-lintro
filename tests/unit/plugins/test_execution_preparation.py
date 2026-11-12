@@ -14,13 +14,15 @@ from lintro.models.core.tool_outcome import NoFiles, Skipped, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.execution_preparation import (
     PreparedExecution,
-    VersionLagPolicy,
-    _parse_allow_version_lag,
-    _version_lag_allowed,
     prepare_execution,
     verify_tool_version,
 )
 from lintro.plugins.protocol import ToolDefinition
+from lintro.utils.tool_snapshots import (
+    VersionLagPolicy,
+    _parse_allow_version_lag,
+    _version_lag_allowed,
+)
 
 
 @pytest.mark.parametrize(

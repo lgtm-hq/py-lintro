@@ -16,7 +16,10 @@ from lintro.config.config_loader import get_config
 from lintro.enums.action import Action, normalize_action
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tools_value import ToolsValue
+from lintro.models.core.python_formatting_decision import PythonFormattingDecision
 from lintro.tools import tool_manager
+from lintro.utils.execution_paths import get_execution_cwd
+from lintro.utils.python_formatting import resolve_python_formatting
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
@@ -219,6 +222,8 @@ def configure_tool_for_execution(
     auto_install: bool = False,
     lintro_config: LintroConfig | None = None,
     diff_base: str | None = None,
+    paths: Sequence[str] | None = None,
+    formatting_decision: PythonFormattingDecision | None = None,
 ) -> BaseToolPlugin:
     """Configure a tool for execution.
 
@@ -247,6 +252,8 @@ def configure_tool_for_execution(
         lintro_config: Optional LintroConfig to reuse; fetched via get_config() if None.
         diff_base: Resolved git base ref for ``--diff`` scanning, or None to scan
             all discovered files.
+        paths: Scan targets anchoring the formatting capability probe.
+        formatting_decision: Ownership already resolved for the entire invocation.
 
     Returns:
         The configured per-invocation tool copy to run.
@@ -304,26 +311,25 @@ def configure_tool_for_execution(
     if effective_tool_auto_install:
         tool.set_options(auto_install=True)
 
-    # Format authority on ``*.py``. The rule itself — fewest mutating
-    # capabilities wins — now lives in the scheduler (#1744, #2606), which
-    # records the demotion and reports it through explain, doctor and init:
-    # black owns FORMAT, so ruff is demoted to its FIX capability and its
-    # formatting stages are switched off unless the user explicitly asked for
-    # them. Applying that record here rather than repeating its conclusion is
-    # blocked by layering (``lintro.utils`` may not import ``lintro.tools``)
-    # and is left to the follow-up that lifts the executor into its own layer.
-    if "black" in selected_tools and tool_name == ToolName.RUFF.value:
-        tool_config = config_manager.get_tool_config(tool_name)
-        lintro_tool_cfg = tool_config.lintro_tool_config or {}
-        if action == Action.FIX:
-            if "format" not in cli_overrides and "format" not in lintro_tool_cfg:
-                tool.set_options(format=False)
-        else:  # check
-            if (
-                "format_check" not in cli_overrides
-                and "format_check" not in lintro_tool_cfg
-            ):
-                tool.set_options(format_check=False)
+    if tool_name == ToolName.RUFF.value and (
+        formatting_decision is not None or "black" in selected_tools
+    ):
+        if formatting_decision is None:
+            ruff_config = (
+                config_manager.get_tool_config("ruff").lintro_tool_config or {}
+            )
+            formatting_decision = resolve_python_formatting(
+                selected_tools,
+                action=action,
+                ruff_options={**ruff_config, **cli_overrides},
+                cache_root=Path(get_execution_cwd(list(paths or []))),
+                strict_missing_tools=lintro_config.execution.strict_missing_tools,
+            )
+        if formatting_decision is not None:
+            tool.set_options(
+                format=formatting_decision.ruff_format,
+                format_check=formatting_decision.ruff_format_check,
+            )
 
     return tool
 

@@ -13,7 +13,7 @@ each tool where it is.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, NoReturn, TypedDict, Unpack
 
 import click
 from rich.text import Text
@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
     from rich.console import Console
 
+    from lintro.models.core.python_formatting_decision import PythonFormattingDecision
     from lintro.tools.core.scheduler import (
         DerivedOrder,
         FormatDemotion,
@@ -49,6 +50,22 @@ MAX_DOCTOR_CONSTRAINTS: int = 5
 
 #: Cap on the format-owner demotions listed in the doctor section.
 MAX_DOCTOR_DEMOTIONS: int = 3
+
+
+class OrderScanOptions(TypedDict, total=False):
+    """Optional scan settings shared by explanation entry points.
+
+    Attributes:
+        dry_run: Whether formatting is a read-only preview.
+        exclude: CLI exclusion patterns.
+        include_venv: Whether virtual environments are included.
+        diff_base: Raw diff-base argument, if supplied.
+    """
+
+    dry_run: bool
+    exclude: str | None
+    include_venv: bool
+    diff_base: str | None
 
 
 def _predecessors(report: DerivedOrder) -> dict[str, list[OrderEdge]]:
@@ -146,12 +163,17 @@ def _format_demotions(demotions: Sequence[FormatDemotion]) -> list[str]:
     return lines
 
 
-def format_order_report(report: DerivedOrder) -> list[str]:
+def format_order_report(
+    report: DerivedOrder,
+    *,
+    python_formatting: PythonFormattingDecision | None = None,
+) -> list[str]:
     """Render the full execution-order explanation.
 
     Args:
         report: Report produced by
             :func:`lintro.tools.core.scheduler.build_order_report`.
+        python_formatting: Runtime Python ownership, independent of write conflicts.
 
     Returns:
         Plain-text lines, ready to print one per line.
@@ -177,7 +199,19 @@ def format_order_report(report: DerivedOrder) -> list[str]:
     else:
         lines.append("  Cycles (0): the derived graph is a DAG.")
     lines.append("")
-    lines.extend(_format_demotions(report.demotions))
+    demotions = report.demotions
+    if python_formatting:
+        demotions = tuple(
+            record
+            for record in demotions
+            if {record.winner, record.loser} != {"black", "ruff"}
+        )
+        owner_count = int(python_formatting.owner is not None)
+        lines.append(f"  Format ownership ({len(demotions) + owner_count}):")
+        lines.append(f"    {python_formatting.text}")
+        lines.extend(f"    {record.reason}" for record in demotions)
+    else:
+        lines.extend(_format_demotions(demotions))
     return lines
 
 
@@ -300,11 +334,9 @@ def explain_order_lines(
     action: str,
     paths: Sequence[str],
     *,
+    tool_option_dict: dict[str, dict[str, object]] | None = None,
     ignore_conflicts: bool = False,
-    dry_run: bool = False,
-    exclude: str | None = None,
-    include_venv: bool = False,
-    diff_base: str | None = None,
+    **scope: Unpack[OrderScanOptions],
 ) -> list[str]:
     """Build the ``--explain-order`` output for a would-be run.
 
@@ -316,23 +348,31 @@ def explain_order_lines(
         tools: ``--tools`` value, or None for the configured/detected set.
         action: ``"check"`` or ``"fmt"``.
         paths: Paths the run would scan, used for language detection.
-        ignore_conflicts: Mirror of the run's ``--ignore-conflicts``.
-        dry_run: Mirror of ``fmt --dry-run``. A dry run rewrites nothing, so
-            it batches as a read-only run and must be explained as one.
-        exclude: Mirror of the run's ``--exclude``.
-        include_venv: Mirror of the run's ``--include-venv``.
-        diff_base: Raw ``--diff`` value the run was given, or ``None``.
+        tool_option_dict: Parsed CLI tool options, overriding file configuration.
+        ignore_conflicts: Mirror of the run's conflict-selection flag.
+        **scope: Scan settings: dry_run, exclude, include_venv and diff_base.
 
     Returns:
         Plain-text lines, ready to print one per line.
     """
+    from pathlib import Path
+
+    from lintro.enums.action import Action
     from lintro.utils.execution.tool_configuration import get_tools_to_run
+    from lintro.utils.execution_paths import get_execution_cwd
+    from lintro.utils.python_formatting import resolve_python_formatting
+    from lintro.utils.unified_config import UnifiedConfigManager
+
+    dry_run = scope.get("dry_run", False)
+    exclude = scope.get("exclude")
+    include_venv = scope.get("include_venv", False)
+    diff_base = scope.get("diff_base")
 
     selection = get_tools_to_run(
         tools,
         action,
-        ignore_conflicts=ignore_conflicts,
         scan_roots=list(paths),
+        ignore_conflicts=ignore_conflicts,
     )
     # Explain what *this* invocation would do: a mutating action derives
     # write-conflict edges, a read-only one does not, and overlap is decided
@@ -343,15 +383,31 @@ def explain_order_lines(
     # each tool would actually be handed, so an explanation that dropped the
     # excludes or the diff base would report conflicts and demotions for files
     # the run could never touch.
+    config_manager = UnifiedConfigManager()
+    ruff_config = config_manager.get_tool_config("ruff").lintro_tool_config or {}
+    tool_option_dict = tool_option_dict or {}
+    resolved_diff_base = _explained_diff_base(diff_base, paths)
+    decision = resolve_python_formatting(
+        selection.to_run,
+        action=Action.CHECK if action == "check" or dry_run else Action.FIX,
+        ruff_options={**ruff_config, **tool_option_dict.get("ruff", {})},
+        cache_root=Path(get_execution_cwd(list(paths))),
+    )
+    active = [
+        name
+        for name in selection.to_run
+        if name != "black" or decision is None or decision.run_black
+    ]
     return format_order_report(
         build_order_report(
-            selection.to_run,
+            active,
             paths=list(paths) or None,
             exclude=exclude,
             include_venv=include_venv,
-            diff_base=_explained_diff_base(diff_base, paths),
+            diff_base=resolved_diff_base,
             write_conflicts=action != "check" and not dry_run,
         ),
+        python_formatting=decision,
     )
 
 
@@ -360,11 +416,9 @@ def emit_order_explanation(
     tools: str | None,
     action: str,
     paths: Sequence[str],
+    tool_option_dict: dict[str, dict[str, object]] | None = None,
     ignore_conflicts: bool = False,
-    dry_run: bool = False,
-    exclude: str | None = None,
-    include_venv: bool = False,
-    diff_base: str | None = None,
+    **scope: Unpack[OrderScanOptions],
 ) -> NoReturn:
     """Print the ``--explain-order`` output and exit without running any tool.
 
@@ -372,12 +426,9 @@ def emit_order_explanation(
         tools: ``--tools`` value, or None for the configured/detected set.
         action: ``"check"`` or ``"fmt"``.
         paths: Paths the run would have scanned.
-        ignore_conflicts: Mirror of the run's ``--ignore-conflicts``.
-        dry_run: Mirror of ``fmt --dry-run``, which rewrites nothing and
-            therefore batches as a read-only run.
-        exclude: Mirror of the run's ``--exclude``.
-        include_venv: Mirror of the run's ``--include-venv``.
-        diff_base: Raw ``--diff`` value the run was given, or ``None``.
+        tool_option_dict: Parsed CLI tool options, overriding file configuration.
+        ignore_conflicts: Mirror of the run's conflict-selection flag.
+        **scope: Scan settings: dry_run, exclude, include_venv and diff_base.
 
     Raises:
         SystemExit: Always. ``0`` once the order is printed, ``1`` when the
@@ -388,11 +439,9 @@ def emit_order_explanation(
             tools,
             action,
             paths,
+            tool_option_dict=tool_option_dict,
             ignore_conflicts=ignore_conflicts,
-            dry_run=dry_run,
-            exclude=exclude,
-            include_venv=include_venv,
-            diff_base=diff_base,
+            **scope,
         )
     except ValueError as exc:
         click.echo(str(exc), err=True)

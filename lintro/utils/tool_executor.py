@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action, normalize_action
@@ -56,8 +57,10 @@ from lintro.utils.execution.tool_configuration import (
     get_tool_display_name,
     get_tools_to_run,
 )
+from lintro.utils.execution_paths import get_execution_cwd
 from lintro.utils.gates import execute_gates
 from lintro.utils.output import OutputManager
+from lintro.utils.python_formatting import resolve_python_formatting
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
@@ -216,6 +219,7 @@ def _execute_tools_parallel(
         exclude=exclude,
         include_venv=include_venv,
         selected_tools=selected_tools,
+        formatting_decision=ctx.python_formatting,
         max_workers=ctx.lintro_config.execution.max_workers,
         incremental=incremental,
         auto_install=effective_auto_install,
@@ -312,6 +316,8 @@ def _execute_tools_sequential(
                 incremental=incremental,
                 action=ctx.action,
                 selected_tools=selected_tools,
+                paths=paths,
+                formatting_decision=ctx.python_formatting,
                 auto_install=effective_auto_install,
                 lintro_config=ctx.lintro_config,
                 diff_base=diff_base,
@@ -445,6 +451,8 @@ def _run_verify_phase(
             incremental=False,
             action=Action.CHECK,
             selected_tools=set(tools_to_run),
+            paths=scope.targets,
+            formatting_decision=ctx.python_formatting,
             auto_install=effective_auto_install,
             lintro_config=ctx.lintro_config,
             diff_base=diff_base,
@@ -657,7 +665,6 @@ def execute_run(
     config_manager = UnifiedConfigManager()
 
     lintro_config = ctx.lintro_config
-    use_parallel = lintro_config.execution.parallel and len(tools_to_run) > 1
 
     # Determine auto_install: CLI flag > config > container default
     from lintro.utils.environment.container_detection import is_container_environment
@@ -693,6 +700,23 @@ def execute_run(
                 exit_code=DEFAULT_EXIT_CODE_SUCCESS,
                 early_exit=True,
             )
+
+    ruff_config = config_manager.get_tool_config("ruff").lintro_tool_config or {}
+    decision = resolve_python_formatting(
+        tools_to_run,
+        action=ctx.action,
+        ruff_options={**ruff_config, **tool_option_dict.get("ruff", {})},
+        cache_root=Path(get_execution_cwd(paths)),
+        strict_missing_tools=ctx.lintro_config.execution.strict_missing_tools,
+    )
+    ctx = replace(ctx, python_formatting=decision)
+    if decision is not None and not decision.run_black:
+        tools_to_run = [name for name in tools_to_run if name != "black"]
+        skipped_tools = [
+            *skipped_tools,
+            SkippedTool(name="black", reason=decision.reason),
+        ]
+    use_parallel = lintro_config.execution.parallel and len(tools_to_run) > 1
 
     # Mutate-then-verify (#1743). Fingerprint every file a mutating capability
     # could rewrite *before* the mutation phase, so the verify pass that
@@ -773,6 +797,17 @@ def execute_run(
             for name in not_in_allowlist
         )
     for st in reported_skips:
+        if (
+            st.name == "black"
+            and decision is not None
+            and decision.black_result is not None
+        ):
+            result = decision.black_result
+            all_results.append(result)
+            logger.print_tool_header(tool_name="black", action=ctx.action)
+            if on_tool_result is not None:
+                on_tool_result(result)
+            continue
         all_results.append(
             ToolResult(
                 name=st.name,
@@ -809,7 +844,7 @@ def execute_run(
             ctx.action,
         )
 
-    return finalize_artifact(
+    artifact = finalize_artifact(
         ctx=ctx,
         all_results=all_results,
         total_issues=total_issues,
@@ -818,6 +853,9 @@ def execute_run(
         paths=paths,
         partial_scan=incremental or diff_base is not None,
     )
+
+    artifact.python_formatting = decision
+    return artifact
 
 
 def run_lint_tools_simple(

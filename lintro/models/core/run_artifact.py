@@ -19,6 +19,7 @@ from lintro.enums.action import Action
 from lintro.models.core.severity_counts import SeverityCounts, SeverityDelta
 
 if TYPE_CHECKING:
+    from lintro.models.core.python_formatting_decision import PythonFormattingDecision
     from lintro.models.core.tool_result import ToolResult
 
 
@@ -53,6 +54,7 @@ class RunArtifact:
             measured file set can change between invocations.
         force_failure: A post-execution policy requires a failing exit code,
             independently of the findings (for example an AI policy gate).
+        python_formatting: Immutable policy applied during Python formatting.
     """
 
     tool_results: list[ToolResult] = field(default_factory=list)
@@ -69,6 +71,7 @@ class RunArtifact:
     paths: tuple[str, ...] = (".",)
     partial_scan: bool = False
     force_failure: bool = False
+    python_formatting: PythonFormattingDecision | None = None
 
     @property
     def success(self) -> bool:

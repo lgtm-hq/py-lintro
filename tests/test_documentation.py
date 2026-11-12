@@ -13,6 +13,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.config_overrides import ENV_PROVIDER_BLOCK_PREFIX
+from lintro.utils.tool_snapshots import ALLOW_VERSION_LAG_ENV
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -359,6 +360,7 @@ _AI_PROVIDER_BLOCK_ENV_PREFIX = ENV_PROVIDER_BLOCK_PREFIX
 
 # Env vars the docs are allowed to advertise: they MUST be read by the runtime.
 _DOCUMENTED_LINTRO_ENV_VARS = {
+    ALLOW_VERSION_LAG_ENV,
     "LINTRO_LOG_DIR",
     "LINTRO_VERSION_TIMEOUT",
     "LINTRO_DOCKER",

@@ -476,6 +476,8 @@ def _render_console_summary(artifact: RunArtifact, *, ctx: RunContext) -> None:
     """
     logger = ctx.logger
     logger.print_execution_summary(artifact.action, artifact.tool_results)
+    if artifact.python_formatting:
+        logger.console_output(text=artifact.python_formatting.text)
     if any(r.baselined_count is not None for r in artifact.tool_results):
         count = sum(r.baselined_count or 0 for r in artifact.tool_results)
         logger.console_output(

@@ -6,8 +6,12 @@ returns without handing anything to the execution pipeline.
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from unittest.mock import patch
 
+import click
+import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
 
@@ -122,3 +126,114 @@ def test_check_explain_order_uses_the_default_selection() -> None:
     assert_that(mock_run.called).is_false()
     assert_that(result.output).contains("Execution order (derived from tool claims)")
     assert_that(result.output).contains("ruff")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [check_command, format_command],
+    ids=["check", "format"],
+)
+@pytest.mark.parametrize(
+    "ignore",
+    [False, True],
+    ids=["resolve-conflicts", "ignore-conflicts"],
+)
+def test_explained_selection_matches_execution_when_conflicts_filter_tools(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: click.Command,
+    ignore: bool,
+) -> None:
+    """Explanations and actual runs honor the same conflict-selection switch.
+
+    Args:
+        tmp_path: Isolated fixture project.
+        monkeypatch: Conditional conflict resolver and native tool doubles.
+        command: Check or format command to exercise end to end.
+        ignore: Whether both selected tools should survive conflict resolution.
+    """
+    from lintro.config.config_loader import clear_config_cache
+    from lintro.models.core.tool_result import ToolResult
+    from lintro.models.core.tool_snapshot import ToolSnapshot
+    from lintro.plugins.base import BaseToolPlugin
+    from lintro.tools import tool_manager
+    from lintro.tools.black.definition import BlackPlugin
+    from lintro.tools.ruff.definition import RuffPlugin
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "a.py").write_text("x = 1\n")
+    (tmp_path / ".lintro-config.yaml").write_text(
+        "execution:\n  parallel: false\nai:\n  enabled: false\n",
+    )
+    clear_config_cache()
+    executed: list[str] = []
+
+    def order(names: list[str], ignore_conflicts: bool = False) -> list[str]:
+        """Model a conflict resolver that can remove a selected tool.
+
+        Args:
+            names: Candidate tools.
+            ignore_conflicts: Preserve both candidates only when requested.
+
+        Returns:
+            The resolver's selected subset.
+        """
+        return (
+            list(names)
+            if ignore_conflicts
+            else [name for name in names if name != "black"]
+        )
+
+    def run(
+        self: BaseToolPlugin,
+        paths: list[str],
+        options: dict[str, object],
+    ) -> ToolResult:
+        """Record tools actually executed by the native pipeline.
+
+        Args:
+            self: Plugin being invoked.
+            paths: Requested paths.
+            options: Runtime overrides.
+
+        Returns:
+            A successful empty native result.
+        """
+        executed.append(str(self.name))
+        return ToolResult(name=self.name, success=True, inspected_files=True)
+
+    monkeypatch.setattr(tool_manager, "get_tool_execution_order", order)
+    monkeypatch.setattr(
+        "lintro.utils.tool_snapshots.get_tool_snapshot",
+        lambda name, **kwargs: ToolSnapshot(
+            name=name,
+            available=True,
+            version_check_passed=True,
+        ),
+    )
+    for plugin in (RuffPlugin, BlackPlugin):
+        monkeypatch.setattr(plugin, "check", run)
+        monkeypatch.setattr(plugin, "fix", run)
+    args = [
+        ".",
+        "--tools",
+        "ruff,black",
+        "--yes",
+        "--tool-options",
+        "ruff:format=True,ruff:format_check=True",
+    ]
+    if ignore:
+        args.append("--ignore-conflicts")
+    runner = CliRunner()
+    explanation = runner.invoke(command, [*args, "--explain-order"])
+    actual = runner.invoke(command, args)
+    assert_that(explanation.exit_code).is_equal_to(0)
+    assert_that(actual.exit_code).is_equal_to(0)
+    expected = {"ruff", "black"} if ignore else {"ruff"}
+    assert_that(set(executed)).is_equal_to(expected)
+    explained = set(
+        re.findall(r"^\s+\d+\. ([\w-]+)$", explanation.output, flags=re.MULTILINE),
+    )
+    assert_that(explained).is_equal_to(set(executed))
+    if ignore:
+        assert_that(explanation.output).contains("explicitly enabled")

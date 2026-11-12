@@ -23,6 +23,7 @@ import lintro.utils.tool_executor as te
 from lintro.config.execution_config import ExecutionConfig
 from lintro.config.lintro_config import LintroConfig
 from lintro.enums.action import Action
+from lintro.models.core.python_formatting_decision import PythonFormattingDecision
 from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.severity_counts import SeverityCounts
 from lintro.models.core.tool_result import ToolResult
@@ -1712,3 +1713,40 @@ def test_render_run_sarif_stdout_stays_profile_free(
     payload = json.loads(capsys.readouterr().out)
     assert_that(payload).does_not_contain_key("profile")
     assert_that(payload["version"]).is_equal_to("2.1.0")
+
+
+def test_refresh_preserves_python_formatting_while_recomputing_findings(
+    tmp_path: Path,
+    fake_logger: Any,
+) -> None:
+    """AI-layer refresh retains runtime ownership in the rendered summary.
+
+    Args:
+        tmp_path: Isolated run directory.
+        fake_logger: Captured console logger.
+    """
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger)
+    artifact = RunArtifact(
+        tool_results=[ToolResult(name="ruff", success=True, issues_count=0)],
+        python_formatting=PythonFormattingDecision(
+            owner="ruff",
+            reason="black: not installed",
+            ruff_format=True,
+            ruff_format_check=True,
+            run_black=False,
+            black_result=None,
+            text="ruff owns Python formatting (black: not installed)",
+        ),
+    )
+    refreshed = te.refresh_artifact(artifact, ctx=ctx)
+    assert_that(refreshed.python_formatting).is_equal_to(artifact.python_formatting)
+    assert_that(refreshed.total_issues).is_equal_to(0)
+    render_run(refreshed, ctx=ctx, output_format="grid")
+    messages = [
+        kwargs.get("text", "")
+        for name, _, kwargs in fake_logger.calls
+        if name == "console_output"
+    ]
+    assert_that(messages).contains(
+        refreshed.python_formatting.text if refreshed.python_formatting else "",
+    )

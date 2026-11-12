@@ -28,6 +28,7 @@ from rich.progress import (
 )
 
 from lintro.enums.action import Action
+from lintro.models.core.python_formatting_decision import PythonFormattingDecision
 from lintro.models.core.tool_outcome import (
     Checked,
     FixPartial,
@@ -98,6 +99,7 @@ def run_tools_parallel(
     auto_install: bool = False,
     max_fix_retries: int = 3,
     diff_base: str | None = None,
+    formatting_decision: PythonFormattingDecision | None = None,
 ) -> list[ToolResult]:
     """Run tools through the async executor, batch by batch.
 
@@ -122,6 +124,7 @@ def run_tools_parallel(
         auto_install: Whether to auto-install Node.js deps if missing.
         max_fix_retries: Maximum fix→verify convergence cycles.
         diff_base: Resolved git base ref for ``--diff`` scanning, or None.
+        formatting_decision: Policy resolved once for this invocation.
 
     Returns:
         List of ToolResult objects.
@@ -200,6 +203,8 @@ def run_tools_parallel(
                             incremental=incremental,
                             action=action,
                             selected_tools=selected_tools,
+                            paths=paths,
+                            formatting_decision=formatting_decision,
                             auto_install=auto_install,
                             diff_base=diff_base,
                         )
