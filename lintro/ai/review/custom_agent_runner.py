@@ -23,7 +23,12 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from lintro.ai.exceptions import AICostBudgetExceededError, AIError, AIProviderError
+from lintro.ai.exceptions import (
+    AICostBudgetExceededError,
+    AIError,
+    AIProviderError,
+    AIRetiredModelError,
+)
 from lintro.ai.invoke import call_ai
 from lintro.ai.json_response import strip_json_fences
 from lintro.ai.prompts.review import (
@@ -31,6 +36,7 @@ from lintro.ai.prompts.review import (
     REVIEW_CUSTOM_AGENT_SYSTEM,
     REVIEW_CUSTOM_AGENT_USER_PROMPT_TEMPLATE,
 )
+from lintro.ai.registry import retired_model_error
 from lintro.ai.review.context.diff_parse import split_unified_diff_by_file
 from lintro.ai.review.custom_agents import CustomAgentSpec, SelectedCustomAgent
 from lintro.ai.review.finding_parser import parse_findings
@@ -170,11 +176,25 @@ def _resolve_provider(
 
     Returns:
         Tuple of provider and config to use for this agent's call. Falls back
-        to the run defaults when the override cannot be constructed.
+        to the run defaults when the override's provider cannot be built.
+
+    Raises:
+        AIRetiredModelError: When the override is a model the run's provider
+            has retired. :func:`run_custom_agent_passes` catches it and skips
+            the agent, so a request that skipped preparation never runs the
+            agent on the configured model instead of the one it named
+            (#2277).
     """
     if not agent.model or agent.model == ai_config.model:
         return provider, ai_config
 
+    # Only the model changes, so only the model is checked. Re-validating
+    # the whole run config would also re-check fields the run set with an
+    # unvalidated copy (``apply_timeout``, the MCP cost clamp) and refuse an
+    # agent for a reason that has nothing to do with it.
+    retired = retired_model_error(agent.model, provider=ai_config.provider)
+    if retired is not None:
+        raise AIRetiredModelError(retired)
     agent_config = ai_config.model_copy(update={"model": agent.model})
     cached = cache.get(agent.model)
     if cached is not None:
@@ -331,13 +351,24 @@ async def run_custom_agent_passes(
     for entry in selected:
         agent = entry.agent
         budget.check()
-        agent_provider, agent_config = _resolve_provider(
-            agent=agent,
-            provider=provider,
-            ai_config=ai_config,
-            cache=provider_cache,
-            workspace_root=workspace_root,
-        )
+        try:
+            agent_provider, agent_config = _resolve_provider(
+                agent=agent,
+                provider=provider,
+                ai_config=ai_config,
+                cache=provider_cache,
+                workspace_root=workspace_root,
+            )
+        except AIRetiredModelError as error:
+            # Same posture as a failed call: skip this agent, keep the review.
+            logger.error(
+                "Custom review agent {agent} was not run: {error}",
+                agent=agent.name,
+                error=error,
+            )
+            if on_agent_failed is not None:
+                on_agent_failed(agent.name)
+            continue
         prompt = build_custom_agent_prompt(
             agent=agent,
             files=entry.files,

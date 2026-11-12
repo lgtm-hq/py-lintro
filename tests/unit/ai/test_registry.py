@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import FrozenInstanceError, dataclass
 
@@ -11,6 +12,7 @@ from assertpy import assert_that
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIProviderNotRegisteredError
+from lintro.ai.model_pricing import MODEL_CONTEXT_WINDOWS
 from lintro.ai.provider_config import ProviderConfig
 from lintro.ai.provider_enum import (
     accepted_provider_values,
@@ -33,6 +35,7 @@ from lintro.ai.registry import (
     default_models,
     metadata_for,
     model_pricing,
+    retired_model_error,
 )
 
 
@@ -354,3 +357,59 @@ def test_default_pricing_values():
     """DEFAULT_PRICING has expected fallback values."""
     assert_that(DEFAULT_PRICING.input_per_million).is_equal_to(3.00)
     assert_that(DEFAULT_PRICING.output_per_million).is_equal_to(15.00)
+
+
+#: Dated Anthropic snapshot ids deliberately kept registered, each checked
+#: "Active" on Anthropic's model deprecations page
+#: (https://platform.claude.com/docs/en/about-claude/model-deprecations) on the
+#: date recorded. A newly registered dated id must be checked there and added
+#: here; once the page lists it as retired it moves from ``pricing`` to the
+#: provider's ``retired_models`` and leaves this allowlist (#2277).
+_VERIFIED_DATED_ANTHROPIC_IDS = {"claude-haiku-4-5-20251001": "2026-11-11"}
+
+#: The ``-YYYYMMDD`` snapshot suffix Anthropic's pre-4.6 ids carry.
+_DATE_SUFFIX = re.compile(r"-\d{8}$")
+
+
+def test_registered_dated_anthropic_ids_are_exactly_the_verified_ones() -> None:
+    """No dated Anthropic id is registered without a recorded lifecycle check.
+
+    Dated snapshots are the ids Anthropic retires, and a retired id that stays
+    registered validates and then fails at request time (#2277). The two sets
+    are compared for equality, so a newly registered dated id and an
+    allowlist entry left behind after a retirement both fail.
+    """
+    priced = metadata_for(AIProvider.ANTHROPIC).pricing
+    dated = sorted(model for model in priced if _DATE_SUFFIX.search(model))
+
+    assert_that(dated).described_as(
+        "dated Anthropic ids must be verified on the deprecations page and "
+        "listed in _VERIFIED_DATED_ANTHROPIC_IDS",
+    ).is_equal_to(sorted(_VERIFIED_DATED_ANTHROPIC_IDS))
+
+
+def test_no_retired_model_is_priced_or_has_a_context_window() -> None:
+    """A retired id is gone from every live table, whichever provider owns it."""
+    retired = {
+        model for record in all_metadata().values() for model in record.retired_models
+    }
+
+    assert_that(retired).is_not_empty()
+    assert_that(sorted(retired & set(model_pricing()))).is_empty()
+    assert_that(sorted(retired & set(MODEL_CONTEXT_WINDOWS))).is_empty()
+
+
+def test_every_retired_model_is_refused_with_a_priced_replacement() -> None:
+    """Each retirement resolves to a refusal naming a model lintro prices."""
+    for provider, record in all_metadata().items():
+        for model, retired in record.retired_models.items():
+            assert_that(record.pricing).contains_key(retired.replacement)
+            assert_that(retired_model_error(model, provider=provider)).contains(
+                f"use {retired.replacement!r} instead",
+            )
+
+
+def test_default_models_are_not_retired() -> None:
+    """No provider defaults to a model its vendor no longer serves."""
+    for provider, model in default_models().items():
+        assert_that(retired_model_error(model, provider=provider)).is_none()

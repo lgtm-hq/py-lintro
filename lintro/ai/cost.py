@@ -19,7 +19,7 @@ def estimate_cost(
     """Estimate the cost of an AI API call.
 
     Args:
-        model: Model identifier (e.g., "claude-sonnet-4-20250514").
+        model: Model identifier (e.g., "claude-sonnet-4-6").
         input_tokens: Number of input tokens.
         output_tokens: Number of output tokens.
 

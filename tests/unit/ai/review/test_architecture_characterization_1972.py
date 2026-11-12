@@ -253,7 +253,7 @@ def test_resolve_ai_config_matches_for_identical_raw_mapping() -> None:
         "review": True,
         "lint": False,
         "provider": "anthropic",
-        "model": "claude-sonnet-4-20250514",
+        "model": "claude-sonnet-5-5",
         "transport": "api",
         "max_cost_usd": 0.5,
         "max_tokens": 4096,

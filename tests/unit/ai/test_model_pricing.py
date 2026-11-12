@@ -14,7 +14,7 @@ from lintro.ai.model_pricing import (
 def test_get_context_window_returns_known_model_size() -> None:
     """Known models return configured context window sizes."""
     assert_that(
-        get_context_window(model="claude-sonnet-4-20250514"),
+        get_context_window(model="claude-haiku-4-5-20251001"),
     ).is_equal_to(200_000)
 
 

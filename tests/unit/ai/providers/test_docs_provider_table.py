@@ -34,6 +34,7 @@ _PROVIDER_HEADER = (
     "CLI binary",
 )
 _PRICING_HEADER = ("Provider", "Model", "Input", "Output")
+_RETIRED_HEADER = ("Provider", "Retired model", "Retired on", "Replacement")
 
 
 def _marked_block(*, name: str) -> str:
@@ -180,3 +181,29 @@ def test_docs_model_pricing_table_matches_plugin_metadata() -> None:
         "docs/ai-features.md model pricing table is stale; replace the "
         "generated block with:\n" + _paste_back(header=_PRICING_HEADER, rows=expected),
     ).is_equal_to(expected)
+
+
+def test_docs_retired_models_table_matches_plugin_metadata() -> None:
+    """The published retirements are the ones validation refuses (#2277).
+
+    Rows follow provider enum order and each provider's own declaration
+    order, so a retirement declared without the docs, or documented without
+    being declared, fails here.
+    """
+    declared: list[tuple[str, ...]] = [
+        (
+            record.display_name,
+            f"`{model}`",
+            retired.retired_on.isoformat(),
+            f"`{retired.replacement}`",
+        )
+        for record in all_metadata().values()
+        for model, retired in record.retired_models.items()
+    ]
+    header, *published = _table_rows(block=_marked_block(name="retired-models-table"))
+
+    assert_that(header).is_equal_to(_RETIRED_HEADER)
+    assert_that(published).described_as(
+        "docs/ai-features.md retired-models table is stale; use:\n"
+        + _paste_back(header=_RETIRED_HEADER, rows=declared),
+    ).is_equal_to(declared)

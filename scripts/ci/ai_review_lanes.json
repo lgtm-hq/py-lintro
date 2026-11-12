@@ -57,9 +57,9 @@
   "chain": ["anthropic"],
   "priced_models": [
     "claude-haiku-4-5-20251001",
-    "claude-opus-4-20250514",
-    "claude-sonnet-4-20250514",
+    "claude-opus-4-8",
     "claude-sonnet-4-6",
+    "claude-sonnet-5-5",
     "gpt-4-turbo",
     "gpt-4o",
     "gpt-4o-mini",
@@ -81,7 +81,7 @@
       "base_url_files": [],
       "egress": ["api.anthropic.com:443"],
       "model": "claude-opus-5-5",
-      "shadow_price_model": "claude-opus-4-20250514",
+      "shadow_price_model": "claude-opus-4-8",
       "cost_basis": "list_price_shadow",
       "smoke_row": "anthropic-api",
       "smoke_covers": "host"

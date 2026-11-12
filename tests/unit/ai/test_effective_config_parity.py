@@ -43,7 +43,7 @@ RAW_AI_SECTION: dict[str, object] = {
     "lint": True,
     "review": True,
     "provider": "anthropic",
-    "model": "claude-sonnet-4-20250514",
+    "model": "claude-sonnet-5-5",
     "transport": "api",
     "max_cost_usd": 1.0,
     "max_tokens": 4096,
@@ -260,7 +260,7 @@ def test_an_env_overlay_reaches_every_surface_identically(
         monkeypatch: Pytest monkeypatch fixture.
         tmp_path: Stand-in MCP workspace root.
     """
-    monkeypatch.setenv("LINTRO_AI_MODEL", "claude-opus-4-20250514")
+    monkeypatch.setenv("LINTRO_AI_MODEL", "claude-opus-4-8")
     lintro_config = LintroConfig(ai=dict(RAW_AI_SECTION))
 
     lint_path = interface_resolve(lintro_config)
@@ -268,7 +268,7 @@ def test_an_env_overlay_reaches_every_surface_identically(
     mcp = _mcp_resolved(monkeypatch, tmp_path)
 
     for resolved in (lint_path, review_cli, mcp):
-        assert_that(resolved.config.model).is_equal_to("claude-opus-4-20250514")
+        assert_that(resolved.config.model).is_equal_to("claude-opus-4-8")
         assert_that(resolved.source_of("model")).is_equal_to(ConfigSource.ENV)
 
 

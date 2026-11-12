@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 
     from lintro.ai.config import AIConfig
     from lintro.ai.enums import AITransport
+    from lintro.ai.model_lifecycle import RetiredModel
     from lintro.ai.model_pricing import ModelPricing
     from lintro.ai.provider_config import ProviderConfig
     from lintro.ai.provider_enum import AIProvider
@@ -194,6 +195,12 @@ class ProviderMetadata:
             (for example a flat-rate subscription CLI).
         cli_bounds: How the provider's CLI is bounded per call (read-only tool
             surface, turn-limit flag), or ``None`` when it has no CLI (#2685).
+        retired_models: Model identifiers the vendor has retired, mapped to
+            the retirement date and the replacement its deprecations page
+            lists. Kept so validation can refuse such an id by name, with the
+            replacement, instead of letting it through as an unknown model
+            that fails at request time (#2277). Disjoint from *pricing*, and
+            every replacement is a key of *pricing*.
     """
 
     provider: AIProvider
@@ -213,9 +220,10 @@ class ProviderMetadata:
     cli_auth_probe: CliAuthProbe | None = None
     pricing: Mapping[str, ModelPricing] = field(default_factory=dict)
     cli_bounds: CliBounds | None = None
+    retired_models: Mapping[str, RetiredModel] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Store *pricing* behind a read-only view and check the transports.
+        """Freeze the model tables and check the transports and lifecycle.
 
         A frozen dataclass stops the attribute being rebound but not the
         mapping being edited in place, and consumers treat metadata as a
@@ -230,8 +238,18 @@ class ProviderMetadata:
                 is rejected where it is declared rather than surfacing as a
                 confusing doctor hint. (It is not the factory's
                 unset-transport fallback; see the field's own docs.)
+                Also raised when a retired id is still priced or is the
+                default model, or when a retirement names a replacement this
+                provider does not price: each would let a retired id, or
+                advice to use an unaccounted one, reach users.
         """
         object.__setattr__(self, "pricing", MappingProxyType(dict(self.pricing)))
+        object.__setattr__(
+            self,
+            "retired_models",
+            MappingProxyType(dict(self.retired_models)),
+        )
+        self._check_retired_models()
         if self.default_transport not in self.supported_transports:
             supported = ", ".join(sorted(t.value for t in self.supported_transports))
             raise ValueError(
@@ -239,6 +257,32 @@ class ProviderMetadata:
                 f"'{self.default_transport.value}', which is not among its "
                 f"supported transports: {supported or 'none'}.",
             )
+
+    def _check_retired_models(self) -> None:
+        """Refuse a retirement table that contradicts the live tables.
+
+        Raises:
+            ValueError: If a retired id is priced or is the default model, or
+                a retirement's replacement is not priced by this provider.
+        """
+        label = self.provider.value
+        for model, retired in self.retired_models.items():
+            if model in self.pricing:
+                raise ValueError(
+                    f"Provider '{label}' prices retired model '{model}'; "
+                    "remove it from pricing.",
+                )
+            if model == self.default_model:
+                raise ValueError(
+                    f"Provider '{label}' declares retired model '{model}' as "
+                    "its default model.",
+                )
+            if retired.replacement not in self.pricing:
+                raise ValueError(
+                    f"Provider '{label}' names replacement "
+                    f"'{retired.replacement}' for retired model '{model}', "
+                    "but does not price it.",
+                )
 
     @property
     def sdk_install_hint(self) -> str:

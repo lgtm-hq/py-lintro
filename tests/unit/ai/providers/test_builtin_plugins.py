@@ -195,7 +195,7 @@ def test_get_provider_threads_the_model_and_api_key_env() -> None:
     config = AIConfig(
         provider=AIProvider.ANTHROPIC,
         transport=AITransport.API,
-        model="claude-opus-4-20250514",
+        model="claude-opus-4-8",
         api_key_env="CUSTOM_ANTHROPIC_KEY",
         max_tokens=1234,
     )
@@ -203,7 +203,7 @@ def test_get_provider_threads_the_model_and_api_key_env() -> None:
     with patch(_SDK_FLAGS[AIProvider.ANTHROPIC], True):
         built = get_provider(config)
 
-    assert_that(built.model_name).is_equal_to("claude-opus-4-20250514")
+    assert_that(built.model_name).is_equal_to("claude-opus-4-8")
     assert_that(built._api_key_env).is_equal_to("CUSTOM_ANTHROPIC_KEY")
     assert_that(built._max_tokens).is_equal_to(1234)
 

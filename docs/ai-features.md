@@ -1660,9 +1660,9 @@ enforceable on an `unpriceable` transport — see the Cursor section below.
 | Provider  | Model                       | Input  | Output |
 | --------- | --------------------------- | ------ | ------ |
 | Anthropic | `claude-sonnet-4-6`         | $3.00  | $15.00 |
-| Anthropic | `claude-sonnet-4-20250514`  | $3.00  | $15.00 |
+| Anthropic | `claude-sonnet-5-5`         | $2.00  | $10.00 |
 | Anthropic | `claude-haiku-4-5-20251001` | $0.80  | $4.00  |
-| Anthropic | `claude-opus-4-20250514`    | $15.00 | $75.00 |
+| Anthropic | `claude-opus-4-8`           | $5.00  | $25.00 |
 | Cursor    | `auto`                      | $0.00  | $0.00  |
 | Cursor    | `gpt-5.3-codex-fast`        | $0.00  | $0.00  |
 | OpenAI    | `gpt-4o`                    | $2.50  | $10.00 |
@@ -1672,6 +1672,38 @@ enforceable on an `unpriceable` transport — see the Cursor section below.
 | OpenAI    | `o1-mini`                   | $1.10  | $4.40  |
 
 <!-- END SNAPSHOT: model-pricing-table -->
+
+A model its vendor has retired is refused rather than priced. Each provider's metadata
+keeps the ids it once registered and the vendor has since retired, with the retirement
+date and the replacement the vendor's deprecations page lists. The refusal applies only
+when that provider is the one selected: the same string sent through `openai` to an
+OpenAI-compatible endpoint is not refused.
+
+Naming a retired id in `ai.model` or `ai.fallback_models`, `LINTRO_AI_MODEL`, or
+`--model` fails validation before any request. `lintro check` and `lintro review` stop
+with the error. `lintro config` prints it in place of the AI section, and
+`lintro doctor` reports it as a failed `ai.config` check, prints the rest of its report,
+and exits non-zero:
+
+```text
+invalid AI configuration: ai.model: 'claude-opus-4-20250514' was retired by Anthropic on 2026-06-15 and requests to it fail; use 'claude-opus-4-8' instead
+```
+
+A custom review agent whose `model:` is retired stops `lintro review` while it prepares,
+before any review call. Code that calls lintro's Python API with a model or fallback
+chain that skipped validation is refused at the provider factory and before the first
+attempt of the fallback chain, with the same replacement named.
+
+<!-- BEGIN SNAPSHOT: retired-models-table -->
+
+| Provider  | Retired model              | Retired on | Replacement         |
+| --------- | -------------------------- | ---------- | ------------------- |
+| Anthropic | `claude-sonnet-4-20250514` | 2026-06-15 | `claude-sonnet-5-5` |
+| Anthropic | `claude-opus-4-20250514`   | 2026-06-15 | `claude-opus-4-8`   |
+
+<!-- END SNAPSHOT: retired-models-table -->
+
+The same test asserts this table against the metadata, like the two above.
 
 The three are peers: lintro picks none of them for you, and `ai.provider` has no
 default. Sections are alphabetical.

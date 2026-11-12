@@ -16,7 +16,7 @@ from review_matrix.spec_loader import load_matrix
 
 from lintro.ai.enums import AITransport
 from lintro.ai.provider_enum import AIProvider
-from lintro.ai.registry import metadata_for
+from lintro.ai.registry import metadata_for, retired_model_error
 
 HARNESS_ROOT = Path(__file__).resolve().parents[2] / "evals" / "review-efficacy"
 MATRIX = load_matrix(HARNESS_ROOT / "matrix.yaml")
@@ -40,6 +40,33 @@ def test_matrix_cell_names_a_registered_provider(config: MatrixConfig) -> None:
         config: Matrix cell under test.
     """
     assert_that([provider.value for provider in AIProvider]).contains(config.provider)
+
+
+@pytest.mark.parametrize(
+    "config",
+    MATRIX.configs,
+    ids=[config.config_id for config in MATRIX.configs],
+)
+def test_matrix_cell_model_is_not_retired(config: MatrixConfig) -> None:
+    """No cell names a model its vendor retired, which would fail at the API.
+
+    Checked apart from registration so the failure names the replacement
+    rather than only reporting an unregistered id (#2277).
+
+    Args:
+        config: Matrix cell under test.
+    """
+    retired = retired_model_error(config.model, provider=config.provider)
+    assert_that(retired).described_as(
+        f"matrix cell {config.config_id!r}",
+    ).is_none()
+
+
+def test_the_matrix_retirement_check_names_the_replacement() -> None:
+    """The check above fails with the replacement for a retired cell model."""
+    assert_that(
+        retired_model_error("claude-opus-4-20250514", provider="anthropic"),
+    ).contains("use 'claude-opus-4-8' instead")
 
 
 @pytest.mark.parametrize(

@@ -17,6 +17,7 @@ from lintro.ai.exceptions import (
     AINotAvailableError,
     AIProviderNotRegisteredError,
     AIProviderRequiredError,
+    AIRetiredModelError,
 )
 from lintro.ai.paths import resolve_workspace_root
 from lintro.ai.provider_enum import (
@@ -26,7 +27,7 @@ from lintro.ai.provider_enum import (
 )
 from lintro.ai.providers.builtins import load_builtin_providers
 from lintro.ai.providers.registry import all_providers, get_registered
-from lintro.ai.registry import metadata_for
+from lintro.ai.registry import metadata_for, retired_models_in_chain
 from lintro.ai.transcript import maybe_start_transcript
 
 if TYPE_CHECKING:
@@ -66,6 +67,11 @@ def get_provider(
             ``ai.provider``, ``LINTRO_AI_PROVIDER``, and ``--provider``.
         ValueError: If the provider name is not recognized, or is recognized
             but has no registered plugin.
+        AIRetiredModelError: If ``model`` or a ``fallback_models`` entry is
+            one the provider has retired. Config validation refuses these
+            already; this backstop covers a config built without it
+            (``model_copy``, ``model_construct``), before anything is built
+            or spent (#2277).
     """
     if config.provider is None:
         raise AIProviderRequiredError(provider_required_error())
@@ -78,6 +84,12 @@ def get_provider(
         ) from exc
 
     load_builtin_providers()
+    retired = retired_models_in_chain(
+        (config.model, *config.fallback_models),
+        provider=provider_enum,
+    )
+    if retired is not None:
+        raise AIRetiredModelError(retired)
     try:
         plugin = get_registered(provider_enum)
     except AIProviderNotRegisteredError as exc:

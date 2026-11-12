@@ -25,6 +25,7 @@ from lintro.ai.enums import AITransport
 from lintro.ai.enums.ai_call_kind import AICallKind
 from lintro.ai.enums.sanitize_mode import SanitizeMode
 from lintro.ai.exceptions import AITurnLimitError
+from lintro.ai.fallback import ensure_chain_not_retired
 from lintro.ai.fix_context import (
     CONTEXT_LINES,
     FULL_FILE_THRESHOLD,
@@ -502,6 +503,11 @@ async def generate_fixes(
     Reads the source file for each issue, sends context to the AI,
     and produces a unified diff. Runs API calls in parallel.
 
+    The effective model chain is checked before any call, so a retired model
+    or fallback raises ``AIRetiredModelError`` (from
+    :func:`~lintro.ai.fallback.ensure_chain_not_retired`) instead of ending as
+    zero suggestions and a debug line (#2277).
+
     Args:
         issues: Sequence of issues to fix.
         provider: AI provider instance.
@@ -564,6 +570,9 @@ async def generate_fixes(
         backoff_factor=backoff_factor,
         fallback_models=fallback_models,
     )
+    # Fix workers swallow per-call failures, so a retired model in the
+    # effective chain is refused here, before the first call (#2277).
+    ensure_chain_not_retired(provider, effective_config.fallback_models)
 
     # Shared file cache guarded by a lock (capped to limit memory usage).
     file_cache: dict[str, str | None] = {}

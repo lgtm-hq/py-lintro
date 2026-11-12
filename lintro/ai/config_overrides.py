@@ -670,6 +670,11 @@ def _describe_validation_error(
         accepted = _accepted_values(field)
         if accepted:
             return f"{name}={raw!r} is not one of: {accepted}"
+        # A free-form field's validator says why it refused the value (a
+        # retired model names its replacement, #2277); keep that reason.
+        reason = str(error.get("msg", "")).removeprefix("Value error, ").strip()
+        if reason:
+            return f"{name}={raw!r} is not a valid value for ai.{field}: {reason}"
         return f"{name}={raw!r} is not a valid value for ai.{field}"
     return str(exc)
 
