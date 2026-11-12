@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.10] - 2026-11-12
+
+### Fixed
+
+- **tools**: anchor ruff fix path to the project root (#3399) (595a983)
+
 ## [0.180.9] - 2026-11-12
 
 ### Fixed
