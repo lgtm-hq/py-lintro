@@ -31,6 +31,9 @@ from lintro.utils import file_cache
 _PIN = "3.9.4"
 _SPEC = f"prettier@{_PIN}"
 
+#: A path argument as ``os.replace`` and ``os.unlink`` accept one.
+_PathArg = os.PathLike[str] | str
+
 
 @pytest.fixture
 def cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -477,6 +480,7 @@ class _NameWatcher(threading.Thread):
             except OSError:
                 names = []
             self.longest = max([self.longest, *map(len, names)])
+            time.sleep(0.001)
 
 
 class _Repairer(threading.Thread):
@@ -625,3 +629,144 @@ def test_entry_with_a_long_name_is_still_repaired(cache: Path) -> None:
     assert_that(long_bad.exists()).is_false()
     assert_that((cache / "_npx").is_dir()).is_true()
     assert_that(_remaining(cache)).is_empty()
+
+
+# ---------------------------------------------------------------------------
+# Locks and leftovers around a repair
+# ---------------------------------------------------------------------------
+
+
+def test_repair_never_deletes_a_lock_npx_took_on_a_recreated_entry(
+    cache: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Once the bad entry is aside, its old lock path belongs to whoever is there.
+
+    npx recreates the entry and takes its own lock while the aside copy is
+    still being deleted; that lock must survive the repair.
+
+    Args:
+        cache: Per-pin cache.
+        monkeypatch: Hooks npx's recreation into the aside deletion.
+    """
+    bad = _entry(cache, version="1.0.0")
+    npx_lock = bad / "concurrency.lock"
+    delete = npx_cache._delete
+
+    def npx_recreates_then_delete(path: Path) -> None:
+        npx_lock.mkdir(parents=True)
+        delete(path)
+
+    monkeypatch.setattr(npx_cache, "_delete", npx_recreates_then_delete)
+
+    _repair(cache)
+
+    assert_that(npx_lock.is_dir()).is_true()
+    assert_that([n for n in _remaining(cache) if n.startswith(".")]).is_empty()
+
+
+def test_repair_never_moves_an_entry_npx_is_installing(
+    cache: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stray file that npx replaces with a fresh, locked install is left alone.
+
+    The repair sees a file, but by the time it removes it npx has put a
+    directory there and holds its lock: the install must not be moved while
+    it is written, and the repair waits for it and then keeps it.
+
+    Args:
+        cache: Per-pin cache.
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Hooks npx's install into the removal of the stray file.
+    """
+    (cache / "_npx").mkdir(parents=True)
+    entry = cache / "_npx" / "0123456789abcdef"
+    entry.write_text("", encoding="utf-8")
+    real_replace, real_unlink = os.replace, os.unlink
+    installs: list[threading.Thread] = []
+
+    staged = _entry(tmp_path / "staging", entry.name)
+
+    def npx_installs() -> None:
+        time.sleep(0.3)
+        (staged / "node_modules").rename(entry / "node_modules")
+        (entry / "concurrency.lock").rmdir()
+
+    def race(path: _PathArg) -> None:
+        if Path(path) == entry and not installs:
+            real_unlink(entry)
+            (entry / "concurrency.lock").mkdir(parents=True)
+            installs.append(threading.Thread(target=npx_installs))
+            installs[0].start()
+
+    def racing_replace(src: _PathArg, dst: _PathArg) -> None:
+        race(src)
+        real_replace(src, dst)
+
+    def racing_unlink(path: _PathArg, *, dir_fd: int | None = None) -> None:
+        race(path)
+        real_unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "replace", racing_replace)
+    monkeypatch.setattr(os, "unlink", racing_unlink)
+    try:
+        _repair(cache)
+    finally:
+        for install in installs:
+            install.join()
+
+    assert_that(installs).is_length(1)
+    assert_that(_runs_pin(entry)).is_true()
+    assert_that(_remaining(cache)).is_equal_to([entry.name])
+
+
+def test_repair_removes_an_npx_directory_left_aside_beside_it(cache: Path) -> None:
+    """A whole ``_npx`` moved aside by an earlier run is deleted from the cache.
+
+    Args:
+        cache: Per-pin cache.
+    """
+    good = _entry(cache, "good")
+    leftover = cache / ".lintro-stale-_npx-0123456789abcdef0123456789abcdef"
+    (leftover / "0123456789abcdef" / "node_modules").mkdir(parents=True)
+
+    _repair(cache)
+
+    assert_that(leftover.exists()).is_false()
+    assert_that(sorted(p.name for p in cache.iterdir())).is_equal_to(["_npx"])
+    assert_that(_runs_pin(good)).is_true()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0,
+    reason="needs POSIX permissions that bind the current user",
+)
+def test_undeletable_leftover_warns_and_the_valid_entry_still_runs(
+    cache: Path,
+    logged_warnings: list[str],
+) -> None:
+    """A leftover that cannot be deleted is reported, never a refusal.
+
+    It no longer has an npm entry name, so it cannot change what runs.
+
+    Args:
+        cache: Per-pin cache.
+        logged_warnings: Warnings logged during the test.
+    """
+    good = _entry(cache, "good")
+    leftover = cache / "_npx" / ".lintro-stale-protected-0123"
+    sealed = leftover / "sealed"
+    sealed.mkdir(parents=True)
+    (sealed / "kept.js").write_text("", encoding="utf-8")
+    sealed.chmod(0o555)
+    try:
+        _repair(cache)
+    finally:
+        sealed.chmod(0o755)
+
+    assert_that(_runs_pin(good)).is_true()
+    assert_that(leftover.exists()).is_true()
+    assert_that(logged_warnings).is_length(1)
+    assert_that(logged_warnings[0]).contains(str(leftover), "kept.js")
