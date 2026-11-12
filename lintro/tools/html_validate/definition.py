@@ -103,25 +103,39 @@ def _reported_inspection(output: str) -> bool | None:
     return None
 
 
-def ignored_every_file(*, success: bool, stdout: str, stderr: str) -> bool:
+def ignored_every_file(
+    *,
+    success: bool,
+    stdout: str,
+    stderr: str,
+    file_args: list[str],
+) -> bool:
     """Report whether html-validate's own config ignored every given file.
 
     html-validate has no option to accept an empty input. When every file
     is excluded by ``.htmlvalidateignore`` it prints no report, names the
     unmatched patterns on stderr and exits 1. lintro passes only files it
     discovered on disk, so that message means the files were ignored, not
-    missing.
+    missing, but only when no argument holds glob syntax: html-validate
+    expands its arguments as globs, so a literal ``[slug].html`` does not
+    match itself and fails with the same message (#3393).
 
     Args:
         success: Whether html-validate exited 0.
         stdout: The JSON formatter's stdout.
         stderr: html-validate's diagnostics.
+        file_args: The paths passed to html-validate.
 
     Returns:
-        True for a failed run with no report whose stderr says no file matched.
+        True for a failed run with no report, no glob-syntax argument, and a
+        stderr line that starts with the no-files-matching message.
     """
-    return (
-        not success and not stdout.strip() and HTML_VALIDATE_NO_FILES_MATCHING in stderr
+    if success or stdout.strip():
+        return False
+    if any(contains_glob_syntax(path) for path in file_args):
+        return False
+    return any(
+        line.startswith(HTML_VALIDATE_NO_FILES_MATCHING) for line in stderr.splitlines()
     )
 
 
@@ -316,6 +330,7 @@ class HtmlValidatePlugin(BaseToolPlugin):
             success=result.success,
             stdout=result.stdout,
             stderr=result.stderr,
+            file_args=file_args,
         ):
             return ToolResult.from_outcome(
                 ToolOutcome(execution=NoFiles()),

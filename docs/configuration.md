@@ -2657,6 +2657,12 @@ Lintro passed, html-validate exits 1 with `No files matching patterns`; Lintro r
 that run as "no files", passing without claiming any file was inspected. Any other error
 from html-validate still fails the run.
 
+html-validate treats every path it is given as a glob, so a file whose name contains
+glob characters (`*?[]{}`, as in a routed site's `[slug].html`) does not match itself
+and draws the same `No files matching patterns` error. Lintro cannot tell that apart
+from an ignored file, so when any path it passed contains glob characters the run still
+fails as an execution error instead of being reported as "no files".
+
 **Available Options via `--tool-options`:**
 
 | Option    | Type    | Description                                 |
