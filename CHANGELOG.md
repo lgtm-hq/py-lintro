@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.14] - 2026-11-12
+
+### Fixed
+
+- **tools**: mark failed fix stages unmeasured so a clean retry cannot overwrite them
+  (#3408) (38ef05f)
+
 ## [0.180.13] - 2026-11-12
 
 ### Fixed
