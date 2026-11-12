@@ -19,7 +19,9 @@ not (issue #724). The three optional AI callables the executor used to accept
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Literal
 
 import click
 
@@ -34,6 +36,7 @@ from lintro.utils.fingerprint_baseline_file import load_run_baseline
 from lintro.utils.tool_executor import build_run_context, execute_run
 
 if TYPE_CHECKING:
+    from lintro.ai.resolved_ai_config import ResolvedAIConfig
     from lintro.models.core.run_artifact import RunArtifact
     from lintro.models.core.sarif_enrichment import AISarifEnrichment
     from lintro.utils.execution.run_context import RunContext
@@ -68,40 +71,99 @@ def _ai_config_error_message(exc: Exception) -> str:
     return str(exc)
 
 
-def _ai_status_lines(ctx: RunContext) -> list[str] | None:
+@dataclass
+class _RunAIConfig:
+    """The invocation's effective ``ai:`` config, resolved at most once (#2374).
+
+    The pre-execution status row, the ``fmt`` checkpoint hook and the post-run
+    AI layer all need the effective AI settings. Each used to resolve the raw
+    ``ai:`` mapping on its own, and only the AI layer applied the invocation's
+    ``--transport`` flag, so the summary could report a transport the run did
+    not use. This holder resolves on first use, with the invocation's CLI
+    overlay, and hands every seam the same
+    :class:`~lintro.ai.resolved_ai_config.ResolvedAIConfig`.
+
+    Resolution stays lazy so a run that never reaches an AI seam (JSON output
+    that exits early, ``lintro test`` with machine output) does not validate
+    ``ai:`` at all, exactly as before.
+
+    Attributes:
+        mapping: The raw ``ai:`` section the run's config holds.
+        transport: The invocation's ``--transport`` value, or None.
+        diagnostics: Whether the one resolution may emit the unknown-key
+            warning and migration hints. True when the AI layer may run, which
+            is the only path that reported them before resolution was shared.
+    """
+
+    mapping: Mapping[str, Any] | None
+    transport: str | None = None
+    diagnostics: bool = True
+    _resolved: ResolvedAIConfig | None = field(default=None, init=False, repr=False)
+
+    def get(self) -> ResolvedAIConfig:
+        """Return the effective AI config, resolving it on the first call.
+
+        Returns:
+            The invocation's effective AI config with provenance.
+
+        Raises:
+            click.UsageError: When an ``LINTRO_AI_*`` overlay, the
+                ``--transport`` flag, or the ``ai:`` config section fails
+                validation.
+        """
+        if self._resolved is None:
+            from pydantic import ValidationError
+
+            from lintro.ai.effective_config import (
+                AICliOverrides,
+                resolve_effective_ai_config,
+            )
+            from lintro.ai.exceptions import AIConfigOverrideError
+
+            try:
+                self._resolved = resolve_effective_ai_config(
+                    self.mapping,
+                    cli_overrides=AICliOverrides(transport=self.transport),
+                    diagnostics=self.diagnostics,
+                )
+            except (AIConfigOverrideError, ValidationError) as exc:
+                raise click.UsageError(_ai_config_error_message(exc)) from exc
+        return self._resolved
+
+
+def _ai_status_lines(
+    ctx: RunContext,
+    *,
+    run_ai_config: _RunAIConfig,
+) -> list[str] | None:
     """Render the AI rows of the pre-execution configuration summary.
 
     Returns ``None`` — and imports nothing from the AI display layer — when the
     summary will not be printed at all.
 
+    The rows render the invocation's effective config, CLI flags included, so
+    ``lintro check --transport cli`` reports ``transport: cli (flag)`` — the
+    value the AI layer later runs with (#2374).
+
     Args:
         ctx: The run context, consulted for the resolved output mode.
+        run_ai_config: The invocation's shared AI config resolution.
 
     Returns:
         list[str] | None: Rich-markup lines for the summary's AI row, or
         ``None`` when no summary will be shown.
-
-    Raises:
-        click.UsageError: When an ``LINTRO_AI_*`` overlay or the ``ai:``
-            config section fails validation.
     """
     if ctx.clean_stdout_output:
         return None
 
-    from pydantic import ValidationError
-
-    from lintro.ai.exceptions import AIConfigOverrideError
     from lintro.ai.interface import render_ai_status
     from lintro.utils.environment import detect_ci_environment
 
     ci_env = detect_ci_environment()
-    try:
-        return render_ai_status(
-            ai_config=getattr(ctx.lintro_config, "ai", None),
-            is_ci=ci_env is not None and ci_env.is_ci,
-        )
-    except (AIConfigOverrideError, ValidationError) as exc:
-        raise click.UsageError(_ai_config_error_message(exc)) from exc
+    return render_ai_status(
+        ai_config=run_ai_config.get(),
+        is_ci=ci_env is not None and ci_env.is_ci,
+    )
 
 
 def _sarif_enrichment(
@@ -132,7 +194,12 @@ def _sarif_enrichment(
     return sarif_enrichment_from_results(all_results=artifact.tool_results)
 
 
-def _capture_fmt_checkpoint(*, ctx: RunContext, paths: list[str]) -> None:
+def _capture_fmt_checkpoint(
+    *,
+    ctx: RunContext,
+    paths: list[str],
+    run_ai_config: _RunAIConfig | None = None,
+) -> None:
     """Snapshot ``fmt`` targets when ``ai.checkpoint_fmt`` is enabled.
 
     ``lintro fmt`` rewrites files in place, so the same pre-mutation git
@@ -150,12 +217,15 @@ def _capture_fmt_checkpoint(*, ctx: RunContext, paths: list[str]) -> None:
     Args:
         ctx: The run context for this run.
         paths: Paths the run will format.
+        run_ai_config: The invocation's shared AI config resolution, or None
+            to resolve the ``ai:`` mapping here without CLI flags.
+
+    An invalid ``LINTRO_AI_*`` overlay or ``ai:`` section surfaces as the
+    :class:`click.UsageError` :meth:`_RunAIConfig.get` raises.
 
     Raises:
         click.ClickException: When checkpoint enumeration fails, before any
             formatting runs.
-        click.UsageError: When an ``LINTRO_AI_*`` overlay or the ``ai:``
-            config section fails validation.
     """
     from lintro.enums.action import Action as _Action
 
@@ -166,15 +236,9 @@ def _capture_fmt_checkpoint(*, ctx: RunContext, paths: list[str]) -> None:
     # LintroConfig stores the AI section as a raw mapping. Resolve it at
     # this API boundary before reading the checkpoint options as attributes.
     if isinstance(ai_config, dict):
-        from pydantic import ValidationError
-
-        from lintro.ai.effective_config import resolve_effective_ai_config
-        from lintro.ai.exceptions import AIConfigOverrideError
-
-        try:
-            ai_config = resolve_effective_ai_config(ai_config, diagnostics=False).config
-        except (AIConfigOverrideError, ValidationError) as exc:
-            raise click.UsageError(_ai_config_error_message(exc)) from exc
+        if run_ai_config is None:
+            run_ai_config = _RunAIConfig(mapping=ai_config, diagnostics=False)
+        ai_config = run_ai_config.get().config
     if not getattr(ai_config, "checkpoint_fmt", False):
         return
 
@@ -269,11 +333,9 @@ def run_lint_artifact(
 
     Returns:
         RunArtifact: The rendered run's results, totals, severity tallies, and
-        exit code.
-
-    Raises:
-        click.UsageError: When an ``LINTRO_AI_*`` overlay or the ``ai:``
-            config section fails validation.
+        exit code. An invalid ``LINTRO_AI_*`` overlay, ``--transport``
+        value or ``ai:`` config section raises :class:`click.UsageError`
+        instead, from the run's one shared AI config resolution.
     """
     del stream, no_log  # accepted for signature stability; not yet implemented
 
@@ -291,7 +353,13 @@ def run_lint_artifact(
         if ctx.action != Action.TEST
         else None
     )
-    _capture_fmt_checkpoint(ctx=ctx, paths=paths)
+    # One resolution of ``ai:`` per run, shared by every AI seam below (#2374).
+    run_ai_config = _RunAIConfig(
+        mapping=getattr(ctx.lintro_config, "ai", None),
+        transport=transport,
+        diagnostics=ai_enabled,
+    )
+    _capture_fmt_checkpoint(ctx=ctx, paths=paths, run_ai_config=run_ai_config)
     artifact = execute_run(
         ctx=ctx,
         paths=paths,
@@ -308,7 +376,7 @@ def run_lint_artifact(
         yes=yes,
         ignore_conflicts=ignore_conflicts,
         diff_base=diff_base,
-        ai_status_lines=_ai_status_lines(ctx),
+        ai_status_lines=_ai_status_lines(ctx, run_ai_config=run_ai_config),
         on_tool_result=(
             None
             if acknowledgements is not None
@@ -322,40 +390,22 @@ def run_lint_artifact(
         ),
     )
 
-    if ai_enabled:
-        from pydantic import ValidationError
-
-        from lintro.ai.effective_config import (
-            AICliOverrides,
-            resolve_effective_ai_config,
-        )
-        from lintro.ai.exceptions import AIConfigOverrideError
+    if ai_enabled and not artifact.early_exit:
         from lintro.ai.interface import enhance_artifact
 
-        if not artifact.early_exit:
-            # Validate the ``ai:`` section before the AI hook runs, with the
-            # overlay the hook applies and no diagnostics (the hook prints
-            # those). This is after ``execute_run``, so a fmt run may already
-            # have written files.
-            # Do not catch around the hook instead: anything it runs may raise
-            # a ValidationError, and with ``ai.fail_on_ai_error`` an unrelated
-            # one must not be reported as an invalid ``ai:`` section (#3116).
-            # Resolving ``ai:`` again is intentionally redundant with the
-            # hook's own resolution, so a bad section is reported on its own.
-            try:
-                resolve_effective_ai_config(
-                    getattr(ctx.lintro_config, "ai", None),
-                    cli_overrides=AICliOverrides(transport=transport),
-                    diagnostics=False,
-                )
-            except (AIConfigOverrideError, ValidationError) as exc:
-                raise click.UsageError(_ai_config_error_message(exc)) from exc
+        # Resolve (or reuse) ``ai:`` before the AI hook runs, so a bad section
+        # is a usage error on its own. When no earlier seam resolved it, this
+        # is after ``execute_run``, so a fmt run may already have written
+        # files. Do not catch around the hook instead: anything it runs may
+        # raise a ValidationError, and with ``ai.fail_on_ai_error`` an
+        # unrelated one must not be reported as an invalid ``ai:`` section
+        # (#3116). The hook receives this value rather than resolving again.
         artifact = enhance_artifact(
             artifact,
             ctx=ctx,
             output_format=output_format,
             ai_fix=ai_fix,
-            transport=transport,
+            resolved_ai_config=run_ai_config.get(),
         )
 
     if acknowledgements is not None:

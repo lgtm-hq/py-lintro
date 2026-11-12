@@ -205,6 +205,7 @@ def run_ai_layer(
     output_format: str,
     ai_fix: bool = False,
     transport: str | None = None,
+    resolved_ai_config: ResolvedAIConfig | None = None,
 ) -> AIOutcome:
     """Run AI enhancement for a completed lint run.
 
@@ -221,7 +222,13 @@ def run_ai_layer(
         console_logger: Logger for console output.
         output_format: Output format string.
         ai_fix: Whether AI fix suggestions were requested via CLI.
-        transport: Optional CLI override for ``ai.transport``.
+        transport: Optional CLI override for ``ai.transport``. Ignored when
+            ``resolved_ai_config`` is given, which already carries it.
+        resolved_ai_config: The invocation's effective AI config, already
+            resolved with its CLI flags. The run pipeline resolves once and
+            passes it here, so the AI layer runs on exactly the value the
+            pre-execution summary showed and never re-emits the unknown-key
+            warning (#2374). When None, the config is resolved here.
 
     Returns:
         An :class:`AIOutcome` with ``ran`` set when the AI layer executed and
@@ -230,15 +237,17 @@ def run_ai_layer(
     Raises:
         Exception: Re-raised when ``ai.fail_on_ai_error`` is enabled.
     """
-    from lintro.ai.effective_config import AICliOverrides
+    resolved = resolved_ai_config
+    if resolved is None:
+        from lintro.ai.effective_config import AICliOverrides
 
-    # The lint path's ``--transport`` is an ordinary CLI overlay on the one
-    # resolver, not a post-resolution ``model_copy`` (#2299): resolving it
-    # here is what gives ``check``/``fmt`` the same provenance as review.
-    resolved = resolve_effective_ai_config(
-        lintro_config,
-        cli_overrides=AICliOverrides(transport=transport),
-    )
+        # The lint path's ``--transport`` is an ordinary CLI overlay on the
+        # one resolver, not a post-resolution ``model_copy`` (#2299), which is
+        # what gives ``check``/``fmt`` the same provenance as review.
+        resolved = resolve_effective_ai_config(
+            lintro_config,
+            cli_overrides=AICliOverrides(transport=transport),
+        )
     ai_config = resolved.config
     effective_ai_fix = ai_fix or ai_config.default_fix
     _warn_ai_fix_disabled(
@@ -295,22 +304,23 @@ def render_ai_status(
 ) -> list[str]:
     """Render the pre-execution AI status lines.
 
-    This is where the raw ``ai:`` mapping the core executor holds becomes a
-    resolved value, through the same resolver execution uses, so the renderer
-    itself only ever sees typed input (#2299). Diagnostics are off for that
-    resolution because the execution path already reported the unknown-key
-    warning and the migration hints.
+    The run pipeline resolves the ``ai:`` section once per invocation, with
+    that invocation's CLI flags, and passes the
+    :class:`ResolvedAIConfig` here and to the AI layer alike. The summary
+    therefore shows what the run executes with, flags included:
+    ``lintro check --transport cli`` reports ``transport: cli (flag)``
+    (#2374).
 
-    The summary reflects the **project and environment layers**. The core
-    pre-execution summary hands over the raw mapping without the invocation's
-    flags, so a lint-path ``--transport`` override is applied at execution and
-    is not visible here; threading it through is
-    `#2374 <https://github.com/lgtm-hq/py-lintro/issues/2374>`_.
+    A raw ``ai:`` mapping is still accepted and resolved through the same
+    resolver execution uses, so the renderer itself only ever sees typed
+    input (#2299). That resolution has no CLI flags and no diagnostics, so it
+    reflects the project and environment layers only; callers that hold
+    flags resolve first and pass the result.
 
     Args:
-        ai_config: Raw ``ai:`` mapping from the config (what the core
-            executor holds), an already-parsed :class:`AIConfig`, a
-            :class:`ResolvedAIConfig`, or None when unavailable.
+        ai_config: The invocation's :class:`ResolvedAIConfig` (what the run
+            pipeline passes), an already-parsed :class:`AIConfig`, a raw
+            ``ai:`` mapping, or None when unavailable.
         is_ci: Whether the run is in a CI environment.
 
     Returns:
@@ -334,6 +344,7 @@ def enhance_artifact(
     ai_fix: bool = False,
     transport: str | None = None,
     fail_under: float | None = None,
+    resolved_ai_config: ResolvedAIConfig | None = None,
 ) -> RunArtifact:
     """Run the AI layer over a completed execute phase and refresh the result.
 
@@ -348,8 +359,11 @@ def enhance_artifact(
         ctx: Shared run context; supplies the console logger and config.
         output_format: Output format string.
         ai_fix: Whether AI fix suggestions were requested via CLI.
-        transport: Optional CLI override for ``ai.transport``.
+        transport: Optional CLI override for ``ai.transport``. Ignored when
+            ``resolved_ai_config`` is given.
         fail_under: Health-score gate to re-apply after AI changed the results.
+        resolved_ai_config: The invocation's already-resolved AI config, so
+            the AI layer does not resolve ``ai:`` a second time (#2374).
 
     Returns:
         RunArtifact: The original artifact when AI did not run or the run
@@ -367,6 +381,7 @@ def enhance_artifact(
         output_format=output_format,
         ai_fix=ai_fix,
         transport=transport,
+        resolved_ai_config=resolved_ai_config,
     )
     # ``run_ai_layer`` never forces a failure without having run, so a
     # non-running outcome leaves the artifact exactly as the executor built it.
