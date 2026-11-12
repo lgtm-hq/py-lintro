@@ -16,6 +16,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from lintro.parsers.base_parser import strip_ansi_codes
 from lintro.utils.path_utils import absolute_path_without_resolving
 
 _FAILED_TO_LINT = re.compile(r"^\s*warning: Failed to lint ")
@@ -242,10 +243,12 @@ def check_line_length_violations(
         )
     # Ruff reports an unreadable or vanished input only as a stderr warning
     # and still exits 0 with ``[]``. That empty report did not measure the file.
+    # Strip colour first: ``FORCE_COLOR`` makes Ruff wrap "warning:" in ANSI
+    # escapes, which would hide the warning from the anchored pattern.
     unlinted = [
-        line.strip()
-        for line in result.stderr.splitlines()
-        if _FAILED_TO_LINT.match(line)
+        plain.strip()
+        for plain in map(strip_ansi_codes, result.stderr.splitlines())
+        if _FAILED_TO_LINT.match(plain)
     ]
     if unlinted:
         raise LineLengthCheckUnavailableError("; ".join(unlinted))

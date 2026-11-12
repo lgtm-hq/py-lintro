@@ -667,9 +667,14 @@ def test_check_line_length_command_includes_required_flags(
             "warning: Failed to lint /p/locked.py: Permission denied (os error 13)\n",
             True,
         ),
+        (
+            "\x1b[1;33mwarning\x1b[0m\x1b[1m:\x1b[0m \x1b[1mFailed to lint "
+            "/p/locked.py: Permission denied (os error 13)\x1b[0m\n",
+            True,
+        ),
         ("warning: The top-level linter settings are deprecated\n", False),
     ],
-    ids=["unreadable", "unrelated-warning"],
+    ids=["unreadable", "unreadable-coloured", "unrelated-warning"],
 )
 def test_check_line_length_unlinted_path_is_not_a_measurement(
     mock_ruff_available: MagicMock,
