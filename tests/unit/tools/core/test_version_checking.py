@@ -85,6 +85,59 @@ def test_get_version_timeout_invalid(
 # Tests for get_version_check_timeout (#3083)
 
 
+#: The production cut, before any test widens it.
+_DETAIL_LIMIT = version_checking._CONFIG_ERROR_DETAIL_LIMIT
+
+
+@pytest.fixture
+def path_blind_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Return a project directory whose path length the detail cut ignores.
+
+    A YAML parse warning quotes the config's absolute path before its
+    position, and the detail is cut at ``_CONFIG_ERROR_DETAIL_LIMIT``. Under a
+    long temp root (``/private/var/folders/…/pytest-of-<user>/…`` on macOS)
+    the cut lands inside the position, so the exact text depended on where
+    pytest put ``tmp_path`` (#3411). The cut is widened by exactly the length
+    of that directory's path: the warning reads as it would for a project at
+    a zero-length root, and :func:`_yaml_detail` checks that the rest still
+    fits the production limit.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest fixture for patching modules and attributes.
+
+    Returns:
+        Path: The project directory, resolved as the config loader reports it.
+    """
+    project = tmp_path.resolve()
+    monkeypatch.setattr(
+        version_checking,
+        "_CONFIG_ERROR_DETAIL_LIMIT",
+        _DETAIL_LIMIT + len(str(project)),
+    )
+    return project
+
+
+def _yaml_detail(problem: str) -> str:
+    """Return the full warning detail for a YAML error at line 2, column 1.
+
+    Args:
+        problem: PyYAML's problem text.
+
+    Returns:
+        str: The detail as ``version_checking`` renders it for the config in
+            the current working directory, before any cut.
+    """
+    directory = str(Path.cwd())
+    detail = f"{problem} ({directory}/.lintro-config.yaml, line 2, column 1)"
+    # Everything but the directory must fit the real limit, or the exact-text
+    # assertions would only pass because the cut was widened.
+    assert_that(len(detail) - len(directory)).is_less_than_or_equal_to(
+        _DETAIL_LIMIT,
+    )
+    return detail
+
+
 def _use_project_config(
     project: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -210,21 +263,21 @@ def test_invalid_env_version_timeout_warns_once_per_process(
 
 
 def test_malformed_config_falls_back_to_default_with_one_warning(
-    tmp_path: Path,
+    path_blind_project: Path,
     monkeypatch: pytest.MonkeyPatch,
     logged_warnings: list[str],
 ) -> None:
     """Malformed YAML yields the 30s default and warns once per process.
 
     Args:
-        tmp_path: Temporary project directory.
+        path_blind_project: Temporary project directory, see its fixture.
         monkeypatch: Pytest fixture for patching modules and attributes.
         logged_warnings: Captured WARNING-level log messages.
     """
     monkeypatch.setattr(version_checking, "_logged_warnings", set())
     monkeypatch.delenv("LINTRO_VERSION_TIMEOUT", raising=False)
     _use_project_config(
-        tmp_path,
+        path_blind_project,
         monkeypatch,
         file_name=".lintro-config.yaml",
         content="execution: [version_check_timeout: 45\n",
@@ -235,11 +288,10 @@ def test_malformed_config_falls_back_to_default_with_one_warning(
     assert_that(timeouts).is_equal_to([30, 30, 30])
     # PyYAML's message opens with the context ("while parsing a flow
     # sequence"); the warning carries the problem and its 1-based position.
-    config = Path.cwd() / ".lintro-config.yaml"
     assert_that(logged_warnings).is_equal_to(
         [
-            f"{_CONFIG_WARNING}expected ',' or ']', but got '<stream end>' "
-            f"({config}, line 2, column 1)",
+            _CONFIG_WARNING
+            + _yaml_detail("expected ',' or ']', but got '<stream end>'"),
         ],
     )
 
@@ -524,7 +576,7 @@ def test_other_config_errors_warn_with_their_first_non_empty_line(
 
 
 def test_a_different_config_error_later_still_warns_once(
-    tmp_path: Path,
+    path_blind_project: Path,
     monkeypatch: pytest.MonkeyPatch,
     logged_warnings: list[str],
 ) -> None:
@@ -534,7 +586,7 @@ def test_a_different_config_error_later_still_warns_once(
     different error must surface rather than hide behind the first one's key.
 
     Args:
-        tmp_path: Temporary project directory.
+        path_blind_project: Temporary project directory, see its fixture.
         monkeypatch: Pytest fixture for patching modules and attributes.
         logged_warnings: Captured WARNING-level log messages.
     """
@@ -547,7 +599,7 @@ def test_a_different_config_error_later_still_warns_once(
         "execution: [version_check_timeout: 45\n",
     ):
         _use_project_config(
-            tmp_path,
+            path_blind_project,
             monkeypatch,
             file_name=".lintro-config.yaml",
             content=content,
@@ -555,15 +607,12 @@ def test_a_different_config_error_later_still_warns_once(
         timeouts.extend(get_version_check_timeout() for _ in range(2))
 
     assert_that(timeouts).is_equal_to([30] * 6)
-    config = Path.cwd() / ".lintro-config.yaml"
     assert_that(
         [line.removeprefix(_CONFIG_WARNING) for line in logged_warnings],
     ).is_equal_to(
         [
-            f"expected ',' or ']', but got '<stream end>' "
-            f"({config}, line 2, column 1)",
-            f"expected ',' or '}}', but got '<stream end>' "
-            f"({config}, line 2, column 1)",
+            _yaml_detail("expected ',' or ']', but got '<stream end>'"),
+            _yaml_detail("expected ',' or '}', but got '<stream end>'"),
         ],
     )
 
