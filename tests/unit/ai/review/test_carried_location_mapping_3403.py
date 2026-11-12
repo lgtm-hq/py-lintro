@@ -391,8 +391,11 @@ def _review(
     """
     head = _git(repo, "rev-parse", "HEAD")
 
-    def canned(**_: Any) -> AIResponse:
+    def canned(**kwargs: Any) -> AIResponse:
         """Serve the round's canned findings, whatever the call asked.
+
+        Args:
+            **kwargs: Ignored provider call arguments.
 
         Returns:
             The canned response.
