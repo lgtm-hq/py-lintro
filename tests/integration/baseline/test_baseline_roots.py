@@ -11,6 +11,7 @@ from lintro import api
 from lintro.cli import cli
 from lintro.config.config_loader import clear_config_cache, get_config
 from lintro.utils.fingerprint_baseline_file import read_baseline
+from tests.integration._tools import require_tool
 
 
 @pytest.fixture(params=["yaml", "toml", "explicit", "no_config", "absolute", "symlink"])
@@ -144,3 +145,6 @@ def test_unconfigured_subdirectory_run_keeps_its_original_scope(
     assert_that(result.exit_code).is_equal_to(1)
     assert_that(result.stdout).contains("F401")
     assert_that(result.output).does_not_contain("require running from the project root")
+
+
+pytestmark = [require_tool("ruff")]

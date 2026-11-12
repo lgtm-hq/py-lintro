@@ -11,6 +11,7 @@ from lintro import api
 from lintro.cli import cli
 from lintro.config.config_loader import clear_config_cache
 from lintro.exceptions.errors import ConfigurationError
+from tests.integration._tools import require_tool
 
 
 @pytest.fixture
@@ -138,3 +139,6 @@ def test_badge_ignores_configured_acknowledgements_and_baseline_loading_errors(
     payload = json.loads(result.stdout)
     assert payload["counts"]["total"] == 1
     assert payload["color"] != "brightgreen"
+
+
+pytestmark = [require_tool("ruff")]
