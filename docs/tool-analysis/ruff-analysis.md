@@ -211,6 +211,45 @@ The wrapper supports both configuration files and runtime options:
 - **Runtime options**: Override specific settings via `set_options()`
 - **Combined approach**: Configuration files provide defaults, runtime options override
 
+### First-party import detection
+
+Ruff's import sorting (`I001`) classifies each import as standard library, third-party
+or first-party. It decides first-party by resolving the module against its
+[`src`](https://docs.astral.sh/ruff/settings/#src) search path. Without a `[tool.ruff]`
+table that path is relative to the directory Ruff runs in, so plain `ruff check` can
+give a different verdict depending on where you start it.
+
+Lintro does not run Ruff in the directory you start it from. It runs every Ruff
+subprocess (the check pass, the format pass and the `lintro format` fix path) from a
+**project root** worked out from the files being linted. Lintro takes the common
+ancestor of those files and walks up to the nearest directory with `.git`,
+`pyproject.toml` or another project marker. So `lintro check scripts/ci` and
+`lintro format scripts/ci` give the same result whether you start them at the repository
+root or inside `scripts/ci/`, and `lintro check` and `lintro format` agree with each
+other.
+
+The root still depends on **which paths you pass**, because they decide the files and so
+their common ancestor. For example, take a repository with `.git` at the top and a
+nested `pkg_c/pyproject.toml` with no `[tool.ruff]` table:
+
+- `lintro check .` also covers files outside `pkg_c`, so it anchors at the outer
+  repository. A module at `pkg_c/helper.py` is not a top-level module from there.
+- `lintro check pkg_c` anchors at `pkg_c`, where `helper` is first-party. The same
+  import in `pkg_c/sub/use.py` can therefore get a different `I001` verdict.
+
+A run that covers several projects uses the root they have in common, which is the outer
+one. Lintro does not group files by project.
+
+To fix the classification regardless of which paths you pass, set `src` explicitly. Ruff
+resolves it against the config file that declares it, and Lintro does not override it.
+For example, to treat a helper in `scripts/ci/` that a sibling script imports as
+first-party:
+
+```toml
+[tool.ruff]
+src = ["scripts/ci"]
+```
+
 ## Rule Categories
 
 Lintro preserves all Ruff rule categories:

@@ -170,9 +170,10 @@ def execute_ruff_check(
     if isinstance(ctx, ToolResult):
         return ctx
 
-    # Ruff must run from the common parent directory of the target files (so it
-    # discovers the correct configuration) and receive file paths relative to
-    # that directory.
+    # Ruff runs from the target files' project root (``ctx.cwd``) and receives
+    # file paths relative to it. That anchors config discovery and the default
+    # ``src`` used for first-party import classification (I001) to the project
+    # rather than the process cwd; the fix path uses the same anchor (#2349).
     cwd: str | None = ctx.cwd
     rel_files: list[str] = ctx.rel_files
     timeout: int = int(ctx.timeout)
