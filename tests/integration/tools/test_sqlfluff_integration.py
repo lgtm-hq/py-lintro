@@ -355,3 +355,39 @@ def test_set_options(
     sqlfluff_plugin = get_plugin("sqlfluff")
     sqlfluff_plugin.set_options(**{option_name: option_value})
     assert_that(sqlfluff_plugin.options.get(option_name)).is_equal_to(option_value)
+
+
+def test_files_sqlfluffignore_excludes_are_not_claimed(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """A file ``.sqlfluffignore`` excludes is never reported as inspected.
+
+    SQLFluff prints ``[]`` at exit 0 for an ignored file, while a linted one
+    always gets a record (#3388). Check and fix over only ignored files are
+    no-files runs; adding a linted file makes an ordinary run.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Project holding the config, the ignore file and SQL files.
+    """
+    (tmp_path / ".sqlfluff").write_text("[sqlfluff]\ndialect = ansi\n")
+    (tmp_path / ".sqlfluffignore").write_text("ignored.sql\n")
+    ignored = tmp_path / "ignored.sql"
+    ignored.write_text("select * from t\n")
+    linted = tmp_path / "linted.sql"
+    linted.write_text("SELECT a FROM t\n")
+    sqlfluff_plugin = get_plugin("sqlfluff")
+
+    checked = sqlfluff_plugin.check([str(ignored)], {})
+    fixed = sqlfluff_plugin.fix([str(ignored)], {})
+    mixed = sqlfluff_plugin.check([str(ignored), str(linted)], {})
+
+    for result in (checked, fixed):
+        assert_that(result.success).is_true()
+        assert_that(result.no_files).is_true()
+        assert_that(result.inspected_files).is_false()
+        assert_that(result.output).contains(".sqlfluffignore")
+    assert_that(ignored.read_text()).is_equal_to("select * from t\n")
+    assert_that(mixed.no_files).is_false()
+    assert_that(mixed.inspected_files).is_true()

@@ -448,3 +448,34 @@ def test_invalid_line_length(
     else:
         with pytest.raises(ValueError):
             ruff_plugin.set_options(line_length=option_value)
+
+
+def test_fix_with_a_broken_config_is_an_execution_failure(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """Ruff that cannot parse its config fixed and inspected nothing.
+
+    Ruff exits 2 with empty stdout and ``ruff failed`` on stderr. The fix run
+    fails as an execution error quoting that message, with no inspection
+    claim and never "No fixes applied." (#3388).
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Project holding the broken config and a Python file.
+    """
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff\nline-length = \n")
+    source = tmp_path / "module.py"
+    source.write_text("import os\nx=1\n")
+    ruff_plugin = get_plugin("ruff")
+
+    result = ruff_plugin.fix([str(source)], {"format": True})
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.inspected_files).is_none()
+    assert_that(result.output).contains("Ruff could not run").contains(
+        "ruff failed",
+    ).does_not_contain("No fixes applied")
+    assert_that(source.read_text()).is_equal_to("import os\nx=1\n")

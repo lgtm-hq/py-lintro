@@ -233,3 +233,41 @@ def test_set_options(
     assert_that(bandit_plugin.options.get(option_name)).is_not_none()
     if option_name == "skip":
         assert_that(bandit_plugin.options.get(option_name)).is_equal_to(option_value)
+
+
+def test_files_bandit_config_excludes_are_not_claimed(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """Bandit's own ``exclude_dirs`` excluding every target is a no-files run.
+
+    Bandit exits 0 with no errors and only ``_totals`` in its metrics, so the
+    run must not claim the requested file was inspected (#3388). A scanned
+    file next to it keeps the run an ordinary inspected one.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Project holding the config and the Python files.
+    """
+    vendored = tmp_path / "vendored_skip"
+    vendored.mkdir()
+    excluded = vendored / "danger.py"
+    excluded.write_text("import subprocess\nsubprocess.call('ls', shell=True)\n")
+    kept = tmp_path / "kept.py"
+    kept.write_text("x = 1\n")
+    config = tmp_path / "bandit.yaml"
+    config.write_text('exclude_dirs: ["vendored_skip"]\n')
+    bandit_plugin = get_plugin("bandit")
+    bandit_plugin.set_options(configfile=str(config))
+
+    only_excluded = bandit_plugin.check([str(excluded)], {})
+    mixed = bandit_plugin.check([str(excluded), str(kept)], {})
+
+    assert_that(only_excluded.success).is_true()
+    assert_that(only_excluded.no_files).is_true()
+    assert_that(only_excluded.inspected_files).is_false()
+    assert_that(only_excluded.issues_count).is_zero()
+    assert_that(only_excluded.output).contains("excludes every file given")
+    assert_that(mixed.no_files).is_false()
+    assert_that(mixed.inspected_files).is_true()
+    assert_that(mixed.issues_count).is_zero()

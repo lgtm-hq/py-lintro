@@ -1568,6 +1568,12 @@ select = E,W,F,I,N,D
 exclude = .git,__pycache__,.venv
 ```
 
+If Ruff cannot run, for example because it cannot parse `pyproject.toml`, it exits 2 and
+prints only its own error. `lintro format --tools ruff` then fails the run as an
+execution error that quotes Ruff's message. It does not report "No fixes applied." and
+does not claim that any file was inspected. A report Ruff did print but that Lintro
+could not fully parse stays a parse failure.
+
 #### Mypy Configuration
 
 - Default run mode: `--strict` with `--ignore-missing-imports` enabled to avoid
@@ -1629,6 +1635,12 @@ exclude = test_*.py
 - `severity`: Minimum severity level (`LOW`, `MEDIUM`, `HIGH`)
 - `confidence`: Minimum confidence level (`LOW`, `MEDIUM`, `HIGH`)
 - `baseline`: Path to baseline report for comparison
+
+A file Bandit's own configuration excludes, for example through `exclude_dirs` in the
+file given as the `configfile` option, is not scanned and gets no per-file entry in
+Bandit's report metrics. When that is true of every file Lintro passed, the run is
+reported as "no files": it passes without claiming any file was inspected. When only
+some files are excluded, the run is an ordinary one.
 
 #### Semgrep Configuration
 
@@ -2835,6 +2847,12 @@ extended_capitalisation_policy = "lower"
 | `exclude_rules` | list   | List of rules to exclude from checking              |
 | `rules`         | list   | List of specific rules to include                   |
 | `templater`     | string | Templater to use (raw, jinja, python, placeholder)  |
+
+`.sqlfluffignore` is honored by the underlying tool. SQLFluff prints a record for every
+file it lints, even a clean or empty one, and an empty report for a file
+`.sqlfluffignore` excludes. When every file Lintro passed is excluded, check and format
+runs are reported as "no files": they pass without claiming any file was inspected. When
+only some files are excluded, the run is an ordinary one.
 
 **Supported Dialects:**
 
