@@ -71,6 +71,41 @@ def _lint_report_missing(*, success: bool, output: str) -> bool:
     return not strip_ansi_codes(output).lstrip().startswith(("[", "{"))
 
 
+#: First line of Ruff's own message when it cannot run at all, such as a
+#: configuration it cannot parse.
+RUFF_FAILED_BANNER: str = "ruff failed"
+
+
+def _format_check_failed_to_run(*, success: bool, output: str) -> bool:
+    """Whether ``ruff format --check`` failed without checking any file.
+
+    The exit status alone cannot tell: ``ruff format --check`` exits 2 for a
+    file with invalid syntax too, printing an ``invalid-syntax`` diagnostic
+    and, when no other file needs reformatting, naming no file. That is a
+    normal outcome; the JSON ``ruff check`` stage reports the same syntax
+    error as a finding. Only Ruff's own ``ruff failed`` banner, with nothing
+    else before it, means Ruff could not run (#3388).
+
+    Args:
+        success: Whether the command exited 0.
+        output: The command's combined output.
+
+    Returns:
+        True when the command failed with Ruff's own failure banner.
+    """
+    if success:
+        return False
+    first_line = next(
+        (
+            line.strip()
+            for line in strip_ansi_codes(output).splitlines()
+            if line.strip()
+        ),
+        "",
+    )
+    return first_line == RUFF_FAILED_BANNER
+
+
 def _not_run_result(
     *,
     stage: str,
@@ -269,9 +304,10 @@ def execute_ruff_fix(
                 cwd=ctx.cwd,
             )
         format_files = parse_ruff_format_check_output(output=output_format_check)
-        if not success_format_check and not format_files:
-            # ``ruff format --check`` exits 1 only to list files it would
-            # reformat; a failure naming none is Ruff failing to run.
+        if not format_files and _format_check_failed_to_run(
+            success=success_format_check,
+            output=output_format_check,
+        ):
             return _not_run_result(
                 stage="ruff format --check",
                 output=output_format_check,

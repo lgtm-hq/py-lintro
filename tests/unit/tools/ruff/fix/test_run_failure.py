@@ -159,3 +159,56 @@ def test_failed_check_with_a_report_stays_a_malformed_report(
     assert_that(result.execution_failed).is_false()
     assert_that(result.parse_failures_count).is_equal_to(1)
     assert_that(str(result.output)).does_not_contain("Ruff could not run")
+
+
+SYNTAX_ERROR = {
+    "filename": "syn.py",
+    "message": "Expected an identifier",
+    "code": "invalid-syntax",
+    "location": {"row": 1, "column": 5},
+}
+FORMAT_CHECK_SYNTAX_ERROR = (
+    "invalid-syntax: Expected an identifier\n"
+    " --> syn.py:1:5\n"
+    "  |\n"
+    "1 | def (:\n"
+    "  |     ^\n"
+)
+
+
+def test_syntax_error_at_format_check_does_not_abort_the_run(
+    ruff_plugin: RuffPlugin,
+    temp_python_file: str,
+) -> None:
+    """``ruff format --check`` exiting 2 on invalid syntax is a normal outcome.
+
+    With no other file to reformat it names no file, yet Ruff ran: the JSON
+    check reports the same syntax error as a finding, and the lint fix still
+    removes the unrelated F401.
+    """
+    report = [FINDING, SYNTAX_ERROR]
+    result = _fix(
+        ruff_plugin,
+        temp_python_file,
+        [
+            subprocess.CompletedProcess(["ruff"], 1, json.dumps(report), ""),
+            subprocess.CompletedProcess(["ruff"], 2, "", FORMAT_CHECK_SYNTAX_ERROR),
+            subprocess.CompletedProcess(["ruff"], 1, json.dumps([SYNTAX_ERROR]), ""),
+            subprocess.CompletedProcess(["ruff"], 1, json.dumps([SYNTAX_ERROR]), ""),
+            subprocess.CompletedProcess(
+                ["ruff"],
+                2,
+                "",
+                "error: Failed to parse syn.py:1:5: Expected an identifier\n",
+            ),
+        ],
+        format_files=True,
+    )
+
+    assert_that(result.execution_failed).is_false()
+    assert_that(str(result.output)).does_not_contain("Ruff could not run")
+    assert_that(result.initial_issues).extracting("code").contains("F401")
+    assert_that(result.issues).extracting("message").is_equal_to(
+        ["Expected an identifier"],
+    )
+    assert_that(result.fixed_issues_count).is_equal_to(1)

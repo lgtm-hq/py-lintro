@@ -20,7 +20,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
-from lintro.tools.bandit.definition import BANDIT_ALL_EXCLUDED_MESSAGE, BanditPlugin
+from lintro.tools.bandit.definition import BanditPlugin
 
 TOTALS = {"loc": 0, "nosec": 0, "skipped_tests": 0}
 
@@ -68,7 +68,9 @@ def test_every_file_excluded_is_a_no_files_run(tmp_path: Path) -> None:
     assert_that(result.inspected_files).is_false()
     assert_that(result.execution_failed).is_false()
     assert_that(result.issues_count).is_zero()
-    assert_that(result.output).is_equal_to(BANDIT_ALL_EXCLUDED_MESSAGE)
+    assert_that(result.output).contains("excludes every file given").contains(
+        "none was inspected",
+    )
 
 
 @pytest.mark.parametrize("spelling", ["as-given", "unnormalised"])

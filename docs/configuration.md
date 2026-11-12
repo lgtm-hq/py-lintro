@@ -2849,10 +2849,12 @@ extended_capitalisation_policy = "lower"
 | `templater`     | string | Templater to use (raw, jinja, python, placeholder)  |
 
 `.sqlfluffignore` is honored by the underlying tool. SQLFluff prints a record for every
-file it lints, even a clean or empty one, and an empty report for a file
-`.sqlfluffignore` excludes. When every file Lintro passed is excluded, check and format
-runs are reported as "no files": they pass without claiming any file was inspected. When
-only some files are excluded, the run is an ordinary one.
+file it lints, even a clean or empty one. It prints an empty report, with a warning, for
+a file it skips: one `.sqlfluffignore` excludes, or one larger than
+`large_file_skip_byte_limit` (20,000 bytes by default). When SQLFluff skips every file
+Lintro passed, check and format runs are reported as "no files": they pass without
+claiming any file was inspected, and the reason quotes SQLFluff's first skip warning.
+When only some files are skipped, the run is an ordinary one.
 
 **Supported Dialects:**
 

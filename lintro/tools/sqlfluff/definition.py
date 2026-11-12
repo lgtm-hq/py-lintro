@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, replace
+from pathlib import PurePath
 from typing import Any
 
 from lintro._tool_versions import get_min_version
@@ -45,10 +46,32 @@ from lintro.tools.core.option_validators import (
 SQLFLUFF_DEFAULT_TIMEOUT: int = 60
 SQLFLUFF_FILE_PATTERNS: list[str] = ["*.sql"]
 SQLFLUFF_DEFAULT_FORMAT: str = "json"
-SQLFLUFF_ALL_IGNORED_MESSAGE: str = (
-    "No files to lint: SQLFluff's own ignore configuration (.sqlfluffignore) "
-    "excludes every file given; none was inspected."
+SQLFLUFF_ALL_SKIPPED_MESSAGE: str = (
+    "No files to lint: SQLFluff skipped every file given (an ignore file such "
+    "as .sqlfluffignore, or its large_file_skip_byte_limit); none was inspected."
 )
+
+
+def _skip_reason(stderr: str, *, path: str) -> str:
+    """Quote the warning SQLFluff printed when it skipped a file.
+
+    SQLFluff names the file by the path it was given, which is absolute. That
+    path is shortened to the file name first, so the quote's length cap keeps
+    the part that says why the file was skipped.
+
+    Args:
+        stderr: The skipped invocation's diagnostics stream.
+        path: The file passed to SQLFluff.
+
+    Returns:
+        SQLFluff's own warning without its log-level prefix, or an empty
+        string when it printed none.
+    """
+    if not stderr.strip():
+        return ""
+    excerpt = tool_message_excerpt(stderr.replace(path, PurePath(path).name))
+    level, _, rest = excerpt.partition(" ")
+    return rest.strip() if level == "WARNING" and rest.strip() else excerpt
 
 
 def _is_json(text: str) -> bool:
@@ -113,7 +136,11 @@ class SqlfluffPlugin(BaseToolPlugin):
     """
 
     _lint_diagnostics: list[str] = field(default_factory=list, init=False, repr=False)
-    _lint_ignored: set[str] = field(default_factory=set, init=False, repr=False)
+    _lint_skipped: dict[str, str] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
 
     @property
     def definition(self) -> ToolDefinition:
@@ -315,8 +342,9 @@ class SqlfluffPlugin(BaseToolPlugin):
         if result.success and _is_empty_report(result.stdout):
             # Every linted file, even a clean or empty one, gets a record. A
             # clean exit with an empty array is SQLFluff skipping the one file
-            # given because ``.sqlfluffignore`` excludes it (#3388).
-            self._lint_ignored.add(cmd[-1])
+            # given: ``.sqlfluffignore`` excludes it, or it is larger than
+            # ``large_file_skip_byte_limit`` (#3388). Its warning says which.
+            self._lint_skipped[cmd[-1]] = _skip_reason(result.stderr, path=cmd[-1])
         if not result.success and result.stderr.strip():
             self._lint_diagnostics.append(f"{cmd[-1]}:\n{result.stderr}")
         if not result.success and not _is_json(result.stdout):
@@ -398,26 +426,28 @@ class SqlfluffPlugin(BaseToolPlugin):
         """
         super()._isolate_execution_state()
         self._lint_diagnostics = []
-        self._lint_ignored = set()
+        self._lint_skipped = {}
 
     def _reset_lint_state(self) -> None:
         """Forget what earlier runs of this instance recorded."""
         self._lint_diagnostics.clear()
-        self._lint_ignored.clear()
+        self._lint_skipped.clear()
 
-    def _all_ignored_result(
+    def _all_skipped_result(
         self,
         *,
         result: ToolResult,
         files: list[str],
         fixing: bool,
     ) -> ToolResult | None:
-        """Return the no-files result when SQLFluff ignored every file.
+        """Return the no-files result when SQLFluff skipped every file.
 
-        A file ``.sqlfluffignore`` excludes is never claimed as inspected.
-        When it excluded all of them, nothing was inspected: the run is "no
-        files", not a clean pass (#3388). A run that also failed, timed out
-        or reported findings keeps its own result.
+        A file SQLFluff skipped, because ``.sqlfluffignore`` excludes it or
+        it is larger than ``large_file_skip_byte_limit``, is never claimed as
+        inspected. When it skipped all of them, nothing was inspected: the
+        run is "no files", not a clean pass (#3388). The reason quotes the
+        first skip warning SQLFluff printed. A run that also failed, timed
+        out or reported findings keeps its own result.
 
         Args:
             result: Aggregated check or fix outcome.
@@ -429,7 +459,7 @@ class SqlfluffPlugin(BaseToolPlugin):
         """
         if (
             not files
-            or self._lint_ignored != set(files)
+            or set(self._lint_skipped) != set(files)
             or result.execution_failed
             or result.timed_out
             or result.issues
@@ -443,10 +473,19 @@ class SqlfluffPlugin(BaseToolPlugin):
             if fixing
             else ToolOutcome(execution=NoFiles())
         )
+        warning = next(
+            (self._lint_skipped[file] for file in files if self._lint_skipped[file]),
+            "",
+        )
+        output = (
+            f"{SQLFLUFF_ALL_SKIPPED_MESSAGE} SQLFluff: {warning}"
+            if warning
+            else SQLFLUFF_ALL_SKIPPED_MESSAGE
+        )
         return ToolResult.from_outcome(
             outcome,
             name=self.definition.name,
-            output=SQLFLUFF_ALL_IGNORED_MESSAGE,
+            output=output,
             cwd=result.cwd,
         )
 
@@ -488,9 +527,9 @@ class SqlfluffPlugin(BaseToolPlugin):
             parse=lambda output: self._parse_lint_report(output, failures),
             policy=PerFileCheckPolicy(issues_imply_failure=True),
         )
-        ignored = self._all_ignored_result(result=result, files=ctx.files, fixing=False)
-        if ignored is not None:
-            return ignored
+        skipped = self._all_skipped_result(result=result, files=ctx.files, fixing=False)
+        if skipped is not None:
+            return skipped
         return self._with_lint_diagnostics(
             replace(
                 result,
@@ -560,9 +599,9 @@ class SqlfluffPlugin(BaseToolPlugin):
                 fix_findings_exit_codes=frozenset({1}),
             ),
         )
-        ignored = self._all_ignored_result(result=result, files=ctx.files, fixing=True)
-        if ignored is not None:
-            return ignored
+        skipped = self._all_skipped_result(result=result, files=ctx.files, fixing=True)
+        if skipped is not None:
+            return skipped
         unmeasured = self._unmeasured_reason(
             result,
             errors=errors,
