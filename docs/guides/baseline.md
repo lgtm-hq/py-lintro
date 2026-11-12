@@ -156,7 +156,8 @@ source file (Ruff's `invalid-syntax`; older Ruff releases used a null code or `E
 never acknowledged: `create` and `update` do not record it, and filtering leaves it
 visible even if a matching entry exists. Ruff skips other rules for a file it cannot
 parse while still listing that file as inspected, so such a file also supplies no exact
-coverage: `update` and `prune` keep every entry for it until it parses again.
+coverage: `update` and `prune` keep every entry for it until it parses again. An
+existing `invalid-syntax` entry in a baseline no longer acknowledges anything.
 
 Format accounting matches fingerprint occurrences across the filtered initial and
 residual lists, so line shifts do not cancel fix credit. If formatting introduces a new
@@ -225,13 +226,15 @@ baseline intact. `update` and `prune` take the lock before their scan and hold i
 the write, so another writer cannot change the file between the scan and the merge; a
 concurrent management command fails with the lock error instead. After the replacement,
 the writer also flushes the parent directory on POSIX so the new file survives a crash.
-Replacements preserve the existing file's permission mode only: the replacement is owned
-by the user and group of the writing process, not the previous owner. Creation uses
-ordinary file permissions restricted by the process umask. A killed writer can leave a
-sibling `.lock` file. Confirm that no baseline management command is active before
-removing that lock and retrying; locks are never removed automatically by a later
-writer. No rule packs (#3023), provenance, or broader ignore system (#1610) are
-introduced here.
+If the filesystem does not support a directory fsync (some network mounts), the write
+still succeeds and a debug line is logged. Replacements preserve the existing file's
+permission mode only: the replacement is owned by the user and group of the writing
+process, not the previous owner. Creation uses ordinary file permissions restricted by
+the process umask. Ctrl-C and errors release the lock, but a writer killed by a signal
+such as SIGTERM, including a CI timeout, can leave a sibling `.lock` file. Confirm that
+no baseline management command is active before removing that lock and retrying; locks
+are never removed automatically by a later writer. No rule packs (#3023), provenance, or
+broader ignore system (#1610) are introduced here.
 
 ## Execution checks for all runs
 

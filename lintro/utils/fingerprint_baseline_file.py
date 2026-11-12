@@ -12,6 +12,8 @@ from pathlib import Path
 from secrets import token_hex
 from typing import TYPE_CHECKING, Any, Literal
 
+from loguru import logger
+
 from lintro.exceptions.errors import ConfigurationError
 from lintro.models.core.fingerprint_baseline import FingerprintBaseline
 
@@ -20,6 +22,24 @@ if TYPE_CHECKING:
 
 MAX_BASELINE_BYTES = 10 * 1024 * 1024
 DEFAULT_BASELINE = ".lintro-baseline.json"
+
+# Directory fsync errors some filesystems (e.g. network mounts) return when
+# they do not support flushing a directory. The data write already succeeded.
+_UNSUPPORTED_DIRECTORY_FSYNC = frozenset(
+    {errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EBADF},
+)
+
+
+def as_sentence(text: str) -> str:
+    """End a message with exactly one period.
+
+    Args:
+        text: Message that may already end with a period.
+
+    Returns:
+        The message, ending with a period.
+    """
+    return text if text.endswith(".") else f"{text}."
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -90,14 +110,24 @@ def writer_lock(path: Path) -> Iterator[None]:
 def _fsync_directory(directory: Path) -> None:
     """Flush a directory entry change to disk where the platform allows it.
 
+    A filesystem that does not support a directory fsync does not undo the
+    committed write, so those errors are logged rather than raised.
+
     Args:
         directory: Directory whose entries were just renamed or linked.
+
+    Raises:
+        OSError: For directory fsync errors other than unsupported operations.
     """
     if os.name != "posix":
         return
     descriptor = os.open(directory, os.O_RDONLY)
     try:
         os.fsync(descriptor)
+    except OSError as exc:
+        if exc.errno not in _UNSUPPORTED_DIRECTORY_FSYNC:
+            raise
+        logger.debug(f"Baseline directory fsync unsupported for {directory}: {exc}")
     finally:
         os.close(descriptor)
 
@@ -279,7 +309,7 @@ def load_run_baseline(
         return read_baseline(path)
     except (OSError, ValueError) as exc:
         raise ConfigurationError(
-            f"Cannot load fingerprint baseline: {exc}."
+            as_sentence(f"Cannot load fingerprint baseline: {exc}")
             + global_baseline_note(explicit, config),
         ) from exc
 

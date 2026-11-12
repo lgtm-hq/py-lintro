@@ -15,6 +15,7 @@ from lintro.utils.fingerprint_baseline import (
     snapshot,
 )
 from lintro.utils.fingerprint_baseline_file import (
+    as_sentence,
     change_baseline,
     global_baseline_note,
     read_baseline,
@@ -163,7 +164,7 @@ def _manage(
                 read_baseline(path)  # Fail before running tools; reread under lock.
             except ValueError as exc:
                 raise ValueError(
-                    f"{exc}." + global_baseline_note(baseline, config),
+                    as_sentence(str(exc)) + global_baseline_note(baseline, config),
                 ) from exc
         # Hold the writer lock from before the scan until the write, so no
         # other writer can change the file between this scan and its merge.

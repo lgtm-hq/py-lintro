@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import stat
 from dataclasses import replace
@@ -425,3 +426,104 @@ def test_simple_runner_accepts_false_to_skip_configured_baseline(
         run_lint_tools_simple(**common)
 
     assert_that(run_lint_tools_simple(**common, baseline=False)).is_equal_to(1)
+
+
+def _reject_directory_fsync(
+    monkeypatch: pytest.MonkeyPatch,
+    error: int,
+) -> None:
+    """Make every directory fsync fail with ``error``, as some mounts do.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        error: Errno raised for directory descriptors.
+    """
+    real_fsync = os.fsync
+
+    def fsync(descriptor: int) -> None:
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise OSError(error, os.strerror(error))
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="directory fsync is POSIX-only")
+@pytest.mark.parametrize("create", [True, False])
+def test_unsupported_directory_fsync_keeps_committed_write(
+    workspace: Path,
+    dirty_result: ToolResult,
+    finding: RuffIssue,
+    monkeypatch: pytest.MonkeyPatch,
+    create: bool,
+) -> None:
+    """EINVAL from a directory fsync does not fail a write that already landed."""
+    path = workspace / ".lintro-baseline.json"
+    if not create:
+        change_baseline(path, lambda _: snapshot([], root=workspace), create=True)
+    written = snapshot(
+        [replace(dirty_result, issues=[finding, finding], issues_count=2)],
+        root=workspace,
+    )
+    _reject_directory_fsync(monkeypatch, errno.EINVAL)
+
+    returned = change_baseline(path, lambda _: written, create=create)
+
+    assert_that(returned.entries).is_equal_to(written.entries)
+    assert_that(read_baseline(path).entries).is_equal_to(written.entries)
+    assert_that(Path(f"{path}.lock").exists()).is_false()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="directory fsync is POSIX-only")
+def test_other_directory_fsync_errors_still_fail(
+    workspace: Path,
+    dirty_result: ToolResult,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real I/O error from the directory fsync is still reported."""
+    path = workspace / ".lintro-baseline.json"
+    _reject_directory_fsync(monkeypatch, errno.EIO)
+
+    with pytest.raises(OSError) as raised:
+        change_baseline(
+            path,
+            lambda _: snapshot([dirty_result], root=workspace),
+            create=True,
+        )
+
+    assert_that(raised.value.errno).is_equal_to(errno.EIO)
+
+
+def test_baseline_errors_end_with_a_single_period(
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Root and missing-file errors do not gain a doubled period."""
+    (workspace / ".lintro-config.yaml").write_text(
+        "baseline: missing.json\n",
+        encoding="utf-8",
+    )
+    clear_config_cache()
+    nested = workspace / "pkg"
+    nested.mkdir()
+
+    missing = CliRunner().invoke(cli, ["baseline", "update", "--tools", "ruff"])
+    with pytest.raises(ConfigurationError) as raised:
+        load_run_baseline(None, load_config(allow_pyproject_fallback=False))
+    monkeypatch.chdir(nested)
+    with pytest.raises(ConfigurationError) as elsewhere:
+        load_run_baseline(None, load_config(allow_pyproject_fallback=False))
+
+    assert_that(missing.exit_code).is_equal_to(1)
+    assert_that(missing.output).contains(
+        f"baseline is not a regular file: {workspace / 'missing.json'}.",
+    )
+    assert_that(str(raised.value)).is_equal_to(
+        "Cannot load fingerprint baseline: baseline is not a regular file: "
+        f"{workspace / 'missing.json'}.",
+    )
+    assert_that(str(elsewhere.value)).ends_with(
+        "adjusting path arguments as needed.",
+    )
+    for message in (missing.output, str(raised.value), str(elsewhere.value)):
+        assert_that(message).does_not_contain("..")
