@@ -8,6 +8,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
+from lintro.tools.core.node_fallback import NPX_ISOLATION_FLAGS
 from lintro.tools.tsc.definition import (
     TSC_DEFAULT_TIMEOUT,
     TSC_FILE_PATTERNS,
@@ -266,10 +267,12 @@ def test_get_tsc_command_with_npx_fallback(
 
     # tsc ships inside the ``typescript`` package, so the runner needs
     # ``--package`` to find the executable (#1811). npx is always
-    # non-interactive (#2028).
-    assert_that(cmd[:3]).is_equal_to(["npx", "--yes", "--package"])
-    assert_that(cmd[3]).starts_with("typescript@")
-    assert_that(cmd[4]).is_equal_to("tsc")
+    # non-interactive (#2028) and isolated from npm configuration (#2043).
+    assert_that(cmd[:-2]).is_equal_to(
+        ["npx", "--yes", *NPX_ISOLATION_FLAGS, "--package"],
+    )
+    assert_that(cmd[-2]).starts_with("typescript@")
+    assert_that(cmd[-1]).is_equal_to("tsc")
 
 
 def test_get_tsc_command_fallback_to_tsc(

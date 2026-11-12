@@ -1,24 +1,27 @@
 """Real npx/bunx: what they launch, and lintro never passing on a pin they skip.
 
 ``npx --package <pkg>@<pin> <bin>`` may reuse anything npm finds installed and
-run ``<bin>`` by name from an ancestor ``node_modules/.bin``, so its pin is not
-reliable evidence once a ``node_modules`` tree is in reach (#2043). lintro
-therefore trusts an npx pin only when no ``node_modules`` exists in the
-execution directory or above it and npm bin links are not disabled; in every
-other npx-only case the tool is unavailable. ``bunx <pkg>@<pin>`` always
-resolves from the registry, so its pin stands.
+run ``<bin>`` by name from an ancestor ``node_modules/.bin``, so its pin is
+not reliable evidence once npm has a tree to reuse (#2043). lintro adds flags
+that neutralise npm's workspace, bin-link and global settings, and refuses an
+npx-only fallback when a ``node_modules`` directory or a ``package.json``
+declaring workspaces (or naming the package) sits in the execution directory
+or above it, or when ``workspace=<name>`` is configured. ``bunx <pkg>@<pin>``
+always resolves from the registry, so its pin stands.
 
-Each npx test first runs real npx to show what it launches, then checks that
-lintro either refuses or reports exactly what npx ran. A pin is never reported
-available while npx runs something else.
+Each npx test probes with lintro and then runs the exact command lintro
+generated, so the observation is what would really execute. A shared check
+fails if lintro ever reports a pin as available while that command runs
+something else.
 
 Nothing reaches the internet. A localhost registry serves a fake pinned
-``prettier`` whose binary prints ``registry <pin>``. Caches start empty.
+``prettier`` whose binary prints ``registry <pin>``, to npm and bun alike.
+Caches and ``HOME`` are private to each test.
 
 npx is gated with a plain skip, not ``require_command``: the tools image ships
 bun (with ``node`` linked to it) but no npm, and ``require_command`` turns an
-absent command into a failure there (#465). bunx is in the image, so it uses
-``require_command``.
+absent command into a failure there (#465). bun is in the image, so the bunx
+test uses ``require_command``.
 """
 
 from __future__ import annotations
@@ -45,7 +48,6 @@ from tests.integration._tools import NO_MIN_VERSION, require_command
 
 _PIN = get_tool_version("prettier") or ""
 _OLDER = "1.0.0"
-_UNREACHABLE_REGISTRY = "http://127.0.0.1:9"
 _NPX = shutil.which("npx")
 _NODE = shutil.which("node")
 _REFUSAL = "npx may run an unpinned copy"
@@ -338,14 +340,14 @@ def _isolate(
     registry_url: str,
     extra_env: dict[str, str],
 ) -> dict[str, str]:
-    """Expose only *commands* on PATH, with a private registry and caches.
+    """Expose only *commands* on PATH, with a private registry, HOME and caches.
 
     Args:
         monkeypatch: Scoped environment override.
         tmp_path: Directory for the PATH shim, HOME and caches.
         commands: Command name -> real executable to link into PATH.
-        registry_url: Registry both runners use.
-        extra_env: Extra variables for the layout, such as bin links.
+        registry_url: Registry npm and bun both use.
+        extra_env: Extra variables for the layout, such as npm config.
 
     Returns:
         The environment the real runner should use.
@@ -355,7 +357,7 @@ def _isolate(
     for name, target in commands.items():
         (shim / name).symlink_to(target)
     home = tmp_path / "fake-home"
-    home.mkdir()
+    home.mkdir(exist_ok=True)
     monkeypatch.setenv("PATH", f"{shim}{os.pathsep}/bin")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("npm_config_registry", registry_url)
@@ -363,7 +365,7 @@ def _isolate(
     monkeypatch.setenv("npm_config_update_notifier", "false")
     monkeypatch.setenv("npm_config_audit", "false")
     monkeypatch.setenv("npm_config_fund", "false")
-    monkeypatch.setenv("BUN_CONFIG_REGISTRY", _UNREACHABLE_REGISTRY)
+    monkeypatch.setenv("BUN_CONFIG_REGISTRY", registry_url)
     monkeypatch.setenv("BUN_INSTALL_CACHE_DIR", str(tmp_path / "bun-cache"))
     for key, value in extra_env.items():
         monkeypatch.setenv(key, value)
@@ -371,7 +373,11 @@ def _isolate(
 
 
 def _run(argv: list[str], cwd: Path, env: dict[str, str]) -> tuple[int, str]:
-    """Run a real runner.
+    """Run a real runner and report what the launched tool printed.
+
+    Runners write install progress to stderr and the tool writes to stdout, so
+    the last stdout line names what ran; without stdout, the last stderr line
+    carries the failure (``command not found``, ``npm error``).
 
     Args:
         argv: Command to run.
@@ -379,7 +385,7 @@ def _run(argv: list[str], cwd: Path, env: dict[str, str]) -> tuple[int, str]:
         env: Environment from :func:`_isolate`.
 
     Returns:
-        Exit code and the last line of combined output.
+        Exit code and the last stdout line, else the last stderr line.
     """
     result = subprocess.run(  # nosec B603 - fixed argv, shell=False
         argv,
@@ -390,44 +396,43 @@ def _run(argv: list[str], cwd: Path, env: dict[str, str]) -> tuple[int, str]:
         timeout=180,
         check=False,
     )
-    lines = (result.stdout + result.stderr).strip().splitlines()
+    lines = result.stdout.strip().splitlines() or result.stderr.strip().splitlines()
     return result.returncode, lines[-1] if lines else ""
 
 
-def _npx_then_probe(
+def _probe_then_npx(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     registry_url: str,
     build: Callable[[Path], Path],
-    extra_env: dict[str, str] | None = None,
+    configure: Callable[[Path, Path], dict[str, str]] | None = None,
 ) -> tuple[int, str, ToolSnapshot]:
-    """Run real npx in a layout, then lintro's probe for the same directory.
+    """Probe with lintro, then run the exact npx command lintro generated.
 
     Args:
         tmp_path: Temporary directory provided by pytest.
         monkeypatch: Scoped environment override.
         registry_url: Localhost registry URL.
         build: Layout builder returning the execution directory.
-        extra_env: Extra variables for both npx and lintro.
+        configure: Writes npm config for the layout and returns extra env.
 
     Returns:
-        npx's exit code, its last output line, and lintro's snapshot.
+        npx's exit code, what it launched, and lintro's snapshot.
     """
     assert _NPX is not None and _NODE is not None
     cwd = build(tmp_path)
+    extra = configure(tmp_path, cwd) if configure is not None else {}
     env = _isolate(
         monkeypatch,
         tmp_path,
         {"npx": _NPX, "node": _NODE},
         registry_url,
-        extra_env or {},
+        extra,
     )
-    code, launched = _run(
-        ["npx", "--yes", "--package", f"prettier@{_PIN}", "prettier"],
-        cwd,
-        env,
-    )
-    return code, launched, snapshots.probe_tool("prettier", search_root=cwd)
+    snapshot = snapshots.probe_tool("prettier", search_root=cwd)
+    assert_that(snapshot.command[0]).is_equal_to("npx")
+    code, launched = _run(list(snapshot.command), cwd, env)
+    return code, launched, snapshot
 
 
 def _assert_never_a_false_pass(snapshot: ToolSnapshot, launched: str) -> None:
@@ -435,54 +440,319 @@ def _assert_never_a_false_pass(snapshot: ToolSnapshot, launched: str) -> None:
 
     Args:
         snapshot: lintro's probe result.
-        launched: What real npx printed.
+        launched: What the command lintro generated printed.
     """
     if snapshot.available and snapshot.version_check_passed:
         assert_that(snapshot.command[0]).is_equal_to("npx")
         assert_that(launched).is_equal_to(f"registry {snapshot.version}")
 
 
+def _require_clean_ancestry(tmp_path: Path) -> None:
+    """Skip when a ``node_modules`` or ``package.json`` sits above *tmp_path*.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    origin = tmp_path.resolve()
+    for directory in (origin, *origin.parents):
+        if (directory / "node_modules").exists() or (
+            directory / "package.json"
+        ).exists():
+            pytest.skip(f"{directory} holds npm project files above the test directory")
+
+
+# ---------------------------------------------------------------------------
+# Workspace layouts and npm config sources
+# ---------------------------------------------------------------------------
+
+
+def _member_tree(tmp_path: Path, *, nested_pin: bool) -> Path:
+    """Workspace root without ``node_modules``; the member has its own tree.
+
+    The member ``packages/app`` holds prettier 1.0.0 with its ``.bin`` link
+    and, when *nested_pin*, a transitive copy at the pin.
+
+    Args:
+        tmp_path: Directory to build in.
+        nested_pin: Whether the member's tree also holds the pin.
+
+    Returns:
+        The workspace root, where lintro and npx run.
+    """
+    root = tmp_path / "ws"
+    app = _workspace(root)
+    _hoist_older(app)
+    if nested_pin:
+        wrapper = app / "node_modules" / "wrapper"
+        _package(wrapper, "1.0.0", name="wrapper", dependencies={"prettier": _PIN})
+        _package(wrapper / "node_modules" / "prettier", _PIN)
+    return root
+
+
+def _at_root(build: Callable[[Path], Path]) -> Callable[[Path], Path]:
+    """Run a workspace-member layout from its workspace root instead.
+
+    With ``--workspaces=false`` npm stops at the member's own ``package.json``
+    and never loads the root tree, so these variants keep the root tree in
+    play.
+
+    Args:
+        build: Builder returning ``<root>/packages/app``.
+
+    Returns:
+        A builder returning ``<root>``.
+    """
+    return lambda tmp_path: build(tmp_path).parent.parent
+
+
+def _member_tree_with_pin(tmp_path: Path) -> Path:
+    return _member_tree(tmp_path, nested_pin=True)
+
+
+def _member_tree_without_pin(tmp_path: Path) -> Path:
+    return _member_tree(tmp_path, nested_pin=False)
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _env(**values: str) -> Callable[[Path, Path], dict[str, str]]:
+    """Config source: environment variables only.
+
+    Args:
+        **values: Variables to set.
+
+    Returns:
+        A configure callable for :func:`_probe_then_npx`.
+    """
+    return lambda _tmp, _cwd: dict(values)
+
+
+def _project_rc(text: str) -> Callable[[Path, Path], dict[str, str]]:
+    """Config source: ``.npmrc`` in the execution directory.
+
+    Args:
+        text: File content.
+
+    Returns:
+        A configure callable for :func:`_probe_then_npx`.
+    """
+
+    def configure(_tmp: Path, cwd: Path) -> dict[str, str]:
+        _write(cwd / ".npmrc", text)
+        return {}
+
+    return configure
+
+
+def _user_rc(text: str) -> Callable[[Path, Path], dict[str, str]]:
+    """Config source: ``$HOME/.npmrc``.
+
+    Args:
+        text: File content.
+
+    Returns:
+        A configure callable for :func:`_probe_then_npx`.
+    """
+
+    def configure(tmp: Path, _cwd: Path) -> dict[str, str]:
+        _write(tmp / "fake-home" / ".npmrc", text)
+        return {}
+
+    return configure
+
+
+def _userconfig_rc(text: str) -> Callable[[Path, Path], dict[str, str]]:
+    """Config source: a file named by ``npm_config_userconfig``.
+
+    Args:
+        text: File content.
+
+    Returns:
+        A configure callable for :func:`_probe_then_npx`.
+    """
+
+    def configure(tmp: Path, _cwd: Path) -> dict[str, str]:
+        _write(tmp / "custom-userrc", text)
+        return {"npm_config_userconfig": str(tmp / "custom-userrc")}
+
+    return configure
+
+
+def _globalconfig_rc(text: str) -> Callable[[Path, Path], dict[str, str]]:
+    """Config source: a file named by ``npm_config_globalconfig``.
+
+    Args:
+        text: File content.
+
+    Returns:
+        A configure callable for :func:`_probe_then_npx`.
+    """
+
+    def configure(tmp: Path, _cwd: Path) -> dict[str, str]:
+        _write(tmp / "globalrc", text)
+        return {"npm_config_globalconfig": str(tmp / "globalrc")}
+
+    return configure
+
+
+def _global_prefix_with_older_bin(tmp: Path, _cwd: Path) -> dict[str, str]:
+    """Config source: a global prefix holding the pin behind an older ``bin``.
+
+    Args:
+        tmp: Temporary directory.
+        _cwd: Execution directory (unused).
+
+    Returns:
+        Extra environment pointing npm at the prefix.
+    """
+    prefix = tmp / "global-prefix"
+    _package(prefix / "lib" / "node_modules" / "prettier", _PIN)
+    _package(
+        prefix / "lib" / "node_modules" / "old",
+        _OLDER,
+        name="old",
+        label=f"global {_OLDER}",
+    )
+    (prefix / "bin").mkdir(parents=True)
+    (prefix / "bin" / "prettier").symlink_to("../lib/node_modules/old/bin.js")
+    return {"npm_config_prefix": str(prefix)}
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
+_Configure = Callable[[Path, Path], dict[str, str]] | None
 
-_REFUSED_LAYOUTS: list[tuple[str, Callable[[Path], Path], dict[str, str], str]] = [
+#: (id, layout, config, what lintro's generated npx command launches, reason).
+#: From a workspace member, ``--workspaces=false`` keeps npm on the member's
+#: own tree, so npx often runs the pin there; lintro still refuses, because a
+#: ``node_modules`` it cannot vouch for sits above. From the root, npx still
+#: fails with every flag set (``-at-root``, ``member-tree-*``). A root with its
+#: own ``node_modules/.bin/prettier`` never reaches npx: lintro resolves and
+#: probes that concrete binary instead.
+_REFUSED: list[tuple[str, Callable[[Path], Path], _Configure, str, str]] = [
     (
         "hoisted-older-pin-elsewhere",
         _hoisted_with_pin_elsewhere,
-        {},
-        f"hoisted {_OLDER}",
+        None,
+        f"registry {_PIN}",
+        "a node_modules tree exists",
     ),
-    ("hoisted-older-no-pin", _hoisted_no_pin, {}, f"registry {_PIN}"),
-    ("nested-pin-no-bin", _nested_pin_no_bin, {}, "not found"),
-    ("outside-bin-no-pin", _outside_bin_no_pin, {}, f"registry {_PIN}"),
-    ("pnpm-transitive-pin", _pnpm_transitive_pin, {}, f"hoisted {_OLDER}"),
-    ("stale-hidden-lockfile", _stale_hidden_lockfile, {}, f"hoisted {_OLDER}"),
     (
-        "bin-links-off-hoisted",
+        "hoisted-older-no-pin",
         _hoisted_no_pin,
-        {"NPM_CONFIG_BIN_LINKS": "false"},
-        f"hoisted {_OLDER}",
+        None,
+        f"registry {_PIN}",
+        "a node_modules tree exists",
     ),
-    ("workspace-brace-glob", _brace_glob, {}, f"hoisted {_OLDER}"),
-    ("workspace-extglob", _extglob, {}, f"hoisted {_OLDER}"),
+    (
+        "nested-pin-no-bin",
+        _nested_pin_no_bin,
+        None,
+        f"registry {_PIN}",
+        "a node_modules tree exists",
+    ),
+    (
+        "nested-pin-no-bin-at-root",
+        _at_root(_nested_pin_no_bin),
+        None,
+        "not found",
+        "a node_modules tree exists",
+    ),
+    (
+        "outside-bin-no-pin",
+        _outside_bin_no_pin,
+        None,
+        f"registry {_PIN}",
+        "a node_modules tree exists",
+    ),
+    (
+        "pnpm-transitive-pin",
+        _pnpm_transitive_pin,
+        None,
+        f"registry {_PIN}",
+        "a node_modules tree exists",
+    ),
+    (
+        "stale-hidden-lockfile",
+        _stale_hidden_lockfile,
+        None,
+        f"registry {_PIN}",
+        "a node_modules tree exists",
+    ),
+    (
+        "workspace-brace-glob",
+        _brace_glob,
+        None,
+        f"registry {_PIN}",
+        "a node_modules tree exists",
+    ),
+    (
+        "workspace-extglob",
+        _extglob,
+        None,
+        f"registry {_PIN}",
+        "a node_modules tree exists",
+    ),
+    # Workspace selection from the review: the root has no node_modules, a
+    # member does. The root declares workspaces, so npm loads the member's
+    # tree from it whatever the flags say.
+    (
+        "member-tree-no-config",
+        _member_tree_with_pin,
+        None,
+        "not found",
+        "declares npm workspaces",
+    ),
+    (
+        "member-tree-env-workspaces",
+        _member_tree_with_pin,
+        _env(npm_config_workspaces="true"),
+        "not found",
+        "declares npm workspaces",
+    ),
+    (
+        "member-tree-env-workspace",
+        _member_tree_with_pin,
+        _env(npm_config_workspace="app"),
+        "npm error",
+        "declares npm workspaces",
+    ),
+    (
+        "member-tree-npmrc-workspaces",
+        _member_tree_with_pin,
+        _project_rc("workspaces=true\n"),
+        "not found",
+        "declares npm workspaces",
+    ),
+    (
+        "member-tree-npmrc-bin-links-off",
+        _member_tree_without_pin,
+        _project_rc("bin-links=false\nworkspaces=true\n"),
+        f"registry {_PIN}",
+        "declares npm workspaces",
+    ),
 ]
 
 
 @requires_npx
 @pytest.mark.parametrize(
-    ("build", "extra_env", "npx_ran"),
-    [(build, env, ran) for _name, build, env, ran in _REFUSED_LAYOUTS],
-    ids=[name for name, _build, _env, _ran in _REFUSED_LAYOUTS],
+    ("build", "configure", "npx_ran", "reason"),
+    [(build, conf, ran, why) for _id, build, conf, ran, why in _REFUSED],
+    ids=[case[0] for case in _REFUSED],
 )
-def test_npx_only_with_a_node_modules_tree_is_refused(
+def test_npx_only_with_reusable_npm_state_is_refused(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     registry: str,
     build: Callable[[Path], Path],
-    extra_env: dict[str, str],
+    configure: _Configure,
     npx_ran: str,
+    reason: str,
 ) -> None:
     """Wherever npx could reuse something, lintro refuses instead of trusting the pin.
 
@@ -491,120 +761,152 @@ def test_npx_only_with_a_node_modules_tree_is_refused(
         monkeypatch: Scoped environment override.
         registry: Localhost registry URL.
         build: Layout builder.
-        extra_env: Extra variables for the layout.
-        npx_ran: What real npx prints in this layout.
+        configure: npm config for the layout.
+        npx_ran: What lintro's generated npx command launches here.
+        reason: Text the refusal must contain.
     """
-    _code, launched, snapshot = _npx_then_probe(
+    _code, launched, snapshot = _probe_then_npx(
         tmp_path,
         monkeypatch,
         registry,
         build,
-        extra_env,
+        configure,
     )
 
     assert_that(launched).contains(npx_ran)
     assert_that(snapshot.available).is_false()
     assert_that(snapshot.version).is_none()
-    assert_that(snapshot.probe_error).contains(_REFUSAL)
+    assert_that(snapshot.probe_error).contains(_REFUSAL).contains(reason)
     _assert_never_a_false_pass(snapshot, launched)
 
 
-def _has_node_modules_above(directory: Path) -> bool:
-    """Report whether a ``node_modules`` exists in *directory* or an ancestor.
-
-    Args:
-        directory: Directory to start from.
-
-    Returns:
-        True when the clean-project precondition cannot hold on this machine.
-    """
-    origin = directory.resolve()
-    return any((d / "node_modules").exists() for d in (origin, *origin.parents))
+#: ``workspace=<name>`` cannot be cleared by any npx flag, so each source is
+#: detected and refused; npx itself exits with an npm error.
+_WORKSPACE_SELECTED: list[tuple[str, Callable[[Path, Path], dict[str, str]], str]] = [
+    ("env", _env(npm_config_workspace="app"), "npm_config_workspace=app"),
+    ("env-upper", _env(NPM_CONFIG_WORKSPACE="app"), "NPM_CONFIG_WORKSPACE=app"),
+    ("project-npmrc", _project_rc("workspace=app\n"), "proj/.npmrc"),
+    ("user-npmrc", _user_rc("workspace=app\n"), "fake-home/.npmrc"),
+    ("userconfig", _userconfig_rc("workspace[]=app\n"), "custom-userrc"),
+    ("globalconfig", _globalconfig_rc("workspace=app\n"), "globalrc"),
+]
 
 
 @requires_npx
-def test_npx_only_in_a_clean_project_trusts_the_pin_npx_runs(
+@pytest.mark.parametrize(
+    ("configure", "named"),
+    [(conf, named) for _id, conf, named in _WORKSPACE_SELECTED],
+    ids=[case[0] for case in _WORKSPACE_SELECTED],
+)
+def test_npx_only_with_a_selected_workspace_is_refused(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     registry: str,
+    configure: Callable[[Path, Path], dict[str, str]],
+    named: str,
 ) -> None:
-    """With nothing to reuse, npx runs the pin and lintro reports exactly that.
+    """A configured ``workspace`` makes npx fail, so lintro refuses it.
 
     Args:
         tmp_path: Temporary directory provided by pytest.
         monkeypatch: Scoped environment override.
         registry: Localhost registry URL.
+        configure: Where the setting comes from.
+        named: Text naming that source in the refusal.
     """
-    if _has_node_modules_above(tmp_path):
-        pytest.skip("a node_modules directory exists above the temporary directory")
+    _require_clean_ancestry(tmp_path)
 
-    code, launched, snapshot = _npx_then_probe(
+    code, launched, snapshot = _probe_then_npx(
         tmp_path,
         monkeypatch,
         registry,
         _clean_project,
+        configure,
+    )
+
+    assert_that(code).is_not_zero()
+    assert_that(launched).contains("npm error")
+    assert_that(snapshot.available).is_false()
+    assert_that(snapshot.probe_error).contains("npm workspace selection is configured")
+    assert_that(snapshot.probe_error).contains(named)
+    _assert_never_a_false_pass(snapshot, launched)
+
+
+#: Settings the generated command's flags neutralise: lintro trusts the pin
+#: and the generated command really runs it.
+_NEUTRALISED: list[tuple[str, _Configure]] = [
+    ("no-config", None),
+    ("env-workspaces", _env(npm_config_workspaces="true")),
+    ("project-npmrc-workspaces", _project_rc("workspaces=true\n")),
+    ("env-bin-links-off", _env(NPM_CONFIG_BIN_LINKS="false")),
+    ("project-npmrc-bin-links-off", _project_rc("bin-links=false\n")),
+    ("user-npmrc-bin-links-off", _user_rc("bin-links=false\n")),
+    ("globalconfig-bin-links-off", _globalconfig_rc("bin-links=false\n")),
+    ("env-global", _env(npm_config_global="true")),
+    ("global-prefix-older-bin", _global_prefix_with_older_bin),
+]
+
+
+@requires_npx
+@pytest.mark.parametrize(
+    "configure",
+    [conf for _id, conf in _NEUTRALISED],
+    ids=[case[0] for case in _NEUTRALISED],
+)
+def test_npx_only_in_a_clean_project_runs_the_pin_lintro_reports(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+    configure: _Configure,
+) -> None:
+    """With nothing to reuse, the generated npx command runs the reported pin.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+        configure: npm config the flags must neutralise.
+    """
+    _require_clean_ancestry(tmp_path)
+
+    code, launched, snapshot = _probe_then_npx(
+        tmp_path,
+        monkeypatch,
+        registry,
+        _clean_project,
+        configure,
     )
 
     assert_that(code).is_zero()
     assert_that(launched).is_equal_to(f"registry {_PIN}")
-    assert_that(snapshot.command[0]).is_equal_to("npx")
     assert_that(snapshot.available).is_true()
     assert_that(snapshot.version).is_equal_to(_PIN)
     _assert_never_a_false_pass(snapshot, launched)
 
 
-@requires_npx
-def test_npx_only_with_bin_links_off_is_refused_even_when_clean(
+@require_command("bun", ["bun"], min_version=NO_MIN_VERSION)
+def test_bunx_runs_the_pin_beside_a_hoisted_copy_and_the_gate_reports_it(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     registry: str,
 ) -> None:
-    """Bin links off: npx installs the pin but cannot run it; lintro refuses.
+    """Bun fetches the pin from the registry and runs it, never the local tree.
 
     Args:
         tmp_path: Temporary directory provided by pytest.
         monkeypatch: Scoped environment override.
-        registry: Localhost registry URL.
-    """
-    if _has_node_modules_above(tmp_path):
-        pytest.skip("a node_modules directory exists above the temporary directory")
-
-    code, launched, snapshot = _npx_then_probe(
-        tmp_path,
-        monkeypatch,
-        registry,
-        _clean_project,
-        {"NPM_CONFIG_BIN_LINKS": "false"},
-    )
-
-    assert_that(code).is_equal_to(127)
-    assert_that(launched).contains("not found")
-    assert_that(snapshot.available).is_false()
-    assert_that(snapshot.probe_error).contains("bin links are disabled")
-    _assert_never_a_false_pass(snapshot, launched)
-
-
-@require_command("bunx", ["bunx"], min_version=NO_MIN_VERSION)
-def test_bunx_ignores_the_hoisted_binary_and_the_gate_keeps_the_pin(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """With bunx, the registry pin runs and the local tree is never used.
-
-    Args:
-        tmp_path: Temporary directory provided by pytest.
-        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL, served to bun too.
     """
     bunx = shutil.which("bunx")
     assert bunx is not None
     cwd = _hoisted_with_pin_elsewhere(tmp_path)
-    env = _isolate(monkeypatch, tmp_path, {"bunx": bunx}, _UNREACHABLE_REGISTRY, {})
+    env = _isolate(monkeypatch, tmp_path, {"bunx": bunx}, registry, {})
 
-    _code, launched = _run(["bunx", f"prettier@{_PIN}"], cwd, env)
     snapshot = snapshots.probe_tool("prettier", search_root=cwd)
+    code, launched = _run(list(snapshot.command), cwd, env)
 
-    assert_that(launched).does_not_contain("hoisted")
-    assert_that(launched).does_not_contain("nested")
     assert_that(snapshot.command[0]).is_equal_to("bunx")
     assert_that(snapshot.available).is_true()
     assert_that(snapshot.version).is_equal_to(_PIN)
+    assert_that(code).is_zero()
+    assert_that(launched).is_equal_to(f"registry {_PIN}")

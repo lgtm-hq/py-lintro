@@ -35,7 +35,10 @@ from typing import TYPE_CHECKING, ClassVar
 from loguru import logger
 
 from lintro.plugins.subprocess_executor import is_compiled_binary
-from lintro.tools.core.node_fallback import notify_registry_fallback_selected
+from lintro.tools.core.node_fallback import (
+    NPX_ISOLATION_FLAGS,
+    notify_registry_fallback_selected,
+)
 
 if TYPE_CHECKING:
     from lintro.enums.tool_name import ToolName
@@ -665,7 +668,14 @@ class NodeJSBuilder(CommandBuilder):
                 if runner == "npx":
                     # The version gate refuses this unless npx can only run
                     # the pin (``node_fallback.npx_pin_refusal``, #2043).
-                    command = ["npx", "--yes", "--package", spec, binary_name]
+                    command = [
+                        "npx",
+                        "--yes",
+                        *NPX_ISOLATION_FLAGS,
+                        "--package",
+                        spec,
+                        binary_name,
+                    ]
                 elif package_name == binary_name:
                     command = [runner, spec]
                 else:

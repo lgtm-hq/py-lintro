@@ -1390,26 +1390,38 @@ Rationale:
 
    `npx` does not always run its pin. It reuses whatever npm finds installed and then
    runs `<binary>` by name from any `node_modules/.bin` above the checked directory, so
-   a hoisted older copy, a pnpm store, a stale `node_modules/.package-lock.json` or a
-   workspace glob npm reads differently can make it run another version. With npm bin
-   links disabled, it installs the pin but links no executable and falls back to
-   whatever is on `PATH`. Lintro therefore trusts an npx pin only when **both** of these
-   hold:
+   a hoisted older copy, a pnpm store, a stale `node_modules/.package-lock.json`, a
+   workspace glob npm reads differently, or npm config that selects a workspace can make
+   it run another version, or nothing. Lintro guards the npx branch in two ways.
+
+   **Flags on the generated command.** Every npx fallback runs as `npx --yes`, then
+   `--workspaces=false`, `--include-workspace-root=false`, `--bin-links=true` and
+   `--global=false`, then `--package <package>@<pinned> <binary>`. Each flag overrides
+   the same setting from the environment (`npm_config_*`) and from the project, user
+   (`~/.npmrc` or `userconfig`) and global (`globalconfig`) npmrc files. So
+   `workspaces=true`, `bin-links=false` and `global=true` cannot change what runs.
+
+   **Refusal when npx could still reuse something.** The pin is trusted only when all of
+   these hold, and the tool is **unavailable** otherwise:
 
    - no `node_modules` directory exists in the checked directory or any directory above
      it, up to the filesystem root;
-   - `NPM_CONFIG_BIN_LINKS` / `npm_config_bin_links` is unset or `true`.
+   - no `package.json` there or above declares `workspaces` (npm loads every member's
+     own `node_modules` from the workspace root), is the package itself, or fails to
+     parse;
+   - `workspace=<name>` is not set in the environment or in any npmrc npm would read:
+     the project `.npmrc` (checked in every directory upward), the user file, the global
+     file and npm's builtin `npmrc`. No flag clears that setting, and npm refuses to run
+     with it, so Lintro refuses first. An npmrc that cannot be read also refuses.
 
-   In every other npx-only case the tool is **unavailable**. The reason names the
-   `node_modules` directory (or the bin-links setting) it found, says that
-   `npx may run an unpinned copy`, and ends with
-   `Install <pkg>@<pinned> locally or install bun.`
+   The reason names what it found, says that `npx may run an unpinned copy`, and ends
+   with `Install <pkg>@<pinned> locally or install bun.`
 
-   **Trade-off:** if `npx` is your only runner and a `node_modules` tree is in reach,
-   the automatic registry fallback no longer runs for a Node tool you have not
-   installed. Add the tool as a devDependency (branch 1), install it globally (branch
-   2), or install bun. `bunx <pkg>@<pinned>` always resolves from the registry and never
-   runs the local tree, so it is not restricted.
+   **Trade-off:** if `npx` is your only runner and a `node_modules` tree or a workspace
+   root is in reach, the automatic registry fallback no longer runs for a Node tool you
+   have not installed. Add the tool as a devDependency (branch 1), install it globally
+   (branch 2), or install bun. `bunx <pkg>@<pinned>` always resolves from the registry
+   and never runs the local tree, so it is not restricted.
 
 4. **bare `<binary>`** — last resort, fails if nothing is installed.
 

@@ -14,9 +14,11 @@ itself (see issue #1767).
 
 from __future__ import annotations
 
+import json
 import os
 import re
-from collections.abc import Mapping, Sequence
+import shutil
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
 from loguru import logger
@@ -39,10 +41,28 @@ REGISTRY_RUNNERS: frozenset[str] = frozenset({"bunx", "npx"})
 # a boolean runner flag (see ``RUNNER_FLAGS``).
 PACKAGE_FLAGS: frozenset[str] = frozenset({"-p", "--package"})
 
+#: Flags on every npx fallback so npm configuration cannot change what runs
+#: (#2043). Verified with npx 11.20.0 against a localhost registry: each one
+#: overrides the same setting from the environment and from the project, user
+#: (``~/.npmrc`` or ``userconfig``) and global (``globalconfig``) npmrc files.
+#: ``--workspaces=false`` and ``--include-workspace-root=false`` stop workspace
+#: selection moving the run into a member with its own ``node_modules/.bin``;
+#: ``--bin-links=true`` makes the installed pin's executable exist;
+#: ``--global=false`` stops ``global=true`` breaking the run. A configured
+#: ``workspace=<name>`` cannot be cleared by any flag; see
+#: :func:`npx_pin_refusal`.
+NPX_ISOLATION_FLAGS: tuple[str, ...] = (
+    "--workspaces=false",
+    "--include-workspace-root=false",
+    "--bin-links=true",
+    "--global=false",
+)
+
 # Boolean runner flags that may precede the package spec or ``--package``.
 # Skipped when recovering the spec from a resolved command. ``--yes`` / ``-y``
-# is npx's non-interactive install flag, not a package selector.
-RUNNER_FLAGS: frozenset[str] = frozenset({"--yes", "-y"})
+# is npx's non-interactive install flag, not a package selector; the isolation
+# flags are fixed settings, not selectors either.
+RUNNER_FLAGS: frozenset[str] = frozenset({"--yes", "-y", *NPX_ISOLATION_FLAGS})
 
 # Node runtime floors that a pinned npm tool imposes on the consumer once the
 # registry fallback (or a local install) is used. These come from the pinned
@@ -122,9 +142,196 @@ def registry_fallback_spec(command: Sequence[str]) -> str | None:
     return command[index]
 
 
-#: npm config key that, when false, stops npx linking the pinned package's
-#: executable after installing it (env spellings are matched case-insensitively).
-_BIN_LINKS_ENV: str = "npm_config_bin_links"
+#: npm config that selects a workspace and cannot be cleared by a flag: with
+#: ``--workspaces=false`` npm 11 refuses to run at all.
+_WORKSPACE_KEY: str = "workspace"
+
+
+def _env_value(env: Mapping[str, str], name: str) -> tuple[str, str] | None:
+    """Look up an ``npm_config_*`` variable as npm does, ignoring case.
+
+    Args:
+        env: Environment npx would inherit.
+        name: Config name, such as ``userconfig``.
+
+    Returns:
+        The matching key and its value, or None.
+    """
+    wanted = f"npm_config_{name}"
+    for key, value in env.items():
+        if key.lower() == wanted:
+            return key, value
+    return None
+
+
+def _read_npmrc(path: Path) -> dict[str, list[str]] | None:
+    """Read the keys of an npmrc file, as lower-cased names to values.
+
+    Only key names and values are needed, so the parse is permissive: comments
+    and blank lines are skipped, ``key[]`` is folded into ``key``, quotes are
+    stripped, and ``${VAR}`` and ``~`` are expanded in values. Keys inside
+    ``[section]`` blocks are kept too, which can only add matches.
+
+    Args:
+        path: File to read.
+
+    Returns:
+        The keys found (empty when the file does not exist), or None when the
+        file exists but cannot be read.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}
+    except (OSError, UnicodeDecodeError):
+        return None
+    keys: dict[str, list[str]] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line[0] in ";#" or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        name = key.strip().strip("\"'").removesuffix("[]").lower()
+        cleaned = os.path.expanduser(os.path.expandvars(value.strip().strip("\"'")))
+        keys.setdefault(name, []).append(cleaned)
+    return keys
+
+
+def _npm_root() -> Path | None:
+    """Locate the npm package npx belongs to, for its builtin ``npmrc``.
+
+    Returns:
+        npm's package directory, or None when npx is not on ``PATH``.
+    """
+    npx = shutil.which("npx")
+    if npx is None:
+        return None
+    # npx is a link to ``<npm>/bin/npx-cli.js``.
+    return Path(npx).resolve().parent.parent
+
+
+def _global_prefixes(env: Mapping[str, str], configured: list[str]) -> Iterator[Path]:
+    """Yield every directory npm might use as its global prefix.
+
+    Args:
+        env: Environment npx would inherit.
+        configured: ``prefix`` values found in npmrc files.
+
+    Yields:
+        Path: Candidate prefixes (duplicates are harmless).
+    """
+    found = _env_value(env, "prefix")
+    if found is not None:
+        yield Path(os.path.expanduser(found[1]))
+    yield from (Path(value) for value in configured)
+    if env.get("PREFIX"):
+        yield Path(env["PREFIX"])
+    node = shutil.which("node")
+    if node is not None:
+        for binary in (Path(node), Path(node).resolve()):
+            prefix = binary.parent.parent
+            yield prefix
+            if env.get("DESTDIR"):
+                yield Path(env["DESTDIR"]) / prefix.relative_to(prefix.anchor)
+
+
+def _npmrc_candidates(cwd: Path, env: Mapping[str, str]) -> Iterator[Path]:
+    """Yield every npmrc file npm 11 could read for a run in *cwd*.
+
+    Follows ``@npmcli/config``: builtin ``<npm>/npmrc``, the project
+    ``.npmrc`` (every ancestor is checked, a superset of the project root),
+    ``userconfig`` (default ``~/.npmrc``) and ``globalconfig`` (default
+    ``<prefix>/etc/npmrc``). Locations configured inside earlier files are
+    followed, as npm does.
+
+    Args:
+        cwd: Directory npx would run in.
+        env: Environment npx would inherit.
+
+    Yields:
+        Path: Candidate files, some of which may not exist.
+    """
+    root = _npm_root()
+    early = [] if root is None else [root / "npmrc"]
+    origin = cwd.resolve()
+    early.extend(directory / ".npmrc" for directory in (origin, *origin.parents))
+    yield from early
+    settings: dict[str, list[str]] = {}
+    for path in early:
+        for key, values in (_read_npmrc(path) or {}).items():
+            settings.setdefault(key, []).extend(values)
+    users = [Path.home() / ".npmrc", *(Path(v) for v in settings.get("userconfig", []))]
+    found = _env_value(env, "userconfig")
+    if found is not None:
+        users.append(Path(os.path.expanduser(found[1])))
+    yield from users
+    for path in users:
+        for key, values in (_read_npmrc(path) or {}).items():
+            settings.setdefault(key, []).extend(values)
+    found = _env_value(env, "globalconfig")
+    if found is not None:
+        yield Path(os.path.expanduser(found[1]))
+    yield from (Path(value) for value in settings.get("globalconfig", []))
+    for prefix in _global_prefixes(env, settings.get("prefix", [])):
+        yield prefix / "etc" / "npmrc"
+
+
+def _workspace_config_reason(cwd: Path, env: Mapping[str, str]) -> str | None:
+    """Refuse when npm is configured to select a workspace.
+
+    Args:
+        cwd: Directory npx would run in.
+        env: Environment npx would inherit.
+
+    Returns:
+        Why npx cannot be trusted, or None.
+    """
+    found = _env_value(env, _WORKSPACE_KEY)
+    if found is not None:
+        return f"npm workspace selection is configured ({found[0]}={found[1]})"
+    seen: set[Path] = set()
+    for path in _npmrc_candidates(cwd, env):
+        if path in seen:
+            continue
+        seen.add(path)
+        keys = _read_npmrc(path)
+        if keys is None:
+            return f"{path.as_posix()} cannot be read"
+        if _WORKSPACE_KEY in keys:
+            return f"npm workspace selection is configured in {path.as_posix()}"
+    return None
+
+
+def _project_reason(cwd: Path, package: str) -> str | None:
+    """Refuse when npm's project tree could already hold something to run.
+
+    Args:
+        cwd: Directory npx would run in.
+        package: npm package the spec names.
+
+    Returns:
+        Why npx cannot be trusted, or None.
+    """
+    origin = cwd.resolve()
+    for directory in (origin, *origin.parents):
+        tree = directory / "node_modules"
+        if tree.exists():
+            return f"a node_modules tree exists at {tree.as_posix()}"
+        manifest = directory / "package.json"
+        if not manifest.exists():
+            continue
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return f"{manifest.as_posix()} cannot be read"
+        if not isinstance(data, dict):
+            return f"{manifest.as_posix()} cannot be read"
+        if "workspaces" in data:
+            # npm loads every member's node_modules from the workspace root.
+            return f"{manifest.as_posix()} declares npm workspaces"
+        if data.get("name") == package:
+            return f"{manifest.as_posix()} is the {package} package itself"
+    return None
 
 
 def npx_pin_refusal(
@@ -136,15 +343,22 @@ def npx_pin_refusal(
 ) -> str | None:
     """Refuse an npx-only fallback unless npx can only run the pinned package.
 
-    ``npx --package <pkg>@<pin> <bin>`` reuses whatever npm finds installed
-    and then runs ``<bin>`` by name from any ancestor ``node_modules/.bin``,
-    so a ``node_modules`` tree can make it launch a different version than the
-    pin (hoisted copies, pnpm stores, a stale hidden lockfile, workspace globs
-    npm resolves differently). With bin links disabled it installs the pin but
-    links no executable, and again falls back to whatever is on ``PATH``.
-    Predicting npm's choice is a moving target, so the pin is trusted only when
-    there is nothing for npx to reuse (#2043). ``bunx <pkg>@<pin>`` always
-    resolves from the registry and is not subject to this rule.
+    ``npx --package <pkg>@<pin> <bin>`` reuses whatever npm finds in its
+    project tree and then runs ``<bin>`` by name from any ancestor
+    ``node_modules/.bin``, so an installed tree can make it launch a different
+    version than the pin, or nothing (#2043). The generated command carries
+    :data:`NPX_ISOLATION_FLAGS`, which neutralise workspace, bin-link and
+    global settings from every config source. What remains is refused here:
+
+    - a ``node_modules`` directory in *cwd* or any ancestor;
+    - a ``package.json`` in *cwd* or any ancestor that declares
+      ``workspaces`` (npm loads members' trees from the root), is the package
+      itself, or cannot be parsed;
+    - ``workspace=<name>`` in the environment or in any npmrc npm would read,
+      or an npmrc that cannot be read.
+
+    ``bunx <pkg>@<pin>`` always resolves from the registry and is not subject
+    to this rule.
 
     Args:
         cwd: Directory npx would run in.
@@ -155,24 +369,14 @@ def npx_pin_refusal(
     Returns:
         None when the pin is what npx runs, otherwise an actionable reason.
     """
-    remedy = f"Install {package}@{pin} locally or install bun."
     env = os.environ if environ is None else environ
-    for key, value in env.items():
-        # Unset or explicitly true is safe; anything else may disable links.
-        if key.lower() == _BIN_LINKS_ENV and value.strip().lower() != "true":
-            return (
-                f"only npx is available and npm bin links are disabled "
-                f"({key}={value}); npx may run an unpinned copy. {remedy}"
-            )
-    origin = cwd.resolve()
-    for directory in (origin, *origin.parents):
-        tree = directory / "node_modules"
-        if tree.exists():
-            return (
-                f"only npx is available and a node_modules tree exists at "
-                f"{tree.as_posix()}; npx may run an unpinned copy. {remedy}"
-            )
-    return None
+    reason = _project_reason(cwd, package) or _workspace_config_reason(cwd, env)
+    if reason is None:
+        return None
+    return (
+        f"only npx is available and {reason}; npx may run an unpinned copy. "
+        f"Install {package}@{pin} locally or install bun."
+    )
 
 
 def is_registry_fallback_command(command: Sequence[str]) -> bool:
