@@ -174,6 +174,32 @@ def test_run_has_unreported_failure(
     ).is_equal_to(not expected)
 
 
+def test_execution_failure_with_findings_is_an_unreported_failure() -> None:
+    """Findings that survived a partial run do not make its counts usable.
+
+    A tool that withheld files it would misread keeps the findings for the
+    rest but never inspected those files (#3393), so neither a badge nor the
+    severity baseline may use the run.
+    """
+    partial = ToolResult(
+        name="stylelint",
+        success=False,
+        issues_count=1,
+        issues=[RuffIssue(file="a.css", line=1, code="X", message="kept")],
+        execution_failed=True,
+        findings_complete=False,
+    )
+
+    assert_that(run_has_unreported_failure([_real_result(), partial])).is_true()
+    assert_that(
+        baseline_is_eligible(
+            action=Action.CHECK,
+            dry_run_preview=False,
+            tool_results=[_real_result(), partial],
+        ),
+    ).is_false()
+
+
 def test_run_has_unreported_failure_accepts_an_empty_run() -> None:
     """An empty run has no failed tool, even though it cannot publish counts."""
     assert_that(run_has_unreported_failure([])).is_false()

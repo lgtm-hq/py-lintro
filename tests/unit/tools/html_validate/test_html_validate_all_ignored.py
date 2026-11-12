@@ -276,3 +276,46 @@ def test_matches_itself_by_platform(path: str, sep: str, expected: bool) -> None
         expected: Whether html-validate's expansion maps the path to itself.
     """
     assert_that(definition.matches_itself(path, sep=sep)).is_equal_to(expected)
+
+
+# Each case was checked against html-validate 11.21.0: ``True`` names resolve
+# to themselves, ``False`` names resolve to another file or to nothing.
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        pytest.param("(app)/page.html", True, id="sveltekit-route-group"),
+        pytest.param("src/routes/(app)/+page.svelte", True, id="route-group-page"),
+        pytest.param("page (1).html", True, id="copy-suffix"),
+        pytest.param("a(b.html", True, id="lone-open-paren"),
+        pytest.param("x!y(z).html", True, id="bang-not-before-paren"),
+        pytest.param("a]b[c.html", True, id="bracket-without-later-close"),
+        pytest.param("{a}b{c}.html", True, id="braces-without-comma"),
+        pytest.param("a}b,c{.html", True, id="brace-without-later-close"),
+        pytest.param("a+(b).html", False, id="extglob-plus"),
+        pytest.param("x@(y).html", False, id="extglob-at"),
+        pytest.param("!(z).html", False, id="extglob-bang"),
+        pytest.param("?(q).html", False, id="extglob-question"),
+        pytest.param("*(r).html", False, id="extglob-star"),
+        pytest.param("[a].html", False, id="character-class"),
+        pytest.param("[]].html", False, id="character-class-of-close"),
+        pytest.param("(x)/[y]/p.html", False, id="class-in-directory"),
+        pytest.param("{a,b}.html", False, id="brace-list"),
+        pytest.param("{1..2}.html", False, id="brace-range"),
+        pytest.param("{a}b,c}.html", False, id="comma-before-later-brace"),
+        pytest.param("a*b.html", False, id="star"),
+        pytest.param("a?b.html", False, id="question"),
+        pytest.param("[].html", False, id="empty-class-held-back-anyway"),
+        pytest.param("a+(b.html", False, id="unclosed-extglob-held-back-anyway"),
+    ],
+)
+def test_matches_itself_holds_back_only_misread_shapes(
+    path: str,
+    expected: bool,
+) -> None:
+    """Parentheses, brackets and braces are unsafe only in glob shapes.
+
+    Args:
+        path: A relative path on POSIX.
+        expected: Whether html-validate's expansion maps the path to itself.
+    """
+    assert_that(definition.matches_itself(path, sep="/")).is_equal_to(expected)

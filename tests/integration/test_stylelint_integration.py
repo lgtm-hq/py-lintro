@@ -14,7 +14,9 @@ from pathlib import Path
 
 import pytest
 from assertpy import assert_that
+from click.testing import CliRunner
 
+from lintro.cli import cli
 from lintro.parsers.stylelint.stylelint_issue import StylelintIssue
 from lintro.tools.stylelint.definition import StylelintPlugin
 from tests.integration._tools import require_command
@@ -293,3 +295,44 @@ def test_backslash_path_never_rewrites_the_file_it_resembles(
         assert_that(result.success).is_false()
         assert_that(result.execution_failed).is_true()
         assert_that(result.issues).is_empty()
+
+
+def test_dry_run_of_a_mixed_run_keeps_the_withheld_files_reason(
+    styled_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    r"""``format --dry-run`` reports the withheld file instead of crashing.
+
+    Promoting the partial preview to success used to raise
+    ``execution_failed cannot report success`` and replace the reason with a
+    generic error (#3393).
+
+    Args:
+        styled_project: Temp project with a stylelint config.
+        monkeypatch: Runs the CLI from the project directory.
+    """
+    for name in ("normal.css", "dir\\file.css"):
+        shutil.copy(FIXTURES / "stylelint_violations.css", styled_project / name)
+    monkeypatch.chdir(styled_project)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "format",
+            "normal.css",
+            "dir\\file.css",
+            "--tools",
+            "stylelint",
+            "--dry-run",
+            "--output-format",
+            "json",
+        ],
+    )
+
+    report = json.loads(result.stdout)
+    (stylelint,) = (row for row in report["results"] if row["tool"] == "stylelint")
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(stylelint["execution_failed"]).is_true()
+    assert_that(stylelint["success"]).is_false()
+    assert_that(stylelint["output"]).starts_with("Stylelint was not run on 1 file(s)")
+    assert_that(stylelint["output"]).does_not_contain("ValueError")

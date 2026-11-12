@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass, replace
 
@@ -82,16 +83,29 @@ HTML_VALIDATE_ALL_IGNORED_MESSAGE: str = (
 # run before any file is validated (see issue #1727).
 _GLOB_METACHARACTERS: frozenset[str] = frozenset("*?[]{}")
 
-# Characters that can stop a literal path from matching itself in
-# html-validate's ``fs.globSync`` expansion. Node builds its minimatch matcher
-# with ``windowsPathsNoEscape: true`` (a backslash becomes a path separator),
-# extglobs enabled (``+(...)``, ``@(...)`` and the like need parentheses),
-# brace expansion and character classes, but with ``nonegate`` and
+# Shapes that can stop a literal path from matching itself in html-validate's
+# ``fs.globSync`` expansion. Node builds its minimatch matcher with
+# ``windowsPathsNoEscape: true`` (a backslash becomes a path separator),
+# extglobs, brace expansion and character classes, but with ``nonegate`` and
 # ``nocomment`` (``!`` and ``#`` stay literal). Such a path can be dropped or
 # matched to a different file, so it is never passed to html-validate (#3393).
+# Each shape was checked against html-validate 11.21.0, and each is broader
+# than what it misreads, never narrower:
+#
+# - ``*`` and ``?`` anywhere (``?(...)`` and ``*(...)`` extglobs included).
+# - ``+(``, ``@(`` and ``!(`` extglobs. A bare parenthesis is literal, so
+#   SvelteKit route groups like ``(app)/+page.svelte`` and ``page (1).html``
+#   are read as written.
+# - A ``[`` with any later ``]`` (a character class). A lone ``[`` or ``]``
+#   is literal; ``[].html`` is also literal but is held back anyway.
+# - A ``{`` with a later ``}`` and a ``,`` or ``..`` anywhere between them
+#   (brace expansion). ``{a}`` and a lone brace are literal.
+#
 # The backslash only matters on POSIX, where it can be part of a file name; on
 # Windows it is always a separator and the conversion is correct.
-_SELF_MATCH_BREAKERS: frozenset[str] = _GLOB_METACHARACTERS | frozenset("()")
+_SELF_MATCH_BREAKER: re.Pattern[str] = re.compile(
+    r"[*?]|[+@!]\(|\[.*\]|\{.*(?:,|\.\.).*\}",
+)
 
 
 def _glob_reason(paths: list[str]) -> str:
@@ -185,10 +199,11 @@ def matches_itself(argument: str, *, sep: str | None = None) -> bool:
             backslash is unsafe only where it is not the separator.
 
     Returns:
-        False when the path holds a glob, extglob or brace character, or a
-        backslash on POSIX, that can change what it matches.
+        False when the path holds a glob, extglob, character-class or brace
+        expansion shape, or a backslash on POSIX, that can change what it
+        matches.
     """
-    if any(char in _SELF_MATCH_BREAKERS for char in argument):
+    if _SELF_MATCH_BREAKER.search(argument):
         return False
     return (os.sep if sep is None else sep) == "\\" or "\\" not in argument
 

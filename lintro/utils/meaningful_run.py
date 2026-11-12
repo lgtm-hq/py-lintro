@@ -63,18 +63,23 @@ def run_inspected_files(results: Sequence[ToolResult]) -> bool:
 
 
 def run_has_unreported_failure(results: Sequence[ToolResult]) -> bool:
-    """Return whether a tool failed without reporting any findings.
+    """Return whether a tool failed in a way its findings do not account for.
 
     Args:
         results: Every result the run produced, skipped placeholders included.
 
     Returns:
         bool: ``True`` when a non-skipped tool failed without parsed findings,
-        even if ``issues_count`` is positive (as for run-level gates).
-        Failures with parsed findings are ordinary lint verdicts.
+        even if ``issues_count`` is positive (as for run-level gates), or
+        reported an execution failure. An execution failure means part of the
+        input was never inspected (for example paths a tool would misread,
+        #3393), so the findings that did survive are a partial count.
+        Other failures with parsed findings are ordinary lint verdicts.
     """
     return any(
-        not result.skipped and not result.success and not result.issues
+        not result.skipped
+        and not result.success
+        and (result.execution_failed or not result.issues)
         for result in results
     )
 

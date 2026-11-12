@@ -226,3 +226,61 @@ def test_html_validate_mixed_run_validates_the_rest_and_fails(
     assert_that({Path(issue.file).name for issue in result.issues}).is_equal_to(
         {"page.html"},
     )
+
+
+@pytest.mark.html_validate
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param("(app)/page.html", id="route-group-directory"),
+        pytest.param("page (1).html", id="copy-suffix"),
+    ],
+)
+def test_html_validate_validates_paths_with_bare_parentheses(
+    tmp_path: Path,
+    name: str,
+) -> None:
+    """A bare parenthesis is literal, so the file is validated as named.
+
+    A clean sibling at the root keeps the working directory at ``tmp_path``,
+    so the parentheses are part of the path html-validate receives.
+
+    Args:
+        tmp_path: Pytest-managed temporary directory.
+        name: A path whose parentheses follow no extglob prefix.
+    """
+    target = tmp_path / name
+    target.parent.mkdir(exist_ok=True)
+    target.write_text("<p><div></p>\n", encoding="utf-8")
+    sibling = tmp_path / "index.html"
+    sibling.write_text("<p>clean</p>\n", encoding="utf-8")
+    tool = ToolRegistry.get("html_validate")
+    tool.exclude_patterns = []
+    result = tool.check([str(target), str(sibling)], {})
+
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_greater_than(0)
+    assert_that(
+        {Path(issue.file).relative_to(tmp_path).as_posix() for issue in result.issues},
+    ).is_equal_to({name})
+
+
+@pytest.mark.html_validate
+def test_html_validate_holds_back_extglob_name(tmp_path: Path) -> None:
+    """``a+(b).html`` would validate ``ab.html``; it is held back instead.
+
+    Args:
+        tmp_path: Pytest-managed temporary directory.
+    """
+    (tmp_path / "ab.html").write_text("<p><div></p>\n", encoding="utf-8")
+    target = tmp_path / "a+(b).html"
+    target.write_text("<p><div></p>\n", encoding="utf-8")
+    tool = ToolRegistry.get("html_validate")
+    tool.exclude_patterns = []
+    result = tool.check([str(target)], {})
+
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.issues).is_empty()
+    assert_that(result.output).contains("a+(b).html", "not inspected")

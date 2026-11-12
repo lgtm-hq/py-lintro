@@ -48,7 +48,9 @@ def _live_counts_are_usable(artifact: RunArtifact) -> bool:
     also disqualifies the run — a completed clean tool alongside a timed-out
     security scanner would otherwise publish "0 issues" for findings that were
     never collected. A non-skipped tool that failed without findings also
-    disqualifies the run; a failed tool that reported findings remains usable.
+    disqualifies the run, and so does an execution failure that kept some
+    findings but left files uninspected; a failed tool that reported complete
+    findings remains usable.
 
     Args:
         artifact: Completed check run.
@@ -173,7 +175,8 @@ def resolve_severity_counts(
     Raises:
         click.ClickException: If the live check exits before producing counts,
             no tool actually executed (empty / all-skipped), or any tool timed
-            out or failed without reporting findings.
+            out, failed without reporting findings, or reported an execution
+            failure that left files uninspected.
     """
     if override is not None:
         return override
@@ -190,7 +193,8 @@ def resolve_severity_counts(
         raise click.ClickException(
             "Could not determine usable issue counts because the check "
             "exited early, was empty, timed out, all tools were skipped, "
-            "or a tool failed without reporting findings.",
+            "or a tool failed without reporting findings or without "
+            "inspecting every file.",
         )
     return artifact.severity_counts
 

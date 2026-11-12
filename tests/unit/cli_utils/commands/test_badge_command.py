@@ -208,6 +208,39 @@ def test_badge_live_early_exit_prints_no_badge() -> None:
     assert_that(result.output).does_not_contain("img.shields.io")
 
 
+def test_badge_refuses_a_partial_run_that_kept_findings() -> None:
+    """One surviving finding cannot stand in for files a tool never read.
+
+    A run that withheld misread paths keeps the findings for the rest and
+    reports an execution failure (#3393); publishing "1 error" for it would
+    claim the uninspected files were clean.
+    """
+    results = [
+        ToolResult(
+            name="stylelint",
+            success=False,
+            issues_count=1,
+            issues=[RuffIssue(file="a.css", line=1, code="X", message="kept")],
+            output="Stylelint was not run on 1 file(s).",
+            execution_failed=True,
+            findings_complete=False,
+        ),
+        ToolResult(name="html_validate", success=True, inspected_files=True),
+    ]
+    artifact = RunArtifact(
+        tool_results=results,
+        severity_counts=count_severities(results),
+        exit_code=1,
+    )
+
+    with patch("lintro.cli_utils.commands.badge.api.check_run", return_value=artifact):
+        result = CliRunner().invoke(badge_command, ["--json"])
+
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(result.output).contains("without inspecting every file")
+    assert_that(result.output).does_not_contain("img.shields.io")
+
+
 @pytest.mark.parametrize("with_clean_tool", [False, True], ids=["alone", "mixed"])
 @pytest.mark.parametrize("issues_count", [0, 3], ids=["crash", "duplicate-code-gate"])
 def test_badge_refuses_a_tool_failure_without_findings(

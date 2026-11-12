@@ -137,10 +137,14 @@ def filter_result_to_fixable(result: ToolResult) -> ToolResult:
     if isinstance(outcome.execution, (Skipped, NoFiles)):
         return result
     fixable = [issue for issue in result.issues if issue_would_be_fixed(issue)]
+    # An execution failure (for example a run that withheld paths the tool
+    # would misread, #3393) is never a completed check: its failed verdict and
+    # reason stand, and only its findings are narrowed.
     completed_check = (
         isinstance(outcome.execution, Checked)
         and not isinstance(outcome.accounting, FixUnmeasured)
         and not result.parse_failures_count
+        and not result.execution_failed
     )
     return dataclasses.replace(
         result,

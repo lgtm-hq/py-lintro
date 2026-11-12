@@ -90,6 +90,32 @@ def test_preview_keeps_a_partial_parse_failure_failed() -> None:
     assert_that(determine_exit_code(Action.CHECK, [preview], 0, 0)).is_equal_to(1)
 
 
+def test_preview_keeps_an_execution_failure_with_its_reason() -> None:
+    """A run that left files uninspected stays failed and keeps its findings.
+
+    Promoting it to success used to raise ``execution_failed cannot report
+    success`` and replace the reason with a generic error (#3393).
+    """
+    fixable = RuffIssue(file="a.py", message="fixable", fixable=True)
+    reason = "Stylelint was not run on 1 file(s). Those files were not inspected."
+    result = ToolResult.from_outcome(
+        ToolOutcome(Checked(False, inspected_files=None), issues_count=2),
+        name="stylelint",
+        output=reason,
+        issues=[fixable, RuffIssue(file="b.py", message="not fixable")],
+        execution_failed=True,
+        findings_complete=False,
+    )
+
+    preview = filter_result_to_fixable(result)
+
+    assert_that(preview.success).is_false()
+    assert_that(preview.execution_failed).is_true()
+    assert_that(preview.output).is_equal_to(reason)
+    assert_that(preview.issues).is_equal_to([fixable])
+    assert_that(determine_exit_code(Action.CHECK, [preview], 0, 0)).is_equal_to(1)
+
+
 @pytest.mark.parametrize("execution", [NoFiles(), Skipped("no configuration")])
 def test_preview_does_not_promote_inactive_payloads(
     execution: NoFiles | Skipped,
