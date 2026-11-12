@@ -129,7 +129,7 @@ def recorded_ruff_argv() -> Generator[list[list[str]], None, None]:
             A completed process reporting empty JSON output.
         """
         commands.append(list(argv))
-        return SimpleNamespace(stdout="[]", returncode=0)
+        return SimpleNamespace(stdout="[]", stderr="", returncode=0)
 
     with patch("subprocess.run", side_effect=fake_run):
         yield commands
@@ -658,3 +658,40 @@ def test_check_line_length_command_includes_required_flags(
         "--no-cache",
     )
     assert_that(violations).is_empty()
+
+
+@pytest.mark.parametrize(
+    ("stderr", "failed"),
+    [
+        (
+            "warning: Failed to lint /p/locked.py: Permission denied (os error 13)\n",
+            True,
+        ),
+        (
+            "\x1b[1;33mwarning\x1b[0m\x1b[1m:\x1b[0m \x1b[1mFailed to lint "
+            "/p/locked.py: Permission denied (os error 13)\x1b[0m\n",
+            True,
+        ),
+        ("warning: The top-level linter settings are deprecated\n", False),
+    ],
+    ids=["unreadable", "unreadable-coloured", "unrelated-warning"],
+)
+def test_check_line_length_unlinted_path_is_not_a_measurement(
+    mock_ruff_available: MagicMock,
+    stderr: str,
+    failed: bool,
+) -> None:
+    """Ruff's exit-0 empty report for an unread file is not a clean result.
+
+    Args:
+        mock_ruff_available: Mock fixture ensuring ruff is available.
+        stderr: Ruff's stderr warnings.
+        failed: Whether the measurement must be reported unavailable.
+    """
+    process = subprocess.CompletedProcess(["ruff"], 0, "[]", stderr)
+    with patch("subprocess.run", return_value=process):
+        if failed:
+            with pytest.raises(LineLengthCheckUnavailableError, match="locked.py"):
+                check_line_length_violations(files=["locked.py"])
+        else:
+            assert_that(check_line_length_violations(files=["a.py"])).is_empty()

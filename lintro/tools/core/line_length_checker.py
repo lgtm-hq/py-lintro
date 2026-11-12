@@ -8,6 +8,7 @@ making the architecture more modular.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
@@ -15,7 +16,10 @@ from pathlib import Path
 
 from loguru import logger
 
+from lintro.parsers.base_parser import strip_ansi_codes
 from lintro.utils.path_utils import absolute_path_without_resolving
+
+_FAILED_TO_LINT = re.compile(r"^\s*warning: Failed to lint ")
 
 
 class LineLengthCheckUnavailableError(RuntimeError):
@@ -237,6 +241,17 @@ def check_line_length_violations(
             f"Ruff exited with code {result.returncode}: "
             f"{result.stderr.strip() or result.stdout.strip()}",
         )
+    # Ruff reports an unreadable or vanished input only as a stderr warning
+    # and still exits 0 with ``[]``. That empty report did not measure the file.
+    # Strip colour first: ``FORCE_COLOR`` makes Ruff wrap "warning:" in ANSI
+    # escapes, which would hide the warning from the anchored pattern.
+    unlinted = [
+        plain.strip()
+        for plain in map(strip_ansi_codes, result.stderr.splitlines())
+        if _FAILED_TO_LINT.match(plain)
+    ]
+    if unlinted:
+        raise LineLengthCheckUnavailableError("; ".join(unlinted))
     try:
         return _parse_violations(result.stdout, cwd)
     except (ValueError, TypeError) as e:

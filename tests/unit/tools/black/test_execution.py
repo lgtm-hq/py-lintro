@@ -592,6 +592,8 @@ def test_fix_initial_supplement_failure_reports_unapplied_changes(
         result = black_plugin.fix([str(py_file)], {})
 
     assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.findings_complete).is_false()
     assert_that(result.fixed_issues_count).is_none()
     assert_that(result.output).contains(
         f"would reformat {py_file}\nE501 supplement failed",
@@ -855,7 +857,9 @@ def test_fix_incomplete_pass_cannot_claim_inspection_or_measured_fixes(
     if stage == "mutation":
         expected_files = ["example.py"]
     elif stage == "final":
-        expected_files = list(dict.fromkeys(["example.py", *expected_files]))
+        # A summary-only entry may be the retained file, so it adds nothing.
+        named = [name for name in expected_files if name != "<unknown>"]
+        expected_files = list(dict.fromkeys(["example.py", *named]))
     if returncode == 123:
         (tmp_path / "broken.py").write_text("def f(:\n", encoding="utf-8")
     if stage == "mutation" or report in {_LOST, _DISTINCT}:
@@ -899,6 +903,9 @@ def test_fix_incomplete_pass_cannot_claim_inspection_or_measured_fixes(
     totals = aggregate_tool_results([result], Action.FIX)
     assert_that(totals).is_equal_to((len(expected_files), 0, 0))
     assert_that(result.issues).extracting("file").is_equal_to(expected_files)
+    assert_that(result.issues).extracting("message").does_not_contain(
+        "Reformatted file",
+    )
     assert_that(unknown_residual_tool_names([result])).is_equal_to(["black"])
     assert_that(
         determine_exit_code(Action.FIX, [result], totals[0], totals[2]),
@@ -1045,3 +1052,107 @@ def test_fix_timeout_preserves_only_completed_initial_measurement(
     assert_that(result.remaining_issues_count).is_none()
     assert_that(aggregate_tool_results([result], Action.FIX)).is_equal_to((1, 0, 0))
     assert_that(result.issues).extracting("file").is_equal_to(["example.py"])
+
+
+def test_final_summary_counts_only_files_beyond_retained_findings(
+    black_plugin: BlackPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A summary-only final report adds only what exceeds the retained files."""
+    file = tmp_path / "example.py"
+    file.write_text("x=1\n", encoding="utf-8")
+    (tmp_path / "other.py").write_text("y=2\n", encoding="utf-8")
+    _native_reports(
+        monkeypatch,
+        [
+            (1, _FINDING),
+            (0, "reformatted example.py\n"),
+            (1, "2 files would be reformatted.\n"),
+        ],
+    )
+
+    result = black_plugin.fix([str(tmp_path)], {})
+
+    assert_that(result.issues).extracting("file").is_equal_to(
+        ["example.py", "<unknown>"],
+    )
+    assert_that(aggregate_tool_results([result], Action.FIX)).is_equal_to((2, 0, 0))
+    assert_that(result.residual_unknown).is_true()
+
+
+@pytest.mark.parametrize(
+    "final",
+    [
+        pytest.param(subprocess.TimeoutExpired(["black"], 30), id="timeout"),
+        pytest.param((123, _ERROR), id="error"),
+    ],
+)
+def test_fix_diff_keeps_completed_preview_when_final_check_fails(
+    black_plugin: BlackPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    final: tuple[int, str] | subprocess.TimeoutExpired,
+) -> None:
+    """A failed final check cannot drop findings from a completed diff preview."""
+    file = tmp_path / "example.py"
+    file.write_text("x=1\n", encoding="utf-8")
+    (tmp_path / "broken.py").write_text("def f(:\n", encoding="utf-8")
+    black_plugin.set_options(diff=True)
+    _native_reports(monkeypatch, [(0, _FINDING), final])
+
+    result = black_plugin.fix([str(tmp_path)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_equal_to(not isinstance(final, tuple))
+    assert_that(result.issues).extracting("file", "message").is_equal_to(
+        [("example.py", "Would reformat file")],
+    )
+    assert_that(result.initial_issues_count).is_none()
+    assert_that(aggregate_tool_results([result], Action.FIX)).is_equal_to((1, 0, 0))
+    assert_that(file.read_text()).is_equal_to("x=1\n")
+
+
+@pytest.mark.parametrize("fix", [False, True], ids=["check", "fix"])
+def test_silent_black_exit_names_quiet_setting(
+    black_plugin: BlackPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fix: bool,
+) -> None:
+    """Exit 1 with no report fails the run and explains Black's quiet setting."""
+    file = tmp_path / "example.py"
+    file.write_text("x=1\n", encoding="utf-8")
+    _native_reports(monkeypatch, [(1, "")])
+
+    result = (black_plugin.fix if fix else black_plugin.check)([str(file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.issues).is_empty()
+    assert_that(result.output).contains("No stdout/stderr", "`quiet = true`")
+    assert_that(file.read_text()).is_equal_to("x=1\n")
+
+
+@pytest.mark.parametrize("separator", ["\n", "\r"], ids=["lf", "cr"])
+def test_check_split_filename_is_a_parse_failure(
+    black_plugin: BlackPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    separator: str,
+) -> None:
+    """A filename split by CR or LF cannot become a silently wrong finding."""
+    name = f"a{separator}b.py"
+    file = tmp_path / name
+    file.write_text("x=1\n", encoding="utf-8")
+    _native_reports(
+        monkeypatch,
+        [(1, f"would reformat {name}\n1 file would be reformatted.\n")],
+    )
+
+    result = black_plugin.check([str(file)], {})
+
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.success).is_false()

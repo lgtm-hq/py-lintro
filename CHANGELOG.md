@@ -13,11 +13,24 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- Black: since 0.177.8 (#3169), an initial check that times out during `lintro format`
+  leaves the initial issue count unknown instead of reporting 0, and an incomplete
+  initial check (for example, one file with a syntax error) makes `lintro format` change
+  nothing instead of formatting the other files. This matches prettier and oxfmt
+  (#3354).
+
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- Black: a summary-only final report no longer counts an already retained file twice;
+  findings kept after a failed formatting pass read "Would reformat file"; a failed
+  initial E501 check sets `execution_failed`; a completed diff preview survives a failed
+  final check; a reported name matching no input (such as one split by CR or LF) is a
+  parse failure; a Ruff `Failed to lint` warning fails the E501 check; and
+  `quiet = true` in `[tool.black]` is named when Black prints no report (#3354).
 
 ### Security
 

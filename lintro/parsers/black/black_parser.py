@@ -14,6 +14,8 @@ remain accurate across environments.
 
 from __future__ import annotations
 
+import contextlib
+import os
 import re
 from collections.abc import Iterable
 from pathlib import Path
@@ -62,21 +64,72 @@ def _normalize_black_output(output: str) -> str:
     return strip_ansi_codes(output).replace("\r\n", "\n").replace("\r", "\n")
 
 
-def black_report_parse_failures(output: str, issues: list[BlackIssue]) -> int:
+def _path_identities(path: Path) -> set[str]:
+    """Return the lexical and resolved spellings Black may report for a path."""
+    identities = {os.path.normpath(path)}
+    with contextlib.suppress(OSError, RuntimeError, ValueError):
+        identities.add(str(path.resolve()))
+    return identities
+
+
+def _unmatched_report_names(
+    issues: list[BlackIssue],
+    *,
+    files: list[str],
+    cwd: str | None,
+) -> int:
+    """Count reported file names that do not name any Black input.
+
+    The text report is line-based, so a CR or LF inside a filename splits one
+    record into a truncated name and a stray row. Such a name cannot match an
+    input, which turns a silently wrong filename into a parse failure.
+
+    Args:
+        issues: Parsed per-file formatting findings.
+        files: Exact file arguments passed to Black, relative to cwd.
+        cwd: Working directory used by Black.
+
+    Returns:
+        Findings whose file is neither unknown nor one of the inputs.
+    """
+    base = Path(cwd or Path.cwd())
+    expected: set[str] = set()
+    for file in files:
+        expected |= _path_identities(base / file)
+    return sum(
+        issue.file != "<unknown>" and not _path_identities(base / issue.file) & expected
+        for issue in issues
+    )
+
+
+def black_report_parse_failures(
+    output: str,
+    issues: list[BlackIssue],
+    *,
+    files: list[str] | None = None,
+    cwd: str | None = None,
+) -> int:
     """Count unaccounted formatting entries in Black's native summary.
 
     Args:
         output: Native Black output.
         issues: Parsed per-file formatting findings.
+        files: Exact file arguments passed to Black, relative to cwd. When
+            given, a reported name that matches no input is also a failure.
+        cwd: Working directory used by Black.
 
     Returns:
-        Missing entries, including summary-only findings without file identities.
+        Missing entries, including summary-only findings without file
+        identities, plus reported names that match no input file.
     """
     output = _normalize_black_output(output)
     summary = _SUMMARY_WOULD.search(output) or _SUMMARY_REFORMATTED.search(output)
     expected = int(summary.group("count")) if summary else len(issues)
     identified = sum(issue.file != "<unknown>" for issue in issues)
-    return abs(expected - identified)
+    missing = abs(expected - identified)
+    if files is None:
+        return missing
+    return missing + _unmatched_report_names(issues, files=files, cwd=cwd)
 
 
 def black_inspected_paths(
