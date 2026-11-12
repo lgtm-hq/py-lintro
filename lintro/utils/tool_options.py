@@ -3,6 +3,8 @@
 Handles parsing of CLI tool options and coercing string values to typed Python values.
 """
 
+from collections.abc import Mapping
+
 from lintro.enums.boolean_string import BooleanString
 
 
@@ -89,3 +91,36 @@ def parse_tool_options(tool_options: str | None) -> dict[str, dict[str, object]]
         tool_option_dict[tool_name][opt_name] = _coerce_value(opt_value)
 
     return tool_option_dict
+
+
+#: Option names lintro sets internally. ``--tool-options`` may not supply them.
+RESERVED_TOOL_OPTIONS = frozenset({"_baseline_coverage"})
+
+
+def merge_private_tool_options(
+    user_options: dict[str, dict[str, object]],
+    private_options: Mapping[str, Mapping[str, object]] | None,
+) -> tuple[dict[str, dict[str, object]], list[str]]:
+    """Drop reserved keys from user options, then add internal options.
+
+    Args:
+        user_options: Parsed ``--tool-options`` overrides.
+        private_options: Internal per-tool options set by lintro itself.
+
+    Returns:
+        The merged options, and each dropped ``tool:option`` pair.
+    """
+    merged: dict[str, dict[str, object]] = {}
+    dropped: list[str] = []
+    for tool_name, options in user_options.items():
+        kept: dict[str, object] = {}
+        for name, value in options.items():
+            if name in RESERVED_TOOL_OPTIONS:
+                dropped.append(f"{tool_name}:{name}")
+            else:
+                kept[name] = value
+        if kept:
+            merged[tool_name] = kept
+    for tool_name, internal in (private_options or {}).items():
+        merged.setdefault(tool_name.lower(), {}).update(internal)
+    return merged, dropped

@@ -97,6 +97,7 @@ Configuration `watch.ignore` **extends** those built-ins; it cannot re-enable `.
 | `--exclude`              | Comma-separated exclude patterns passed to the tools.  |
 | `--include-venv`         | Include virtual environment directories.               |
 | `--output-format`        | Continuous output format: `plain` or `grid`.           |
+| `--no-baseline`          | Do not apply the configured fingerprint baseline.      |
 
 ## Configuration
 
@@ -126,6 +127,10 @@ watch:
 | `ignore`       | list[str] | `[]`    | Extra gitignore-style patterns (extends built-ins). |
 
 ## Notes
+
+- A configured [fingerprint baseline](guides/baseline.md) filters every watch run. Watch
+  loads it once at startup and exits with an error, before watching, when the file is
+  missing or invalid. Pass `--no-baseline` to watch without it.
 
 - Watching a single file watches its parent directory recursively so renames and
   re-creates are picked up.

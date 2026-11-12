@@ -24,6 +24,28 @@ if TYPE_CHECKING:
 Fingerprint = tuple[str, str, str, str]
 FindingT = TypeVar("FindingT", bound=BaselineFinding)
 
+#: Rule codes a certified producer uses when it could not parse a source file.
+#: Ruff reports ``invalid-syntax``; older releases used a null code or ``E999``.
+SOURCE_PARSE_CODES: dict[str, frozenset[str]] = {
+    "ruff": frozenset({"", "invalid-syntax", "E999"}),
+}
+
+
+def is_source_parse_diagnostic(issue: BaselineFinding, *, tool: str) -> bool:
+    """Report whether a finding says the producer could not parse the source.
+
+    Such a finding is never acknowledged, and its file has no exact coverage:
+    the producer may have skipped other rules for that file.
+
+    Args:
+        issue: Finding to classify.
+        tool: Canonical tool name.
+
+    Returns:
+        True for a source-parse diagnostic.
+    """
+    return issue.get_code() in SOURCE_PARSE_CODES.get(tool.lower(), frozenset())
+
 
 def relative_file(file: str, *, root: Path, cwd: str | None = None) -> str | None:
     """Canonicalize a diagnostic path without accepting paths outside the root.
@@ -133,6 +155,8 @@ def snapshot(results: Sequence[ToolResult], *, root: Path) -> FingerprintBaselin
         if baseline_incomplete_reason(result) is not None:
             continue
         for issue in result.issues or []:
+            if is_source_parse_diagnostic(issue, tool=result.name):
+                continue
             entry = fingerprint(issue, tool=result.name, root=root, cwd=result.cwd)
             if entry is None:
                 continue
@@ -176,9 +200,14 @@ def maintain_baseline(
     for result in results:
         if baseline_incomplete_reason(result) is not None:
             continue
+        unparsed = {
+            relative_file(issue.file, root=root, cwd=result.cwd)
+            for issue in result.issues or []
+            if is_source_parse_diagnostic(issue, tool=result.name)
+        }
         for file in result.inspected_paths or ():
             relative = relative_file(file, root=root, cwd=result.cwd)
-            if relative is not None:
+            if relative is not None and relative not in unparsed:
                 key = (result.name.lower(), relative)
                 coverage[key] = (
                     coverage.get(key, frozenset()) | result.uninspected_codes
@@ -228,7 +257,11 @@ def filter_issues(
     budget = Counter({entry.key: entry.count for entry in baseline.entries})
     retained: list[FindingT] = []
     for issue in issues:
-        entry = fingerprint(issue, tool=result.name, root=root, cwd=result.cwd)
+        entry = (
+            None
+            if is_source_parse_diagnostic(issue, tool=result.name)
+            else fingerprint(issue, tool=result.name, root=root, cwd=result.cwd)
+        )
         if entry is not None and budget[entry.key] > 0:
             budget[entry.key] -= 1
         else:

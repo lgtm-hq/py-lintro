@@ -15,7 +15,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from lintro.enums.action import Action
 from lintro.utils.tool_executor import run_lint_tools_simple
@@ -45,6 +45,8 @@ class WatchRunner:
             tests.
         run_tools: The execution backend; defaults to the shared
             ``run_lint_tools_simple`` and is injectable for tests.
+        baseline: Fingerprint baseline path, ``None`` for the configured
+            baseline, or ``False`` to disable filtering.
     """
 
     auto_fix: bool = False
@@ -56,6 +58,7 @@ class WatchRunner:
     watch_paths: list[str] = field(default_factory=list)
     emit: Callable[[str], None] = print
     run_tools: Callable[..., int] = run_lint_tools_simple
+    baseline: str | Literal[False] | None = None
 
     _last_exit_code: int = field(default=0, init=False)
     _event_kinds: dict[str, str] = field(default_factory=dict, init=False)
@@ -124,6 +127,7 @@ class WatchRunner:
                 "run_gates": False,
                 "on_tool_result": self._render_tool_result,
                 "render_summary": False,
+                "baseline": self.baseline,
             }
             exit_code = self.run_tools(**execution_options)
         except Exception as exc:
