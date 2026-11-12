@@ -1,0 +1,31 @@
+{
+  "timestamp": "2026-11-12T11:12:55.328006+00:00",
+  "action": "check",
+  "summary": {
+    "total_issues": 0,
+    "total_net_resolved": 0,
+    "total_fixed": 0,
+    "tools_run": 1,
+    "timed_out_tools": [],
+    "severity_counts": {
+      "error": 0,
+      "warning": 0,
+      "info": 0,
+      "total": 0
+    }
+  },
+  "results": [
+    {
+      "tool": "shellcheck",
+      "success": false,
+      "issues_count": 0,
+      "skipped": false,
+      "skip_reason": null,
+      "timed_out": false,
+      "output": "Error processing /workspace/clean.sh: Malformed ShellCheck report: invalid JSON (Expecting value); output: internal error: boom\ninternal error: boom\n\n\nFailed to process 1 file(s) due to execution errors",
+      "status": "failed",
+      "parse_failures_count": 1,
+      "execution_failed": true
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "timestamp": "2026-11-12T11:12:55.806549+00:00",
+  "action": "check",
+  "summary": {
+    "total_issues": 0,
+    "total_net_resolved": 0,
+    "total_fixed": 0,
+    "tools_run": 1,
+    "timed_out_tools": [],
+    "severity_counts": {
+      "error": 0,
+      "warning": 0,
+      "info": 0,
+      "total": 0
+    }
+  },
+  "results": [
+    {
+      "tool": "shellcheck",
+      "success": true,
+      "issues_count": 0,
+      "skipped": false,
+      "skip_reason": null,
+      "timed_out": false,
+      "output": null,
+      "status": "ok"
+    }
+  ]
+}

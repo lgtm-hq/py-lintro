@@ -370,7 +370,12 @@ PATH. A command that launches and then fails, such as `python -m tool` exiting n
 because the module is absent, is not classified. Other probe failures, such as a
 non-zero exit or unparseable output, omit both keys. A slow probe is not a missing tool:
 CI can treat `probe_timeout` as infrastructure noise while still failing on
-`binary_missing`.
+`binary_missing`. Lintro's own dogfood skip gate (`scripts/ci/check-dogfood-skips.py`)
+absorbs a `probe_timeout` only when the same tool reported a verdict in another attempt
+of the same CI run: `status` `ok` or `failed` with neither `execution_failed` nor
+`timed_out` set. Without one the gate still fails. In the nightly dogfood workflow such
+a failure reruns the gate and is classified as infrastructure, while the pull-request
+gate in `docker-ci.yml` fails on it like any unavailable tool.
 
 Set `execution.strict_missing_tools: true` to require installed, runnable tools:
 unavailability then sets `success: false` and makes the run exit 1, while retaining

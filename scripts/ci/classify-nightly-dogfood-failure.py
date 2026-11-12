@@ -22,13 +22,21 @@ Infra kill (classified)              infra kill      ping, annotated "no verdict
 Unclassifiable failure               any             ping (fail closed)
 ===================================  ==============  ==========================
 
+One exception to the "infra kill twice" row (#3383): when both skip-gate
+attempts failed only on version-probe timeouts and name a common tool in
+``probe-timed-out-tools``, the ping demands action and its annotation names
+those tools, because a tool that hangs on ``--version`` every attempt is more
+likely an image bug than runner noise. Timeouts for disjoint tools stay the
+no-action coverage gap; a timeout answered by a passing retry stays clear.
+
 Classification is deliberately same-run: it reads job results and job outputs
 that the jobs themselves published, never Actions API logs, whose ingestion
 race is the very problem #2238 exists to fix. The structural infra signatures
 are not re-implemented here — each attempt is handed to
 ``scripts/ci/is-infra-flake-failure.sh``, the single source of truth the PR
 path already uses (exit 143, cancelled/timed_out, lint-passed-but-job-failed,
-tool-execution timeout on the attempt's own report).
+tool-execution timeout on the attempt's own report, and a skip gate failed only
+by version-probe timeouts with no sibling verdict, #3383).
 
 An attempt that failed while publishing no lint verdict at all (empty
 ``status``/``exit-code``, the signature of a runner killed mid-lint) is not
@@ -47,9 +55,11 @@ value is the workflow's ``needs.<job>.result`` / ``needs.<job>.outputs.<name>``)
     LINT_RETRY_RESULT, LINT_RETRY_CONCLUSION, LINT_RETRY_STATUS,
     LINT_RETRY_EXIT_CODE, LINT_RETRY_TIMEOUT_FLAKE, LINT_RETRY_TIMED_OUT_TOOLS
     SKIP_GATE_RESULT, SKIP_GATE_CONCLUSION, SKIP_GATE_STATUS,
-    SKIP_GATE_EXIT_CODE
+    SKIP_GATE_EXIT_CODE, SKIP_GATE_PROBE_TIMEOUT_FLAKE,
+    SKIP_GATE_PROBE_TIMED_OUT_TOOLS
     SKIP_GATE_RETRY_RESULT, SKIP_GATE_RETRY_CONCLUSION,
-    SKIP_GATE_RETRY_STATUS, SKIP_GATE_RETRY_EXIT_CODE
+    SKIP_GATE_RETRY_STATUS, SKIP_GATE_RETRY_EXIT_CODE,
+    SKIP_GATE_RETRY_PROBE_TIMEOUT_FLAKE, SKIP_GATE_RETRY_PROBE_TIMED_OUT_TOOLS
     VERIFY_RESULT, VERIFY_CONCLUSION
     RESOLVE_RESULT, RESOLVE_CONCLUSION
     INFRA_FLAKE_SCRIPT  Override for is-infra-flake-failure.sh (tests only).
@@ -62,7 +72,8 @@ value is the workflow's ``needs.<job>.result`` / ``needs.<job>.outputs.<name>``)
 Outputs (stdout, and appended to ``GITHUB_OUTPUT`` when set):
     notify=true|false           whether to ping the deduplicated tracker
     action-required=true|false  false when every ping is a no-verdict night
-    annotation=<one line>       empty unless a coverage gap must stay visible
+    annotation=<one line>       empty unless a coverage gap or a repeated
+                                version-probe timeout must stay visible
     reason=<one line>           per-job explanation, for the run log
 
 Exit codes:
@@ -90,6 +101,17 @@ _NOT_RUN_RESULTS: frozenset[str] = frozenset({"", "skipped"})
 _NO_VERDICT_ANNOTATION = (
     "Infra kill x2: no lint verdict tonight, superseded by the next scheduled "
     "run. No action required — this ping records the coverage gap."
+)
+
+# Annotation for a version probe that timed out for the same tool on both
+# skip-gate attempts (#3383). One slow runner is noise; the same tool hanging
+# on --version twice in one night, with no verdict from dogfood-full either,
+# looks like an image bug and would otherwise repeat every night as a
+# "no action" coverage gap.
+_REPEATED_PROBE_TIMEOUT_ANNOTATION = (
+    "Version probe timed out on both skip-gate attempts for: {tools}. A tool "
+    "that hangs on --version every attempt is likely an image bug, not runner "
+    "noise. Action required."
 )
 
 
@@ -120,11 +142,14 @@ class UnitVerdict(StrEnum):
         CLEAR: Nothing to report to the tracker.
         PING: Ping the tracker exactly as before (action required).
         PING_NO_VERDICT: Ping, annotated as a coverage gap, no action required.
+        PING_REPEATED_PROBE_TIMEOUT: Ping with action required, annotated
+            with the tools whose version probe timed out on both attempts.
     """
 
     CLEAR = auto()
     PING = auto()
     PING_NO_VERDICT = auto()
+    PING_REPEATED_PROBE_TIMEOUT = auto()
 
 
 @dataclass(frozen=True)
@@ -139,6 +164,11 @@ class Attempt:
         timeout_flake: ``true`` when this attempt's own report proves its only
             failures were tool-execution timeouts with zero findings (#1653).
         timed_out_tools: Comma-separated tool names, for the log message.
+        probe_timeout_flake: ``true`` when this skip-gate attempt's only
+            violations were version-probe timeouts with no sibling verdict
+            (#3383).
+        probe_timed_out_tools: Comma-separated tool names, for the log
+            message.
     """
 
     result: str = ""
@@ -147,6 +177,8 @@ class Attempt:
     exit_code: str = ""
     timeout_flake: str = ""
     timed_out_tools: str = ""
+    probe_timeout_flake: str = ""
+    probe_timed_out_tools: str = ""
 
 
 @dataclass(frozen=True)
@@ -202,6 +234,8 @@ def _attempt_from_env(prefix: str, *, environ: dict[str, str]) -> Attempt:
         exit_code=value("EXIT_CODE"),
         timeout_flake=value("TIMEOUT_FLAKE"),
         timed_out_tools=value("TIMED_OUT_TOOLS"),
+        probe_timeout_flake=value("PROBE_TIMEOUT_FLAKE"),
+        probe_timed_out_tools=value("PROBE_TIMED_OUT_TOOLS"),
     )
 
 
@@ -232,6 +266,8 @@ def is_infra_flake(attempt: Attempt, *, script: Path) -> bool:
             "EXIT_CODE_OUTPUT": attempt.exit_code,
             "TIMEOUT_FLAKE": attempt.timeout_flake,
             "TIMED_OUT_TOOLS": attempt.timed_out_tools,
+            "PROBE_TIMEOUT_FLAKE": attempt.probe_timeout_flake,
+            "PROBE_TIMED_OUT_TOOLS": attempt.probe_timed_out_tools,
         },
     )
     completed = subprocess.run(  # nosec B603 - fixed argv, repo-local script
@@ -280,6 +316,56 @@ def classify_attempt(attempt: Attempt, *, script: Path) -> AttemptState:
     return AttemptState.UNCLASSIFIABLE
 
 
+def _probe_timed_out_tools(attempt: Attempt) -> list[str]:
+    """Return the tools a probe-timeout-only skip-gate attempt named.
+
+    Args:
+        attempt: One skip-gate attempt.
+
+    Returns:
+        The named tools in reported order, or an empty list when the attempt
+        did not fail only on version-probe timeouts.
+    """
+    if attempt.probe_timeout_flake != "true":
+        return []
+    return [
+        tool.strip()
+        for tool in attempt.probe_timed_out_tools.split(",")
+        if tool.strip()
+    ]
+
+
+def _tool_key(tool: str) -> str:
+    """Fold a tool name the way the skip gate does (case, hyphen/underscore).
+
+    Args:
+        tool: Tool name as reported.
+
+    Returns:
+        The comparison key.
+    """
+    return tool.lower().replace("-", "_")
+
+
+def repeated_probe_timeout_tools(unit: Unit) -> list[str]:
+    """Return the tools whose version probe timed out on both attempts.
+
+    Args:
+        unit: A primary/retry pair.
+
+    Returns:
+        Tools named by both attempts' ``probe-timed-out-tools``, in the
+        primary's order and spelling; empty unless both attempts failed only
+        on probe timeouts and share at least one tool.
+    """
+    retry_keys = {_tool_key(tool) for tool in _probe_timed_out_tools(unit.retry)}
+    return [
+        tool
+        for tool in _probe_timed_out_tools(unit.primary)
+        if _tool_key(tool) in retry_keys
+    ]
+
+
 def classify_unit(
     unit: Unit,
     *,
@@ -311,6 +397,16 @@ def classify_unit(
         # The retry should have run for this state; fail closed rather than
         # silently swallowing a night with no coverage and no explanation.
         return UnitVerdict.PING, f"{unit.name}: {primary}, no retry ran, ping"
+    repeated = repeated_probe_timeout_tools(unit)
+    if primary is AttemptState.INFRA and retry is AttemptState.INFRA and repeated:
+        # The same tool timed out on --version on both attempts: not a
+        # coverage gap to wait out, but a likely image bug (#3383). Timeouts
+        # for different tools stay the no-action coverage gap below.
+        return (
+            UnitVerdict.PING_REPEATED_PROBE_TIMEOUT,
+            f"{unit.name}: version probe timed out on both attempts "
+            f"({','.join(repeated)}), ping",
+        )
     pair = {primary, retry}
     if AttemptState.INFRA in pair and pair <= {
         AttemptState.INFRA,
@@ -353,10 +449,24 @@ def decide(units: list[Unit], *, script: Path) -> Decision:
             reason=reason,
         )
     only_no_verdict = all(verdict is UnitVerdict.PING_NO_VERDICT for verdict in pinging)
+    probe_tools = [
+        tool
+        for unit, (verdict, _) in zip(units, verdicts, strict=True)
+        if verdict is UnitVerdict.PING_REPEATED_PROBE_TIMEOUT
+        for tool in repeated_probe_timeout_tools(unit)
+    ]
+    if probe_tools:
+        annotation = _REPEATED_PROBE_TIMEOUT_ANNOTATION.format(
+            tools=", ".join(probe_tools),
+        )
+    elif only_no_verdict:
+        annotation = _NO_VERDICT_ANNOTATION
+    else:
+        annotation = ""
     return Decision(
         notify=True,
         action_required=not only_no_verdict,
-        annotation=_NO_VERDICT_ANNOTATION if only_no_verdict else "",
+        annotation=annotation,
         reason=reason,
     )
 

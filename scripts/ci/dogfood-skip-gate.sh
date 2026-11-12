@@ -45,6 +45,13 @@ set -euo pipefail
 #   REPORT_JSON    Optional. Existing JSON report to consume. When set, the
 #                  container lint is skipped. When unset, the report is
 #                  written to dogfood-skip-report.json.
+#   SIBLING_REPORTS Optional. Newline-separated JSON reports from other
+#                  attempts of the same run, inside the workspace (one path per
+#                  line, so a path may contain spaces). A tool whose version
+#                  probe timed out (probe_failure=probe_timeout) is absorbed
+#                  only when one of these holds a verdict for it (#3383).
+#                  Missing, empty or unreadable files are ignored, which leaves
+#                  the timeout fatal.
 #   MAP_HOST_USER  Optional. true maps host UID/GID into the container
 #                  (default: true on GitHub Actions).
 
@@ -57,7 +64,9 @@ Usage:
 Run lintro chk (JSON) in Docker and fail on non-allowlisted tool skips.
 Also publishes timeout-flake / timed-out-tools to GITHUB_OUTPUT (#1653), plus
 status / exit-code once the skip check reaches a verdict (#2246): their absence
-is how a caller tells a killed run from a real skip regression.
+is how a caller tells a killed run from a real skip regression. A verdict also
+publishes probe-timeout-flake / probe-timed-out-tools (#3383): true only when
+every violation is a timed-out version probe with no sibling verdict.
 
 Environment:
   LINTRO_IMAGE   Required. Pinned py-lintro image (CI tag or digest).
@@ -65,6 +74,10 @@ Environment:
   ALLOWLIST      Optional. Allowlist YAML (default: scripts/ci/dogfood-skip-allowlist.yaml).
   REPORT_JSON    Optional. Existing JSON report to consume. When unset, lintro
                  derives a report in Docker at dogfood-skip-report.json.
+  SIBLING_REPORTS Optional. Newline-separated reports (one path per line) from
+                 other attempts of the same run; a probe_timeout row is
+                 absorbed only when one of them has a verdict for the tool
+                 (#3383).
   MAP_HOST_USER  Optional. true maps host UID/GID into the container.
 
 Exit codes:
@@ -105,19 +118,45 @@ fi
 # The workspace is mounted at /code. Validate and translate an absolute
 # supplied path before touching Docker so an out-of-workspace report fails
 # without even pulling the image.
-report_in_container="/code/${REPORT_JSON}"
-if [[ "$REPORT_JSON" == /* ]]; then
-	workspace_dir="$(pwd -P)"
-	case "$REPORT_JSON" in
+workspace_dir="$(pwd -P)"
+# Print the container path of a workspace file, or fail for one outside it.
+container_path() {
+	local host_path="$1"
+	if [[ "$host_path" != /* ]]; then
+		printf '/code/%s\n' "$host_path"
+		return 0
+	fi
+	case "$host_path" in
 	"${workspace_dir}"/*)
-		report_in_container="/code/${REPORT_JSON#"${workspace_dir}/"}"
+		printf '/code/%s\n' "${host_path#"${workspace_dir}/"}"
 		;;
 	*)
-		log_error "REPORT_JSON must be inside the mounted workspace: ${REPORT_JSON}"
-		exit 2
+		return 1
 		;;
 	esac
+}
+
+if ! report_in_container="$(container_path "$REPORT_JSON")"; then
+	log_error "REPORT_JSON must be inside the mounted workspace: ${REPORT_JSON}"
+	exit 2
 fi
+
+# Reports from other attempts of this run (#3383). Only evidence for a
+# probe_timeout row, so an absent one is logged and skipped: the timeout then
+# stays fatal, never silently passes.
+declare -a sibling_args=()
+while IFS= read -r sibling; do
+	[[ -n "$sibling" ]] || continue
+	if [[ ! -s "$sibling" ]]; then
+		log_info "Sibling report not available, ignoring: ${sibling}"
+		continue
+	fi
+	if ! sibling_in_container="$(container_path "$sibling")"; then
+		log_error "SIBLING_REPORTS entry must be inside the mounted workspace: ${sibling}"
+		exit 2
+	fi
+	sibling_args+=(--sibling-report "$sibling_in_container")
+done <<<"${SIBLING_REPORTS:-}"
 
 # Pull explicitly so a registry failure surfaces as a clear gate error rather
 # than an empty report.
@@ -195,12 +234,18 @@ fi
 # needed. The workspace is mounted at /code, so the report and allowlist are
 # both visible there.
 log_info "Checking skips against ${ALLOWLIST}..."
+# The checker's stdout streams to the log through tee (unbuffered via -u, so
+# it keeps its order against the FAIL lines on stderr) and is also kept for
+# the gate-output lines published below.
+checker_stdout="$(mktemp)"
+trap 'rm -f "$checker_stdout"' EXIT
 set +e
 "${docker_args[@]}" --entrypoint python3 "${LINTRO_IMAGE}" \
-	/code/scripts/ci/check-dogfood-skips.py \
+	-u /code/scripts/ci/check-dogfood-skips.py \
 	--report "$report_in_container" \
-	--allowlist "/code/${ALLOWLIST}"
-gate_exit_code=$?
+	--allowlist "/code/${ALLOWLIST}" \
+	"${sibling_args[@]+"${sibling_args[@]}"}" | tee "$checker_stdout"
+gate_exit_code=${PIPESTATUS[0]}
 set -e
 
 # Publish this gate's own verdict (#2246). A consumer must be able to tell
@@ -220,6 +265,12 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
 	0) printf 'status=passed\n' >>"${GITHUB_OUTPUT}" ;;
 	1) printf 'status=failed\n' >>"${GITHUB_OUTPUT}" ;;
 	esac
+	# probe-timeout-flake / probe-timed-out-tools (#3383), printed by the
+	# checker only once it reaches a verdict. Only those two keys are copied.
+	if [[ "${gate_exit_code}" == 0 || "${gate_exit_code}" == 1 ]]; then
+		sed -n -E 's/^gate-output: (probe-timeout-flake|probe-timed-out-tools)=/\1=/p' \
+			"$checker_stdout" >>"${GITHUB_OUTPUT}"
+	fi
 	printf 'exit-code=%s\n' "${gate_exit_code}" >>"${GITHUB_OUTPUT}"
 fi
 

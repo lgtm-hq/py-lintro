@@ -12,6 +12,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.action import Action
+from lintro.enums.probe_failure import ProbeFailure
 from lintro.models.core.tool_outcome import ToolOutcome, Unavailable
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.json_output import serialize_tool_result
@@ -22,8 +23,13 @@ _SCRIPT = _REPO_ROOT / "scripts" / "ci" / "dogfood-skip-gate.sh"
 _DOCKER_STUB = """#!/usr/bin/env bash
 printf '%s\\n' "$*" >>"${DOCKER_ARGS_LOG}"
 if [[ "$*" == *"--entrypoint python3"* && -n "${CHECKER_PYTHON:-}" ]]; then
-\texec "$CHECKER_PYTHON" "$CHECKER_SCRIPT" \\
-\t\t--report "$CHECKER_REPORT" --allowlist "$CHECKER_ALLOWLIST"
+\tsibling=()
+\tif [[ "$*" == *"--sibling-report /code/"* ]]; then
+\t\tsibling=(--sibling-report "$CHECKER_SIBLING")
+\tfi
+\texec "$CHECKER_PYTHON" -u "$CHECKER_SCRIPT" \\
+\t\t--report "$CHECKER_REPORT" --allowlist "$CHECKER_ALLOWLIST" \\
+\t\t"${sibling[@]+"${sibling[@]}"}"
 fi
 if [[ "$*" != *"--entrypoint python3"* ]]; then
 \tprevious=
@@ -476,3 +482,105 @@ def test_configuration_error_publishes_no_verdict(tmp_path: Path) -> None:
 
     assert_that(result.returncode).is_equal_to(2)
     assert_that(output_path.read_text()).does_not_contain("status=")
+
+
+@pytest.mark.parametrize(
+    ("sibling_rows", "expected_exit", "expected_outputs"),
+    [
+        (
+            [{"tool": "semgrep", "status": "ok", "issues_count": 0}],
+            0,
+            ["status=passed", "probe-timeout-flake=false", "probe-timed-out-tools="],
+        ),
+        (
+            None,
+            1,
+            [
+                "status=failed",
+                "probe-timeout-flake=true",
+                "probe-timed-out-tools=semgrep",
+            ],
+        ),
+    ],
+    ids=["sibling-verdict", "sibling-report-absent"],
+)
+def test_gate_absorbs_a_probe_timeout_only_with_a_sibling_verdict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    sibling_rows: list[dict[str, object]] | None,
+    expected_exit: int,
+    expected_outputs: list[str],
+) -> None:
+    """SIBLING_REPORTS reaches the checker and its probe verdict is published.
+
+    An absent sibling report is ignored rather than an error, which leaves the
+    probe timeout fatal and flags it for the infra classifier (#3383).
+    """
+    timed_out = ToolResult.from_outcome(
+        ToolOutcome(
+            Unavailable(
+                "semgrep version check timed out",
+                probe_failure=ProbeFailure.PROBE_TIMEOUT,
+                probe_seconds=120.0,
+            ),
+        ),
+        name="semgrep",
+    )
+    report = tmp_path / "results.json"
+    report.write_text(
+        json.dumps(
+            {"results": [serialize_tool_result(timed_out, action=Action.CHECK)]},
+        ),
+    )
+    # One path per line, so a directory with a space is a single entry; the
+    # missing first entry is logged and skipped.
+    sibling = tmp_path / "sibling dir" / "results.json"
+    if sibling_rows is not None:
+        sibling.parent.mkdir()
+        sibling.write_text(json.dumps({"results": sibling_rows}))
+    allowlist = tmp_path / "allowlist.yaml"
+    allowlist.write_text("allowlist: []\n")
+    bin_dir, log_path = _docker_stub(tmp_path)
+    output_path = tmp_path / "github-output"
+    for key, value in {
+        "CHECKER_PYTHON": sys.executable,
+        "CHECKER_SCRIPT": str(_REPO_ROOT / "scripts/ci/check-dogfood-skips.py"),
+        "CHECKER_REPORT": str(report),
+        "CHECKER_ALLOWLIST": str(allowlist),
+        "CHECKER_SIBLING": str(sibling),
+        "SIBLING_REPORTS": "absent/results.json\n\nsibling dir/results.json\n",
+    }.items():
+        monkeypatch.setenv(key, value)
+
+    result = _run_gate(
+        cwd=tmp_path,
+        report_json=report.name,
+        allowlist=allowlist,
+        bin_dir=bin_dir,
+        log_path=log_path,
+        output_path=output_path,
+    )
+
+    assert_that(result.returncode).is_equal_to(expected_exit)
+    assert_that(output_path.read_text().splitlines()).contains(*expected_outputs)
+    assert_that(result.stderr).contains("probe_timeout after 120s")
+    assert_that(result.stdout).contains(
+        "Sibling report not available, ignoring: absent/results.json",
+    )
+    checker_call = next(
+        line
+        for line in log_path.read_text().splitlines()
+        if "--entrypoint python3" in line
+    )
+    # Unbuffered, so the streamed summary keeps its order against stderr.
+    assert_that(checker_call).contains(
+        "ghcr.io/example/lintro:ci-test -u /code/scripts/ci/check-dogfood-skips.py",
+    )
+    # Streamed to the log as well as parsed for the published outputs.
+    assert_that(result.stdout).contains("Dogfood no-silent-skip gate")
+    if sibling_rows is None:
+        assert_that(checker_call).does_not_contain("--sibling-report")
+    else:
+        assert_that(checker_call).contains(
+            "--sibling-report /code/sibling dir/results.json",
+        )

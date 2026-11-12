@@ -1784,6 +1784,89 @@ def test_dogfood_nightly_skip_gate_publishes_and_retries_its_verdict() -> None:
     assert_that(condition).contains("needs.dogfood-skip-gate.outputs.status == ''")
 
 
+def test_dogfood_nightly_skip_gates_read_dogfood_full_as_sibling_evidence() -> None:
+    """Both nightly gate attempts get dogfood-full's report as a sibling (#3383).
+
+    A probe_timeout row is absorbed only when another attempt of the run
+    reported a verdict for the tool. dogfood-full is that attempt; its report
+    download must not fail the gate, because an absent report simply leaves the
+    timeout fatal.
+    """
+    nightly = _load_workflow(name="dogfood-nightly.yml")
+    for job_id in ("dogfood-skip-gate", "dogfood_skip_gate_retry"):
+        job = nightly["jobs"][job_id]
+        download = next(
+            step
+            for step in job["steps"]
+            if step.get("name") == "Download dogfood-full lint JSON report"
+        )
+        assert_that(download["continue-on-error"]).is_true()
+        assert_that(download["with"]).is_equal_to(
+            {"name": "linting-json-report", "path": ".lintro/sibling/dogfood-full"},
+        )
+        check = next(step for step in job["steps"] if step.get("id") == "skips")
+        assert_that(check["env"]["SIBLING_REPORTS"]).is_equal_to(
+            ".lintro/sibling/dogfood-full/results.json",
+        )
+        harden = next(
+            step
+            for step in job["steps"]
+            if str(step.get("uses", "")).startswith("step-security/harden-runner@")
+        )
+        assert_that(harden["with"]["allowed-endpoints"].split()).contains(
+            "results-receiver.actions.githubusercontent.com:443",
+        )
+
+
+def test_dogfood_nightly_wires_probe_timeout_flake_end_to_end() -> None:
+    """An unabsorbed probe timeout reruns the gate and reaches the classifier.
+
+    Both gate attempts publish the flag, the retry runs on it as well as on a
+    missing verdict, and classify-failure forwards both attempts' flags so
+    is-infra-flake-failure.sh can classify the failure (#3383).
+    """
+    nightly = _load_workflow(name="dogfood-nightly.yml")
+    for job_id in ("dogfood-skip-gate", "dogfood_skip_gate_retry"):
+        outputs = nightly["jobs"][job_id]["outputs"]
+        assert_that(outputs).contains_entry(
+            {"probe-timeout-flake": "${{ steps.skips.outputs.probe-timeout-flake }}"},
+            {
+                "probe-timed-out-tools": (
+                    "${{ steps.skips.outputs.probe-timed-out-tools }}"
+                ),
+            },
+        )
+
+    # Pinned whole: the retry needs a failed/cancelled gate AND either no
+    # verdict OR a probe-timeout-only verdict. An && inside either group, or
+    # a dropped group, would silently change who gets retried.
+    condition = _normalize_github_expr(nightly["jobs"]["dogfood_skip_gate_retry"]["if"])
+    assert_that(condition).is_equal_to(
+        "always() && !cancelled() && "
+        "( needs.dogfood-skip-gate.result == 'failure' || "
+        "needs.dogfood-skip-gate.result == 'cancelled' ) && "
+        "( needs.dogfood-skip-gate.outputs.status == '' || "
+        "needs.dogfood-skip-gate.outputs.probe-timeout-flake == 'true' )",
+    )
+
+    step = next(
+        step
+        for step in nightly["jobs"]["classify-failure"]["steps"]
+        if step.get("id") == "classify"
+    )
+    env = {key: _normalize_github_expr(value) for key, value in step["env"].items()}
+    for prefix, job in (
+        ("SKIP_GATE", "dogfood-skip-gate"),
+        ("SKIP_GATE_RETRY", "dogfood_skip_gate_retry"),
+    ):
+        assert_that(env[f"{prefix}_PROBE_TIMEOUT_FLAKE"]).contains(
+            f"needs.{job}.outputs.probe-timeout-flake",
+        )
+        assert_that(env[f"{prefix}_PROBE_TIMED_OUT_TOOLS"]).contains(
+            f"needs.{job}.outputs.probe-timed-out-tools",
+        )
+
+
 def test_dogfood_nightly_skip_gate_retry_is_a_lockstep_copy() -> None:
     """The skip-gate retry must run exactly what the primary ran (#2246).
 

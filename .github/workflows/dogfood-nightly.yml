@@ -256,6 +256,11 @@ jobs:
       # with no coverage from a real non-allowlisted skip.
       status: ${{ steps.skips.outputs.status }}
       exit-code: ${{ steps.skips.outputs.exit-code }}
+      # 'true' when the verdict failed only on version-probe timeouts that no
+      # other attempt of the run answered (#3383). classify-failure hands it
+      # to is-infra-flake-failure.sh, and the retry re-probes on it.
+      probe-timeout-flake: ${{ steps.skips.outputs.probe-timeout-flake }}
+      probe-timed-out-tools: ${{ steps.skips.outputs.probe-timed-out-tools }}
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
@@ -263,6 +268,7 @@ jobs:
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
+            results-receiver.actions.githubusercontent.com:443
             github.com:443
             api.github.com:443
             codeload.github.com:443
@@ -298,6 +304,17 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Download dogfood-full lint JSON report
+        # Sibling evidence for a timed-out version probe (#3383): dogfood-full
+        # is another attempt of this run, and a verdict it reported for a tool
+        # lets the gate absorb that tool's probe_timeout. A missing artifact
+        # (lint killed before upload) just leaves the timeout fatal, so the
+        # download must not fail the gate on its own.
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: linting-json-report
+          path: .lintro/sibling/dogfood-full
       - name: Log in to GitHub Container Registry
         # yamllint disable-line rule:line-length
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
@@ -315,6 +332,9 @@ jobs:
             pydoclint:timeout=120,black:timeout=120,bandit:timeout=300,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
           # The same resolved image dogfood-full lints with (#2602).
           LINTRO_IMAGE: ${{ needs.resolve-image.outputs.image }}
+          # Absorb a probe_timeout only when dogfood-full reported a verdict
+          # for the same tool (#3383); absent file = no evidence = still fatal.
+          SIBLING_REPORTS: .lintro/sibling/dogfood-full/results.json
         # Memory trace (#1761): this job is repeatedly killed mid-lint with
         # "runner has received a shutdown signal" + container EOF, and memory
         # pressure is the leading hypothesis. Samples stream into this step's
@@ -327,10 +347,14 @@ jobs:
   # Bounded retry (1 attempt) of the gate above (#2246). Same job, same
   # image, same tool options — GitHub Actions has no job-level retry, and the
   # kills this exists to absorb take the whole runner down mid-step, so a
-  # second job is the only way to reach a verdict the same night. It runs only
+  # second job is the only way to reach a verdict the same night. It runs
   # when the primary gate published no verdict at all (its `status` output is
   # written by scripts/ci/dogfood-skip-gate.sh once the skip check completes),
-  # so a real non-allowlisted skip is reported immediately, never re-run.
+  # or when its only violations were version-probe timeouts that no other
+  # attempt answered (`probe-timeout-flake`, #3383): a fresh attempt re-probes
+  # the tool, and classify-failure treats the primary as infra, which would
+  # ping with action required if no retry ran. Any other non-allowlisted skip
+  # is reported immediately, never re-run.
   dogfood_skip_gate_retry:
     name: 🚦 Dogfood No-Silent-Skip Gate (retry)
     needs: [resolve-image, dogfood-skip-gate]
@@ -341,7 +365,10 @@ jobs:
         needs.dogfood-skip-gate.result == 'failure' ||
         needs.dogfood-skip-gate.result == 'cancelled'
       ) &&
-      needs.dogfood-skip-gate.outputs.status == ''
+      (
+        needs.dogfood-skip-gate.outputs.status == '' ||
+        needs.dogfood-skip-gate.outputs.probe-timeout-flake == 'true'
+      )
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -355,6 +382,11 @@ jobs:
       # with no coverage from a real non-allowlisted skip.
       status: ${{ steps.skips.outputs.status }}
       exit-code: ${{ steps.skips.outputs.exit-code }}
+      # 'true' when the verdict failed only on version-probe timeouts that no
+      # other attempt of the run answered (#3383). classify-failure hands it
+      # to is-infra-flake-failure.sh, and the retry re-probes on it.
+      probe-timeout-flake: ${{ steps.skips.outputs.probe-timeout-flake }}
+      probe-timed-out-tools: ${{ steps.skips.outputs.probe-timed-out-tools }}
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
@@ -362,6 +394,7 @@ jobs:
         with:
           egress-policy: 'audit' # TEMP: lgtm-hq/lgtm-ci#1207
           allowed-endpoints: >
+            results-receiver.actions.githubusercontent.com:443
             github.com:443
             api.github.com:443
             codeload.github.com:443
@@ -397,6 +430,17 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Download dogfood-full lint JSON report
+        # Sibling evidence for a timed-out version probe (#3383): dogfood-full
+        # is another attempt of this run, and a verdict it reported for a tool
+        # lets the gate absorb that tool's probe_timeout. A missing artifact
+        # (lint killed before upload) just leaves the timeout fatal, so the
+        # download must not fail the gate on its own.
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: linting-json-report
+          path: .lintro/sibling/dogfood-full
       - name: Log in to GitHub Container Registry
         # yamllint disable-line rule:line-length
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
@@ -414,6 +458,9 @@ jobs:
             pydoclint:timeout=120,black:timeout=120,bandit:timeout=300,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
           # The same resolved image dogfood-full lints with (#2602).
           LINTRO_IMAGE: ${{ needs.resolve-image.outputs.image }}
+          # Absorb a probe_timeout only when dogfood-full reported a verdict
+          # for the same tool (#3383); absent file = no evidence = still fatal.
+          SIBLING_REPORTS: .lintro/sibling/dogfood-full/results.json
         # Memory trace (#1761): this job is repeatedly killed mid-lint with
         # "runner has received a shutdown signal" + container EOF, and memory
         # pressure is the leading hypothesis. Samples stream into this step's
@@ -491,11 +538,20 @@ jobs:
           SKIP_GATE_STATUS: ${{ needs.dogfood-skip-gate.outputs.status }}
           SKIP_GATE_EXIT_CODE: >-
             ${{ needs.dogfood-skip-gate.outputs.exit-code }}
+          # Probe-timeout-only skip-gate failures (#3383) are infra noise.
+          SKIP_GATE_PROBE_TIMEOUT_FLAKE: >-
+            ${{ needs.dogfood-skip-gate.outputs.probe-timeout-flake }}
+          SKIP_GATE_PROBE_TIMED_OUT_TOOLS: >-
+            ${{ needs.dogfood-skip-gate.outputs.probe-timed-out-tools }}
           SKIP_GATE_RETRY_RESULT: ${{ needs.dogfood_skip_gate_retry.result }}
           SKIP_GATE_RETRY_STATUS: >-
             ${{ needs.dogfood_skip_gate_retry.outputs.status }}
           SKIP_GATE_RETRY_EXIT_CODE: >-
             ${{ needs.dogfood_skip_gate_retry.outputs.exit-code }}
+          SKIP_GATE_RETRY_PROBE_TIMEOUT_FLAKE: >-
+            ${{ needs.dogfood_skip_gate_retry.outputs.probe-timeout-flake }}
+          SKIP_GATE_RETRY_PROBE_TIMED_OUT_TOOLS: >-
+            ${{ needs.dogfood_skip_gate_retry.outputs.probe-timed-out-tools }}
           VERIFY_RESULT: ${{ needs.verify-pinned-image-tools.result }}
           # A night whose image could not be resolved ran no lint at all;
           # that coverage gap must reach the tracker, not pass silently.
