@@ -133,8 +133,8 @@ The configuration system works in a specific order:
      as unavailable with `probe_failure: probe_timeout`, an `unavailable_reason` naming
      both budgets (for example `version probe timed out twice (30 s, 60 s)`) and
      `probe_seconds`, the wall-clock time both attempts took. That is distinct from
-     `probe_failure: binary_missing`, which is reserved for an executable that was not
-     found.
+     `probe_failure: binary_missing`, which is reported only when launching the probe
+     fails with "file not found" (or a tool without a version probe is not on PATH).
 
 2. **Enforce Tier** - Cross-cutting settings injected as CLI flags
    - These settings override native configs via CLI arguments

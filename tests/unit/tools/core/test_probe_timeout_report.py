@@ -2,24 +2,34 @@
 
 from __future__ import annotations
 
+import json
 import subprocess  # nosec B404 - only TimeoutExpired/CompletedProcess are used
+import time
 from collections.abc import Callable, Sequence
+from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
 
+from lintro import __version__ as lintro_version
 from lintro.enums.action import Action
 from lintro.enums.probe_failure import ProbeFailure
 from lintro.models.core.tool_outcome import ToolOutcome, Unavailable
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools.core import version_parsing
 from lintro.tools.core.snapshots import (
+    DEFAULT_SNAPSHOT_TTL_SECONDS,
     ToolSnapshot,
+    _snapshot_from_version,
+    probe_all_tools,
     probe_tool,
     snapshot_to_unavailable_result,
 )
+from lintro.tools.core.version_parsing import ToolVersionInfo
 from lintro.utils.json_output import serialize_tool_result
 
 #: One scripted outcome per probe attempt: an exception to raise, or stdout.
@@ -257,3 +267,87 @@ def test_probe_failure_requires_an_unavailable_result() -> None:
         success=True,
         probe_failure=ProbeFailure.PROBE_TIMEOUT,
     )
+
+
+def test_cached_probe_seconds_without_timeout_is_reprobed_not_crashed(
+    tmp_path: Path,
+) -> None:
+    """A cache entry pairing timing with another cause is discarded on load.
+
+    Args:
+        tmp_path: Pytest temporary directory holding the cache.
+    """
+    mismatched = ToolSnapshot(
+        name="ruff",
+        probe_error="stale cached evidence",
+        command=("ruff",),
+        probe_failure=ProbeFailure.BINARY_MISSING,
+        probe_seconds=90.0,
+        probed_at=time.time(),
+    )
+    cache_file = tmp_path / ".lintro-cache" / "tool-snapshots.json"
+    cache_file.parent.mkdir(parents=True)
+    cache_file.write_text(
+        json.dumps(
+            {
+                "lintro_version": lintro_version,
+                "probed_at": time.time(),
+                "ttl_seconds": DEFAULT_SNAPSHOT_TTL_SECONDS,
+                "snapshots": {"ruff": mismatched.to_dict()},
+            },
+        ),
+        encoding="utf-8",
+    )
+    fresh = replace(
+        mismatched,
+        probe_error="Failed to run version check: fresh probe",
+        probe_seconds=None,
+    )
+
+    with (
+        patch(
+            "lintro.tools.core.snapshots.get_executable_command",
+            return_value=["ruff"],
+        ),
+        patch("lintro.tools.core.snapshots.shutil.which", return_value=None),
+        patch("lintro.tools.core.snapshots.probe_tool", return_value=fresh),
+        patch("lintro.plugins.discovery.discover_all_tools", return_value=None),
+        patch(
+            "lintro.plugins.registry.ToolRegistry.get_names",
+            return_value=["ruff"],
+        ),
+    ):
+        snapshot = probe_all_tools(cache_root=tmp_path)["ruff"]
+    report = serialize_tool_result(
+        snapshot_to_unavailable_result(snapshot, strict=False),
+        action=Action.CHECK,
+    )
+
+    assert_that(report).contains_entry(
+        {"unavailable_reason": "Failed to run version check: fresh probe"},
+        {"probe_failure": "binary_missing"},
+    )
+    assert_that(report).does_not_contain_key("probe_seconds")
+    assert_that(ToolSnapshot.from_dict).raises(ValueError).when_called_with(
+        mismatched.to_dict(),
+    )
+
+
+def test_module_launch_that_exits_nonzero_is_not_binary_missing() -> None:
+    """``python -m tool`` failing with no PATH binary has no probe cause."""
+    snapshot = ToolSnapshot(
+        name="sometool",
+        command=("python", "-m", "sometool"),
+    )
+    info = ToolVersionInfo(
+        name="sometool",
+        min_version="1.0.0",
+        error_message="Command failed: python -m sometool --version",
+        probe_failed=True,
+    )
+
+    result = _snapshot_from_version(snapshot, info, "Install sometool")
+
+    assert_that(result.available).is_false()
+    assert_that(result.probe_failure).is_none()
+    assert_that(result.probe_error).contains("Command failed")

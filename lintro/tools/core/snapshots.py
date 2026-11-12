@@ -553,6 +553,8 @@ def _snapshot_from_version(
         version_info.current_version is not None and not version_info.probe_failed
     )
     available = passed or unparseable or below_minimum
+    # Only the probe knows the cause: an empty binary_path alone does not
+    # prove a missing executable (``python -m X`` can launch and exit non-zero).
     probe_failure = None if available else version_info.probe_failure
     # A probe that timed out did launch something (a wrapper such as bunx or
     # python -m), so it is not reported as a missing executable (#2337).
@@ -563,7 +565,6 @@ def _snapshot_from_version(
     ):
         main_cmd = snapshot.command[0] if snapshot.command else snapshot.name
         error = f"{main_cmd} not found in PATH. {error}".strip()
-        probe_failure = ProbeFailure.BINARY_MISSING
     return replace(
         snapshot,
         available=available,

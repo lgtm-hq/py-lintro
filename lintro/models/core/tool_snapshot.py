@@ -171,6 +171,10 @@ class ToolSnapshot:
             or not 0 <= probe_seconds <= sys.float_info.max
         ):
             raise ValueError("probe_seconds must be a finite nonnegative number")
+        # Probe timing is evidence of a timeout only; any other pairing would
+        # load here and then fail when the result is built (#2337).
+        if probe_seconds is not None and probe_failure != ProbeFailure.PROBE_TIMEOUT:
+            raise ValueError("probe_seconds requires a probe_timeout failure")
         # Missing command evidence cannot establish a cache's binary identity.
         # Explicit in-process snapshots still serialize an empty command list.
         command = data.get("command")

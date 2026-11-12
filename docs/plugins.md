@@ -346,7 +346,7 @@ When the version probe knows why it failed, an unavailable result also carries a
 
 | `probe_failure`  | Meaning                                                          |
 | ---------------- | ---------------------------------------------------------------- |
-| `binary_missing` | The executable was not found                                     |
+| `binary_missing` | The executable was not found (see below)                         |
 | `probe_timeout`  | The executable ran, but `--version` timed out twice (with retry) |
 
 A `probe_timeout` result adds `probe_seconds`, the wall-clock seconds both attempts
@@ -364,9 +364,13 @@ took, and its `unavailable_reason` names both budgets:
 }
 ```
 
-Other probe failures, such as a non-zero exit or unparseable output, omit both keys. A
-slow probe is not a missing tool: CI can treat `probe_timeout` as infrastructure noise
-while still failing on `binary_missing`.
+`binary_missing` is reported only when launching the version probe fails with "file not
+found", or, for a tool that declares no version probe, when its executable is not on
+PATH. A command that launches and then fails, such as `python -m tool` exiting non-zero
+because the module is absent, is not classified. Other probe failures, such as a
+non-zero exit or unparseable output, omit both keys. A slow probe is not a missing tool:
+CI can treat `probe_timeout` as infrastructure noise while still failing on
+`binary_missing`.
 
 Set `execution.strict_missing_tools: true` to require installed, runnable tools:
 unavailability then sets `success: false` and makes the run exit 1, while retaining
