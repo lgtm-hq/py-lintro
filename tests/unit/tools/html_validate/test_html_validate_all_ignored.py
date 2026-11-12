@@ -306,6 +306,17 @@ def test_matches_itself_by_platform(path: str, sep: str, expected: bool) -> None
         pytest.param("a?b.html", False, id="question"),
         pytest.param("[].html", False, id="empty-class-held-back-anyway"),
         pytest.param("a+(b.html", False, id="unclosed-extglob-held-back-anyway"),
+        pytest.param("[a\nb].html", False, id="newline-inside-class"),
+        pytest.param("[a\nb]/p.html", False, id="newline-inside-class-directory"),
+        pytest.param("[a\tb].html", False, id="tab-inside-class"),
+        pytest.param("{a,\nb}.html", False, id="newline-inside-brace-list"),
+        pytest.param("{a\n..b}.html", False, id="newline-inside-brace-range"),
+        pytest.param("a+(\nb).html", False, id="newline-inside-extglob"),
+        pytest.param("a\nb.html", False, id="bare-newline"),
+        pytest.param("a\tb.html", False, id="bare-tab"),
+        pytest.param("a\x01b.html", False, id="c0-control"),
+        pytest.param("a\x7fb.html", False, id="delete"),
+        pytest.param("a\x85b.html", False, id="c1-control"),
     ],
 )
 def test_matches_itself_holds_back_only_misread_shapes(

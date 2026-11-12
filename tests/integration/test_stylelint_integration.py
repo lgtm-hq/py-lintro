@@ -336,3 +336,42 @@ def test_dry_run_of_a_mixed_run_keeps_the_withheld_files_reason(
     assert_that(stylelint["success"]).is_false()
     assert_that(stylelint["output"]).starts_with("Stylelint was not run on 1 file(s)")
     assert_that(stylelint["output"]).does_not_contain("ValueError")
+
+
+@pytest.mark.parametrize(
+    ("name", "decoy"),
+    [
+        pytest.param("[a\nb].css", "a.css", id="file-name"),
+        pytest.param("[a\nb]/p.css", "a/p.css", id="directory-name"),
+        pytest.param("a\tb.css", "ab.css", id="tab"),
+    ],
+)
+def test_control_character_names_are_linted_literally(
+    styled_project: Path,
+    name: str,
+    decoy: str,
+) -> None:
+    r"""Stylelint escapes an existing path, so control characters stay literal.
+
+    Unlike html-validate, Stylelint 18 reads ``[a\\nb].css`` as the file it
+    names, so such a path is linted and the decoy is not (#3393).
+
+    Args:
+        styled_project: Temp project with a stylelint config.
+        name: A path holding a control character.
+        decoy: A file a glob reading of the name could match.
+    """
+    lookalike = styled_project / decoy
+    lookalike.parent.mkdir(exist_ok=True)
+    shutil.copy(FIXTURES / "stylelint_violations.css", lookalike)
+    target = styled_project / name
+    target.parent.mkdir(exist_ok=True)
+    shutil.copy(FIXTURES / "stylelint_violations.css", target)
+
+    result = StylelintPlugin().check([str(target)], {})
+
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.issues_count).is_greater_than(0)
+    assert_that({Path(issue.file).name for issue in result.issues}).is_equal_to(
+        {target.name},
+    )

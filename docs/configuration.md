@@ -2672,15 +2672,16 @@ html-validate treats every path it is given as a glob, so a path holding a glob 
 can fail to match itself, or match a different file (`[slug].html` matches `s.html`).
 The shapes are `*` or `?` anywhere, an extglob such as `+(a)`, `@(a)` or `!(a)`, a
 character class (`[` with a later `]`, as in a routed site's `[slug].html`), brace
-expansion (`{` and a later `}` with a `,` or `..` between them), and, on POSIX systems,
-a backslash (read as a path separator). A bare parenthesis is literal, so SvelteKit
-route groups such as `src/routes/(app)/+page.svelte` and names such as `page (1).html`
-are validated as usual. Lintro never passes a path with one of these shapes to
-html-validate. It validates the other files, keeps their findings, and fails the run as
-an execution error that names the files left uninspected; if every path holds one of
-these shapes, html-validate is not run at all. The glob shapes are held back on every
-platform. The backslash is held back on POSIX only: on Windows it is always a path
-separator, so those paths are validated as usual.
+expansion (`{` and a later `}` with a `,` or `..` between them, even across a newline),
+any control character such as a newline or tab, and, on POSIX systems, a backslash (read
+as a path separator). A bare parenthesis is literal, so SvelteKit route groups such as
+`src/routes/(app)/+page.svelte` and names such as `page (1).html` are validated as
+usual. Lintro never passes a path with one of these shapes to html-validate. It
+validates the other files, keeps their findings, and fails the run as an execution error
+that names the files left uninspected; if every path holds one of these shapes,
+html-validate is not run at all. The glob shapes are held back on every platform. The
+backslash is held back on POSIX only: on Windows it is always a path separator, so those
+paths are validated as usual.
 
 **Available Options via `--tool-options`:**
 

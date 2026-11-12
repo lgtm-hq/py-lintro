@@ -100,11 +100,18 @@ _GLOB_METACHARACTERS: frozenset[str] = frozenset("*?[]{}")
 #   is literal; ``[].html`` is also literal but is held back anyway.
 # - A ``{`` with a later ``}`` and a ``,`` or ``..`` anywhere between them
 #   (brace expansion). ``{a}`` and a lone brace are literal.
+# - Any control character (C0, DEL or C1), outright. A POSIX file name can
+#   hold one, and a newline or tab inside ``[...]`` still forms a class that
+#   matches other files. Such names are pathological, so they are held back
+#   wherever the character appears.
 #
-# The backslash only matters on POSIX, where it can be part of a file name; on
-# Windows it is always a separator and the conversion is correct.
+# Every span check runs with ``re.DOTALL``, so a delimiter pair is found
+# across a newline. The backslash only matters on POSIX, where it can be part
+# of a file name; on Windows it is always a separator and the conversion is
+# correct.
 _SELF_MATCH_BREAKER: re.Pattern[str] = re.compile(
-    r"[*?]|[+@!]\(|\[.*\]|\{.*(?:,|\.\.).*\}",
+    r"[*?]|[+@!]\(|\[.*\]|\{.*(?:,|\.\.).*\}|[\x00-\x1f\x7f-\x9f]",
+    re.DOTALL,
 )
 
 

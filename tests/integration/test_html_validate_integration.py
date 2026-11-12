@@ -284,3 +284,44 @@ def test_html_validate_holds_back_extglob_name(tmp_path: Path) -> None:
     assert_that(result.findings_complete).is_false()
     assert_that(result.issues).is_empty()
     assert_that(result.output).contains("a+(b).html", "not inspected")
+
+
+@pytest.mark.html_validate
+@pytest.mark.parametrize(
+    ("name", "decoys"),
+    [
+        pytest.param("[a\nb].html", ("a.html", "b.html"), id="file-name"),
+        pytest.param("[a\nb]/p.html", ("a/p.html", "b/p.html"), id="directory-name"),
+    ],
+)
+def test_html_validate_holds_back_a_class_spanning_a_newline(
+    tmp_path: Path,
+    name: str,
+    decoys: tuple[str, ...],
+) -> None:
+    r"""A ``[...]`` class across a newline would validate the clean decoys.
+
+    html-validate reads ``[a\\nb]`` as a class matching ``a`` or ``b``: it
+    validated the decoys, printed ``[]`` and the run passed (#3393).
+
+    Args:
+        tmp_path: Pytest-managed temporary directory.
+        name: A path whose class spans a newline.
+        decoys: Clean files the class would match instead.
+    """
+    for decoy in decoys:
+        (tmp_path / decoy).parent.mkdir(exist_ok=True)
+        (tmp_path / decoy).write_text("<p>clean</p>\n", encoding="utf-8")
+    sibling = tmp_path / "index.html"
+    sibling.write_text("<p>clean</p>\n", encoding="utf-8")
+    target = tmp_path / name
+    target.parent.mkdir(exist_ok=True)
+    target.write_text("<p><div></p>\n", encoding="utf-8")
+    tool = ToolRegistry.get("html_validate")
+    tool.exclude_patterns = []
+    result = tool.check([str(target), str(sibling)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.inspected_files).is_none()
+    assert_that(result.output).contains("not inspected")
