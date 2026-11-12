@@ -19,21 +19,30 @@ Use `--baseline PATH` on these commands to choose a different file. Alternativel
 the invocation directory; configured paths are relative to the project config. This also
 applies to a `baseline` value inherited from global user config: it resolves at the
 project config directory, or at cwd when there is no project config, rather than at the
-global config directory.
+global config directory. A `baseline` value must be a non-empty string; an empty
+`baseline:` (null) means no baseline, and any other value fails configuration loading
+with a one-line error.
+
+A `baseline` key in the global user config opts every project into filtering. A project
+without that file fails `lintro check` with an error that names the global config file;
+set `baseline` in the project config, remove it from the global config, or pass
+`baseline=False` (Python API) or `--no-baseline` (watch).
 
 Filtering and `create`, `update`, and `prune` require running from the project config
-directory. Without a project config, they require running from the resolved baseline
-file's directory, including when using an explicit `--baseline` path. Other invocation
-directories fail before tools run, with the required root in the error. This prevents an
-acknowledgement for root `a.py` from hiding a new finding in `pkg/a.py` when invoked
-from `pkg`. To check a subdirectory, run from the root and pass `pkg` as the scan path.
-With a project config, baseline files may live in a separate directory without changing
-the root. Finding paths are relative to this root and case-sensitive on every platform;
-case-only renames change their identity. Commit the baseline alongside the code. Use one
-baseline per project root: version one does not record its root, so sharing a baseline
-between different project configurations can alias relative file identities. Creation
-refuses to overwrite a file. `show` reads statistics without executing tools and can run
-from any directory.
+directory. Without a project config, a `baseline` value from the global config resolves
+at the invocation directory, which is then its root, so a value such as `sub/x.json`
+works from the directory that contains `sub`. Otherwise, without a project config, they
+require running from the resolved baseline file's directory, including when using an
+explicit `--baseline` path. Other invocation directories fail before tools run, with the
+required root in the error. This prevents an acknowledgement for root `a.py` from hiding
+a new finding in `pkg/a.py` when invoked from `pkg`. To check a subdirectory, run from
+the root and pass `pkg` as the scan path. With a project config, baseline files may live
+in a separate directory without changing the root. Finding paths are relative to this
+root and case-sensitive on every platform; case-only renames change their identity.
+Commit the baseline alongside the code. Use one baseline per project root: version one
+does not record its root, so sharing a baseline between different project configurations
+can alias relative file identities. Creation refuses to overwrite a file. `show` reads
+statistics without executing tools and can run from any directory.
 
 Treat the baseline as a reviewed suppression policy. Review additions, changed
 fingerprints, and increased occurrence counts alongside code changes: `update` can
@@ -95,7 +104,11 @@ never loaded just because it exists. Callers publishing quality counts should op
 explicitly, as the badge does.
 
 The executor's `run_lint_tools_simple` also uses the configured baseline when its
-`baseline` argument is omitted, including calls from watch mode.
+`baseline` argument is omitted, and accepts the same `baseline=False` opt-out as the
+public API. Watch mode passes `--no-baseline` through to it as `baseline=False`. Watch
+validates the baseline once at startup and exits with an error, before watching, when
+the file is missing or invalid; `--no-baseline` watches without it. Each run then
+re-reads the file, so edits apply on the next batch.
 
 Version 1 matches the tuple `(tool, relative file, rule code, SHA-256(message))`. Line
 and column are excluded from identity; the stored line is only a hint. Messages
@@ -111,19 +124,42 @@ acknowledged and remain visible. File moves and changed messages or rule codes a
 findings.
 
 Filtering runs after execution, AI enhancement, and the format verify pass, before final
-display or serialization. It filters detected and residual findings separately and
-recomputes totals, severity counts, success, and measured fix accounting. Baselined
-findings are reported separately, never counted as fixes. Timeout, parse-failure,
-unknown residual, unknown inspection, and unexplained failure states remain failures. A
-failed producer must explicitly certify that its findings fully explain the failure
-before they can be acknowledged. The supported check tools above supply this proof from
-their native exit statuses and reports. Other failed producers retain their findings
-until they supply that proof. Whenever findings are acknowledged, cached display text
-and native diagnostic output are cleared, including when retained findings keep the
-result failing. Final display and serialization use the retained structured findings.
-Incomplete results preserve their findings and execution-error output. Live diagnostic
-display is deferred when a baseline is active so final structured findings reflect
-filtering.
+display or serialization. The order is deliberate: AI fixes can change files, so the
+filter must see the final findings, and an AI gate stays independent of
+acknowledgements. Baselined findings are therefore still sent to the AI when AI is
+enabled. It filters detected and residual findings separately and recomputes totals,
+severity counts, success, and measured fix accounting. Baselined findings are reported
+separately, never counted as fixes. Timeout, parse-failure, unknown residual, unknown
+inspection, and unexplained failure states remain failures. A failed producer must
+explicitly certify that its findings fully explain the failure before they can be
+acknowledged. The supported check tools above supply this proof from their native exit
+statuses and reports. Other failed producers retain their findings until they supply
+that proof. Whenever findings are acknowledged, cached display text and native
+diagnostic output are cleared, including when retained findings keep the result failing.
+Final display and serialization use the retained structured findings. Incomplete results
+preserve their findings and execution-error output. Live diagnostic display is deferred
+when a baseline is active so final structured findings reflect filtering.
+
+What a user sees for an incomplete native report: the result keeps every finding and its
+native output, filtering is skipped for that tool, and when it has findings a warning
+such as `Baseline not applied to ruff: report has 1 parse failure(s)` names the reason.
+The run fails. A clean result from a producer that does not certify failed findings is
+still complete: it has nothing to filter, so it passes with no warning and a baselined
+count of zero.
+
+Baselined counts appear in the JSON output (`baselined_count` per tool and
+`summary.total_baselined`, in both `--output-format json` and JSON report files) and in
+the console summary line `N issues (M baselined)`, which every stdout format except
+JSON, SARIF, CSV, and Markdown prints. SARIF, CSV, and Markdown output, and report files
+other than JSON, list only the retained findings and carry no baselined count.
+
+**Source-parse diagnostics.** A finding that says the producer could not parse the
+source file (Ruff's `invalid-syntax`; older Ruff releases used a null code or `E999`) is
+never acknowledged: `create` and `update` do not record it, and filtering leaves it
+visible even if a matching entry exists. Ruff skips other rules for a file it cannot
+parse while still listing that file as inspected, so such a file also supplies no exact
+coverage: `update` and `prune` keep every entry for it until it parses again. An
+existing `invalid-syntax` entry in a baseline no longer acknowledges anything.
 
 Format accounting matches fingerprint occurrences across the filtered initial and
 residual lists, so line shifts do not cancel fix credit. If formatting introduces a new
@@ -150,7 +186,10 @@ Native project configuration and configured tool options (including
 `[tool.lintro.<tool>]`) still determine which rules are observed. Rule coverage is not
 compared with previous scans. Disabling a rule there can let `update` or `prune` remove
 its entries on fully covered files; re-enabling the rule then exposes those findings
-again.
+again. This is a decided limit of version one, not an oversight: recording the active
+rule set needs a schema change and a per-producer rule listing that no certified
+producer supplies yet. Review removals in the baseline diff after changing rule
+configuration.
 
 The boolean `inspected_files` proves that some work happened, not which files were
 examined. Until #2609 supplies coverage throughout the tool registry, pruning must not
@@ -185,12 +224,19 @@ Baseline JSON is untrusted input. Unknown schema versions, unexpected or duplica
 members, repeated entries, non-canonical paths, parent traversal, absolute paths,
 invalid hashes or counts, and oversized files fail closed before tools run. Writes use
 an exclusive sibling lock and an atomic replacement; an error leaves the existing
-baseline intact. Replacements preserve the existing file's permission mode; creation
-uses ordinary file permissions restricted by the process umask. A killed writer can
-leave a sibling `.lock` file. Confirm that no baseline management command is active
-before removing that lock and retrying; locks are never removed automatically by a later
-writer. No rule packs (#3023), provenance, or broader ignore system (#1610) are
-introduced here.
+baseline intact. `update` and `prune` take the lock before their scan and hold it until
+the write, so another writer cannot change the file between the scan and the merge; a
+concurrent management command fails with the lock error instead. After the replacement,
+the writer also flushes the parent directory on POSIX so the new file survives a crash.
+If the filesystem does not support a directory fsync (some network mounts), the write
+still succeeds and a debug line is logged. Replacements preserve the existing file's
+permission mode only: the replacement is owned by the user and group of the writing
+process, not the previous owner. Creation uses ordinary file permissions restricted by
+the process umask. Ctrl-C and errors release the lock, but a writer killed by a signal
+such as SIGTERM, including a CI timeout, can leave a sibling `.lock` file. Confirm that
+no baseline management command is active before removing that lock and retrying; locks
+are never removed automatically by a later writer. No rule packs (#3023), provenance, or
+broader ignore system (#1610) are introduced here.
 
 ## Execution checks for all runs
 

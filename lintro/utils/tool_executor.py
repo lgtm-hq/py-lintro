@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from lintro.enums.action import Action, normalize_action
 from lintro.models.core.run_artifact import RunArtifact
@@ -64,7 +64,7 @@ from lintro.utils.python_formatting import resolve_python_formatting
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
 # Re-export constants and internals for backwards compatibility. The private
 # names stay importable from here because they were part of this module before
@@ -518,6 +518,7 @@ def execute_run(
     diff_base: str | None = None,
     ai_status_lines: list[str] | None = None,
     on_tool_result: Callable[[ToolResult], None] | None = None,
+    private_tool_options: Mapping[str, Mapping[str, object]] | None = None,
 ) -> RunArtifact:
     """Run the selected tools and aggregate everything the render phase needs.
 
@@ -555,6 +556,9 @@ def execute_run(
             summary without AI rows.
         on_tool_result: Optional callback invoked with each completed tool
             result so it can be displayed live. ``None`` runs silently.
+        private_tool_options: Internal per-tool options set by lintro itself,
+            such as baseline coverage requests. They never travel through
+            ``tool_options``, and ``tool_options`` cannot set their keys.
 
     Invalid plugin results (including ``TypeError`` and ``AttributeError``)
     become failed tool results with error details; the other tools still run.
@@ -657,9 +661,20 @@ def execute_run(
     resolved_diff_base = diff_scope.base
 
     # Parse tool options once for all tools
-    from lintro.utils.tool_options import parse_tool_options
+    from lintro.utils.tool_options import (
+        merge_private_tool_options,
+        parse_tool_options,
+    )
 
-    tool_option_dict = parse_tool_options(tool_options)
+    tool_option_dict, dropped_options = merge_private_tool_options(
+        parse_tool_options(tool_options),
+        private_tool_options,
+    )
+    for dropped in dropped_options:
+        logger.console_output(
+            text=f"Ignoring reserved internal tool option: {dropped}",
+            color="yellow",
+        )
 
     # Create UnifiedConfigManager once before the loop
     config_manager = UnifiedConfigManager()
@@ -887,7 +902,7 @@ def run_lint_tools_simple(
     on_tool_result: Callable[[ToolResult], None] | None = None,
     render_summary: bool = True,
     profile: bool = False,
-    baseline: str | None = None,
+    baseline: str | Literal[False] | None = None,
 ) -> int:
     """Run tools and render their output, returning the process exit code.
 
@@ -930,7 +945,8 @@ def run_lint_tools_simple(
         render_summary: Whether to render the normal final report and summary.
         profile: When True, render a per-tool performance profile after the run
             and include the profile payload in JSON output.
-        baseline: Optional fingerprint baseline path overriding project config.
+        baseline: Fingerprint baseline path overriding project config, ``None``
+            to use the configured baseline, or ``False`` to disable filtering.
 
     Invalid plugin results become failed tool results with error details.
 

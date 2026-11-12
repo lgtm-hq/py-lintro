@@ -7,6 +7,8 @@ clean Ctrl-C shutdown.
 
 from __future__ import annotations
 
+from typing import Literal
+
 import click
 from rich.console import Console
 
@@ -14,9 +16,26 @@ from lintro.config.config_loader import load_config
 from lintro.enums.action import Action
 from lintro.exceptions.errors import ConfigurationError
 from lintro.utils.execution.tool_configuration import get_tools_to_run
+from lintro.utils.fingerprint_baseline_file import load_run_baseline
 
 # Constants
 DEFAULT_PATHS: tuple[str, ...] = (".",)
+_NO_BASELINE = "lintro.watch.no_baseline"
+
+
+def _record_no_baseline(
+    ctx: click.Context,
+    _param: click.Parameter,
+    value: bool,
+) -> None:
+    """Record ``--no-baseline`` on the context instead of a function argument.
+
+    Args:
+        ctx: Current click context.
+        _param: The ``--no-baseline`` parameter.
+        value: Whether the flag was given.
+    """
+    ctx.meta[_NO_BASELINE] = value
 
 
 @click.command("watch")
@@ -67,6 +86,14 @@ DEFAULT_PATHS: tuple[str, ...] = (".",)
     type=click.Choice(["plain", "grid"]),
     help="Output format for displaying results.",
 )
+@click.option(
+    "--no-baseline",
+    is_flag=True,
+    default=False,
+    expose_value=False,
+    callback=_record_no_baseline,
+    help="Do not apply the configured fingerprint baseline.",
+)
 def watch_command(
     paths: tuple[str, ...],
     tools: str | None,
@@ -96,7 +123,8 @@ def watch_command(
 
     Raises:
         click.BadParameter: If an explicit tool name or action is invalid.
-        click.ClickException: If configuration or observer startup fails.
+        click.ClickException: If configuration, the fingerprint baseline, or
+            observer startup fails.
         click.UsageError: If validation leaves no enabled watch tools.
         click.exceptions.Exit: If the latest lint batch has a nonzero exit code.
     """
@@ -111,6 +139,16 @@ def watch_command(
     except (ConfigurationError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     watch_cfg = config.watch
+    # ``--no-baseline`` is recorded on the context to keep the signature short.
+    no_baseline = bool(click.get_current_context().meta.get(_NO_BASELINE))
+    effective_baseline: Literal[False] | None = False if no_baseline else None
+    # Fail before watching: every batch would otherwise report the same error.
+    try:
+        load_run_baseline(effective_baseline, config)
+    except ConfigurationError as exc:
+        raise click.ClickException(
+            f"{exc} Pass --no-baseline to watch without it.",
+        ) from exc
 
     path_list: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
 
@@ -166,6 +204,7 @@ def watch_command(
         include_venv=include_venv,
         emit=_emit,
         watch_paths=path_list,
+        baseline=effective_baseline,
     )
 
     try:

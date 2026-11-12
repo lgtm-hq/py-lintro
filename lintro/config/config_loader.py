@@ -319,6 +319,8 @@ _SECTION_FIELD_OWNERS: dict[str, type[BaseModel]] = {
     "review": ReviewConfig,
 }
 _SCHEMALESS_SECTIONS = frozenset({"ai", "defaults", "tools"})
+# Top-level scalar keys that load_config reads directly.
+_TOP_LEVEL_SCALARS = frozenset({"baseline"})
 
 
 def _with_normalized_tool_keys(data: dict[str, Any]) -> dict[str, Any]:
@@ -460,6 +462,8 @@ def _is_effective_contributed_path(path: str) -> bool:
     """
     parts = path.split(".")
     section = parts[0]
+    if section in _TOP_LEVEL_SCALARS:
+        return len(parts) == 1
     if section in _SCHEMALESS_SECTIONS:
         # tools.<name>.<field> is the only schema-bearing depth here.
         if section == "tools" and len(parts) >= 3:
@@ -1422,6 +1426,28 @@ def _require_mapping_section(
     return _require_mapping_value(data[section], label=section)
 
 
+def _baseline_value(data: dict[str, Any]) -> str | None:
+    """Validate the top-level ``baseline`` path with a one-line error.
+
+    Args:
+        data: Normalized configuration mapping.
+
+    Returns:
+        The configured path, or None when the key is absent or null. YAML spells
+        an empty ``baseline:`` as null, which has always meant no baseline.
+
+    Raises:
+        ValueError: When a present value is not a non-empty string.
+    """
+    value = data.get("baseline")
+    if value is None:
+        return None
+    if isinstance(value, str) and value:
+        return value
+    actual = "an empty string" if isinstance(value, str) else type(value).__name__
+    raise ValueError(f"baseline must be a non-empty file path string, got {actual}")
+
+
 def build_config_from_dict(
     data: dict[str, Any],
     resolved_path: str | None = None,
@@ -1477,7 +1503,7 @@ def build_config_from_dict(
         output=output_config,
         watch=watch_config,
         deps=deps_config,
-        baseline=data.get("baseline"),
+        baseline=_baseline_value(data),
         config_path=resolved_path,
     )
 

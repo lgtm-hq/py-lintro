@@ -10,7 +10,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from assertpy import assert_that
@@ -63,6 +63,7 @@ def _make_run_tools(
         run_gates: bool,
         on_tool_result: Callable[[ToolResult], None],
         render_summary: bool,
+        baseline: str | Literal[False] | None,
     ) -> int:
         recorder["calls"] += 1
         recorder["kwargs"] = {
@@ -80,6 +81,7 @@ def _make_run_tools(
             "run_gates": run_gates,
             "on_tool_result": on_tool_result,
             "render_summary": render_summary,
+            "baseline": baseline,
         }
         on_tool_result(
             ToolResult(

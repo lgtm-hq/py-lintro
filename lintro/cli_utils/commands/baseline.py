@@ -15,10 +15,13 @@ from lintro.utils.fingerprint_baseline import (
     snapshot,
 )
 from lintro.utils.fingerprint_baseline_file import (
+    as_sentence,
     change_baseline,
+    global_baseline_note,
     read_baseline,
     require_baseline_root,
     resolve_baseline_path,
+    writer_lock,
 )
 from lintro.utils.tool_executor import build_run_context, execute_run
 from lintro.utils.tool_options import parse_tool_options
@@ -32,6 +35,14 @@ BASELINE_SCAN_HELP = (
     "Default or mixed selections abort if any active result is incomplete or "
     "cannot certify its findings; no failing tool is silently omitted."
 )
+
+
+#: Exact-coverage requests for the producers that read them. They are passed
+#: as private executor options, never through the user's ``--tool-options``.
+BASELINE_COVERAGE_OPTIONS: dict[str, dict[str, object]] = {
+    "ruff": {"_baseline_coverage": True},
+    "black": {"_baseline_coverage": True},
+}
 
 
 @click.group(
@@ -75,16 +86,8 @@ def _scan(
             ctx=ctx,
             paths=list(paths) or ["."],
             tools=tools,
-            tool_options=",".join(
-                filter(
-                    None,
-                    (
-                        tool_options,
-                        "ruff:_baseline_coverage=true",
-                        "black:_baseline_coverage=true",
-                    ),
-                ),
-            ),
+            tool_options=tool_options,
+            private_tool_options=BASELINE_COVERAGE_OPTIONS,
             exclude=exclude,
             include_venv=False,
             group_by="file",
@@ -111,7 +114,7 @@ def _scan(
             + ". Use --tools to select supported tools; see 'lintro baseline --help'.",
         )
     # Exact file discovery does not prove that user overrides ran every rule.
-    # Only original user options count; our internal coverage flags do not.
+    # Internal coverage requests travel separately and never count here.
     overridden_tools = parse_tool_options(tool_options)
     artifact.tool_results = [
         (
@@ -152,33 +155,48 @@ def _manage(
         path = resolve_baseline_path(baseline, config, default=True)
         if path is None:
             raise ValueError("baseline path could not be resolved")
-        root = require_baseline_root(path, config)
+        root = require_baseline_root(path, config, explicit=baseline)
         if mode == "create":
             if path.exists() or path.is_symlink():
                 raise ValueError(f"baseline already exists: {path}")
         else:
-            read_baseline(path)  # Fail before running tools; reread under lock.
-        artifact = _scan(
-            paths,
-            tools=tools,
-            tool_options=tool_options,
-            exclude=exclude,
-        )
-        current = snapshot(artifact.tool_results, root=root)
-
-        def transform(previous: FingerprintBaseline | None) -> FingerprintBaseline:
-            """Merge against the latest file while holding the writer lock."""
-            if previous is None:
-                return current
-            return maintain_baseline(
-                previous,
-                current,
-                results=artifact.tool_results,
-                root=root,
-                prune=mode == "prune",
+            try:
+                read_baseline(path)  # Fail before running tools; reread under lock.
+            except ValueError as exc:
+                raise ValueError(
+                    as_sentence(str(exc)) + global_baseline_note(baseline, config),
+                ) from exc
+        # Hold the writer lock from before the scan until the write, so no
+        # other writer can change the file between this scan and its merge.
+        with writer_lock(path):
+            artifact = _scan(
+                paths,
+                tools=tools,
+                tool_options=tool_options,
+                exclude=exclude,
             )
+            current = snapshot(artifact.tool_results, root=root)
 
-        updated = change_baseline(path, transform, create=mode == "create")
+            def transform(
+                previous: FingerprintBaseline | None,
+            ) -> FingerprintBaseline:
+                """Merge against the file as read under the writer lock."""
+                if previous is None:
+                    return current
+                return maintain_baseline(
+                    previous,
+                    current,
+                    results=artifact.tool_results,
+                    root=root,
+                    prune=mode == "prune",
+                )
+
+            updated = change_baseline(
+                path,
+                transform,
+                create=mode == "create",
+                locked=True,
+            )
     except (OSError, ValueError, ConfigurationError) as exc:
         raise click.ClickException(str(exc)) from exc
     count = sum(entry.count for entry in updated.entries)
