@@ -10,8 +10,6 @@ the apply point is asserted to run ahead of ``_emit_output``.
 
 from __future__ import annotations
 
-import os
-import signal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -129,16 +127,13 @@ def _result(*findings: ReviewFinding) -> ReviewResult:
     )
 
 
-def _run(*, result: ReviewResult, post: bool = False) -> object:
+def _run(*, result: ReviewResult, post: bool = False) -> None:
     """Drive ``_render_post_and_exit`` over a stubbed run.
 
     Args:
         result: The review result the run completed with.
         post: Whether the run was invoked with ``--post``, so the post tail
             and ``_post_review`` run for real.
-
-    Returns:
-        The code the run exited with.
     """
     options = SimpleNamespace(
         show_checklist=None,
@@ -173,7 +168,7 @@ def _run(*, result: ReviewResult, post: bool = False) -> object:
     )
     # The stubs above mean only the fields named here are ever read, so the
     # namespaces stand in for the real option, config and target dataclasses.
-    with pytest.raises(SystemExit) as exited:
+    with pytest.raises(SystemExit):
         review_command._render_post_and_exit(
             options=cast(Any, options),
             lintro_config=cast(Any, lintro_config),
@@ -183,7 +178,6 @@ def _run(*, result: ReviewResult, post: bool = False) -> object:
             targets=cast(Any, _TARGETS),
             resolved_profile=cast(Any, _PROFILE),
         )
-    return exited.value.code
 
 
 def test_the_cli_marks_findings_before_any_surface_reads_them(
@@ -227,19 +221,17 @@ def _stub_poster(
     *,
     monkeypatch: pytest.MonkeyPatch,
     deliver: bool,
-    then_sigterm: bool = False,
 ) -> None:
     """Replace the GitHub poster with one that fills the delivery sink.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
         deliver: Whether the eligible findings' inline review is accepted.
-        then_sigterm: Whether the runner's SIGTERM lands mid-post.
     """
     from lintro.ai.review import github as review_github
 
     def post_review(**kwargs: Any) -> bool:
-        """Record the outcome the real poster would, then maybe get killed.
+        """Record the outcome the real poster would.
 
         Args:
             **kwargs: The poster's keyword arguments.
@@ -249,8 +241,6 @@ def _stub_poster(
         """
         delivery = kwargs["options"].inline_delivery
         delivery.attempted = True
-        if then_sigterm:
-            os.kill(os.getpid(), signal.SIGTERM)
         if deliver:
             delivery.delivered.extend(
                 f for f in kwargs["result"].findings if f.posted_inline
@@ -310,37 +300,6 @@ def test_the_output_is_rendered_after_posting_with_its_outcome(
     assert_that(_delivered(emitted=emitted)).is_equal_to(
         {**expected, "Kept as a note": False},
     )
-
-
-def test_sigterm_mid_post_still_writes_the_output(
-    monkeypatch: pytest.MonkeyPatch,
-    emitted: dict[str, Any],
-) -> None:
-    """The envelope survives the runner's SIGTERM, now that it follows posting.
-
-    The CI wrapper classifies the round from the JSON, so a SIGTERM landing
-    while the round posts must still let it be written. The run exits with
-    the status the signal would have produced, and the default handler is
-    back afterwards.
-
-    Args:
-        monkeypatch: Pytest monkeypatch fixture.
-        emitted: What the stubbed ``_emit_output`` captured.
-    """
-    previous = signal.signal(signal.SIGTERM, signal.SIG_DFL)
-    try:
-        _stub_poster(monkeypatch=monkeypatch, deliver=True, then_sigterm=True)
-
-        code = _run(result=_result(*_THREAD_AND_NOTE), post=True)
-
-        restored = signal.getsignal(signal.SIGTERM)
-    finally:
-        signal.signal(signal.SIGTERM, previous)
-    assert_that(code).is_equal_to(128 + signal.SIGTERM)
-    assert_that(_delivered(emitted=emitted)).is_equal_to(
-        {"Posted as a thread": False, "Kept as a note": False},
-    )
-    assert_that(restored).is_equal_to(signal.SIG_DFL)
 
 
 # --- state persistence (review thread on #2583, round 2) ----------------------

@@ -134,7 +134,8 @@ class ReviewFinding:
             pull request (#3426). ``True`` when GitHub accepted it, ``False``
             when posting was attempted and no inline comment was confirmed
             (not eligible, not mappable to the diff, or the POST was
-            refused), and ``None`` when the run never posted.
+            refused, or a SIGTERM stopped posting first), and ``None`` when
+            the run never posted.
         merged_duplicates: Findings a synthesis duplicate merge folded into
             this one (lintro-ops #37). The merge re-attributes a defect
             rather than fixing it, so the matcher carries each merged-away

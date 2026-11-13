@@ -26,8 +26,11 @@ class InlineDelivery:
     Attributes:
         attempted: True once the poster reached GitHub and began posting.
             Stays False for a run that never posted (no ``--post``, no
-            GitHub context, a SIGTERM partial), so every finding reports
-            ``inline_delivered: null``.
+            GitHub context, or a review the runner's SIGTERM stopped before
+            posting began), so every finding reports
+            ``inline_delivered: null``. A SIGTERM that lands *during*
+            posting comes after this is set, so findings report ``false``
+            unless their inline review was already confirmed.
         delivered: Findings whose inline comment GitHub accepted. Matched by
             identity, so two findings with equal fields are never confused.
     """

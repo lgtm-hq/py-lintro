@@ -396,13 +396,16 @@ actually did: `true` when the finding's inline comment reached the pull request,
 when posting ran and no inline comment was confirmed (not eligible, not on a diff line,
 or the inline POST was refused), and `null` when posting was not attempted (no `--post`,
 no GitHub context, a SIGTERM partial, or the MCP tool, which never posts). With `--post`
-the JSON is written after posting so it can carry the outcome. The terminal verdict, the
-JSON `readiness_verdict`, and the exit code are derived from tracked records rather than
-from what posted inline: a P3 opens a record and moves the verdict to `nits only` even
-though it renders in the sticky, while a finding routed to notes opens no record and
-never moves it — so a P1 routed to notes does not fail the process. With the default
-floor that means a `low` confidence P1; with `review_inline_min_confidence: low` no
-confidence is below the floor, so every P1 finding blocks again.
+the JSON is written after posting so it can carry the outcome. A SIGTERM that lands
+during posting stops the post, still writes the JSON, and exits 143; posting was already
+attempted, so findings report `false` there, not `null`, unless their inline review was
+already confirmed. The terminal verdict, the JSON `readiness_verdict`, and the exit code
+are derived from tracked records rather than from what posted inline: a P3 opens a
+record and moves the verdict to `nits only` even though it renders in the sticky, while
+a finding routed to notes opens no record and never moves it — so a P1 routed to notes
+does not fail the process. With the default floor that means a `low` confidence P1; with
+`review_inline_min_confidence: low` no confidence is below the floor, so every P1
+finding blocks again.
 
 The same holds for category routing: a P3 in a routed category (default `code-smell`)
 opens no record and does not move the verdict, so a PR whose only nits are `code-smell`
