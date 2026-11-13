@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess  # nosec B404 - runs this interpreter with a fixed argv; shell=False
+import sys
 import threading
 import time
 from pathlib import Path
@@ -28,6 +30,9 @@ from lintro.utils import file_cache
 
 _PIN = "3.9.4"
 _SPEC = f"prettier@{_PIN}"
+
+#: A path argument as ``os.replace`` and ``os.unlink`` accept one.
+_PathArg = os.PathLike[str] | str
 
 
 @pytest.fixture
@@ -406,3 +411,362 @@ def test_concurrent_repairs_agree(cache: Path) -> None:
     assert_that(good.exists()).is_true()
     assert_that([entry.exists() for entry in bad]).does_not_contain(True)
     assert_that(_runs_pin(good)).is_true()
+
+
+# ---------------------------------------------------------------------------
+# Concurrent repair stress (#3419)
+# ---------------------------------------------------------------------------
+
+#: Longest ``_npx`` name a repair may create: the stale prefix, the original
+#: base name (at most 64 characters here) and a uuid, far below ``NAME_MAX``.
+_ASIDE_NAME_BOUND = 128
+
+#: Child repairer: waits for the start signal, then repairs a few times.
+_CHILD_REPAIRER = """
+import sys, time
+from pathlib import Path
+from lintro.utils import file_cache
+from lintro.tools.core.npx_cache import repair_npx_cache
+file_cache.CACHE_DIR = Path(sys.argv[1])
+go = Path(sys.argv[3])
+while not go.exists():
+    time.sleep(0.005)
+for _ in range(int(sys.argv[4])):
+    repair_npx_cache(
+        Path(sys.argv[2]), package="prettier", pin=sys.argv[5],
+        binary="prettier", pathsep=":",
+    )
+"""
+
+
+def _bulky_bad_entry(cache: Path, name: str, *, files: int = 150) -> Path:
+    """Create a wrong-version entry slow enough to delete to widen races.
+
+    Args:
+        cache: Per-pin cache.
+        name: Entry (hash) directory name.
+        files: Filler files written into the entry.
+
+    Returns:
+        The entry directory.
+    """
+    entry = _entry(cache, name, version="1.0.0")
+    filler = entry / "node_modules" / "filler"
+    filler.mkdir()
+    for index in range(files):
+        (filler / f"f{index}.js").write_text("x", encoding="utf-8")
+    return entry
+
+
+class _NameWatcher(threading.Thread):
+    """Record the longest name seen under ``_npx`` while repairs run."""
+
+    def __init__(self, npx_root: Path) -> None:
+        """Watch *npx_root* until stopped.
+
+        Args:
+            npx_root: ``<cache>/_npx``.
+        """
+        super().__init__(daemon=True)
+        self.npx_root = npx_root
+        self.longest = 0
+        self.done = threading.Event()
+
+    def run(self) -> None:
+        """Poll the directory listing until :attr:`done` is set."""
+        while not self.done.is_set():
+            try:
+                names = [entry.name for entry in self.npx_root.iterdir()]
+            except OSError:
+                names = []
+            self.longest = max([self.longest, *map(len, names)])
+            time.sleep(0.001)
+
+
+class _Repairer(threading.Thread):
+    """Repair the cache a few times once released, keeping any error."""
+
+    def __init__(self, cache: Path, start: threading.Event, rounds: int) -> None:
+        """Prepare a repairer thread.
+
+        Args:
+            cache: Per-pin cache.
+            start: Released when every repairer is ready.
+            rounds: Repairs to run back to back.
+        """
+        super().__init__()
+        self.cache = cache
+        self.release = start
+        self.rounds = rounds
+        self.errors: list[Exception] = []
+
+    def run(self) -> None:
+        """Run the repairs, recording rather than raising failures."""
+        self.release.wait()
+        for _ in range(self.rounds):
+            try:
+                _repair(self.cache)
+            except Exception as exc:
+                self.errors.append(exc)
+
+
+def _remaining(cache: Path) -> list[str]:
+    """List what is left under ``_npx``.
+
+    Args:
+        cache: Per-pin cache.
+
+    Returns:
+        Sorted entry names.
+    """
+    return sorted(entry.name for entry in (cache / "_npx").iterdir())
+
+
+def test_many_threads_repairing_keep_names_bounded(cache: Path) -> None:
+    """Racing repairers in one process never grow a name or fail (#3419).
+
+    Args:
+        cache: Per-pin cache.
+    """
+    good = _entry(cache, "good")
+    for index in range(6):
+        _bulky_bad_entry(cache, f"bad{index}")
+    watcher = _NameWatcher(cache / "_npx")
+    watcher.start()
+    start = threading.Event()
+    repairers = [_Repairer(cache, start, rounds=4) for _ in range(16)]
+    for repairer in repairers:
+        repairer.start()
+    start.set()
+    for repairer in repairers:
+        repairer.join()
+    watcher.done.set()
+    watcher.join()
+
+    assert_that([e for r in repairers for e in r.errors]).is_empty()
+    assert_that(watcher.longest).is_less_than_or_equal_to(_ASIDE_NAME_BOUND)
+    assert_that(_remaining(cache)).is_equal_to([good.name])
+    assert_that(_runs_pin(good)).is_true()
+
+
+def test_many_processes_repairing_keep_names_bounded(
+    cache: Path,
+    tmp_path: Path,
+) -> None:
+    """Separate lintro runs repairing one cache never fail or leave debris.
+
+    Args:
+        cache: Per-pin cache.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    good = _entry(cache, "good")
+    for index in range(6):
+        _bulky_bad_entry(cache, f"bad{index}")
+    go = tmp_path / "go"
+    watcher = _NameWatcher(cache / "_npx")
+    watcher.start()
+    children = [
+        subprocess.Popen(  # nosec B603 - fixed argv, shell=False
+            [
+                sys.executable,
+                "-c",
+                _CHILD_REPAIRER,
+                str(file_cache.CACHE_DIR),
+                str(cache),
+                str(go),
+                "3",
+                _PIN,
+            ],
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for _ in range(8)
+    ]
+    time.sleep(0.5)
+    go.touch()
+    failures = [
+        stderr
+        for child in children
+        for _, stderr in [child.communicate(timeout=90)]
+        if child.returncode != 0
+    ]
+    watcher.done.set()
+    watcher.join()
+
+    assert_that(failures).is_empty()
+    assert_that(watcher.longest).is_less_than_or_equal_to(_ASIDE_NAME_BOUND)
+    assert_that(_remaining(cache)).is_equal_to([good.name])
+
+
+def test_stale_entry_is_deleted_without_another_rename(cache: Path) -> None:
+    """An entry already set aside is removed in place, however long its name.
+
+    Renaming it again would prepend the prefix once more; at the file name
+    limit that rename fails and the tool would be refused for nothing.
+
+    Args:
+        cache: Per-pin cache.
+    """
+    good = _entry(cache, "good")
+    stale = _entry(cache, ".lintro-stale-" + "a" * 230, version="1.0.0")
+
+    _repair(cache)
+
+    assert_that(stale.exists()).is_false()
+    assert_that(_remaining(cache)).is_equal_to([good.name])
+
+
+def test_entry_with_a_long_name_is_still_repaired(cache: Path) -> None:
+    """The aside name stays bounded whatever the original name's length.
+
+    Args:
+        cache: Per-pin cache.
+    """
+    long_bad = _entry(cache, "b" * 240, version="1.0.0")
+
+    _repair(cache)
+
+    assert_that(long_bad.exists()).is_false()
+    assert_that((cache / "_npx").is_dir()).is_true()
+    assert_that(_remaining(cache)).is_empty()
+
+
+# ---------------------------------------------------------------------------
+# Locks and leftovers around a repair
+# ---------------------------------------------------------------------------
+
+
+def test_repair_never_deletes_a_lock_npx_took_on_a_recreated_entry(
+    cache: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Once the bad entry is aside, its old lock path belongs to whoever is there.
+
+    npx recreates the entry and takes its own lock while the aside copy is
+    still being deleted; that lock must survive the repair.
+
+    Args:
+        cache: Per-pin cache.
+        monkeypatch: Hooks npx's recreation into the aside deletion.
+    """
+    bad = _entry(cache, version="1.0.0")
+    npx_lock = bad / "concurrency.lock"
+    delete = npx_cache._delete
+
+    def npx_recreates_then_delete(path: Path) -> None:
+        npx_lock.mkdir(parents=True)
+        delete(path)
+
+    monkeypatch.setattr(npx_cache, "_delete", npx_recreates_then_delete)
+
+    _repair(cache)
+
+    assert_that(npx_lock.is_dir()).is_true()
+    assert_that([n for n in _remaining(cache) if n.startswith(".")]).is_empty()
+
+
+def test_repair_never_moves_an_entry_npx_is_installing(
+    cache: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stray file that npx replaces with a fresh, locked install is left alone.
+
+    The repair sees a file, but by the time it removes it npx has put a
+    directory there and holds its lock: the install must not be moved while
+    it is written, and the repair waits for it and then keeps it.
+
+    Args:
+        cache: Per-pin cache.
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Hooks npx's install into the removal of the stray file.
+    """
+    (cache / "_npx").mkdir(parents=True)
+    entry = cache / "_npx" / "0123456789abcdef"
+    entry.write_text("", encoding="utf-8")
+    real_replace, real_unlink = os.replace, os.unlink
+    installs: list[threading.Thread] = []
+
+    staged = _entry(tmp_path / "staging", entry.name)
+
+    def npx_installs() -> None:
+        time.sleep(0.3)
+        (staged / "node_modules").rename(entry / "node_modules")
+        (entry / "concurrency.lock").rmdir()
+
+    def race(path: _PathArg) -> None:
+        if Path(path) == entry and not installs:
+            real_unlink(entry)
+            (entry / "concurrency.lock").mkdir(parents=True)
+            installs.append(threading.Thread(target=npx_installs))
+            installs[0].start()
+
+    def racing_replace(src: _PathArg, dst: _PathArg) -> None:
+        race(src)
+        real_replace(src, dst)
+
+    def racing_unlink(path: _PathArg, *, dir_fd: int | None = None) -> None:
+        race(path)
+        real_unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "replace", racing_replace)
+    monkeypatch.setattr(os, "unlink", racing_unlink)
+    try:
+        _repair(cache)
+    finally:
+        for install in installs:
+            install.join()
+
+    assert_that(installs).is_length(1)
+    assert_that(_runs_pin(entry)).is_true()
+    assert_that(_remaining(cache)).is_equal_to([entry.name])
+
+
+def test_repair_removes_an_npx_directory_left_aside_beside_it(cache: Path) -> None:
+    """A whole ``_npx`` moved aside by an earlier run is deleted from the cache.
+
+    Args:
+        cache: Per-pin cache.
+    """
+    good = _entry(cache, "good")
+    leftover = cache / ".lintro-stale-_npx-0123456789abcdef0123456789abcdef"
+    (leftover / "0123456789abcdef" / "node_modules").mkdir(parents=True)
+
+    _repair(cache)
+
+    assert_that(leftover.exists()).is_false()
+    assert_that(sorted(p.name for p in cache.iterdir())).is_equal_to(["_npx"])
+    assert_that(_runs_pin(good)).is_true()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0,
+    reason="needs POSIX permissions that bind the current user",
+)
+def test_undeletable_leftover_warns_and_the_valid_entry_still_runs(
+    cache: Path,
+    logged_warnings: list[str],
+) -> None:
+    """A leftover that cannot be deleted is reported, never a refusal.
+
+    It no longer has an npm entry name, so it cannot change what runs.
+
+    Args:
+        cache: Per-pin cache.
+        logged_warnings: Warnings logged during the test.
+    """
+    good = _entry(cache, "good")
+    leftover = cache / "_npx" / ".lintro-stale-protected-0123"
+    sealed = leftover / "sealed"
+    sealed.mkdir(parents=True)
+    (sealed / "kept.js").write_text("", encoding="utf-8")
+    sealed.chmod(0o555)
+    try:
+        _repair(cache)
+    finally:
+        sealed.chmod(0o755)
+
+    assert_that(_runs_pin(good)).is_true()
+    assert_that(leftover.exists()).is_true()
+    assert_that(logged_warnings).is_length(1)
+    assert_that(logged_warnings[0]).contains(str(leftover), "kept.js")
