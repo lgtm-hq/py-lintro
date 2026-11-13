@@ -2774,12 +2774,22 @@ expansion (`{` and a later `}` with a `,` or `..` between them, even across a ne
 any control character such as a newline or tab, and, on POSIX systems, a backslash (read
 as a path separator). A bare parenthesis is literal, so SvelteKit route groups such as
 `src/routes/(app)/+page.svelte` and names such as `page (1).html` are validated as
-usual. Lintro never passes a path with one of these shapes to html-validate. It
+usual. Lintro never passes a path with one of these shapes to html-validate as an
+argument. It validates each such file through html-validate's standard input instead
+(`--stdin --stdin-filename <path>`), one html-validate process per file, run from the
+file's own directory so the same `.htmlvalidate.*` configuration applies. Findings are
+reported under the file's real path and merged with the other files into one result. The
+glob shapes are handled this way on every platform. The backslash is handled this way on
+POSIX only: on Windows it is always a path separator, so those paths are passed as
+usual.
+
+Standard input skips two things a path argument gets: `.htmlvalidateignore`, and
+transformers configured under `transform`. A glob-named file is therefore still held
+back when an `.htmlvalidateignore` sits in its directory or any parent, when its
+resolved configuration declares a transformer, or when it cannot be read. Lintro
 validates the other files, keeps their findings, and fails the run as an execution error
-that names the files left uninspected; if every path holds one of these shapes,
-html-validate is not run at all. The glob shapes are held back on every platform. The
-backslash is held back on POSIX only: on Windows it is always a path separator, so those
-paths are validated as usual.
+that names the files left uninspected; if every path is held back, html-validate is not
+run at all.
 
 **Available Options via `--tool-options`:**
 

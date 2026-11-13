@@ -55,7 +55,10 @@ a broken upstream release cannot take every consumer down at once.
 
 Files are passed as literal paths, never globs or directories. html-validate expands
 those through `fs.globSync`, which is missing on some Bun builds and aborts the run
-before any file is validated.
+before any file is validated. A file whose name html-validate would read as a glob (such
+as a routed site's `[slug].html`) is validated through `--stdin --stdin-filename <path>`
+instead, one process per file, from the file's directory. See the html-validate section
+of `docs/configuration.md` for the cases that are still held back.
 
 ## Output format
 
