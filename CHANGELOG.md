@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.19] - 2026-11-13
+
+### Fixed
+
+- **ai/review**: word the sticky footer from what was posted inline (#3425) (eb4ee53)
+
 ## [0.180.18] - 2026-11-13
 
 ### Fixed
