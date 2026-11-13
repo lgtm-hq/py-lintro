@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from lintro.ai.review.models.inline_delivery import InlineDelivery
     from lintro.ai.review.posting_policy import PostingPolicy
 
 from dataclasses import dataclass
@@ -44,6 +45,9 @@ class ReviewPostOptions:
             ids so the caller can persist them after posting.
         posting_policy: Policy the findings were marked under, so the
             notes block can name the confidence floor it rendered at.
+        inline_delivery: Optional sink the poster fills with what it
+            actually delivered inline, so the caller's JSON can report
+            delivery separately from eligibility (#3426).
     """
 
     checklist_display: ChecklistDisplay = ChecklistDisplay.OFF
@@ -57,3 +61,4 @@ class ReviewPostOptions:
     departed_paths: frozenset[str] | None = None
     captured_comment_ids: dict[str, int] | None = None
     posting_policy: PostingPolicy | None = None
+    inline_delivery: InlineDelivery | None = None

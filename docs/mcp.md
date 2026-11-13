@@ -178,7 +178,9 @@ Arguments (all optional):
       "suggested_code": "i += 1",
       "suggestion_dropped": "",
       "checklist_ids": [2],
-      "source": ""
+      "source": "",
+      "posted_inline": true,
+      "inline_delivered": null
     }
   ],
   "run": {
@@ -209,6 +211,13 @@ file at HEAD. Otherwise it names why the one-click patch was withheld — `stale
 `ambiguous_anchor`, or `file_missing` — and `suggested_code` is cleared so no consumer
 can apply a hunk that no longer matches the file. The finding's prose (including its
 described fix) is always kept.
+
+`posted_inline` is **eligibility**: `true` when the posting policy would open an inline
+thread for the finding, `false` when it is routed to the sticky's notes block. It does
+not mean a comment exists. `inline_delivered` is **delivery**: `true` when the inline
+comment reached the pull request, `false` when posting ran and no inline comment was
+confirmed, and `null` when posting was not attempted. `lintro_review` never posts to
+GitHub, so it is always `null` here.
 
 A `lintro_review` result with no reviewable changes includes top-level
 `findings_coverage_complete: false`, `outcome: "no_changes"`, `review_ran: false` and

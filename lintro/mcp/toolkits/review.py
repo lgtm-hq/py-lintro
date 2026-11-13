@@ -465,7 +465,9 @@ def _finding_to_dict(*, finding: ReviewFinding) -> dict[str, Any]:
         without the cross-chunk synthesis pass (#2269) serializes exactly as
         it did before that pass existed. ``posted_inline`` (#2572) is always
         present: the payload keeps every finding, and the flag says which
-        ones the posting policy would open a thread for.
+        ones the posting policy would open a thread for. It is eligibility
+        only. ``inline_delivered`` (#3426) is always present too and is
+        ``None`` here, because the MCP tool never posts to GitHub.
     """
     payload: dict[str, Any] = {
         "file": finding.file,
@@ -484,6 +486,7 @@ def _finding_to_dict(*, finding: ReviewFinding) -> dict[str, Any]:
         "checklist_ids": list(finding.checklist_ids),
         "source": finding.source,
         "posted_inline": finding.posted_inline,
+        "inline_delivered": finding.inline_delivered,
     }
     if finding.origin is not None:
         payload["origin"] = str(finding.origin)

@@ -161,6 +161,12 @@ def post_review_to_github(
     if not gh_reporter.is_available():
         logger.warning("GitHub PR context not available — skipping review posting")
         return False
+    delivery = settings.inline_delivery
+    if delivery is not None:
+        # From here on the round reaches GitHub, so a finding with no
+        # confirmed inline comment reports ``inline_delivered: false``
+        # rather than "not attempted" (#3426).
+        delivery.attempted = True
 
     notices: list[tuple[int, str]] = []
     existing, sticky_state = load_sticky_comment(reporter=gh_reporter, notices=notices)
@@ -281,6 +287,11 @@ def post_review_to_github(
             diff_lines=diff_lines,
         )
         inline_posted = posted.ok
+        if inline_posted and delivery is not None:
+            # The same findings the footer counts as commented inline
+            # (#3410): the policy- and tier-selected ones minus those that
+            # mapped to no diff line. A refused POST delivers none (#3426).
+            delivery.delivered.extend(inline_findings)
         if not inline_posted:
             success = False
             # Degraded path (#1909): the rejected findings now have no surface

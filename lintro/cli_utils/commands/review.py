@@ -21,8 +21,10 @@ from __future__ import annotations
 
 import json
 import os
-from contextlib import suppress
-from dataclasses import dataclass, replace
+import signal
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
@@ -84,6 +86,7 @@ from lintro.ai.review.lifecycle.state import (
     persist_review_state,
 )
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
+from lintro.ai.review.models.inline_delivery import InlineDelivery
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.orchestrator import guard_changed_paths
@@ -253,10 +256,14 @@ class _ReviewRender:
         checklist_display: Resolved ``--show-checklist`` mode.
         question_map: Prompt checklist id to question text, used to attribute
             findings back to the checklist they answered.
+        inline_delivery: What ``--post`` delivered inline, filled while
+            posting and stamped onto the findings the JSON renders (#3426).
+            Left unattempted when the run does not post.
     """
 
     checklist_display: ChecklistDisplay
     question_map: dict[int, str]
+    inline_delivery: InlineDelivery = field(default_factory=InlineDelivery)
 
 
 def _failure_metadata(exc: Exception) -> ReviewMetadata | None:
@@ -1655,22 +1662,30 @@ def _render_post_and_exit(
             ai_config=prepared.ai_config,
         )
 
-    _emit_output(
-        options=options,
-        result=result,
-        render=render,
-        advisory_results=advisory_results,
-    )
-    if options.post and not skip_post_tail:
-        _post_review(
+    # Posting runs before the output is rendered so the JSON can report
+    # what reached the pull request inline, not only what was eligible
+    # (#3426). The envelope is still written when posting raises or the
+    # runner's SIGTERM lands mid-post: the CI wrapper classifies the round
+    # from it.
+    try:
+        if options.post and not skip_post_tail:
+            with _sigterm_exits():
+                _post_review(
+                    options=options,
+                    lintro_config=lintro_config,
+                    prepared=prepared,
+                    result=result,
+                    prior_state=prior_state,
+                    targets=targets,
+                    resolved_profile=resolved_profile,
+                    render=render,
+                )
+    finally:
+        _emit_output(
             options=options,
-            lintro_config=lintro_config,
-            prepared=prepared,
-            result=result,
-            prior_state=prior_state,
-            targets=targets,
-            resolved_profile=resolved_profile,
+            result=render.inline_delivery.stamp(result=result),
             render=render,
+            advisory_results=advisory_results,
         )
 
     # A run that reviewed nothing (#2731) is a delivery failure, exit 1 like a
@@ -1767,6 +1782,7 @@ def _post_review(
                 overrides=_cli_overrides(options=options),
             ),
             captured_comment_ids=captured_comment_ids,
+            inline_delivery=render.inline_delivery,
         ),
     )
     # Unconditional: ``_run_round`` already wrote this round's state from the
@@ -1883,6 +1899,49 @@ def _existing_changed_files(
         if candidate.is_file():
             paths.append(str(candidate))
     return paths
+
+
+@contextmanager
+def _sigterm_exits() -> Iterator[None]:
+    """Turn SIGTERM into ``SystemExit`` while the review is posted.
+
+    The review's own interrupt handler is gone by the time the round posts,
+    so SIGTERM would kill the process outright and the JSON envelope, which
+    is written after posting (#3426), would never reach the CI wrapper.
+    Raising instead lets the caller's ``finally`` write it first. The exit
+    status stays ``128 + SIGTERM``, as for a process the signal killed.
+
+    A handler someone else installed is left alone, and so is a call off
+    the main thread, where Python cannot install one.
+
+    Yields:
+        None: Control returns to the caller with the handler in place.
+    """
+
+    def _exit(signum: int, _frame: object) -> NoReturn:
+        """Raise ``SystemExit`` with the status the signal would have caused.
+
+        Args:
+            signum: The received signal number.
+            _frame: Current stack frame, unused.
+
+        Raises:
+            SystemExit: Always.
+        """
+        raise SystemExit(128 + signum)
+
+    if signal.getsignal(signal.SIGTERM) is not signal.SIG_DFL:
+        yield
+        return
+    try:
+        signal.signal(signal.SIGTERM, _exit)
+    except ValueError:
+        yield
+        return
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
 
 def _skip_sigterm_post_tail(*, result: ReviewResult) -> bool:

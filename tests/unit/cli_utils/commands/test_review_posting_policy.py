@@ -10,6 +10,8 @@ the apply point is asserted to run ahead of ``_emit_output``.
 
 from __future__ import annotations
 
+import os
+import signal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -127,13 +129,16 @@ def _result(*findings: ReviewFinding) -> ReviewResult:
     )
 
 
-def _run(*, result: ReviewResult, post: bool = False) -> None:
+def _run(*, result: ReviewResult, post: bool = False) -> object:
     """Drive ``_render_post_and_exit`` over a stubbed run.
 
     Args:
         result: The review result the run completed with.
         post: Whether the run was invoked with ``--post``, so the post tail
             and ``_post_review`` run for real.
+
+    Returns:
+        The code the run exited with.
     """
     options = SimpleNamespace(
         show_checklist=None,
@@ -168,7 +173,7 @@ def _run(*, result: ReviewResult, post: bool = False) -> None:
     )
     # The stubs above mean only the fields named here are ever read, so the
     # namespaces stand in for the real option, config and target dataclasses.
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as exited:
         review_command._render_post_and_exit(
             options=cast(Any, options),
             lintro_config=cast(Any, lintro_config),
@@ -178,6 +183,7 @@ def _run(*, result: ReviewResult, post: bool = False) -> None:
             targets=cast(Any, _TARGETS),
             resolved_profile=cast(Any, _PROFILE),
         )
+    return exited.value.code
 
 
 def test_the_cli_marks_findings_before_any_surface_reads_them(
@@ -197,6 +203,144 @@ def test_the_cli_marks_findings_before_any_surface_reads_them(
     assert_that(flags).is_equal_to(
         {"Posted as a thread": True, "Kept as a note": False},
     )
+
+
+# --- inline delivery (#3426) --------------------------------------------------
+
+
+def _delivered(*, emitted: dict[str, Any]) -> dict[str, bool | None]:
+    """Map each emitted finding's title to its ``inline_delivered`` value.
+
+    Args:
+        emitted: What the stubbed ``_emit_output`` captured.
+
+    Returns:
+        Title to delivery flag, for every finding the output rendered.
+    """
+    return {
+        finding.title: finding.inline_delivered
+        for finding in emitted["result"].findings
+    }
+
+
+def _stub_poster(
+    *,
+    monkeypatch: pytest.MonkeyPatch,
+    deliver: bool,
+    then_sigterm: bool = False,
+) -> None:
+    """Replace the GitHub poster with one that fills the delivery sink.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        deliver: Whether the eligible findings' inline review is accepted.
+        then_sigterm: Whether the runner's SIGTERM lands mid-post.
+    """
+    from lintro.ai.review import github as review_github
+
+    def post_review(**kwargs: Any) -> bool:
+        """Record the outcome the real poster would, then maybe get killed.
+
+        Args:
+            **kwargs: The poster's keyword arguments.
+
+        Returns:
+            bool: Whether the inline review was accepted.
+        """
+        delivery = kwargs["options"].inline_delivery
+        delivery.attempted = True
+        if then_sigterm:
+            os.kill(os.getpid(), signal.SIGTERM)
+        if deliver:
+            delivery.delivered.extend(
+                f for f in kwargs["result"].findings if f.posted_inline
+            )
+        return deliver
+
+    monkeypatch.setattr(review_github, "post_review_to_github", post_review)
+    monkeypatch.setattr(
+        review_command,
+        "persist_review_state",
+        lambda **kwargs: None,
+    )
+
+
+_THREAD_AND_NOTE = (
+    _finding(),
+    _finding(title="Kept as a note", confidence="medium"),
+)
+
+
+def test_a_run_that_does_not_post_reports_delivery_not_attempted(
+    emitted: dict[str, Any],
+) -> None:
+    """Without ``--post`` every finding renders ``inline_delivered: None``."""
+    _run(result=_result(*_THREAD_AND_NOTE))
+
+    assert_that(_delivered(emitted=emitted)).is_equal_to(
+        {"Posted as a thread": None, "Kept as a note": None},
+    )
+
+
+@pytest.mark.parametrize(
+    ("deliver", "expected"),
+    [
+        pytest.param(True, {"Posted as a thread": True}, id="accepted"),
+        pytest.param(False, {"Posted as a thread": False}, id="rejected"),
+    ],
+)
+def test_the_output_is_rendered_after_posting_with_its_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+    emitted: dict[str, Any],
+    deliver: bool,
+    expected: dict[str, bool],
+) -> None:
+    """``--post`` output carries what the post delivered, not eligibility.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        emitted: What the stubbed ``_emit_output`` captured.
+        deliver: Whether the inline review is accepted.
+        expected: Delivery the eligible finding must report.
+    """
+    _stub_poster(monkeypatch=monkeypatch, deliver=deliver)
+
+    _run(result=_result(*_THREAD_AND_NOTE), post=True)
+
+    assert_that(_delivered(emitted=emitted)).is_equal_to(
+        {**expected, "Kept as a note": False},
+    )
+
+
+def test_sigterm_mid_post_still_writes_the_output(
+    monkeypatch: pytest.MonkeyPatch,
+    emitted: dict[str, Any],
+) -> None:
+    """The envelope survives the runner's SIGTERM, now that it follows posting.
+
+    The CI wrapper classifies the round from the JSON, so a SIGTERM landing
+    while the round posts must still let it be written. The run exits with
+    the status the signal would have produced, and the default handler is
+    back afterwards.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        emitted: What the stubbed ``_emit_output`` captured.
+    """
+    previous = signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    try:
+        _stub_poster(monkeypatch=monkeypatch, deliver=True, then_sigterm=True)
+
+        code = _run(result=_result(*_THREAD_AND_NOTE), post=True)
+
+        restored = signal.getsignal(signal.SIGTERM)
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+    assert_that(code).is_equal_to(128 + signal.SIGTERM)
+    assert_that(_delivered(emitted=emitted)).is_equal_to(
+        {"Posted as a thread": False, "Kept as a note": False},
+    )
+    assert_that(restored).is_equal_to(signal.SIG_DFL)
 
 
 # --- state persistence (review thread on #2583, round 2) ----------------------

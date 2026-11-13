@@ -387,15 +387,22 @@ a sibling at another line that stopped being reported still resolves. The record
 resolves only once the finding stops being reported at all, and a finding whose
 confidence recovers matches the record it already had rather than reappearing as new.
 
-Nothing is dropped. JSON and MCP output keep every finding and add `posted_inline`
-(`true` / `false`) per finding so a consumer can tell a thread from a note. The terminal
-verdict, the JSON `readiness_verdict`, and the exit code are derived from tracked
-records rather than from what posted inline: a P3 opens a record and moves the verdict
-to `nits only` even though it renders in the sticky, while a finding routed to notes
-opens no record and never moves it — so a P1 routed to notes does not fail the process.
-With the default floor that means a `low` confidence P1; with
-`review_inline_min_confidence: low` no confidence is below the floor, so every P1
-finding blocks again.
+Nothing is dropped. JSON and MCP output keep every finding and add two fields per
+finding. `posted_inline` (`true` / `false`) is **eligibility**: whether the policy would
+open a thread for the finding or route it to the notes. It keeps its old name for
+compatibility and is set before anything is posted, so it stays `true` when the inline
+POST is refused or never made. `inline_delivered` is **delivery**, set from what posting
+actually did: `true` when the finding's inline comment reached the pull request, `false`
+when posting ran and no inline comment was confirmed (not eligible, not on a diff line,
+or the inline POST was refused), and `null` when posting was not attempted (no `--post`,
+no GitHub context, a SIGTERM partial, or the MCP tool, which never posts). With `--post`
+the JSON is written after posting so it can carry the outcome. The terminal verdict, the
+JSON `readiness_verdict`, and the exit code are derived from tracked records rather than
+from what posted inline: a P3 opens a record and moves the verdict to `nits only` even
+though it renders in the sticky, while a finding routed to notes opens no record and
+never moves it — so a P1 routed to notes does not fail the process. With the default
+floor that means a `low` confidence P1; with `review_inline_min_confidence: low` no
+confidence is below the floor, so every P1 finding blocks again.
 
 The same holds for category routing: a P3 in a routed category (default `code-smell`)
 opens no record and does not move the verdict, so a PR whose only nits are `code-smell`
