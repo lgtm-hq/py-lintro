@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.16] - 2026-11-13
+
+### Fixed
+
+- **tools**: stop claiming inspection on Ruff --fix config errors and config-ignored
+  files (#3416) (2401d07)
+
 ## [0.180.15] - 2026-11-13
 
 ### Changed
