@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.17] - 2026-11-13
+
+### Fixed
+
+- **tools**: stop concurrent npx cache repairs from growing stale entry names (#3420)
+  (43319a8)
+
 ## [0.180.16] - 2026-11-13
 
 ### Fixed
