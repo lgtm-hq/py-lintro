@@ -7,6 +7,7 @@ Real-npx coverage is in ``tests/integration/test_registry_runner_hoisted_bin.py`
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess  # nosec B404 - runs this interpreter with a fixed argv; shell=False
@@ -770,3 +771,260 @@ def test_undeletable_leftover_warns_and_the_valid_entry_still_runs(
     assert_that(leftover.exists()).is_true()
     assert_that(logged_warnings).is_length(1)
     assert_that(logged_warnings[0]).contains(str(leftover), "kept.js")
+
+
+# ---------------------------------------------------------------------------
+# Lock ownership: refuse or leak, never remove a lock lintro does not hold (#3422)
+# ---------------------------------------------------------------------------
+
+
+def _owner_marker(pid: int) -> str:
+    """Name an owner marker as a lintro process *pid* on this host writes it.
+
+    Args:
+        pid: Process id recorded in the marker.
+
+    Returns:
+        The marker file name.
+    """
+    return f"{npx_cache._OWNER_PREFIX}{npx_cache._host_tag()}-{pid}-{'0' * 32}"
+
+
+def _exited_pid() -> int:
+    """Return the id of a process that has already exited.
+
+    Returns:
+        A pid no live process holds.
+    """
+    child = subprocess.Popen([sys.executable, "-c", "pass"])  # nosec B603
+    child.wait()
+    return child.pid
+
+
+def _npm_reclaims_at_claim(
+    monkeypatch: pytest.MonkeyPatch,
+    lock: Path,
+) -> list[int]:
+    """Make "npm" reclaim *lock* just before lintro renames it to claim it.
+
+    Like npm, the stand-in removes the stale lock with ``rmdir`` and takes a
+    fresh one with ``mkdir``.
+
+    Args:
+        monkeypatch: Installs the hook on ``os.rename``.
+        lock: The stale lock lintro is about to claim.
+
+    Returns:
+        A list that receives the inode of npm's fresh lock.
+    """
+    taken: list[int] = []
+    real_rename = os.rename
+
+    def racing_rename(src: _PathArg, dst: _PathArg) -> None:
+        if not taken and Path(src) == lock:
+            lock.rmdir()
+            lock.mkdir()
+            taken.append(lock.stat().st_ino)
+        real_rename(src, dst)
+
+    monkeypatch.setattr(os, "rename", racing_rename)
+    return taken
+
+
+def test_lock_lintro_holds_survives_npms_stale_lock_removal(tmp_path: Path) -> None:
+    """Npm removes a stale lock with ``rmdir``, which cannot remove lintro's.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    lock = tmp_path / "concurrency.lock"
+    marker = npx_cache._acquire(lock)
+    old = time.time() - 120
+    os.utime(lock, (old, old))
+
+    with pytest.raises(OSError):
+        lock.rmdir()
+    held = npx_cache._holds(marker)
+    npx_cache._release(marker)
+
+    assert_that(held).is_true()
+    assert_that(sorted(p.name for p in tmp_path.iterdir())).is_empty()
+
+
+def test_live_lock_moved_by_a_stale_claim_is_put_back(
+    cache: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Npm reclaiming first keeps its lock: lintro restores it, then waits.
+
+    Args:
+        cache: Per-pin cache.
+        monkeypatch: Places npm's reclaim inside lintro's claim.
+    """
+    bad = _entry(cache, version="1.0.0")
+    lock = bad / "concurrency.lock"
+    lock.mkdir()
+    old = time.time() - 120
+    os.utime(lock, (old, old))
+    taken = _npm_reclaims_at_claim(monkeypatch, lock)
+    seen_at_release: list[int] = []
+
+    def npm_releases() -> None:
+        deadline = time.monotonic() + 10
+        while not taken and time.monotonic() < deadline:
+            time.sleep(0.01)
+        time.sleep(0.3)
+        with contextlib.suppress(OSError):
+            seen_at_release.append(lock.stat().st_ino)
+            lock.rmdir()
+
+    holder = threading.Thread(target=npm_releases)
+    holder.start()
+    try:
+        _repair(cache)
+    finally:
+        holder.join()
+
+    assert_that(taken).is_length(1)
+    assert_that(seen_at_release).is_equal_to(taken)
+    assert_that(bad.exists()).is_false()
+
+
+def test_live_lock_that_cannot_be_put_back_is_left_and_repair_refused(
+    cache: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Losing the stale-lock race without a way back leaks the lock and refuses.
+
+    Args:
+        cache: Per-pin cache.
+        monkeypatch: Places npm's reclaim inside lintro's claim and takes
+            away the exclusive rename.
+    """
+    bad = _entry(cache, version="1.0.0")
+    lock = bad / "concurrency.lock"
+    lock.mkdir()
+    old = time.time() - 120
+    os.utime(lock, (old, old))
+    taken = _npm_reclaims_at_claim(monkeypatch, lock)
+    create = npx_cache._create_lock
+
+    def no_way_back(src: Path, dst: Path) -> bool | None:
+        return None
+
+    def create_then_lose_exclusive_rename(path: Path) -> Path | None:
+        marker = create(path)
+        monkeypatch.setattr(npx_cache, "_rename_noreplace", no_way_back)
+        return marker
+
+    monkeypatch.setattr(npx_cache, "_create_lock", create_then_lose_exclusive_rename)
+
+    with pytest.raises(NpxCacheError, match="could not put it back"):
+        _repair(cache)
+
+    leaked = [p for p in bad.iterdir() if p.name.startswith(".lintro-stale-")]
+    assert_that(lock.exists()).is_false()
+    assert_that([p.stat().st_ino for p in leaked]).is_equal_to(taken)
+    assert_that(_runs_pin(bad)).is_false()
+    assert_that((bad / "node_modules").is_dir()).is_true()
+
+
+def test_lock_left_by_an_exited_lintro_is_taken_over(cache: Path) -> None:
+    """A lock whose owner process has exited does not block repair.
+
+    Args:
+        cache: Per-pin cache.
+    """
+    bad = _entry(cache, version="1.0.0")
+    lock = bad / "concurrency.lock"
+    lock.mkdir()
+    (lock / _owner_marker(_exited_pid())).touch()
+
+    _repair(cache)
+
+    assert_that(bad.exists()).is_false()
+    assert_that(_remaining(cache)).is_empty()
+
+
+def test_stale_lock_of_a_live_lintro_is_waited_for_then_refused(
+    cache: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Age alone never lets one lintro take another live lintro's lock.
+
+    Args:
+        cache: Per-pin cache.
+        monkeypatch: Scoped override of the wait budget.
+    """
+    bad = _entry(cache, version="1.0.0")
+    lock = bad / "concurrency.lock"
+    lock.mkdir()
+    owner = lock / _owner_marker(os.getppid())
+    owner.touch()
+    old = time.time() - 120
+    os.utime(lock, (old, old))
+    monkeypatch.setattr(npx_cache, "_LOCK_WAIT_SECONDS", 0.2)
+
+    with pytest.raises(NpxCacheError, match="stayed locked"):
+        _repair(cache)
+
+    assert_that(owner.is_file()).is_true()
+    assert_that((bad / "node_modules").is_dir()).is_true()
+
+
+def test_repair_refuses_and_leaves_the_lock_when_ownership_is_lost(
+    cache: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lock lintro no longer holds is neither moved with the entry nor removed.
+
+    Args:
+        cache: Per-pin cache.
+        monkeypatch: Hands the lock to another holder during validation.
+    """
+    bad = _entry(cache, version="1.0.0")
+    lock = bad / "concurrency.lock"
+    validate = npx_cache.entry_runs_pin
+
+    def validate_while_another_holder_takes_over(entry: Path, **kwargs: str) -> bool:
+        for marker in lock.iterdir():
+            marker.unlink()
+        return validate(entry, **kwargs)
+
+    monkeypatch.setattr(
+        npx_cache,
+        "entry_runs_pin",
+        validate_while_another_holder_takes_over,
+    )
+
+    with pytest.raises(NpxCacheError, match="lost its lock"):
+        _repair(cache)
+
+    assert_that(lock.is_dir()).is_true()
+    assert_that((bad / "node_modules").is_dir()).is_true()
+
+
+def test_repair_without_an_exclusive_rename_still_locks_and_cleans_up(
+    cache: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Platforms with no exclusive rename fall back to ``mkdir`` then mark.
+
+    Args:
+        cache: Per-pin cache.
+        monkeypatch: Takes away the exclusive rename.
+    """
+    good = _entry(cache, "good")
+    bad = _entry(cache, "bad", version="1.0.0")
+    before = sorted(p.name for p in good.iterdir())
+
+    def unsupported(src: Path, dst: Path) -> bool | None:
+        return None
+
+    monkeypatch.setattr(npx_cache, "_rename_noreplace", unsupported)
+
+    _repair(cache)
+
+    assert_that(bad.exists()).is_false()
+    assert_that(sorted(p.name for p in good.iterdir())).is_equal_to(before)
+    assert_that(_runs_pin(good)).is_true()
