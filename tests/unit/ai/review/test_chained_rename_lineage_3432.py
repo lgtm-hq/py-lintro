@@ -365,19 +365,35 @@ def test_two_findings_converging_on_one_file_keep_their_threads(
     )
 
 
-def _shallow_clone(*, tmp_path: Path, repo: Path, base: str) -> Path:
-    """Check the PR head out as the workflow does: depth 1, head fetched alone.
+def _shallow_clone(
+    *,
+    tmp_path: Path,
+    repo: Path,
+    base: str,
+    previous: str = "",
+    whole_range: bool = False,
+) -> Path:
+    """Check the PR head out as the workflow does: a depth-1 trusted branch.
 
     Args:
         tmp_path: Pytest temp dir; the clone goes in ``workflow``.
         repo: The source repository at the PR head.
         base: The base commit, the trusted branch's tip.
+        previous: A previously reviewed head to fetch at depth 1 as well,
+            so both ends of its range are readable but not what lies
+            between them.
+        whole_range: Fetch the head's whole history down to the base
+            instead of the head alone.
 
     Returns:
-        The clone, which holds no commit between the base and the head.
+        The shallow clone, checked out at the PR head.
     """
     git(repo, "update-ref", "refs/heads/trusted", base)
     git(repo, "update-ref", "refs/pull/1/head", git(repo, "rev-parse", "HEAD"))
+    refspecs = ["+refs/pull/1/head:refs/pr"]
+    if previous:
+        git(repo, "update-ref", "refs/heads/previous", previous)
+        refspecs.append("+refs/heads/previous:refs/previous")
     clone = tmp_path / "workflow"
     git(
         tmp_path,
@@ -394,11 +410,10 @@ def _shallow_clone(*, tmp_path: Path, repo: Path, base: str) -> Path:
         clone,
         "fetch",
         "-q",
-        "--depth",
-        "1",
+        *([] if whole_range else ["--depth", "1"]),
         "--no-tags",
         "origin",
-        "+refs/pull/1/head:refs/pr",
+        *refspecs,
     )
     git(clone, "checkout", "-q", "--detach", "refs/pr")
     assert_that(
@@ -498,6 +513,76 @@ def test_a_first_path_reused_between_reviews_does_not_take_the_finding(
     )
 
     _assert_held_on_b(round_=third, key=key)
+
+
+@pytest.mark.parametrize("force_full", _MODES)
+def test_a_reuse_hidden_by_the_shallow_boundary_holds_the_finding(
+    tmp_path: Path,
+    force_full: bool,
+) -> None:
+    """Both reviewed heads are fetched at depth 1; the commit re-creating ``a.py`` is not.
+
+    ``git log`` over the range succeeds without that commit, so its silence
+    is no proof ``a.py`` was never re-created: X is held on ``b.py``.
+    """
+    (tmp_path / "source").mkdir()
+    repo, base, state, key = _carried_to_b(tmp_path / "source", force_full=force_full)
+    reviewed_head = git(repo, "rev-parse", "HEAD")
+    (repo / "a.py").write_text(lines(300, label="base"))
+    commit(repo, "re-create an unrelated a.py")
+    git(repo, "mv", "a.py", "c.py")
+    git(repo, "mv", "b.py", "d.py")
+    text = lines(300, label="rewritten").splitlines(keepends=True)
+    text[80] = "bug_at_81 = True\n"
+    (repo / "d.py").write_text("".join(text))
+    commit(repo, "rename the new a.py, rename and rewrite b.py")
+    clone = _shallow_clone(
+        tmp_path=tmp_path,
+        repo=repo,
+        base=base,
+        previous=reviewed_head,
+    )
+    # Both ends of the range are readable; the re-creating commit is missing.
+    git(clone, "cat-file", "-e", reviewed_head)
+    assert_that(
+        git(clone, "log", "--format=%s", f"{reviewed_head}..HEAD"),
+    ).does_not_contain("re-create")
+
+    third = harness._round(
+        repo=clone,
+        base=base,
+        prior=state,
+        reported=[harness._x(file="d.py")],
+        force_full=force_full,
+    )
+
+    _assert_held_on_b(round_=third, key=key)
+
+
+@pytest.mark.parametrize("force_full", _MODES)
+def test_a_shallow_clone_holding_the_whole_range_follows_the_first_path(
+    tmp_path: Path,
+    force_full: bool,
+) -> None:
+    """A clone shallow only below the base still proves ``a.py`` was never re-created."""
+    (tmp_path / "source").mkdir()
+    repo, base, state, key = _carried_to_b(tmp_path / "source", force_full=force_full)
+    git(repo, "mv", "b.py", "c.py")
+    text = lines(300, label="base").splitlines(keepends=True)
+    text[80] = "bug_at_81 = True\n"
+    (repo / "c.py").write_text("".join(text))
+    commit(repo, "second rename plus heavy edit")
+    clone = _shallow_clone(tmp_path=tmp_path, repo=repo, base=base, whole_range=True)
+
+    third = harness._round(
+        repo=clone,
+        base=base,
+        prior=state,
+        reported=[harness._x(file="c.py")],
+        force_full=force_full,
+    )
+
+    harness._assert_carried_with_thread(round_=third, key=key, file="c.py")
 
 
 def test_a_record_stored_before_origin_paths_loads_without_one() -> None:

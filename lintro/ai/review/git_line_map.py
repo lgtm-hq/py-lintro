@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from loguru import logger
 
@@ -191,11 +192,18 @@ def path_added_in_range(
 
     Returns:
         Whether some commit adds the path, or ``None`` when git could not
-        walk the range.
+        walk the range or a shallow clone may not hold all of it
+        (:func:`_range_is_complete`).
     """
     if not from_sha or not to_sha or not path:
         return None
     try:
+        if not _range_is_complete(
+            repo_root=repo_root,
+            from_sha=from_sha,
+            to_sha=to_sha,
+        ):
+            return None
         result = _run_git(
             args=[
                 "-C",
@@ -224,6 +232,61 @@ def path_added_in_range(
     if result.returncode != 0:
         return None
     return path in result.stdout.split("\0")
+
+
+def _range_is_complete(*, repo_root: str, from_sha: str, to_sha: str) -> bool:
+    """Tell whether the repository holds every commit of ``from_sha..to_sha``.
+
+    A shallow clone answers ``git log`` over a range cut short by its
+    boundary without an error: both ends can be readable while the commits
+    between them were never fetched. In a shallow repository the range is
+    complete only when ``from_sha`` is an ancestor of ``to_sha`` there and no
+    shallow boundary commit lies inside the range (#3432).
+
+    Args:
+        repo_root: The repository.
+        from_sha: The older commit (excluded).
+        to_sha: The newer commit.
+
+    Returns:
+        True when every commit is present; False when one may be missing or
+        git could not tell. A failure to run git at all propagates to
+        :func:`path_added_in_range`, which reports it as unknown.
+    """
+    shallow = _run_git(
+        args=["-C", repo_root, "rev-parse", "--is-shallow-repository"],
+        check=False,
+    )
+    if shallow.returncode != 0:
+        return False
+    if shallow.stdout.strip() != "true":
+        return True
+    ancestor = _run_git(
+        args=["-C", repo_root, "merge-base", "--is-ancestor", from_sha, to_sha],
+        check=False,
+    )
+    shallow_file = _run_git(
+        args=["-C", repo_root, "rev-parse", "--git-path", "shallow"],
+        check=False,
+    )
+    walked = _run_git(
+        args=["-C", repo_root, "rev-list", f"{from_sha}..{to_sha}"],
+        check=False,
+    )
+    if (
+        ancestor.returncode != 0
+        or shallow_file.returncode != 0
+        or walked.returncode != 0
+    ):
+        return False
+    try:
+        # ``--git-path`` answers relative to the directory git ran in.
+        shallow_path = Path(repo_root) / shallow_file.stdout.strip()
+        boundary = set(shallow_path.read_text().split())
+    except OSError as exc:
+        logger.debug("Could not read the shallow boundary: {}", exc)
+        return False
+    return boundary.isdisjoint(walked.stdout.split())
 
 
 def path_exists(*, repo_root: str, sha: str, path: str) -> bool | None:

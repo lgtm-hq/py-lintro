@@ -942,8 +942,10 @@ resolve; it never narrows what it may report.**
   renames that first path, the finding follows that rename too. The lookup is skipped,
   and the finding held as before, when the first path's provenance cannot be verified or
   could be ambiguous:
-  - git cannot walk the range since the finding's recorded head (an unreachable head in
-    a shallow checkout);
+  - git cannot walk the whole range since the finding's recorded head: the head is
+    unreachable, or the checkout is shallow and its boundary cuts into the range (the
+    recorded head is not an ancestor there, or a boundary commit lies inside it), even
+    when both ends of the range are readable;
   - the first path exists at the start of the range;
   - any commit in the range adds it or renames another file onto it, even if that file
     moved on again before the range's end (`git log --diff-filter=A --no-renames` over
