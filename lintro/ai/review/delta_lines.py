@@ -178,8 +178,16 @@ def map_open_findings(
             lookups=lookups,
         )
         later = _cached_renames(lookups=lookups, from_sha=since_sha, to_sha=head_sha)
-        moved_on = later is None or path in later.moved or path in later.ambiguous
-        read_path = later.moved.get(path, path) if later is not None else path
+        unpaired = _unpaired_rename(lookups=lookups, renames=later, path=path)
+        moved_on = (
+            later is None
+            or path in later.moved
+            or path in later.ambiguous
+            or bool(unpaired)
+        )
+        read_path = (
+            (unpaired or later.moved.get(path, path)) if later is not None else path
+        )
         if line is None or moved_on:
             lines[read_path] = None
         else:
@@ -231,6 +239,31 @@ def _cached_renames(
     return lookups.renames[(from_sha, to_sha)]
 
 
+def _unpaired_rename(
+    *,
+    lookups: _Lookups,
+    renames: Renames | None,
+    path: str,
+) -> str:
+    """Return the PR's rename destination for a path git saw deleted (#3413).
+
+    A file renamed and heavily edited in the same range reads to git as a
+    delete plus an add; the pull request's rename metadata still pairs it.
+
+    Args:
+        lookups: The round's git answers and the PR's renames.
+        renames: Renames git listed for the range, or ``None``.
+        path: The path at the range's start.
+
+    Returns:
+        The destination, or ``""`` when git paired the path itself or did not
+        report it deleted, or the pull request names no rename for it.
+    """
+    if renames is None or path not in renames.deleted:
+        return ""
+    return lookups.renamed_from.get(path, "")
+
+
 def _place(
     *,
     record: FindingRecord,
@@ -264,6 +297,9 @@ def _place(
     dest = renames.moved.get(record.file, record.file)
     if record.file in renames.ambiguous:
         return dest, None, ""
+    unpaired = _unpaired_rename(lookups=lookups, renames=renames, path=record.file)
+    if unpaired:
+        return unpaired, None, ""
     key = (record.line_sha, since_sha, record.file, dest)
     if key not in lookups.hunks:
         lookups.hunks[key] = file_hunks(

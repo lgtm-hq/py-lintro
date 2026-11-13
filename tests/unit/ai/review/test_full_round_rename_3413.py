@@ -577,6 +577,62 @@ def test_a_rename_after_a_history_rewrite_follows_the_pr_metadata(
     )
 
 
+@pytest.mark.parametrize(
+    ("force_full", "reason"),
+    [
+        pytest.param(False, DeltaReason.DELTA, id="delta"),
+        pytest.param(True, DeltaReason.EXPLICIT_FULL, id="full"),
+    ],
+)
+def test_a_rename_git_reads_as_delete_plus_add_follows_the_pr_metadata(
+    tmp_path: Path,
+    force_full: bool,
+    reason: DeltaReason,
+) -> None:
+    """X's head is reachable but rewritten past pairing; the PR rename holds."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    base_text = lines(300, label="base").splitlines(keepends=True)
+    (repo / "a.py").write_text("".join(base_text))
+    base = commit(repo, "base")
+    reviewed = lines(300, label="reviewed").splitlines(keepends=True)
+    reviewed[80] = "bug_at_81 = True\n"
+    (repo / "a.py").write_text("".join(reviewed))
+    reviewed_head = commit(repo, "reviewed feature")
+    first = _round(
+        repo=repo,
+        base=base,
+        prior=None,
+        reported=[_x(file="a.py")],
+        force_full=False,
+    )
+    prior = _with_thread(first.state)
+    (original,) = prior.findings
+    git(repo, "mv", "a.py", "b.py")
+    base_text[80] = "bug_at_81 = True\n"
+    (repo / "b.py").write_text("".join(base_text))
+    commit(repo, "rename and rewrite since the reviewed head")
+    # The PR pairs the rename; the range since the reviewed head does not.
+    assert_that(
+        git(repo, "diff", "-M", "--name-status", f"{base}..HEAD"),
+    ).contains("R099\ta.py\tb.py")
+    assert_that(
+        git(repo, "diff", "-M", "-B", "--name-status", f"{reviewed_head}..HEAD"),
+    ).contains("D\ta.py", "A\tb.py")
+
+    second = _round(
+        repo=repo,
+        base=base,
+        prior=prior,
+        reported=[_x(file="b.py")],
+        force_full=force_full,
+    )
+
+    assert_that(second.result.metadata.delta_reason).is_equal_to(reason)
+    _assert_carried_with_thread(round_=second, key=original.key, file="b.py")
+
+
 def test_an_unreachable_head_on_a_deleted_file_is_not_a_fix(
     tmp_path: Path,
 ) -> None:

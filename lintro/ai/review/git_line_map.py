@@ -62,10 +62,13 @@ class Renames:
         ambiguous: Source paths git also reports as touched another way
             (renamed away and re-added, say), so no single destination holds
             the finding.
+        deleted: Paths git reports as deleted; a rename it did not pair
+            (heavily edited on the way) shows up here (#3413).
     """
 
     moved: dict[str, str]
     ambiguous: frozenset[str]
+    deleted: frozenset[str] = frozenset()
 
 
 def literal_pathspec(path: str) -> str:
@@ -139,6 +142,7 @@ def range_renames(*, repo_root: str, from_sha: str, to_sha: str) -> Renames | No
     tokens = text.split("\0")
     moved: dict[str, str] = {}
     touched: list[str] = []
+    deleted: set[str] = set()
     index = 0
     while index < len(tokens) and tokens[index]:
         status = tokens[index]
@@ -148,10 +152,13 @@ def range_renames(*, repo_root: str, from_sha: str, to_sha: str) -> Renames | No
             index += 3
         else:
             touched.extend(tokens[index + 1 : index + 2])
+            if status == "D" and index + 1 < len(tokens):
+                deleted.add(tokens[index + 1])
             index += 2
     return Renames(
         moved=moved,
         ambiguous=frozenset(source for source in moved if source in touched),
+        deleted=frozenset(deleted),
     )
 
 

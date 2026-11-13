@@ -920,23 +920,25 @@ resolve; it never narrows what it may report.**
   maps each prior open finding forward to its own head through `line_sha..<head>`,
   chained renames included, so a delta round and a full round over the same history
   carry, open and resolve the same findings. When git cannot reach a finding's recorded
-  head (a rewritten branch in a shallow checkout), the pull request's own changed-file
-  metadata moves it: a file reported as renamed takes the finding to its new path, at
-  its stored line. When that names no rename either, the finding is held where it was
-  stored (`line_sha` `"unmapped"` in `relocated_findings`) and its path leaving the diff
-  never counts as a fix: it stays open and is marked not re-verified. A round maps at
-  most 200 findings through git (`MAX_MAPPED_FINDINGS`, one `git diff -U0` per distinct
-  recorded head and path); any beyond that are held (`"unchecked"`), carried unverified
-  and never resolved that round. Every diff behind this pins its format against user
-  configuration: literal pathspecs (`odd[1].py` is never a glob), `--no-textconv`,
-  `--no-ext-diff`, `--no-color`, `--no-relative` and fixed `a/`/`b/` prefixes. Only the
-  section whose headers name the intended file is read. A record still carried without
-  being read (its file was not read this round) is stored with `unverified: true`. The
-  sticky, including a board rebuilt from stored state, marks it **⏸ not re-verified**.
-  Its severity and its weight in the verdict do not change. The prompt says what range
-  the embedded text is ("the change since the previous review round … unchanged context
-  lines may still be earlier changes of this pull request"), and the depth-3 adversarial
-  sweep and an output-exhaustion split read the same delta text.
+  head (a rewritten branch in a shallow checkout), or reads a rename as a delete plus an
+  add (a file renamed and heavily edited since that head), the pull request's own
+  changed-file metadata moves it: a file reported as renamed takes the finding to its
+  new path, at its stored line. When that names no rename either, the finding is held
+  where it was stored (`line_sha` `"unmapped"` in `relocated_findings`) and its path
+  leaving the diff never counts as a fix: it stays open and is marked not re-verified. A
+  round maps at most 200 findings through git (`MAX_MAPPED_FINDINGS`, one `git diff -U0`
+  per distinct recorded head and path); any beyond that are held (`"unchecked"`),
+  carried unverified and never resolved that round. Every diff behind this pins its
+  format against user configuration: literal pathspecs (`odd[1].py` is never a glob),
+  `--no-textconv`, `--no-ext-diff`, `--no-color`, `--no-relative` and fixed `a/`/`b/`
+  prefixes. Only the section whose headers name the intended file is read. A record
+  still carried without being read (its file was not read this round) is stored with
+  `unverified: true`. The sticky, including a board rebuilt from stored state, marks it
+  **⏸ not re-verified**. Its severity and its weight in the verdict do not change. The
+  prompt says what range the embedded text is ("the change since the previous review
+  round … unchanged context lines may still be earlier changes of this pull request"),
+  and the depth-3 adversarial sweep and an output-exhaustion split read the same delta
+  text.
 - **What is reported and counted.** Findings are never filtered by delta location, and
   coverage identity stays the whole-PR patch hash, so a changed file the round did not
   read still forces `INCOMPLETE` (ADR-0007). The question pass and the synthesis call
