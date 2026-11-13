@@ -2794,12 +2794,57 @@ expansion (`{` and a later `}` with a `,` or `..` between them, even across a ne
 any control character such as a newline or tab, and, on POSIX systems, a backslash (read
 as a path separator). A bare parenthesis is literal, so SvelteKit route groups such as
 `src/routes/(app)/+page.svelte` and names such as `page (1).html` are validated as
-usual. Lintro never passes a path with one of these shapes to html-validate. It
-validates the other files, keeps their findings, and fails the run as an execution error
-that names the files left uninspected; if every path holds one of these shapes,
-html-validate is not run at all. The glob shapes are held back on every platform. The
-backslash is held back on POSIX only: on Windows it is always a path separator, so those
-paths are validated as usual.
+usual. Lintro never passes a path with one of these shapes to html-validate as an
+argument. It validates each such file through html-validate's standard input instead
+(`--stdin`), one html-validate process per file, run from the file's own directory so
+the same `.htmlvalidate.*` configuration applies. The file's name is not passed at all,
+not even as `--stdin-filename`: the `npx` fallback runs html-validate through a shell
+that would expand `[slug].html` to a neighbouring `s.html`. html-validate reports the
+content as `/dev/stdin`, and Lintro puts the file's real path on that report. Findings
+are reported under the file's real path and merged with the other files into one result.
+The glob shapes are handled this way on every platform. The backslash is handled this
+way on POSIX only: on Windows it is always a path separator, so those paths are passed
+as usual.
+
+Standard input does not behave exactly like a path argument: flat configs and transforms
+are matched against the name `/dev/stdin`, `.htmlvalidateignore` is skipped, and the
+working directory resolves symlinks. Lintro therefore uses standard input only for files
+a strict allowlist proves safe. A glob-named file goes through standard input only if
+all of these hold; otherwise it is held back, and the reason names the rule that failed:
+
+- **No flat config** (`flat config present`). No `html-validate.config.mjs`, `.cjs`,
+  `.js`, `.mts`, `.cts` or `.ts` exists in the file's directory, the run's working
+  directory, or any parent of either.
+- **No symlinks** (`symlinked path`). Neither the file, its directory, nor the working
+  directory has a symlink anywhere in its path.
+- **JSON configs on the allowlist** (`config not on the allowlist`). Every
+  `.htmlvalidate.*` config from the file's directory up to the filesystem root is
+  `.htmlvalidate.json`. Each uses only the keys `$schema`, `root`, `extends` and
+  `rules`. Each `extends` entry is one of html-validate's built-in presets:
+  `html-validate:a11y`, `:browser`, `:document`, `:prettier`, `:recommended` or
+  `:standard`. Any transform, plugin or custom `elements` metadata is therefore held
+  back, including a Vue-only transform for glob-named `.html` files.
+- **Ignore files provably inapplicable** (`ignore file not provably inapplicable`).
+  Every `.htmlvalidateignore` from the file's directory up to the filesystem root must
+  be ASCII, as must the file's path. None of its patterns may match, compared
+  case-insensitively with negation (`!`) lines disregarded. An ignore file that cannot
+  be read or parsed holds the file back.
+- **The pinned html-validate runs from the file's directory**
+  (`pinned html-validate cannot be verified from <dir>`). Each standard-input call runs
+  from the file's own directory. When html-validate resolves to the `npx` fallback,
+  which runs whatever `node_modules/.bin/html-validate` it finds above its working
+  directory, the same pin check the version gate applies is repeated for that directory.
+  A `node_modules` tree there, for example, holds the file back. A project-local or
+  `PATH` install is an absolute path and `bunx` runs the pinned version, so neither is
+  checked again.
+
+A file that cannot be read is held back as well. A held-back file is treated as it was
+before standard input was used: it is not validated. Lintro validates the other files,
+keeps their findings, and fails the run as an execution error that names each file left
+uninspected and why; if every path is held back, html-validate is not run at all. Rules
+see these files' filename as `/dev/stdin`; only the report carries the real path. If an
+html-validate call times out, the remaining glob-named files are not started, and every
+one of them is named as not inspected.
 
 **Available Options via `--tool-options`:**
 
