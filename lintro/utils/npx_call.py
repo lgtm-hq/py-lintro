@@ -22,8 +22,8 @@ environment string at 131,072 bytes (``MAX_ARG_STRLEN``), and npm copies the
 ``--call`` string into both the ``sh -c`` argument and ``npm_lifecycle_script``.
 :func:`shlex.join` escapes a single quote in five bytes where npm's own escaping
 takes four, so without the file a long file list npm alone still fitted would
-fail with ``E2BIG``. The file ``exec``\ s the tool, so the process tree matches
-the inline form, where the shell execs a lone command.
+fail with ``E2BIG``. The file does not ``exec`` the tool: the shell stays its
+parent, so a signal-killed tool exits 128+N as it does inline under dash.
 
 Windows is left alone: there npm uses ``cmd.exe``, which does not glob, and
 POSIX quoting would be wrong for it.
