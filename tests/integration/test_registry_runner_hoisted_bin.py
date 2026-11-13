@@ -1434,7 +1434,11 @@ def test_bunx_runs_the_pin_beside_a_hoisted_copy_and_the_gate_reports_it(
     monkeypatch: pytest.MonkeyPatch,
     registry: str,
 ) -> None:
-    """Bun fetches the pin from the registry and runs it, never the local tree.
+    """Bun fetches the pin from the registry beside an unlinked hoisted copy.
+
+    The root keeps an older ``prettier`` package but no ``.bin`` link, so
+    lintro has no local binary to run and reaches bunx, which runs the pin and
+    not the hoisted copy.
 
     Args:
         tmp_path: Temporary directory provided by pytest.

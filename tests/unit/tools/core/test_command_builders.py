@@ -900,6 +900,129 @@ def test_find_local_node_binary_skips_non_executable_file(
     assert_that(found).is_equal_to(root_bin.resolve().as_posix())
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX exec bit; Windows resolves the .cmd shim",
+)
+def test_find_local_node_binary_logs_the_skipped_non_executable_path(
+    tmp_path: Path,
+) -> None:
+    """A skipped non-executable bin is named in a debug log, not dropped silently.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    (tmp_path / ".git").mkdir()
+    stray = _write_local_node_binary(tmp_path, "html-validate")
+    stray.chmod(0o644)
+    messages: list[str] = []
+    sink_id = logger.add(messages.append, level="DEBUG", format="{message}")
+    try:
+        found = find_local_node_binary("html-validate", start=tmp_path)
+    finally:
+        logger.remove(sink_id)
+
+    assert_that(found).is_none()
+    assert_that("".join(messages)).contains(stray.resolve().as_posix())
+
+
+def test_find_local_node_binary_ignores_parent_bin_outside_home_without_git(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A no-git project outside ``$HOME`` stops at its own ``package.json``.
+
+    With neither boundary in reach the walk would otherwise climb to ``/`` and
+    run a ``node_modules/.bin`` planted beside a downloaded project.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))
+    planted = _write_local_node_binary(tmp_path, "html-validate")
+    project = tmp_path / "downloaded-project"
+    nested = project / "src"
+    nested.mkdir(parents=True)
+    (project / "package.json").write_text("{}\n")
+
+    found = find_local_node_binary("html-validate", start=nested)
+
+    assert_that(found).is_none()
+    assert_that(planted.is_file()).is_true()
+
+
+@pytest.mark.parametrize(
+    ("manifest", "marker"),
+    [
+        ('{"workspaces": ["packages/*"]}\n', None),
+        ('{"workspaces": {"packages": ["packages/*"]}}\n', None),
+        ("{}\n", "pnpm-workspace.yaml"),
+    ],
+    ids=["npm-workspaces", "yarn-workspaces-object", "pnpm-workspace-yaml"],
+)
+def test_find_local_node_binary_finds_hoisted_bin_outside_home_without_git(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    manifest: str,
+    marker: str | None,
+) -> None:
+    """A no-git workspace outside ``$HOME`` still reaches its root's bin.
+
+    The project bound is the outermost workspace root, not the member's own
+    ``package.json``, so the hoisted bin is found while a bin planted above the
+    workspace is not.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Pytest monkeypatch fixture.
+        manifest: The workspace root's ``package.json``.
+        marker: Extra workspace marker file at the root, if any.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))
+    _write_local_node_binary(tmp_path, "html-validate")
+    root = tmp_path / "code"
+    root.mkdir()
+    (root / "package.json").write_text(manifest)
+    if marker is not None:
+        (root / marker).write_text("packages:\n  - packages/*\n")
+    root_bin = _write_local_node_binary(root, "html-validate")
+    member = root / "packages" / "app"
+    member.mkdir(parents=True)
+    (member / "package.json").write_text("{}\n")
+
+    found = find_local_node_binary("html-validate", start=member)
+
+    assert_that(found).is_equal_to(root_bin.resolve().as_posix())
+
+
+def test_find_local_node_binary_ignores_bin_in_a_git_tracked_home(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dotfiles ``$HOME`` under git does not pull its bin into a project.
+
+    ``$HOME``'s own ``.git`` must not make it the repository root of a no-git
+    project below it.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    home = tmp_path / "home"
+    (home / ".git").mkdir(parents=True)
+    decoy = _write_local_node_binary(home, "html-validate")
+    project = home / "code" / "project"
+    project.mkdir(parents=True)
+    (project / "package.json").write_text("{}\n")
+    monkeypatch.setenv("HOME", str(home))
+
+    found = find_local_node_binary("html-validate", start=project)
+
+    assert_that(found).is_none()
+    assert_that(decoy.is_file()).is_true()
+
+
 def test_node_tool_prefers_path_binary_over_bunx(
     no_local_node_install: None,
 ) -> None:

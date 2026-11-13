@@ -170,19 +170,30 @@ def _read_dependencies(manifest: dict[str, object]) -> dict[str, str]:
 
 
 def search_chain(origin: Path) -> tuple[Path, ...]:
-    """Return the directories to search, stopped at a repository boundary.
+    """Return the directories to search, stopped at a project boundary.
 
     An unbounded walk to the filesystem root is dangerous here in a way it is
     not for read-only lookups: a stray ``package.json`` in ``$HOME`` would make
     lintro believe it is inside a Node project, switch from a global install to
     ``npm install -D``, and write a dev dependency into an unrelated manifest.
     A ``~/package-lock.json`` could likewise decide the manager for a project
-    that has none.
+    that has none, and a planted ``node_modules/.bin`` above a project could
+    run in place of its own tools.
 
-    The walk therefore stops at the first directory containing a ``.git`` entry
-    (inclusive — a repository root is a legitimate project root), and never
-    ascends above the user's home directory. Intermediate ``package.json``
-    files do not stop it.
+    The boundary, in order:
+
+    1. The first directory containing a ``.git`` entry, inclusive: a repository
+       root is a legitimate project root.
+    2. ``$HOME``, exclusive, unless the walk starts there.
+    3. When the walk meets neither (a downloaded project in ``/tmp``, a ``/code``
+       container mount), the project itself: the outermost ancestor that is a
+       workspace root (its ``package.json`` declares ``workspaces``, or a
+       ``pnpm-workspace.yaml`` sits beside it), else the nearest ``package.json``.
+       With no manifest at all the whole chain is returned, as before #2040.
+
+    Intermediate ``package.json`` files do not stop the walk under rules 1 and
+    2, because npm, yarn and pnpm workspaces hoist a member's bins to the
+    workspace root.
 
     This is the single project boundary for Node.js tooling: runtime bin
     resolution,
@@ -208,13 +219,39 @@ def search_chain(origin: Path) -> tuple[Path, ...]:
         # nested below it. Starting *in* ``$HOME`` is a different matter — that
         # is a deliberate cwd, so the manifest there is the one meant.
         if directory == home and chain:
-            break
+            return tuple(chain)
         chain.append(directory)
         # ``.git`` is a directory in a normal clone and a file in a worktree or
         # submodule, so existence is the right test.
         if (directory / ".git").exists() or directory == home:
-            break
-    return tuple(chain)
+            return tuple(chain)
+    return _bound_to_project(tuple(chain))
+
+
+def _bound_to_project(chain: tuple[Path, ...]) -> tuple[Path, ...]:
+    """Cut a walk that met no ``.git`` or ``$HOME`` at its project root.
+
+    Args:
+        chain: The origin followed by every ancestor up to the filesystem root.
+
+    Returns:
+        *chain* up to the outermost workspace root, else up to the nearest
+        ``package.json``, else unchanged.
+    """
+    nearest: int | None = None
+    outermost_workspace: int | None = None
+    for index, directory in enumerate(chain):
+        manifest_path = directory / "package.json"
+        if not manifest_path.is_file():
+            continue
+        if nearest is None:
+            nearest = index
+        if (directory / "pnpm-workspace.yaml").is_file() or (
+            "workspaces" in _read_manifest(manifest_path)
+        ):
+            outermost_workspace = index
+    end = outermost_workspace if outermost_workspace is not None else nearest
+    return chain if end is None else chain[: end + 1]
 
 
 def detect_node_project(start: Path | None = None) -> NodeProject | None:
