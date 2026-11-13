@@ -27,6 +27,7 @@ from lintro.plugins.execution_preparation import PreparedExecution
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.html_validate.definition import HtmlValidatePlugin
 from lintro.tools.html_validate.stdin_route import (
+    TRANSFORM_CONFIGURED,
     StdinRoute,
     merge_results,
     stdin_command,
@@ -283,8 +284,8 @@ def test_a_stdin_timeout_stops_the_run_and_keeps_counted_findings(
     assert_that(result.output).contains(
         f"{tmp_path / '[a].html'}: ",
         "timed out",
-        "not run on 2 file(s)",
-        "'[b].html'",
+        "not run on 2 file(s) because an earlier html-validate call timed out: "
+        "'[b].html', '[c].html'.",
     )
 
 
@@ -349,7 +350,7 @@ def test_a_file_under_an_ignore_file_is_held_back(tmp_path: Path) -> None:
     assert_that(result.execution_failed).is_true()
     assert_that(result.output).contains(
         "'[slug].html': a pattern in",
-        ".htmlvalidateignore ignores it",
+        ".htmlvalidateignore may ignore it",
         "not inspected",
     )
     assert_that(result.output).does_not_contain("transform", "cannot be read")
@@ -397,26 +398,30 @@ def _printed(config: str, *, returncode: int = 0) -> SubprocessResult:
     ("printed", "expected"),
     [
         pytest.param(_printed('{"rules": {}}'), None, id="no-transform"),
-        pytest.param(_printed('{"transform": {}}'), None, id="empty-transform"),
+        pytest.param(
+            _printed('{"transform": {}, "plugins": []}'),
+            None,
+            id="every-json-config-prints-an-empty-transform",
+        ),
+        pytest.param(
+            _printed('{"transform": {}, "plugins": ["my-plugin"]}'),
+            TRANSFORM_CONFIGURED,
+            id="resolved-plugin",
+        ),
         pytest.param(
             _printed('{"transform": {"^.*\\\\.vue$": "html-validate-vue"}}'),
-            None,
+            TRANSFORM_CONFIGURED,
             id="vue-only-transform",
         ),
         pytest.param(
-            _printed('{"transform": {"\\\\.html$": "my-transform"}}'),
-            "its transform pattern '\\\\.html$' applies to it",
-            id="transform-matches-the-real-path",
+            _printed('{"transform": {"\\\\bfoo\\\\.html$": "my-transform"}}'),
+            TRANSFORM_CONFIGURED,
+            id="js-word-boundary-pattern",
         ),
         pytest.param(
-            _printed('{"transform": {"^/dev/": "my-transform"}}'),
-            "its transform pattern '^/dev/' applies to it",
-            id="transform-matches-dev-stdin",
-        ),
-        pytest.param(
-            _printed('{"transform": {"[": "my-transform"}}'),
-            "its transform pattern '[' cannot be checked",
-            id="uncompilable-key",
+            _printed('{"transform": "not-an-object"}'),
+            TRANSFORM_CONFIGURED,
+            id="unreadable-transform-value",
         ),
         pytest.param(
             _printed("", returncode=1),
@@ -435,15 +440,16 @@ def _printed(config: str, *, returncode: int = 0) -> SubprocessResult:
         ),
     ],
 )
-def test_transform_keys_hold_back_only_the_files_they_match(
+def test_any_configured_transform_holds_the_file_back(
     tmp_path: Path,
     printed: SubprocessResult,
     expected: str | None,
 ) -> None:
-    """A transform key holds a file back only when it matches that file.
+    """Any ``transform`` in the resolved config holds every file back.
 
-    Keys are matched against the real path and ``/dev/stdin``, the name
-    html-validate matches on the stdin route.
+    Transform keys are JavaScript patterns (a word boundary differs from
+    Python's around ``é``), and function values print as ``{}``, so lintro
+    never tries to match them.
 
     Args:
         tmp_path: Directory holding the config and the file.
@@ -496,6 +502,55 @@ def _no_config_call(cmd: list[str], cwd: str) -> NoReturn:
     raise AssertionError(f"unexpected call {cmd} in {cwd}")
 
 
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        pytest.param(
+            '{"transform": {}}',
+            f"{TRANSFORM_CONFIGURED} in {{config}}",
+            id="transform-key-even-if-empty",
+        ),
+        pytest.param(
+            '{"plugins": ["html-validate-vue"]}',
+            "a transform may be configured: {config} loads a plugin",
+            id="plugin",
+        ),
+        pytest.param(
+            '{"extends": ["html-validate:recommended", "my-shared-config"]}',
+            "a transform may be configured: {config} loads a plugin",
+            id="external-preset",
+        ),
+        pytest.param(
+            '{"extends": "html-validate:recommended"}',
+            "a transform may be configured: {config} loads a plugin",
+            id="extends-not-a-list",
+        ),
+        pytest.param("{not json", "{config} cannot be read", id="invalid-json"),
+        pytest.param("[]", "{config} cannot be read", id="not-an-object"),
+    ],
+)
+def test_a_json_config_that_may_transform_holds_back_without_asking(
+    tmp_path: Path,
+    config: str,
+    expected: str,
+) -> None:
+    """Function transforms print as ``{}``, so the config files decide first.
+
+    Args:
+        tmp_path: Root of the tree.
+        config: The ``.htmlvalidate.json`` content, one directory up.
+        expected: Start of the hold-back reason.
+    """
+    config_file = tmp_path / ".htmlvalidate.json"
+    config_file.write_text(config, encoding="utf-8")
+    (tmp_path / "[slug]").mkdir()
+    (tmp_path / "[slug]" / "page.html").write_text("<p>a</p>", encoding="utf-8")
+
+    reason = _route(tmp_path, _no_config_call).hold_back_reason("[slug]/page.html")
+
+    assert_that(reason).starts_with(expected.format(config=config_file))
+
+
 def test_without_a_config_file_stdin_is_used_without_asking(tmp_path: Path) -> None:
     """The built-in preset has no transformers, so nothing extra runs.
 
@@ -511,34 +566,58 @@ def test_without_a_config_file_stdin_is_used_without_asking(tmp_path: Path) -> N
     )
 
 
+_MAY_IGNORE = "a pattern in {root}/.htmlvalidateignore may ignore it"
+
+
 @pytest.mark.parametrize(
     ("ignores", "expected"),
     [
         pytest.param({"": "dist/\n"}, None, id="pattern-for-another-directory"),
         pytest.param(
+            {"": "# src/?slug?.html\n\n"},
+            None,
+            id="comment-and-blank-lines",
+        ),
+        pytest.param(
             {"": "src/?slug?.html\n"},
-            "a pattern in {root}/.htmlvalidateignore ignores it",
+            _MAY_IGNORE,
             id="root-pattern-relative-to-its-directory",
         ),
         pytest.param(
             {"src": "?slug?.html\n"},
-            "a pattern in {root}/src/.htmlvalidateignore ignores it",
+            "a pattern in {root}/src/.htmlvalidateignore may ignore it",
             id="nearer-ignore-file",
         ),
+        pytest.param({"": "src/\n"}, _MAY_IGNORE, id="directory"),
+        pytest.param({"": "src/?SLUG?.HTML\n"}, _MAY_IGNORE, id="upper-case-name"),
+        pytest.param({"": "*.HTML\n"}, _MAY_IGNORE, id="upper-case-extension"),
         pytest.param(
             {"": "*.html\n!src/?slug?.html\n"},
-            None,
-            id="negated-pattern",
+            _MAY_IGNORE,
+            id="negation-never-re-includes",
         ),
-        pytest.param({"": "src/\n"}, "{root}/.htmlvalidateignore", id="directory"),
+        pytest.param(
+            {"": "src/\n!src/?slug?.html\n"},
+            _MAY_IGNORE,
+            id="excluded-parent-stays-excluded",
+        ),
+        pytest.param(
+            {"": "[z-a].html\n"},
+            "{root}/.htmlvalidateignore cannot be read or parsed",
+            id="invalid-range",
+        ),
     ],
 )
-def test_ignore_files_apply_with_gitignore_semantics(
+def test_ignore_files_hold_back_whatever_html_validate_might_ignore(
     tmp_path: Path,
     ignores: dict[str, str],
     expected: str | None,
 ) -> None:
-    """An ignore file holds a file back only when one of its patterns matches.
+    """Ignore patterns match case-insensitively and negations are dropped.
+
+    html-validate's ``ignore`` package is case-insensitive and keeps a file
+    under an excluded parent excluded. Dropping negations means the check
+    can only hold back more than html-validate ignores, never less.
 
     Args:
         tmp_path: Root of the tree.
@@ -573,8 +652,44 @@ def test_an_unreadable_ignore_file_holds_the_file_back(tmp_path: Path) -> None:
     reason = _route(tmp_path, _no_config_call).hold_back_reason("[slug].html")
 
     assert_that(reason).is_equal_to(
-        f"{tmp_path / '.htmlvalidateignore'} cannot be read",
+        f"{tmp_path / '.htmlvalidateignore'} cannot be read or parsed",
     )
+
+
+@pytest.mark.parametrize(
+    "name",
+    [".htmlvalidate.js", ".htmlvalidate.cjs", ".htmlvalidate.mjs"],
+)
+def test_a_javascript_config_holds_the_file_back_without_asking(
+    tmp_path: Path,
+    name: str,
+) -> None:
+    """A JavaScript config can build transforms lintro cannot see.
+
+    Args:
+        tmp_path: Root of the tree.
+        name: The JavaScript config file, one directory above the file.
+    """
+    (tmp_path / name).write_text("module.exports = {};\n", encoding="utf-8")
+    (tmp_path / "[slug]").mkdir()
+    (tmp_path / "[slug]" / "page.html").write_text("<p>a</p>", encoding="utf-8")
+
+    reason = _route(tmp_path, _no_config_call).hold_back_reason("[slug]/page.html")
+
+    assert_that(reason).starts_with("a transform may be configured: ").contains(
+        str(tmp_path / name),
+    )
+
+
+def test_paths_resolve_dot_dot_segments_like_node(tmp_path: Path) -> None:
+    """``a/../[s].html`` names the same file html-validate would read.
+
+    Args:
+        tmp_path: Root of the tree.
+    """
+    route = _route(tmp_path, _no_config_call)
+
+    assert_that(route.absolute("a/../[s].html")).is_equal_to(tmp_path / "[s].html")
 
 
 def test_a_failed_print_config_launch_holds_the_file_back(tmp_path: Path) -> None:

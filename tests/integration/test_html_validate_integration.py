@@ -381,21 +381,77 @@ def _config_with_transform(key: str) -> str:
     )
 
 
+_TRANSFORM_CONFIGURED = "a transform is configured"
+
+# A transformer that returns its source unchanged, as a function value:
+# ``--print-config`` serialises it to ``"transform": {}``.
+_FUNCTION_TRANSFORM_CJS = (
+    "module.exports = {\n"
+    '  extends: ["html-validate:recommended"],\n'
+    '  transform: { "slug": function (source) { return [source]; } },\n'
+    "};\n"
+)
+
+
 @pytest.mark.html_validate
 @pytest.mark.parametrize(
-    ("setting", "content", "reason"),
+    ("setting", "content", "held", "reason"),
     [
         pytest.param(
             _IGNORE,
             "?slug?.html\n",
-            ".htmlvalidateignore ignores it",
+            "[slug].html",
+            ".htmlvalidateignore may ignore it",
             id="ignore-pattern-matches",
+        ),
+        pytest.param(
+            _IGNORE,
+            "?SLUG?.HTML\n",
+            "[slug].html",
+            ".htmlvalidateignore may ignore it",
+            id="ignore-pattern-other-case",
+        ),
+        pytest.param(
+            _IGNORE,
+            "x/\n!x/?slug?.html\n",
+            "x/[slug].html",
+            ".htmlvalidateignore may ignore it",
+            id="ignore-excluded-parent",
+        ),
+        pytest.param(
+            _IGNORE,
+            "[z-a].html\n",
+            "[slug].html",
+            ".htmlvalidateignore cannot be read or parsed",
+            id="ignore-invalid-range",
         ),
         pytest.param(
             _CONFIG,
             _config_with_transform("slug"),
-            "its transform pattern 'slug' applies to it",
+            "[slug].html",
+            _TRANSFORM_CONFIGURED,
             id="transform-matches",
+        ),
+        pytest.param(
+            _CONFIG,
+            _config_with_transform("^.*\\.vue$"),
+            "[slug].html",
+            _TRANSFORM_CONFIGURED,
+            id="vue-only-transform",
+        ),
+        pytest.param(
+            _CONFIG,
+            _config_with_transform("\\bfoo\\.html$"),
+            "[x]éfoo.html",
+            _TRANSFORM_CONFIGURED,
+            id="js-word-boundary-differs-from-python",
+        ),
+        pytest.param(
+            ".htmlvalidate.cjs",
+            _FUNCTION_TRANSFORM_CJS,
+            "[slug].html",
+            "a transform may be configured",
+            id="function-transform-in-cjs",
         ),
     ],
 )
@@ -403,32 +459,36 @@ def test_html_validate_holds_back_what_stdin_cannot_validate(
     tmp_path: Path,
     setting: str,
     content: str,
+    held: str,
     reason: str,
 ) -> None:
-    """A matching ignore pattern or transformer holds the file back.
+    """An ignore pattern or transform that may apply holds the file back.
 
-    stdin skips ``.htmlvalidateignore`` and matches transformers against
-    ``/dev/stdin``. The plain file is still validated and keeps its
-    findings; the run fails and names the held-back file with the reason
-    that applied (#3393).
+    stdin skips ``.htmlvalidateignore`` and transforms. lintro checks both
+    conservatively, so a file html-validate might ignore or transform is
+    never validated untransformed. The plain file is still validated and
+    keeps its findings; the run fails and names the held-back file with
+    the reason that applied (#3393).
 
     Args:
         tmp_path: Pytest-managed temporary directory.
         setting: The file holding the setting.
-        content: The setting that applies to ``[slug].html`` only.
+        content: The setting.
+        held: The glob-named file that must be held back.
         reason: The reason the output must give.
     """
     (tmp_path / setting).write_text(content, encoding="utf-8")
-    held = tmp_path / "[slug].html"
-    held.write_text(_FINDINGS, encoding="utf-8")
+    target = tmp_path / held
+    target.parent.mkdir(exist_ok=True)
+    target.write_text(_FINDINGS, encoding="utf-8")
     plain = tmp_path / "page.html"
     plain.write_text(_FINDINGS, encoding="utf-8")
-    result = _check([held, plain])
+    result = _check([target, plain])
 
     assert_that(result.success).is_false()
     assert_that(result.execution_failed).is_true()
     assert_that(result.findings_complete).is_false()
-    assert_that(result.output).contains("'[slug].html': ", reason, "not inspected")
+    assert_that(result.output).contains(f"{held!r}: ", reason, "not inspected")
     assert_that(_reported(result, tmp_path)).is_equal_to({"page.html"})
 
 
@@ -436,11 +496,11 @@ def test_html_validate_holds_back_what_stdin_cannot_validate(
 @pytest.mark.parametrize(
     ("setting", "content"),
     [
-        pytest.param(_IGNORE, "dist/\n", id="ignore-pattern-elsewhere"),
+        pytest.param(_IGNORE, "dist/\n# [slug].html\n", id="ignore-pattern-elsewhere"),
         pytest.param(
             _CONFIG,
-            _config_with_transform("^.*\\.vue$"),
-            id="vue-only-transform",
+            json.dumps({"extends": ["html-validate:recommended"]}),
+            id="json-config-without-transform",
         ),
     ],
 )
@@ -558,7 +618,9 @@ def test_html_validate_stops_after_a_stdin_timeout(tmp_path: Path) -> None:
     assert_that(result.output).contains(
         f"{tmp_path / '[0slow].html'}: ",
         "timed out",
-        "not run on 2 file(s)",
+        "not run on 2 file(s) because an earlier html-validate call timed out",
+        "'[a].html'",
+        "'[b].html'",
     )
 
 

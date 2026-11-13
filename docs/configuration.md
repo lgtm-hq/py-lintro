@@ -2784,18 +2784,28 @@ POSIX only: on Windows it is always a path separator, so those paths are passed 
 usual.
 
 Standard input skips two things a path argument gets: `.htmlvalidateignore`, and
-transformers configured under `transform`, which html-validate matches against the name
-`/dev/stdin` instead of the file's path. Lintro applies `.htmlvalidateignore` itself,
-the way html-validate does: every ignore file from the file's directory up to the
-filesystem root, with gitignore semantics, relative to that ignore file's directory. A
-glob-named file is still held back when a pattern ignores it or an ignore file cannot be
-read; when a `transform` key matches its path or `/dev/stdin` (or is not a regular
-expression Lintro can check); or when the file cannot be read. Lintro validates the
-other files, keeps their findings, and fails the run as an execution error that names
-each file left uninspected and why; if every path is held back, html-validate is not run
-at all. Plugin rules see these files' filename as `/dev/stdin`; only the report carries
-the real path. If an html-validate call times out, the remaining glob-named files are
-not started and are named as not inspected.
+transformers configured under `transform`. Lintro checks both conservatively, so a file
+html-validate might ignore or transform is never validated through standard input:
+
+- **Ignore files.** Every `.htmlvalidateignore` from the file's directory up to the
+  filesystem root is checked case-insensitively, relative to that ignore file's
+  directory. Negation (`!`) lines are disregarded, so a file matching any other pattern
+  is held back even if a later line re-includes it. An ignore file that cannot be read
+  or parsed holds the file back.
+- **Transforms.** If a transform is configured, the file is held back, whichever files
+  its pattern names. A `.htmlvalidate.js`, `.cjs` or `.mjs` config in the lookup chain
+  holds the file back. So does a `.htmlvalidate.json` with a `transform` key, a plugin,
+  or a preset outside `html-validate:`, because those can define transforms Lintro
+  cannot inspect. A configuration that cannot be read holds the file back too. This
+  means, for example, that a Vue-only transform also holds back glob-named `.html`
+  files.
+
+A file that cannot be read is held back as well. Lintro validates the other files, keeps
+their findings, and fails the run as an execution error that names each file left
+uninspected and why; if every path is held back, html-validate is not run at all. Plugin
+rules see these files' filename as `/dev/stdin`; only the report carries the real path.
+If an html-validate call times out, the remaining glob-named files are not started, and
+every one of them is named as not inspected.
 
 **Available Options via `--tool-options`:**
 

@@ -11,12 +11,17 @@ against html-validate 11.21.0:
 - Configuration is looked up from the process working directory, not the
   file's directory. Each call therefore runs from the file's own directory,
   which gives the same lookup as a positional run.
-- ``.htmlvalidateignore`` is never consulted. lintro applies it the way
-  html-validate's ``IsIgnored`` does, and holds back a file a pattern ignores
-  or whose ignore file cannot be read.
-- Transformers are matched against ``/dev/stdin``, not the real name. A file
-  a ``transform`` key matches, under either name, is held back, because stdin
-  would validate the untransformed source or apply the wrong transformer.
+- ``.htmlvalidateignore`` is never consulted. lintro checks it
+  conservatively: every ignore file from the file's directory to the root,
+  case-insensitively, with negation lines dropped, so a file html-validate
+  might ignore is always held back. A parse error holds the file back too.
+- Transformers are matched against ``/dev/stdin``, not the real name, and
+  their patterns are JavaScript regular expressions, possibly with function
+  values ``--print-config`` cannot show. The file is held back when a JSON
+  config in the lookup chain has a ``transform`` key, a plugin, or a preset
+  outside ``html-validate:``; when a JavaScript config is in the chain; when
+  a config cannot be read; or when the resolved config has a transform or
+  plugin.
 - Rules see the source's filename as ``/dev/stdin``; only the report is
   renamed.
 
@@ -28,7 +33,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess  # nosec B404 - used safely with shell disabled
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -43,15 +47,17 @@ from lintro.tools.core.incomplete_run import incomplete_run_result
 
 HTML_VALIDATE_IGNORE_FILENAME: str = ".htmlvalidateignore"
 
-#: The name html-validate gives the stdin source; transformers match it.
-STDIN_FILENAME: str = "/dev/stdin"
-
-# Config file names html-validate searches for, in its own lookup order.
-_CONFIG_FILENAMES: tuple[str, ...] = (
-    ".htmlvalidate.json",
+# Config file names html-validate searches for. A JavaScript config can build
+# transformers or the whole config at load time, which lintro cannot inspect.
+_JSON_CONFIG_FILENAME: str = ".htmlvalidate.json"
+_SCRIPT_CONFIG_FILENAMES: tuple[str, ...] = (
     ".htmlvalidate.mjs",
     ".htmlvalidate.cjs",
     ".htmlvalidate.js",
+)
+
+TRANSFORM_CONFIGURED: str = (
+    "a transform is configured, which html-validate does not apply to stdin"
 )
 
 #: Runs an html-validate argv from a directory and returns its result.
@@ -97,7 +103,7 @@ class StdinRoute:
     run_tool: RunTool
     cwd: str
     _reasons: dict[str, str | None] = field(default_factory=dict, repr=False)
-    _transforms: dict[Path, list[str] | None] = field(
+    _transforms: dict[Path, str | None] = field(
         default_factory=dict,
         repr=False,
     )
@@ -113,9 +119,10 @@ class StdinRoute:
             path: A relative or absolute path as passed to the tool.
 
         Returns:
-            The absolute path.
+            The absolute path, with ``..`` segments resolved the way Node's
+            ``path.join`` resolves them.
         """
-        return Path(self.cwd, path)
+        return Path(os.path.normpath(os.path.join(self.cwd, path)))
 
     def hold_back_reason(self, path: str) -> str | None:
         """Say why stdin cannot validate a file as a positional run would.
@@ -126,8 +133,8 @@ class StdinRoute:
         Returns:
             None when stdin is faithful for the file; otherwise the one
             reason that applied: the file is unreadable, an
-            ``.htmlvalidateignore`` ignores it or cannot be read, or a
-            transformer applies to it or cannot be checked.
+            ``.htmlvalidateignore`` pattern may ignore it or cannot be
+            parsed, or a transform is or may be configured.
         """
         if path not in self._reasons:
             self._reasons[path] = self._judge(self.absolute(path))
@@ -144,14 +151,15 @@ class StdinRoute:
         """
         if not target.is_file() or not os.access(target, os.R_OK):
             return "the file cannot be read"
-        return self._ignored(target) or self._transformed(target)
+        return self._ignored(target) or self._transform_reason(target.parent)
 
     def _ignored(self, target: Path) -> str | None:
-        """Apply ``.htmlvalidateignore`` the way html-validate's CLI does.
+        """Check ``.htmlvalidateignore`` files, erring towards holding back.
 
         html-validate walks from the file's directory to the filesystem
-        root and asks each ignore file, with gitignore semantics, about the
-        path relative to that file's directory. Any match ignores the file.
+        root and asks each ignore file about the path relative to that
+        file's directory, case-insensitively. lintro drops negation lines,
+        so a negation can only add hold-backs, never remove one.
 
         Args:
             target: Absolute path of the file.
@@ -164,14 +172,20 @@ class StdinRoute:
             if not ignore_file.exists():
                 continue
             spec = self._ignore_spec(ignore_file)
+            unparsed = f"{ignore_file} cannot be read or parsed"
             if spec is None:
-                return f"{ignore_file} cannot be read"
-            if spec.match_file(os.path.relpath(target, folder)):
-                return f"a pattern in {ignore_file} ignores it"
+                return unparsed
+            relative = os.path.relpath(target, folder).lower()
+            try:
+                matched = spec.match_file(relative)
+            except Exception:  # any matcher error holds the file back
+                return unparsed
+            if matched:
+                return f"a pattern in {ignore_file} may ignore it"
         return None
 
     def _ignore_spec(self, ignore_file: Path) -> pathspec.GitIgnoreSpec | None:
-        """Parse an ignore file once.
+        """Parse an ignore file's non-negated patterns once, lower-cased.
 
         Args:
             ignore_file: Path of an existing ``.htmlvalidateignore``.
@@ -180,69 +194,74 @@ class StdinRoute:
             Its patterns, or None when it cannot be read or parsed.
         """
         if ignore_file not in self._ignore_specs:
+            spec: pathspec.GitIgnoreSpec | None
             try:
                 lines = ignore_file.read_text(encoding="utf-8").splitlines()
-                spec: pathspec.GitIgnoreSpec | None
-                spec = pathspec.GitIgnoreSpec.from_lines(lines)
-            except (OSError, UnicodeDecodeError, ValueError):
+                kept = [
+                    line.lower() for line in lines if not line.lstrip().startswith("!")
+                ]
+                spec = pathspec.GitIgnoreSpec.from_lines(kept)
+            except Exception:  # any read or parse error holds the file back
                 spec = None
             self._ignore_specs[ignore_file] = spec
         return self._ignore_specs[ignore_file]
 
-    def _transformed(self, target: Path) -> str | None:
-        """Check the file against its configuration's transformer keys.
-
-        Args:
-            target: Absolute path of the file.
-
-        Returns:
-            Why the file is held back, or None when no transformer applies.
-        """
-        keys = self._transform_keys(target.parent)
-        if keys is None:
-            return "html-validate could not print the configuration for it"
-        for key in keys:
-            try:
-                pattern = re.compile(key)
-            except re.error:
-                return f"its transform pattern {key!r} cannot be checked"
-            if pattern.search(str(target)) or pattern.search(STDIN_FILENAME):
-                return f"its transform pattern {key!r} applies to it"
-        return None
-
-    def _transform_keys(self, directory: Path) -> list[str] | None:
-        """List the transformer patterns configured for a directory.
-
-        The built-in preset declares none, so html-validate is only asked
-        when a config file sits in the directory or above it.
+    def _transform_reason(self, directory: Path) -> str | None:
+        """Say whether a transform is or may be configured for a directory.
 
         Args:
             directory: The directory a stdin call would run from.
 
         Returns:
-            The ``transform`` keys, or None when the configuration could not
-            be read.
+            Why files there are held back, or None when no transform can
+            apply.
         """
         if directory not in self._transforms:
-            keys: list[str] | None = []
-            if any(
-                (folder / name).exists()
-                for folder in _ancestors(directory)
-                for name in _CONFIG_FILENAMES
-            ):
-                keys = self._print_config_transforms(directory)
-            self._transforms[directory] = keys
+            self._transforms[directory] = self._judge_transforms(directory)
         return self._transforms[directory]
 
-    def _print_config_transforms(self, directory: Path) -> list[str] | None:
+    def _judge_transforms(self, directory: Path) -> str | None:
+        """Find a configured or possible transform for a directory.
+
+        Transform patterns are JavaScript regular expressions and their
+        values may be functions, which ``--print-config`` drops, so no
+        pattern is ever matched here. Any sign of a transform holds back.
+
+        Args:
+            directory: The directory a stdin call would run from.
+
+        Returns:
+            The reason, or None when only the built-in presets and JSON
+            configs with no transform, plugin or external preset apply.
+        """
+        folders = _ancestors(directory)
+        configs = [
+            folder / _JSON_CONFIG_FILENAME
+            for folder in folders
+            if (folder / _JSON_CONFIG_FILENAME).exists()
+        ]
+        reason = _script_config_reason(folders) or next(
+            (found for found in map(_json_config_reason, configs) if found),
+            None,
+        )
+        if reason is not None or not configs:
+            return reason
+        config = self._print_config(directory)
+        if config is None:
+            return "html-validate could not print the configuration for it"
+        if config.get("transform") or config.get("plugins"):
+            return TRANSFORM_CONFIGURED
+        return None
+
+    def _print_config(self, directory: Path) -> dict[str, object] | None:
         """Ask html-validate for the stdin configuration of a directory.
 
         Args:
             directory: The directory a stdin call would run from.
 
         Returns:
-            The ``transform`` keys, or None when html-validate printed no
-            usable configuration.
+            The resolved configuration, or None when html-validate printed
+            no usable configuration.
         """
         cmd = [*self.base_command, "--print-config", "--stdin"]
         try:
@@ -255,12 +274,60 @@ class StdinRoute:
             config = json.loads(result.stdout)
         except ValueError:
             return None
-        if not isinstance(config, dict):
-            return None
-        transform = config.get("transform") or {}
-        if not isinstance(transform, dict):
-            return None
-        return [str(key) for key in transform]
+        return config if isinstance(config, dict) else None
+
+
+def _script_config_reason(folders: Sequence[Path]) -> str | None:
+    """Find a JavaScript config in the lookup chain.
+
+    Args:
+        folders: The directory and its parents.
+
+    Returns:
+        The hold-back reason, or None when there is none.
+    """
+    for folder in folders:
+        for name in _SCRIPT_CONFIG_FILENAMES:
+            if (folder / name).exists():
+                return (
+                    f"a transform may be configured: {folder / name} is a "
+                    "JavaScript config lintro cannot inspect, and "
+                    "html-validate does not apply transforms to stdin"
+                )
+    return None
+
+
+def _json_config_reason(config_file: Path) -> str | None:
+    """Look for a transform, or a JavaScript source of one, in a JSON config.
+
+    Plugins and presets outside ``html-validate:`` are JavaScript modules
+    that can declare transforms ``--print-config`` cannot show.
+
+    Args:
+        config_file: An existing ``.htmlvalidate.json``.
+
+    Returns:
+        The hold-back reason, or None when the file declares none of them.
+    """
+    try:
+        config = json.loads(config_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return f"{config_file} cannot be read"
+    if not isinstance(config, dict):
+        return f"{config_file} cannot be read"
+    if "transform" in config:
+        return f"{TRANSFORM_CONFIGURED} in {config_file}"
+    extends = config.get("extends") or []
+    external = not isinstance(extends, list) or any(
+        not (isinstance(entry, str) and entry.startswith("html-validate:"))
+        for entry in extends
+    )
+    if config.get("plugins") or external:
+        return (
+            f"a transform may be configured: {config_file} loads a plugin or "
+            "an external preset lintro cannot inspect"
+        )
+    return None
 
 
 def _sum_parse_failures(results: Sequence[ToolResult]) -> int | None:

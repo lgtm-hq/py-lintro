@@ -518,15 +518,15 @@ class HtmlValidatePlugin(BaseToolPlugin):
             cwd: The run's working directory.
 
         Returns:
-            An incomplete run naming them as not inspected.
+            An incomplete run naming every one of them as not inspected.
         """
+        named = ", ".join(repr(path) for path in paths)
         return incomplete_run_result(
             name=self.definition.name,
-            reason=unread_paths_reason(
-                tool="html-validate",
-                paths=paths,
-                why="An earlier html-validate call timed out, so they were "
-                "not started.",
+            reason=(
+                f"html-validate was not run on {len(paths)} file(s) because an "
+                f"earlier html-validate call timed out: {named}. Those files "
+                "were not inspected."
             ),
             cwd=cwd,
         )
