@@ -381,15 +381,23 @@ def _config_with_transform(key: str) -> str:
     )
 
 
-_TRANSFORM_CONFIGURED = "a transform is configured"
+_CONFIG_NOT_ALLOWED = "config not on the allowlist"
+_IGNORE_NOT_INAPPLICABLE = "ignore file not provably inapplicable"
 
-# A transformer that returns its source unchanged, as a function value:
-# ``--print-config`` serialises it to ``"transform": {}``.
+# A transformer that returns its source unchanged, as a function value, which
+# no static inspection of the config can see.
 _FUNCTION_TRANSFORM_CJS = (
     "module.exports = {\n"
     '  extends: ["html-validate:recommended"],\n'
     '  transform: { "slug": function (source) { return [source]; } },\n'
     "};\n"
+)
+
+# A flat config block scoped to HTML files. On stdin html-validate matches
+# ``files`` against ``/dev/stdin``, so the block would silently drop out.
+_FLAT_CONFIG_MJS = (
+    'export default [{ files: ["**/*.html"], '
+    'rules: { "no-inline-style": "error", "close-order": "error" } }];\n'
 )
 
 
@@ -401,57 +409,85 @@ _FUNCTION_TRANSFORM_CJS = (
             _IGNORE,
             "?slug?.html\n",
             "[slug].html",
-            ".htmlvalidateignore may ignore it",
+            _IGNORE_NOT_INAPPLICABLE,
             id="ignore-pattern-matches",
         ),
         pytest.param(
             _IGNORE,
             "?SLUG?.HTML\n",
             "[slug].html",
-            ".htmlvalidateignore may ignore it",
+            _IGNORE_NOT_INAPPLICABLE,
             id="ignore-pattern-other-case",
         ),
         pytest.param(
             _IGNORE,
             "x/\n!x/?slug?.html\n",
             "x/[slug].html",
-            ".htmlvalidateignore may ignore it",
+            _IGNORE_NOT_INAPPLICABLE,
             id="ignore-excluded-parent",
         ),
         pytest.param(
             _IGNORE,
             "[z-a].html\n",
             "[slug].html",
-            ".htmlvalidateignore cannot be read or parsed",
+            _IGNORE_NOT_INAPPLICABLE,
             id="ignore-invalid-range",
+        ),
+        pytest.param(
+            _IGNORE,
+            "x/????.html\n",
+            "x/[\U0001f600].html",
+            _IGNORE_NOT_INAPPLICABLE,
+            id="ignore-utf16-units-in-js",
+        ),
+        pytest.param(
+            _IGNORE,
+            "?Σ?.html\n",
+            "[ς].html",
+            _IGNORE_NOT_INAPPLICABLE,
+            id="ignore-unicode-case-folding",
         ),
         pytest.param(
             _CONFIG,
             _config_with_transform("slug"),
             "[slug].html",
-            _TRANSFORM_CONFIGURED,
+            _CONFIG_NOT_ALLOWED,
             id="transform-matches",
         ),
         pytest.param(
             _CONFIG,
             _config_with_transform("^.*\\.vue$"),
             "[slug].html",
-            _TRANSFORM_CONFIGURED,
+            _CONFIG_NOT_ALLOWED,
             id="vue-only-transform",
         ),
         pytest.param(
             _CONFIG,
             _config_with_transform("\\bfoo\\.html$"),
             "[x]éfoo.html",
-            _TRANSFORM_CONFIGURED,
+            _CONFIG_NOT_ALLOWED,
             id="js-word-boundary-differs-from-python",
         ),
         pytest.param(
             ".htmlvalidate.cjs",
             _FUNCTION_TRANSFORM_CJS,
             "[slug].html",
-            "a transform may be configured",
+            _CONFIG_NOT_ALLOWED,
             id="function-transform-in-cjs",
+        ),
+        pytest.param(
+            "routes/.htmlvalidate.json",
+            json.dumps({"extends": ["html-validate:custom.cjs"]}),
+            "routes/[slug].html",
+            _CONFIG_NOT_ALLOWED,
+            id="html-validate-prefixed-local-preset",
+        ),
+        pytest.param(
+            "html-validate.config.mjs",
+            _FLAT_CONFIG_MJS,
+            "[slug].html",
+            "flat config present",
+            id="flat-config-files-block",
         ),
     ],
 )
@@ -477,6 +513,7 @@ def test_html_validate_holds_back_what_stdin_cannot_validate(
         held: The glob-named file that must be held back.
         reason: The reason the output must give.
     """
+    (tmp_path / setting).parent.mkdir(exist_ok=True)
     (tmp_path / setting).write_text(content, encoding="utf-8")
     target = tmp_path / held
     target.parent.mkdir(exist_ok=True)
@@ -524,6 +561,40 @@ def test_html_validate_validates_through_stdin_when_settings_do_not_apply(
     assert_that(result.execution_failed).is_false()
     assert_that(result.success).is_false()
     assert_that(_reported(result, tmp_path)).is_equal_to({"[slug].html"})
+
+
+@pytest.mark.html_validate
+@pytest.mark.skipif(os.name == "nt", reason="directory symlinks need privileges")
+def test_html_validate_holds_back_a_file_under_a_symlinked_directory(
+    tmp_path: Path,
+) -> None:
+    """A symlinked directory can make stdin read a different config.
+
+    ``project/linked`` points at ``physical/pages``, and ``physical`` has a
+    ``root: true`` config with no rules. A stdin call run from ``linked``
+    resolves into the physical tree and would report nothing.
+
+    Args:
+        tmp_path: Pytest-managed temporary directory.
+    """
+    physical = tmp_path / "physical"
+    (physical / "pages").mkdir(parents=True)
+    (physical / _CONFIG).write_text('{"root": true}', encoding="utf-8")
+    (physical / "pages" / "[slug].html").write_text(_FINDINGS, encoding="utf-8")
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "linked").symlink_to(physical / "pages", target_is_directory=True)
+    plain = project / "page.html"
+    plain.write_text(_FINDINGS, encoding="utf-8")
+    result = _check([project / "linked" / "[slug].html", plain])
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.output).contains(
+        "'linked/[slug].html': symlinked path",
+        "not inspected",
+    )
+    assert_that(_reported(result, project)).is_equal_to({"page.html"})
 
 
 @pytest.mark.html_validate

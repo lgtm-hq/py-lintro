@@ -393,16 +393,7 @@ class HtmlValidatePlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
         invocation = self._invocation(ctx)
-        route = StdinRoute(
-            base_command=invocation.cmd,
-            run_tool=lambda cmd, cwd: self._run_subprocess_result(
-                cmd=cmd,
-                timeout=ctx.timeout,
-                cwd=cwd,
-                stdin=subprocess.DEVNULL,
-            ),
-            cwd=ctx.cwd,
-        )
+        route = StdinRoute(cwd=ctx.cwd)
         return run_on_readable_paths(
             ctx,
             readable=lambda path: (

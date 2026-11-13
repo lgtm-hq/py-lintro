@@ -2783,25 +2783,33 @@ glob shapes are handled this way on every platform. The backslash is handled thi
 POSIX only: on Windows it is always a path separator, so those paths are passed as
 usual.
 
-Standard input skips two things a path argument gets: `.htmlvalidateignore`, and
-transformers configured under `transform`. Lintro checks both conservatively, so a file
-html-validate might ignore or transform is never validated through standard input:
+Standard input does not behave exactly like a path argument: flat configs and transforms
+are matched against the name `/dev/stdin`, `.htmlvalidateignore` is skipped, and the
+working directory resolves symlinks. Lintro therefore uses standard input only for files
+a strict allowlist proves safe. A glob-named file goes through standard input only if
+all of these hold; otherwise it is held back, and the reason names the rule that failed:
 
-- **Ignore files.** Every `.htmlvalidateignore` from the file's directory up to the
-  filesystem root is checked case-insensitively, relative to that ignore file's
-  directory. Negation (`!`) lines are disregarded, so a file matching any other pattern
-  is held back even if a later line re-includes it. An ignore file that cannot be read
-  or parsed holds the file back.
-- **Transforms.** If a transform is configured, the file is held back, whichever files
-  its pattern names. A `.htmlvalidate.js`, `.cjs` or `.mjs` config in the lookup chain
-  holds the file back. So does a `.htmlvalidate.json` with a `transform` key, a plugin,
-  or a preset outside `html-validate:`, because those can define transforms Lintro
-  cannot inspect. A configuration that cannot be read holds the file back too. This
-  means, for example, that a Vue-only transform also holds back glob-named `.html`
-  files.
+- **No flat config** (`flat config present`). No `html-validate.config.mjs`, `.cjs`,
+  `.js`, `.mts`, `.cts` or `.ts` exists in the file's directory, the run's working
+  directory, or any parent of either.
+- **No symlinks** (`symlinked path`). Neither the file, its directory, nor the working
+  directory has a symlink anywhere in its path.
+- **JSON configs on the allowlist** (`config not on the allowlist`). Every
+  `.htmlvalidate.*` config from the file's directory up to the filesystem root is
+  `.htmlvalidate.json`. Each uses only the keys `$schema`, `root`, `extends`, `rules`
+  and `elements`. Each `extends` entry is one of html-validate's built-in presets:
+  `html-validate:a11y`, `:browser`, `:document`, `:prettier`, `:recommended` or
+  `:standard`. Any transform or plugin is therefore held back, including a Vue-only
+  transform for glob-named `.html` files.
+- **Ignore files provably inapplicable** (`ignore file not provably inapplicable`).
+  Every `.htmlvalidateignore` from the file's directory up to the filesystem root must
+  be ASCII, as must the file's path. None of its patterns may match, compared
+  case-insensitively with negation (`!`) lines disregarded. An ignore file that cannot
+  be read or parsed holds the file back.
 
-A file that cannot be read is held back as well. Lintro validates the other files, keeps
-their findings, and fails the run as an execution error that names each file left
+A file that cannot be read is held back as well. A held-back file is treated as it was
+before standard input was used: it is not validated. Lintro validates the other files,
+keeps their findings, and fails the run as an execution error that names each file left
 uninspected and why; if every path is held back, html-validate is not run at all. Plugin
 rules see these files' filename as `/dev/stdin`; only the report carries the real path.
 If an html-validate call times out, the remaining glob-named files are not started, and

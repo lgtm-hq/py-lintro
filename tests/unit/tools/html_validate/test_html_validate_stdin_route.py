@@ -11,10 +11,8 @@ from __future__ import annotations
 import json
 import os
 import subprocess  # nosec B404 - TimeoutExpired for a simulated deadline
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import NoReturn
 from unittest.mock import patch
 
 import pytest
@@ -27,7 +25,10 @@ from lintro.plugins.execution_preparation import PreparedExecution
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.html_validate.definition import HtmlValidatePlugin
 from lintro.tools.html_validate.stdin_route import (
-    TRANSFORM_CONFIGURED,
+    CONFIG_NOT_ALLOWED,
+    FLAT_CONFIG_PRESENT,
+    IGNORE_NOT_INAPPLICABLE,
+    SYMLINKED_PATH,
     StdinRoute,
     merge_results,
     stdin_command,
@@ -349,295 +350,258 @@ def test_a_file_under_an_ignore_file_is_held_back(tmp_path: Path) -> None:
     assert_that(fake.calls).is_empty()
     assert_that(result.execution_failed).is_true()
     assert_that(result.output).contains(
-        "'[slug].html': a pattern in",
-        ".htmlvalidateignore may ignore it",
+        f"'[slug].html': {IGNORE_NOT_INAPPLICABLE}: ",
+        ".htmlvalidateignore",
         "not inspected",
     )
     assert_that(result.output).does_not_contain("transform", "cannot be read")
 
 
-def _route(
-    tmp_path: Path,
-    answer: Callable[[list[str], str], SubprocessResult],
-) -> StdinRoute:
-    """Build a route rooted at ``tmp_path`` with a canned print-config.
+def _reason(tmp_path: Path, path: str, *, cwd: Path | None = None) -> str | None:
+    """Ask a fresh route why a file is held back.
 
     Args:
-        tmp_path: Directory the relative paths resolve against.
-        answer: Stands in for the html-validate call.
+        tmp_path: Default working directory.
+        path: The file, relative to the working directory.
+        cwd: The run's working directory, when not ``tmp_path``.
 
     Returns:
-        The route.
+        The hold-back reason, or None.
     """
-    return StdinRoute(
-        base_command=[_EXECUTABLE, "--formatter", "json"],
-        run_tool=answer,
-        cwd=str(tmp_path),
-    )
+    return StdinRoute(cwd=str(cwd or tmp_path)).hold_back_reason(path)
 
 
-def _printed(config: str, *, returncode: int = 0) -> SubprocessResult:
-    """Build a ``--print-config`` result.
+def _write(path: Path, content: str = "<p>a</p>") -> Path:
+    """Write a file, creating its directory.
 
     Args:
-        config: What html-validate printed.
-        returncode: Its exit status.
+        path: The file.
+        content: What to write.
 
     Returns:
-        The canned result.
+        The path.
     """
-    return SubprocessResult(
-        returncode=returncode,
-        stdout=config,
-        stderr="",
-        output=config,
-    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return path
 
 
-@pytest.mark.parametrize(
-    ("printed", "expected"),
-    [
-        pytest.param(_printed('{"rules": {}}'), None, id="no-transform"),
-        pytest.param(
-            _printed('{"transform": {}, "plugins": []}'),
-            None,
-            id="every-json-config-prints-an-empty-transform",
-        ),
-        pytest.param(
-            _printed('{"transform": {}, "plugins": ["my-plugin"]}'),
-            TRANSFORM_CONFIGURED,
-            id="resolved-plugin",
-        ),
-        pytest.param(
-            _printed('{"transform": {"^.*\\\\.vue$": "html-validate-vue"}}'),
-            TRANSFORM_CONFIGURED,
-            id="vue-only-transform",
-        ),
-        pytest.param(
-            _printed('{"transform": {"\\\\bfoo\\\\.html$": "my-transform"}}'),
-            TRANSFORM_CONFIGURED,
-            id="js-word-boundary-pattern",
-        ),
-        pytest.param(
-            _printed('{"transform": "not-an-object"}'),
-            TRANSFORM_CONFIGURED,
-            id="unreadable-transform-value",
-        ),
-        pytest.param(
-            _printed("", returncode=1),
-            "html-validate could not print the configuration for it",
-            id="config-error",
-        ),
-        pytest.param(
-            _printed("not json"),
-            "html-validate could not print the configuration for it",
-            id="unreadable-output",
-        ),
-        pytest.param(
-            _printed("[]"),
-            "html-validate could not print the configuration for it",
-            id="not-an-object",
-        ),
-    ],
-)
-def test_any_configured_transform_holds_the_file_back(
-    tmp_path: Path,
-    printed: SubprocessResult,
-    expected: str | None,
-) -> None:
-    """Any ``transform`` in the resolved config holds every file back.
-
-    Transform keys are JavaScript patterns (a word boundary differs from
-    Python's around ``é``), and function values print as ``{}``, so lintro
-    never tries to match them.
-
-    Args:
-        tmp_path: Directory holding the config and the file.
-        printed: What ``--print-config --stdin`` answered.
-        expected: The hold-back reason, or None when stdin is used.
-    """
-    (tmp_path / ".htmlvalidate.json").write_text("{}", encoding="utf-8")
-    (tmp_path / "[slug]").mkdir()
-    for name in ("page.html", "other.html"):
-        (tmp_path / "[slug]" / name).write_text("<p>a</p>", encoding="utf-8")
-    asked: list[tuple[list[str], str]] = []
-
-    def answer(cmd: list[str], cwd: str) -> SubprocessResult:
-        """Record the print-config call and answer it.
-
-        Args:
-            cmd: The argv.
-            cwd: The working directory.
-
-        Returns:
-            The canned result.
-        """
-        asked.append((cmd, cwd))
-        return printed
-
-    route = _route(tmp_path, answer)
-
-    assert_that(route.hold_back_reason("[slug]/page.html")).is_equal_to(expected)
-    assert_that(route.hold_back_reason("[slug]/other.html")).is_equal_to(expected)
-    assert_that(asked).is_equal_to(
-        [
-            (
-                [_EXECUTABLE, "--formatter", "json", "--print-config", "--stdin"],
-                str(tmp_path / "[slug]"),
-            ),
-        ],
-    )
-
-
-def _no_config_call(cmd: list[str], cwd: str) -> NoReturn:
-    """Fail the test if html-validate is asked for its config.
-
-    Args:
-        cmd: The argv.
-        cwd: The working directory.
-
-    Raises:
-        AssertionError: Always.
-    """
-    raise AssertionError(f"unexpected call {cmd} in {cwd}")
-
-
-@pytest.mark.parametrize(
-    ("config", "expected"),
-    [
-        pytest.param(
-            '{"transform": {}}',
-            f"{TRANSFORM_CONFIGURED} in {{config}}",
-            id="transform-key-even-if-empty",
-        ),
-        pytest.param(
-            '{"plugins": ["html-validate-vue"]}',
-            "a transform may be configured: {config} loads a plugin",
-            id="plugin",
-        ),
-        pytest.param(
-            '{"extends": ["html-validate:recommended", "my-shared-config"]}',
-            "a transform may be configured: {config} loads a plugin",
-            id="external-preset",
-        ),
-        pytest.param(
-            '{"extends": "html-validate:recommended"}',
-            "a transform may be configured: {config} loads a plugin",
-            id="extends-not-a-list",
-        ),
-        pytest.param("{not json", "{config} cannot be read", id="invalid-json"),
-        pytest.param("[]", "{config} cannot be read", id="not-an-object"),
-    ],
-)
-def test_a_json_config_that_may_transform_holds_back_without_asking(
-    tmp_path: Path,
-    config: str,
-    expected: str,
-) -> None:
-    """Function transforms print as ``{}``, so the config files decide first.
+def test_a_plain_tree_goes_to_stdin(tmp_path: Path) -> None:
+    """No config, no ignore file and no symlink: stdin is faithful.
 
     Args:
         tmp_path: Root of the tree.
-        config: The ``.htmlvalidate.json`` content, one directory up.
-        expected: Start of the hold-back reason.
     """
-    config_file = tmp_path / ".htmlvalidate.json"
-    config_file.write_text(config, encoding="utf-8")
-    (tmp_path / "[slug]").mkdir()
-    (tmp_path / "[slug]" / "page.html").write_text("<p>a</p>", encoding="utf-8")
+    _write(tmp_path / "[slug]" / "page.html")
 
-    reason = _route(tmp_path, _no_config_call).hold_back_reason("[slug]/page.html")
-
-    assert_that(reason).starts_with(expected.format(config=config_file))
-
-
-def test_without_a_config_file_stdin_is_used_without_asking(tmp_path: Path) -> None:
-    """The built-in preset has no transformers, so nothing extra runs.
-
-    Args:
-        tmp_path: Directory holding the file.
-    """
-    (tmp_path / "[slug].html").write_text("<p>a</p>", encoding="utf-8")
-    route = _route(tmp_path, _no_config_call)
-
-    assert_that(route.hold_back_reason("[slug].html")).is_none()
-    assert_that(route.hold_back_reason("missing[1].html")).is_equal_to(
+    assert_that(_reason(tmp_path, "[slug]/page.html")).is_none()
+    assert_that(_reason(tmp_path, "missing[1].html")).is_equal_to(
         "the file cannot be read",
     )
 
 
-_MAY_IGNORE = "a pattern in {root}/.htmlvalidateignore may ignore it"
-
-
 @pytest.mark.parametrize(
-    ("ignores", "expected"),
+    "name",
     [
-        pytest.param({"": "dist/\n"}, None, id="pattern-for-another-directory"),
-        pytest.param(
-            {"": "# src/?slug?.html\n\n"},
-            None,
-            id="comment-and-blank-lines",
-        ),
-        pytest.param(
-            {"": "src/?slug?.html\n"},
-            _MAY_IGNORE,
-            id="root-pattern-relative-to-its-directory",
-        ),
-        pytest.param(
-            {"src": "?slug?.html\n"},
-            "a pattern in {root}/src/.htmlvalidateignore may ignore it",
-            id="nearer-ignore-file",
-        ),
-        pytest.param({"": "src/\n"}, _MAY_IGNORE, id="directory"),
-        pytest.param({"": "src/?SLUG?.HTML\n"}, _MAY_IGNORE, id="upper-case-name"),
-        pytest.param({"": "*.HTML\n"}, _MAY_IGNORE, id="upper-case-extension"),
-        pytest.param(
-            {"": "*.html\n!src/?slug?.html\n"},
-            _MAY_IGNORE,
-            id="negation-never-re-includes",
-        ),
-        pytest.param(
-            {"": "src/\n!src/?slug?.html\n"},
-            _MAY_IGNORE,
-            id="excluded-parent-stays-excluded",
-        ),
-        pytest.param(
-            {"": "[z-a].html\n"},
-            "{root}/.htmlvalidateignore cannot be read or parsed",
-            id="invalid-range",
-        ),
+        "html-validate.config.mjs",
+        "html-validate.config.cjs",
+        "html-validate.config.js",
+        "html-validate.config.mts",
+        "html-validate.config.cts",
+        "html-validate.config.ts",
     ],
 )
-def test_ignore_files_hold_back_whatever_html_validate_might_ignore(
-    tmp_path: Path,
-    ignores: dict[str, str],
-    expected: str | None,
-) -> None:
-    """Ignore patterns match case-insensitively and negations are dropped.
-
-    html-validate's ``ignore`` package is case-insensitive and keeps a file
-    under an excluded parent excluded. Dropping negations means the check
-    can only hold back more than html-validate ignores, never less.
+def test_a_flat_config_above_the_file_holds_it_back(tmp_path: Path, name: str) -> None:
+    """The CLI prefers a flat config, whose blocks match ``/dev/stdin``.
 
     Args:
         tmp_path: Root of the tree.
-        ignores: Directory (relative to the root) to ignore-file content.
-        expected: Substring of the hold-back reason, or None.
+        name: The flat config file name.
     """
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "[slug].html").write_text("<p>a</p>", encoding="utf-8")
-    for folder, content in ignores.items():
-        (tmp_path / folder / ".htmlvalidateignore").write_text(
-            content,
-            encoding="utf-8",
-        )
+    flat = _write(tmp_path / name, "export default [];\n")
+    _write(tmp_path / "[slug]" / "page.html")
 
-    reason = _route(tmp_path, _no_config_call).hold_back_reason("src/[slug].html")
+    assert_that(_reason(tmp_path, "[slug]/page.html")).is_equal_to(
+        f"{FLAT_CONFIG_PRESENT}: {flat}",
+    )
 
-    if expected is None:
-        assert_that(reason).is_none()
+
+def test_a_flat_config_above_the_working_directory_holds_back(tmp_path: Path) -> None:
+    """The batch call looks up from the working directory, so it counts too.
+
+    Args:
+        tmp_path: Root of the tree.
+    """
+    flat = _write(tmp_path / "run" / "html-validate.config.mjs", "export default [];\n")
+    target = _write(tmp_path / "pages" / "[slug].html")
+
+    assert_that(_reason(tmp_path, str(target), cwd=tmp_path / "run")).is_equal_to(
+        f"{FLAT_CONFIG_PRESENT}: {flat}",
+    )
+
+
+@pytest.mark.parametrize(
+    "linked",
+    [
+        pytest.param("directory", id="symlinked-directory"),
+        pytest.param("file", id="symlinked-file"),
+        pytest.param("cwd", id="symlinked-working-directory"),
+    ],
+)
+def test_a_symlink_anywhere_holds_the_file_back(tmp_path: Path, linked: str) -> None:
+    """A symlink can make the stdin working directory resolve elsewhere.
+
+    Args:
+        tmp_path: Root of the tree.
+        linked: Which part of the path is a symlink.
+    """
+    physical = _write(tmp_path / "physical" / "[slug].html").parent
+    project = tmp_path / "project"
+    project.mkdir()
+    cwd = project
+    if linked == "directory":
+        (project / "linked").symlink_to(physical, target_is_directory=True)
+        path = "linked/[slug].html"
+    elif linked == "file":
+        (project / "[slug].html").symlink_to(physical / "[slug].html")
+        path = "[slug].html"
     else:
-        assert_that(reason).contains(expected.format(root=tmp_path))
+        (tmp_path / "alias").symlink_to(physical, target_is_directory=True)
+        cwd = tmp_path / "alias"
+        path = "[slug].html"
+
+    reason = _reason(tmp_path, path, cwd=cwd)
+
+    assert_that(reason).starts_with(f"{SYMLINKED_PATH}: ")
+
+
+_JSON = ".htmlvalidate.json"
+_NOT_BUILTIN = "extends something other than a built-in preset"
+_SCRIPT = "module.exports = {};"
+
+
+@pytest.mark.parametrize(
+    ("name", "content", "detail"),
+    [
+        pytest.param(_JSON, '{"transform": {}}', "has key 'transform'", id="transform"),
+        pytest.param(_JSON, '{"plugins": []}', "has key 'plugins'", id="plugins"),
+        pytest.param(
+            _JSON,
+            '{"extends": ["html-validate:custom.cjs"]}',
+            _NOT_BUILTIN,
+            id="html-validate-prefixed-file",
+        ),
+        pytest.param(
+            _JSON,
+            '{"extends": ["my-shared-config"]}',
+            _NOT_BUILTIN,
+            id="external-preset",
+        ),
+        pytest.param(
+            _JSON,
+            '{"extends": "html-validate:recommended"}',
+            _NOT_BUILTIN,
+            id="extends-not-a-list",
+        ),
+        pytest.param(_JSON, "{not json", "cannot be read", id="bad-json"),
+        pytest.param(_JSON, "[]", "is not an object", id="not-object"),
+        pytest.param(".htmlvalidate.js", _SCRIPT, "is not JSON", id="js"),
+        pytest.param(".htmlvalidate.cjs", _SCRIPT, "is not JSON", id="cjs"),
+        pytest.param(".htmlvalidate.mjs", _SCRIPT, "is not JSON", id="mjs"),
+    ],
+)
+def test_a_config_off_the_allowlist_holds_the_file_back(
+    tmp_path: Path,
+    name: str,
+    content: str,
+    detail: str,
+) -> None:
+    """Only JSON configs with allowlisted keys and built-in presets pass.
+
+    Args:
+        tmp_path: Root of the tree.
+        name: The config file name, one directory above the file.
+        content: Its content.
+        detail: What the reason must say about the config.
+    """
+    config = _write(tmp_path / name, content)
+    _write(tmp_path / "[slug]" / "page.html")
+
+    assert_that(_reason(tmp_path, "[slug]/page.html")).is_equal_to(
+        f"{CONFIG_NOT_ALLOWED}: {config} {detail}",
+    )
+
+
+def test_an_allowlisted_config_goes_to_stdin(tmp_path: Path) -> None:
+    """Every allowed key and every built-in preset together still pass.
+
+    Args:
+        tmp_path: Root of the tree.
+    """
+    _write(
+        tmp_path / ".htmlvalidate.json",
+        json.dumps(
+            {
+                "$schema": "https://html-validate.org/schemas/config.json",
+                "root": True,
+                "extends": [
+                    "html-validate:a11y",
+                    "html-validate:browser",
+                    "html-validate:document",
+                    "html-validate:prettier",
+                    "html-validate:recommended",
+                    "html-validate:standard",
+                ],
+                "rules": {"close-order": "off"},
+                "elements": ["html5"],
+            },
+        ),
+    )
+    _write(tmp_path / "[slug]" / ".htmlvalidate.json", '{"rules": {}}')
+    _write(tmp_path / "[slug]" / "page.html")
+
+    assert_that(_reason(tmp_path, "[slug]/page.html")).is_none()
+
+
+@pytest.mark.parametrize(
+    ("ignore", "name", "held"),
+    [
+        pytest.param("dist/\n# [slug].html\n\n", "[slug].html", False, id="elsewhere"),
+        pytest.param("src/?slug?.html\n", "[slug].html", True, id="relative-to-root"),
+        pytest.param("src/?SLUG?.HTML\n", "[slug].html", True, id="other-case"),
+        pytest.param("*.HTML\n", "[slug].html", True, id="other-case-extension"),
+        pytest.param("*.html\n!src/?slug?.html\n", "[slug].html", True, id="negation"),
+        pytest.param("src/\n!src/?slug?.html\n", "[slug].html", True, id="parent"),
+        pytest.param("[z-a].html\n", "[slug].html", True, id="invalid-range"),
+        pytest.param("????.html\n", "[\U0001f600].html", True, id="non-ascii-path"),
+        pytest.param("?Σ?.html\n", "[slug].html", True, id="non-ascii-pattern"),
+    ],
+)
+def test_an_ignore_file_must_be_provably_inapplicable(
+    tmp_path: Path,
+    ignore: str,
+    name: str,
+    held: bool,
+) -> None:
+    """Only ASCII ignore files whose patterns cannot match let a file through.
+
+    Matching is case-insensitive with negations dropped, so a negation can
+    only add hold-backs. Non-ASCII content is never trusted: JavaScript
+    counts UTF-16 units and folds case differently.
+
+    Args:
+        tmp_path: Root of the tree.
+        ignore: The root ``.htmlvalidateignore`` content.
+        name: The file name under ``src/``.
+        held: Whether the file is held back.
+    """
+    ignore_file = _write(tmp_path / ".htmlvalidateignore", ignore)
+    _write(tmp_path / "src" / name)
+
+    reason = _reason(tmp_path, f"src/{name}")
+
+    expected = f"{IGNORE_NOT_INAPPLICABLE}: {ignore_file}" if held else None
+    assert_that(reason).is_equal_to(expected)
 
 
 def test_an_unreadable_ignore_file_holds_the_file_back(tmp_path: Path) -> None:
@@ -646,38 +610,11 @@ def test_an_unreadable_ignore_file_holds_the_file_back(tmp_path: Path) -> None:
     Args:
         tmp_path: Root of the tree.
     """
-    (tmp_path / "[slug].html").write_text("<p>a</p>", encoding="utf-8")
+    _write(tmp_path / "[slug].html")
     (tmp_path / ".htmlvalidateignore").mkdir()
 
-    reason = _route(tmp_path, _no_config_call).hold_back_reason("[slug].html")
-
-    assert_that(reason).is_equal_to(
-        f"{tmp_path / '.htmlvalidateignore'} cannot be read or parsed",
-    )
-
-
-@pytest.mark.parametrize(
-    "name",
-    [".htmlvalidate.js", ".htmlvalidate.cjs", ".htmlvalidate.mjs"],
-)
-def test_a_javascript_config_holds_the_file_back_without_asking(
-    tmp_path: Path,
-    name: str,
-) -> None:
-    """A JavaScript config can build transforms lintro cannot see.
-
-    Args:
-        tmp_path: Root of the tree.
-        name: The JavaScript config file, one directory above the file.
-    """
-    (tmp_path / name).write_text("module.exports = {};\n", encoding="utf-8")
-    (tmp_path / "[slug]").mkdir()
-    (tmp_path / "[slug]" / "page.html").write_text("<p>a</p>", encoding="utf-8")
-
-    reason = _route(tmp_path, _no_config_call).hold_back_reason("[slug]/page.html")
-
-    assert_that(reason).starts_with("a transform may be configured: ").contains(
-        str(tmp_path / name),
+    assert_that(_reason(tmp_path, "[slug].html")).is_equal_to(
+        f"{IGNORE_NOT_INAPPLICABLE}: {tmp_path / '.htmlvalidateignore'}",
     )
 
 
@@ -687,35 +624,9 @@ def test_paths_resolve_dot_dot_segments_like_node(tmp_path: Path) -> None:
     Args:
         tmp_path: Root of the tree.
     """
-    route = _route(tmp_path, _no_config_call)
+    route = StdinRoute(cwd=str(tmp_path))
 
     assert_that(route.absolute("a/../[s].html")).is_equal_to(tmp_path / "[s].html")
-
-
-def test_a_failed_print_config_launch_holds_the_file_back(tmp_path: Path) -> None:
-    """An html-validate that cannot start answers nothing, so stdin is not used.
-
-    Args:
-        tmp_path: Directory holding the config and the file.
-    """
-    (tmp_path / ".htmlvalidate.json").write_text("{}", encoding="utf-8")
-    (tmp_path / "[slug].html").write_text("<p>a</p>", encoding="utf-8")
-
-    def answer(cmd: list[str], cwd: str) -> NoReturn:
-        """Fail to launch.
-
-        Args:
-            cmd: The argv.
-            cwd: The working directory.
-
-        Raises:
-            FileNotFoundError: Always.
-        """
-        raise FileNotFoundError(cmd[0], cwd)
-
-    assert_that(
-        _route(tmp_path, answer).hold_back_reason("[slug].html"),
-    ).is_equal_to("html-validate could not print the configuration for it")
 
 
 def _issue(path: str) -> HtmlValidateIssue:
