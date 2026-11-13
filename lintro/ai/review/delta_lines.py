@@ -23,9 +23,10 @@ open here is exactly the false "fixed" #3403 is about.
 When git reads a rename as a delete plus an add, or cannot reach a record's
 head at all (a rewritten branch in a shallow checkout), the pull request's
 own rename metadata moves the record to its file's new path. That metadata
-spans the whole pull request, so a record an earlier round carried across a
-rename is also looked up under the path it was first tracked at (#3432),
-unless that path may now be another file or the destination is contested
+spans the whole pull request, so on a delete plus an add a record an earlier
+round carried across a rename is also looked up under the path it was first
+tracked at (#3432), unless git cannot walk the range, that path may now be
+another file, or the destination is contested
 (:func:`~lintro.ai.review.rename_lineage.lineage_rename`,
 :func:`_contested_lineage`). When that names no rename either, the record is
 held where it is (:data:`~lintro.ai.review.models.delta_plan.LOCATION_UNMAPPED`)
@@ -264,6 +265,7 @@ def _map_record(
             path=path,
             origin_path=record.origin_path,
             from_sha=since_sha,
+            to_sha=head_sha,
         )
         by_lineage = by_lineage or bool(unpaired)
     moved_on = (
@@ -378,17 +380,12 @@ def _place(
         from_sha=record.line_sha,
         to_sha=since_sha,
     )
-    origin_path = record.origin_path if lineage else ""
     if renames is None or not record.line_sha:
-        moved = lookups.renamed_from.get(record.file) or lineage_rename(
-            lookups=lookups,
-            renames=None,
-            path=record.file,
-            origin_path=origin_path,
-            from_sha=since_sha,
-        )
+        # No history to check a first path's provenance against: only the
+        # record's own path follows the PR's renames (#3432).
+        moved = lookups.renamed_from.get(record.file)
         if moved:
-            return moved, None, "", moved != lookups.renamed_from.get(record.file)
+            return moved, None, "", False
         return record.file, None, LOCATION_UNMAPPED if record.line_sha else "", False
     dest = renames.moved.get(record.file, record.file)
     if record.file in renames.ambiguous:
@@ -400,8 +397,9 @@ def _place(
         lookups=lookups,
         renames=renames,
         path=record.file,
-        origin_path=origin_path,
+        origin_path=record.origin_path if lineage else "",
         from_sha=record.line_sha,
+        to_sha=since_sha,
     )
     if unpaired:
         return unpaired, None, "", True

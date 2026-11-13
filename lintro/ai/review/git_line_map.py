@@ -30,6 +30,7 @@ __all__ = [
     "git_text",
     "literal_pathspec",
     "map_line",
+    "path_added_in_range",
     "path_exists",
     "range_renames",
 ]
@@ -166,6 +167,63 @@ def range_renames(*, repo_root: str, from_sha: str, to_sha: str) -> Renames | No
         deleted=frozenset(deleted),
         named=frozenset((*moved, *touched)),
     )
+
+
+def path_added_in_range(
+    *,
+    repo_root: str,
+    from_sha: str,
+    to_sha: str,
+    path: str,
+) -> bool | None:
+    """Tell whether any commit in a range adds a path (#3432).
+
+    Compares every commit, not the range's endpoints, so a file created
+    and renamed away again within the range still counts. Rename detection
+    is off, so a rename onto the path is reported as adding it, and merge
+    commits are compared with each parent.
+
+    Args:
+        repo_root: The repository.
+        from_sha: The older commit (excluded).
+        to_sha: The newer commit.
+        path: Repository-relative path.
+
+    Returns:
+        Whether some commit adds the path, or ``None`` when git could not
+        walk the range.
+    """
+    if not from_sha or not to_sha or not path:
+        return None
+    try:
+        result = _run_git(
+            args=[
+                "-C",
+                repo_root,
+                "-c",
+                "core.quotePath=false",
+                "log",
+                "--format=",
+                "--name-only",
+                "-z",
+                "-m",
+                "--no-renames",
+                "--diff-filter=A",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--no-relative",
+                f"{from_sha}..{to_sha}",
+                "--",
+                literal_pathspec(path),
+            ],
+            check=False,
+        )
+    except ReviewContextError as exc:
+        logger.debug("Could not walk {}..{} for {}: {}", from_sha, to_sha, path, exc)
+        return None
+    if result.returncode != 0:
+        return None
+    return path in result.stdout.split("\0")
 
 
 def path_exists(*, repo_root: str, sha: str, path: str) -> bool | None:

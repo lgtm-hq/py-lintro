@@ -365,29 +365,19 @@ def test_two_findings_converging_on_one_file_keep_their_threads(
     )
 
 
-@pytest.mark.parametrize(
-    ("force_full", "reason"),
-    [
-        pytest.param(False, DeltaReason.NOT_ANCESTOR, id="automatic"),
-        pytest.param(True, DeltaReason.EXPLICIT_FULL, id="forced-full"),
-    ],
-)
-def test_a_rewritten_shallow_history_follows_the_first_paths_rename(
-    tmp_path: Path,
-    force_full: bool,
-    reason: DeltaReason,
-) -> None:
-    """X's head is gone from the clone and the PR names only ``a.py -> c.py``."""
-    (tmp_path / "source").mkdir()
-    repo, base, state, key = _carried_to_b(tmp_path / "source", force_full=False)
-    git(repo, "reset", "-q", "--hard", base)
-    git(repo, "mv", "a.py", "c.py")
-    text = lines(300, label="base").splitlines(keepends=True)
-    text[80] = "bug_at_81 = True\n"
-    (repo / "c.py").write_text("".join(text))
-    head = commit(repo, "rewritten feature, renamed to c.py")
+def _shallow_clone(*, tmp_path: Path, repo: Path, base: str) -> Path:
+    """Check the PR head out as the workflow does: depth 1, head fetched alone.
+
+    Args:
+        tmp_path: Pytest temp dir; the clone goes in ``workflow``.
+        repo: The source repository at the PR head.
+        base: The base commit, the trusted branch's tip.
+
+    Returns:
+        The clone, which holds no commit between the base and the head.
+    """
     git(repo, "update-ref", "refs/heads/trusted", base)
-    git(repo, "update-ref", "refs/pull/1/head", head)
+    git(repo, "update-ref", "refs/pull/1/head", git(repo, "rev-parse", "HEAD"))
     clone = tmp_path / "workflow"
     git(
         tmp_path,
@@ -400,11 +390,60 @@ def test_a_rewritten_shallow_history_follows_the_first_paths_rename(
         repo.as_uri(),
         str(clone),
     )
-    git(clone, "fetch", "-q", "--no-tags", "origin", "+refs/pull/1/head:refs/pr")
+    git(
+        clone,
+        "fetch",
+        "-q",
+        "--depth",
+        "1",
+        "--no-tags",
+        "origin",
+        "+refs/pull/1/head:refs/pr",
+    )
     git(clone, "checkout", "-q", "--detach", "refs/pr")
     assert_that(
         git(clone, "rev-parse", "--is-shallow-repository"),
     ).is_equal_to("true")
+    return clone
+
+
+def _assert_held_on_b(*, round_: harness._Round, key: str) -> None:
+    """X stays open on ``b.py`` with its thread and is reported again elsewhere.
+
+    Args:
+        round_: The round.
+        key: X's original key.
+    """
+    assert_that(round_.counts).is_equal_to((1, 1, 0))
+    assert_that(round_.resolved_threads).is_empty()
+    (carried,) = round_.match.carried
+    assert_that((carried.key, carried.file, carried.inline_comment_id)).is_equal_to(
+        (key, "b.py", harness._THREAD_ID),
+    )
+
+
+@pytest.mark.parametrize(
+    ("force_full", "reason"),
+    [
+        pytest.param(False, DeltaReason.NOT_ANCESTOR, id="automatic"),
+        pytest.param(True, DeltaReason.EXPLICIT_FULL, id="forced-full"),
+    ],
+)
+def test_a_rewritten_shallow_history_holds_the_finding(
+    tmp_path: Path,
+    force_full: bool,
+    reason: DeltaReason,
+) -> None:
+    """X's head is gone from the clone, so ``a.py``'s provenance is unknown: X is held."""
+    (tmp_path / "source").mkdir()
+    repo, base, state, key = _carried_to_b(tmp_path / "source", force_full=False)
+    git(repo, "reset", "-q", "--hard", base)
+    git(repo, "mv", "a.py", "c.py")
+    text = lines(300, label="base").splitlines(keepends=True)
+    text[80] = "bug_at_81 = True\n"
+    (repo / "c.py").write_text("".join(text))
+    commit(repo, "rewritten feature, renamed to c.py")
+    clone = _shallow_clone(tmp_path=tmp_path, repo=repo, base=base)
 
     third = harness._round(
         repo=clone,
@@ -415,7 +454,50 @@ def test_a_rewritten_shallow_history_follows_the_first_paths_rename(
     )
 
     assert_that(third.result.metadata.delta_reason).is_equal_to(reason)
-    harness._assert_carried_with_thread(round_=third, key=key, file="c.py")
+    _assert_held_on_b(round_=third, key=key)
+
+
+@pytest.mark.parametrize("force_full", _MODES)
+@pytest.mark.parametrize("shallow", [False, True], ids=["readable", "unreachable"])
+def test_a_first_path_reused_between_reviews_does_not_take_the_finding(
+    tmp_path: Path,
+    force_full: bool,
+    shallow: bool,
+) -> None:
+    """A new ``a.py`` is created and renamed to ``c.py`` with no review in between.
+
+    The range's endpoints show only ``b.py`` deleted and ``c.py``/``d.py``
+    added, so only the commits in between show ``a.py`` was another file.
+    """
+    (tmp_path / "source").mkdir()
+    repo, base, state, key = _carried_to_b(tmp_path / "source", force_full=force_full)
+    reviewed_head = git(repo, "rev-parse", "HEAD")
+    (repo / "a.py").write_text(lines(300, label="base"))
+    commit(repo, "re-create an unrelated a.py")
+    git(repo, "mv", "a.py", "c.py")
+    git(repo, "mv", "b.py", "d.py")
+    text = lines(300, label="rewritten").splitlines(keepends=True)
+    text[80] = "bug_at_81 = True\n"
+    (repo / "d.py").write_text("".join(text))
+    commit(repo, "rename the new a.py, rename and rewrite b.py")
+    endpoints = git(repo, "diff", "-M", "-B", "--name-status", f"{reviewed_head}..HEAD")
+    assert_that(endpoints).contains("D\tb.py").does_not_contain("a.py")
+    assert_that(
+        git(repo, "diff", "-M", "--name-status", f"{base}..HEAD"),
+    ).contains("R100\ta.py\tc.py")
+    target = (
+        _shallow_clone(tmp_path=tmp_path, repo=repo, base=base) if shallow else repo
+    )
+
+    third = harness._round(
+        repo=target,
+        base=base,
+        prior=state,
+        reported=[harness._x(file="d.py")],
+        force_full=force_full,
+    )
+
+    _assert_held_on_b(round_=third, key=key)
 
 
 def test_a_record_stored_before_origin_paths_loads_without_one() -> None:

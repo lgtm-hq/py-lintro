@@ -938,28 +938,36 @@ resolve; it never narrows what it may report.**
   path it was first tracked at (`FindingRecord.origin_path`, #3432). That is the first
   path the review tracked the finding on, not necessarily its path at the pull request's
   base: a finding first reported on a file the pull request had already renamed has no
-  lineage to follow. When its current path reads as deleted, or its recorded head is
-  unreachable and its current path is gone, and the pull request renames that first
-  path, the finding follows that rename too. The lookup is skipped, and the finding held
-  as before, when it could be ambiguous: the first path exists at the start of the range
-  or the range adds or renames it (a re-created file of the same name), git pairs the
-  destination with another source in the range, or another finding moves to the same
-  destination that round. Holding can leave a duplicate thread; it never resolves a live
-  one. When that names no rename either, the finding is held where it was stored
-  (`line_sha` `"unmapped"` in `relocated_findings`) and its path leaving the diff never
-  counts as a fix: it stays open and is marked not re-verified. A round maps at most 200
-  findings through git (`MAX_MAPPED_FINDINGS`, one `git diff -U0` per distinct recorded
-  head and path); any beyond that are held (`"unchecked"`), carried unverified and never
-  resolved that round. Every diff behind this pins its format against user
-  configuration: literal pathspecs (`odd[1].py` is never a glob), `--no-textconv`,
-  `--no-ext-diff`, `--no-color`, `--no-relative` and fixed `a/`/`b/` prefixes. Only the
-  section whose headers name the intended file is read. A record still carried without
-  being read (its file was not read this round) is stored with `unverified: true`. The
-  sticky, including a board rebuilt from stored state, marks it **⏸ not re-verified**.
-  Its severity and its weight in the verdict do not change. The prompt says what range
-  the embedded text is ("the change since the previous review round … unchanged context
-  lines may still be earlier changes of this pull request"), and the depth-3 adversarial
-  sweep and an output-exhaustion split read the same delta text.
+  lineage to follow. When git reads its current path as deleted and the pull request
+  renames that first path, the finding follows that rename too. The lookup is skipped,
+  and the finding held as before, when the first path's provenance cannot be verified or
+  could be ambiguous:
+  - git cannot walk the range since the finding's recorded head (an unreachable head in
+    a shallow checkout);
+  - the first path exists at the start of the range;
+  - any commit in the range adds it or renames another file onto it, even if that file
+    moved on again before the range's end (`git log --diff-filter=A --no-renames` over
+    every commit, not the endpoint diff);
+  - git pairs the destination with another source in the range;
+  - another finding moves to the same destination that round.
+
+  Holding can leave a duplicate thread; it never resolves a live one. When that names no
+  rename either, the finding is held where it was stored (`line_sha` `"unmapped"` in
+  `relocated_findings`) and its path leaving the diff never counts as a fix: it stays
+  open and is marked not re-verified. A round maps at most 200 findings through git
+  (`MAX_MAPPED_FINDINGS`, one `git diff -U0` per distinct recorded head and path); any
+  beyond that are held (`"unchecked"`), carried unverified and never resolved that
+  round. Every diff behind this pins its format against user configuration: literal
+  pathspecs (`odd[1].py` is never a glob), `--no-textconv`, `--no-ext-diff`,
+  `--no-color`, `--no-relative` and fixed `a/`/`b/` prefixes. Only the section whose
+  headers name the intended file is read. A record still carried without being read (its
+  file was not read this round) is stored with `unverified: true`. The sticky, including
+  a board rebuilt from stored state, marks it **⏸ not re-verified**. Its severity and
+  its weight in the verdict do not change. The prompt says what range the embedded text
+  is ("the change since the previous review round … unchanged context lines may still be
+  earlier changes of this pull request"), and the depth-3 adversarial sweep and an
+  output-exhaustion split read the same delta text.
+
 - **What is reported and counted.** Findings are never filtered by delta location, and
   coverage identity stays the whole-PR patch hash, so a changed file the round did not
   read still forces `INCOMPLETE` (ADR-0007). The question pass and the synthesis call
