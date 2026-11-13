@@ -181,7 +181,14 @@ def search_chain(origin: Path) -> tuple[Path, ...]:
 
     The walk therefore stops at the first directory containing a ``.git`` entry
     (inclusive — a repository root is a legitimate project root), and never
-    ascends above the user's home directory.
+    ascends above the user's home directory. Intermediate ``package.json``
+    files do not stop it.
+
+    This is the single project boundary for Node.js tooling: runtime bin
+    resolution,
+    :func:`~lintro.tools.core.command_builders.find_local_node_binary`,
+    searches exactly this chain, so a hoisted workspace bin that install
+    planning can see is also the one that runs (#2040).
 
     Args:
         origin: Directory to search from.

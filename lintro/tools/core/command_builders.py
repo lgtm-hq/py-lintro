@@ -25,6 +25,7 @@ Example:
 
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 import sysconfig
@@ -35,6 +36,7 @@ from typing import TYPE_CHECKING, ClassVar
 from loguru import logger
 
 from lintro.plugins.subprocess_executor import is_compiled_binary
+from lintro.tools.core.install_strategies.node_project import search_chain
 from lintro.tools.core.node_fallback import (
     notify_registry_fallback_selected,
     npx_runner_options,
@@ -460,11 +462,21 @@ def find_local_node_binary(
     the project's own install. A local install is lockfile-tracked, so it is
     preferred over any registry fetch.
 
-    The walk stops at the nearest ancestor that contains ``package.json`` or
-    ``.git`` (a file or directory). That marker directory is still searched;
-    directories above it are not, so a decoy ``node_modules`` outside the
-    project — or a monorepo root above a nested package with its own
-    ``package.json`` — cannot win.
+    The directories searched are exactly those of
+    :func:`~lintro.tools.core.install_strategies.node_project.search_chain`,
+    so execution and install planning share one project boundary: the walk
+    includes the first ancestor that contains ``.git`` (a file or directory)
+    and stops there, and without a ``.git`` it stops before ``$HOME`` unless
+    *start* is ``$HOME`` itself. A decoy such as ``~/node_modules/.bin`` above
+    the project therefore cannot win.
+
+    Intermediate ``package.json`` files do not stop the walk. npm and yarn
+    workspaces hoist a nested package's bins to the workspace root's
+    ``node_modules/.bin``, and Node's module lookup and npm's run-script
+    ``PATH`` both continue past nested manifests in the same way (#2040).
+
+    On POSIX a candidate must be executable; a stray non-executable file is
+    skipped instead of winning and failing at exec time.
 
     On Windows the package manager writes a ``.cmd`` shim; the extension-less
     shim there is a shell script that cannot be executed with ``shell=False``.
@@ -479,12 +491,12 @@ def find_local_node_binary(
     """
     origin = (start or Path.cwd()).resolve()
     name = f"{binary_name}.cmd" if sys.platform == "win32" else binary_name
-    for directory in (origin, *origin.parents):
+    for directory in search_chain(origin):
         candidate = directory / "node_modules" / ".bin" / name
-        if candidate.is_file():
+        if candidate.is_file() and (
+            sys.platform == "win32" or os.access(candidate, os.X_OK)
+        ):
             return candidate.as_posix()
-        if (directory / "package.json").is_file() or (directory / ".git").exists():
-            break
     return None
 
 

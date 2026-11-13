@@ -189,13 +189,21 @@ def _package(
     (directory / "package.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
-def _hoist_older(root: Path) -> None:
-    """Hoist an older ``prettier`` with its ``.bin`` link at *root*.
+def _hoist_older(root: Path, *, link_bin: bool = True) -> None:
+    """Hoist an older ``prettier`` at *root*, with its ``.bin`` link by default.
+
+    lintro resolves a linked ``node_modules/.bin/prettier`` anywhere up to the
+    repository root itself (#2040), so a layout meant to reach the registry
+    runner from a workspace member hoists the package without the link: the
+    reusable tree is still there for npm, but lintro has no bin to run.
 
     Args:
         root: Directory owning the ``node_modules``.
+        link_bin: Whether to link ``node_modules/.bin/prettier``.
     """
     _package(root / "node_modules" / "prettier", _OLDER, label=f"hoisted {_OLDER}")
+    if not link_bin:
+        return
     bin_dir = root / "node_modules" / ".bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
     (bin_dir / "prettier").symlink_to("../prettier/bin.js")
@@ -237,6 +245,21 @@ def _hoisted_no_pin(tmp_path: Path) -> Path:
     return app
 
 
+def _hoisted_unlinked_with_pin_elsewhere(tmp_path: Path) -> Path:
+    root = tmp_path / "ws"
+    app = _workspace(root)
+    _hoist_older(root, link_bin=False)
+    _package(root / "node_modules" / "other" / "node_modules" / "prettier", _PIN)
+    return app
+
+
+def _hoisted_unlinked_no_pin(tmp_path: Path) -> Path:
+    root = tmp_path / "ws"
+    app = _workspace(root)
+    _hoist_older(root, link_bin=False)
+    return app
+
+
 def _nested_pin_no_bin(tmp_path: Path) -> Path:
     root = tmp_path / "ws"
     app = _workspace(root)
@@ -261,7 +284,7 @@ def _outside_bin_no_pin(tmp_path: Path) -> Path:
 def _pnpm_transitive_pin(tmp_path: Path) -> Path:
     root = tmp_path / "ws"
     app = _workspace(root)
-    _hoist_older(root)
+    _hoist_older(root, link_bin=False)
     store = root / "node_modules" / ".pnpm"
     _package(store / f"prettier@{_PIN}" / "node_modules" / "prettier", _PIN)
     middle = store / "middle@1.0.0" / "node_modules"
@@ -284,7 +307,7 @@ def _pnpm_transitive_pin(tmp_path: Path) -> Path:
 def _stale_hidden_lockfile(tmp_path: Path) -> Path:
     root = tmp_path / "ws"
     app = _workspace(root)
-    _hoist_older(root)
+    _hoist_older(root, link_bin=False)
     other = root / "node_modules" / "other"
     _package(other, "1.0.0", name="other", dependencies={"prettier": _PIN})
     _package(other / "node_modules" / "prettier", _OLDER)
@@ -319,7 +342,7 @@ def _stale_hidden_lockfile(tmp_path: Path) -> Path:
 def _brace_glob(tmp_path: Path) -> Path:
     root = tmp_path / "ws"
     app = _workspace(root, "packages/{app,lib}")
-    _hoist_older(root)
+    _hoist_older(root, link_bin=False)
     _package(root / "node_modules" / "other" / "node_modules" / "prettier", _PIN)
     return app
 
@@ -327,7 +350,7 @@ def _brace_glob(tmp_path: Path) -> Path:
 def _extglob(tmp_path: Path) -> Path:
     root = tmp_path / "ws"
     app = _workspace(root, "packages/@(app|lib)")
-    _hoist_older(root)
+    _hoist_older(root, link_bin=False)
     _package(root / "node_modules" / "other" / "node_modules" / "prettier", _PIN)
     return app
 
@@ -666,20 +689,22 @@ _Configure = Callable[[Path, Path], dict[str, str]] | None
 #: From a workspace member, ``--workspaces=false`` keeps npm on the member's
 #: own tree, so npx often runs the pin there; lintro still refuses, because a
 #: ``node_modules`` it cannot vouch for sits above. From the root, npx still
-#: fails with every flag set (``-at-root``, ``member-tree-*``). A root with its
-#: own ``node_modules/.bin/prettier`` never reaches npx: lintro resolves and
-#: probes that concrete binary instead.
+#: fails with every flag set (``-at-root``, ``member-tree-*``). A workspace
+#: whose root links ``node_modules/.bin/prettier`` never reaches npx, from the
+#: root or from a member: lintro resolves and probes that concrete binary
+#: instead (#2040, covered below), so the hoisted layouts here leave the link
+#: out.
 _REFUSED: list[tuple[str, Callable[[Path], Path], _Configure, str, str]] = [
     (
-        "hoisted-older-pin-elsewhere",
-        _hoisted_with_pin_elsewhere,
+        "hoisted-unlinked-pin-elsewhere",
+        _hoisted_unlinked_with_pin_elsewhere,
         None,
         f"registry {_PIN}",
         "a node_modules tree exists",
     ),
     (
-        "hoisted-older-no-pin",
-        _hoisted_no_pin,
+        "hoisted-unlinked-no-pin",
+        _hoisted_unlinked_no_pin,
         None,
         f"registry {_PIN}",
         "a node_modules tree exists",
@@ -813,6 +838,47 @@ def test_npx_only_with_reusable_npm_state_is_refused(
     assert_that(snapshot.version).is_none()
     assert_that(snapshot.probe_error).contains(_REFUSAL).contains(reason)
     _assert_never_a_false_pass(snapshot, launched, code)
+
+
+@pytest.mark.skipif(_NODE is None, reason="node runs the fake hoisted binary")
+@pytest.mark.parametrize(
+    "build",
+    [_hoisted_with_pin_elsewhere, _hoisted_no_pin],
+    ids=["hoisted-older-pin-elsewhere", "hoisted-older-no-pin"],
+)
+def test_workspace_member_runs_the_bin_hoisted_to_the_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+    build: Callable[[Path], Path],
+) -> None:
+    """From a workspace member, lintro probes and runs the root's hoisted bin.
+
+    The member's own ``package.json`` no longer ends the walk (#2040): the
+    workspace root's ``node_modules/.bin/prettier`` is what npm would put on
+    ``PATH`` for the member, so lintro reports that binary's own version
+    instead of reaching for a registry runner, and the command it generates
+    runs exactly the binary it probed.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL; nothing may fetch from it.
+        build: Workspace layout with an older ``prettier`` linked at the root.
+    """
+    assert _NODE is not None
+    cwd = build(tmp_path)
+    env = _isolate(monkeypatch, tmp_path, {"node": _NODE}, registry, {})
+    # The link itself, not its target: that is the path npm puts on PATH.
+    root_bin = tmp_path.resolve() / "ws" / "node_modules" / ".bin" / "prettier"
+
+    snapshot = snapshots.probe_tool("prettier", search_root=cwd)
+    code, launched = _run(list(snapshot.command), cwd, env)
+
+    assert_that(list(snapshot.command)).is_equal_to([root_bin.as_posix()])
+    assert_that(snapshot.version).is_equal_to(_OLDER)
+    assert_that(snapshot.version_check_passed).is_false()
+    assert_that((code, launched)).is_equal_to((0, f"hoisted {_OLDER}"))
 
 
 @requires_npx
@@ -1377,7 +1443,7 @@ def test_bunx_runs_the_pin_beside_a_hoisted_copy_and_the_gate_reports_it(
     """
     bunx = shutil.which("bunx")
     assert bunx is not None
-    cwd = _hoisted_with_pin_elsewhere(tmp_path)
+    cwd = _hoisted_unlinked_with_pin_elsewhere(tmp_path)
     env = _isolate(monkeypatch, tmp_path, {"bunx": bunx}, registry, {})
 
     snapshot = snapshots.probe_tool("prettier", search_root=cwd)
