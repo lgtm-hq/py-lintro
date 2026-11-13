@@ -250,6 +250,7 @@ def assemble_review_result(
         delta_reason=str(plan.delta.reason),
         merge_base=plan.merge_base,
         reviewed_ranges=plan.reviewed_ranges,
+        relocated_findings=plan.resume.relocations,
         custom_agents_skipped=(
             len(plan.agent_selection.skipped) + len(outcome.custom_agents_failed)
         ),

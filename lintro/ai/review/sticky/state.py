@@ -56,6 +56,39 @@ def matcher_reviewed_ranges(
     return ranges_by_path(reviewed_ranges=result.metadata.reviewed_ranges)
 
 
+def matcher_relocations(
+    *,
+    result: ReviewResult,
+) -> dict[str, tuple[str, int, str]] | None:
+    """Return where a delta round placed each prior open finding (#3403).
+
+    Args:
+        result: Current review result.
+
+    Returns:
+        ``{key: (path, line, line_sha)}``, or ``None`` when the round mapped
+        nothing.
+    """
+    return relocations_by_key(relocations=result.metadata.relocated_findings)
+
+
+def relocations_by_key(
+    *,
+    relocations: Sequence[tuple[str, str, int, str]],
+) -> dict[str, tuple[str, int, str]] | None:
+    """Key ``(key, path, line, line_sha)`` relocations for the matcher.
+
+    Args:
+        relocations: The quadruples a delta round recorded.
+
+    Returns:
+        ``{key: (path, line, line_sha)}``, or ``None`` when there are none.
+    """
+    if not relocations:
+        return None
+    return {key: (path, line, sha) for key, path, line, sha in relocations}
+
+
 def ranges_by_path(
     *,
     reviewed_ranges: Sequence[tuple[str, int, int]],
@@ -108,6 +141,7 @@ def stamp_finding_ids(
         reviewed_paths=matcher_reviewed_paths(result=result),
         departed_paths=departed_paths,
         reviewed_ranges=matcher_reviewed_ranges(result=result),
+        relocations=matcher_relocations(result=result),
     )
     return replace(
         result,

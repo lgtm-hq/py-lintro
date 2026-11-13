@@ -10,7 +10,11 @@ surface can carry it as ``finding_id``.
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import replace
 from typing import TYPE_CHECKING
+
+from lintro.ai.review.enums.finding_status import FindingStatus
+from lintro.ai.review.finding_identity import fingerprint_for
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -18,7 +22,7 @@ if TYPE_CHECKING:
     from lintro.ai.review.models.finding_record import FindingRecord
     from lintro.ai.review.models.review_finding import ReviewFinding
 
-__all__ = ["_carry_absent", "_finding_positions", "_line_unread"]
+__all__ = ["_carry_absent", "_finding_positions", "_line_unread", "_relocate"]
 
 
 def _finding_positions(
@@ -51,6 +55,45 @@ def _finding_positions(
     return positions_by_fingerprint, finding_ids
 
 
+def _relocate(
+    *,
+    record: FindingRecord,
+    relocations: Mapping[str, tuple[str, int, str]] | None,
+) -> FindingRecord:
+    """Move a prior open record to where the delta round placed it (#3403).
+
+    Args:
+        record: A prior record.
+        relocations: ``{key: (path, line, line_sha)}`` from the delta round.
+
+    Returns:
+        The record at its mapped location and coordinate head; resolved
+        records and records the round did not map are returned unchanged.
+    """
+    moved = relocations.get(record.key) if relocations else None
+    if moved is None or record.status is not FindingStatus.OPEN:
+        return record
+    path, line, line_sha = moved
+    if path == record.file:
+        return replace(record, line=line, line_sha=line_sha)
+    # A rename moves the record, not its stable key: it pairs under its new
+    # path's identity while keeping the key its thread marker carries.
+    moved_fingerprint = fingerprint_for(
+        file=path,
+        category=record.category,
+        title=record.title,
+    )
+    return replace(
+        record,
+        file=path,
+        line=line,
+        line_sha=line_sha,
+        match_fingerprint=(
+            "" if moved_fingerprint == record.fingerprint else moved_fingerprint
+        ),
+    )
+
+
 def _carry_absent(
     *,
     record: FindingRecord,
@@ -59,6 +102,7 @@ def _carry_absent(
     departed_paths: frozenset[str] | None,
     reviewed_ranges: Mapping[str, tuple[tuple[int, int], ...]] | None,
     range_carries: set[str],
+    unverified_carries: set[str],
 ) -> bool:
     """Decide whether a prior open finding absent this round is carried.
 
@@ -70,6 +114,10 @@ def _carry_absent(
         reviewed_ranges: Line ranges a delta round read per narrowed file.
         range_carries: Receives the record's key when the only reason to
             carry is a delta round leaving its line unread (#2627).
+        unverified_carries: Receives the record's key when it is carried
+            only because the round did not read it, so nothing re-judged it
+            against this head (#3403). The matcher stores that on the record
+            as ``unverified``; it never changes the record's severity.
 
     Returns:
         True to carry it rather than resolve it.
@@ -85,6 +133,8 @@ def _carry_absent(
     carry = ((unread or line_unread) and not left_diff) or held
     if carry and line_unread and not unread and not held:
         range_carries.add(record.key)
+    if carry and not held:
+        unverified_carries.add(record.key)
     return carry
 
 

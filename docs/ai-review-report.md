@@ -14,6 +14,12 @@ The title carries the derived verdict:
 - **Incomplete** — coverage-at-HEAD is below 100%. The findings-based label is withheld
   so a partial round can never look clean.
 
+A finding the latest round carried forward without reading it shows **⏸ not
+re-verified** in the Δ column instead of **—** (re-checked and unchanged). The label is
+a disclosure only: the finding keeps its severity and counts toward the verdict exactly
+as before. The label is stored with the finding, so a board rebuilt from stored state
+(for example after a provider error) still shows it.
+
 `~` on cost or tokens means the figure was estimated locally (subscription CLI, or a
 provider that returned no usage counters). Subscription runs still show “what this would
 have cost”; that figure is not a bill.

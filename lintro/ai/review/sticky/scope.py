@@ -50,7 +50,7 @@ def _scope_line(*, runs: tuple[RunRecord, ...], round_number: int) -> str:
     if coverage.delta_since:
         return (
             f"🔁 Round {round_number} read the delta since "
-            f"`{_short_sha(sha=coverage.delta_since)}`; files with open threads "
+            f"`{_short_sha(sha=coverage.delta_since)}`; files with open findings "
             "were re-read."
         )
     why = _FULL_REASONS.get(coverage.delta_reason, coverage.delta_reason)

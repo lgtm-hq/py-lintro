@@ -44,6 +44,7 @@ from lintro.ai.review.run_record_factory import (
 from lintro.ai.review.sticky.body import round_sections, state_sections
 from lintro.ai.review.sticky.history import _archive_body
 from lintro.ai.review.sticky.state import (
+    matcher_relocations,
     matcher_reviewed_paths,
     matcher_reviewed_ranges,
     stamp_comment_ids,
@@ -91,6 +92,7 @@ def _round_outcome(*, request: StickyRequest) -> RoundOutcome:
         reviewed_paths=matcher_reviewed_paths(result=request.result),
         departed_paths=request.departed_paths,
         reviewed_ranges=matcher_reviewed_ranges(result=request.result),
+        relocations=matcher_relocations(result=request.result),
     )
     match = replace(
         match,

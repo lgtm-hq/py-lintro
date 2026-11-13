@@ -27,6 +27,7 @@ from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.finding_carry import (
     _carry_absent,
     _finding_positions,
+    _relocate,
 )
 from lintro.ai.review.finding_identity import (
     FINGERPRINT_LENGTH,
@@ -157,7 +158,7 @@ def review_findings_from_unposted(
             continue
         if not is_inline_tier(severity=record.severity):
             continue
-        if record.fingerprint in seen:
+        if record.pairing_fingerprint in seen:
             continue
         path = normalize_file_path(record.file)
         if path in reviewed_paths or record.file in reviewed_paths:
@@ -227,18 +228,23 @@ def _index_prior_records(
     Args:
         records: The prior state's finding records, in stored order.
 
+    A record moved to a renamed file (#3403) is a candidate under the
+    identity of its current path (:attr:`FindingRecord.pairing_fingerprint`)
+    while its stable key keeps the fingerprint it was created with, so its
+    ordinal is held under that stored fingerprint too.
+
     Returns:
-        Pairing candidates by fingerprint (indices into ``records``), and the
-        ordinals archived records hold, by fingerprint.
+        Pairing candidates by pairing fingerprint (indices into ``records``),
+        and the ordinals every record holds, by stored fingerprint.
     """
     by_fingerprint: dict[str, list[int]] = defaultdict(list)
-    archived: dict[str, set[int]] = defaultdict(set)
+    held: dict[str, set[int]] = defaultdict(set)
     for index, record in enumerate(records):
+        held[record.fingerprint].add(record.ordinal)
         if record.status is FindingStatus.REBASELINED:
-            archived[record.fingerprint].add(record.ordinal)
             continue
-        by_fingerprint[record.fingerprint].append(index)
-    return by_fingerprint, archived
+        by_fingerprint[record.pairing_fingerprint].append(index)
+    return by_fingerprint, held
 
 
 def match_findings(
@@ -250,6 +256,7 @@ def match_findings(
     reviewed_paths: frozenset[str] | None = None,
     departed_paths: frozenset[str] | None = None,
     reviewed_ranges: Mapping[str, tuple[tuple[int, int], ...]] | None = None,
+    relocations: Mapping[str, tuple[str, int, str]] | None = None,
 ) -> FindingMatchResult:
     """Match this round's findings against the previously persisted state.
 
@@ -302,21 +309,32 @@ def match_findings(
             open finding on such a file whose
             line falls outside every range was not re-read: it is carried,
             not resolved. Files absent from the mapping were read whole.
+        relocations: Where the delta round placed each prior open finding,
+            ``{key: (path, line, line_sha)}`` (#3403). A relocated record is
+            matched, carried or resolved at that location, and persisted
+            there, so a line an unread round moved is never judged stale.
 
     Returns:
         The per-round transitions plus the merged record set to persist.
     """
-    prior_records = list(previous.findings) if previous is not None else []
-    inline_records = current_records(
-        findings=[finding for finding in findings if finding.posted_inline],
-        round_number=round_number,
-    )
+    prior_records = [
+        _relocate(record=record, relocations=relocations)
+        for record in (previous.findings if previous is not None else ())
+    ]
+    # A sighting's line is in this head's coordinates (#3403).
+    inline_records = [
+        replace(record, line_sha=head_sha)
+        for record in current_records(
+            findings=[finding for finding in findings if finding.posted_inline],
+            round_number=round_number,
+        )
+    ]
     note_records = current_records(
         findings=[finding for finding in findings if not finding.posted_inline],
         round_number=round_number,
     )
 
-    prior_by_fingerprint, archived_ordinals = _index_prior_records(
+    prior_by_fingerprint, held_ordinals = _index_prior_records(
         records=prior_records,
     )
     current_by_fingerprint: dict[str, list[FindingRecord]] = defaultdict(list)
@@ -336,16 +354,16 @@ def match_findings(
     outcomes: dict[str, FindingMatchOutcome] = {}
     matched_prior: set[int] = set()
     range_carries: set[str] = set()
+    unverified_carries: set[str] = set()
 
     for fingerprint, group in current_by_fingerprint.items():
         prior_indices = prior_by_fingerprint.get(fingerprint, [])
         prior_group = [prior_records[index] for index in prior_indices]
         pairs = pair_group(prior=prior_group, current=group)
         # Every prior record of this fingerprint stays in state (matched,
-        # carried as resolved, or archived), so their ordinals remain taken.
-        taken = {record.ordinal for record in prior_group} | archived_ordinals[
-            fingerprint
-        ]
+        # carried as resolved, archived, or moved to a renamed file under its
+        # original key), so their ordinals remain taken.
+        taken = {record.ordinal for record in prior_group} | held_ordinals[fingerprint]
         assigned: dict[int, FindingRecord] = {}
 
         for current_index, record in enumerate(group):
@@ -413,16 +431,21 @@ def match_findings(
             departed_paths=departed_paths,
             reviewed_ranges=reviewed_ranges,
             range_carries=range_carries,
+            unverified_carries=unverified_carries,
         ):
-            merged.append(record)
-            carried.append(record)
-            outcomes[record.key] = FindingMatchOutcome.CARRIED
+            # Only a carry nothing re-judged is labelled; one a note or a
+            # merged duplicate re-asserted this round was re-verified (#3403).
+            kept = replace(record, unverified=record.key in unverified_carries)
+            merged.append(kept)
+            carried.append(kept)
+            outcomes[kept.key] = FindingMatchOutcome.CARRIED
             continue
         closed = replace(
             record,
             status=FindingStatus.RESOLVED,
             resolved_sha=head_sha,
             resolved_round=round_number,
+            unverified=False,
         )
         merged.append(closed)
         resolved.append(closed)

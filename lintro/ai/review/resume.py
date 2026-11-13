@@ -58,6 +58,9 @@ class ResumePlan:
             onto the raw prior, so a record from an excluded round is
             dropped rather than carried under a round number the resumed
             round reuses.
+        relocations: ``(key, path, line, line_sha)`` locations a delta round
+            mapped prior open findings to (:attr:`DeltaPlan.relocations`,
+            #3403), so the checkpoints judge them where the final round does.
     """
 
     classified: tuple[ClassifiedFile, ...]
@@ -66,6 +69,7 @@ class ResumePlan:
     eligible: tuple[str, ...]
     reviewed_ranges: tuple[tuple[str, int, int], ...] = ()
     coverage: tuple[CoverageRecord, ...] = ()
+    relocations: tuple[tuple[str, str, int, str], ...] = ()
 
     def counts(self, *, reviewed_now: Sequence[str]) -> CoverageCounts:
         """Return counters after the provider finished *reviewed_now*."""

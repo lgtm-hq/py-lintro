@@ -122,7 +122,9 @@ def record_keys(
     slots: dict[tuple[str, str, int], list[str]] = defaultdict(list)
     for record in match.records:
         if record.status is FindingStatus.OPEN:
-            slots[(record.fingerprint, record.file, record.line)].append(record.key)
+            slots[(record.pairing_fingerprint, record.file, record.line)].append(
+                record.key,
+            )
 
     keys: list[str] = []
     for finding in findings:

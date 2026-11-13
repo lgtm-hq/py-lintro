@@ -12,7 +12,7 @@ re-derived.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -31,11 +31,10 @@ from lintro.ai.review.cli_limits import (
 )
 from lintro.ai.review.custom_agents import select_custom_agents
 from lintro.ai.review.delta import (
-    apply_delta_hunks,
-    delta_hunks,
     merge_base,
     plan_delta,
 )
+from lintro.ai.review.delta_round import narrow_round
 from lintro.ai.review.enums.delta_reason import DeltaReason
 from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
@@ -417,26 +416,13 @@ def plan_run(
         force_full=options.force_full,
         reusable_rounds=reusable,
     )
-    reviewed_ranges: tuple[tuple[str, int, int], ...] = ()
-    if delta.is_delta and chunks:
-        hunks = delta_hunks(
-            repo_root=repo_root,
-            since_sha=delta.since_sha or "",
-            head_sha=context.head_ref,
-            pr_paths=(file.path for file in context.changed_files),
-        )
-        if hunks is None:
-            delta = DeltaPlan.full(reason=DeltaReason.DELTA_FAILED)
-        else:
-            applied = apply_delta_hunks(
-                chunks=chunks,
-                hunks=hunks,
-                since_sha=delta.since_sha or "",
-            )
-            chunks = applied.chunks
-            reviewed_ranges = applied.reviewed_ranges
-            # The checkpoints match on the same ranges as the final round.
-            resume = replace(resume, reviewed_ranges=reviewed_ranges)
+    chunks, delta, resume = narrow_round(
+        chunks=chunks,
+        delta=delta,
+        context=context,
+        repo_root=repo_root,
+        resume=resume,
+    )
     recorded_merge_base = (
         merge_base(
             repo_root=repo_root,
@@ -494,7 +480,7 @@ def plan_run(
         use_one_shot=len(chunks) > 1,
         tools_disabled=context.checkout is ReviewCheckout.NONE,
         delta=delta,
-        reviewed_ranges=reviewed_ranges,
+        reviewed_ranges=resume.reviewed_ranges,
         merge_base=recorded_merge_base,
         timings=timings,
     )

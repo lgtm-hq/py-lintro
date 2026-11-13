@@ -105,6 +105,11 @@ def merge_pair(
     regressed = prior.status is FindingStatus.RESOLVED
     merged = FindingRecord(
         fingerprint=prior.fingerprint,
+        # A record paired across a rename keeps its stable key and pairs on
+        # its current path's identity from now on (#3403).
+        match_fingerprint=(
+            "" if current.fingerprint == prior.fingerprint else current.fingerprint
+        ),
         # The ordinal is part of the persistent identity: a matched finding
         # keeps the one it was first assigned, so its key stays stable and can
         # never collide with a sibling still tracked under the old ordinal.
@@ -114,6 +119,7 @@ def merge_pair(
         title=current.title,
         file=current.file,
         line=current.line,
+        line_sha=current.line_sha,
         status=FindingStatus.OPEN,
         since_round=prior.since_round,
         resolved_sha=prior.resolved_sha,
@@ -194,7 +200,7 @@ def notes_holding_prior_records(
     # Only a record whose thread was posted can be the reason a thread is
     # still open, which is what the sticky's tag tells the reader.
     carries = {
-        (prior_records[index].fingerprint, note.line)
+        (note.fingerprint, note.line)
         for index, note in held_by.items()
         if prior_records[index].inline_comment_id is not None
     }

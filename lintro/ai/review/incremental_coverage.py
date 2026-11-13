@@ -36,7 +36,7 @@ from lintro.ai.review.reuse_gate import inherit_model_evidence
 from lintro.ai.review.sensitivity import filter_findings_by_policy
 from lintro.ai.review.severity_gate import apply_severity_gates
 from lintro.ai.review.state_store import state_dir, write_state_part
-from lintro.ai.review.sticky.state import ranges_by_path
+from lintro.ai.review.sticky.state import ranges_by_path, relocations_by_key
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -180,6 +180,7 @@ def write_incremental_coverage_part(
         reviewed_paths=actually_reviewed,
         # A delta round (#2627) resolves only what it re-read, mid-run too.
         reviewed_ranges=ranges_by_path(reviewed_ranges=resume.reviewed_ranges),
+        relocations=relocations_by_key(relocations=resume.relocations),
     )
     # A shadow figure is never spend (#2867, ADR-0011 B): a gateway's is
     # what the budget charged, priced per call on the shadow model, and a
