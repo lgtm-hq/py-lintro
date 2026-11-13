@@ -2796,11 +2796,11 @@ all of these hold; otherwise it is held back, and the reason names the rule that
   directory has a symlink anywhere in its path.
 - **JSON configs on the allowlist** (`config not on the allowlist`). Every
   `.htmlvalidate.*` config from the file's directory up to the filesystem root is
-  `.htmlvalidate.json`. Each uses only the keys `$schema`, `root`, `extends`, `rules`
-  and `elements`. Each `extends` entry is one of html-validate's built-in presets:
+  `.htmlvalidate.json`. Each uses only the keys `$schema`, `root`, `extends` and
+  `rules`. Each `extends` entry is one of html-validate's built-in presets:
   `html-validate:a11y`, `:browser`, `:document`, `:prettier`, `:recommended` or
-  `:standard`. Any transform or plugin is therefore held back, including a Vue-only
-  transform for glob-named `.html` files.
+  `:standard`. Any transform, plugin or custom `elements` metadata is therefore held
+  back, including a Vue-only transform for glob-named `.html` files.
 - **Ignore files provably inapplicable** (`ignore file not provably inapplicable`).
   Every `.htmlvalidateignore` from the file's directory up to the filesystem root must
   be ASCII, as must the file's path. None of its patterns may match, compared
@@ -2810,10 +2810,10 @@ all of these hold; otherwise it is held back, and the reason names the rule that
 A file that cannot be read is held back as well. A held-back file is treated as it was
 before standard input was used: it is not validated. Lintro validates the other files,
 keeps their findings, and fails the run as an execution error that names each file left
-uninspected and why; if every path is held back, html-validate is not run at all. Plugin
-rules see these files' filename as `/dev/stdin`; only the report carries the real path.
-If an html-validate call times out, the remaining glob-named files are not started, and
-every one of them is named as not inspected.
+uninspected and why; if every path is held back, html-validate is not run at all. Rules
+see these files' filename as `/dev/stdin`; only the report carries the real path. If an
+html-validate call times out, the remaining glob-named files are not started, and every
+one of them is named as not inspected.
 
 **Available Options via `--tool-options`:**
 

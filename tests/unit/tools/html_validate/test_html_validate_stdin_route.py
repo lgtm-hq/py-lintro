@@ -487,6 +487,13 @@ _SCRIPT = "module.exports = {};"
         pytest.param(_JSON, '{"plugins": []}', "has key 'plugins'", id="plugins"),
         pytest.param(
             _JSON,
+            '{"elements": ["html5"]}',
+            "has key 'elements'",
+            id="elements",
+        ),
+        pytest.param(_JSON, '{"extends": [{}]}', _NOT_BUILTIN, id="extends-non-string"),
+        pytest.param(
+            _JSON,
             '{"extends": ["html-validate:custom.cjs"]}',
             _NOT_BUILTIN,
             id="html-validate-prefixed-file",
@@ -553,7 +560,6 @@ def test_an_allowlisted_config_goes_to_stdin(tmp_path: Path) -> None:
                     "html-validate:standard",
                 ],
                 "rules": {"close-order": "off"},
-                "elements": ["html5"],
             },
         ),
     )

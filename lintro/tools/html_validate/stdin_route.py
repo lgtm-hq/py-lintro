@@ -64,9 +64,11 @@ _SCRIPT_CONFIG_FILENAMES: tuple[str, ...] = (
     ".htmlvalidate.js",
 )
 
-# Config keys that cannot bring in a transform, plugin or code.
+# Config keys that cannot bring in a transform, plugin or code. ``elements``
+# is not one: an entry can be a JavaScript module, and a JSON entry resolves
+# ``<rootDir>`` from the working directory, which differs on the stdin route.
 _ALLOWED_CONFIG_KEYS: frozenset[str] = frozenset(
-    {"$schema", "root", "extends", "rules", "elements"},
+    {"$schema", "root", "extends", "rules"},
 )
 
 # html-validate's built-in presets: the ``presets`` object in
@@ -162,7 +164,7 @@ def _config_problem(config_file: Path) -> str | None:
         return f"has key {extra[0]!r}"
     extends = config.get("extends", [])
     if not isinstance(extends, list) or not all(
-        entry in _BUILTIN_PRESETS for entry in extends
+        isinstance(entry, str) and entry in _BUILTIN_PRESETS for entry in extends
     ):
         return "extends something other than a built-in preset"
     return None
