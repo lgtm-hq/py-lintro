@@ -17,6 +17,7 @@ from loguru import logger
 
 from lintro.models.core.subprocess_result import SubprocessResult as SubprocessResult
 from lintro.plugins.subprocess_failure import format_subprocess_failure
+from lintro.utils.npx_call import npx_shell_safe_command
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -173,8 +174,9 @@ def run_subprocess(
         effective_env = {**os.environ, **env}
 
     try:
+        # npx runs the tool through ``sh -c``; quote its arguments (#3439).
         result = subprocess.run(  # nosec B603 - args list, shell=False
-            cmd,
+            npx_shell_safe_command(cmd),
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -292,8 +294,9 @@ def run_subprocess_streaming(
     try:
         # Use Popen for streaming output
         # Args list, shell=False
+        # npx runs the tool through ``sh -c``; quote its arguments (#3439).
         process = subprocess.Popen(  # nosec B603
-            cmd,
+            npx_shell_safe_command(cmd),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
