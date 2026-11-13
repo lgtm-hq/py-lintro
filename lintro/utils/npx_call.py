@@ -25,6 +25,16 @@ takes four, so without the file a long file list npm alone still fitted would
 fail with ``E2BIG``. The file does not ``exec`` the tool: the shell stays its
 parent, so a signal-killed tool exits 128+N as it does inline under dash.
 
+The shell itself is pinned too (#3441). npm reads ``script-shell`` from a
+project ``.npmrc`` (the one in the directory npx runs from, so a nested file
+counts when a tool runs from a subdirectory), from ``npm_config_script_shell``
+and from the user and global npmrc files. Any executable named there replaces
+``sh`` and receives the script, so it could print ``[]``, exit 0 and stand in
+for the pinned tool. Every rewritten command therefore carries
+:data:`NPX_SCRIPT_SHELL_OPTION` before ``--package``: npm gives a command-line
+flag precedence over the environment and every npmrc file (checked with npm
+10.9.9 and 11.20.0). The sourced script file runs under the same ``/bin/sh``.
+
 Windows is left alone: there npm uses ``cmd.exe``, which does not glob, and
 POSIX quoting would be wrong for it.
 """
@@ -45,6 +55,14 @@ PACKAGE_FLAGS: frozenset[str] = frozenset({"-p", "--package"})
 #: is 131,072 bytes; the margin leaves room for npm's own wrapping.
 NPX_INLINE_SCRIPT_LIMIT: int = 96 * 1024
 
+#: Shell npm runs the ``--call`` script with on POSIX. An absolute path, so
+#: neither an npmrc ``script-shell`` nor a ``sh`` earlier on ``PATH`` can stand
+#: in for it (#3441).
+NPX_SCRIPT_SHELL: str = "/bin/sh"
+
+#: The npx option that forces :data:`NPX_SCRIPT_SHELL` over npm configuration.
+NPX_SCRIPT_SHELL_OPTION: str = f"--script-shell={NPX_SCRIPT_SHELL}"
+
 #: A command line ready to spawn. A plain name keeps pydoclint from misreading
 #: the nested ``Iterator[list[str]]`` yield type as ``str`` (DOC404).
 Argv = list[str]
@@ -62,9 +80,9 @@ def _split_npx_fallback(
         windows: Whether npx runs on Windows; None means ``os.name == "nt"``.
 
     Returns:
-        The ``[npx, *options, --package, spec]`` prefix and the quoted binary
-        and arguments, or None for any command that is not lintro's POSIX npx
-        fallback.
+        The ``[npx, *options, --script-shell=/bin/sh, --package, spec]`` prefix
+        and the quoted binary and arguments, or None for any command that is
+        not lintro's POSIX npx fallback.
     """
     command = list(cmd)
     if windows is None:
@@ -82,7 +100,8 @@ def _split_npx_fallback(
     script_start = index + 2
     if script_start >= len(command):
         return None
-    return command[:script_start], shlex.join(command[script_start:])
+    prefix = [*command[:index], NPX_SCRIPT_SHELL_OPTION, *command[index:script_start]]
+    return prefix, shlex.join(command[script_start:])
 
 
 @contextlib.contextmanager
@@ -95,7 +114,9 @@ def npx_shell_safe_command(
     """Yield the argv to spawn so npm's shell sees every argument literally.
 
     ``[npx, *options, --package, spec, binary, *args]`` becomes
-    ``[npx, *options, --package, spec, --call, "<quoted binary and args>"]``.
+    ``[npx, *options, --script-shell=/bin/sh, --package, spec, --call,
+    "<quoted binary and args>"]``, so neither the arguments nor npm's
+    configured ``script-shell`` can change what runs.
     A script longer than *inline_limit* bytes is written to a temporary file
     that ``--call`` sources; the file is deleted when the context exits, so
     keep the context open until the process has finished. Every other command,

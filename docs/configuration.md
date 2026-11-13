@@ -1409,10 +1409,19 @@ Rationale:
    spaces, `*`, `?` or `$`. It leaves `[`, `]`, `{`, `}` and `,` bare, so a file named
    `[slug].ts` would glob to a neighbouring `s.ts`, and under a bash `script-shell`
    `a{1,2}.ts` would become `a1.ts a2.ts`. On Linux and macOS, Lintro therefore runs the
-   tool as `--package <package>@<pinned> --call '<binary> <args>'`, quoting every
-   argument itself so the shell sees literals. On Windows npm uses `cmd.exe`, which does
-   not glob, and the command is left as above. `bunx`, project-local and `PATH` binaries
-   never go through a shell and are spawned unchanged.
+   tool as
+   `--script-shell=/bin/sh --package <package>@<pinned> --call '<binary> <args>'`,
+   quoting every argument itself so the shell sees literals. On Windows npm uses
+   `cmd.exe`, which does not glob, and the command is left as above. `bunx`,
+   project-local and `PATH` binaries never go through a shell and are spawned unchanged.
+
+   **The shell is pinned too.** npm reads `script-shell` from a repository `.npmrc` (the
+   one in the directory the tool runs from, so a nested file counts), from
+   `npm_config_script_shell` and from the user and global npmrc files. Whatever
+   executable it names receives the tool's command line, so it could print an empty
+   result and exit 0 in place of the pinned tool. The `--script-shell=/bin/sh` flag
+   takes precedence over every one of those settings, so on Linux and macOS a configured
+   `script-shell` never runs under the npx fallback.
 
    **Lintro's own npm cache, checked before every run.** Each pinned package gets its
    own cache directory, so a user cache that already holds something under npm's `_npx`
