@@ -118,6 +118,9 @@ def merge_pair(
         category=current.category,
         title=current.title,
         file=current.file,
+        # The rename lineage survives the pairing, so a later rename git
+        # cannot pair still finds the pull request's metadata (#3432).
+        origin_path=prior.origin_path_at(path=current.file),
         line=current.line,
         line_sha=current.line_sha,
         status=FindingStatus.OPEN,

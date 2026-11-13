@@ -20,9 +20,12 @@ cannot be mapped (no recorded head, git cannot diff the range, the line
 itself was edited, or a rename is ambiguous) the file is read whole: failing
 open here is exactly the false "fixed" #3403 is about.
 
-When git cannot reach a record's head at all (a rewritten branch in a
-shallow checkout), the pull request's own rename metadata moves the record
-to its file's new path. When that names no rename either, the record is
+When git reads a rename as a delete plus an add, or cannot reach a record's
+head at all (a rewritten branch in a shallow checkout), the pull request's
+own rename metadata moves the record to its file's new path. That metadata
+spans the whole pull request, so on a delete plus an add a record an earlier
+round carried across a rename is also looked up under the path it was first
+tracked at (#3432). When that names no rename either, the record is
 held where it is (:data:`~lintro.ai.review.models.delta_plan.LOCATION_UNMAPPED`)
 and its path leaving the diff never counts as a fix. A round maps at most
 :data:`MAX_MAPPED_FINDINGS` records through git; any beyond that are held
@@ -178,7 +181,12 @@ def map_open_findings(
             lookups=lookups,
         )
         later = _cached_renames(lookups=lookups, from_sha=since_sha, to_sha=head_sha)
-        unpaired = _unpaired_rename(lookups=lookups, renames=later, path=path)
+        unpaired = _unpaired_rename(
+            lookups=lookups,
+            renames=later,
+            path=path,
+            origin_path=record.origin_path,
+        )
         moved_on = (
             later is None
             or path in later.moved
@@ -244,24 +252,36 @@ def _unpaired_rename(
     lookups: _Lookups,
     renames: Renames | None,
     path: str,
+    origin_path: str = "",
 ) -> str:
     """Return the PR's rename destination for a path git saw deleted (#3413).
 
     A file renamed and heavily edited in the same range reads to git as a
     delete plus an add; the pull request's rename metadata still pairs it.
+    That metadata spans the whole pull request, so a record a previous round
+    already carried across a rename sits on a path it never names: it is then
+    looked up under the record's first path (#3432).
 
     Args:
         lookups: The round's git answers and the PR's renames.
         renames: Renames git listed for the range, or ``None``.
         path: The path at the range's start.
+        origin_path: The record's first path
+            (:attr:`~lintro.ai.review.models.finding_record.FindingRecord.origin_path`),
+            or ``""``.
 
     Returns:
         The destination, or ``""`` when git paired the path itself or did not
-        report it deleted, or the pull request names no rename for it.
+        report it deleted, or the pull request names no rename for it or for
+        its first path.
     """
     if renames is None or path not in renames.deleted:
         return ""
-    return lookups.renamed_from.get(path, "")
+    direct = lookups.renamed_from.get(path, "")
+    if direct or not origin_path:
+        return direct
+    lineage = lookups.renamed_from.get(origin_path, "")
+    return "" if lineage == path else lineage
 
 
 def _place(
@@ -297,7 +317,12 @@ def _place(
     dest = renames.moved.get(record.file, record.file)
     if record.file in renames.ambiguous:
         return dest, None, ""
-    unpaired = _unpaired_rename(lookups=lookups, renames=renames, path=record.file)
+    unpaired = _unpaired_rename(
+        lookups=lookups,
+        renames=renames,
+        path=record.file,
+        origin_path=record.origin_path,
+    )
     if unpaired:
         return unpaired, None, ""
     key = (record.line_sha, since_sha, record.file, dest)

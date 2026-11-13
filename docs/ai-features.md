@@ -933,13 +933,17 @@ resolve; it never narrows what it may report.**
   head (a rewritten branch in a shallow checkout), or reads a rename as a delete plus an
   add (a file renamed and heavily edited since that head), the pull request's own
   changed-file metadata moves it: a file reported as renamed takes the finding to its
-  new path, at its stored line. When that names no rename either, the finding is held
-  where it was stored (`line_sha` `"unmapped"` in `relocated_findings`) and its path
-  leaving the diff never counts as a fix: it stays open and is marked not re-verified. A
-  round maps at most 200 findings through git (`MAX_MAPPED_FINDINGS`, one `git diff -U0`
-  per distinct recorded head and path); any beyond that are held (`"unchecked"`),
-  carried unverified and never resolved that round. Every diff behind this pins its
-  format against user configuration: literal pathspecs (`odd[1].py` is never a glob),
+  new path, at its stored line. That metadata names only the pull request's overall
+  rename, so a finding an earlier round already carried to a renamed file remembers the
+  path it was first tracked at (`FindingRecord.origin_path`, #3432). When its current
+  path reads as deleted and the pull request renames that first path, the finding
+  follows that rename too. When that names no rename either, the finding is held where
+  it was stored (`line_sha` `"unmapped"` in `relocated_findings`) and its path leaving
+  the diff never counts as a fix: it stays open and is marked not re-verified. A round
+  maps at most 200 findings through git (`MAX_MAPPED_FINDINGS`, one `git diff -U0` per
+  distinct recorded head and path); any beyond that are held (`"unchecked"`), carried
+  unverified and never resolved that round. Every diff behind this pins its format
+  against user configuration: literal pathspecs (`odd[1].py` is never a glob),
   `--no-textconv`, `--no-ext-diff`, `--no-color`, `--no-relative` and fixed `a/`/`b/`
   prefixes. Only the section whose headers name the intended file is read. A record
   still carried without being read (its file was not read this round) is stored with
