@@ -186,14 +186,17 @@ def search_chain(origin: Path) -> tuple[Path, ...]:
        root is a legitimate project root.
     2. ``$HOME``, exclusive, unless the walk starts there.
     3. When the walk meets neither (a downloaded project in ``/tmp``, a ``/code``
-       container mount), the project itself: the outermost ancestor that is a
-       workspace root (its ``package.json`` declares ``workspaces``, or a
-       ``pnpm-workspace.yaml`` sits beside it), else the nearest ``package.json``.
-       With no manifest at all the whole chain is returned, as before #2040.
+       container mount), the nearest ``package.json``, inclusive, exactly as
+       before #2040. An ancestor's ``workspaces`` declaration is deliberately
+       not trusted here: nothing vouches for a manifest above an unrooted
+       project, and ``"workspaces": ["**"]`` would claim any directory. With no
+       manifest at all the whole chain is returned, also as before.
 
     Intermediate ``package.json`` files do not stop the walk under rules 1 and
     2, because npm, yarn and pnpm workspaces hoist a member's bins to the
-    workspace root.
+    workspace root. A hoisted workspace in practice lives in a repository or
+    under ``$HOME``; one with neither (an unpacked tarball outside ``$HOME``)
+    resolves only from its nearest manifest.
 
     This is the single project boundary for Node.js tooling: runtime bin
     resolution,
@@ -229,29 +232,19 @@ def search_chain(origin: Path) -> tuple[Path, ...]:
 
 
 def _bound_to_project(chain: tuple[Path, ...]) -> tuple[Path, ...]:
-    """Cut a walk that met no ``.git`` or ``$HOME`` at its project root.
+    """Cut a walk that met no ``.git`` or ``$HOME`` at the nearest manifest.
 
     Args:
         chain: The origin followed by every ancestor up to the filesystem root.
 
     Returns:
-        *chain* up to the outermost workspace root, else up to the nearest
-        ``package.json``, else unchanged.
+        *chain* up to and including the nearest directory with a
+        ``package.json``, or unchanged when there is none.
     """
-    nearest: int | None = None
-    outermost_workspace: int | None = None
     for index, directory in enumerate(chain):
-        manifest_path = directory / "package.json"
-        if not manifest_path.is_file():
-            continue
-        if nearest is None:
-            nearest = index
-        if (directory / "pnpm-workspace.yaml").is_file() or (
-            "workspaces" in _read_manifest(manifest_path)
-        ):
-            outermost_workspace = index
-    end = outermost_workspace if outermost_workspace is not None else nearest
-    return chain if end is None else chain[: end + 1]
+        if (directory / "package.json").is_file():
+            return chain[: index + 1]
+    return chain
 
 
 def detect_node_project(start: Path | None = None) -> NodeProject | None:

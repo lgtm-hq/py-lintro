@@ -468,16 +468,16 @@ def find_local_node_binary(
     includes the first ancestor that contains ``.git`` (a file or directory)
     and stops there; without a ``.git`` it stops before ``$HOME`` unless
     *start* is ``$HOME`` itself. When it meets neither, as for a project
-    outside ``$HOME`` with no repository, it stops at the outermost workspace
-    root above *start*, else at the nearest ``package.json``. A decoy such as
-    ``~/node_modules/.bin`` or ``/tmp/node_modules/.bin`` above the project
-    therefore cannot win.
+    outside ``$HOME`` with no repository, it stops at the nearest
+    ``package.json``, as before #2040; an ancestor's ``workspaces`` field is
+    not trusted there. A decoy such as ``~/node_modules/.bin`` or
+    ``/tmp/node_modules/.bin`` above the project therefore cannot win.
 
-    Within that boundary, intermediate ``package.json`` files do not stop the
-    walk. npm, yarn and pnpm workspaces hoist a nested package's bins to the
-    workspace root's ``node_modules/.bin``, and Node's module lookup and npm's
-    run-script ``PATH`` both continue past nested manifests in the same way
-    (#2040).
+    Within the ``.git`` and ``$HOME`` boundaries, intermediate
+    ``package.json`` files do not stop the walk. npm, yarn and pnpm workspaces
+    hoist a nested package's bins to the workspace root's
+    ``node_modules/.bin``, and Node's module lookup and npm's run-script
+    ``PATH`` both continue past nested manifests in the same way (#2040).
 
     On POSIX a candidate must be executable; a stray non-executable file is
     skipped, with a debug log naming it, instead of winning and failing at

@@ -961,17 +961,17 @@ def test_find_local_node_binary_ignores_parent_bin_outside_home_without_git(
     ],
     ids=["npm-workspaces", "yarn-workspaces-object", "pnpm-workspace-yaml"],
 )
-def test_find_local_node_binary_finds_hoisted_bin_outside_home_without_git(
+def test_find_local_node_binary_member_manifest_bounds_no_git_workspace_outside_home(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     manifest: str,
     marker: str | None,
 ) -> None:
-    """A no-git workspace outside ``$HOME`` still reaches its root's bin.
+    """Outside ``$HOME`` with no ``.git``, a member's manifest ends the walk.
 
-    The project bound is the outermost workspace root, not the member's own
-    ``package.json``, so the hoisted bin is found while a bin planted above the
-    workspace is not.
+    Nothing vouches for an ancestor's ``workspaces`` declaration there, so a
+    no-git workspace (an unpacked tarball) resolves exactly as before #2040:
+    the root's hoisted bin is not reached from a member.
 
     Args:
         tmp_path: Temporary directory provided by pytest.
@@ -980,7 +980,6 @@ def test_find_local_node_binary_finds_hoisted_bin_outside_home_without_git(
         marker: Extra workspace marker file at the root, if any.
     """
     monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))
-    _write_local_node_binary(tmp_path, "html-validate")
     root = tmp_path / "code"
     root.mkdir()
     (root / "package.json").write_text(manifest)
@@ -990,6 +989,55 @@ def test_find_local_node_binary_finds_hoisted_bin_outside_home_without_git(
     member = root / "packages" / "app"
     member.mkdir(parents=True)
     (member / "package.json").write_text("{}\n")
+
+    found = find_local_node_binary("html-validate", start=member)
+
+    assert_that(found).is_none()
+    assert_that(root_bin.is_file()).is_true()
+
+
+def test_find_local_node_binary_ignores_catch_all_workspace_parent_outside_home(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A planted ``"workspaces": ["**"]`` parent cannot claim a project.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))
+    (tmp_path / "package.json").write_text('{"workspaces": ["**"]}\n')
+    planted = _write_local_node_binary(tmp_path, "html-validate")
+    project = tmp_path / "downloaded-project"
+    project.mkdir()
+    (project / "package.json").write_text("{}\n")
+
+    found = find_local_node_binary("html-validate", start=project)
+
+    assert_that(found).is_none()
+    assert_that(planted.is_file()).is_true()
+
+
+def test_find_local_node_binary_finds_hoisted_bin_in_no_git_workspace_under_home(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Under ``$HOME`` a no-git workspace member still reaches the root's bin.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    home = tmp_path / "home"
+    root = home / "code" / "ws"
+    root.mkdir(parents=True)
+    (root / "package.json").write_text('{"workspaces": ["packages/*"]}\n')
+    root_bin = _write_local_node_binary(root, "html-validate")
+    member = root / "packages" / "app"
+    member.mkdir(parents=True)
+    (member / "package.json").write_text("{}\n")
+    monkeypatch.setenv("HOME", str(home))
 
     found = find_local_node_binary("html-validate", start=member)
 
