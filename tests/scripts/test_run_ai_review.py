@@ -2264,7 +2264,7 @@ def test_workflow_uploads_state_artifacts_on_always() -> None:
     assert_that(name).contains("-final")
     assert_that(upload_with["path"]).is_equal_to("ai-review-state/")
     assert_that(upload_with["if-no-files-found"]).is_equal_to("ignore")
-    assert_that(upload_with["retention-days"]).is_equal_to(30)
+    assert_that(upload_with["retention-days"]).is_equal_to(90)
 
 
 def test_workflow_keeps_mint_immediately_before_review() -> None:
