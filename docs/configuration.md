@@ -2842,9 +2842,19 @@ A file that cannot be read is held back as well. A held-back file is treated as 
 before standard input was used: it is not validated. Lintro validates the other files,
 keeps their findings, and fails the run as an execution error that names each file left
 uninspected and why; if every path is held back, html-validate is not run at all. Rules
-see these files' filename as `/dev/stdin`; only the report carries the real path. If an
-html-validate call times out, the remaining glob-named files are not started, and every
-one of them is named as not inspected.
+see these files' filename as `/dev/stdin`; only the report carries the real path.
+
+The standard-input calls run side by side, at most
+`min(CPU count, 8, execution.max_workers)` at a time, so `max_workers: 1` runs them one
+after another. The first call runs alone, so a hanging html-validate costs one deadline,
+not one per worker. Under the `npx` fallback the calls keep running one at a time until
+one of them has run html-validate and printed a report, because concurrent `npx` runs
+that all install a package that is not cached yet can fail without a report. Every file
+and directory is checked against the allowlist above before the first call starts, and
+findings are merged in the order the files were listed, so the result is the same as
+running the calls one after another. If an html-validate call times out, no further call
+starts, even one already handed to a worker: calls already running finish and keep their
+findings, and every glob-named file that was not started is named as not inspected.
 
 **Available Options via `--tool-options`:**
 
