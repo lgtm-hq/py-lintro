@@ -1,4 +1,4 @@
-"""Where each open finding sits at a delta round's base (#3403).
+"""Where each open finding sits at a round's base (#3403, #3413).
 
 A delta round (#2627) narrows a changed file to its ``since..head`` hunks. A
 prior open finding whose line falls outside every hunk is then carried
@@ -13,87 +13,70 @@ A record's location is in the coordinates of the head that last reported it
 (:attr:`~lintro.ai.review.models.finding_record.FindingRecord.line_sha`). A
 round that carried it unread did not move it, so before the delta check the
 location is mapped forward to the delta's base through ``line_sha..since``,
-following a rename git reports. The mapped location is also what the matcher
+following a rename git reports. A full round maps every record to its own
+head the same way (#3413). The mapped location is also what the matcher
 judges the finding at (:attr:`MappedFindings.relocations`). When a location
 cannot be mapped (no recorded head, git cannot diff the range, the line
 itself was edited, or a rename is ambiguous) the file is read whole: failing
 open here is exactly the false "fixed" #3403 is about.
 
-Every diff here pins its format so user configuration cannot change the
-coordinates: literal pathspecs (a path such as ``odd[1].py`` is never a
-glob), no text conversion or external driver, no colour, no relative paths
-and fixed ``a/``/``b/`` prefixes, and only the section whose headers name
-the intended file is read.
+When git cannot reach a record's head at all (a rewritten branch in a
+shallow checkout), the pull request's own rename metadata moves the record
+to its file's new path. When that names no rename either, the record is
+held where it is (:data:`~lintro.ai.review.models.delta_plan.LOCATION_UNMAPPED`)
+and its path leaving the diff never counts as a fix. A round maps at most
+:data:`MAX_MAPPED_FINDINGS` records through git; any beyond that are held
+(:data:`~lintro.ai.review.models.delta_plan.LOCATION_UNCHECKED`) and never
+resolved that round. The git primitives live in
+:mod:`lintro.ai.review.git_line_map`.
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from loguru import logger
-
-from lintro.ai.review.context.diff_parse import (
-    _unquote_git_path,
-    split_unified_diff_by_file,
-)
-from lintro.ai.review.context.git_ops import _run_git
+from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.enums.finding_status import FindingStatus
-from lintro.ai.review.exceptions import ReviewContextError
+from lintro.ai.review.git_line_map import (
+    PINNED_DIFF_FLAGS,
+    Hunks,
+    Renames,
+    file_hunks,
+    literal_pathspec,
+    map_line,
+    range_renames,
+)
+from lintro.ai.review.models.delta_plan import (
+    LOCATION_UNCHECKED,
+    LOCATION_UNMAPPED,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
+    from collections.abc import Collection, Iterable, Mapping
 
+    from lintro.ai.review.models.changed_file import ChangedFile
     from lintro.ai.review.models.finding_record import FindingRecord
     from lintro.ai.review.models.review_state import ReviewState
 
 __all__ = [
+    "MAX_MAPPED_FINDINGS",
     "PINNED_DIFF_FLAGS",
     "MappedFindings",
     "literal_pathspec",
     "map_open_findings",
+    "pr_renames",
     "shows_every_line",
 ]
 
-#: Flags that fix a diff's text whatever the user's git configuration says.
-PINNED_DIFF_FLAGS: tuple[str, ...] = (
-    "--no-color",
-    "--no-ext-diff",
-    "--no-textconv",
-    "--no-relative",
-    "--src-prefix=a/",
-    "--dst-prefix=b/",
-)
-
-#: A unified-diff hunk header: old start/length, new length.
-_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,(\d+))? @@", re.MULTILINE)
-
-#: The old-side file header of a diff section.
-_OLD_HEADER_RE = re.compile(r'^--- (?:"((?:[^"\\]|\\.)+)"|(.+?))(?:\t|$)', re.MULTILINE)
-
-#: ``(old_start, old_length, new_length)`` per hunk, or ``None`` when unknown.
-_Hunks = tuple[tuple[int, int, int], ...] | None
-
-
-@dataclass(frozen=True, slots=True)
-class _Renames:
-    """Renames git reports between two commits.
-
-    Attributes:
-        moved: Source path to destination path.
-        ambiguous: Source paths git also reports as touched another way
-            (renamed away and re-added, say), so no single destination holds
-            the finding.
-    """
-
-    moved: dict[str, str]
-    ambiguous: frozenset[str]
+#: Records one round maps through git (one ``git diff -U0`` per distinct
+#: ``(line_sha, path)``); the rest are held open and unresolved (#3413).
+MAX_MAPPED_FINDINGS = 200
 
 
 @dataclass(frozen=True, slots=True)
 class MappedFindings:
-    """The open findings' locations at a delta round's base.
+    """The open findings' locations at a round's base.
 
     Attributes:
         lines: Lines per file a narrowed file must show, in the base's
@@ -103,23 +86,47 @@ class MappedFindings:
             whose stored location was not already in the base's coordinates.
             ``line_sha`` is the base when the line was mapped, and empty when
             only the path is known (a rename whose line could not be placed),
-            which makes the next round read the file whole again.
+            which makes the next round read the file whole again. It is
+            :data:`LOCATION_UNMAPPED` or :data:`LOCATION_UNCHECKED` for a
+            record held at its stored location (#3413).
     """
 
     lines: dict[str, tuple[int, ...] | None] = field(default_factory=dict)
     relocations: tuple[tuple[str, str, int, str], ...] = ()
 
 
-def literal_pathspec(path: str) -> str:
-    """Return a pathspec that matches ``path`` exactly, never as a glob.
+@dataclass
+class _Lookups:
+    """Git answers one round reuses across its records.
+
+    Attributes:
+        repo_root: The repository holding the commits.
+        renamed_from: The pull request's renames, source path to new path.
+        renames: Renames per ``(from_sha, to_sha)`` range.
+        hunks: Hunks per ``(from_sha, to_sha, old_path, new_path)``.
+    """
+
+    repo_root: str
+    renamed_from: Mapping[str, str]
+    renames: dict[tuple[str, str], Renames | None] = field(default_factory=dict)
+    hunks: dict[tuple[str, str, str, str], Hunks] = field(default_factory=dict)
+
+
+def pr_renames(*, changed_files: Iterable[ChangedFile]) -> dict[str, str]:
+    """Return the pull request's renames from its changed-file metadata.
 
     Args:
-        path: Repository-relative path.
+        changed_files: The round's changed files (git or the files API).
 
     Returns:
-        The ``:(literal)`` pathspec.
+        Source path to new path for every renamed file; copies leave their
+        source in place and are not listed.
     """
-    return f":(literal){path}"
+    return {
+        item.previous_path: item.path
+        for item in changed_files
+        if item.status is ChangedFileStatus.RENAMED and item.previous_path
+    }
 
 
 def map_open_findings(
@@ -128,6 +135,7 @@ def map_open_findings(
     since_sha: str,
     head_sha: str,
     repo_root: str,
+    renamed_from: Mapping[str, str] | None = None,
 ) -> MappedFindings:
     """Place every open prior finding at ``since_sha`` (#3403).
 
@@ -137,41 +145,49 @@ def map_open_findings(
 
     Args:
         prior: State of the previous rounds, or ``None``.
-        since_sha: The delta's base, the prior round's head.
+        since_sha: The delta's base, the prior round's head; a full round
+            passes its own head (#3413).
         head_sha: This round's head; a file renamed since the base is keyed
             by its head path, whose chunk the round reads.
         repo_root: The repository holding the commits.
+        renamed_from: The pull request's renames (:func:`pr_renames`), used
+            when git cannot list the renames since a record's head.
 
     Returns:
         The mapped lines and the relocations to judge findings at.
     """
     if prior is None:
         return MappedFindings()
-    cache: dict[tuple[str, str], _Renames | None] = {}
+    lookups = _Lookups(repo_root=repo_root, renamed_from=renamed_from or {})
     lines: dict[str, set[int] | None] = {}
     relocations: list[tuple[str, str, int, str]] = []
+    mapped = 0
     for record in prior.findings:
         if record.status is not FindingStatus.OPEN or not record.file:
             continue
-        path, line = _place(
+        if record.line_sha and record.line_sha != since_sha:
+            mapped += 1
+            if mapped > MAX_MAPPED_FINDINGS:
+                relocations.append(
+                    (record.key, record.file, record.line, LOCATION_UNCHECKED),
+                )
+                continue
+        path, line, hold = _place(
             record=record,
             since_sha=since_sha,
-            renames=_cached_renames(
-                cache=cache,
-                repo_root=repo_root,
-                from_sha=record.line_sha,
-                to_sha=since_sha,
-            ),
-            repo_root=repo_root,
+            lookups=lookups,
         )
-        later = _cached_renames(
-            cache=cache,
-            repo_root=repo_root,
-            from_sha=since_sha,
-            to_sha=head_sha,
+        later = _cached_renames(lookups=lookups, from_sha=since_sha, to_sha=head_sha)
+        unpaired = _unpaired_rename(lookups=lookups, renames=later, path=path)
+        moved_on = (
+            later is None
+            or path in later.moved
+            or path in later.ambiguous
+            or bool(unpaired)
         )
-        moved_on = later is None or path in later.moved or path in later.ambiguous
-        read_path = later.moved.get(path, path) if later is not None else path
+        read_path = (
+            (unpaired or later.moved.get(path, path)) if later is not None else path
+        )
         if line is None or moved_on:
             lines[read_path] = None
         else:
@@ -182,6 +198,8 @@ def map_open_findings(
             relocations.append((record.key, read_path, record.line, ""))
         elif line is None and path != record.file:
             relocations.append((record.key, path, record.line, ""))
+        elif hold:
+            relocations.append((record.key, record.file, record.line, hold))
         elif line is not None and record.line_sha != since_sha:
             relocations.append((record.key, path, line, since_sha))
     return MappedFindings(
@@ -195,16 +213,14 @@ def map_open_findings(
 
 def _cached_renames(
     *,
-    cache: dict[tuple[str, str], _Renames | None],
-    repo_root: str,
+    lookups: _Lookups,
     from_sha: str,
     to_sha: str,
-) -> _Renames | None:
+) -> Renames | None:
     """Return the renames between two commits, listing each range once.
 
     Args:
-        cache: Ranges already listed this round.
-        repo_root: The repository.
+        lookups: The round's git answers.
         from_sha: The older commit.
         to_sha: The newer commit.
 
@@ -213,228 +229,87 @@ def _cached_renames(
         list them.
     """
     if from_sha == to_sha:
-        return _Renames(moved={}, ambiguous=frozenset())
-    if (from_sha, to_sha) not in cache:
-        cache[(from_sha, to_sha)] = _range_renames(
-            repo_root=repo_root,
+        return Renames(moved={}, ambiguous=frozenset())
+    if (from_sha, to_sha) not in lookups.renames:
+        lookups.renames[(from_sha, to_sha)] = range_renames(
+            repo_root=lookups.repo_root,
             from_sha=from_sha,
             to_sha=to_sha,
         )
-    return cache[(from_sha, to_sha)]
+    return lookups.renames[(from_sha, to_sha)]
+
+
+def _unpaired_rename(
+    *,
+    lookups: _Lookups,
+    renames: Renames | None,
+    path: str,
+) -> str:
+    """Return the PR's rename destination for a path git saw deleted (#3413).
+
+    A file renamed and heavily edited in the same range reads to git as a
+    delete plus an add; the pull request's rename metadata still pairs it.
+
+    Args:
+        lookups: The round's git answers and the PR's renames.
+        renames: Renames git listed for the range, or ``None``.
+        path: The path at the range's start.
+
+    Returns:
+        The destination, or ``""`` when git paired the path itself or did not
+        report it deleted, or the pull request names no rename for it.
+    """
+    if renames is None or path not in renames.deleted:
+        return ""
+    return lookups.renamed_from.get(path, "")
 
 
 def _place(
     *,
     record: FindingRecord,
     since_sha: str,
-    renames: _Renames | None,
-    repo_root: str,
-) -> tuple[str, int | None]:
+    lookups: _Lookups,
+) -> tuple[str, int | None, str]:
     """Return a record's path and line at ``since_sha``.
 
     Args:
         record: An open record.
         since_sha: The head to place it at.
-        renames: Renames between the record's head and ``since_sha``, or
-            ``None`` when git could not list them.
-        repo_root: The repository holding the commits.
+        lookups: The round's git answers.
 
     Returns:
-        ``(path, line)``; the line is ``None`` when it cannot be placed.
+        ``(path, line, hold)``; the line is ``None`` when it cannot be
+        placed, and ``hold`` is :data:`LOCATION_UNMAPPED` when git could not
+        reach the record's head and no rename metadata moved it (#3413).
     """
     if record.line_sha == since_sha:
-        return record.file, record.line
-    if renames is None or not record.line_sha:
-        return record.file, None
-    dest = renames.moved.get(record.file, record.file)
-    if record.file in renames.ambiguous:
-        return dest, None
-    hunks = _file_hunks(
-        repo_root=repo_root,
+        return record.file, record.line, ""
+    renames = _cached_renames(
+        lookups=lookups,
         from_sha=record.line_sha,
         to_sha=since_sha,
-        old_path=record.file,
-        new_path=dest,
     )
-    return dest, _map_line(line=record.line, hunks=hunks)
-
-
-def _git_text(*, repo_root: str, args: list[str]) -> str | None:
-    """Run one pinned ``git diff`` and return its output.
-
-    Args:
-        repo_root: The repository.
-        args: Arguments after ``git diff`` and the pinned flags.
-
-    Returns:
-        Standard output, or ``None`` when git failed.
-    """
-    try:
-        result = _run_git(
-            args=[
-                "-C",
-                repo_root,
-                "-c",
-                "core.quotePath=false",
-                "diff",
-                *PINNED_DIFF_FLAGS,
-                *args,
-            ],
-            check=False,
+    if renames is None or not record.line_sha:
+        moved = lookups.renamed_from.get(record.file)
+        if moved:
+            return moved, None, ""
+        return record.file, None, LOCATION_UNMAPPED if record.line_sha else ""
+    dest = renames.moved.get(record.file, record.file)
+    if record.file in renames.ambiguous:
+        return dest, None, ""
+    unpaired = _unpaired_rename(lookups=lookups, renames=renames, path=record.file)
+    if unpaired:
+        return unpaired, None, ""
+    key = (record.line_sha, since_sha, record.file, dest)
+    if key not in lookups.hunks:
+        lookups.hunks[key] = file_hunks(
+            repo_root=lookups.repo_root,
+            from_sha=record.line_sha,
+            to_sha=since_sha,
+            old_path=record.file,
+            new_path=dest,
         )
-    except ReviewContextError as exc:
-        logger.debug("Could not map finding locations: {}", exc)
-        return None
-    return result.stdout if result.returncode == 0 else None
-
-
-def _range_renames(*, repo_root: str, from_sha: str, to_sha: str) -> _Renames | None:
-    """List the renames git detects between two commits.
-
-    Args:
-        repo_root: The repository.
-        from_sha: The older commit.
-        to_sha: The newer commit.
-
-    Returns:
-        The renames, or ``None`` when git could not list them.
-    """
-    if not from_sha or not to_sha:
-        return None
-    text = _git_text(
-        repo_root=repo_root,
-        # Breaking rewrites lets git pair a file renamed away and then
-        # re-added under its old name, which is then reported as ambiguous.
-        args=[
-            "--name-status",
-            "-z",
-            "--find-renames",
-            "--break-rewrites",
-            f"{from_sha}..{to_sha}",
-        ],
-    )
-    if text is None:
-        return None
-    tokens = text.split("\0")
-    moved: dict[str, str] = {}
-    touched: list[str] = []
-    index = 0
-    while index < len(tokens) and tokens[index]:
-        status = tokens[index]
-        if status.startswith(("R", "C")) and index + 2 < len(tokens):
-            moved[tokens[index + 1]] = tokens[index + 2]
-            touched.append(tokens[index + 2])
-            index += 3
-        else:
-            touched.extend(tokens[index + 1 : index + 2])
-            index += 2
-    return _Renames(
-        moved=moved,
-        ambiguous=frozenset(source for source in moved if source in touched),
-    )
-
-
-def _file_hunks(
-    *,
-    repo_root: str,
-    from_sha: str,
-    to_sha: str,
-    old_path: str,
-    new_path: str,
-) -> _Hunks:
-    """Return the hunks taking ``old_path`` at one commit to ``new_path``.
-
-    Args:
-        repo_root: The repository holding both commits.
-        from_sha: The head the line was recorded at.
-        to_sha: The head to map it to.
-        old_path: The file at ``from_sha``.
-        new_path: The file at ``to_sha`` (``old_path`` unless renamed).
-
-    Returns:
-        The hunks (empty when the file did not change), or ``None`` when git
-        could not compute the range, the change is binary, or the section
-        git printed is not the one from ``old_path`` to ``new_path``.
-    """
-    renamed = new_path != old_path
-    text = _git_text(
-        repo_root=repo_root,
-        args=[
-            "-U0",
-            "--find-renames" if renamed else "--no-renames",
-            f"{from_sha}..{to_sha}",
-            "--",
-            literal_pathspec(old_path),
-            *([literal_pathspec(new_path)] if renamed else []),
-        ],
-    )
-    if text is None:
-        return None
-    if not text.strip():
-        return ()
-    sections = split_unified_diff_by_file(unified_diff=text)
-    section = sections.get(new_path)
-    if section is None or not _old_side_is(section=section, path=old_path):
-        return None
-    if "\nBinary files " in section or section.startswith("Binary files "):
-        return None
-    return tuple(
-        (
-            int(match.group(1)),
-            1 if match.group(2) is None else int(match.group(2)),
-            1 if match.group(3) is None else int(match.group(3)),
-        )
-        for match in _HUNK_RE.finditer(section)
-    )
-
-
-def _old_side_is(*, section: str, path: str) -> bool:
-    """Tell whether a diff section's old side is ``a/<path>``.
-
-    Args:
-        section: One file's diff section.
-        path: The expected old-side path.
-
-    Returns:
-        True when the ``---`` header names ``path``. A section without one
-        (a pure rename or mode change) only matches through its
-        ``diff --git`` header, which :func:`split_unified_diff_by_file`
-        already keyed it by.
-    """
-    match = _OLD_HEADER_RE.search(section)
-    if match is None:
-        return "\n@@ " not in section and not section.startswith("@@ ")
-    quoted, plain = match.groups()
-    raw = _unquote_git_path(path=quoted) if quoted is not None else (plain or "")
-    return raw == f"a/{path}"
-
-
-def _map_line(*, line: int, hunks: _Hunks) -> int | None:
-    """Map a line through a diff's hunks to the new side.
-
-    Args:
-        line: The line on the old side.
-        hunks: The diff's hunks, or ``None`` when they are unknown.
-
-    Returns:
-        The line on the new side, or ``None`` when the hunks are unknown or
-        the line itself was edited or removed.
-    """
-    if hunks is None:
-        return None
-    shift = 0
-    for old_start, old_len, new_len in hunks:
-        if old_len == 0:
-            # A pure insertion lands after line ``old_start``.
-            if old_start < line:
-                shift += new_len
-            continue
-        old_end = old_start + old_len - 1
-        if old_start <= line <= old_end:
-            return None
-        if old_end < line:
-            shift += new_len - old_len
-    return line + shift
+    return dest, map_line(line=record.line, hunks=lookups.hunks[key]), ""
 
 
 def shows_every_line(

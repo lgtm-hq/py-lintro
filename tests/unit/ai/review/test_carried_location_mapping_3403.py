@@ -40,7 +40,6 @@ from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
-from lintro.ai.review.models.review_thread import ReviewThread
 from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
@@ -52,15 +51,17 @@ from lintro.ai.review.sticky.assembly import (
 )
 from lintro.ai.review.sticky.state import matcher_relocations, stamp_finding_ids
 from lintro.config.review_config import ReviewVerifyMode
+from tests.unit.ai.review.scratch_repo_fixtures import ThreadHost as _ThreadHost
+from tests.unit.ai.review.scratch_repo_fixtures import commit as _commit
+from tests.unit.ai.review.scratch_repo_fixtures import fake_provider as _provider
+from tests.unit.ai.review.scratch_repo_fixtures import git as _git
+from tests.unit.ai.review.scratch_repo_fixtures import lines as _lines
 from tests.unit.ai.review.test_carried_reverify_3403 import (
-    _git,
-    _lines,
     _plan_round,
     _record,
     _round_result,
     _sticky_request,
 )
-from tests.unit.ai.review.test_resume_fake_transport import _provider
 
 
 def _repo(root: Path, names: list[str]) -> tuple[str, str]:
@@ -84,21 +85,6 @@ def _repo(root: Path, names: list[str]) -> tuple[str, str]:
         (root / name).write_text(_lines(300, label="case"))
     _git(root, "commit", "-q", "-am", "first")
     return base, _git(root, "rev-parse", "HEAD")
-
-
-def _commit(repo: Path, message: str) -> str:
-    """Commit every change and return the new head.
-
-    Args:
-        repo: The repository.
-        message: The commit message.
-
-    Returns:
-        The new head.
-    """
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", message)
-    return _git(repo, "rev-parse", "HEAD")
 
 
 def _x_carried(*, path: str, line: int, line_sha: str, since: str) -> ReviewState:
@@ -525,63 +511,6 @@ def test_a_carried_unread_finding_is_persisted_at_its_mapped_line(
 # --- a renamed finding keeps its key, its thread and its pairing -------------
 
 _THREAD_ID = 501
-
-
-class _ThreadHost:
-    """A pull request's inline comments and threads, edited in place.
-
-    Attributes:
-        bodies: Comment id to current body.
-        resolved: Thread node ids resolved so far.
-    """
-
-    bodies: dict[int, str]
-    resolved: list[str]
-
-    def __init__(self, *, bodies: dict[int, str]) -> None:
-        """Hold the comments.
-
-        Args:
-            bodies: Comment id to body.
-        """
-        self.bodies = dict(bodies)
-        self.resolved = []
-
-    def update_review_comment(self, *, comment_id: int, body: str) -> bool:
-        """Replace a comment's body.
-
-        Args:
-            comment_id: The comment.
-            body: Its new body.
-
-        Returns:
-            True: the edit always takes.
-        """
-        self.bodies[comment_id] = body
-        return True
-
-    def fetch_review_threads(self) -> dict[int, ReviewThread]:
-        """Return one open thread per comment.
-
-        Returns:
-            Comment id to thread.
-        """
-        return {
-            comment_id: ReviewThread(node_id=f"T{comment_id}")
-            for comment_id in self.bodies
-        }
-
-    def resolve_review_thread(self, *, thread_id: str) -> bool:
-        """Resolve a thread.
-
-        Args:
-            thread_id: The thread's node id.
-
-        Returns:
-            True: the resolution always takes.
-        """
-        self.resolved.append(thread_id)
-        return True
 
 
 def _x_finding(*, file: str, line: int) -> ReviewFinding:

@@ -100,9 +100,12 @@ class ReviewMetadata:
             such a file outside them is carried, never resolved. Empty on a
             full round.
         relocated_findings (tuple[tuple[str, str, int, str], ...]): ``(key,
-            path, line, line_sha)`` locations a delta round mapped prior open
-            findings to (#3403); the matcher judges and persists each record
-            there rather than at its stale stored location.
+            path, line, line_sha)`` locations the round mapped prior open
+            findings to (#3403), on a delta round and a full round alike
+            (#3413); the matcher judges and persists each record there rather
+            than at its stale stored location. A ``line_sha`` of
+            ``"unmapped"`` or ``"unchecked"`` holds the record where it was
+            stored (:data:`~lintro.ai.review.models.delta_plan.LOCATION_HOLDS`).
         custom_agents_run (int): Number of user-defined review agents that
             completed a pass in this run (issue #1245).
         custom_agents_skipped (int): Number of discovered agents that did not

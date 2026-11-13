@@ -23,9 +23,6 @@ Every test drives a scratch git repository: no network, no provider.
 from __future__ import annotations
 
 import json
-import os
-import shutil
-import subprocess  # nosec B404 - scratch repositories are driven with fixed git argv
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -65,14 +62,8 @@ from lintro.ai.review.sticky.assembly import (
     build_sticky_comment,
     render_state_sticky,
 )
-
-_ENV = {
-    "GIT_AUTHOR_NAME": "t",
-    "GIT_AUTHOR_EMAIL": "t@example.com",
-    "GIT_COMMITTER_NAME": "t",
-    "GIT_COMMITTER_EMAIL": "t@example.com",
-    "GIT_CONFIG_GLOBAL": os.devnull,
-}
+from tests.unit.ai.review.scratch_repo_fixtures import git as _git
+from tests.unit.ai.review.scratch_repo_fixtures import lines as _lines
 
 #: The #3391 finding: open since round 4, never posted inline.
 _FIX_RETRY = "lintro/utils/execution/fix_retry.py"
@@ -81,39 +72,6 @@ _FIX_RETRY_TITLE = "Execution-failed retry pass still gets fabricated fix counts
 #: The #3374 finding: a P3 test gap, never posted inline.
 _BRIDGE_TEST = "tests/unit/ai/review/test_lint_bridge.py"
 _BRIDGE_TITLE = "Bridge black-skip branch has no test coverage"
-
-
-def _git(cwd: Path, *args: str) -> str:
-    """Run git in a scratch repository.
-
-    Args:
-        cwd: The repository.
-        *args: Git arguments.
-
-    Returns:
-        Stripped stdout.
-    """
-    return subprocess.run(  # nosec B603 B607 - fixed argv over a scratch repository
-        [shutil.which("git") or "git", *args],
-        cwd=cwd,
-        env={**os.environ, **_ENV},
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-
-
-def _lines(count: int, *, label: str) -> str:
-    """Return ``count`` numbered filler lines.
-
-    Args:
-        count: How many lines.
-        label: Prefix that keeps each file's text distinct.
-
-    Returns:
-        The text, newline-terminated.
-    """
-    return "".join(f"{label}_{index} = {index}\n" for index in range(1, count + 1))
 
 
 @dataclass(frozen=True)

@@ -60,7 +60,7 @@ def matcher_relocations(
     *,
     result: ReviewResult,
 ) -> dict[str, tuple[str, int, str]] | None:
-    """Return where a delta round placed each prior open finding (#3403).
+    """Return where the round placed each prior open finding (#3403, #3413).
 
     Args:
         result: Current review result.
@@ -79,7 +79,7 @@ def relocations_by_key(
     """Key ``(key, path, line, line_sha)`` relocations for the matcher.
 
     Args:
-        relocations: The quadruples a delta round recorded.
+        relocations: The quadruples the round recorded.
 
     Returns:
         ``{key: (path, line, line_sha)}``, or ``None`` when there are none.
