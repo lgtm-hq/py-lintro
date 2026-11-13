@@ -64,7 +64,7 @@ def _relocate(
 
     Args:
         record: A prior record.
-        relocations: ``{key: (path, line, line_sha)}`` from the delta round.
+        relocations: ``{key: (path, line, line_sha)}`` from the round.
 
     Returns:
         The record at its mapped location and coordinate head; resolved

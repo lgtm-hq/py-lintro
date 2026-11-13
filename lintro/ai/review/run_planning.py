@@ -422,6 +422,7 @@ def plan_run(
         context=context,
         repo_root=repo_root,
         resume=resume,
+        prior=options.prior_state,
     )
     recorded_merge_base = (
         merge_base(

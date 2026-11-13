@@ -309,8 +309,8 @@ def match_findings(
             open finding on such a file whose
             line falls outside every range was not re-read: it is carried,
             not resolved. Files absent from the mapping were read whole.
-        relocations: Where the delta round placed each prior open finding,
-            ``{key: (path, line, line_sha)}`` (#3403). A relocated record is
+        relocations: Where the round placed each prior open finding,
+            ``{key: (path, line, line_sha)}`` (#3403, #3413). A relocated record is
             matched, carried or resolved at that location, and persisted
             there, so a line an unread round moved is never judged stale.
 
