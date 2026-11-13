@@ -9,12 +9,16 @@ leaked lock, never in lintro carrying on.
 
 from __future__ import annotations
 
+import contextlib
 import os
+import queue
 import shutil
 import signal
 import subprocess  # nosec B404 - runs node with a fixed argv; shell=False
 import sys
+import threading
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -75,6 +79,28 @@ _PIN = "3.9.4"
 #: A path argument as ``os.rename`` and ``Path.rmdir`` receive one.
 _PathArg = os.PathLike[str] | str
 
+#: Longest wait for npm to report that it holds a lock.
+_HELD_DEADLINE_SECONDS = 30.0
+
+#: Every npm process a test starts, killed at teardown if still running.
+_STARTED: list[subprocess.Popen[str]] = []
+
+
+@pytest.fixture(autouse=True)
+def _reap_npm() -> Iterator[None]:
+    """Kill any npm process a test left running, whatever the outcome.
+
+    Yields:
+        None: This fixture is used for its side effect only.
+    """
+    yield
+    while _STARTED:
+        npm = _STARTED.pop()
+        if npm.poll() is None:
+            npm.kill()
+        with contextlib.suppress(subprocess.SubprocessError, OSError, ValueError):
+            npm.communicate(timeout=_HELD_DEADLINE_SECONDS)
+
 
 def _npm_holds(lock: Path, millis: int) -> subprocess.Popen[str]:
     """Start real npm taking *lock* and holding it.
@@ -87,12 +113,14 @@ def _npm_holds(lock: Path, millis: int) -> subprocess.Popen[str]:
         The running node process.
     """
     assert _NODE is not None and _WITH_LOCK is not None
-    return subprocess.Popen(  # nosec B603 - fixed argv, shell=False
+    npm = subprocess.Popen(  # nosec B603 - fixed argv, shell=False
         [_NODE, "-e", _NPM_HOLDER, str(_WITH_LOCK), str(lock), str(millis)],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
     )
+    _STARTED.append(npm)
+    return npm
 
 
 def _age(path: Path, seconds: float = 120) -> None:
@@ -124,6 +152,10 @@ def cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _start_and_wait_held(lock: Path, millis: int) -> subprocess.Popen[str]:
     """Start real npm on *lock* and return once it holds the lock.
 
+    The ``HELD`` line is read on a helper thread with a deadline, so a node
+    process that exits early or never gets the lock fails the test instead of
+    hanging the run.
+
     Args:
         lock: ``<entry>/concurrency.lock``.
         millis: How long npm keeps the lock.
@@ -132,9 +164,21 @@ def _start_and_wait_held(lock: Path, millis: int) -> subprocess.Popen[str]:
         The running node process, past its ``HELD`` line.
     """
     npm = _npm_holds(lock, millis)
-    assert npm.stdout is not None
-    line = npm.stdout.readline()
-    assert line.startswith("HELD:"), line
+    stdout = npm.stdout
+    assert stdout is not None
+    lines: queue.Queue[str] = queue.Queue()
+    threading.Thread(target=lambda: lines.put(stdout.readline()), daemon=True).start()
+    line = ""
+    try:
+        with contextlib.suppress(queue.Empty):
+            line = lines.get(timeout=_HELD_DEADLINE_SECONDS)
+        if not line.startswith("HELD:"):
+            pytest.fail(f"npm never reported holding {lock}: {line!r}")
+    finally:
+        if not line.startswith("HELD:"):
+            npm.kill()
+            with contextlib.suppress(subprocess.SubprocessError, OSError, ValueError):
+                npm.communicate(timeout=_HELD_DEADLINE_SECONDS)
     return npm
 
 
