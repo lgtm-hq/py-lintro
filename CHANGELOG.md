@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.21] - 2026-11-13
+
+### Fixed
+
+- **tools**: ignore echoed file paths when scanning fix stderr (#3435) (a2d3206)
+
 ## [0.180.20] - 2026-11-13
 
 ### Fixed
