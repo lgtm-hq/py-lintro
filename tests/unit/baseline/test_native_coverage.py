@@ -145,7 +145,15 @@ def test_native_per_file_exclusion_retains_acknowledgements(
     clear_pyproject_cache()
     maintained = runner.invoke(cli, ["baseline", mode, filename, "--tools", tool])
 
-    assert_that(maintained.exit_code).described_as(maintained.output).is_zero()
+    if tool == "sqlfluff":
+        # SQLFluff's ``[]`` for its only file is a no-files run (#3388): no
+        # tool confirmed inspection, so maintenance refuses to touch the file.
+        assert_that(maintained.exit_code).described_as(maintained.output).is_equal_to(1)
+        assert_that(maintained.output).contains(
+            "no active tool confirmed file inspection",
+        )
+    else:
+        assert_that(maintained.exit_code).described_as(maintained.output).is_zero()
     assert_that(baseline.read_bytes()).is_equal_to(before)
     plugin = ToolRegistry.get(tool).copy_for_execution()
     plugin.set_options(**load_lintro_tool_config(tool))

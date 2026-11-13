@@ -141,6 +141,9 @@ CLEAN_OUTPUTS = {name: reports[1] for name, reports in JSON_REPORTS.items()} | {
     # Stylelint's clean report names each linted file; ``[]`` means its own
     # ignore configuration excluded every file, a no-files run (#3393).
     "stylelint": '[{"source":"a.css","warnings":[]}]',
+    # SQLFluff's clean report holds a record for the linted file; ``[]``
+    # means ``.sqlfluffignore`` excluded it, a no-files run (#3388).
+    "sqlfluff": '[{"filepath":"a.sql","violations":[]}]',
 }
 CLEAN_SUCCESS_EXCLUSIONS: dict[str, str] = {}
 

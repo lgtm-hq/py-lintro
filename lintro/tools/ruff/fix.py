@@ -22,10 +22,15 @@ from loguru import logger
 
 from lintro.models.core.tool_outcome import Checked, FixMeasured, TimedOut, ToolOutcome
 from lintro.parsers.base_issue import BaseIssue
+from lintro.parsers.base_parser import strip_ansi_codes
 from lintro.parsers.ruff.ruff_format_issue import RuffFormatIssue
 from lintro.parsers.ruff.ruff_parser import (
     parse_ruff_format_check_output,
     parse_ruff_output_with_stats,
+)
+from lintro.tools.core.incomplete_run import (
+    incomplete_run_result,
+    tool_message_excerpt,
 )
 from lintro.tools.core.timeout_utils import create_timeout_result
 
@@ -43,6 +48,88 @@ if TYPE_CHECKING:
 __all__ = ["RUFF_DEFAULT_TIMEOUT", "execute_ruff_fix"]
 
 DEFAULT_REMAINING_ISSUES_DISPLAY: int = 5
+
+
+def _lint_report_missing(*, success: bool, output: str) -> bool:
+    """Whether a failed ``ruff check`` printed no JSON report at all.
+
+    With ``--output-format json`` Ruff prints a JSON report on every
+    completed run and exits 0 or 1. A configuration error, unknown flag or
+    panic exits 2 with only its own message (``ruff failed`` ...). A failed
+    run whose output does not open a JSON value is therefore Ruff failing to
+    run, not a malformed report; the latter keeps its parse-failure count.
+
+    Args:
+        success: Whether the command exited 0.
+        output: The command's combined output.
+
+    Returns:
+        True when the command failed without printing a report.
+    """
+    if success:
+        return False
+    return not strip_ansi_codes(output).lstrip().startswith(("[", "{"))
+
+
+#: First line of Ruff's own message when it cannot run at all, such as a
+#: configuration it cannot parse.
+RUFF_FAILED_BANNER: str = "ruff failed"
+
+
+def _format_check_failed_to_run(*, success: bool, output: str) -> bool:
+    """Whether ``ruff format --check`` failed without checking any file.
+
+    The exit status alone cannot tell: ``ruff format --check`` exits 2 for a
+    file with invalid syntax too, printing an ``invalid-syntax`` diagnostic
+    and, when no other file needs reformatting, naming no file. That is a
+    normal outcome; the JSON ``ruff check`` stage reports the same syntax
+    error as a finding. Only Ruff's own ``ruff failed`` banner, with nothing
+    else before it, means Ruff could not run (#3388).
+
+    Args:
+        success: Whether the command exited 0.
+        output: The command's combined output.
+
+    Returns:
+        True when the command failed with Ruff's own failure banner.
+    """
+    if success:
+        return False
+    first_line = next(
+        (
+            line.strip()
+            for line in strip_ansi_codes(output).splitlines()
+            if line.strip()
+        ),
+        "",
+    )
+    return first_line == RUFF_FAILED_BANNER
+
+
+def _not_run_result(
+    *,
+    stage: str,
+    output: str,
+    issues: list[BaseIssue],
+    cwd: str | None,
+) -> ToolResult:
+    """Build the result for a fix run Ruff could not complete.
+
+    Args:
+        stage: The Ruff command that failed, e.g. ``ruff check``.
+        output: What that command printed.
+        issues: Findings an earlier stage really reported.
+        cwd: Working directory Ruff ran in.
+
+    Returns:
+        An execution failure with unknown inspection quoting Ruff's message.
+    """
+    reason = (
+        f"Ruff could not run ({stage} printed no report): "
+        f"{tool_message_excerpt(output)}"
+    )
+    logger.debug(reason)
+    return incomplete_run_result(name="ruff", reason=reason, issues=issues, cwd=cwd)
 
 
 @contextmanager
@@ -159,6 +246,15 @@ def execute_ruff_fix(
             parse_failures_count=parse_failures,
             cwd=ctx.cwd,
         )
+    if _lint_report_missing(success=success_check, output=output_check):
+        # A broken config fails every stage the same way; nothing was fixed
+        # and no file was inspected (#3388).
+        return _not_run_result(
+            stage="ruff check",
+            output=output_check,
+            issues=[],
+            cwd=ctx.cwd,
+        )
     initial_lint_issues, parse_failures = parse_ruff_output_with_stats(
         output=output_check,
     )
@@ -208,6 +304,16 @@ def execute_ruff_fix(
                 cwd=ctx.cwd,
             )
         format_files = parse_ruff_format_check_output(output=output_format_check)
+        if not format_files and _format_check_failed_to_run(
+            success=success_format_check,
+            output=output_format_check,
+        ):
+            return _not_run_result(
+                stage="ruff format --check",
+                output=output_format_check,
+                issues=initial_issues,
+                cwd=ctx.cwd,
+            )
         initial_format_count = len(format_files)
         # Record the formatting findings as issues, not just as a count. The
         # run-level verify pass (#1743) derives its residual from
@@ -261,6 +367,13 @@ def execute_ruff_fix(
                 # genuine pre-timeout issues are counted.
                 issues=initial_issues,  # Include initial issues found
                 parse_failures_count=parse_failures,
+                cwd=ctx.cwd,
+            )
+        if _lint_report_missing(success=success, output=output):
+            return _not_run_result(
+                stage="ruff check --fix",
+                output=output,
+                issues=initial_issues,
                 cwd=ctx.cwd,
             )
         remaining_issues, final_parse_failures = parse_ruff_output_with_stats(

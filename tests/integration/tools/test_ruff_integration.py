@@ -448,3 +448,66 @@ def test_invalid_line_length(
     else:
         with pytest.raises(ValueError):
             ruff_plugin.set_options(line_length=option_value)
+
+
+def test_fix_with_a_broken_config_is_an_execution_failure(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """Ruff that cannot parse its config fixed and inspected nothing.
+
+    Ruff exits 2 with empty stdout and ``ruff failed`` on stderr. The fix run
+    fails as an execution error quoting that message, with no inspection
+    claim and never "No fixes applied." (#3388).
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Project holding the broken config and a Python file.
+    """
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff\nline-length = \n")
+    source = tmp_path / "module.py"
+    source.write_text("import os\nx=1\n")
+    ruff_plugin = get_plugin("ruff")
+
+    result = ruff_plugin.fix([str(source)], {"format": True})
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.inspected_files).is_none()
+    assert_that(result.output).contains("Ruff could not run").contains(
+        "ruff failed",
+    ).does_not_contain("No fixes applied")
+    assert_that(source.read_text()).is_equal_to("import os\nx=1\n")
+
+
+def test_fix_with_a_syntax_error_still_fixes_other_files(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """A file with invalid syntax is a finding, not Ruff failing to run.
+
+    ``ruff format --check`` exits 2 on invalid syntax and, when no other file
+    needs reformatting, names no file. The run must still fix the unrelated
+    F401 and report the syntax error as remaining, as it did before #3388.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Project holding the broken and the fixable file.
+    """
+    broken = tmp_path / "syn.py"
+    broken.write_text("def (:\n")
+    fixable = tmp_path / "ok.py"
+    fixable.write_text("import os\n\nx = 1\n")
+    ruff_plugin = get_plugin("ruff")
+
+    result = ruff_plugin.fix([str(broken), str(fixable)], {"format": True})
+
+    assert_that(result.execution_failed).is_false()
+    assert_that(str(result.output)).does_not_contain("Ruff could not run")
+    assert_that(fixable.read_text()).does_not_contain("import os")
+    assert_that(result.fixed_issues_count).is_equal_to(1)
+    assert_that(result.remaining_issues_count).is_equal_to(3)
+    assert_that({issue.get_code() for issue in result.issues}).is_equal_to(
+        {"invalid-syntax"},
+    )

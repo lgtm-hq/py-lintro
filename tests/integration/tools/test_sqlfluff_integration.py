@@ -355,3 +355,70 @@ def test_set_options(
     sqlfluff_plugin = get_plugin("sqlfluff")
     sqlfluff_plugin.set_options(**{option_name: option_value})
     assert_that(sqlfluff_plugin.options.get(option_name)).is_equal_to(option_value)
+
+
+def test_files_sqlfluffignore_excludes_are_not_claimed(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """A file ``.sqlfluffignore`` excludes is never reported as inspected.
+
+    SQLFluff prints ``[]`` at exit 0 for an ignored file, while a linted one
+    always gets a record (#3388). Check and fix over only ignored files are
+    no-files runs; adding a linted file makes an ordinary run.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Project holding the config, the ignore file and SQL files.
+    """
+    (tmp_path / ".sqlfluff").write_text("[sqlfluff]\ndialect = ansi\n")
+    (tmp_path / ".sqlfluffignore").write_text("ignored.sql\n")
+    ignored = tmp_path / "ignored.sql"
+    ignored.write_text("select * from t\n")
+    linted = tmp_path / "linted.sql"
+    linted.write_text("SELECT a FROM t\n")
+    sqlfluff_plugin = get_plugin("sqlfluff")
+
+    checked = sqlfluff_plugin.check([str(ignored)], {})
+    fixed = sqlfluff_plugin.fix([str(ignored)], {})
+    mixed = sqlfluff_plugin.check([str(ignored), str(linted)], {})
+
+    for result in (checked, fixed):
+        assert_that(result.success).is_true()
+        assert_that(result.no_files).is_true()
+        assert_that(result.inspected_files).is_false()
+        assert_that(result.output).contains(".sqlfluffignore")
+    assert_that(ignored.read_text()).is_equal_to("select * from t\n")
+    assert_that(mixed.no_files).is_false()
+    assert_that(mixed.inspected_files).is_true()
+
+
+def test_file_over_the_size_limit_is_named_as_skipped(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """A file over ``large_file_skip_byte_limit`` is skipped, not inspected.
+
+    SQLFluff prints ``[]`` at exit 0 for it, the same report as for an ignored
+    file, with a "Skipping to avoid parser lock" warning. The reason quotes
+    that warning instead of blaming ``.sqlfluffignore`` (#3388).
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Project holding the config and the large SQL file.
+    """
+    (tmp_path / ".sqlfluff").write_text("[sqlfluff]\ndialect = ansi\n")
+    large = tmp_path / "large.sql"
+    # 1,500 lines of 17 bytes: 25,500 bytes, over the 20,000 default.
+    statement = "SELECT a FROM t;"
+    large.write_text("\n".join([statement] * 1500) + "\n")
+    sqlfluff_plugin = get_plugin("sqlfluff")
+
+    result = sqlfluff_plugin.check([str(large)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.no_files).is_true()
+    assert_that(result.inspected_files).is_false()
+    assert_that(result.output).contains("SQLFluff skipped every file given").contains(
+        "over the limit of 20000 bytes",
+    ).does_not_contain("ignore pattern")

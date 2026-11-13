@@ -8,6 +8,7 @@ AST nodes to identify potential vulnerabilities.
 from __future__ import annotations
 
 import json
+import os
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from typing import Any
@@ -38,6 +39,10 @@ from lintro.utils.config import load_bandit_config
 BANDIT_DEFAULT_TIMEOUT: int = 90
 BANDIT_FILE_PATTERNS: list[str] = ["*.py", "*.pyi"]
 BANDIT_OUTPUT_FORMAT: str = "json"
+BANDIT_ALL_EXCLUDED_MESSAGE: str = (
+    "No files to scan: Bandit's own configuration (exclude_dirs or --exclude) "
+    "excludes every file given; none was inspected."
+)
 
 
 def _extract_bandit_json(raw_text: str) -> dict[str, Any]:
@@ -72,6 +77,29 @@ def _extract_bandit_json(raw_text: str) -> dict[str, Any]:
     if not isinstance(parsed.get("results"), list):
         raise ValueError("Bandit output missing a valid 'results' list")
     return parsed
+
+
+def _scanned_files(report: dict[str, Any], files: list[str]) -> list[str] | None:
+    """Name the requested files Bandit's report shows it scanned.
+
+    Bandit records per-file metrics, keyed by the path as given, for every
+    file it scans, even an empty one. A file its own configuration excludes
+    (``exclude_dirs`` in a config file, or ``--exclude``) has no entry, and
+    the run still exits 0 with an empty ``errors`` list (#3388).
+
+    Args:
+        report: Bandit's parsed JSON report.
+        files: Paths lintro passed to Bandit.
+
+    Returns:
+        The requested files with a metrics entry, or None when the report has
+        no ``metrics`` object to read coverage from.
+    """
+    metrics = report.get("metrics")
+    if not isinstance(metrics, dict):
+        return None
+    scanned = {os.path.normpath(str(key)) for key in metrics if key != "_totals"}
+    return [file for file in files if os.path.normpath(file) in scanned]
 
 
 #: Scan errors named individually before the rest are summarised as a count.
@@ -549,6 +577,17 @@ class BanditPlugin(BaseToolPlugin):
                     output=output if execution_failure else _scan_errors_reason(errors),
                     issues=issues,
                     parse_failures=0,
+                )
+
+            # A clean report whose metrics name none of the requested files
+            # scanned nothing: Bandit's own configuration excluded them all,
+            # so the run is "no files", never an inspection (#3388).
+            if not issues and _scanned_files(bandit_data, ctx.files) == []:
+                logger.debug("[bandit] Bandit's configuration excluded every file")
+                return ToolResult.from_outcome(
+                    ToolOutcome(execution=NoFiles()),
+                    name=self.definition.name,
+                    output=BANDIT_ALL_EXCLUDED_MESSAGE,
                 )
 
             return ToolResult.from_outcome(

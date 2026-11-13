@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, replace
+from pathlib import PurePath
 from typing import Any
 
 from lintro._tool_versions import get_min_version
@@ -17,6 +18,7 @@ from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
 from lintro.models.core.subprocess_result import SubprocessResult
+from lintro.models.core.tool_outcome import FixMeasured, NoFiles, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.sqlfluff.sqlfluff_issue import SqlfluffIssue
 from lintro.parsers.sqlfluff.sqlfluff_parser import parse_sqlfluff_output_with_stats
@@ -44,6 +46,32 @@ from lintro.tools.core.option_validators import (
 SQLFLUFF_DEFAULT_TIMEOUT: int = 60
 SQLFLUFF_FILE_PATTERNS: list[str] = ["*.sql"]
 SQLFLUFF_DEFAULT_FORMAT: str = "json"
+SQLFLUFF_ALL_SKIPPED_MESSAGE: str = (
+    "No files to lint: SQLFluff skipped every file given (an ignore file such "
+    "as .sqlfluffignore, or its large_file_skip_byte_limit); none was inspected."
+)
+
+
+def _skip_reason(stderr: str, *, path: str) -> str:
+    """Quote the warning SQLFluff printed when it skipped a file.
+
+    SQLFluff names the file by the path it was given, which is absolute. That
+    path is shortened to the file name first, so the quote's length cap keeps
+    the part that says why the file was skipped.
+
+    Args:
+        stderr: The skipped invocation's diagnostics stream.
+        path: The file passed to SQLFluff.
+
+    Returns:
+        SQLFluff's own warning without its log-level prefix, or an empty
+        string when it printed none.
+    """
+    if not stderr.strip():
+        return ""
+    excerpt = tool_message_excerpt(stderr.replace(path, PurePath(path).name))
+    level, _, rest = excerpt.partition(" ")
+    return rest.strip() if level == "WARNING" and rest.strip() else excerpt
 
 
 def _is_json(text: str) -> bool:
@@ -60,6 +88,21 @@ def _is_json(text: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _is_empty_report(text: str) -> bool:
+    """Report whether a lint report is an empty JSON array.
+
+    Args:
+        text: One ``sqlfluff lint`` invocation's stdout.
+
+    Returns:
+        True when the whole text decodes to ``[]``.
+    """
+    try:
+        return bool(json.loads(text) == [])
+    except ValueError:
+        return False
 
 
 def _parse_report(output: str, failures: list[int]) -> list[SqlfluffIssue]:
@@ -93,6 +136,11 @@ class SqlfluffPlugin(BaseToolPlugin):
     """
 
     _lint_diagnostics: list[str] = field(default_factory=list, init=False, repr=False)
+    _lint_skipped: dict[str, str] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
 
     @property
     def definition(self) -> ToolDefinition:
@@ -291,6 +339,12 @@ class SqlfluffPlugin(BaseToolPlugin):
             raise RuntimeError(
                 f"SQLFluff printed no report (exit {result.returncode}){detail}",
             )
+        if result.success and _is_empty_report(result.stdout):
+            # Every linted file, even a clean or empty one, gets a record. A
+            # clean exit with an empty array is SQLFluff skipping the one file
+            # given: ``.sqlfluffignore`` excludes it, or it is larger than
+            # ``large_file_skip_byte_limit`` (#3388). Its warning says which.
+            self._lint_skipped[cmd[-1]] = _skip_reason(result.stderr, path=cmd[-1])
         if not result.success and result.stderr.strip():
             self._lint_diagnostics.append(f"{cmd[-1]}:\n{result.stderr}")
         if not result.success and not _is_json(result.stdout):
@@ -372,6 +426,68 @@ class SqlfluffPlugin(BaseToolPlugin):
         """
         super()._isolate_execution_state()
         self._lint_diagnostics = []
+        self._lint_skipped = {}
+
+    def _reset_lint_state(self) -> None:
+        """Forget what earlier runs of this instance recorded."""
+        self._lint_diagnostics.clear()
+        self._lint_skipped.clear()
+
+    def _all_skipped_result(
+        self,
+        *,
+        result: ToolResult,
+        files: list[str],
+        fixing: bool,
+    ) -> ToolResult | None:
+        """Return the no-files result when SQLFluff skipped every file.
+
+        A file SQLFluff skipped, because ``.sqlfluffignore`` excludes it or
+        it is larger than ``large_file_skip_byte_limit``, is never claimed as
+        inspected. When it skipped all of them, nothing was inspected: the
+        run is "no files", not a clean pass (#3388). The reason quotes the
+        first skip warning SQLFluff printed. A run that also failed, timed
+        out or reported findings keeps its own result.
+
+        Args:
+            result: Aggregated check or fix outcome.
+            files: Every file lintro passed to SQLFluff.
+            fixing: Whether this is a fix run, which records zero counters.
+
+        Returns:
+            The no-files result, or None when SQLFluff linted any file.
+        """
+        if (
+            not files
+            or set(self._lint_skipped) != set(files)
+            or result.execution_failed
+            or result.timed_out
+            or result.issues
+        ):
+            return None
+        outcome = (
+            ToolOutcome(
+                execution=NoFiles(),
+                accounting=FixMeasured(initial=0, fixed=0, remaining=0),
+            )
+            if fixing
+            else ToolOutcome(execution=NoFiles())
+        )
+        warning = next(
+            (self._lint_skipped[file] for file in files if self._lint_skipped[file]),
+            "",
+        )
+        output = (
+            f"{SQLFLUFF_ALL_SKIPPED_MESSAGE} SQLFluff: {warning}"
+            if warning
+            else SQLFLUFF_ALL_SKIPPED_MESSAGE
+        )
+        return ToolResult.from_outcome(
+            outcome,
+            name=self.definition.name,
+            output=output,
+            cwd=result.cwd,
+        )
 
     def _with_lint_diagnostics(self, result: ToolResult) -> ToolResult:
         """Attach lint diagnostics without feeding them through the JSON parser.
@@ -398,7 +514,7 @@ class SqlfluffPlugin(BaseToolPlugin):
             ToolResult with check results.
         """
         # Use shared preparation for version check, path validation, file discovery
-        self._lint_diagnostics.clear()
+        self._reset_lint_state()
         ctx = self.prepare(paths, options)
         if isinstance(ctx, ToolResult):
             return ctx
@@ -411,6 +527,9 @@ class SqlfluffPlugin(BaseToolPlugin):
             parse=lambda output: self._parse_lint_report(output, failures),
             policy=PerFileCheckPolicy(issues_imply_failure=True),
         )
+        skipped = self._all_skipped_result(result=result, files=ctx.files, fixing=False)
+        if skipped is not None:
+            return skipped
         return self._with_lint_diagnostics(
             replace(
                 result,
@@ -430,7 +549,7 @@ class SqlfluffPlugin(BaseToolPlugin):
             ToolResult with fix results.
         """
         # Use shared preparation for version check, path validation, file discovery
-        self._lint_diagnostics.clear()
+        self._reset_lint_state()
         ctx = self.prepare(paths, options)
         if isinstance(ctx, ToolResult):
             return ctx
@@ -480,6 +599,9 @@ class SqlfluffPlugin(BaseToolPlugin):
                 fix_findings_exit_codes=frozenset({1}),
             ),
         )
+        skipped = self._all_skipped_result(result=result, files=ctx.files, fixing=True)
+        if skipped is not None:
+            return skipped
         unmeasured = self._unmeasured_reason(
             result,
             errors=errors,
