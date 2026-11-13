@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.20] - 2026-11-13
+
+### Fixed
+
+- **ai/review**: carry renamed findings in full review rounds (#3430) (fe99e5e)
+
 ## [0.180.19] - 2026-11-13
 
 ### Fixed
