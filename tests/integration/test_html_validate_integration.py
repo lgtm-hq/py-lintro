@@ -4,9 +4,11 @@ These tests are gated on html-validate being resolvable (via bunx/npx or a
 direct binary). They exercise the plugin end-to-end against a real HTML fixture.
 """
 
+import json
 import os
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -358,35 +360,65 @@ def test_html_validate_stdin_uses_the_files_own_directory_config(
     assert_that(result.issues).is_empty()
 
 
+_IGNORE = ".htmlvalidateignore"
+_CONFIG = ".htmlvalidate.json"
+
+
+def _config_with_transform(key: str) -> str:
+    """Build an html-validate config declaring one transformer.
+
+    Args:
+        key: The transform pattern.
+
+    Returns:
+        The JSON config.
+    """
+    return json.dumps(
+        {
+            "extends": ["html-validate:recommended"],
+            "transform": {key: "lintro-test-missing-transformer"},
+        },
+    )
+
+
 @pytest.mark.html_validate
 @pytest.mark.parametrize(
-    "fallback",
+    ("setting", "content", "reason"),
     [
-        pytest.param("ignore-file", id="htmlvalidateignore"),
-        pytest.param("transform", id="transform-config"),
+        pytest.param(
+            _IGNORE,
+            "?slug?.html\n",
+            ".htmlvalidateignore ignores it",
+            id="ignore-pattern-matches",
+        ),
+        pytest.param(
+            _CONFIG,
+            _config_with_transform("slug"),
+            "its transform pattern 'slug' applies to it",
+            id="transform-matches",
+        ),
     ],
 )
 def test_html_validate_holds_back_what_stdin_cannot_validate(
     tmp_path: Path,
-    fallback: str,
+    setting: str,
+    content: str,
+    reason: str,
 ) -> None:
-    """Stdin skips ignore files and transformers, so such files are held back.
+    """A matching ignore pattern or transformer holds the file back.
 
-    The plain file is still validated and keeps its findings; the run fails
-    and names the file left uninspected (#3393).
+    stdin skips ``.htmlvalidateignore`` and matches transformers against
+    ``/dev/stdin``. The plain file is still validated and keeps its
+    findings; the run fails and names the held-back file with the reason
+    that applied (#3393).
 
     Args:
         tmp_path: Pytest-managed temporary directory.
-        fallback: Which stdin limitation the tree triggers.
+        setting: The file holding the setting.
+        content: The setting that applies to ``[slug].html`` only.
+        reason: The reason the output must give.
     """
-    if fallback == "ignore-file":
-        (tmp_path / ".htmlvalidateignore").write_text("other.html\n", encoding="utf-8")
-    else:
-        (tmp_path / ".htmlvalidate.json").write_text(
-            '{"extends": ["html-validate:recommended"], '
-            '"transform": {"^.*\\\\.vue$": "html-validate-vue"}}',
-            encoding="utf-8",
-        )
+    (tmp_path / setting).write_text(content, encoding="utf-8")
     held = tmp_path / "[slug].html"
     held.write_text(_FINDINGS, encoding="utf-8")
     plain = tmp_path / "page.html"
@@ -396,8 +428,138 @@ def test_html_validate_holds_back_what_stdin_cannot_validate(
     assert_that(result.success).is_false()
     assert_that(result.execution_failed).is_true()
     assert_that(result.findings_complete).is_false()
-    assert_that(result.output).contains("[slug].html", "not inspected")
+    assert_that(result.output).contains("'[slug].html': ", reason, "not inspected")
     assert_that(_reported(result, tmp_path)).is_equal_to({"page.html"})
+
+
+@pytest.mark.html_validate
+@pytest.mark.parametrize(
+    ("setting", "content"),
+    [
+        pytest.param(_IGNORE, "dist/\n", id="ignore-pattern-elsewhere"),
+        pytest.param(
+            _CONFIG,
+            _config_with_transform("^.*\\.vue$"),
+            id="vue-only-transform",
+        ),
+    ],
+)
+def test_html_validate_validates_through_stdin_when_settings_do_not_apply(
+    tmp_path: Path,
+    setting: str,
+    content: str,
+) -> None:
+    """An ignore file or transformer for other files does not hold one back.
+
+    Args:
+        tmp_path: Pytest-managed temporary directory.
+        setting: The file holding the setting.
+        content: A setting that matches no file in the run.
+    """
+    (tmp_path / setting).write_text(content, encoding="utf-8")
+    target = tmp_path / "[slug].html"
+    target.write_text(_FINDINGS, encoding="utf-8")
+    result = _check([target])
+
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.success).is_false()
+    assert_that(_reported(result, tmp_path)).is_equal_to({"[slug].html"})
+
+
+@pytest.mark.html_validate
+def test_html_validate_validates_a_name_starting_with_a_dash(tmp_path: Path) -> None:
+    """``-x.html`` is passed as a path, not read as an unknown option.
+
+    Args:
+        tmp_path: Pytest-managed temporary directory.
+    """
+    target = tmp_path / "-x.html"
+    target.write_text(_FINDINGS, encoding="utf-8")
+    result = _check([target])
+
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.success).is_false()
+    assert_that(_reported(result, tmp_path)).is_equal_to({"-x.html"})
+
+
+def _wrap_html_validate(root: Path, script: str) -> None:
+    """Install a project-local html-validate that wraps the real one.
+
+    The plugin prefers ``node_modules/.bin`` in the directory it runs in.
+
+    Args:
+        root: The project directory.
+        script: Shell lines run before handing over to the real binary.
+    """
+    real = shutil.which("html-validate")
+    if real is None:
+        pytest.skip("needs html-validate on PATH to wrap")
+    wrapper = root / "node_modules" / ".bin" / "html-validate"
+    wrapper.parent.mkdir(parents=True)
+    wrapper.write_text(
+        f'#!/bin/sh\n{script}\nexec "{real}" "$@"\n',
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+
+
+@pytest.mark.html_validate
+@pytest.mark.skipif(os.name == "nt", reason="uses a POSIX shell wrapper")
+def test_html_validate_keeps_findings_when_the_binary_vanishes(
+    tmp_path: Path,
+) -> None:
+    """A launch failure mid-run makes an incomplete run that keeps findings.
+
+    The wrapper deletes itself during the first stdin call, so the next
+    stdin call cannot start.
+
+    Args:
+        tmp_path: Pytest-managed temporary directory.
+    """
+    _wrap_html_validate(
+        tmp_path,
+        'case " $* " in *" --stdin-filename "*) rm -f "$0";; esac',
+    )
+    for name in ("page.html", "[a].html", "[b].html"):
+        (tmp_path / name).write_text(_FINDINGS, encoding="utf-8")
+    result = _check([tmp_path])
+
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(len(result.issues))
+    assert_that(_reported(result, tmp_path)).is_equal_to({"page.html", "[a].html"})
+    assert_that(result.output).contains(
+        f"{tmp_path / '[b].html'}: html-validate could not be started",
+    )
+
+
+@pytest.mark.html_validate
+@pytest.mark.skipif(os.name == "nt", reason="uses a POSIX shell wrapper")
+def test_html_validate_stops_after_a_stdin_timeout(tmp_path: Path) -> None:
+    """After one stdin deadline the remaining files are named, not started.
+
+    Args:
+        tmp_path: Pytest-managed temporary directory.
+    """
+    _wrap_html_validate(tmp_path, 'case "$*" in *slow*) sleep 30;; esac')
+    for name in ("page.html", "[0slow].html", "[a].html", "[b].html"):
+        (tmp_path / name).write_text(_FINDINGS, encoding="utf-8")
+    tool = ToolRegistry.get("html_validate")
+    tool.exclude_patterns = []
+    started = time.monotonic()
+    result = tool.check([str(tmp_path)], {"timeout": 2})
+    elapsed = time.monotonic() - started
+
+    assert_that(elapsed).is_less_than(20)
+    assert_that(result.timed_out).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.issues_count).is_equal_to(len(result.issues))
+    assert_that(_reported(result, tmp_path)).is_equal_to({"page.html"})
+    assert_that(result.output).contains(
+        f"{tmp_path / '[0slow].html'}: ",
+        "timed out",
+        "not run on 2 file(s)",
+    )
 
 
 @pytest.mark.html_validate

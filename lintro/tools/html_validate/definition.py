@@ -28,6 +28,7 @@ import json
 import os
 import re
 import subprocess  # nosec B404 - used safely with shell disabled
+from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
 
@@ -125,25 +126,40 @@ _SELF_MATCH_BREAKER: re.Pattern[str] = re.compile(
 )
 
 
-def _glob_reason(paths: list[str]) -> str:
-    """Name the paths withheld from html-validate because of glob syntax.
+# How many held-back files have their own reason spelled out.
+_REASONS_SHOWN: int = 5
+
+
+def _glob_reason(
+    paths: list[str],
+    *,
+    hold_back_reason: Callable[[str], str | None],
+) -> str:
+    """Name the paths withheld from html-validate, and why stdin was not used.
 
     Args:
         paths: Relative paths html-validate's glob expansion would misread.
+        hold_back_reason: The reason stdin could not validate a path.
 
     Returns:
-        A one-line reason.
+        A reason naming the count, the first path, and the reason that
+        applied to each of the first few paths.
     """
+    shown = "; ".join(
+        f"{path!r}: {hold_back_reason(path) or 'not validated'}"
+        for path in paths[:_REASONS_SHOWN]
+    )
+    more = len(paths) - _REASONS_SHOWN
+    if more > 0:
+        shown = f"{shown}; and {more} more"
     return unread_paths_reason(
         tool="html-validate",
         paths=paths,
         why=(
             "html-validate expands each path as a glob, and glob, extglob or "
             "backslash characters in a name can make it skip the file or "
-            "validate a different one. Such a file is validated through stdin "
-            "instead, except when it cannot be read, an .htmlvalidateignore "
-            "applies to it, or its configuration declares a transformer, all "
-            "of which stdin cannot honor."
+            "validate a different one. Such a file is validated through "
+            f"stdin instead, which was not possible here ({shown})."
         ),
     )
 
@@ -238,6 +254,22 @@ def contains_glob_syntax(argument: str) -> bool:
         True when the argument contains glob metacharacters.
     """
     return any(char in _GLOB_METACHARACTERS for char in argument)
+
+
+def _naming(target: str, result: ToolResult) -> ToolResult:
+    """Start a failed stdin call's reason with the file it was for.
+
+    Args:
+        target: The file the call validated.
+        result: The call's result.
+
+    Returns:
+        The result, its output prefixed with the path when the call timed
+        out or gave no verdict; a lint verdict is returned unchanged.
+    """
+    if not (result.execution_failed or result.timed_out):
+        return result
+    return replace(result, output=f"{target}: {result.output or 'no output'}")
 
 
 @dataclass(frozen=True)
@@ -373,8 +405,13 @@ class HtmlValidatePlugin(BaseToolPlugin):
         )
         return run_on_readable_paths(
             ctx,
-            readable=lambda path: matches_itself(path) or route.can_validate(path),
-            reason=_glob_reason,
+            readable=lambda path: (
+                matches_itself(path) or route.hold_back_reason(path) is None
+            ),
+            reason=lambda unread: _glob_reason(
+                unread,
+                hold_back_reason=route.hold_back_reason,
+            ),
             run=lambda kept: self._check_kept(kept, invocation=invocation, route=route),
             unrun=lambda reason, cwd: incomplete_run_result(
                 name=self.definition.name,
@@ -456,27 +493,42 @@ class HtmlValidatePlugin(BaseToolPlugin):
                     invocation=invocation,
                 ),
             )
-        results.extend(
-            self._check_stdin(
-                str(route.absolute(path)),
-                invocation=invocation,
-                timeout=ctx.timeout,
-                cwd=ctx.cwd,
+        pending = [path for path in passed if not matches_itself(path)]
+        for position, path in enumerate(pending):
+            if results and results[-1].timed_out:
+                # One deadline already passed; starting the rest could take
+                # the per-call timeout once per remaining file.
+                results.append(self._not_started(pending[position:], cwd=ctx.cwd))
+                break
+            results.append(
+                self._check_stdin(
+                    str(route.absolute(path)),
+                    invocation=invocation,
+                    timeout=ctx.timeout,
+                    cwd=ctx.cwd,
+                ),
             )
-            for path in passed
-            if not matches_itself(path)
-        )
-        return merge_results(
-            results,
+        return merge_results(results, name=self.definition.name, cwd=ctx.cwd)
+
+    def _not_started(self, paths: list[str], *, cwd: str) -> ToolResult:
+        """Name the stdin files skipped after an earlier call timed out.
+
+        Args:
+            paths: The files never started.
+            cwd: The run's working directory.
+
+        Returns:
+            An incomplete run naming them as not inspected.
+        """
+        return incomplete_run_result(
             name=self.definition.name,
-            cwd=ctx.cwd,
-            timed_out=lambda issues: batch_timeout_result(
-                plugin=self,
-                timeout=ctx.timeout,
-                cmd=invocation.cmd,
-                cwd=ctx.cwd,
-                issues=issues,
+            reason=unread_paths_reason(
+                tool="html-validate",
+                paths=paths,
+                why="An earlier html-validate call timed out, so they were "
+                "not started.",
             ),
+            cwd=cwd,
         )
 
     def _check_stdin(
@@ -499,8 +551,9 @@ class HtmlValidatePlugin(BaseToolPlugin):
             cwd: The run's working directory, recorded on the result.
 
         Returns:
-            ToolResult for the one file. A file that can no longer be opened
-            is an incomplete run naming it as not inspected.
+            ToolResult for the one file. A file that can no longer be opened,
+            or an html-validate that cannot be started, is an incomplete run;
+            every failure reason starts with the file's path.
         """
         cmd = stdin_command(invocation.cmd, filename=target)
         directory = os.path.dirname(target)
@@ -513,7 +566,10 @@ class HtmlValidatePlugin(BaseToolPlugin):
             except OSError as error:
                 return incomplete_run_result(
                     name=self.definition.name,
-                    reason=f"{_glob_reason([target])} ({error.strerror})",
+                    reason=(
+                        f"{target}: the file could not be opened "
+                        f"({error.strerror}), so it was not inspected."
+                    ),
                     cwd=cwd,
                 )
             try:
@@ -524,17 +580,38 @@ class HtmlValidatePlugin(BaseToolPlugin):
                     stdin=source.fileno(),
                 )
             except subprocess.TimeoutExpired:
-                return self._timed_out(
-                    cmd=cmd,
-                    timeout=timeout,
-                    cwd=cwd,
-                    invocation=invocation,
+                return _naming(
+                    target,
+                    self._timed_out(
+                        cmd=cmd,
+                        timeout=timeout,
+                        cwd=cwd,
+                        invocation=invocation,
+                    ),
                 )
-        return self._evaluate(
-            result,
-            invocation=invocation,
-            cwd=cwd,
-            file_args=[],
+            except OSError as error:
+                reason = (
+                    f"{target}: html-validate could not be started ({error}), "
+                    "so the file was not inspected."
+                )
+                return incomplete_run_result(
+                    name=self.definition.name,
+                    reason=self._append_fallback_guidance(
+                        output=reason,
+                        used_registry_fallback=invocation.used_registry_fallback,
+                        command=invocation.fallback_command,
+                    )
+                    or reason,
+                    cwd=cwd,
+                )
+        return _naming(
+            target,
+            self._evaluate(
+                result,
+                invocation=invocation,
+                cwd=cwd,
+                file_args=[],
+            ),
         )
 
     def _timed_out(
@@ -600,7 +677,12 @@ class HtmlValidatePlugin(BaseToolPlugin):
         # Always pass the literal files lintro discovered, never a glob or a
         # directory: html-validate expands those through ``fs.globSync``, which
         # aborts the whole run on Bun builds that lack it (issue #1727).
-        file_args: list[str] = ctx.rel_files or ctx.files
+        # A name starting with "-" would be read as an option; "./" keeps it
+        # a path, and html-validate still reports it under its full path.
+        file_args: list[str] = [
+            f"./{path}" if path.startswith("-") else path
+            for path in ctx.rel_files or ctx.files
+        ]
         cmd = [*invocation.cmd, *file_args]
 
         logger.debug(

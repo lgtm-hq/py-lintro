@@ -20,9 +20,8 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.models.core.tool_outcome import Checked, NoFiles, ToolOutcome
+from lintro.models.core.tool_outcome import Checked, NoFiles, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
-from lintro.parsers.base_issue import BaseIssue
 from lintro.parsers.html_validate.html_validate_issue import HtmlValidateIssue
 from lintro.plugins.execution_preparation import PreparedExecution
 from lintro.plugins.subprocess_executor import SubprocessResult
@@ -87,12 +86,14 @@ class _FakeHtmlValidate:
     Attributes:
         dirty: Positional paths that carry an error.
         calls: Every recorded invocation.
-        stdin_times_out: Whether stdin calls hit their deadline.
+        slow: File names whose stdin call hits its deadline.
+        vanished: File names whose stdin call finds no executable.
     """
 
     dirty: set[str] = field(default_factory=set)
     calls: list[_Call] = field(default_factory=list)
-    stdin_times_out: bool = False
+    slow: set[str] = field(default_factory=set)
+    vanished: set[str] = field(default_factory=set)
 
     def __call__(
         self,
@@ -114,7 +115,8 @@ class _FakeHtmlValidate:
             The canned html-validate result.
 
         Raises:
-            subprocess.TimeoutExpired: For a stdin call, when it times out.
+            subprocess.TimeoutExpired: For a stdin call on a ``slow`` file.
+            FileNotFoundError: For a stdin call on a ``vanished`` file.
         """
         del timeout
         source = None
@@ -122,9 +124,11 @@ class _FakeHtmlValidate:
             source = os.read(stdin, 65536).decode()
         self.calls.append(_Call(cmd=list(cmd), cwd=cwd, source=source))
         if "--stdin" in cmd:
-            if self.stdin_times_out:
-                raise subprocess.TimeoutExpired(cmd=cmd, timeout=30)
             name = cmd[cmd.index("--stdin-filename") + 1]
+            if Path(name).name in self.slow:
+                raise subprocess.TimeoutExpired(cmd=cmd, timeout=30)
+            if Path(name).name in self.vanished:
+                raise FileNotFoundError(cmd[0])
             dirty = "<div>" in (source or "")
             stdout = _report(name, findings=dirty)
         else:
@@ -249,28 +253,85 @@ def test_only_glob_named_clean_files_pass(tmp_path: Path) -> None:
     assert_that(result.output).is_none()
 
 
-def test_a_stdin_timeout_times_out_the_run_and_keeps_findings(
+def test_a_stdin_timeout_stops_the_run_and_keeps_counted_findings(
     tmp_path: Path,
 ) -> None:
-    """A deadline on one stdin call is a timeout, with the other findings kept.
+    """After one stdin deadline no further call starts; findings stay counted.
 
     Args:
         tmp_path: Working directory for the run.
     """
-    fake = _FakeHtmlValidate(
-        dirty={"page.html"},
-        stdin_times_out=True,
-    )
+    fake = _FakeHtmlValidate(dirty={"page.html"}, slow={"[a].html"})
     result = _check(
         tmp_path,
-        {"page.html": "<p><div></p>", "[slug].html": "<p>a</p>"},
+        {
+            "page.html": "<p><div></p>",
+            "[a].html": "<p>a</p>",
+            "[b].html": "<p><div></p>",
+            "[c].html": "<p><div></p>",
+        },
         fake,
     )
 
-    assert_that(result.timed_out).is_true()
+    started = [call.cmd[-1] for call in fake.calls if "--stdin" in call.cmd]
+    assert_that(started).is_equal_to([str(tmp_path / "[a].html")])
+    assert_that(result.timed_out).is_false()
+    assert_that(result.execution_failed).is_true()
     assert_that(result.success).is_false()
+    assert_that(result.inspected_files).is_none()
+    assert_that(result.issues_count).is_equal_to(len(result.issues)).is_equal_to(1)
+    assert_that(result.output).contains(
+        f"{tmp_path / '[a].html'}: ",
+        "timed out",
+        "not run on 2 file(s)",
+        "'[b].html'",
+    )
+
+
+def test_a_launch_failure_keeps_earlier_findings_and_names_the_file(
+    tmp_path: Path,
+) -> None:
+    """An executable gone mid-run makes an incomplete run, not a lost one.
+
+    Args:
+        tmp_path: Working directory for the run.
+    """
+    fake = _FakeHtmlValidate(dirty={"page.html"}, vanished={"[b].html"})
+    result = _check(
+        tmp_path,
+        {
+            "page.html": "<p><div></p>",
+            "[a].html": "<p><div></p>",
+            "[b].html": "<p><div></p>",
+        },
+        fake,
+    )
+
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(2)
+    assert_that({str(issue.file) for issue in result.issues}).is_equal_to(
+        {"page.html", str(tmp_path / "[a].html")},
+    )
+    assert_that(result.output).starts_with(
+        f"{tmp_path / '[b].html'}: html-validate could not be started",
+    )
+
+
+def test_a_dash_name_is_passed_as_a_path(tmp_path: Path) -> None:
+    """``-x.html`` would be read as an option, so it is passed as ``./-x.html``.
+
+    Args:
+        tmp_path: Working directory for the run.
+    """
+    fake = _FakeHtmlValidate(dirty={"./-x.html"})
+    result = _check(tmp_path, {"-x.html": "<p><div></p>", "ok.html": "<p></p>"}, fake)
+
+    assert_that([call.cmd[3:] for call in fake.calls]).is_equal_to(
+        [["./-x.html", "ok.html"]],
+    )
     assert_that([str(issue.file) for issue in result.issues]).is_equal_to(
-        ["page.html"],
+        ["./-x.html"],
     )
 
 
@@ -280,13 +341,18 @@ def test_a_file_under_an_ignore_file_is_held_back(tmp_path: Path) -> None:
     Args:
         tmp_path: Working directory for the run.
     """
-    (tmp_path / ".htmlvalidateignore").write_text("other.html\n", encoding="utf-8")
+    (tmp_path / ".htmlvalidateignore").write_text("?slug?.html\n", encoding="utf-8")
     fake = _FakeHtmlValidate()
     result = _check(tmp_path, {"[slug].html": "<p><div></p>"}, fake)
 
     assert_that(fake.calls).is_empty()
     assert_that(result.execution_failed).is_true()
-    assert_that(result.output).contains("[slug].html", "not inspected")
+    assert_that(result.output).contains(
+        "'[slug].html': a pattern in",
+        ".htmlvalidateignore ignores it",
+        "not inspected",
+    )
+    assert_that(result.output).does_not_contain("transform", "cannot be read")
 
 
 def _route(
@@ -330,33 +396,64 @@ def _printed(config: str, *, returncode: int = 0) -> SubprocessResult:
 @pytest.mark.parametrize(
     ("printed", "expected"),
     [
-        pytest.param(_printed('{"rules": {}}'), True, id="no-transform"),
-        pytest.param(_printed('{"transform": {}}'), True, id="empty-transform"),
+        pytest.param(_printed('{"rules": {}}'), None, id="no-transform"),
+        pytest.param(_printed('{"transform": {}}'), None, id="empty-transform"),
         pytest.param(
             _printed('{"transform": {"^.*\\\\.vue$": "html-validate-vue"}}'),
-            False,
-            id="transform",
+            None,
+            id="vue-only-transform",
         ),
-        pytest.param(_printed("", returncode=1), False, id="config-error"),
-        pytest.param(_printed("not json"), False, id="unreadable-output"),
-        pytest.param(_printed("[]"), False, id="not-an-object"),
+        pytest.param(
+            _printed('{"transform": {"\\\\.html$": "my-transform"}}'),
+            "its transform pattern '\\\\.html$' applies to it",
+            id="transform-matches-the-real-path",
+        ),
+        pytest.param(
+            _printed('{"transform": {"^/dev/": "my-transform"}}'),
+            "its transform pattern '^/dev/' applies to it",
+            id="transform-matches-dev-stdin",
+        ),
+        pytest.param(
+            _printed('{"transform": {"[": "my-transform"}}'),
+            "its transform pattern '[' cannot be checked",
+            id="uncompilable-key",
+        ),
+        pytest.param(
+            _printed("", returncode=1),
+            "html-validate could not print the configuration for it",
+            id="config-error",
+        ),
+        pytest.param(
+            _printed("not json"),
+            "html-validate could not print the configuration for it",
+            id="unreadable-output",
+        ),
+        pytest.param(
+            _printed("[]"),
+            "html-validate could not print the configuration for it",
+            id="not-an-object",
+        ),
     ],
 )
-def test_a_config_file_is_read_for_transformers(
+def test_transform_keys_hold_back_only_the_files_they_match(
     tmp_path: Path,
     printed: SubprocessResult,
-    expected: bool,
+    expected: str | None,
 ) -> None:
-    """With a config file present, only a transformer-free config uses stdin.
+    """A transform key holds a file back only when it matches that file.
+
+    Keys are matched against the real path and ``/dev/stdin``, the name
+    html-validate matches on the stdin route.
 
     Args:
         tmp_path: Directory holding the config and the file.
         printed: What ``--print-config --stdin`` answered.
-        expected: Whether stdin may validate the file.
+        expected: The hold-back reason, or None when stdin is used.
     """
     (tmp_path / ".htmlvalidate.json").write_text("{}", encoding="utf-8")
     (tmp_path / "[slug]").mkdir()
-    (tmp_path / "[slug]" / "page.html").write_text("<p>a</p>", encoding="utf-8")
+    for name in ("page.html", "other.html"):
+        (tmp_path / "[slug]" / name).write_text("<p>a</p>", encoding="utf-8")
     asked: list[tuple[list[str], str]] = []
 
     def answer(cmd: list[str], cwd: str) -> SubprocessResult:
@@ -374,8 +471,8 @@ def test_a_config_file_is_read_for_transformers(
 
     route = _route(tmp_path, answer)
 
-    assert_that(route.can_validate("[slug]/page.html")).is_equal_to(expected)
-    assert_that(route.can_validate("[slug]/page.html")).is_equal_to(expected)
+    assert_that(route.hold_back_reason("[slug]/page.html")).is_equal_to(expected)
+    assert_that(route.hold_back_reason("[slug]/other.html")).is_equal_to(expected)
     assert_that(asked).is_equal_to(
         [
             (
@@ -386,6 +483,19 @@ def test_a_config_file_is_read_for_transformers(
     )
 
 
+def _no_config_call(cmd: list[str], cwd: str) -> NoReturn:
+    """Fail the test if html-validate is asked for its config.
+
+    Args:
+        cmd: The argv.
+        cwd: The working directory.
+
+    Raises:
+        AssertionError: Always.
+    """
+    raise AssertionError(f"unexpected call {cmd} in {cwd}")
+
+
 def test_without_a_config_file_stdin_is_used_without_asking(tmp_path: Path) -> None:
     """The built-in preset has no transformers, so nothing extra runs.
 
@@ -393,23 +503,78 @@ def test_without_a_config_file_stdin_is_used_without_asking(tmp_path: Path) -> N
         tmp_path: Directory holding the file.
     """
     (tmp_path / "[slug].html").write_text("<p>a</p>", encoding="utf-8")
+    route = _route(tmp_path, _no_config_call)
 
-    def answer(cmd: list[str], cwd: str) -> NoReturn:
-        """Fail the test if html-validate is asked for its config.
+    assert_that(route.hold_back_reason("[slug].html")).is_none()
+    assert_that(route.hold_back_reason("missing[1].html")).is_equal_to(
+        "the file cannot be read",
+    )
 
-        Args:
-            cmd: The argv.
-            cwd: The working directory.
 
-        Raises:
-            AssertionError: Always.
-        """
-        raise AssertionError(f"unexpected call {cmd} in {cwd}")
+@pytest.mark.parametrize(
+    ("ignores", "expected"),
+    [
+        pytest.param({"": "dist/\n"}, None, id="pattern-for-another-directory"),
+        pytest.param(
+            {"": "src/?slug?.html\n"},
+            "a pattern in {root}/.htmlvalidateignore ignores it",
+            id="root-pattern-relative-to-its-directory",
+        ),
+        pytest.param(
+            {"src": "?slug?.html\n"},
+            "a pattern in {root}/src/.htmlvalidateignore ignores it",
+            id="nearer-ignore-file",
+        ),
+        pytest.param(
+            {"": "*.html\n!src/?slug?.html\n"},
+            None,
+            id="negated-pattern",
+        ),
+        pytest.param({"": "src/\n"}, "{root}/.htmlvalidateignore", id="directory"),
+    ],
+)
+def test_ignore_files_apply_with_gitignore_semantics(
+    tmp_path: Path,
+    ignores: dict[str, str],
+    expected: str | None,
+) -> None:
+    """An ignore file holds a file back only when one of its patterns matches.
 
-    route = _route(tmp_path, answer)
+    Args:
+        tmp_path: Root of the tree.
+        ignores: Directory (relative to the root) to ignore-file content.
+        expected: Substring of the hold-back reason, or None.
+    """
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "[slug].html").write_text("<p>a</p>", encoding="utf-8")
+    for folder, content in ignores.items():
+        (tmp_path / folder / ".htmlvalidateignore").write_text(
+            content,
+            encoding="utf-8",
+        )
 
-    assert_that(route.can_validate("[slug].html")).is_true()
-    assert_that(route.can_validate("missing[1].html")).is_false()
+    reason = _route(tmp_path, _no_config_call).hold_back_reason("src/[slug].html")
+
+    if expected is None:
+        assert_that(reason).is_none()
+    else:
+        assert_that(reason).contains(expected.format(root=tmp_path))
+
+
+def test_an_unreadable_ignore_file_holds_the_file_back(tmp_path: Path) -> None:
+    """An ignore file lintro cannot read could ignore anything.
+
+    Args:
+        tmp_path: Root of the tree.
+    """
+    (tmp_path / "[slug].html").write_text("<p>a</p>", encoding="utf-8")
+    (tmp_path / ".htmlvalidateignore").mkdir()
+
+    reason = _route(tmp_path, _no_config_call).hold_back_reason("[slug].html")
+
+    assert_that(reason).is_equal_to(
+        f"{tmp_path / '.htmlvalidateignore'} cannot be read",
+    )
 
 
 def test_a_failed_print_config_launch_holds_the_file_back(tmp_path: Path) -> None:
@@ -433,7 +598,9 @@ def test_a_failed_print_config_launch_holds_the_file_back(tmp_path: Path) -> Non
         """
         raise FileNotFoundError(cmd[0], cwd)
 
-    assert_that(_route(tmp_path, answer).can_validate("[slug].html")).is_false()
+    assert_that(
+        _route(tmp_path, answer).hold_back_reason("[slug].html"),
+    ).is_equal_to("html-validate could not print the configuration for it")
 
 
 def _issue(path: str) -> HtmlValidateIssue:
@@ -472,18 +639,6 @@ def _checked(*paths: str, success: bool, failures: int | None = None) -> ToolRes
     )
 
 
-def _never_times_out(issues: list[BaseIssue]) -> NoReturn:
-    """Fail the test if the merge builds a timeout.
-
-    Args:
-        issues: Findings it would carry.
-
-    Raises:
-        AssertionError: Always.
-    """
-    raise AssertionError(f"unexpected timeout with {issues}")
-
-
 def test_merge_keeps_every_finding_and_sums_parse_failures() -> None:
     """Merged findings, counts and outputs come from every part."""
     merged = merge_results(
@@ -494,7 +649,6 @@ def test_merge_keeps_every_finding_and_sums_parse_failures() -> None:
         ],
         name="html_validate",
         cwd="/r",
-        timed_out=_never_times_out,
     )
 
     assert_that(merged.success).is_false()
@@ -522,7 +676,6 @@ def test_merge_drops_a_no_files_part() -> None:
         [ignored, stdin_part],
         name="html_validate",
         cwd=None,
-        timed_out=_never_times_out,
     )
 
     assert_that(merged.no_files).is_false()
@@ -543,10 +696,39 @@ def test_merge_of_a_failed_part_is_an_incomplete_run() -> None:
         [_checked("a.html", success=False), broken],
         name="html_validate",
         cwd=None,
-        timed_out=_never_times_out,
     )
 
     assert_that(merged.execution_failed).is_true()
     assert_that(merged.inspected_files).is_none()
     assert_that(merged.output).contains("printed no report")
     assert_that([issue.file for issue in merged.issues]).is_equal_to(["a.html"])
+
+
+def test_merge_keeps_counts_and_every_reason_beside_a_timeout() -> None:
+    """A timeout part does not reset the counts or replace a crash reason."""
+    timed_out = ToolResult.from_outcome(
+        ToolOutcome(execution=TimedOut("/r/[t].html: timed out")),
+        name="html_validate",
+    )
+    crashed = ToolResult.from_outcome(
+        ToolOutcome(execution=Checked(success=False, inspected_files=None)),
+        name="html_validate",
+        output="/r/[c].html: html-validate could not be started",
+        execution_failed=True,
+    )
+
+    merged = merge_results(
+        [_checked("a.html", "b.html", success=False), crashed, timed_out],
+        name="html_validate",
+        cwd="/r",
+    )
+
+    assert_that(merged.timed_out).is_false()
+    assert_that(merged.execution_failed).is_true()
+    assert_that(merged.findings_complete).is_false()
+    assert_that(merged.inspected_files).is_none()
+    assert_that(merged.issues_count).is_equal_to(len(merged.issues)).is_equal_to(2)
+    assert_that(merged.output).contains(
+        "/r/[c].html: html-validate could not be started",
+        "/r/[t].html: timed out",
+    )

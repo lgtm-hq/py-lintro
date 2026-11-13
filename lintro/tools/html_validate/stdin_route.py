@@ -5,17 +5,20 @@ html-validate expands every positional argument as a glob, so a file named
 validated. ``--stdin --stdin-filename <path>`` validates any name and reports
 the findings under that name, one file per call.
 
-The stdin path differs from a positional run in three ways, each checked
+The stdin path differs from a positional run in four ways, each checked
 against html-validate 11.21.0:
 
 - Configuration is looked up from the process working directory, not the
   file's directory. Each call therefore runs from the file's own directory,
   which gives the same lookup as a positional run.
-- ``.htmlvalidateignore`` is never consulted. A file below such an ignore
-  file could be one html-validate would skip, so it is held back instead.
+- ``.htmlvalidateignore`` is never consulted. lintro applies it the way
+  html-validate's ``IsIgnored`` does, and holds back a file a pattern ignores
+  or whose ignore file cannot be read.
 - Transformers are matched against ``/dev/stdin``, not the real name. A file
-  whose resolved configuration declares any ``transform`` is held back,
-  because stdin would validate the untransformed source.
+  a ``transform`` key matches, under either name, is held back, because stdin
+  would validate the untransformed source or apply the wrong transformer.
+- Rules see the source's filename as ``/dev/stdin``; only the report is
+  renamed.
 
 A file that cannot be read is held back too. Held-back files keep the
 existing hold-back result: the run fails and names them as not inspected.
@@ -25,21 +28,23 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess  # nosec B404 - used safely with shell disabled
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+
+import pathspec
 
 from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools.core.incomplete_run import incomplete_run_result
 
-if TYPE_CHECKING:
-    from lintro.parsers.base_issue import BaseIssue
-
 HTML_VALIDATE_IGNORE_FILENAME: str = ".htmlvalidateignore"
+
+#: The name html-validate gives the stdin source; transformers match it.
+STDIN_FILENAME: str = "/dev/stdin"
 
 # Config file names html-validate searches for, in its own lookup order.
 _CONFIG_FILENAMES: tuple[str, ...] = (
@@ -91,7 +96,15 @@ class StdinRoute:
     base_command: list[str]
     run_tool: RunTool
     cwd: str
-    _transforms: dict[Path, bool | None] = field(default_factory=dict, repr=False)
+    _reasons: dict[str, str | None] = field(default_factory=dict, repr=False)
+    _transforms: dict[Path, list[str] | None] = field(
+        default_factory=dict,
+        repr=False,
+    )
+    _ignore_specs: dict[Path, pathspec.GitIgnoreSpec | None] = field(
+        default_factory=dict,
+        repr=False,
+    )
 
     def absolute(self, path: str) -> Path:
         """Resolve a passed path against the working directory.
@@ -104,29 +117,101 @@ class StdinRoute:
         """
         return Path(self.cwd, path)
 
-    def can_validate(self, path: str) -> bool:
-        """Report whether stdin validates a file as a positional run would.
+    def hold_back_reason(self, path: str) -> str | None:
+        """Say why stdin cannot validate a file as a positional run would.
 
         Args:
             path: A relative or absolute path as passed to the tool.
 
         Returns:
-            True for a readable file with no ``.htmlvalidateignore`` above it
-            and a resolved configuration that declares no transformer.
+            None when stdin is faithful for the file; otherwise the one
+            reason that applied: the file is unreadable, an
+            ``.htmlvalidateignore`` ignores it or cannot be read, or a
+            transformer applies to it or cannot be checked.
         """
-        target = self.absolute(path)
-        if not target.is_file() or not os.access(target, os.R_OK):
-            return False
-        directory = target.parent
-        if any(
-            (folder / HTML_VALIDATE_IGNORE_FILENAME).exists()
-            for folder in _ancestors(directory)
-        ):
-            return False
-        return self._declares_transform(directory) is False
+        if path not in self._reasons:
+            self._reasons[path] = self._judge(self.absolute(path))
+        return self._reasons[path]
 
-    def _declares_transform(self, directory: Path) -> bool | None:
-        """Report whether the configuration for a directory has transformers.
+    def _judge(self, target: Path) -> str | None:
+        """Find the first reason stdin cannot validate a file.
+
+        Args:
+            target: Absolute path of the file.
+
+        Returns:
+            The reason, or None when stdin is faithful.
+        """
+        if not target.is_file() or not os.access(target, os.R_OK):
+            return "the file cannot be read"
+        return self._ignored(target) or self._transformed(target)
+
+    def _ignored(self, target: Path) -> str | None:
+        """Apply ``.htmlvalidateignore`` the way html-validate's CLI does.
+
+        html-validate walks from the file's directory to the filesystem
+        root and asks each ignore file, with gitignore semantics, about the
+        path relative to that file's directory. Any match ignores the file.
+
+        Args:
+            target: Absolute path of the file.
+
+        Returns:
+            Why the file is held back, or None when no ignore file applies.
+        """
+        for folder in _ancestors(target.parent):
+            ignore_file = folder / HTML_VALIDATE_IGNORE_FILENAME
+            if not ignore_file.exists():
+                continue
+            spec = self._ignore_spec(ignore_file)
+            if spec is None:
+                return f"{ignore_file} cannot be read"
+            if spec.match_file(os.path.relpath(target, folder)):
+                return f"a pattern in {ignore_file} ignores it"
+        return None
+
+    def _ignore_spec(self, ignore_file: Path) -> pathspec.GitIgnoreSpec | None:
+        """Parse an ignore file once.
+
+        Args:
+            ignore_file: Path of an existing ``.htmlvalidateignore``.
+
+        Returns:
+            Its patterns, or None when it cannot be read or parsed.
+        """
+        if ignore_file not in self._ignore_specs:
+            try:
+                lines = ignore_file.read_text(encoding="utf-8").splitlines()
+                spec: pathspec.GitIgnoreSpec | None
+                spec = pathspec.GitIgnoreSpec.from_lines(lines)
+            except (OSError, UnicodeDecodeError, ValueError):
+                spec = None
+            self._ignore_specs[ignore_file] = spec
+        return self._ignore_specs[ignore_file]
+
+    def _transformed(self, target: Path) -> str | None:
+        """Check the file against its configuration's transformer keys.
+
+        Args:
+            target: Absolute path of the file.
+
+        Returns:
+            Why the file is held back, or None when no transformer applies.
+        """
+        keys = self._transform_keys(target.parent)
+        if keys is None:
+            return "html-validate could not print the configuration for it"
+        for key in keys:
+            try:
+                pattern = re.compile(key)
+            except re.error:
+                return f"its transform pattern {key!r} cannot be checked"
+            if pattern.search(str(target)) or pattern.search(STDIN_FILENAME):
+                return f"its transform pattern {key!r} applies to it"
+        return None
+
+    def _transform_keys(self, directory: Path) -> list[str] | None:
+        """List the transformer patterns configured for a directory.
 
         The built-in preset declares none, so html-validate is only asked
         when a config file sits in the directory or above it.
@@ -135,29 +220,29 @@ class StdinRoute:
             directory: The directory a stdin call would run from.
 
         Returns:
-            True or False, or None when the configuration could not be read.
+            The ``transform`` keys, or None when the configuration could not
+            be read.
         """
-        if directory in self._transforms:
-            return self._transforms[directory]
-        answer: bool | None = False
-        if any(
-            (folder / name).exists()
-            for folder in _ancestors(directory)
-            for name in _CONFIG_FILENAMES
-        ):
-            answer = self._print_config_transform(directory)
-        self._transforms[directory] = answer
-        return answer
+        if directory not in self._transforms:
+            keys: list[str] | None = []
+            if any(
+                (folder / name).exists()
+                for folder in _ancestors(directory)
+                for name in _CONFIG_FILENAMES
+            ):
+                keys = self._print_config_transforms(directory)
+            self._transforms[directory] = keys
+        return self._transforms[directory]
 
-    def _print_config_transform(self, directory: Path) -> bool | None:
+    def _print_config_transforms(self, directory: Path) -> list[str] | None:
         """Ask html-validate for the stdin configuration of a directory.
 
         Args:
             directory: The directory a stdin call would run from.
 
         Returns:
-            Whether the resolved configuration declares a transformer, or
-            None when html-validate printed no configuration.
+            The ``transform`` keys, or None when html-validate printed no
+            usable configuration.
         """
         cmd = [*self.base_command, "--print-config", "--stdin"]
         try:
@@ -172,7 +257,10 @@ class StdinRoute:
             return None
         if not isinstance(config, dict):
             return None
-        return bool(config.get("transform"))
+        transform = config.get("transform") or {}
+        if not isinstance(transform, dict):
+            return None
+        return [str(key) for key in transform]
 
 
 def _sum_parse_failures(results: Sequence[ToolResult]) -> int | None:
@@ -184,9 +272,9 @@ def _sum_parse_failures(results: Sequence[ToolResult]) -> int | None:
     Returns:
         The sum, or None when no result recorded a count.
     """
-    counts = [r.parse_failures_count for r in results if r.parse_failures_count]
-    recorded = [r for r in results if r.parse_failures_count is not None]
-    return sum(counts) if recorded else None
+    recorded = [r.parse_failures_count for r in results]
+    counts = [count for count in recorded if count is not None]
+    return sum(counts) if counts else None
 
 
 def _joined_output(results: Sequence[ToolResult]) -> str | None:
@@ -198,7 +286,7 @@ def _joined_output(results: Sequence[ToolResult]) -> str | None:
     Returns:
         The outputs separated by newlines, or None when all were empty.
     """
-    parts = [r.output for r in results if (r.output or "").strip()]
+    parts = [r.output for r in results if r.output and r.output.strip()]
     return "\n".join(part for part in parts if part) or None
 
 
@@ -207,7 +295,6 @@ def merge_results(
     *,
     name: str,
     cwd: str | None,
-    timed_out: Callable[[list[BaseIssue]], ToolResult],
 ) -> ToolResult:
     """Merge one batch result and per-file stdin results into one result.
 
@@ -215,27 +302,25 @@ def merge_results(
         results: At least one result, all from the same tool and run.
         name: Tool name for the merged result.
         cwd: Working directory for the merged result.
-        timed_out: Builds a timeout result carrying the given findings.
 
     Returns:
-        The single result unchanged; otherwise a timeout when any part
-        timed out, an incomplete run when any part has no complete verdict,
-        and a checked verdict over every part. A "no files" part (every
+        The single result unchanged. Otherwise a "no files" part (every
         plain file ignored by html-validate) adds nothing; when every part
-        is "no files" the first is returned.
+        is "no files" the first is returned. Any part that timed out or has
+        no complete verdict makes an incomplete run that keeps every finding
+        and every failed part's reason. Otherwise a checked verdict over
+        every part.
     """
     if len(results) == 1:
         return results[0]
-    issues = [issue for result in results for issue in result.issues]
-    if any(result.timed_out for result in results):
-        return timed_out(issues)
     ran = [result for result in results if not result.no_files]
     if not ran:
         return results[0]
     if len(ran) == 1:
         return ran[0]
+    issues = [issue for result in ran for issue in result.issues]
     failures = _sum_parse_failures(ran)
-    broken = [result for result in ran if result.execution_failed]
+    broken = [r for r in ran if r.execution_failed or r.timed_out]
     if broken:
         return incomplete_run_result(
             name=name,

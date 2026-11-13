@@ -2784,12 +2784,18 @@ POSIX only: on Windows it is always a path separator, so those paths are passed 
 usual.
 
 Standard input skips two things a path argument gets: `.htmlvalidateignore`, and
-transformers configured under `transform`. A glob-named file is therefore still held
-back when an `.htmlvalidateignore` sits in its directory or any parent, when its
-resolved configuration declares a transformer, or when it cannot be read. Lintro
-validates the other files, keeps their findings, and fails the run as an execution error
-that names the files left uninspected; if every path is held back, html-validate is not
-run at all.
+transformers configured under `transform`, which html-validate matches against the name
+`/dev/stdin` instead of the file's path. Lintro applies `.htmlvalidateignore` itself,
+the way html-validate does: every ignore file from the file's directory up to the
+filesystem root, with gitignore semantics, relative to that ignore file's directory. A
+glob-named file is still held back when a pattern ignores it or an ignore file cannot be
+read; when a `transform` key matches its path or `/dev/stdin` (or is not a regular
+expression Lintro can check); or when the file cannot be read. Lintro validates the
+other files, keeps their findings, and fails the run as an execution error that names
+each file left uninspected and why; if every path is held back, html-validate is not run
+at all. Plugin rules see these files' filename as `/dev/stdin`; only the report carries
+the real path. If an html-validate call times out, the remaining glob-named files are
+not started and are named as not inspected.
 
 **Available Options via `--tool-options`:**
 
