@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.24] - 2026-11-13
+
+### Changed
+
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 7c7b62a (#3454)
+  (cd2cbba)
+
+### Fixed
+
+- **html-validate**: validate glob-named files through stdin (#3431) (5fcebc7)
+
 ## [0.180.23] - 2026-11-13
 
 ### Fixed
