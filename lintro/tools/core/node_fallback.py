@@ -22,6 +22,8 @@ from pathlib import Path
 
 from loguru import logger
 
+from lintro.utils.npx_call import PACKAGE_FLAGS
+
 #: An exact npm pin: ``MAJOR.MINOR.PATCH`` with an optional prerelease and
 #: build suffix. Partial versions (``1.2``), wildcards (``1.x``), ranges
 #: (``^1.2.3``) and dist-tags (``latest``) all let the runner choose (#2043).
@@ -34,11 +36,11 @@ EXACT_SEMVER: re.Pattern[str] = re.compile(
 # Package runners used as the last-resort registry fallback for Node tools.
 REGISTRY_RUNNERS: frozenset[str] = frozenset({"bunx", "npx"})
 
-# Runner flags that carry the package spec when it differs from the executable
-# name (``bunx --package typescript@6.0.3 tsc``). Both ``bunx`` and ``npx``
-# accept the short and long spelling. ``--yes`` is *not* a package flag; it is
-# a boolean runner flag (see ``RUNNER_FLAGS``).
-PACKAGE_FLAGS: frozenset[str] = frozenset({"-p", "--package"})
+# ``PACKAGE_FLAGS`` (from :mod:`lintro.utils.npx_call`, which the executor's
+# npx rewrite shares) are the runner flags that carry the package spec when it
+# differs from the executable name (``bunx --package typescript@6.0.3 tsc``).
+# Both ``bunx`` and ``npx`` accept the short and long spelling. ``--yes`` is
+# *not* a package flag; it is a boolean runner flag (see ``RUNNER_FLAGS``).
 
 #: Flags on every npx fallback so npm configuration cannot change what runs
 #: (#2043). Verified with npx 11.20.0 against a localhost registry: each one

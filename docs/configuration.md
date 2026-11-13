@@ -1404,6 +1404,16 @@ Rationale:
    so `workspaces`, `bin-links`, `global`, `offline`, `prefer-offline` and `cache`
    cannot change what runs.
 
+   **Path arguments stay literal.** npx runs the tool through a shell (`sh -c`, or npm's
+   `script-shell`) and quotes an argument only when it contains characters such as
+   spaces, `*`, `?` or `$`. It leaves `[`, `]`, `{`, `}` and `,` bare, so a file named
+   `[slug].ts` would glob to a neighbouring `s.ts`, and under a bash `script-shell`
+   `a{1,2}.ts` would become `a1.ts a2.ts`. On Linux and macOS, Lintro therefore runs the
+   tool as `--package <package>@<pinned> --call '<binary> <args>'`, quoting every
+   argument itself so the shell sees literals. On Windows npm uses `cmd.exe`, which does
+   not glob, and the command is left as above. `bunx`, project-local and `PATH` binaries
+   never go through a shell and are spawned unchanged.
+
    **Lintro's own npm cache, checked before every run.** Each pinned package gets its
    own cache directory, so a user cache that already holds something under npm's `_npx`
    directory, or a `cache` value containing a `PATH` separator, is never used. Before

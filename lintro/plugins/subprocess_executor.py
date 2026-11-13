@@ -17,6 +17,7 @@ from loguru import logger
 
 from lintro.models.core.subprocess_result import SubprocessResult as SubprocessResult
 from lintro.plugins.subprocess_failure import format_subprocess_failure
+from lintro.utils.npx_call import npx_shell_safe_command
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -172,9 +173,13 @@ def run_subprocess(
     if env is not None:
         effective_env = {**os.environ, **env}
 
+    # npx runs the tool through ``sh -c``; quote its arguments, and keep any
+    # script file the long form needs until the process has finished (#3439).
+    spawn_scope = contextlib.ExitStack()
     try:
+        spawn_cmd = spawn_scope.enter_context(npx_shell_safe_command(cmd))
         result = subprocess.run(  # nosec B603 - args list, shell=False
-            cmd,
+            spawn_cmd,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -239,6 +244,8 @@ def run_subprocess(
             f"Command not found: {cmd[0]}. "
             f"Please ensure it is installed and in your PATH.",
         ) from e
+    finally:
+        spawn_scope.close()
 
 
 def run_subprocess_streaming(
@@ -268,13 +275,12 @@ def run_subprocess_streaming(
             os.environ to preserve PATH and other essential variables.
         line_handler: Optional callback called for each line of output.
 
+    ``subprocess.TimeoutExpired`` (on timeout) and ``FileNotFoundError`` (when
+    the executable is missing) propagate from :func:`_stream_subprocess`.
+
     Returns:
         SubprocessResult with the return code and captured output. ``stdout``
         holds the merged stream, ``stderr`` is empty.
-
-    Raises:
-        subprocess.TimeoutExpired: If command times out.
-        FileNotFoundError: If command executable is not found.
     """
     validate_subprocess_command(cmd)
 
@@ -289,16 +295,55 @@ def run_subprocess_streaming(
     if env is not None:
         effective_env = {**os.environ, **env}
 
+    # npx runs the tool through ``sh -c``; quote its arguments, and keep any
+    # script file the long form needs until the process has finished (#3439).
+    with npx_shell_safe_command(cmd) as spawn_cmd:
+        return _stream_subprocess(
+            cmd=cmd,
+            spawn_cmd=spawn_cmd,
+            timeout=timeout,
+            cwd=cwd,
+            env=effective_env,
+            line_handler=line_handler,
+        )
+
+
+def _stream_subprocess(
+    *,
+    cmd: list[str],
+    spawn_cmd: list[str],
+    timeout: float,
+    cwd: str | None,
+    env: dict[str, str] | None,
+    line_handler: Callable[[str], None] | None,
+) -> SubprocessResult:
+    """Spawn *spawn_cmd* and stream its merged output.
+
+    Args:
+        cmd: Command as lintro built it, for messages.
+        spawn_cmd: Argv actually spawned (see :func:`npx_shell_safe_command`).
+        timeout: Timeout in seconds.
+        cwd: Working directory for command execution.
+        env: Full environment for the subprocess, or None to inherit.
+        line_handler: Optional callback called for each line of output.
+
+    Returns:
+        SubprocessResult with the merged stream in ``stdout``.
+
+    Raises:
+        subprocess.TimeoutExpired: If command times out.
+        FileNotFoundError: If command executable is not found.
+    """
     try:
         # Use Popen for streaming output
         # Args list, shell=False
         process = subprocess.Popen(  # nosec B603
-            cmd,
+            spawn_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             cwd=cwd,
-            env=effective_env,
+            env=env,
             bufsize=1,  # Line buffering
         )
 
