@@ -23,7 +23,7 @@ import json
 import shutil
 import tarfile
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -32,6 +32,7 @@ from assertpy import assert_that
 
 from lintro._tool_versions import get_tool_version
 from lintro.enums.tool_name import ToolName
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.plugins.subprocess_executor import (
     run_subprocess,
     run_subprocess_streaming,
@@ -52,6 +53,17 @@ pytestmark = pytest.mark.skipif(
 #: Names the shell would expand, and the decoys they would expand to.
 _TARGETS: tuple[str, ...] = ("[slug].css", "a{1,2}.css", "src/[...rest]/x.css")
 _DECOYS: tuple[str, ...] = ("s.css", "a1.css", "a2.css", "src/r/x.css")
+#: Enough quoted names that the joined ``--call`` script passes Linux's
+#: 131,072-byte per-argument limit (the #3440 review's long-argv shape).
+_LONG_NAMES: tuple[str, ...] = tuple("a'b" * 20 + f"{i}.css" for i in range(900))
+
+_SHELLS = [
+    "sh",
+    pytest.param(
+        "bash",
+        marks=pytest.mark.skipif(_BASH is None, reason="bash is not installed"),
+    ),
+]
 
 
 def _echo_tarball() -> bytes:
@@ -183,16 +195,7 @@ def _npx_command(
     return project, command
 
 
-@pytest.mark.parametrize(
-    "script_shell",
-    [
-        "sh",
-        pytest.param(
-            "bash",
-            marks=pytest.mark.skipif(_BASH is None, reason="bash is not installed"),
-        ),
-    ],
-)
+@pytest.mark.parametrize("script_shell", _SHELLS)
 def test_npx_fallback_passes_glob_and_brace_names_literally(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -245,3 +248,33 @@ def test_npx_fallback_streaming_passes_names_literally(
     assert_that(result.returncode).described_as(result.output).is_zero()
     received = json.loads(result.stdout.strip().splitlines()[-1])
     assert_that(received).is_equal_to(["[slug].css"])
+
+
+@pytest.mark.parametrize("executor", [run_subprocess, run_subprocess_streaming])
+@pytest.mark.parametrize("script_shell", _SHELLS)
+def test_npx_fallback_runs_a_file_list_past_the_argument_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+    script_shell: str,
+    executor: Callable[..., SubprocessResult],
+) -> None:
+    """A long quoted file list reaches the tool intact instead of hitting E2BIG.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+        script_shell: Shell npm runs the tool through.
+        executor: lintro subprocess entry point.
+    """
+    project, command = _npx_command(tmp_path, monkeypatch, registry, script_shell)
+    for name in _LONG_NAMES:
+        (project / name).write_text("a{color:red}\n", encoding="utf-8")
+    argv = ["--check", *_LONG_NAMES]
+
+    result = executor([*command, *argv], timeout=180, cwd=str(project))
+
+    assert_that(result.returncode).described_as(result.output[-2000:]).is_zero()
+    received = json.loads(result.stdout.strip().splitlines()[-1])
+    assert_that(received).is_equal_to(argv)
