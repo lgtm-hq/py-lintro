@@ -29,6 +29,7 @@
         "cross_chunk_contradiction": null,
         "origin": null,
         "posted_inline": true,
+        "inline_delivered": null,
         "merged_duplicates": [],
         "finding_id": ""
       },
@@ -60,6 +61,7 @@
         "cross_chunk_contradiction": null,
         "origin": null,
         "posted_inline": true,
+        "inline_delivered": null,
         "merged_duplicates": [],
         "finding_id": ""
       }
@@ -112,6 +114,7 @@
         "cross_chunk_contradiction": null,
         "origin": null,
         "posted_inline": true,
+        "inline_delivered": null,
         "merged_duplicates": [],
         "finding_id": ""
       },
@@ -143,6 +146,7 @@
         "cross_chunk_contradiction": null,
         "origin": null,
         "posted_inline": true,
+        "inline_delivered": null,
         "merged_duplicates": [],
         "finding_id": ""
       }

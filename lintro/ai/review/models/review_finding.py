@@ -119,14 +119,23 @@ class ReviewFinding:
             surfaces can attribute a whole-PR finding that no single chunk
             could have reported. Serialized only when set, so a run without
             the pass renders exactly as it did before.
-        posted_inline: Whether the posting policy (#2572) selected this
-            finding for an inline review thread. ``False`` routes it to the
+        posted_inline: Whether the posting policy (#2572) made this finding
+            eligible for an inline review thread. It is eligibility, not
+            delivery: it is set before anything is posted and stays ``True``
+            when the inline POST is refused or never made (#3426); see
+            ``inline_delivered``. ``False`` routes it to the
             sticky comment's collapsed "Notes and questions" block instead,
             where it never feeds the derived verdict or the header counts.
             Defaults to ``True`` so a finding that never passed through the
             policy renders exactly as it did before the gate existed; the
             default policy clears it for low-confidence findings and for
             questions.
+        inline_delivered: Whether this finding's inline comment reached the
+            pull request (#3426). ``True`` when GitHub accepted it, ``False``
+            when posting was attempted and no inline comment was confirmed
+            (not eligible, not mappable to the diff, or the POST was
+            refused, or a SIGTERM stopped posting first), and ``None`` when
+            the run never posted.
         merged_duplicates: Findings a synthesis duplicate merge folded into
             this one (lintro-ops #37). The merge re-attributes a defect
             rather than fixing it, so the matcher carries each merged-away
@@ -164,6 +173,7 @@ class ReviewFinding:
     cross_chunk_contradiction: CrossChunkContradiction | None = None
     origin: FindingOrigin | None = None
     posted_inline: bool = True
+    inline_delivered: bool | None = None
     merged_duplicates: tuple[MergedDuplicate, ...] = field(default_factory=tuple)
     finding_id: str = ""
 

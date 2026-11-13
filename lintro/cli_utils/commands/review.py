@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import os
 from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
@@ -78,12 +78,14 @@ from lintro.ai.review.exceptions import (
     ReviewPreparationError,
 )
 from lintro.ai.review.finding_matcher import count_blocking_findings
+from lintro.ai.review.interrupt import defer_sigterm
 from lintro.ai.review.lifecycle.state import (
     departed_paths,
     load_prior_review_state,
     persist_review_state,
 )
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
+from lintro.ai.review.models.inline_delivery import InlineDelivery
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.orchestrator import guard_changed_paths
@@ -253,10 +255,14 @@ class _ReviewRender:
         checklist_display: Resolved ``--show-checklist`` mode.
         question_map: Prompt checklist id to question text, used to attribute
             findings back to the checklist they answered.
+        inline_delivery: What ``--post`` delivered inline, filled while
+            posting and stamped onto the findings the JSON renders (#3426).
+            Left unattempted when the run does not post.
     """
 
     checklist_display: ChecklistDisplay
     question_map: dict[int, str]
+    inline_delivery: InlineDelivery = field(default_factory=InlineDelivery)
 
 
 def _failure_metadata(exc: Exception) -> ReviewMetadata | None:
@@ -1655,23 +1661,32 @@ def _render_post_and_exit(
             ai_config=prepared.ai_config,
         )
 
-    _emit_output(
-        options=options,
-        result=result,
-        render=render,
-        advisory_results=advisory_results,
-    )
-    if options.post and not skip_post_tail:
-        _post_review(
-            options=options,
-            lintro_config=lintro_config,
-            prepared=prepared,
-            result=result,
-            prior_state=prior_state,
-            targets=targets,
-            resolved_profile=resolved_profile,
-            render=render,
-        )
+    # Posting runs before the output is rendered so the JSON can report
+    # what reached the pull request inline, not only what was eligible
+    # (#3426). The CI wrapper classifies the round from that envelope, so it
+    # is written when posting raises, and SIGTERM — which the wrapper and
+    # ``uv run`` may both deliver — is held off until it is complete.
+    with defer_sigterm() as sigterm:
+        try:
+            if options.post and not skip_post_tail:
+                with sigterm.abortable():
+                    _post_review(
+                        options=options,
+                        lintro_config=lintro_config,
+                        prepared=prepared,
+                        result=result,
+                        prior_state=prior_state,
+                        targets=targets,
+                        resolved_profile=resolved_profile,
+                        render=render,
+                    )
+        finally:
+            _emit_output(
+                options=options,
+                result=render.inline_delivery.stamp(result=result),
+                render=render,
+                advisory_results=advisory_results,
+            )
 
     # A run that reviewed nothing (#2731) is a delivery failure, exit 1 like a
     # P1; ``incomplete`` in general still exits 0 (that policy is separate).
@@ -1767,6 +1782,7 @@ def _post_review(
                 overrides=_cli_overrides(options=options),
             ),
             captured_comment_ids=captured_comment_ids,
+            inline_delivery=render.inline_delivery,
         ),
     )
     # Unconditional: ``_run_round`` already wrote this round's state from the
