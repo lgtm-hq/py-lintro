@@ -45,6 +45,10 @@ PACKAGE_FLAGS: frozenset[str] = frozenset({"-p", "--package"})
 #: is 131,072 bytes; the margin leaves room for npm's own wrapping.
 NPX_INLINE_SCRIPT_LIMIT: int = 96 * 1024
 
+#: A command line ready to spawn. A plain name keeps pydoclint from misreading
+#: the nested ``Iterator[list[str]]`` yield type as ``str`` (DOC404).
+Argv = list[str]
+
 
 def _split_npx_fallback(
     cmd: Sequence[str],
@@ -87,7 +91,7 @@ def npx_shell_safe_command(
     *,
     windows: bool | None = None,
     inline_limit: int = NPX_INLINE_SCRIPT_LIMIT,
-) -> Iterator[list[str]]:
+) -> Iterator[Argv]:
     """Yield the argv to spawn so npm's shell sees every argument literally.
 
     ``[npx, *options, --package, spec, binary, *args]`` becomes
@@ -103,7 +107,7 @@ def npx_shell_safe_command(
         inline_limit: Longest script, in bytes, passed inline.
 
     Yields:
-        list[str]: The argv to spawn.
+        Argv: The argv to spawn.
     """
     parts = _split_npx_fallback(cmd, windows=windows)
     if parts is None:
