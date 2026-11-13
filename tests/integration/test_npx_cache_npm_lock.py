@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess  # nosec B404 - runs node with a fixed argv; shell=False
+import sys
 import time
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -120,128 +121,138 @@ def cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return npx_cache.npx_cache_dir(f"prettier@{_PIN}")
 
 
-def _race_on_first_touch(
-    monkeypatch: pytest.MonkeyPatch,
-    lock: Path,
-    race: Callable[[], None],
-) -> list[bool]:
-    """Run *race* the first time lintro removes or moves *lock* by name.
-
-    Hooks both ``Path.rmdir`` and ``os.rename`` so the race lands at the
-    same point, between lintro looking at the lock and acting on it,
-    whichever call lintro uses.
+def _start_and_wait_held(lock: Path, millis: int) -> subprocess.Popen[str]:
+    """Start real npm on *lock* and return once it holds the lock.
 
     Args:
-        monkeypatch: Installs the hooks.
-        lock: The lock path to watch.
-        race: What the other process does in that window.
+        lock: ``<entry>/concurrency.lock``.
+        millis: How long npm keeps the lock.
 
     Returns:
-        A list that holds True once the race has run.
+        The running node process, past its ``HELD`` line.
     """
-    fired: list[bool] = []
-    real_rmdir, real_rename = Path.rmdir, os.rename
-
-    def maybe_race(path: _PathArg) -> None:
-        if not fired and Path(path) == lock:
-            fired.append(True)
-            race()
-
-    def racing_rmdir(self: Path) -> None:
-        maybe_race(self)
-        real_rmdir(self)
-
-    def racing_rename(src: _PathArg, dst: _PathArg) -> None:
-        maybe_race(src)
-        real_rename(src, dst)
-
-    monkeypatch.setattr(Path, "rmdir", racing_rmdir)
-    monkeypatch.setattr(os, "rename", racing_rename)
-    return fired
+    npm = _npm_holds(lock, millis)
+    assert npm.stdout is not None
+    line = npm.stdout.readline()
+    assert line.startswith("HELD:"), line
+    return npm
 
 
-def test_npm_reclaiming_a_stale_lock_first_keeps_its_lock_and_entry(
+def test_npm_reclaiming_a_stale_lock_while_lintro_looks_is_left_alone(
     cache: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Npm wins the stale-lock race; lintro waits for it instead of deleting.
+    """Sol's stale-lock reproduction from PR #3420: npm wins, lintro refuses.
 
-    Sol's stale-lock reproduction from PR #3420: lintro has judged the lock
-    abandoned, then npm reclaims it and holds a fresh lock with a new inode
-    before lintro acts. lintro must leave that lock and the entry alone
-    while npm holds them, and repair only after npm releases.
+    lintro has just judged the lock abandoned when npm reclaims it and holds
+    a fresh lock. lintro must not touch npm's lock or entry: it refuses and
+    names the path, and npm's callback finishes normally.
 
     Args:
         cache: Per-pin cache.
-        monkeypatch: Places npm's reclaim inside lintro's window.
+        monkeypatch: Places npm's reclaim right after lintro's staleness read.
     """
     entry = cache / "_npx" / "0123456789abcdef"
     lock = entry / "concurrency.lock"
     lock.mkdir(parents=True)
     _age(lock)
     npm: list[subprocess.Popen[str]] = []
-    held: list[str] = []
+    read_age = npx_cache._lock_age
 
-    def npm_reclaims() -> None:
-        npm.append(_npm_holds(lock, 2000))
-        assert npm[0].stdout is not None
-        held.append(npm[0].stdout.readline().strip())
+    def npm_reclaims_after_the_read(path: Path) -> float:
+        age = read_age(path)
+        if not npm:
+            npm.append(_start_and_wait_held(lock, 1500))
+        return age
 
-    fired = _race_on_first_touch(monkeypatch, lock, npm_reclaims)
+    monkeypatch.setattr(npx_cache, "_lock_age", npm_reclaims_after_the_read)
     try:
-        repair_npx_cache(
-            cache,
-            package="prettier",
-            pin=_PIN,
-            binary="prettier",
-            pathsep=":",
-        )
+        with pytest.raises(npx_cache.NpxCacheError, match="looks abandoned") as refusal:
+            repair_npx_cache(
+                cache,
+                package="prettier",
+                pin=_PIN,
+                binary="prettier",
+                pathsep=":",
+            )
     finally:
         output, _ = npm[0].communicate(timeout=30) if npm else ("", None)
 
-    assert_that(fired).is_length(1)
-    assert_that(held[0]).starts_with("HELD:")
+    assert_that(str(refusal.value)).contains(f"Delete {lock}")
     assert_that(output).contains("NORMAL").does_not_contain("FAILED")
-    assert_that(npm[0].returncode).is_equal_to(0)
-    # The empty entry never ran the pin, so it goes once npm has finished.
-    assert_that(entry.exists()).is_false()
+    assert_that(entry.is_dir()).is_true()
 
 
-def test_lintro_lock_left_stale_by_a_delay_is_never_reclaimed_by_npm(
+def test_npm_taking_over_a_lock_lintro_held_too_long_keeps_it(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A lintro run delayed past npm's threshold keeps its lock; npm refuses.
+    """Sol's delayed-release reproduction from PR #3420: npm keeps its lock.
 
-    Sol's delayed-release reproduction from PR #3420: lintro is suspended
-    in release for over 60 seconds (here, its lock is backdated instead),
-    and npm then tries to reclaim the lock. npm must not get it, so lintro's
-    release can never remove a lock npm took.
+    lintro is delayed past npm's threshold in release, after its ownership
+    check (here its lock is backdated rather than waiting 61 seconds), and
+    npm reclaims the lock. lintro's release moves npm's lock aside, sees it
+    is not its own, and puts it back, so npm's callback completes normally.
 
     Args:
         tmp_path: Temporary directory provided by pytest.
-        monkeypatch: Places npm's attempt inside lintro's release.
+        monkeypatch: Places npm's takeover inside lintro's release.
+    """
+    (tmp_path / "probe").mkdir()
+    if npx_cache._rename_noreplace(tmp_path / "probe", tmp_path / "moved") is None:
+        pytest.skip("no exclusive rename here; the lock is left aside instead")
+    entry = tmp_path / "entry"
+    entry.mkdir()
+    lock = entry / "concurrency.lock"
+    held = npx_cache._acquire(lock)
+    npm: list[subprocess.Popen[str]] = []
+    real_rename = os.rename
+
+    def npm_takes_over_before_the_move(src: _PathArg, dst: _PathArg) -> None:
+        if not npm and Path(src) == lock:
+            _age(lock)
+            npm.append(_start_and_wait_held(lock, 1500))
+        real_rename(src, dst)
+
+    monkeypatch.setattr(os, "rename", npm_takes_over_before_the_move)
+    npx_cache._release(lock, held)
+    monkeypatch.undo()
+    output, _ = npm[0].communicate(timeout=30)
+
+    assert_that(output).contains("NORMAL").does_not_contain("FAILED")
+    assert_that(list(entry.iterdir())).is_empty()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs SIGKILL")
+def test_npx_alone_recovers_a_lock_left_by_a_killed_lintro(tmp_path: Path) -> None:
+    """A lintro run killed while holding a lock never blocks plain npx.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
     """
     entry = tmp_path / "entry"
     entry.mkdir()
     lock = entry / "concurrency.lock"
-    marker = npx_cache._acquire(lock)
-    attempts: list[str] = []
+    killed = subprocess.run(  # nosec B603 - fixed argv, shell=False
+        [
+            sys.executable,
+            "-c",
+            "import os, signal, sys\n"
+            "from pathlib import Path\n"
+            "from lintro.tools.core import npx_cache\n"
+            "npx_cache._acquire(Path(sys.argv[1]))\n"
+            "os.kill(os.getpid(), signal.SIGKILL)\n",
+            str(lock),
+        ],
+        check=False,
+        timeout=60,
+    )
+    _age(lock)
+    output, _ = _npm_holds(lock, 100).communicate(timeout=30)
 
-    def npm_tries_to_reclaim() -> None:
-        _age(lock)
-        output, _ = _npm_holds(lock, 100).communicate(timeout=30)
-        attempts.append(output)
-
-    fired = _race_on_first_touch(monkeypatch, lock, npm_tries_to_reclaim)
-    npx_cache._release(marker)
-    monkeypatch.undo()
-    after, _ = _npm_holds(lock, 100).communicate(timeout=30)
-
-    assert_that(fired).is_length(1)
-    assert_that(attempts[0]).contains("FAILED:ENOTEMPTY").does_not_contain("HELD")
-    assert_that(sorted(p.name for p in entry.iterdir())).is_empty()
-    assert_that(after).contains("HELD", "NORMAL")
+    assert_that(killed.returncode).is_equal_to(-signal.SIGKILL)
+    assert_that(output).contains("HELD", "NORMAL")
+    assert_that(lock.exists()).is_false()
 
 
 def test_npm_waits_for_a_lock_lintro_holds_then_takes_it(tmp_path: Path) -> None:
@@ -253,11 +264,11 @@ def test_npm_waits_for_a_lock_lintro_holds_then_takes_it(tmp_path: Path) -> None
     entry = tmp_path / "entry"
     entry.mkdir()
     lock = entry / "concurrency.lock"
-    marker = npx_cache._acquire(lock)
+    held = npx_cache._acquire(lock)
     npm = _npm_holds(lock, 100)
     time.sleep(1.5)
-    npm_waited = npm.poll() is None and npx_cache._holds(marker)
-    npx_cache._release(marker)
+    npm_waited = npm.poll() is None and npx_cache._holds(lock, held)
+    npx_cache._release(lock, held)
     output, _ = npm.communicate(timeout=30)
 
     assert_that(npm_waited).is_true()

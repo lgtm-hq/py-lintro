@@ -1419,21 +1419,23 @@ Rationale:
    is logged as a warning and stays until it can be removed. It does not make the tool
    unavailable, because npx never runs it.
 
-   Lintro never removes a lock it does not hold. A lock Lintro holds contains an owner
-   file (`.lintro-owner-…`), so npm, which only removes empty lock directories, can
-   neither reclaim nor replace it. If a Lintro run is suspended for more than 60 seconds
-   while it holds a lock, a concurrent npx stops with `ENOTEMPTY` instead of taking it.
-   A lock left by a Lintro process that has exited on the same machine is taken over on
-   the next run; elsewhere, or on Windows, Lintro waits for it and then makes the tool
-   unavailable until the lock is removed. An empty lock that npm would call abandoned
-   (older than 60 seconds) is renamed to a unique name first and deleted only if it is
-   still empty and stale. If npm has meanwhile taken a fresh lock, Lintro puts it back
-   and waits for npm. If Lintro cannot put it back, the lock is left under its
-   `.lintro-stale-…` name and the tool is unavailable for that run. The tool is
-   **unavailable** if the cache resolves outside `~/.lintro/cache`, contains the
-   platform's `PATH` separator (`:` on Linux and macOS, `;` on Windows, so `C:\Users\…`
-   is fine), is not a directory, or has an entry npx could run that cannot be locked or
-   repaired.
+   Lintro never reclaims, moves or deletes a lock it did not create itself. If another
+   process's lock is there, Lintro waits up to 30 seconds. If that lock is abandoned
+   (untouched for over 60 seconds), or still held after the wait, the tool is
+   unavailable for that run, and the message names the exact `concurrency.lock` path,
+   which can be deleted once no npm or npx process is running. Running npx itself also
+   clears an abandoned lock. Lintro's own lock is an empty directory like npm's, so if a
+   Lintro run is killed while holding it, npm's own stale-lock handling cleans it up.
+
+   Limitation: npm treats a lock untouched for 60 seconds as abandoned. If a Lintro run
+   holds its lock that long, for example because it was suspended, npm may take the lock
+   over. Lintro then never moves that entry: it refuses the run. When it releases, it
+   puts npm's lock back without replacing anything (on macOS, Linux and Windows). Where
+   that is not possible, npm's lock is left under a `.lintro-stale-…` name with a
+   warning, and npm reports its lock as compromised. The tool is **unavailable** if the
+   cache resolves outside `~/.lintro/cache`, contains the platform's `PATH` separator
+   (`:` on Linux and macOS, `;` on Windows, so `C:\Users\…` is fine), is not a
+   directory, or has an entry npx could run that cannot be locked or repaired.
 
    **Trust model.** Lintro's npx cache (`~/.lintro/cache/npx/<package>@<pinned>`) is
    trusted the same way as Lintro's own installation. Lintro verifies that the installed
