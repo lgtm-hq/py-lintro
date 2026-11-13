@@ -17,6 +17,16 @@ id = "GHSA-xcq7-p3pf-p88h"
 ignoreUntil = 2026-12-06
 reason = "Reverified 2026-11-06: opentelemetry-api@1.37.0 in requirements-semgrep.txt (CVE-2026-114603) remains constrained by pinned Semgrep 1.184.0, the latest published release (2026-11-05), which requires opentelemetry-api~=1.37.0 and excludes fixed 1.45.1. No compatible release fixes the isolated Semgrep lock; the separate application uv.lock is patched to opentelemetry-api@1.45.2 and guarded by test_semgrep_telemetry_ignore_cannot_hide_vulnerable_application_lock, because this OSV ignore is advisory-global (also paired with pip-audit's advisory ignore list). Operator-owned one-calendar-month temporary ignore under the unpatched-upstream policy, not an owner waiver or a claim of non-reachability. The flaw is quadratic CPU denial of service in TraceState.from_header on untrusted tracestate input; this dependency is in the isolated one-shot Semgrep CLI environment, not Lintro's application server. Recheck upstream constraints before expiry and remove once a compatible Semgrep release admits the fixed telemetry stack. Track: https://github.com/lgtm-hq/py-lintro/issues/2972"
 
+# GHSA-mf5v-w3w3-f6cg (CVE-2026-126360, published 2026-11-13) is the same
+# blocker: fixed in opentelemetry-api 1.45.2, but pinned Semgrep 1.184.0 and
+# Semgrep 1.185.0, the latest published release (2026-11-10), both still
+# require opentelemetry-api~=1.37.0 (reverified 2026-11-13).
+
+[[IgnoredVulns]]
+id = "GHSA-mf5v-w3w3-f6cg"
+ignoreUntil = 2026-12-13
+reason = "Reverified 2026-11-13: opentelemetry-api@1.37.0 in requirements-semgrep.txt (CVE-2026-126360) remains constrained by pinned Semgrep 1.184.0 and by Semgrep 1.185.0, the latest published release (2026-11-10), which both require opentelemetry-api~=1.37.0 and exclude fixed 1.45.2. No compatible release fixes the isolated Semgrep lock; the separate application uv.lock is patched to opentelemetry-api@1.45.2 and guarded by test_semgrep_telemetry_ignore_cannot_hide_vulnerable_application_lock, because this OSV ignore is advisory-global (also paired with pip-audit's advisory ignore list). Operator-owned one-calendar-month temporary ignore under the unpatched-upstream policy, not an owner waiver or a claim of non-reachability. The flaw is quadratic-time regex backtracking (ReDoS, CPU denial of service) in TraceContextTextMapPropagator.extract() on an untrusted traceparent value carrying long whitespace and an embedded newline; this dependency is in the isolated one-shot Semgrep CLI environment, not Lintro's application server. Recheck upstream constraints before expiry and remove once a compatible Semgrep release admits the fixed telemetry stack. Track: https://github.com/lgtm-hq/py-lintro/issues/2972"
+
 # --- mcp (PyPI, transitive via semgrep) ---
 # GHSA-84m7-p3x7-pcfv (published 2026-10-15) is fixed in mcp 1.30.0, but the
 # pinned semgrep 1.184.0, the latest published release, still requires

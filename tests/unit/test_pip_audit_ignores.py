@@ -16,6 +16,7 @@ import re
 import tomllib
 from pathlib import Path
 
+import pytest
 from assertpy import assert_that
 from packaging.requirements import Requirement
 from packaging.version import Version
@@ -70,16 +71,27 @@ def test_every_pip_audit_ignore_is_a_live_osv_suppression() -> None:
             ).is_true()
 
 
-def test_semgrep_telemetry_exception_is_paired_with_pip_audit() -> None:
-    """Both scanners cover the same remaining, time-boxed Semgrep blocker."""
-    if not any(
-        entry.get("id") == "GHSA-xcq7-p3pf-p88h" for entry in _osv_suppressions()
-    ):
+@pytest.mark.parametrize(
+    ("ghsa", "cve"),
+    [
+        ("GHSA-xcq7-p3pf-p88h", "CVE-2026-114603"),
+        ("GHSA-mf5v-w3w3-f6cg", "CVE-2026-126360"),
+    ],
+    ids=["tracestate", "traceparent"],
+)
+def test_semgrep_telemetry_exception_is_paired_with_pip_audit(
+    ghsa: str,
+    cve: str,
+) -> None:
+    """Both scanners cover the same remaining, time-boxed Semgrep blocker.
+
+    Args:
+        ghsa: The OSV ``[[IgnoredVulns]]`` id of the telemetry advisory.
+        cve: The CVE alias pip-audit may report the advisory under.
+    """
+    if not any(entry.get("id") == ghsa for entry in _osv_suppressions()):
         return
-    assert_that(_ignored_by_pip_audit()).contains(
-        "CVE-2026-114603",
-        "GHSA-xcq7-p3pf-p88h",
-    )
+    assert_that(_ignored_by_pip_audit()).contains(cve, ghsa)
 
 
 def test_the_alias_match_is_whole_id_only() -> None:

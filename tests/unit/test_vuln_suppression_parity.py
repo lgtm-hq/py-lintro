@@ -192,9 +192,25 @@ def test_markdownlint_dependency_lockfiles_remain_patched(
     assert_that(versions).is_not_empty()
 
 
-def test_semgrep_telemetry_ignore_cannot_hide_vulnerable_application_lock() -> None:
-    """An advisory-global tool exception requires a patched application copy."""
-    if "GHSA-xcq7-p3pf-p88h" not in _osv_entries():
+@pytest.mark.parametrize(
+    ("advisory", "fixed"),
+    [
+        ("GHSA-xcq7-p3pf-p88h", "1.45.1"),
+        ("GHSA-mf5v-w3w3-f6cg", "1.45.2"),
+    ],
+    ids=["tracestate", "traceparent"],
+)
+def test_semgrep_telemetry_ignore_cannot_hide_vulnerable_application_lock(
+    advisory: str,
+    fixed: str,
+) -> None:
+    """An advisory-global tool exception requires a patched application copy.
+
+    Args:
+        advisory: The OSV id of the Semgrep-only telemetry exception.
+        fixed: The first opentelemetry-api release that fixes the advisory.
+    """
+    if advisory not in _osv_entries():
         return
     lock = tomllib.loads((_REPO_ROOT / "uv.lock").read_text(encoding="utf-8"))
     versions = [
@@ -204,9 +220,9 @@ def test_semgrep_telemetry_ignore_cannot_hide_vulnerable_application_lock() -> N
     ]
     assert_that(versions).is_not_empty()
     for version in versions:
-        assert_that(version >= Version("1.45.1")).described_as(
-            "The Semgrep-only exception must not hide GHSA-xcq7-p3pf-p88h "
-            "in uv.lock; patch application telemetry to at least 1.45.1",
+        assert_that(version >= Version(fixed)).described_as(
+            f"The Semgrep-only exception must not hide {advisory} "
+            f"in uv.lock; patch application telemetry to at least {fixed}",
         ).is_true()
 
 
