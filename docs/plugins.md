@@ -594,7 +594,16 @@ command's stderr carries an error diagnostic at the start of a line: a Python
 `PermissionError: ...`. `sqlfluff fix` needs this because it exits 1 both for unfixable
 violations and when it cannot write. Exit 0 is never an execution error, and stdout is
 never searched, since tools print the paths they fixed there and a file may be called
-`PermissionError.sql`.
+`PermissionError.sql`. Before stderr is searched, the runner masks the target file path
+wherever stderr echoes it mid-line, because `sqlfluff fix` prints `== [<path>] ==` on
+stderr for a parse error and a file named `query\nPermissionError: x.sql` would
+otherwise start a line with an exception-shaped fragment (#3414). Only target paths are
+masked, never option values or other arguments, and a masked span never starts at the
+start of a line, so a line that begins outside an echoed path is never hidden. A path
+that is blank or ends in a line break is not masked. Stderr is decoded with universal
+newlines, so a CR or CRLF in the path is matched as LF. A traceback prints the path with
+its line breaks escaped, so a real write failure on such a file is still an execution
+error.
 
 A file whose initial check, fix command or verification records an execution error
 measured nothing, so the runner keeps the findings it has but reports the run's fix

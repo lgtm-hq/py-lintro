@@ -323,3 +323,152 @@ def test_declared_findings_exit_reads_only_stderr_diagnostics(
     if not failed:
         expected_fixed = int(fix.returncode == 0)
         assert_that(result.fixed_issues_count).is_equal_to(expected_fixed)
+
+
+_SPLIT_NAME = "query\nPermissionError: error permission denied.env"
+
+
+@pytest.mark.parametrize(
+    ("stderr", "failed"),
+    [
+        ("  == [{path}] ==\n  L:   1 | PRS | unparsable\n", False),
+        ("Fixing {path}: error, permission denied\n", False),
+        (
+            "Traceback (most recent call last):\n"
+            "PermissionError: [Errno 13] Permission denied: {path!r}\n",
+            True,
+        ),
+        ("  == [{path}] ==\nPermissionError: [Errno 13] denied\n", True),
+        ("{path}\n", True),
+    ],
+    ids=[
+        "echoed-path-split-by-newline",
+        "echoed-path-with-error-words",
+        "traceback-naming-the-path",
+        "exception-line-after-echoed-path",
+        "path-echoed-at-line-start",
+    ],
+)
+def test_echoed_multi_line_path_is_not_a_diagnostic(
+    tmp_path: Path,
+    stderr: str,
+    failed: bool,
+) -> None:
+    """A mid-line echo of the file path is masked; real diagnostics are not (#3414).
+
+    The name splits across lines into an exception-shaped fragment. Only an
+    echo that starts mid-line is the tool printing the path, so a line that
+    starts with the fragment is still read as a diagnostic: the runner fails
+    closed rather than passing a failed write.
+    """
+    env_file = tmp_path / _SPLIT_NAME
+    env_file.write_text("foo=1\n")
+    plugin = DotenvLinterPlugin()
+    ctx = plugin.prepare(paths=[str(env_file)], options={}, no_files_message="none")
+    assert not isinstance(ctx, ToolResult)
+    path = ctx.files[0]
+    fix = SubprocessResult(1, "", stderr.format(path=path), "")
+    errors: list[FixStageError] = []
+    with patch.object(
+        plugin,
+        "_run_subprocess_result",
+        side_effect=[subprocess_result(False, _DOTENV_FINDING), fix],
+    ):
+        result = run_per_file_fix(
+            ctx,
+            plugin=plugin,
+            check_command=plugin._check_command,
+            fix_command=plugin._fix_command,
+            parse=lambda output: parse_dotenv_linter_output(output=output),
+            errors=errors,
+            policy=PerFileFixPolicy(
+                check_failure_message="dotenv-linter check failed",
+                fix_findings_exit_codes=frozenset({1}),
+            ),
+        )
+
+    assert_that(path).contains("\nPermissionError: ")
+    assert_that(result.execution_failed).is_equal_to(failed)
+    assert_that(result.residual_unknown).is_equal_to(failed)
+    assert_that([error.stage for error in errors]).is_equal_to(
+        [FixStage.FIX] if failed else [],
+    )
+    if not failed:
+        assert_that(result.fixed_issues_count).is_zero()
+        assert_that(result.remaining_issues_count).is_equal_to(1)
+
+
+_TRACEBACK = (
+    "Traceback (most recent call last):\n"
+    "PermissionError: [Errno 13] Permission denied: 'x'\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("name", "extra_args", "stderr", "failed"),
+    [
+        ("x.env", ["\n"], f"warning: deprecated option\n{_TRACEBACK}", True),
+        ("x.env", ["\nTraceback"], f"echo: \n{_TRACEBACK}", True),
+        ("x\rPermissionError: denied.env", [], "  == [{path}] ==\n", False),
+        ("x\r\nPermissionError: denied.env", [], "  == [{path}] ==\n", False),
+        (".env.query\n", [], "  == [{path}]{traceback}", True),
+        ("a\nPermissionError: b.env", ["{path}\n"], "  == [{path}] ==\n", False),
+    ],
+    ids=[
+        "bare-newline-option-value",
+        "option-value-shaped-like-a-traceback",
+        "cr-name",
+        "crlf-name",
+        "target-ending-in-newline",
+        "longer-argument-containing-the-target",
+    ],
+)
+def test_only_target_paths_are_masked_on_stderr(
+    tmp_path: Path,
+    name: str,
+    extra_args: list[str],
+    stderr: str,
+    failed: bool,
+) -> None:
+    """Option values never mask stderr; CR and CRLF names are normalised (#3414).
+
+    Stderr reaches the runner decoded with universal newlines, so the canned
+    stderr carries the target with every CR or CRLF turned into LF.
+    """
+    env_file = tmp_path / name
+    env_file.write_text("foo=1\n")
+    plugin = DotenvLinterPlugin()
+    ctx = plugin.prepare(paths=[str(env_file)], options={}, no_files_message="none")
+    assert not isinstance(ctx, ToolResult)
+    path = ctx.files[0]
+    echoed = path.replace("\r\n", "\n").replace("\r", "\n")
+    fix = SubprocessResult(
+        1,
+        "",
+        stderr.format(path=echoed, traceback=_TRACEBACK),
+        "",
+    )
+    with patch.object(
+        plugin,
+        "_run_subprocess_result",
+        side_effect=[subprocess_result(False, _DOTENV_FINDING), fix],
+    ):
+        result = run_per_file_fix(
+            ctx,
+            plugin=plugin,
+            check_command=plugin._check_command,
+            fix_command=lambda f: [
+                *plugin._fix_command(f),
+                *(arg.format(path=f) for arg in extra_args),
+            ],
+            parse=lambda output: parse_dotenv_linter_output(output=output),
+            policy=PerFileFixPolicy(
+                check_failure_message="dotenv-linter check failed",
+                fix_findings_exit_codes=frozenset({1}),
+            ),
+        )
+
+    assert_that(result.execution_failed).is_equal_to(failed)
+    assert_that(result.residual_unknown).is_equal_to(failed)
+    expected_remaining = None if failed else 1
+    assert_that(result.remaining_issues_count).is_equal_to(expected_remaining)
