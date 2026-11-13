@@ -30,6 +30,7 @@ __all__ = [
     "git_text",
     "literal_pathspec",
     "map_line",
+    "path_exists",
     "range_renames",
 ]
 
@@ -64,11 +65,15 @@ class Renames:
             the finding.
         deleted: Paths git reports as deleted; a rename it did not pair
             (heavily edited on the way) shows up here (#3413).
+        named: Every path the range names, rename and copy sources
+            included, so a caller can tell a path the range never touched
+            (#3432).
     """
 
     moved: dict[str, str]
     ambiguous: frozenset[str]
     deleted: frozenset[str] = frozenset()
+    named: frozenset[str] = frozenset()
 
 
 def literal_pathspec(path: str) -> str:
@@ -159,7 +164,42 @@ def range_renames(*, repo_root: str, from_sha: str, to_sha: str) -> Renames | No
         moved=moved,
         ambiguous=frozenset(source for source in moved if source in touched),
         deleted=frozenset(deleted),
+        named=frozenset((*moved, *touched)),
     )
+
+
+def path_exists(*, repo_root: str, sha: str, path: str) -> bool | None:
+    """Tell whether a commit's tree holds a path (#3432).
+
+    Args:
+        repo_root: The repository.
+        sha: The commit.
+        path: Repository-relative path.
+
+    Returns:
+        Whether the path exists at ``sha``, or ``None`` when git could not
+        answer (no commit given, a commit the repository does not hold, or
+        git failed to run).
+    """
+    if not sha or not path:
+        return None
+    try:
+        found = _run_git(
+            args=["-C", repo_root, "cat-file", "-e", f"{sha}:{path}"],
+            check=False,
+        )
+        if found.returncode == 0:
+            return True
+        # The same exit status covers a missing path and a missing commit;
+        # only a tree git can read makes the path's absence an answer.
+        tree = _run_git(
+            args=["-C", repo_root, "cat-file", "-e", f"{sha}^{{tree}}"],
+            check=False,
+        )
+    except ReviewContextError as exc:
+        logger.debug("Could not look up {} at {}: {}", path, sha, exc)
+        return None
+    return False if tree.returncode == 0 else None
 
 
 def file_hunks(

@@ -6,7 +6,10 @@ plus an add, while the pull request's rename metadata only names
 ``a.py -> c.py``. X was stored on ``b.py``, so the metadata did not apply to it
 and the round reported X twice: once new on ``c.py``, once carried on
 ``b.py`` with its thread left open. The record now keeps the path it was first
-tracked at (``FindingRecord.origin_path``), and that path is looked up too.
+tracked at (``FindingRecord.origin_path``), and that path is looked up too,
+except where it could name a different file or another record already arrives
+at the destination: there the round holds X as before, which can duplicate a
+thread but never resolves a live one.
 
 Every round runs through ``run_review`` on a scratch git repository, in delta
 and in full mode, with the harness of #3413.
@@ -23,6 +26,8 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
+from lintro.ai.review.enums.delta_reason import DeltaReason
+from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_state import ReviewState
@@ -249,6 +254,168 @@ def test_an_unrelated_rename_does_not_move_the_finding(
     (carried,) = third.match.carried
     assert_that((carried.key, carried.file)).is_equal_to((key, "b.py"))
     assert_that(third.match.new[0].file).is_equal_to("e.py")
+
+
+@pytest.mark.parametrize("force_full", _MODES)
+def test_a_reused_first_path_renamed_elsewhere_does_not_take_the_finding(
+    tmp_path: Path,
+    force_full: bool,
+) -> None:
+    """A new ``a.py`` renamed to ``c.py`` is not X's file; X is held on ``b.py``."""
+    repo, base, state, key = _carried_to_b(tmp_path, force_full=force_full)
+    (repo / "a.py").write_text(lines(300, label="base"))
+    commit(repo, "re-create an unrelated a.py")
+    middle = harness._round(
+        repo=repo,
+        base=base,
+        prior=state,
+        reported=[harness._x(file="b.py")],
+        force_full=force_full,
+    )
+    git(repo, "mv", "a.py", "c.py")
+    git(repo, "mv", "b.py", "d.py")
+    text = lines(300, label="rewritten").splitlines(keepends=True)
+    text[80] = "bug_at_81 = True\n"
+    (repo / "d.py").write_text("".join(text))
+    commit(repo, "rename the new a.py, rename and rewrite b.py")
+    assert_that(
+        git(repo, "diff", "-M", "--name-status", f"{base}..HEAD"),
+    ).contains("R100\ta.py\tc.py")
+
+    third = harness._round(
+        repo=repo,
+        base=base,
+        prior=middle.state,
+        reported=[harness._x(file="d.py")],
+        force_full=force_full,
+    )
+
+    assert_that(third.counts).is_equal_to((1, 1, 0))
+    assert_that(third.resolved_threads).is_empty()
+    (carried,) = third.match.carried
+    assert_that((carried.key, carried.file)).is_equal_to((key, "b.py"))
+
+
+@pytest.mark.parametrize("force_full", _MODES)
+def test_two_findings_converging_on_one_file_keep_their_threads(
+    tmp_path: Path,
+    force_full: bool,
+) -> None:
+    """X on ``b.py`` (from ``a.py``) and on ``e.py`` (from ``d.py``); ``e.py`` becomes ``c.py``.
+
+    Git pairs ``e.py -> c.py`` while the PR pairs ``a.py -> c.py``. Moving
+    both records to ``c.py`` let the pairing hand ``e.py``'s sighting to
+    ``b.py``'s thread and resolve the live one.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    (repo / "a.py").write_text(lines(300, label="base"))
+    (repo / "d.py").write_text(lines(300, label="otherbase"))
+    base = commit(repo, "two originals")
+    (repo / "a.py").write_text(lines(300, label="case"))
+    text = lines(300, label="base").splitlines(keepends=True)
+    text[80] = "bug_at_81 = True\n"
+    (repo / "d.py").write_text("".join(text))
+    commit(repo, "the same finding on two files")
+    first = harness._round(
+        repo=repo,
+        base=base,
+        prior=None,
+        reported=[harness._x(file="a.py"), harness._x(file="d.py")],
+        force_full=force_full,
+    )
+    threaded = replace(
+        first.state,
+        findings=tuple(
+            replace(record, inline_comment_id=3413 + index)
+            for index, record in enumerate(first.state.findings)
+        ),
+    )
+    git(repo, "mv", "a.py", "b.py")
+    git(repo, "mv", "d.py", "e.py")
+    commit(repo, "rename both")
+    second = harness._round(
+        repo=repo,
+        base=base,
+        prior=threaded,
+        reported=[harness._x(file="b.py"), harness._x(file="e.py")],
+        force_full=force_full,
+    )
+    assert_that(second.counts).is_equal_to((2, 0, 0))
+    git(repo, "rm", "-q", "b.py")
+    git(repo, "mv", "e.py", "c.py")
+    commit(repo, "remove b.py, rename e.py to c.py")
+
+    third = harness._round(
+        repo=repo,
+        base=base,
+        prior=second.state,
+        reported=[harness._x(file="c.py")],
+        force_full=force_full,
+    )
+
+    assert_that(third.counts).is_equal_to((2, 0, 0))
+    assert_that(third.resolved_threads).is_empty()
+    by_thread = {record.inline_comment_id: record for record in third.state.findings}
+    assert_that(
+        {thread: (record.file, record.status) for thread, record in by_thread.items()},
+    ).is_equal_to(
+        {3413: ("b.py", FindingStatus.OPEN), 3414: ("c.py", FindingStatus.OPEN)},
+    )
+
+
+@pytest.mark.parametrize(
+    ("force_full", "reason"),
+    [
+        pytest.param(False, DeltaReason.NOT_ANCESTOR, id="automatic"),
+        pytest.param(True, DeltaReason.EXPLICIT_FULL, id="forced-full"),
+    ],
+)
+def test_a_rewritten_shallow_history_follows_the_first_paths_rename(
+    tmp_path: Path,
+    force_full: bool,
+    reason: DeltaReason,
+) -> None:
+    """X's head is gone from the clone and the PR names only ``a.py -> c.py``."""
+    (tmp_path / "source").mkdir()
+    repo, base, state, key = _carried_to_b(tmp_path / "source", force_full=False)
+    git(repo, "reset", "-q", "--hard", base)
+    git(repo, "mv", "a.py", "c.py")
+    text = lines(300, label="base").splitlines(keepends=True)
+    text[80] = "bug_at_81 = True\n"
+    (repo / "c.py").write_text("".join(text))
+    head = commit(repo, "rewritten feature, renamed to c.py")
+    git(repo, "update-ref", "refs/heads/trusted", base)
+    git(repo, "update-ref", "refs/pull/1/head", head)
+    clone = tmp_path / "workflow"
+    git(
+        tmp_path,
+        "clone",
+        "-q",
+        "--depth",
+        "1",
+        "--branch",
+        "trusted",
+        repo.as_uri(),
+        str(clone),
+    )
+    git(clone, "fetch", "-q", "--no-tags", "origin", "+refs/pull/1/head:refs/pr")
+    git(clone, "checkout", "-q", "--detach", "refs/pr")
+    assert_that(
+        git(clone, "rev-parse", "--is-shallow-repository"),
+    ).is_equal_to("true")
+
+    third = harness._round(
+        repo=clone,
+        base=base,
+        prior=state,
+        reported=[harness._x(file="c.py")],
+        force_full=force_full,
+    )
+
+    assert_that(third.result.metadata.delta_reason).is_equal_to(reason)
+    harness._assert_carried_with_thread(round_=third, key=key, file="c.py")
 
 
 def test_a_record_stored_before_origin_paths_loads_without_one() -> None:
