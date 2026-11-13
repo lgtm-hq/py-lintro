@@ -322,8 +322,12 @@ def test_only_the_platform_separator_is_refused(
 # ---------------------------------------------------------------------------
 
 
-def test_stale_lock_left_by_a_dead_process_is_reclaimed(cache: Path) -> None:
-    """A lock npm itself would call abandoned does not block repair.
+def test_stale_lock_left_by_a_dead_process_is_refused_and_named(cache: Path) -> None:
+    """An abandoned lock lintro did not create is left alone and reported.
+
+    lintro never removes it: npm may be reclaiming it at that very moment.
+    The refusal names the exact path to delete, and npx's own stale-lock
+    handling also clears it.
 
     Args:
         cache: Per-pin cache.
@@ -333,10 +337,14 @@ def test_stale_lock_left_by_a_dead_process_is_reclaimed(cache: Path) -> None:
     lock.mkdir()
     old = time.time() - 120
     os.utime(lock, (old, old))
+    before = lock.stat().st_ino
 
-    _repair(cache)
+    with pytest.raises(NpxCacheError, match="looks abandoned") as refusal:
+        _repair(cache)
 
-    assert_that(older.exists()).is_false()
+    assert_that(str(refusal.value)).contains(f"Delete {lock} once no npm or npx")
+    assert_that(lock.stat().st_ino).is_equal_to(before)
+    assert_that((older / "node_modules").is_dir()).is_true()
 
 
 def test_live_lock_refuses_after_waiting(
@@ -770,3 +778,124 @@ def test_undeletable_leftover_warns_and_the_valid_entry_still_runs(
     assert_that(leftover.exists()).is_true()
     assert_that(logged_warnings).is_length(1)
     assert_that(logged_warnings[0]).contains(str(leftover), "kept.js")
+
+
+# ---------------------------------------------------------------------------
+# Lock ownership: refuse or leave, never remove a lock lintro did not create (#3422)
+# ---------------------------------------------------------------------------
+
+
+def _npm_takes_over(lock: Path) -> int:
+    """Do what npm does to a lock it judges stale: ``rmdir`` then ``mkdir``.
+
+    The replacement is backdated by a second so its identity differs from
+    the lock it replaced even where inode numbers are reused at once.
+
+    Args:
+        lock: The lock directory.
+
+    Returns:
+        The inode of npm's replacement lock.
+    """
+    lock.rmdir()
+    lock.mkdir()
+    earlier = time.time() - 1
+    os.utime(lock, (earlier, earlier))
+    return lock.stat().st_ino
+
+
+def test_lintro_lock_is_an_empty_directory_npm_can_clean_up(tmp_path: Path) -> None:
+    """A lintro run killed while holding its lock leaves what npm can reclaim.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    lock = tmp_path / "concurrency.lock"
+    npx_cache._acquire(lock)
+
+    contents = list(lock.iterdir())
+    lock.rmdir()  # npm's stale-lock handling: an empty-directory rmdir.
+
+    assert_that(contents).is_empty()
+    assert_that(lock.exists()).is_false()
+
+
+def test_release_puts_back_a_lock_npm_took_after_a_long_hold(tmp_path: Path) -> None:
+    """Held past npm's threshold, lintro's release returns npm's lock to npm.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    lock = tmp_path / "concurrency.lock"
+    held = npx_cache._acquire(lock)
+    npm_lock = _npm_takes_over(lock)
+
+    npx_cache._release(lock, held)
+
+    assert_that(lock.stat().st_ino).is_equal_to(npm_lock)
+    assert_that([p.name for p in tmp_path.iterdir()]).is_equal_to([lock.name])
+
+
+def test_release_leaves_and_logs_npms_lock_without_an_exclusive_rename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    logged_warnings: list[str],
+) -> None:
+    """With no safe way back, npm's lock is left aside and logged, never removed.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Takes away the exclusive rename, and lets the ownership
+            check pass so the release reaches its check after the move.
+        logged_warnings: Warnings logged during the test.
+    """
+    lock = tmp_path / "concurrency.lock"
+    held = npx_cache._acquire(lock)
+    npm_lock = _npm_takes_over(lock)
+    holds = npx_cache._holds
+
+    def unsupported(src: Path, dst: Path) -> bool | None:
+        return None
+
+    def raced_after_the_check(path: Path, identity: tuple[int, int]) -> bool:
+        holds(path, identity)
+        return True
+
+    monkeypatch.setattr(npx_cache, "_rename_noreplace", unsupported)
+    monkeypatch.setattr(npx_cache, "_holds", raced_after_the_check)
+
+    npx_cache._release(lock, held)
+
+    left = [p for p in tmp_path.iterdir() if p.name.startswith(".lintro-stale-")]
+    assert_that([p.stat().st_ino for p in left]).is_equal_to([npm_lock])
+    assert_that(logged_warnings).is_length(1)
+    assert_that(logged_warnings[0]).contains(str(left[0]))
+
+
+def test_repair_refuses_and_leaves_npms_lock_when_ownership_is_lost(
+    cache: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lock npm took during validation is neither moved nor removed.
+
+    Args:
+        cache: Per-pin cache.
+        monkeypatch: Lets npm take the lock over during validation.
+    """
+    bad = _entry(cache, version="1.0.0")
+    lock = bad / "concurrency.lock"
+    validate = npx_cache.entry_runs_pin
+    taken: list[int] = []
+
+    def validate_while_npm_takes_over(entry: Path, **kwargs: str) -> bool:
+        taken.append(_npm_takes_over(lock))
+        return validate(entry, **kwargs)
+
+    monkeypatch.setattr(npx_cache, "entry_runs_pin", validate_while_npm_takes_over)
+
+    with pytest.raises(NpxCacheError, match="lost its lock") as refusal:
+        _repair(cache)
+
+    assert_that(str(refusal.value)).contains(str(lock))
+    assert_that([lock.stat().st_ino]).is_equal_to(taken)
+    assert_that((bad / "node_modules").is_dir()).is_true()

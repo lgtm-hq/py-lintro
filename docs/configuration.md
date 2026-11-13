@@ -1417,10 +1417,30 @@ Rationale:
    tries to delete leftovers from an interrupted run on the next run, both inside `_npx`
    and beside it. A leftover it cannot delete, for example because of its permissions,
    is logged as a warning and stays until it can be removed. It does not make the tool
-   unavailable, because npx never runs it. The tool is **unavailable** if the cache
-   resolves outside `~/.lintro/cache`, contains the platform's `PATH` separator (`:` on
-   Linux and macOS, `;` on Windows, so `C:\Users\…` is fine), is not a directory, or has
-   an entry npx could run that cannot be locked or repaired.
+   unavailable, because npx never runs it.
+
+   Lintro never reclaims, moves or deletes a lock it did not create itself. If another
+   process's lock is there, Lintro waits up to 30 seconds. If that lock is abandoned
+   (untouched for over 60 seconds), or still held after the wait, the tool is
+   unavailable for that run, and the message names the exact `concurrency.lock` path,
+   which can be deleted once no npm or npx process is running. Running npx itself also
+   clears an abandoned lock. Lintro's own lock is an empty directory like npm's, so if a
+   Lintro run is killed while holding it, npm's own stale-lock handling cleans it up.
+
+   **Limitation: a Lintro run suspended while it holds a lock.** npm treats a lock
+   untouched for 60 seconds as abandoned. If a Lintro process is suspended for more than
+   60 seconds while it holds an npx cache lock, npm may treat the lock as stale and take
+   it over. From then on Lintro cannot guarantee that it will not disturb npm's
+   operation. npm fails with `ECOMPROMISED` rather than running anything unexpected.
+   Lintro limits the damage: it refuses the run instead of moving the entry. When it
+   releases, it puts npm's lock back without replacing anything (on macOS, Linux and
+   Windows). Where that is not possible, npm's lock is left under a `.lintro-stale-…`
+   name with a warning.
+
+   The tool is **unavailable** if the cache resolves outside `~/.lintro/cache`, contains
+   the platform's `PATH` separator (`:` on Linux and macOS, `;` on Windows, so
+   `C:\Users\…` is fine), is not a directory, or has an entry npx could run that cannot
+   be locked or repaired.
 
    **Trust model.** Lintro's npx cache (`~/.lintro/cache/npx/<package>@<pinned>`) is
    trusted the same way as Lintro's own installation. Lintro verifies that the installed

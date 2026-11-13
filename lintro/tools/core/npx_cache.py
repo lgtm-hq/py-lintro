@@ -12,15 +12,34 @@ reinstalls it.
 Validation takes npm's own per-entry lock (``<entry>/concurrency.lock``, a
 directory created with ``mkdir``, as in ``libnpmexec``'s ``with-lock.js``), so
 it never inspects or removes an entry while npx is reading or installing it.
-A bad entry is renamed aside atomically, while that lock is held, under a
+
+lintro never reclaims, moves or deletes a lock it did not create in this
+process (#3422). A lock that is already there is waited for; if it is
+abandoned, or still held after the wait, the repair is refused with the exact
+path to delete. lintro's own lock is an empty directory, as npm's is, so npm's
+own stale-lock handling cleans up after a lintro run that was killed while
+holding one. lintro remembers the inode and mtime of the directory it created,
+releases it by renaming it to a unique name, and removes it only if the
+renamed directory is that one. It re-checks that identity right before moving
+an entry, and refuses if the lock is no longer its own.
+
+Limitation: npm treats a lock untouched for 60 seconds as abandoned. If a
+lintro run holds its lock that long, for example because it was suspended,
+npm may take the lock over. lintro's release then finds npm's lock aside and
+puts it back with a rename that never replaces an existing name, where the
+platform has one (macOS, Linux, Windows); otherwise it leaves npm's lock under
+the aside name, logs it, and npm reports the compromised lock. The ownership
+re-check before a move refuses in that case, so lintro never moves an entry
+npm has taken over.
+
+A bad entry is renamed aside atomically, while lintro holds its lock, under a
 bounded unique name built from its original name, and then removed. The lock
-travels with the entry, so lintro releases a lock only while it is still the
-one lintro created, never one npx took on a recreated entry. An entry that is
-not a directory is unlinked in place rather than moved, so a directory npx
-has meanwhile created under that name is never moved unlocked. An entry
-already aside, inside ``_npx`` or beside it, is deleted in place and never
-renamed again, so concurrent repairs cannot grow names (#3419); an entry
-another repair already moved or removed counts as repaired.
+travels with the entry. An entry that is not a directory is unlinked in place
+rather than moved, so a directory npx has meanwhile created under that name
+is never moved unlocked. An entry already aside, inside ``_npx`` or beside
+it, is deleted in place and never renamed again, so concurrent repairs cannot
+grow names (#3419); an entry another repair already moved or removed counts
+as repaired.
 
 Any failure to lock, validate or remove an entry npx could run is reported,
 and the caller refuses the fallback. A leftover aside that cannot be deleted
@@ -30,6 +49,8 @@ only logs a warning: it has no npm entry name, so it cannot change what runs.
 from __future__ import annotations
 
 import contextlib
+import ctypes
+import errno
 import json
 import os
 import shutil
@@ -56,8 +77,17 @@ _ASIDE_BASE_CHARS: int = 32
 #: Times one entry is re-examined when it keeps changing type under a repair.
 _ENTRY_ATTEMPTS: int = 5
 
-#: Identity of a lock directory lintro created: inode and mtime, as npm uses.
+#: Identity of a lock directory lintro created: inode and mtime.
 _LockId = tuple[int, int]
+
+#: ``renamex_np`` flag on macOS: fail when the destination exists.
+_RENAME_EXCL: int = 0x4
+
+#: ``renameat2`` flag on Linux: fail when the destination exists.
+_RENAME_NOREPLACE: int = 0x1
+
+#: ``AT_FDCWD`` on Linux: resolve relative paths against the working directory.
+_AT_FDCWD: int = -100
 
 
 class NpxCacheError(Exception):
@@ -137,8 +167,97 @@ def check_cache_location(cache: Path, *, pathsep: str = os.pathsep) -> Path:
     return real
 
 
+def _rename_noreplace(src: Path, dst: Path) -> bool | None:
+    """Rename *src* to *dst* only if *dst* does not exist, atomically.
+
+    Used only to put back a lock npm took while lintro's release had it
+    aside. POSIX ``rename`` silently replaces an empty directory, which could
+    be yet another lock npm has just taken, so a plain rename is never used.
+
+    Args:
+        src: Path to move.
+        dst: Destination that must not exist.
+
+    Returns:
+        True when moved, False when *dst* exists, None when this platform or
+        filesystem offers no such rename.
+
+    Raises:
+        OSError: The rename failed for another reason.
+    """
+    if sys.platform == "win32":
+        try:
+            os.rename(src, dst)
+        except FileExistsError:
+            return False
+        return True
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        if sys.platform == "darwin":
+            result = libc.renamex_np(
+                os.fsencode(src),
+                os.fsencode(dst),
+                ctypes.c_uint(_RENAME_EXCL),
+            )
+        else:
+            result = libc.renameat2(
+                _AT_FDCWD,
+                os.fsencode(src),
+                _AT_FDCWD,
+                os.fsencode(dst),
+                ctypes.c_uint(_RENAME_NOREPLACE),
+            )
+    except (AttributeError, OSError):
+        return None
+    if result == 0:
+        return True
+    code = ctypes.get_errno()
+    if code in {errno.EEXIST, errno.ENOTEMPTY}:
+        return False
+    if code in {errno.EINVAL, errno.ENOSYS, errno.ENOTSUP}:
+        return None
+    raise OSError(code, os.strerror(code), str(src))
+
+
+def _identity(path: Path) -> _LockId:
+    """Return the identity lintro tracks for a lock directory.
+
+    Inode and mtime, not ctime: a rename changes the moved directory's ctime
+    but keeps both of these, and npm changes the mtime only of a lock it
+    holds itself.
+
+    Args:
+        path: Lock directory, under its own or an aside name.
+
+    Returns:
+        ``(st_ino, st_mtime_ns)``.
+    """
+    info = path.stat()
+    return (info.st_ino, info.st_mtime_ns)
+
+
+def _not_ours(lock: Path, why: str) -> str:
+    """Explain the refusal for a lock lintro did not create.
+
+    Args:
+        lock: ``<entry>/concurrency.lock``.
+        why: What lintro found.
+
+    Returns:
+        A message naming the exact path to delete.
+    """
+    return (
+        f"lintro's npm cache lock {lock} {why}; lintro never removes a lock it "
+        f"did not create. Delete {lock} once no npm or npx process is running."
+    )
+
+
 def _acquire(lock: Path) -> _LockId:
     """Take npm's ``mkdir`` lock for one ``_npx`` entry.
+
+    The lock is an empty directory, exactly as npm makes one, so npm's own
+    stale-lock handling cleans up after a lintro run that was killed while
+    holding it. Ownership is the created directory's identity, kept here.
 
     A ``FileNotFoundError`` (or ``NotADirectoryError``) from ``mkdir``
     propagates when the entry itself has gone or changed type, which means a
@@ -151,46 +270,94 @@ def _acquire(lock: Path) -> _LockId:
         The identity of the lock directory created, for :func:`_release`.
 
     Raises:
-        NpxCacheError: The lock stayed held by a live process.
+        NpxCacheError: Another process's lock is abandoned, or stayed held
+            past the wait. lintro never removes it.
     """
     deadline = time.monotonic() + _LOCK_WAIT_SECONDS
     while True:
         try:
             lock.mkdir()
-            created = lock.stat()
-            return (created.st_ino, created.st_mtime_ns)
         except FileExistsError:
-            try:
-                age = time.time() - lock.stat().st_mtime
-            except FileNotFoundError:
-                continue
-            if age > _STALE_LOCK_SECONDS:
-                # Abandoned, as npm itself would judge it, and removed the
-                # same way npm removes one: an empty-directory ``rmdir``.
-                with contextlib.suppress(OSError):
-                    lock.rmdir()
-                continue
-            if time.monotonic() > deadline:
-                raise NpxCacheError(
-                    f"lintro's npm cache entry {lock.parent} stayed locked",
-                ) from None
-            time.sleep(0.1)
+            pass
+        else:
+            return _identity(lock)
+        try:
+            age = _lock_age(lock)
+        except FileNotFoundError:
+            continue
+        if age > _STALE_LOCK_SECONDS:
+            raise NpxCacheError(_not_ours(lock, "looks abandoned")) from None
+        if time.monotonic() > deadline:
+            raise NpxCacheError(_not_ours(lock, "stayed locked")) from None
+        time.sleep(0.1)
+
+
+def _lock_age(lock: Path) -> float:
+    """Return how long ago a lock was created or last touched by its holder.
+
+    Args:
+        lock: ``<entry>/concurrency.lock``.
+
+    Returns:
+        Seconds since the lock's mtime.
+    """
+    return time.time() - lock.stat().st_mtime
+
+
+def _holds(lock: Path, held: _LockId) -> bool:
+    """Report whether the lock at *lock* is still the one lintro created.
+
+    Args:
+        lock: ``<entry>/concurrency.lock``.
+        held: Identity returned by :func:`_acquire`.
+
+    Returns:
+        True when the directory there has lintro's inode and mtime.
+    """
+    try:
+        return _identity(lock) == held
+    except OSError:
+        return False
 
 
 def _release(lock: Path, held: _LockId) -> None:
-    """Remove a lock only while it is still the directory lintro created.
+    """Remove lintro's lock, checking it after an atomic move aside.
+
+    The lock is renamed to a unique name and checked there, so a check that
+    passes is about the directory that will be removed. A lock npm took can
+    only be there when lintro held its own past npm's 60 second threshold;
+    it is put back with an exclusive rename where the platform has one, and
+    otherwise left under the aside name and logged.
 
     Args:
         lock: ``<entry>/concurrency.lock``.
         held: Identity returned by :func:`_acquire`.
     """
+    if not _holds(lock, held):
+        logger.debug(f"lintro no longer holds {lock}; leaving it in place")
+        return
+    aside = lock.with_name(_aside_name(lock.name))
     try:
-        current = lock.stat()
+        os.rename(lock, aside)
+    except OSError:
+        return  # Nothing there to release.
+    try:
+        ours = _identity(aside) == held
     except OSError:
         return
-    if (current.st_ino, current.st_mtime_ns) == held:
+    if ours:
         with contextlib.suppress(OSError):
-            lock.rmdir()
+            aside.rmdir()
+        return
+    try:
+        restored = _rename_noreplace(aside, lock)
+    except OSError:
+        restored = False
+    if not restored:
+        logger.warning(
+            f"lintro held its npm cache lock {lock} past npm's stale threshold "
+            f"and npm took it over; npm's lock is left at {aside}",
+        )
 
 
 def _bin_belongs_to(entry: Path, package_dir: Path, binary: str, package: str) -> bool:
@@ -395,6 +562,11 @@ def _repair_entry(entry: Path, *, package: str, pin: str, binary: str) -> None:
         moved = False
         try:
             if not entry_runs_pin(entry, package=package, pin=pin, binary=binary):
+                if not _holds(lock, held):
+                    raise NpxCacheError(
+                        f"lintro lost its lock {lock} on npm cache entry {entry}; "
+                        "it was held past npm's 60 second stale threshold",
+                    )
                 moved = _discard(entry)
         finally:
             if not moved:
