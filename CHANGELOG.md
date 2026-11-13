@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.15] - 2026-11-13
+
+### Changed
+
+- fix environment-dependent unit and script tests (#3418) (252a4fb)
+
+### Fixed
+
+- **ai/review**: re-verify open findings a delta round would not show (#3409) (f8384bb)
+
 ## [0.180.14] - 2026-11-12
 
 ### Fixed
