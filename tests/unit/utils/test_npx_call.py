@@ -168,7 +168,7 @@ def test_long_script_is_sourced_from_a_file_deleted_on_exit(temp_dir: Path) -> N
     assert_that(spawned[-1]).is_equal_to(f". {shlex.quote(str(files[0]))}")
     assert_that(len(spawned[-1])).is_less_than(NPX_INLINE_SCRIPT_LIMIT)
     assert_that(content).is_equal_to(
-        b"exec " + os.fsencode(shlex.join(command[-902:])) + b"\n",
+        os.fsencode(shlex.join(command[-902:])) + b"\n",
     )
     assert_that(list(temp_dir.iterdir())).is_empty()
 
@@ -230,6 +230,43 @@ def test_call_script_survives_the_shell_beside_decoys(
         )
 
     assert_that(result.stdout.splitlines()).is_equal_to(_NAMES)
+
+
+@posix_only
+@pytest.mark.parametrize("shell", ["sh", "bash", "dash"])
+def test_script_file_keeps_the_shell_as_the_tools_parent(
+    tmp_path: Path,
+    shell: str,
+) -> None:
+    """A tool killed by a signal through the script file exits 128+N.
+
+    The sourced file must not ``exec`` the tool: the shell stays its parent
+    and reports the signal as an exit status, as ``sh -c`` does under dash,
+    rather than npm seeing the shell itself killed.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        shell: Script shell npm would use.
+    """
+    if shutil.which(shell) is None:
+        pytest.skip(f"{shell} is not installed")
+    tool = _executable(tmp_path, "self-kill", "kill -TERM $$\n")
+
+    with npx_shell_safe_command(
+        ["npx", "--yes", "--package", "x@1.0.0", str(tool), "a.css"],
+        windows=False,
+        inline_limit=0,
+    ) as rewritten:
+        result = subprocess.run(  # nosec B603 - fixed argv, shell=False
+            [shell, "-c", rewritten[-1]],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+
+    assert_that(result.returncode).is_equal_to(128 + 15)
 
 
 def _executable(directory: Path, name: str, body: str) -> Path:

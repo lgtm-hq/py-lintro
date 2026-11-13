@@ -117,7 +117,10 @@ def npx_shell_safe_command(
     fd, path = tempfile.mkstemp(prefix="lintro-npx-", suffix=".sh")
     try:
         with os.fdopen(fd, "wb") as handle:
-            handle.write(b"exec " + encoded + b"\n")
+            # No ``exec``: like npm's inline ``sh -c`` under dash, the shell
+            # stays the tool's parent, so a signal-killed tool still exits
+            # 128+N with the shell's diagnostic instead of a raw -N.
+            handle.write(encoded + b"\n")
         yield [*prefix, "--call", f". {shlex.quote(path)}"]
     finally:
         with contextlib.suppress(FileNotFoundError):
