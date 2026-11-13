@@ -4359,7 +4359,8 @@ The literal command matcher recognizes:
 - command prefixes `bunx`, `npx` (with optional `--yes`), `uvx`, `uv run`,
   `uv tool run`, and `python -m` (also `python3` and versioned Python 3 executables);
 - version pins on the formatter name, such as `bunx prettier@3 --write .`,
-  `uvx black@24.1.0 x.py`, `uvx ruff@0.6.0 format`, or `@latest`/`@next`.
+  `uvx black@24.1.0 x.py`, `uvx ruff@0.6.0 format`, or `@latest`/`@next`, and `==` pins
+  after `uvx` or `uv tool run` (`uvx black==24.1 .`).
 
 A bare formatter name needs a command boundary after it: a space, quote, closing
 parenthesis, shell operator, or end of line. A comma is not one, so a JavaScript line

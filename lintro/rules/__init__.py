@@ -20,14 +20,15 @@ class RulePackInfo:
         discover_all_files: Whether a rule sets ``lintro_discover_all_files``
             metadata, asking Lintro to hand Semgrep every candidate file so the
             rule's ``paths.include`` globs, not file extensions, pick targets.
-        anchors_directories: Whether a ``paths.include`` glob names a directory
-            (``**/scripts/**``). Semgrep matches it against paths relative to
-            the scan root, so it needs a project marker to anchor that root.
+        anchored_directories: Directories named by ``paths.include`` globs, such
+            as ``scripts/`` from ``**/scripts/**``. Semgrep matches them against
+            paths relative to the scan root, so they need a project marker to
+            anchor that root. Empty when no glob names a directory.
     """
 
     rule_ids: frozenset[str]
     discover_all_files: bool
-    anchors_directories: bool
+    anchored_directories: tuple[str, ...]
 
 
 def available_rule_packs() -> list[str]:
@@ -118,5 +119,11 @@ def _load_rule_pack(path: Path) -> RulePackInfo:
             rule.get("metadata", {}).get("lintro_discover_all_files") is True
             for rule in rules
         ),
-        anchors_directories=any("/" in glob.removeprefix("**/") for glob in includes),
+        anchored_directories=tuple(
+            dict.fromkeys(
+                glob.removeprefix("**/").removesuffix("**")
+                for glob in includes
+                if "/" in glob.removeprefix("**/")
+            ),
+        ),
     )

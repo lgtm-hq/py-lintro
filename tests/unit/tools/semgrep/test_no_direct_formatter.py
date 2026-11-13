@@ -93,12 +93,12 @@ def test_pack_metadata_drives_discovery_and_anchoring() -> None:
     scripts = rule_pack_info(PACK)
     other = rule_pack_info(OTHER_PACK)
     assert_that(scripts.discover_all_files).is_true()
-    assert_that(scripts.anchors_directories).is_true()
+    assert_that(scripts.anchored_directories).is_equal_to(("scripts/",))
     assert_that(scripts.rule_ids).contains(
         "lintro.scripts.no-direct-formatter.native-command",
     )
     assert_that(other.discover_all_files).is_false()
-    assert_that(other.anchors_directories).is_false()
+    assert_that(other.anchored_directories).is_empty()
     plugin = SemgrepPlugin()
     plugin.set_options(rule_packs=[OTHER_PACK])
     assert_that(plugin.definition.file_patterns).is_equal_to(SEMGREP_FILE_PATTERNS)
@@ -157,7 +157,12 @@ def test_unanchored_pack_warning_needs_directory_globs_and_no_marker(
         (tmp_path / marker).touch()
     message = _unanchored_pack_warning(packs, str(tmp_path))
     if warns:
-        assert_that(message).contains(PACK, str(tmp_path), "pyproject.toml")
+        assert_that(message).contains(
+            f"findings under scripts/ may be missed because no project marker "
+            f"was found in {tmp_path}",
+            PACK,
+            "pyproject.toml",
+        )
     else:
         assert_that(message).is_none()
 

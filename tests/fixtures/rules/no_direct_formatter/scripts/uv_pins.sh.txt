@@ -1,0 +1,13 @@
+#!/bin/sh
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+uvx black==24.1 .
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+uv tool run black==24.1.0 x.py
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+uvx ruff==0.6.0 format x.py
+# ruleid: lintro.scripts.no-direct-formatter.native-command
+uvx sqlfluff==3.0 fix generated.sql
+# Requirement pins are not commands; uv run takes no == pin.
+black==24.1
+ruff==0.6.0
+uv run black==24.1 x.py

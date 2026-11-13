@@ -138,15 +138,19 @@ def _unanchored_pack_warning(packs: list[str], cwd: str) -> str | None:
     Returns:
         A warning for the user, or None when no enabled pack is affected.
     """
-    affected = [name for name in packs if rule_pack_info(name).anchors_directories]
+    affected = [name for name in packs if rule_pack_info(name).anchored_directories]
     if not affected or has_project_marker(cwd):
         return None
+    directories = dict.fromkeys(
+        directory
+        for name in affected
+        for directory in rule_pack_info(name).anchored_directories
+    )
     return (
-        f"[semgrep] Rule pack(s) {', '.join(affected)} match directory paths "
-        f"relative to the project root, but no project marker "
-        f"({', '.join(project_root_markers())}) was found at or above {cwd}. "
-        "Files there are only matched when their directory is inside the scan "
-        "root; add a marker such as .git or pyproject.toml to scan reliably."
+        f"[semgrep] {', '.join(affected)}: findings under "
+        f"{', '.join(directories)} may be missed because no project marker was "
+        f"found in {cwd}. Add one of {', '.join(project_root_markers())} at the "
+        "project root."
     )
 
 
