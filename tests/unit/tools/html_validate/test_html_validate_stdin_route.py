@@ -24,11 +24,14 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.html_validate.html_validate_issue import HtmlValidateIssue
 from lintro.plugins.execution_preparation import PreparedExecution
 from lintro.plugins.subprocess_executor import SubprocessResult
+from lintro.tools.core.command_builders import pinned_npm_spec
+from lintro.tools.core.node_fallback import npx_runner_options
 from lintro.tools.html_validate.definition import HtmlValidatePlugin
 from lintro.tools.html_validate.stdin_route import (
     CONFIG_NOT_ALLOWED,
     FLAT_CONFIG_PRESENT,
     IGNORE_NOT_INAPPLICABLE,
+    PIN_NOT_VERIFIABLE,
     SYMLINKED_PATH,
     StdinRoute,
     merge_results,
@@ -157,6 +160,8 @@ def _check(
     tmp_path: Path,
     files: dict[str, str],
     fake: _FakeHtmlValidate,
+    *,
+    command: list[str] | None = None,
 ) -> ToolResult:
     """Write files and run ``check`` over them with a fake html-validate.
 
@@ -164,6 +169,8 @@ def _check(
         tmp_path: Working directory for the run.
         files: Relative path to content.
         fake: The html-validate stand-in.
+        command: The resolved html-validate command; a fixed absolute path
+            when omitted.
 
     Returns:
         The check result.
@@ -180,7 +187,11 @@ def _check(
     plugin = HtmlValidatePlugin()
     with (
         patch.object(plugin, "prepare", return_value=ctx),
-        patch.object(plugin, "_get_executable_command", return_value=[_EXECUTABLE]),
+        patch.object(
+            plugin,
+            "_get_executable_command",
+            return_value=list(command or [_EXECUTABLE]),
+        ),
         patch.object(plugin, "_run_subprocess_result", side_effect=fake),
     ):
         return plugin.check([str(tmp_path)], {})
@@ -659,6 +670,144 @@ def test_paths_resolve_dot_dot_segments_like_node(tmp_path: Path) -> None:
     route = StdinRoute(cwd=str(tmp_path))
 
     assert_that(route.absolute("a/../[s].html")).is_equal_to(tmp_path / "[s].html")
+
+
+_SPEC = pinned_npm_spec("html-validate")
+_NPX = [
+    "npx",
+    "--yes",
+    *npx_runner_options(_SPEC),
+    "--package",
+    _SPEC,
+    "html-validate",
+]
+
+
+def _nested_bin_tree(tmp_path: Path) -> Path:
+    """Build a tree whose glob-named file sits under its own ``node_modules``.
+
+    Args:
+        tmp_path: Root of the tree.
+
+    Returns:
+        The directory the file's stdin call would run from.
+    """
+    route = tmp_path / "nested[slug]"
+    _write(route / "page.html", "<p><div></p>")
+    _write(route / "node_modules" / ".bin" / "html-validate", "#!/bin/sh\necho '[]'\n")
+    return route
+
+
+def test_npx_is_checked_again_from_each_stdin_directory(tmp_path: Path) -> None:
+    """A ``node_modules`` under the file's directory could replace the pin.
+
+    Args:
+        tmp_path: Root of the tree.
+    """
+    route_dir = _nested_bin_tree(tmp_path)
+    route = StdinRoute(cwd=str(tmp_path), command=_NPX)
+
+    reason = route.hold_back_reason("nested[slug]/page.html")
+
+    assert_that(reason).starts_with(
+        f"{PIN_NOT_VERIFIABLE} from {route_dir}: only npx is available and a "
+        f"node_modules tree exists at {(route_dir / 'node_modules').as_posix()}",
+    )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param(["bunx", _SPEC], id="bunx"),
+        pytest.param(["/usr/local/bin/html-validate"], id="absolute-binary"),
+        pytest.param(["html-validate"], id="bare-name-on-path"),
+    ],
+)
+def test_runners_that_do_not_resolve_from_the_cwd_are_not_rechecked(
+    tmp_path: Path,
+    command: list[str],
+) -> None:
+    """Only a cwd-dependent command is held back by a nested ``node_modules``.
+
+    Args:
+        tmp_path: Root of the tree.
+        command: A resolved html-validate command.
+    """
+    _nested_bin_tree(tmp_path)
+    route = StdinRoute(cwd=str(tmp_path), command=command)
+
+    assert_that(route.hold_back_reason("nested[slug]/page.html")).is_none()
+
+
+@pytest.mark.parametrize(
+    ("command", "detail"),
+    [
+        pytest.param(
+            ["./node_modules/.bin/html-validate"],
+            "the executable path './node_modules/.bin/html-validate' is relative",
+            id="relative-executable",
+        ),
+        pytest.param(
+            ["npx", "--yes", "--package", "html-validate", "html-validate"],
+            "the npx command carries no version pin",
+            id="unpinned-npx",
+        ),
+    ],
+)
+def test_other_cwd_dependent_commands_are_held_back(
+    tmp_path: Path,
+    command: list[str],
+    detail: str,
+) -> None:
+    """A command that cannot be verified from the stdin directory holds back.
+
+    Args:
+        tmp_path: Root of the tree.
+        command: A resolved html-validate command.
+        detail: The reason the command is not trusted.
+    """
+    _write(tmp_path / "[slug].html")
+    route = StdinRoute(cwd=str(tmp_path), command=command)
+
+    assert_that(route.hold_back_reason("[slug].html")).is_equal_to(
+        f"{PIN_NOT_VERIFIABLE} from {tmp_path}: {detail}",
+    )
+
+
+def test_a_nested_bin_under_npx_holds_the_file_back_and_keeps_siblings(
+    tmp_path: Path,
+) -> None:
+    """The file is held back with no stdin call; the sibling keeps findings.
+
+    Args:
+        tmp_path: Working directory for the run.
+    """
+    route_dir = _nested_bin_tree(tmp_path)
+    fake = _FakeHtmlValidate(dirty={"index.html"})
+    files = {"index.html": "<p><div></p>", "nested[slug]/page.html": "<p><div></p>"}
+    result = _check(tmp_path, files, fake, command=_NPX)
+
+    assert_that([call for call in fake.calls if "--stdin" in call.cmd]).is_empty()
+    assert_that(result.execution_failed).is_true()
+    assert_that([str(issue.file) for issue in result.issues]).is_equal_to(
+        ["index.html"],
+    )
+    assert_that(result.output).contains(
+        f"'nested[slug]/page.html': {PIN_NOT_VERIFIABLE} from {route_dir}",
+        "not inspected",
+    )
+
+
+def test_npx_in_a_normal_tree_goes_to_stdin(tmp_path: Path) -> None:
+    """Without a ``node_modules`` or ``package.json`` the npx pin is trusted.
+
+    Args:
+        tmp_path: Root of the tree.
+    """
+    _write(tmp_path / "[slug]" / "page.html")
+    route = StdinRoute(cwd=str(tmp_path), command=_NPX)
+
+    assert_that(route.hold_back_reason("[slug]/page.html")).is_none()
 
 
 def _issue(path: str) -> HtmlValidateIssue:

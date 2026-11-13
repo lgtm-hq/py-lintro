@@ -281,11 +281,14 @@ class _Invocation:
         cmd: The resolved executable plus ``--formatter json``.
         used_registry_fallback: Whether resolution landed on ``bunx``/``npx``.
         fallback_command: The ``[runner, spec]`` prefix, for install guidance.
+        resolved: The command exactly as resolved, as the version gate saw
+            it; the stdin route checks it again from each stdin directory.
     """
 
     cmd: list[str]
     used_registry_fallback: bool
     fallback_command: list[str]
+    resolved: list[str]
 
 
 @register_tool
@@ -394,7 +397,7 @@ class HtmlValidatePlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
         invocation = self._invocation(ctx)
-        route = StdinRoute(cwd=ctx.cwd)
+        route = StdinRoute(cwd=ctx.cwd, command=invocation.resolved)
         return run_on_readable_paths(
             ctx,
             readable=lambda path: (
@@ -445,6 +448,7 @@ class HtmlValidatePlugin(BaseToolPlugin):
             cmd=[*cmd, "--formatter", "json"],
             used_registry_fallback=is_registry_fallback_command(cmd),
             fallback_command=list(cmd[:2]),
+            resolved=list(cmd),
         )
 
     def _check_kept(

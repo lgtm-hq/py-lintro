@@ -2809,6 +2809,14 @@ all of these hold; otherwise it is held back, and the reason names the rule that
   be ASCII, as must the file's path. None of its patterns may match, compared
   case-insensitively with negation (`!`) lines disregarded. An ignore file that cannot
   be read or parsed holds the file back.
+- **The pinned html-validate runs from the file's directory**
+  (`pinned html-validate cannot be verified from <dir>`). Each standard-input call runs
+  from the file's own directory. When html-validate resolves to the `npx` fallback,
+  which runs whatever `node_modules/.bin/html-validate` it finds above its working
+  directory, the same pin check the version gate applies is repeated for that directory.
+  A `node_modules` tree there, for example, holds the file back. A project-local or
+  `PATH` install is an absolute path and `bunx` runs the pinned version, so neither is
+  checked again.
 
 A file that cannot be read is held back as well. A held-back file is treated as it was
 before standard input was used: it is not validated. Lintro validates the other files,

@@ -19,6 +19,8 @@ from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.html_validate.html_validate_issue import HtmlValidateIssue
 from lintro.plugins import ToolRegistry
+from lintro.tools.core.command_builders import pinned_npm_spec
+from lintro.tools.core.node_fallback import npx_runner_options
 from tests.integration._tools import require_command
 
 SAMPLE_FILE = "test_samples/tools/web/html_validate/html_validate_violations.html"
@@ -164,13 +166,20 @@ def tmp_path(tmp_path: Path) -> Path:
     return Path(os.path.realpath(tmp_path))
 
 
-def _check(paths: list[Path], *, stdin_files: int | None = None) -> ToolResult:
+def _check(
+    paths: list[Path],
+    *,
+    stdin_files: int | None = None,
+    command: list[str] | None = None,
+) -> ToolResult:
     """Run the registered html-validate plugin over some paths.
 
     Args:
         paths: Files to check.
         stdin_files: When given, how many files must go through ``--stdin``.
             Each such call must name no file at all.
+        command: A resolved html-validate command to use instead of the
+            plugin's own resolution, such as the real npx fallback.
 
     Returns:
         The plugin's result.
@@ -192,12 +201,28 @@ def _check(paths: list[Path], *, stdin_files: int | None = None) -> ToolResult:
         calls.append([str(arg) for arg in kwargs["cmd"]])
         return original(**kwargs)
 
-    # An instance attribute shadows the method for this one run.
+    def resolved(**kwargs: Any) -> list[str]:
+        """Return the forced command.
+
+        Args:
+            **kwargs: The plugin's resolution arguments (unused).
+
+        Returns:
+            A copy of the forced command.
+        """
+        del kwargs
+        return list(command or [])
+
+    # Instance attributes shadow the methods for this one run.
     object.__setattr__(tool, "_run_subprocess_result", recording)
+    if command is not None:
+        object.__setattr__(tool, "_get_executable_command", resolved)
     try:
         result = tool.check([str(path) for path in paths], {})
     finally:
         object.__delattr__(tool, "_run_subprocess_result")
+        if command is not None:
+            object.__delattr__(tool, "_get_executable_command")
     if stdin_files is not None:
         piped = [cmd for cmd in calls if "--stdin" in cmd]
         assert_that(piped).is_length(stdin_files)
@@ -648,6 +673,92 @@ def test_html_validate_holds_back_a_file_under_a_symlinked_directory(
         "not inspected",
     )
     assert_that(_reported(result, project)).is_equal_to({"page.html"})
+
+
+def _npx_command() -> list[str]:
+    """Build the real npx fallback command lintro resolves without bun.
+
+    Returns:
+        The pinned npx command, exactly as ``NodeJSBuilder`` emits it.
+    """
+    if shutil.which("npx") is None:
+        pytest.skip("needs npx")
+    spec = pinned_npm_spec("html-validate")
+    return [
+        "npx",
+        "--yes",
+        *npx_runner_options(spec),
+        "--package",
+        spec,
+        "html-validate",
+    ]
+
+
+@pytest.mark.html_validate
+@pytest.mark.skipif(os.name == "nt", reason="uses a POSIX shell stand-in")
+def test_html_validate_holds_back_under_a_nested_bin_with_npx(tmp_path: Path) -> None:
+    """A ``node_modules/.bin`` under the file's directory could replace the pin.
+
+    npx runs the binary from any ``node_modules/.bin`` above its cwd, and each
+    stdin call runs from the file's own directory. The nested stand-in
+    prints ``[]``, so validating through it would pass an invalid file.
+
+    Args:
+        tmp_path: Pytest-managed temporary directory.
+    """
+    route = tmp_path / "nested[slug]"
+    (route / "node_modules" / ".bin").mkdir(parents=True)
+    (route / _CONFIG).write_text(
+        json.dumps({"extends": ["html-validate:recommended"]}),
+        encoding="utf-8",
+    )
+    target = route / "page.html"
+    target.write_text(_FINDINGS, encoding="utf-8")
+    stand_in = route / "node_modules" / ".bin" / "html-validate"
+    stand_in.write_text("#!/bin/sh\necho '[]'\n", encoding="utf-8")
+    stand_in.chmod(0o755)
+    package = route / "node_modules" / "html-validate" / "package.json"
+    package.parent.mkdir()
+    package.write_text(
+        json.dumps(
+            {
+                "name": "html-validate",
+                "version": pinned_npm_spec("html-validate").rpartition("@")[2],
+                "bin": {"html-validate": "bin.js"},
+            },
+        ),
+        encoding="utf-8",
+    )
+    sibling = tmp_path / "index.html"
+    sibling.write_text(_FINDINGS, encoding="utf-8")
+    result = _check([target, sibling], stdin_files=0, command=_npx_command())
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.output).contains(
+        "'nested[slug]/page.html': pinned html-validate cannot be verified from "
+        f"{route}",
+        "not inspected",
+    )
+    assert_that(_reported(result, tmp_path)).is_equal_to({"index.html"})
+
+
+@pytest.mark.html_validate
+def test_html_validate_npx_in_a_normal_tree_uses_stdin(tmp_path: Path) -> None:
+    """Without a nested ``node_modules`` the npx pin is trusted for stdin.
+
+    Args:
+        tmp_path: Pytest-managed temporary directory.
+    """
+    target = tmp_path / "[slug].html"
+    target.write_text(_FINDINGS, encoding="utf-8")
+    sibling = tmp_path / "index.html"
+    sibling.write_text(_FINDINGS, encoding="utf-8")
+    result = _check([target, sibling], stdin_files=1, command=_npx_command())
+
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.success).is_false()
+    assert_that(_reported(result, tmp_path)).is_equal_to({"[slug].html", "index.html"})
 
 
 @pytest.mark.html_validate

@@ -47,6 +47,11 @@ from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools.core.incomplete_run import incomplete_run_result
+from lintro.tools.core.node_fallback import (
+    npx_pin_refusal,
+    registry_fallback_spec,
+    split_npm_spec,
+)
 
 HTML_VALIDATE_IGNORE_FILENAME: str = ".htmlvalidateignore"
 
@@ -97,6 +102,39 @@ FLAT_CONFIG_PRESENT: str = "flat config present"
 SYMLINKED_PATH: str = "symlinked path"
 CONFIG_NOT_ALLOWED: str = "config not on the allowlist"
 IGNORE_NOT_INAPPLICABLE: str = "ignore file not provably inapplicable"
+PIN_NOT_VERIFIABLE: str = "pinned html-validate cannot be verified"
+
+
+def _runner_refusal(command: Sequence[str], directory: Path) -> str | None:
+    """Check that the command runs the same html-validate from a directory.
+
+    The version gate verifies the command from the run's working directory
+    only, and each stdin call runs from the file's own directory. Of the
+    commands ``NodeJSBuilder`` resolves, a project-local or ``PATH`` binary
+    is an absolute path and ``bunx <pkg>@<pin>`` resolves the pinned spec, so
+    neither depends on the cwd. ``npx --package <spec> <bin>`` runs ``<bin>``
+    from any ``node_modules/.bin`` above its cwd, so it is checked with the
+    gate's own :func:`npx_pin_refusal`. A relative executable path would name
+    a different file from another directory.
+
+    Args:
+        command: The resolved html-validate command.
+        directory: The directory a stdin call would run from.
+
+    Returns:
+        Why the command cannot be trusted there, or None.
+    """
+    if not command:
+        return None
+    executable = command[0]
+    if Path(executable).name == "npx":
+        package, pin = split_npm_spec(registry_fallback_spec(command) or "")
+        if pin is None:
+            return "the npx command carries no version pin"
+        return npx_pin_refusal(cwd=directory, package=package, pin=pin, command=command)
+    if not os.path.isabs(executable) and ("/" in executable or os.sep in executable):
+        return f"the executable path {executable!r} is relative"
+    return None
 
 
 #: The name html-validate gives a source read from stdin in its report.
@@ -244,9 +282,12 @@ class StdinRoute:
 
     Attributes:
         cwd: The run's working directory; relative paths resolve against it.
+        command: The resolved html-validate command, checked again from each
+            stdin working directory when its resolution depends on the cwd.
     """
 
     cwd: str
+    command: Sequence[str] = ()
     _reasons: dict[str, str | None] = field(default_factory=dict, repr=False)
     _directories: dict[Path, str | None] = field(default_factory=dict, repr=False)
 
@@ -315,7 +356,7 @@ class StdinRoute:
         return self._directories[directory]
 
     def _directory_reason(self, directory: Path) -> str | None:
-        """Check symlinks, flat configs and legacy configs for a directory.
+        """Check symlinks, configs and the runner for a directory.
 
         Args:
             directory: The file's directory.
@@ -323,6 +364,9 @@ class StdinRoute:
         Returns:
             The first failed rule, or None.
         """
+        refusal = _runner_refusal(self.command, directory)
+        if refusal is not None:
+            return f"{PIN_NOT_VERIFIABLE} from {directory}: {refusal}"
         cwd = Path(os.path.abspath(self.cwd))
         for place in (directory, cwd):
             if _symlinked(place):
