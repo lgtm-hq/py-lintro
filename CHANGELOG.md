@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.22] - 2026-11-13
+
+### Fixed
+
+- **ai/review**: report inline delivery apart from eligibility (#3428) (e42c6a9)
+
 ## [0.180.21] - 2026-11-13
 
 ### Fixed
