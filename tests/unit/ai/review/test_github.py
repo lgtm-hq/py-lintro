@@ -526,11 +526,17 @@ def test_post_review_updates_existing_sticky(
     )
 
     assert_that(posted).is_true()
-    reporter.update_issue_comment.assert_called_once()
+    # Two edits of the same comment: the write before the inline POST, and
+    # the refresh that swaps in the counted footer once the POST succeeded
+    # (#3410). Neither creates or deletes a comment.
+    edited_ids = [
+        call.kwargs["comment_id"]
+        for call in reporter.update_issue_comment.call_args_list
+    ]
+    assert_that(edited_ids).is_equal_to([42, 42])
     reporter.post_issue_comment.assert_not_called()
     reporter.delete_issue_comment.assert_not_called()
     kwargs = reporter.update_issue_comment.call_args.kwargs
-    assert_that(kwargs["comment_id"]).is_equal_to(42)
     assert_that(kwargs["body"]).contains("## 🔎 Lintro Review —")
 
 

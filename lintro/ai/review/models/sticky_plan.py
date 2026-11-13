@@ -38,6 +38,8 @@ class StickyPlan:
         checklist_display: Structured checklist visibility mode.
         question_map: Prompt id to question text.
         inline_failure: Findings whose inline comments could not be posted.
+        inline_pending: True while this round's inline review is not yet
+            confirmed posted; the footer then makes no inline claim.
         repo: ``owner/name`` slug used to link finding titles.
         pr_number: Pull request number used for the same links.
         posting_policy: Policy the findings were marked under, so the
@@ -58,6 +60,7 @@ class StickyPlan:
     checklist_display: ChecklistDisplay = ChecklistDisplay.OFF
     question_map: dict[int, str] = field(default_factory=dict)
     inline_failure: InlinePostFailure | None = None
+    inline_pending: bool = False
     repo: str = ""
     pr_number: int | None = None
     posting_policy: PostingPolicy | None = None

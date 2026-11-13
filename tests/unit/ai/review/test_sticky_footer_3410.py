@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from dataclasses import replace
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.models.github_api_response import GitHubApiResponse
+from lintro.ai.review.github import post_review_to_github
 from lintro.ai.review.github_constants import STICKY_FOOTER
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
@@ -15,6 +18,8 @@ from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.sticky import build_sticky_comment, render_state_sticky
+from lintro.ai.review.sticky.footer import inline_split, sticky_footer
+from tests.unit.ai.review.comment_reporter import use_combined_comment_lookup
 
 _HOW_TO_READ = (
     "[how to read this report](https://github.com/lgtm-hq/py-lintro/blob/main/"
@@ -136,3 +141,100 @@ def test_state_only_board_makes_no_inline_claim() -> None:
 
     assert_that(_footer(body)).is_equal_to(_NEUTRAL)
     assert_that(body).does_not_contain("commented inline")
+
+
+def _posting_reporter(
+    *,
+    inline_status: int,
+    update_answers: tuple[bool, ...],
+) -> MagicMock:
+    """Build a reporter whose sticky edits GitHub accepts or refuses in turn.
+
+    The sticky already exists, so the write before the inline POST and the
+    refresh after it are both edits. ``visible`` holds the body GitHub last
+    accepted, which is what a reader of the pull request sees.
+
+    Args:
+        inline_status: HTTP status the inline review POST receives.
+        update_answers: Whether each successive sticky edit is accepted.
+
+    Returns:
+        The configured mock reporter.
+    """
+    reporter = MagicMock()
+    use_combined_comment_lookup(reporter)
+    reporter.is_available.return_value = True
+    reporter.find_issue_comment.return_value = (77, "")
+    diff_lines = {"src/main.py": {10}, "tests/test_main.py": {5}}
+    reporter.fetch_pr_diff_lines.return_value = diff_lines
+    reporter.fetch_compare_lines.return_value = diff_lines
+    reporter.fetch_pr_commit_shas.return_value = []
+    answers = list(update_answers)
+    reporter.visible = ""
+
+    def _update_issue_comment(**kwargs: Any) -> bool:
+        """Accept or refuse a sticky edit, keeping the last accepted body.
+
+        Args:
+            **kwargs: Update arguments, of which ``body`` is recorded.
+
+        Returns:
+            bool: The next scripted answer.
+        """
+        accepted = answers.pop(0)
+        if accepted:
+            reporter.visible = str(kwargs["body"])
+        return accepted
+
+    reporter.update_issue_comment.side_effect = _update_issue_comment
+    reporter.delete_issue_comment.return_value = True
+    reporter.api_response.return_value = GitHubApiResponse(
+        status=inline_status,
+        message="" if inline_status == 200 else "Forbidden",
+    )
+    reporter.api_base = "https://api.github.com"
+    reporter.repo = "owner/name"
+    reporter.pr_number = 7
+    return reporter
+
+
+@pytest.mark.parametrize(
+    ("inline_status", "refresh_accepted", "counted"),
+    [
+        pytest.param(403, False, False, id="inline-rejected-refresh-rejected"),
+        pytest.param(200, False, False, id="inline-accepted-refresh-rejected"),
+        pytest.param(200, True, True, id="inline-accepted-refresh-accepted"),
+    ],
+)
+def test_footer_claims_inline_only_after_the_post_is_confirmed(
+    sample_review_result: ReviewResult,
+    inline_status: int,
+    refresh_accepted: bool,
+    counted: bool,
+) -> None:
+    """The visible sticky never claims inline comments ahead of delivery.
+
+    The first sticky write precedes the inline POST, so it carries the
+    neutral footer; only an accepted refresh after a successful POST swaps
+    in the counted one.
+
+    Args:
+        sample_review_result: Representative review result fixture.
+        inline_status: HTTP status the inline review POST receives.
+        refresh_accepted: Whether GitHub accepts the sticky refresh.
+        counted: Whether the visible footer should be the counted one.
+    """
+    reporter = _posting_reporter(
+        inline_status=inline_status,
+        update_answers=(True, refresh_accepted),
+    )
+
+    post_review_to_github(result=sample_review_result, reporter=reporter)
+
+    inline, sticky_only = inline_split(result=sample_review_result, inline_failure=None)
+    expected = (
+        sticky_footer(inline=inline, sticky_only=sticky_only) if counted else _NEUTRAL
+    )
+    assert_that(inline).is_greater_than(0)
+    assert_that(reporter.update_issue_comment.call_count).is_equal_to(2)
+    assert_that(_footer(reporter.visible)).is_equal_to(expected)

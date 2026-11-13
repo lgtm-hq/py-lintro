@@ -74,15 +74,26 @@ def round_footer(
     *,
     result: ReviewResult,
     inline_failure: InlinePostFailure | None,
+    inline_pending: bool = False,
 ) -> str:
     """Render the footer of a sticky built from a completed round.
+
+    The sticky is written before the inline review is posted, and a later
+    refresh can be refused. While the inline review is not confirmed, a
+    footer that names inline comments would claim delivery that may never
+    happen, so it falls back to the neutral wording. Under-claiming is the
+    safe failure.
 
     Args:
         result: The round's review result.
         inline_failure: Findings whose inline comments could not be posted.
+        inline_pending: True when the inline review has not been confirmed
+            posted yet.
 
     Returns:
         The footer line for that round.
     """
     inline, sticky_only = inline_split(result=result, inline_failure=inline_failure)
+    if inline_pending and inline:
+        return STICKY_FOOTER_NEUTRAL
     return sticky_footer(inline=inline, sticky_only=sticky_only)

@@ -226,6 +226,7 @@ def _round_plan(*, request: StickyRequest, outcome: RoundOutcome) -> StickyPlan:
         checklist_display=request.checklist_display,
         question_map=request.question_map or {},
         inline_failure=request.inline_failure,
+        inline_pending=request.inline_pending,
         repo=request.repo,
         pr_number=request.pr_number,
         posting_policy=request.posting_policy,

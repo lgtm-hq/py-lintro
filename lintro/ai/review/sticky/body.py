@@ -293,6 +293,10 @@ def round_sections(
         *_history_sections(plan=plan, limits=limits, archive_only=archive_history),
         Section(
             name="footer",
-            text=round_footer(result=result, inline_failure=plan.inline_failure),
+            text=round_footer(
+                result=result,
+                inline_failure=plan.inline_failure,
+                inline_pending=plan.inline_pending,
+            ),
         ),
     ]

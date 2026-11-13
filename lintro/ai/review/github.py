@@ -107,6 +107,7 @@ class _StickyRenderer(Protocol):
         *,
         inline_failure: InlinePostFailure | None,
         comment_ids: dict[str, int] | None = None,
+        inline_pending: bool = False,
     ) -> str:
         """Render the body.
 
@@ -114,6 +115,8 @@ class _StickyRenderer(Protocol):
             inline_failure: Findings whose inline comments could not be posted.
             comment_ids: Finding key to inline comment id, persisted so a later
                 round can edit those comments.
+            inline_pending: True while the inline review is not yet confirmed
+                posted, so the footer makes no inline claim.
 
         Returns:
             The complete sticky comment body.
@@ -171,12 +174,15 @@ def post_review_to_github(
         *,
         inline_failure: InlinePostFailure | None,
         comment_ids: dict[str, int] | None = None,
+        inline_pending: bool = False,
     ) -> str:
         """Render the primary sticky body against the unchanged prior state.
 
         Args:
             inline_failure: Findings whose inline comments could not be posted.
             comment_ids: Finding key to inline comment id captured this round.
+            inline_pending: True while the inline review is not yet confirmed
+                posted, so the footer makes no inline claim.
 
         Returns:
             The primary sticky body. The archive body, when history no longer
@@ -195,6 +201,7 @@ def post_review_to_github(
                 cost_basis=settings.cost_basis,
                 inline_failure=inline_failure,
                 inline_comment_ids=comment_ids,
+                inline_pending=inline_pending,
                 repo=gh_reporter.repo or "",
                 pr_number=gh_reporter.pr_number,
                 departed_paths=settings.departed_paths,
@@ -249,7 +256,10 @@ def post_review_to_github(
         reporter=gh_reporter,
         kind=CommentKind.STICKY,
         existing=existing,
-        body=render(inline_failure=failure),
+        # Written before the inline review exists, so its footer must not
+        # claim inline comments yet (#3410): the POST below can be refused,
+        # and so can the refresh that would correct the claim.
+        body=render(inline_failure=failure, inline_pending=bool(inline_findings)),
     )
     success = outcome.ok
     # The archive is where history goes when the board can no longer hold it,
@@ -301,9 +311,10 @@ def post_review_to_github(
     )
 
     # One follow-up edit at most: it carries the newly captured comment ids
-    # (so a later round can find these threads) and, when inline posting
+    # (so a later round can find these threads), the counted footer once the
+    # inline review is confirmed posted (#3410), and, when inline posting
     # failed, the folded-in detail for findings that now have no surface.
-    if comment_ids or (inline_findings and not inline_posted):
+    if comment_ids or inline_findings:
         _refresh_sticky(
             reporter=gh_reporter,
             render=render,
