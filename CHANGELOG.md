@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.25] - 2026-11-13
+
+### Fixed
+
+- **tools**: quote npx fallback arguments so npm's shell cannot expand them (#3440)
+  (12a3381)
+
 ## [0.180.24] - 2026-11-13
 
 ### Changed
