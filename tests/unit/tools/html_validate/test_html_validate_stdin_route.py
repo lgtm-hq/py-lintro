@@ -1,9 +1,10 @@
 """Glob-named files are validated through html-validate's stdin (#3396).
 
 html-validate expands positional paths as globs, so ``[slug].html`` never
-matches itself. Such files are validated one per call with ``--stdin
---stdin-filename <path>``, run from the file's directory, and merged with
-the positional call into one result.
+matches itself. Such files are validated one per call with ``--stdin``,
+run from the file's directory, and merged with the positional call into one
+result. The name never appears on the command line: html-validate reports
+``/dev/stdin`` and lintro renames that report.
 """
 
 from __future__ import annotations
@@ -31,10 +32,14 @@ from lintro.tools.html_validate.stdin_route import (
     SYMLINKED_PATH,
     StdinRoute,
     merge_results,
+    rename_stdin_report,
     stdin_command,
 )
 
 _EXECUTABLE = "/pinned/html-validate"
+_STDIN_ARGV = [_EXECUTABLE, "--formatter", "json", "--stdin"]
+_SLOW = "<!-- slow -->"
+_VANISHED = "<!-- vanished -->"
 
 
 def _report(path: str, *, findings: bool) -> str:
@@ -82,20 +87,18 @@ class _Call:
 class _FakeHtmlValidate:
     """Answer html-validate calls the way html-validate 11.21 does.
 
-    A positional call reports each argument; a stdin call reports the
-    ``--stdin-filename`` and finds an error when the source holds ``<div>``.
+    A positional call reports each argument; a stdin call reports
+    ``/dev/stdin`` and finds an error when the source holds ``<div>``. A
+    stdin call times out on a source holding :data:`_SLOW` and cannot start
+    on one holding :data:`_VANISHED`.
 
     Attributes:
         dirty: Positional paths that carry an error.
         calls: Every recorded invocation.
-        slow: File names whose stdin call hits its deadline.
-        vanished: File names whose stdin call finds no executable.
     """
 
     dirty: set[str] = field(default_factory=set)
     calls: list[_Call] = field(default_factory=list)
-    slow: set[str] = field(default_factory=set)
-    vanished: set[str] = field(default_factory=set)
 
     def __call__(
         self,
@@ -117,8 +120,8 @@ class _FakeHtmlValidate:
             The canned html-validate result.
 
         Raises:
-            subprocess.TimeoutExpired: For a stdin call on a ``slow`` file.
-            FileNotFoundError: For a stdin call on a ``vanished`` file.
+            subprocess.TimeoutExpired: For a stdin source marked slow.
+            FileNotFoundError: For a stdin source marked vanished.
         """
         del timeout
         source = None
@@ -126,13 +129,12 @@ class _FakeHtmlValidate:
             source = os.read(stdin, 65536).decode()
         self.calls.append(_Call(cmd=list(cmd), cwd=cwd, source=source))
         if "--stdin" in cmd:
-            name = cmd[cmd.index("--stdin-filename") + 1]
-            if Path(name).name in self.slow:
+            if _SLOW in (source or ""):
                 raise subprocess.TimeoutExpired(cmd=cmd, timeout=30)
-            if Path(name).name in self.vanished:
+            if _VANISHED in (source or ""):
                 raise FileNotFoundError(cmd[0])
             dirty = "<div>" in (source or "")
-            stdout = _report(name, findings=dirty)
+            stdout = _report("/dev/stdin", findings=dirty)
         else:
             paths = cmd[cmd.index("json") + 1 :]
             stdout = json.dumps(
@@ -184,20 +186,47 @@ def _check(
         return plugin.check([str(tmp_path)], {})
 
 
-def test_stdin_command_passes_no_positional_path() -> None:
-    """The stdin argv names the file only as the reported filename."""
-    cmd = stdin_command([_EXECUTABLE, "--formatter", "json"], filename="/r/[a].html")
+def test_stdin_command_names_no_file() -> None:
+    """No file name reaches the argv, so no runner or shell can rewrite it."""
+    cmd = stdin_command([_EXECUTABLE, "--formatter", "json"])
 
-    assert_that(cmd).is_equal_to(
+    assert_that(cmd).is_equal_to(_STDIN_ARGV)
+
+
+def test_rename_stdin_report_puts_the_real_path_on_the_stdin_report() -> None:
+    """Only the ``/dev/stdin`` report is renamed; stderr is kept."""
+    stdout = json.dumps(
         [
-            _EXECUTABLE,
-            "--formatter",
-            "json",
-            "--stdin",
-            "--stdin-filename",
-            "/r/[a].html",
+            {"filePath": "/dev/stdin", "messages": []},
+            {"filePath": "/elsewhere.html", "messages": []},
         ],
     )
+    result = SubprocessResult(
+        returncode=0,
+        stdout=stdout,
+        stderr="warning\n",
+        output=stdout + "warning\n",
+    )
+
+    renamed = rename_stdin_report(result, filename="/r/[slug].html")
+
+    assert_that(
+        [report["filePath"] for report in json.loads(renamed.stdout)],
+    ).is_equal_to(["/r/[slug].html", "/elsewhere.html"])
+    assert_that(renamed.output).is_equal_to(renamed.stdout + "warning\n")
+    assert_that(renamed.returncode).is_zero()
+
+
+@pytest.mark.parametrize("stdout", ["", "not json", "{}"])
+def test_rename_stdin_report_leaves_a_non_report_alone(stdout: str) -> None:
+    """A missing or malformed report stays as it is, for the usual handling.
+
+    Args:
+        stdout: What html-validate printed.
+    """
+    result = SubprocessResult(returncode=1, stdout=stdout, stderr="", output=stdout)
+
+    assert_that(rename_stdin_report(result, filename="/r/a.html")).is_equal_to(result)
 
 
 def test_glob_named_files_are_validated_through_stdin(tmp_path: Path) -> None:
@@ -220,14 +249,11 @@ def test_glob_named_files_are_validated_through_stdin(tmp_path: Path) -> None:
     positional = [call for call in fake.calls if "--stdin" not in call.cmd]
     piped = [call for call in fake.calls if "--stdin" in call.cmd]
     assert_that([call.cmd[3:] for call in positional]).is_equal_to([["page.html"]])
-    assert_that({(call.cmd[-1], call.cwd, call.source) for call in piped}).is_equal_to(
+    assert_that([call.cmd for call in piped]).is_equal_to([_STDIN_ARGV, _STDIN_ARGV])
+    assert_that({(call.cwd, call.source) for call in piped}).is_equal_to(
         {
-            (
-                str(tmp_path / "[slug]" / "page.html"),
-                str(tmp_path / "[slug]"),
-                "<p><div></p>",
-            ),
-            (str(tmp_path / "a{1,2}.html"), str(tmp_path), "<p>clean</p>"),
+            (str(tmp_path / "[slug]"), "<p><div></p>"),
+            (str(tmp_path), "<p>clean</p>"),
         },
     )
     assert_that(result.success).is_false()
@@ -263,20 +289,20 @@ def test_a_stdin_timeout_stops_the_run_and_keeps_counted_findings(
     Args:
         tmp_path: Working directory for the run.
     """
-    fake = _FakeHtmlValidate(dirty={"page.html"}, slow={"[a].html"})
+    fake = _FakeHtmlValidate(dirty={"page.html"})
     result = _check(
         tmp_path,
         {
             "page.html": "<p><div></p>",
-            "[a].html": "<p>a</p>",
+            "[a].html": f"<p>a</p>{_SLOW}",
             "[b].html": "<p><div></p>",
             "[c].html": "<p><div></p>",
         },
         fake,
     )
 
-    started = [call.cmd[-1] for call in fake.calls if "--stdin" in call.cmd]
-    assert_that(started).is_equal_to([str(tmp_path / "[a].html")])
+    started = [call.source for call in fake.calls if "--stdin" in call.cmd]
+    assert_that(started).is_equal_to([f"<p>a</p>{_SLOW}"])
     assert_that(result.timed_out).is_false()
     assert_that(result.execution_failed).is_true()
     assert_that(result.success).is_false()
@@ -298,13 +324,13 @@ def test_a_launch_failure_keeps_earlier_findings_and_names_the_file(
     Args:
         tmp_path: Working directory for the run.
     """
-    fake = _FakeHtmlValidate(dirty={"page.html"}, vanished={"[b].html"})
+    fake = _FakeHtmlValidate(dirty={"page.html"})
     result = _check(
         tmp_path,
         {
             "page.html": "<p><div></p>",
             "[a].html": "<p><div></p>",
-            "[b].html": "<p><div></p>",
+            "[b].html": f"<p><div></p>{_VANISHED}",
         },
         fake,
     )

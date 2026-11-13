@@ -2,9 +2,16 @@
 
 html-validate expands every positional argument as a glob, so a file named
 ``[slug].html`` or ``a{1,2}.html`` does not match itself and is never
-validated. ``--stdin --stdin-filename <path>`` validates any name and reports
-the findings under that name, one file per call, run from the file's own
-directory so the same ``.htmlvalidate.json`` lookup applies.
+validated. ``--stdin`` validates the file's content instead, one file per
+call, run from the file's own directory so the same ``.htmlvalidate.json``
+lookup applies.
+
+The file's name is never put on the command line, not even as
+``--stdin-filename``: the ``npx`` fallback runs html-validate through
+``/bin/sh``, and npm's quoting leaves ``[``, ``]``, ``{``, ``}`` and ``,``
+bare, so the shell rewrites ``[slug].html`` to a neighbouring ``s.html``.
+html-validate reports the source as ``/dev/stdin``, and lintro puts the real
+path on that report itself (:func:`rename_stdin_report`).
 
 Stdin differs from a positional run in ways lintro cannot emulate reliably:
 flat configs and transforms match ``/dev/stdin``, ``.htmlvalidateignore`` is
@@ -31,11 +38,12 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pathspec
 
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools.core.incomplete_run import incomplete_run_result
@@ -91,17 +99,54 @@ CONFIG_NOT_ALLOWED: str = "config not on the allowlist"
 IGNORE_NOT_INAPPLICABLE: str = "ignore file not provably inapplicable"
 
 
-def stdin_command(base: Sequence[str], *, filename: str) -> list[str]:
+#: The name html-validate gives a source read from stdin in its report.
+STDIN_FILENAME: str = "/dev/stdin"
+
+
+def stdin_command(base: Sequence[str]) -> list[str]:
     """Build the argv that validates one file read from stdin.
 
     Args:
         base: The resolved executable plus ``--formatter json``.
-        filename: The real path findings are reported under.
 
     Returns:
-        An argv that passes no positional path, so nothing is globbed.
+        An argv that names no file at all, so no runner or shell can glob,
+        split or rewrite the file's name.
     """
-    return [*base, "--stdin", "--stdin-filename", filename]
+    return [*base, "--stdin"]
+
+
+def rename_stdin_report(
+    result: SubprocessResult,
+    *,
+    filename: str,
+) -> SubprocessResult:
+    """Put a file's real path on the report html-validate printed for stdin.
+
+    Args:
+        result: A finished ``--stdin`` call.
+        filename: The path the content was read from.
+
+    Returns:
+        The result with every ``/dev/stdin`` report renamed, or unchanged
+        when stdout is not a JSON report list (the caller then reports a
+        malformed or missing report as usual).
+    """
+    try:
+        reports = json.loads(result.stdout)
+    except ValueError:
+        return result
+    if not isinstance(reports, list):
+        return result
+    for report in reports:
+        if isinstance(report, dict) and report.get("filePath") == STDIN_FILENAME:
+            report["filePath"] = filename
+    stdout = json.dumps(reports)
+    return replace(
+        result,
+        stdout=stdout,
+        output=result.output.replace(result.stdout, stdout, 1),
+    )
 
 
 def _ancestors(directory: Path) -> list[Path]:

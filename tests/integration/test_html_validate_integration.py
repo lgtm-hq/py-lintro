@@ -10,10 +10,12 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 from assertpy import assert_that
 
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.html_validate.html_validate_issue import HtmlValidateIssue
 from lintro.plugins import ToolRegistry
@@ -145,18 +147,64 @@ _FINDINGS = "<p><div></p>\n"
 _CLEAN = "<p>clean</p>\n"
 
 
-def _check(paths: list[Path]) -> ToolResult:
+@pytest.fixture
+def tmp_path(tmp_path: Path) -> Path:
+    """Resolve pytest's temporary directory to its real path.
+
+    A symlinked temporary directory (``/var`` on macOS, for instance) would
+    make lintro hold every glob-named file back, so the stdin-route tests
+    would silently become hold-back tests.
+
+    Args:
+        tmp_path: Pytest's temporary directory.
+
+    Returns:
+        The same directory without symlinks.
+    """
+    return Path(os.path.realpath(tmp_path))
+
+
+def _check(paths: list[Path], *, stdin_files: int | None = None) -> ToolResult:
     """Run the registered html-validate plugin over some paths.
 
     Args:
         paths: Files to check.
+        stdin_files: When given, how many files must go through ``--stdin``.
+            Each such call must name no file at all.
 
     Returns:
         The plugin's result.
     """
     tool = ToolRegistry.get("html_validate")
     tool.exclude_patterns = []
-    return tool.check([str(path) for path in paths], {})
+    calls: list[list[str]] = []
+    original = tool._run_subprocess_result
+
+    def recording(**kwargs: Any) -> SubprocessResult:
+        """Record each html-validate argv, then run it.
+
+        Args:
+            **kwargs: The plugin's subprocess arguments.
+
+        Returns:
+            The real subprocess result.
+        """
+        calls.append([str(arg) for arg in kwargs["cmd"]])
+        return original(**kwargs)
+
+    # An instance attribute shadows the method for this one run.
+    object.__setattr__(tool, "_run_subprocess_result", recording)
+    try:
+        result = tool.check([str(path) for path in paths], {})
+    finally:
+        object.__delattr__(tool, "_run_subprocess_result")
+    if stdin_files is not None:
+        piped = [cmd for cmd in calls if "--stdin" in cmd]
+        assert_that(piped).is_length(stdin_files)
+        for cmd in piped:
+            assert_that(cmd[-1]).is_equal_to("--stdin")
+            assert_that(" ".join(cmd)).does_not_contain(*(str(p) for p in paths))
+    return result
 
 
 def _reported(result: ToolResult, root: Path) -> set[str]:
@@ -195,7 +243,7 @@ def test_html_validate_reports_glob_named_file_under_its_real_path(
     """
     target = tmp_path / name
     target.write_text(_FINDINGS, encoding="utf-8")
-    result = _check([target])
+    result = _check([target], stdin_files=1)
 
     assert_that(result.execution_failed).is_false()
     assert_that(result.success).is_false()
@@ -221,7 +269,7 @@ def test_html_validate_clean_glob_named_file_passes_as_inspected(
     """
     target = tmp_path / name
     target.write_text(_CLEAN, encoding="utf-8")
-    result = _check([target])
+    result = _check([target], stdin_files=1)
 
     assert_that(result.success).is_true()
     assert_that(result.execution_failed).is_false()
@@ -244,7 +292,7 @@ def test_html_validate_file_inside_a_slug_directory(tmp_path: Path) -> None:
     target.write_text(_FINDINGS, encoding="utf-8")
     sibling = tmp_path / "index.html"
     sibling.write_text(_CLEAN, encoding="utf-8")
-    result = _check([target, sibling])
+    result = _check([target, sibling], stdin_files=1)
 
     assert_that(result.execution_failed).is_false()
     assert_that(result.success).is_false()
@@ -263,7 +311,7 @@ def test_html_validate_mixed_run_merges_into_one_result(tmp_path: Path) -> None:
         (tmp_path / name).write_text(_FINDINGS, encoding="utf-8")
     clean = tmp_path / "[clean].html"
     clean.write_text(_CLEAN, encoding="utf-8")
-    result = _check([tmp_path / name for name in names] + [clean])
+    result = _check([tmp_path / name for name in names] + [clean], stdin_files=3)
 
     assert_that(result.name).is_equal_to("html_validate")
     assert_that(result.execution_failed).is_false()
@@ -282,7 +330,7 @@ def test_html_validate_clean_mixed_run_passes(tmp_path: Path) -> None:
     paths = [tmp_path / "page.html", tmp_path / "[slug].html"]
     for path in paths:
         path.write_text(_CLEAN, encoding="utf-8")
-    result = _check(paths)
+    result = _check(paths, stdin_files=1)
 
     assert_that(result.success).is_true()
     assert_that(result.inspected_files).is_true()
@@ -328,7 +376,7 @@ def test_html_validate_never_validates_the_file_a_name_resembles(
     target = tmp_path / name
     target.parent.mkdir(exist_ok=True)
     target.write_text(_FINDINGS, encoding="utf-8")
-    result = _check([target, sibling])
+    result = _check([target, sibling], stdin_files=1)
 
     assert_that(result.success).is_false()
     assert_that(result.execution_failed).is_false()
@@ -340,6 +388,9 @@ def test_html_validate_stdin_uses_the_files_own_directory_config(
     tmp_path: Path,
 ) -> None:
     """A config beside the glob-named file applies, as it would positionally.
+
+    A clean sibling at the root keeps the working directory above
+    ``[slug]``, so ``[slug]/page.html`` takes the stdin route.
 
     Args:
         tmp_path: Pytest-managed temporary directory.
@@ -353,7 +404,9 @@ def test_html_validate_stdin_uses_the_files_own_directory_config(
     )
     target = route / "page.html"
     target.write_text(_FINDINGS, encoding="utf-8")
-    result = _check([target])
+    sibling = tmp_path / "index.html"
+    sibling.write_text(_CLEAN, encoding="utf-8")
+    result = _check([target, sibling], stdin_files=1)
 
     assert_that(result.success).is_true()
     assert_that(result.inspected_files).is_true()
@@ -520,7 +573,7 @@ def test_html_validate_holds_back_what_stdin_cannot_validate(
     target.write_text(_FINDINGS, encoding="utf-8")
     plain = tmp_path / "page.html"
     plain.write_text(_FINDINGS, encoding="utf-8")
-    result = _check([target, plain])
+    result = _check([target, plain], stdin_files=0)
 
     assert_that(result.success).is_false()
     assert_that(result.execution_failed).is_true()
@@ -556,7 +609,7 @@ def test_html_validate_validates_through_stdin_when_settings_do_not_apply(
     (tmp_path / setting).write_text(content, encoding="utf-8")
     target = tmp_path / "[slug].html"
     target.write_text(_FINDINGS, encoding="utf-8")
-    result = _check([target])
+    result = _check([target], stdin_files=1)
 
     assert_that(result.execution_failed).is_false()
     assert_that(result.success).is_false()
@@ -586,7 +639,7 @@ def test_html_validate_holds_back_a_file_under_a_symlinked_directory(
     (project / "linked").symlink_to(physical / "pages", target_is_directory=True)
     plain = project / "page.html"
     plain.write_text(_FINDINGS, encoding="utf-8")
-    result = _check([project / "linked" / "[slug].html", plain])
+    result = _check([project / "linked" / "[slug].html", plain], stdin_files=0)
 
     assert_that(result.success).is_false()
     assert_that(result.execution_failed).is_true()
@@ -606,7 +659,7 @@ def test_html_validate_validates_a_name_starting_with_a_dash(tmp_path: Path) -> 
     """
     target = tmp_path / "-x.html"
     target.write_text(_FINDINGS, encoding="utf-8")
-    result = _check([target])
+    result = _check([target], stdin_files=0)
 
     assert_that(result.execution_failed).is_false()
     assert_that(result.success).is_false()
@@ -649,7 +702,7 @@ def test_html_validate_keeps_findings_when_the_binary_vanishes(
     """
     _wrap_html_validate(
         tmp_path,
-        'case " $* " in *" --stdin-filename "*) rm -f "$0";; esac',
+        'case " $* " in *" --stdin "*) rm -f "$0";; esac',
     )
     for name in ("page.html", "[a].html", "[b].html"):
         (tmp_path / name).write_text(_FINDINGS, encoding="utf-8")
@@ -669,11 +722,15 @@ def test_html_validate_keeps_findings_when_the_binary_vanishes(
 def test_html_validate_stops_after_a_stdin_timeout(tmp_path: Path) -> None:
     """After one stdin deadline the remaining files are named, not started.
 
+    No file name reaches the argv, so the wrapper hangs on the stdin call
+    run from the ``[0slow]`` directory.
+
     Args:
         tmp_path: Pytest-managed temporary directory.
     """
-    _wrap_html_validate(tmp_path, 'case "$*" in *slow*) sleep 30;; esac')
-    for name in ("page.html", "[0slow].html", "[a].html", "[b].html"):
+    _wrap_html_validate(tmp_path, 'case "$PWD" in *slow*) sleep 30;; esac')
+    for name in ("page.html", "[0slow]/page.html", "[a].html", "[b].html"):
+        (tmp_path / name).parent.mkdir(exist_ok=True)
         (tmp_path / name).write_text(_FINDINGS, encoding="utf-8")
     tool = ToolRegistry.get("html_validate")
     tool.exclude_patterns = []
@@ -687,7 +744,7 @@ def test_html_validate_stops_after_a_stdin_timeout(tmp_path: Path) -> None:
     assert_that(result.issues_count).is_equal_to(len(result.issues))
     assert_that(_reported(result, tmp_path)).is_equal_to({"page.html"})
     assert_that(result.output).contains(
-        f"{tmp_path / '[0slow].html'}: ",
+        f"{tmp_path / '[0slow]' / 'page.html'}: ",
         "timed out",
         "not run on 2 file(s) because an earlier html-validate call timed out",
         "'[a].html'",

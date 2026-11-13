@@ -66,6 +66,7 @@ from lintro.tools.core.readable_paths import (
 from lintro.tools.html_validate.stdin_route import (
     StdinRoute,
     merge_results,
+    rename_stdin_report,
     stdin_command,
 )
 
@@ -533,7 +534,9 @@ class HtmlValidatePlugin(BaseToolPlugin):
         """Validate one glob-named file through stdin under its real path.
 
         The call runs from the file's directory, so html-validate looks up
-        its configuration exactly as it would for a positional path.
+        its configuration exactly as it would for a positional path. The
+        name is not passed at all: html-validate reports ``/dev/stdin``,
+        and the real path is put on that report afterwards.
 
         Args:
             target: Absolute path of the file; findings are reported under it.
@@ -546,7 +549,7 @@ class HtmlValidatePlugin(BaseToolPlugin):
             or an html-validate that cannot be started, is an incomplete run;
             every failure reason starts with the file's path.
         """
-        cmd = stdin_command(invocation.cmd, filename=target)
+        cmd = stdin_command(invocation.cmd)
         directory = os.path.dirname(target)
         logger.debug(
             f"[HtmlValidatePlugin] Running: {' '.join(cmd)} (cwd={directory})",
@@ -598,7 +601,7 @@ class HtmlValidatePlugin(BaseToolPlugin):
         return _naming(
             target,
             self._evaluate(
-                result,
+                rename_stdin_report(result, filename=target),
                 invocation=invocation,
                 cwd=cwd,
                 file_args=[],

@@ -2776,12 +2776,15 @@ as a path separator). A bare parenthesis is literal, so SvelteKit route groups s
 `src/routes/(app)/+page.svelte` and names such as `page (1).html` are validated as
 usual. Lintro never passes a path with one of these shapes to html-validate as an
 argument. It validates each such file through html-validate's standard input instead
-(`--stdin --stdin-filename <path>`), one html-validate process per file, run from the
-file's own directory so the same `.htmlvalidate.*` configuration applies. Findings are
-reported under the file's real path and merged with the other files into one result. The
-glob shapes are handled this way on every platform. The backslash is handled this way on
-POSIX only: on Windows it is always a path separator, so those paths are passed as
-usual.
+(`--stdin`), one html-validate process per file, run from the file's own directory so
+the same `.htmlvalidate.*` configuration applies. The file's name is not passed at all,
+not even as `--stdin-filename`: the `npx` fallback runs html-validate through a shell
+that would expand `[slug].html` to a neighbouring `s.html`. html-validate reports the
+content as `/dev/stdin`, and Lintro puts the file's real path on that report. Findings
+are reported under the file's real path and merged with the other files into one result.
+The glob shapes are handled this way on every platform. The backslash is handled this
+way on POSIX only: on Windows it is always a path separator, so those paths are passed
+as usual.
 
 Standard input does not behave exactly like a path argument: flat configs and transforms
 are matched against the name `/dev/stdin`, `.htmlvalidateignore` is skipped, and the
