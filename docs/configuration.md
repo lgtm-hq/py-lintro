@@ -1421,7 +1421,11 @@ Rationale:
    executable it names receives the tool's command line, so it could print an empty
    result and exit 0 in place of the pinned tool. The `--script-shell=/bin/sh` flag
    takes precedence over every one of those settings, so on Linux and macOS a configured
-   `script-shell` never runs under the npx fallback.
+   `script-shell` never runs under the npx fallback. It applies only to lintro's own npx
+   calls: your `npm run` scripts still use the shell you configured. The path is
+   absolute on purpose, so a `sh` earlier on `PATH` cannot stand in for it; a host
+   without `/bin/sh` fails the npx fallback loudly (`spawn /bin/sh ENOENT`) instead of
+   falling back to another shell.
 
    **Lintro's own npm cache, checked before every run.** Each pinned package gets its
    own cache directory, so a user cache that already holds something under npm's `_npx`
