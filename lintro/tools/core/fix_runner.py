@@ -65,32 +65,64 @@ _ERROR_DIAGNOSTIC = re.compile(
     re.MULTILINE,
 )
 
-#: Stands in for a fix-command argument echoed on stderr (#3414).
-_ECHOED_ARGUMENT = "<argument>"
+#: Stands in for a target file path echoed on stderr (#3414).
+_ECHOED_PATH = "<path>"
 
 
-def _mask_echoed_arguments(stderr: str, cmd: Sequence[str]) -> str:
-    """Hide the fix command's multi-line arguments where stderr echoes them.
+def _echo_candidate(path: str) -> str | None:
+    """Return the form in which stderr would echo a target path, if masked.
+
+    ``text=True`` decodes stderr with universal newlines, so a CRLF or a
+    lone CR in a file name reaches the scan as LF; the candidate is
+    normalised the same way. A path without a newline cannot split a line
+    and needs no mask. A path that is only whitespace, or that ends in a
+    newline, would swallow the start of the line after its echo, so it is
+    never masked: such a file fails closed instead.
+
+    Args:
+        path: A file path the runner passed to the fix command.
+
+    Returns:
+        The normalised path to mask, or None when it must not be masked.
+    """
+    normalised = path.replace("\r\n", "\n").replace("\r", "\n")
+    if "\n" not in normalised or not normalised.strip():
+        return None
+    if normalised.endswith("\n"):
+        return None
+    return normalised
+
+
+def _mask_echoed_paths(stderr: str, targets: Sequence[str]) -> str:
+    """Hide target file paths where the fix command echoes them mid-line.
 
     A tool that echoes a file path mid-line (``sqlfluff fix`` prints
     ``== [<path>] ==`` on stderr for a parse error) splits a path containing a
     newline across two lines, and the continuation can look like an exception
-    line. Only echoes that start mid-line are masked, so text that begins a
-    line, where every real diagnostic starts, is never hidden. A traceback
-    prints a path as a ``repr`` with its newline escaped, so a genuine
-    exception line naming such a file still matches (#3414).
+    line. Only the file paths the runner fixed are masked, never option
+    values or other arguments, and a masked span never starts at the start of
+    a line, so a line that begins outside an echoed path is never hidden. A
+    traceback prints a path as a ``repr`` with its newline escaped, so a
+    genuine exception line naming such a file still matches (#3414).
 
     Args:
         stderr: The fix command's stderr.
-        cmd: The fix command line, whose arguments include the file path.
+        targets: The file paths the runner passed to the fix command.
 
     Returns:
-        The stderr with every mid-line echo of a multi-line argument replaced.
+        The stderr with every mid-line echo of a multi-line target replaced.
     """
-    for argument in {arg for arg in cmd if "\n" in arg}:
+    candidates = {
+        candidate
+        for candidate in map(_echo_candidate, targets)
+        if candidate is not None
+    }
+    # Longest first, so a path that is a substring of another cannot leave
+    # part of the longer echo unmasked.
+    for candidate in sorted(candidates, key=len, reverse=True):
         stderr = re.sub(
-            rf"(?<=[^\n]){re.escape(argument)}",
-            _ECHOED_ARGUMENT,
+            rf"(?<=[^\n]){re.escape(candidate)}",
+            _ECHOED_PATH,
             stderr,
         )
     return stderr
@@ -416,15 +448,15 @@ def _verify_and_score(
 def _fix_exit_error(
     process: SubprocessResult,
     policy: PerFileFixPolicy,
-    cmd: Sequence[str],
+    targets: Sequence[str],
 ) -> str | None:
     """Classify a completed fix command's exit.
 
     Args:
         process: The fix command's status and output.
         policy: Per-tool policy declaring the findings exit statuses.
-        cmd: The fix command line, whose echoed arguments are not
-            diagnostics.
+        targets: The file paths passed to the fix command, whose echoes
+            are not diagnostics.
 
     Returns:
         The execution error to record, or None when the exit is a clean fix
@@ -443,7 +475,7 @@ def _fix_exit_error(
     # (``sqlfluff fix`` exits 1 for both). Only an error diagnostic on stderr
     # separates them; the exit code is the structured verdict otherwise. A
     # file path the tool echoes is not a diagnostic, even split by a newline.
-    if _ERROR_DIAGNOSTIC.search(_mask_echoed_arguments(process.stderr, cmd)):
+    if _ERROR_DIAGNOSTIC.search(_mask_echoed_paths(process.stderr, targets)):
         return f"Fix command reported an error (exit code {returncode})"
     return None
 
@@ -504,9 +536,11 @@ def _fix_one_file(
             None,
         )
 
-    fix_cmd = fix_command(file_path)
     try:
-        process = plugin._run_subprocess_result(cmd=fix_cmd, timeout=timeout)
+        process = plugin._run_subprocess_result(
+            cmd=fix_command(file_path),
+            timeout=timeout,
+        )
     except subprocess.TimeoutExpired:
         failed = _failed_fix(
             initial_issues=initial_issues,
@@ -524,7 +558,7 @@ def _fix_one_file(
         return failed, FixStage.FIX
 
     fix_output = process.output
-    exit_error = _fix_exit_error(process, policy, fix_cmd)
+    exit_error = _fix_exit_error(process, policy, [file_path])
     if exit_error is not None:
         # The fix may have rewritten the file before it failed, so nothing
         # measured what remains; a clean retry must not replace this (#3401).

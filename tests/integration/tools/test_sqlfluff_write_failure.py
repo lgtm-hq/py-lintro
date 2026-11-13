@@ -79,20 +79,33 @@ def _restore_after_first_write(
 _SPLIT_NAME = "query\nPermissionError: error permission denied.sql"
 
 
-@pytest.mark.parametrize("name", ["query.sql", _SPLIT_NAME])
+@pytest.mark.parametrize(
+    ("name", "exclude_rules"),
+    [
+        ("query.sql", None),
+        (_SPLIT_NAME, None),
+        ("x\nTraceback (most recent call last):.sql", ["\n"]),
+    ],
+    ids=["plain-name", "split-name", "newline-option-value"],
+)
 def test_permission_error_then_clean_retry_stays_unmeasured(
     project: Path,
     name: str,
+    exclude_rules: list[str] | None,
 ) -> None:
-    """The failed write is not replaced by the retry that could have run.
+    r"""The failed write is not replaced by the retry that could have run.
 
     A file name that splits into an exception-shaped line on stderr does not
-    hide the real traceback (#3414).
+    hide the real traceback, and neither does a newline option value: only
+    the target path is masked, so a bare ``"\n"`` argument cannot join the
+    traceback lines into one (#3414).
     """
     query = project / name
     query.write_text("select  1\n")
     project.chmod(stat.S_IRUSR | stat.S_IXUSR)
     plugin = SqlfluffPlugin()
+    if exclude_rules is not None:
+        plugin.set_options(exclude_rules=exclude_rules)
     try:
         with patch.object(
             plugin,
@@ -152,7 +165,16 @@ def test_unfixable_violations_stay_measured(project: Path, name: str) -> None:
     assert_that(result.remaining_issues_count).is_greater_than(0)
 
 
-@pytest.mark.parametrize("name", ["query.sql", _SPLIT_NAME])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "query.sql",
+        _SPLIT_NAME,
+        "x\rPermissionError: denied.sql",
+        "x\r\nPermissionError: denied.sql",
+    ],
+    ids=["plain-name", "lf-name", "cr-name", "crlf-name"],
+)
 def test_parse_errors_stay_measured_when_stderr_echoes_the_path(
     project: Path,
     name: str,
@@ -160,8 +182,10 @@ def test_parse_errors_stay_measured_when_stderr_echoes_the_path(
     """A parse error echoes the path on stderr; that echo is not a diagnostic.
 
     ``sqlfluff fix`` exits 1 and prints ``== [<path>] ==`` on stderr. A name
-    with a newline puts an exception-shaped fragment at the start of a line,
-    which must not turn the ordinary exit into an execution failure (#3414).
+    with a line break puts an exception-shaped fragment at the start of a
+    line, which must not turn the ordinary exit into an execution failure.
+    Stderr is decoded with universal newlines, so a CR or CRLF in the name
+    reaches the scan as LF and must be masked the same way (#3414).
     """
     query = project / name
     query.write_text("SELECT a FROM b WHERE (\n")
