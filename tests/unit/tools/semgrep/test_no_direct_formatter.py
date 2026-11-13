@@ -2,19 +2,169 @@
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 
 import pytest
 import yaml
 from assertpy import assert_that
 
+import lintro.rules
 from lintro.enums.capability import Cap
+from lintro.exceptions.errors import ConfigurationError
 from lintro.plugins.file_discovery import discover_files
 from lintro.plugins.registry import ToolRegistry
-from lintro.rules import available_rule_packs, resolve_rule_pack
-from lintro.tools.semgrep.definition import SemgrepPlugin
+from lintro.rules import available_rule_packs, resolve_rule_pack, rule_pack_info
+from lintro.tools.semgrep.definition import (
+    SEMGREP_FILE_PATTERNS,
+    SemgrepPlugin,
+    _unanchored_pack_warning,
+)
 
 PACK = "scripts/no-direct-formatter"
+OTHER_PACK = "python/none-coercion"
+RUNNER_TOKENS = {"bunx", "npx", "uvx", "--yes", "uv", "tool", "run"}
+
+
+def _invoked_formatter(command: str) -> str:
+    """Name the executable a literal example runs once runner prefixes go.
+
+    Args:
+        command: Example command line from the pack metadata.
+
+    Returns:
+        The executable name without any ``@version`` pin.
+    """
+    tokens = shlex.split(command)
+    while tokens and tokens[0] in RUNNER_TOKENS:
+        tokens.pop(0)
+    return tokens[0].partition("@")[0] if tokens else ""
+
+
+def _pack_examples() -> dict[str, str]:
+    """Load the formatter examples declared in the pack metadata.
+
+    Returns:
+        Example command per formatter name.
+    """
+    rules = yaml.safe_load(resolve_rule_pack(PACK).read_text(encoding="utf-8"))["rules"]
+    return {
+        name: command
+        for rule in rules
+        for name, command in rule["metadata"]["lintro_formatters"].items()
+    }
+
+
+@pytest.mark.parametrize(
+    ("command", "formatter"),
+    [
+        ("black x.py", "black"),
+        ("uvx ruff@0.6.0 format x.py", "ruff"),
+        ("bunx --yes prettier@3 --write .", "prettier"),
+        ("uv tool run black x.py", "black"),
+    ],
+)
+def test_invoked_formatter_reads_past_runners_and_pins(
+    command: str,
+    formatter: str,
+) -> None:
+    """The example check names the formatter, so a swapped example cannot pass.
+
+    Args:
+        command: Literal command line.
+        formatter: Executable it runs.
+    """
+    assert_that(_invoked_formatter(command)).is_equal_to(formatter)
+
+
+@pytest.mark.parametrize(("name", "command"), sorted(_pack_examples().items()))
+def test_each_example_runs_its_own_formatter(name: str, command: str) -> None:
+    """A ``ruff:`` entry holding ``black x.py`` would match but prove nothing.
+
+    Args:
+        name: Formatter key in the pack metadata.
+        command: Example command declared for that key.
+    """
+    assert_that(_invoked_formatter(command)).described_as(name).is_equal_to(name)
+
+
+def test_pack_metadata_drives_discovery_and_anchoring() -> None:
+    """Pack flags come from YAML, not from a pack name hard-coded in the plugin."""
+    scripts = rule_pack_info(PACK)
+    other = rule_pack_info(OTHER_PACK)
+    assert_that(scripts.discover_all_files).is_true()
+    assert_that(scripts.anchored_directories).is_equal_to(("scripts/",))
+    assert_that(scripts.rule_ids).contains(
+        "lintro.scripts.no-direct-formatter.native-command",
+    )
+    assert_that(other.discover_all_files).is_false()
+    assert_that(other.anchored_directories).is_empty()
+    plugin = SemgrepPlugin()
+    plugin.set_options(rule_packs=[OTHER_PACK])
+    assert_that(plugin.definition.file_patterns).is_equal_to(SEMGREP_FILE_PATTERNS)
+    plugin.set_options(rule_packs=[OTHER_PACK, PACK])
+    assert_that(plugin.definition.file_patterns).is_equal_to(["*"])
+
+
+def test_definition_reads_skip_pack_validation_until_packs_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated reads reuse the definition; a changed selection is validated again.
+
+    Args:
+        tmp_path: Empty rules directory that no pack name resolves in.
+        monkeypatch: Point pack resolution at the empty directory.
+    """
+    plugin = SemgrepPlugin()
+    plugin.set_options(rule_packs=[PACK])
+    first = plugin.definition
+    # With no packs installed, any validation or rules-directory glob would raise.
+    monkeypatch.setattr(lintro.rules, "_RULES_ROOT", tmp_path)
+    for _ in range(3):
+        assert_that(plugin.definition).is_same_as(first)
+    assert_that(first.file_patterns).is_equal_to(["*"])
+    plugin.options["rule_packs"] = [OTHER_PACK]
+    assert_that(lambda: plugin.definition).raises(ConfigurationError).when_called_with()
+
+
+@pytest.mark.parametrize(
+    ("packs", "marker", "warns"),
+    [
+        ([PACK], None, True),
+        ([PACK], "pyproject.toml", False),
+        ([PACK], ".git", False),
+        ([OTHER_PACK], None, False),
+        ([], None, False),
+    ],
+    ids=["no-marker", "pyproject", "git", "unanchored-pack", "no-packs"],
+)
+def test_unanchored_pack_warning_needs_directory_globs_and_no_marker(
+    tmp_path: Path,
+    packs: list[str],
+    marker: str | None,
+    warns: bool,
+) -> None:
+    """Only directory-scoped packs in a marker-less working directory warn.
+
+    Args:
+        tmp_path: Working directory the Semgrep subprocess would use.
+        packs: Enabled packs.
+        marker: Project marker created in the working directory, if any.
+        warns: Whether a warning is expected.
+    """
+    if marker is not None:
+        (tmp_path / marker).touch()
+    message = _unanchored_pack_warning(packs, str(tmp_path))
+    if warns:
+        assert_that(message).contains(
+            f"findings under scripts/ may be missed because no project marker "
+            f"was found in {tmp_path}",
+            PACK,
+            "pyproject.toml",
+        )
+    else:
+        assert_that(message).is_none()
 
 
 def test_pack_tracks_builtin_format_claimants() -> None:
@@ -25,9 +175,7 @@ def test_pack_tracks_builtin_format_claimants() -> None:
         if ToolRegistry.get_origin(name) == ToolRegistry.BUILTIN_ORIGIN
         and any(Cap.FORMAT in claim.capabilities for claim in definition.claims)
     }
-    rules = yaml.safe_load(resolve_rule_pack(PACK).read_text(encoding="utf-8"))["rules"]
-    covered = {name for rule in rules for name in rule["metadata"]["lintro_formatters"]}
-    assert_that(covered).is_equal_to(declared)
+    assert_that(set(_pack_examples())).is_equal_to(declared)
     assert_that(available_rule_packs()).contains(PACK)
 
 

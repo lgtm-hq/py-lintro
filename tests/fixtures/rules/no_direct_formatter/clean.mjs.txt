@@ -20,4 +20,17 @@ execSync('uv run --no-sync black generated.py');
 execSync(
   'black generated.py'
 );
-execSync('generate "input"; black generated.py');
+
+// Multi-line object and array shorthand naming a formatter is not a command.
+const formatters = {
+  black,
+  oxfmt,
+};
+const names = [
+  rustfmt,
+  shfmt,
+];
+console.log('cd web && prettier --write .');
+execSync('cd web && prettier --check .');
+execSync('uvx ruff check generated.py');
+execSync('bunx prettier@3 --check .');

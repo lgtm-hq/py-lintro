@@ -4321,14 +4321,26 @@ The pack targets `**/scripts/**`, `**/*.mjs`, and `**/Makefile`, at the project 
 in nested packages. It covers extensionless files inside `scripts` too. Other Makefile
 names (`GNUmakefile`, `makefile`, and `*.mk`) are outside the shipped scope unless they
 are inside `scripts`. A file such as `src/ordinary.js`, `docs/formatters.md`,
-`descripts/generate.sh`, or a root `format.sh` is outside that scope. Selecting this
-pack expands Lintro's candidate discovery so Semgrep can apply these path filters. Use
-narrower CLI paths or Semgrep's existing `include`/`exclude` options to restrict the
-scan further, for example:
+`descripts/generate.sh`, or a root `format.sh` is outside that scope. Files passed
+explicitly on the command line are filtered the same way. Selecting this pack expands
+Lintro's candidate discovery to every file so Semgrep can apply these path filters. That
+wider file list goes to the whole Semgrep run, not only to this pack: a native
+`.semgrep.yaml`, an explicit `config`, or `config=auto` running alongside it also scans
+files outside Semgrep's usual extensions, such as YAML, Dockerfiles and extensionless
+scripts. Use narrower CLI paths or Semgrep's existing `include`/`exclude` options to
+restrict the scan further, for example:
 
 ```bash
 lintro check scripts --tools semgrep --tool-options 'semgrep:include=scripts/**'
 ```
+
+The directory globs are matched against paths relative to the project root: the nearest
+directory at or above the scanned files that holds `.git`, `pyproject.toml`,
+`package.json`, `setup.py`, `setup.cfg`, `go.mod`, or `Cargo.toml`. In a tree with no
+such marker, Semgrep runs from the files' common directory instead. Scanning only
+`scripts/` then hands Semgrep `fmt.sh` rather than `scripts/fmt.sh`, so `**/scripts/**`
+cannot match. Lintro prints a warning naming the pack and that directory in this case.
+Add a project marker to scan these trees reliably.
 
 These filters narrow the shipped scope; they cannot widen it. For a different scope, use
 `lintro/rules/scripts/no-direct-formatter.yaml` as a starting point for a native Semgrep
@@ -4342,9 +4354,17 @@ The literal command matcher recognizes:
   `sqlfluff format`/`fix`;
 - bare shell commands, Make recipes, simple `&&`/`||`/`;` command chains, adjacent shell
   operators and redirections, and literal command strings passed to `exec`, `execSync`,
-  `execFile`, `execFileSync`, `spawn`, or `spawnSync` (including member calls);
-- command prefixes `bunx`, `npx` (with optional `--yes`), `uv run`, and `python -m`
-  (also `python3` and versioned Python 3 executables).
+  `execFile`, `execFileSync`, `spawn`, or `spawnSync` (including member calls), with
+  chains inside the command string such as `execSync('cd web && prettier --write .')`;
+- command prefixes `bunx`, `npx` (with optional `--yes`), `uvx`, `uv run`,
+  `uv tool run`, and `python -m` (also `python3` and versioned Python 3 executables);
+- version pins on the formatter name, such as `bunx prettier@3 --write .`,
+  `uvx black@24.1.0 x.py`, `uvx ruff@0.6.0 format`, or `@latest`/`@next`, and `==` pins
+  after `uvx` or `uv tool run` (`uvx black==24.1 .`).
+
+A bare formatter name needs a command boundary after it: a space, quote, closing
+parenthesis, shell operator, or end of line. A comma is not one, so a JavaScript line
+such as `  black,` in an object or array literal is not reported.
 
 `lintro format` and `uv run lintro format` delegate to Lintro and are allowed.
 `prettier --check`, `ruff check`, `buf lint`, `taplo check`, and `sqlfluff lint` are
@@ -4372,8 +4392,9 @@ absolute executable paths, arbitrary runner flags, multiline commands, or subcom
 split across argument arrays (for example `spawnSync('ruff', ['format', file])`). Bare
 `spawnSync('black', [file])` is covered, as are literal Prettier write flags in the
 command string or its immediate argument array. Flags in later commands or unrelated
-JavaScript arguments do not make a check-only Prettier command match. Chains with quoted
-text before the separator can be missed.
+JavaScript arguments do not make a check-only Prettier command match. Shell chains with
+quoted text before the separator can be missed; inside a literal `exec`-family command
+string they are matched.
 
 Unsupported forms include formatter commands receiving a pipeline (`cat x | black -`),
 subshells (`x=$(black g.py)`), shell control flow (`if black ...; then`), environment

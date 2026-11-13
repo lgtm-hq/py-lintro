@@ -1,0 +1,4 @@
+// A separator inside an inner quoted segment does not start a new command.
+execSync('echo "hi; black is a color"');
+execSync(`echo "${a}; black"`);
+execSync('commit -m "chore; prettier --write run"');

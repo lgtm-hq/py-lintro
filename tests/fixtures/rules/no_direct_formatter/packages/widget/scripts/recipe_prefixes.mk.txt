@@ -1,0 +1,9 @@
+format:
+	# ruleid: lintro.scripts.no-direct-formatter.native-command
+	@-black generated.py
+	# ruleid: lintro.scripts.no-direct-formatter.native-command
+	-@black generated.py
+	# ruleid: lintro.scripts.no-direct-formatter.native-command
+	@+black generated.py
+	# ruleid: lintro.scripts.no-direct-formatter.native-command
+	+-@ruff format generated.py

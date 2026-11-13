@@ -13,10 +13,12 @@ from typing import Any
 import pytest
 import yaml
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.parsers.semgrep.semgrep_issue import SemgrepIssue
 from lintro.rules import resolve_rule_pack
 from lintro.tools.semgrep.definition import SemgrepPlugin
+from lintro.utils.execution_paths import get_execution_cwd, has_project_marker
 from tests.integration._tools import require_tool
 
 pytestmark = require_tool("semgrep")
@@ -120,30 +122,79 @@ def test_script_findings_match_annotations(
     assert_that(sorted(actual)).described_as(fixture).is_equal_to(sorted(expected))
 
 
-@pytest.mark.parametrize("scope", [".", "scripts/direct.sh", "Makefile", "build.mjs"])
+def _annotated_scripts() -> set[str]:
+    """Return the materialized fixture paths that carry a ruleid annotation.
+
+    Returns:
+        Project-relative POSIX paths expected to produce findings.
+    """
+    return {
+        fixture.relative_to(FIXTURES).with_suffix("").as_posix()
+        for fixture in FIXTURES.rglob("*.txt")
+        if re.search(r"(?:#|//) ruleid: ", fixture.read_text(encoding="utf-8"))
+    }
+
+
+def _isolate_semgrep(
+    monkeypatch: pytest.MonkeyPatch,
+    root: Path,
+    state: Path | None = None,
+) -> None:
+    """Run the plugin from a project root with offline, private Semgrep state.
+
+    Args:
+        monkeypatch: Fixture used to set the directory and environment.
+        root: Directory to run from.
+        state: Directory for Semgrep's settings and log; defaults to ``root``.
+    """
+    state = root if state is None else state
+    monkeypatch.chdir(root)
+    monkeypatch.setenv("SEMGREP_SETTINGS_FILE", str(state / "settings.yml"))
+    monkeypatch.setenv("SEMGREP_LOG_FILE", str(state / "semgrep.log"))
+    monkeypatch.setenv("SEMGREP_SEND_METRICS", "off")
+    monkeypatch.setenv("SEMGREP_ENABLE_VERSION_CHECK", "0")
+
+
+# Out-of-scope files that run a formatter, passed explicitly beside one script.
+OUT_OF_SCOPE = ["format.sh", "descripts/generate.sh", "src/ordinary.js"]
+
+
+@pytest.mark.parametrize(
+    ("scope", "expected"),
+    [
+        (["."], None),
+        (["scripts/direct.sh"], {"scripts/direct.sh"}),
+        (["Makefile"], {"Makefile"}),
+        (["build.mjs"], {"build.mjs"}),
+        (["scripts/direct.sh", *OUT_OF_SCOPE], {"scripts/direct.sh"}),
+    ],
+    ids=["project", "script", "makefile", "module", "explicit-out-of-scope"],
+)
 def test_plugin_reports_native_commands(
     script_project: Path,
     monkeypatch: pytest.MonkeyPatch,
-    scope: str,
+    scope: list[str],
+    expected: set[str] | None,
 ) -> None:
-    """The plugin discovers script inputs and returns useful, stable findings.
+    """The plugin reports exactly the in-scope scripts it is handed.
 
     Args:
         script_project: Fixture tree with a project marker.
         monkeypatch: Isolate current directory and Semgrep state.
-        scope: Directory or explicit script path handed to the plugin.
+        scope: Directories or explicit file paths handed to the plugin.
+        expected: Files that must be reported; None means every annotated one.
     """
-    monkeypatch.chdir(script_project)
-    monkeypatch.setenv("SEMGREP_SETTINGS_FILE", str(script_project / "settings.yml"))
-    monkeypatch.setenv("SEMGREP_LOG_FILE", str(script_project / "semgrep.log"))
-    monkeypatch.setenv("SEMGREP_SEND_METRICS", "off")
-    monkeypatch.setenv("SEMGREP_ENABLE_VERSION_CHECK", "0")
-    result = SemgrepPlugin().check([scope], {"rule_packs": [PACK], "jobs": 1})
+    _isolate_semgrep(monkeypatch, script_project)
+    result = SemgrepPlugin().check(scope, {"rule_packs": [PACK], "jobs": 1})
     assert_that(result.success).is_true()
     assert_that(result.inspected_files).is_true()
     assert_that(result.skipped).is_false()
-    assert_that(result.issues_count).is_greater_than(0)
     findings = [issue for issue in result.issues if isinstance(issue, SemgrepIssue)]
+    reported = {Path(issue.file).as_posix() for issue in findings}
+    assert_that(reported).is_equal_to(
+        _annotated_scripts() if expected is None else expected,
+    )
+    assert_that(reported).does_not_contain(*OUT_OF_SCOPE)
     assert_that({issue.check_id for issue in findings}).is_equal_to({RULE_ID})
     assert_that({issue.severity for issue in findings}).is_equal_to({"WARNING"})
     assert_that(findings[0].message).contains("lintro fmt", "uv run lintro fmt")
@@ -168,11 +219,7 @@ def test_every_declared_formatter_example_matches(
             encoding="utf-8",
         )
     (tmp_path / "pyproject.toml").touch()
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("SEMGREP_SETTINGS_FILE", str(tmp_path / "settings.yml"))
-    monkeypatch.setenv("SEMGREP_LOG_FILE", str(tmp_path / "semgrep.log"))
-    monkeypatch.setenv("SEMGREP_SEND_METRICS", "off")
-    monkeypatch.setenv("SEMGREP_ENABLE_VERSION_CHECK", "0")
+    _isolate_semgrep(monkeypatch, tmp_path)
     result = SemgrepPlugin().check(["."], {"rule_packs": [PACK], "jobs": 1})
     assert_that(result.success).is_true()
     assert_that(result.inspected_files).is_true()
@@ -183,3 +230,35 @@ def test_every_declared_formatter_example_matches(
         if isinstance(issue, SemgrepIssue)
     }
     assert_that(actual).is_equal_to(set(examples))
+
+
+@pytest.mark.parametrize("scope", [".", "scripts", "scripts/fmt.sh"])
+def test_tree_without_project_marker_warns_instead_of_passing_silently(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scope: str,
+) -> None:
+    """A marker-less tree anchors on scripts/ itself, so the user is told why.
+
+    Args:
+        tmp_path: Holds the marker-less tree and, beside it, Semgrep's state.
+        monkeypatch: Isolate current directory and Semgrep state.
+        scope: Path handed to the plugin, as in the reported reproduction.
+    """
+    tree = tmp_path / "tree"
+    script = tree / "scripts" / "fmt.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text("black x.py\n", encoding="utf-8")
+    if has_project_marker(get_execution_cwd([str(script)])):
+        pytest.skip("an ancestor of the temporary directory holds a project marker")
+    _isolate_semgrep(monkeypatch, tree, state=tmp_path)
+    warnings: list[str] = []
+    sink = logger.add(warnings.append, level="WARNING", format="{message}")
+    try:
+        result = SemgrepPlugin().check([scope], {"rule_packs": [PACK], "jobs": 1})
+    finally:
+        logger.remove(sink)
+    assert_that(result.success).is_true()
+    unanchored = [text for text in warnings if "no project marker" in text]
+    assert_that(unanchored).is_length(1)
+    assert_that(unanchored[0]).contains(PACK, str(script.parent))

@@ -10,6 +10,8 @@ rules:
       formatter selection and configuration instead of invoking a native formatter.
     metadata:
       lintro_rule_pack: scripts/no-direct-formatter
+      # Discover every file: paths.include, not file extensions, picks targets.
+      lintro_discover_all_files: true
       # Executable matcher examples; keys must equal builtin FORMAT claimants.
       lintro_formatters:
         black: black generated.py
@@ -30,19 +32,35 @@ rules:
       (?mx)
       ^(?![\t ]*(?:\#|//))[\t ]*
       (?:
-        [@+-]?
+        # Make recipe prefixes in any order: @black, -@black, @+black.
+        [@+-]*
         | [^\r\n\#"'`]*?(?:&&|\|\||;)[\t ]*
         | [^\r\n]*?\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync)
           [\t ]*\([\t ]*(?P<command_quote>["'`])
+          # A chain inside the command string: 'cd web && prettier -w .'.
+          # Inner quoted segments are skipped whole, so "hi; black" is text.
+          (?:
+            (?:
+              [^\r\n"'`]
+              | (?!(?P=command_quote))(?:"[^"\r\n]*"|'[^'\r\n]*'|`[^`\r\n]*`)
+            )*?
+            (?:&&|\|\||;)[\t ]*
+          )?
       )
       (?:
         (?:bunx|npx)(?:[\t ]+--yes)?[\t ]+
+        | (?P<uv_tool>uvx[\t ]+|uv[\t ]+tool[\t ]+run[\t ]+)
         | uv[\t ]+run[\t ]+
         | python(?:3(?:\.[0-9]+)?)?[\t ]+-m[\t ]+
       )?
       (?:
-        (?:black|oxfmt|rustfmt|shfmt)(?=[\t "'`),;&|<>]|$)
-        | prettier(?=[\t "'`),;&|<>]|$)
+        # Optional runner version pins such as prettier@3 or black@24.1.0;
+        # uvx and uv tool run also take black==24.1 (not bare requirement lines).
+        # No comma boundary here: a JS line "  black," is object shorthand.
+        (?:black|oxfmt|rustfmt|shfmt)
+          (?:@(?:[0-9][\w.+-]*|latest|next)|(?(uv_tool)==[0-9][\w.+-]*|(?!)))?
+          (?=[\t "'`);&|<>]|$)
+        | prettier(?:@(?:[0-9][\w.+-]*|latest|next))?(?=[\t "'`),;&|<>]|$)
           # Stay in this shell command, JS command string, or its argv array.
           (?=
             (?(command_quote)
@@ -54,7 +72,15 @@ rules:
             )
             (?<![\w-])(?:--write|-w)(?=[\t "'`,\]<>;&|)]|$)
           )
-        | (?:ruff[\t ]+format|buf[\t ]+format|cargo[\t ]+fmt
-            | taplo[\t ]+(?:fmt|format)|sqlfluff[\t ]+(?:format|fix))
+        | (?:(?:ruff|buf)
+              (?:@(?:[0-9][\w.+-]*|latest|next)|(?(uv_tool)==[0-9][\w.+-]*|(?!)))?
+              [\t ]+format
+            | cargo[\t ]+fmt
+            | taplo
+              (?:@(?:[0-9][\w.+-]*|latest|next)|(?(uv_tool)==[0-9][\w.+-]*|(?!)))?
+              [\t ]+(?:fmt|format)
+            | sqlfluff
+              (?:@(?:[0-9][\w.+-]*|latest|next)|(?(uv_tool)==[0-9][\w.+-]*|(?!)))?
+              [\t ]+(?:format|fix))
           (?=[\t "'`),;&|<>]|$)
       )

@@ -62,6 +62,31 @@ _PROJECT_ROOT_MARKERS: tuple[str, ...] = (
 _PROJECT_ROOT_SEARCH_MAX_DEPTH = 20
 
 
+def project_root_markers() -> tuple[str, ...]:
+    """Return the file names that anchor a project root, in probe order.
+
+    Returns:
+        Marker names such as ``.git`` and ``pyproject.toml``.
+    """
+    return _PROJECT_ROOT_MARKERS
+
+
+def has_project_marker(directory: str | Path) -> bool:
+    """Report whether a directory holds a project root marker.
+
+    :func:`get_execution_cwd` returns a marker's directory when it finds one,
+    so a working directory without a marker means it fell back to the files'
+    common ancestor, which moves with the scan scope.
+
+    Args:
+        directory: Directory to probe, typically an execution working directory.
+
+    Returns:
+        Whether any marker from :data:`_PROJECT_ROOT_MARKERS` exists there.
+    """
+    return any((Path(directory) / marker).exists() for marker in _PROJECT_ROOT_MARKERS)
+
+
 def get_execution_cwd(
     files: list[str],
     *,

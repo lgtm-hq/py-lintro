@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote as url_quote
 
-import yaml
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
@@ -30,12 +29,13 @@ from lintro.parsers.semgrep.semgrep_parser import parse_semgrep_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
-from lintro.rules import resolve_rule_pack, validate_rule_packs
+from lintro.rules import resolve_rule_pack, rule_pack_info, validate_rule_packs
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_list,
     validate_str,
 )
+from lintro.utils.execution_paths import has_project_marker, project_root_markers
 
 # Constants for Semgrep configuration
 SEMGREP_DEFAULT_TIMEOUT: int = 300  # Semgrep needs more time on larger codebases
@@ -98,15 +98,10 @@ def _restore_pack_rule_ids(data: dict[str, Any], packs: list[str]) -> None:
     if not isinstance(results, list):
         return
     # User rules can copy the metadata marker; the shipped YAML owns the IDs.
-    shipped_ids = {
-        pack: {
-            rule["id"]
-            for rule in yaml.safe_load(
-                resolve_rule_pack(pack).read_text(encoding="utf-8"),
-            )["rules"]
-        }
-        for pack in packs
-    }
+    # A native rule copying both the marker and an exact shipped ID is still
+    # reported, only under the shipped ID. That is cosmetic, so Lintro does not
+    # also verify the path prefix Semgrep derives from each config (#3353).
+    shipped_ids = {pack: rule_pack_info(pack).rule_ids for pack in packs}
     for result in results:
         if not isinstance(result, dict):
             continue
@@ -126,6 +121,37 @@ def _restore_pack_rule_ids(data: dict[str, Any], packs: list[str]) -> None:
             not prefix or prefix.endswith(".")
         ):
             result["check_id"] = marker + suffix
+
+
+def _unanchored_pack_warning(packs: list[str], cwd: str) -> str | None:
+    """Explain when directory-scoped packs run without a project root.
+
+    Semgrep matches ``paths.include`` against target paths relative to its
+    working directory. Without a project marker that directory falls back to
+    the files' common ancestor, so scanning ``scripts/`` hands Semgrep
+    ``fmt.sh`` and a ``**/scripts/**`` glob silently matches nothing.
+
+    Args:
+        packs: Validated, enabled pack names.
+        cwd: Working directory chosen for the Semgrep subprocess.
+
+    Returns:
+        A warning for the user, or None when no enabled pack is affected.
+    """
+    affected = [name for name in packs if rule_pack_info(name).anchored_directories]
+    if not affected or has_project_marker(cwd):
+        return None
+    directories = dict.fromkeys(
+        directory
+        for name in affected
+        for directory in rule_pack_info(name).anchored_directories
+    )
+    return (
+        f"[semgrep] {', '.join(affected)}: findings under "
+        f"{', '.join(directories)} may be missed because no project marker was "
+        f"found in {cwd}. Add one of {', '.join(project_root_markers())} at the "
+        "project root."
+    )
 
 
 def _has_unclosed_array(prefix: str) -> bool:
@@ -225,6 +251,13 @@ class SemgrepPlugin(BaseToolPlugin):
     """
 
     _config_explicit: bool = field(default=False, init=False, repr=False)
+    # The definition for the last pack selection seen, keyed by that raw list.
+    _definition_cache: tuple[tuple[str, ...], ToolDefinition] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def _reset_execution_state(self) -> None:
         """Restore implicit configuration selection when options are reset."""
@@ -232,7 +265,26 @@ class SemgrepPlugin(BaseToolPlugin):
 
     @property
     def definition(self) -> ToolDefinition:
-        """Return the tool definition.
+        """Return the tool definition, rebuilt only when ``rule_packs`` changes.
+
+        Returns:
+            ToolDefinition containing tool metadata.
+        """
+        selected = self.options.get("rule_packs", [])
+        key = tuple(selected) if isinstance(selected, list) else None
+        cached = self._definition_cache
+        if key is not None and cached is not None and cached[0] == key:
+            return cached[1]
+        definition = self._build_definition(validate_rule_packs(selected))
+        if key is not None:
+            self._definition_cache = (key, definition)
+        return definition
+
+    def _build_definition(self, packs: list[str]) -> ToolDefinition:
+        """Build the tool definition for a validated pack selection.
+
+        Args:
+            packs: Validated, enabled pack names.
 
         Returns:
             ToolDefinition containing tool metadata.
@@ -240,10 +292,9 @@ class SemgrepPlugin(BaseToolPlugin):
         # Generic script rules include Makefiles and extensionless scripts.
         # Discovery matches basenames only; let the pack's paths.include apply
         # its precise directory globs after opt-in instead of losing those files.
-        packs = validate_rule_packs(self.options.get("rule_packs", []))
-        file_patterns = (
-            ["*"] if "scripts/no-direct-formatter" in packs else SEMGREP_FILE_PATTERNS
-        )
+        # Every file then also reaches any other config in the same Semgrep run.
+        widen = any(rule_pack_info(name).discover_all_files for name in packs)
+        file_patterns = ["*"] if widen else SEMGREP_FILE_PATTERNS
         return ToolDefinition(
             name="semgrep",
             description=(
@@ -358,6 +409,14 @@ class SemgrepPlugin(BaseToolPlugin):
 
         # Output format - always use JSON for reliable parsing
         cmd.extend([f"--{SEMGREP_OUTPUT_FORMAT}"])
+
+        if cwd is not None:
+            unanchored = _unanchored_pack_warning(
+                validate_rule_packs(self.options.get("rule_packs", [])),
+                cwd,
+            )
+            if unanchored is not None:
+                logger.warning(unanchored)
 
         # Config option (required for semgrep to know what rules to use)
         for config in _rule_configs(self.options, cwd, self._config_explicit):
