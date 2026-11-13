@@ -20,7 +20,7 @@
     "@commitlint/cli": "21.2.4",
     "@commitlint/config-conventional": "21.2.4",
     "@stoplight/spectral-cli": "6.17.0",
-    "astro": "7.4.5",
+    "astro": "7.4.7",
     "html-validate": "11.18.0",
     "markdownlint-cli2": "0.24.0",
     "oxfmt": "0.75.0",

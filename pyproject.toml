@@ -418,11 +418,17 @@ exclude = [
 # remains blocked; uv.lock is patched to 1.45.2. The paired OSV row carries
 # the 2026-11-06 re-verification (Semgrep 1.184.0) and 2026-12-06 expiry
 # (#2972).
+# GHSA-mf5v-w3w3-f6cg / CVE-2026-126360: same Semgrep telemetry 1.37.0
+# blocker (fixed in 1.45.2, which uv.lock already carries). The paired OSV row
+# carries the 2026-11-13 re-verification (Semgrep 1.185.0) and 2026-12-13
+# expiry (#2972).
 ignore_vulns = [
   "CVE-2026-59951",
   "GHSA-84m7-p3x7-pcfv",
   "CVE-2026-114603",
   "GHSA-xcq7-p3pf-p88h",
+  "CVE-2026-126360",
+  "GHSA-mf5v-w3w3-f6cg",
   "CVE-2026-116685",
   "GHSA-5h93-6whr-6q8j",
   "CVE-2026-116686",
