@@ -54,6 +54,7 @@ from lintro.ai.review.delta_lines import (
     PINNED_DIFF_FLAGS,
     literal_pathspec,
     map_open_findings,
+    pr_renames,
     shows_every_line,
 )
 from lintro.ai.review.enums.delta_reason import DeltaReason
@@ -149,6 +150,7 @@ def plan_delta(
         since_sha=since,
         head_sha=head_sha,
         repo_root=repo_root,
+        renamed_from=pr_renames(changed_files=context.changed_files),
     )
     return DeltaPlan(
         reason=DeltaReason.DELTA,

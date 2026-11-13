@@ -7,7 +7,20 @@ from dataclasses import dataclass, field
 
 from lintro.ai.review.enums.delta_reason import DeltaReason
 
-__all__ = ["DeltaPlan"]
+__all__ = ["LOCATION_HOLDS", "LOCATION_UNCHECKED", "LOCATION_UNMAPPED", "DeltaPlan"]
+
+#: A relocation's ``line_sha`` when git could not reach the record's head and
+#: the pull request's rename metadata did not move it (#3413). The record is
+#: kept where it was stored, and its path leaving the diff is no fix.
+LOCATION_UNMAPPED = "unmapped"
+
+#: A relocation's ``line_sha`` for a record beyond the round's mapping cap
+#: (:data:`lintro.ai.review.delta_lines.MAX_MAPPED_FINDINGS`): kept where it
+#: was stored, carried unverified and never resolved that round (#3413).
+LOCATION_UNCHECKED = "unchecked"
+
+#: The relocation ``line_sha`` values that hold a record in place.
+LOCATION_HOLDS = frozenset({LOCATION_UNMAPPED, LOCATION_UNCHECKED})
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +43,9 @@ class DeltaPlan:
             A narrowed file must show every one of them or be read whole.
         relocations: ``(key, path, line, line_sha)`` for each open record
             whose stored location was not in ``since_sha``'s coordinates; the
-            matcher judges the record there and persists it (#3403).
+            matcher judges the record there and persists it (#3403). A
+            ``line_sha`` in :data:`LOCATION_HOLDS` keeps the record where it
+            was stored instead (#3413).
     """
 
     reason: DeltaReason

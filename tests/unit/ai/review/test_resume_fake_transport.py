@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 from assertpy import assert_that
 
 from lintro.ai.budget import CostBudget
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
-from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.enums.file_review_need import FileReviewNeed
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
@@ -28,6 +27,7 @@ from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.patch_hash import normalized_patch_hash
 from lintro.ai.review.resume import plan_resume
 from lintro.ai.review.session import ReviewSessionOptions
+from tests.unit.ai.review.scratch_repo_fixtures import fake_provider as _provider
 
 
 def _diff(*, path: str, added: str) -> str:
@@ -70,18 +70,6 @@ def _payload(*, file: str) -> str:
         '"fix": "f", "confidence": "high"'
         "}]}"
     )
-
-
-def _provider() -> MagicMock:
-    """Return a session-less provider whose complete() is unused."""
-    provider = MagicMock()
-    # The run session closes every provider it owns (#2302), so the
-    # double has to model an awaitable ``aclose``.
-    provider.aclose = AsyncMock()
-    provider.model_name = "fake-model"
-    provider.name = "fake"
-    provider.capabilities = ProviderCapabilities(supports_sessions=False)
-    return provider
 
 
 def _vouching_runs(*, round_number: int = 1) -> tuple[RunRecord, ...]:

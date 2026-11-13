@@ -909,26 +909,34 @@ resolve; it never narrows what it may report.**
   carried it unread leaves that head unchanged, so `plan_delta` maps the location
   forward through `line_sha..<prior head>` before the check (`DeltaPlan.open_lines`),
   following a rename git reports. The matcher then judges the finding at the mapped path
-  and line and stores it there (`DeltaPlan.relocations`, carried on the result as
-  `relocated_findings`). When a location cannot be mapped (no recorded head, git cannot
-  diff the range, the range edited the line itself, or a rename is ambiguous) the file
-  is read whole. A finding moved to a renamed file keeps its key, finding id and inline
-  thread, and from then on pairs under its new path's identity
-  (`FindingRecord.match_fingerprint`), so reporting it again carries it rather than
-  resolving the old record and opening a new one. A full round (`--full`, a rewritten
-  branch, a moved base) applies the same relocation (#3413): it maps each prior open
-  finding forward to its own head through `line_sha..<head>`, chained renames included,
-  so a delta round and a full round over the same history carry, open and resolve the
-  same findings. Every diff behind this pins its format against user configuration:
-  literal pathspecs (`odd[1].py` is never a glob), `--no-textconv`, `--no-ext-diff`,
-  `--no-color`, `--no-relative` and fixed `a/`/`b/` prefixes. Only the section whose
-  headers name the intended file is read. A record still carried without being read (its
-  file was not read this round) is stored with `unverified: true`. The sticky, including
-  a board rebuilt from stored state, marks it **⏸ not re-verified**. Its severity and
-  its weight in the verdict do not change. The prompt says what range the embedded text
-  is ("the change since the previous review round … unchanged context lines may still be
-  earlier changes of this pull request"), and the depth-3 adversarial sweep and an
-  output-exhaustion split read the same delta text.
+  and line and stores it there (`DeltaPlan.relocations`, carried on the result and in
+  the JSON output as `relocated_findings`, which full rounds fill too). When a location
+  cannot be mapped (no recorded head, git cannot diff the range, the range edited the
+  line itself, or a rename is ambiguous) the file is read whole. A finding moved to a
+  renamed file keeps its key, finding id and inline thread, and from then on pairs under
+  its new path's identity (`FindingRecord.match_fingerprint`), so reporting it again
+  carries it rather than resolving the old record and opening a new one. A full round
+  (`--full`, a rewritten branch, a moved base) applies the same relocation (#3413): it
+  maps each prior open finding forward to its own head through `line_sha..<head>`,
+  chained renames included, so a delta round and a full round over the same history
+  carry, open and resolve the same findings. When git cannot reach a finding's recorded
+  head (a rewritten branch in a shallow checkout), the pull request's own changed-file
+  metadata moves it: a file reported as renamed takes the finding to its new path, at
+  its stored line. When that names no rename either, the finding is held where it was
+  stored (`line_sha` `"unmapped"` in `relocated_findings`) and its path leaving the diff
+  never counts as a fix: it stays open and is marked not re-verified. A round maps at
+  most 200 findings through git (`MAX_MAPPED_FINDINGS`, one `git diff -U0` per distinct
+  recorded head and path); any beyond that are held (`"unchecked"`), carried unverified
+  and never resolved that round. Every diff behind this pins its format against user
+  configuration: literal pathspecs (`odd[1].py` is never a glob), `--no-textconv`,
+  `--no-ext-diff`, `--no-color`, `--no-relative` and fixed `a/`/`b/` prefixes. Only the
+  section whose headers name the intended file is read. A record still carried without
+  being read (its file was not read this round) is stored with `unverified: true`. The
+  sticky, including a board rebuilt from stored state, marks it **⏸ not re-verified**.
+  Its severity and its weight in the verdict do not change. The prompt says what range
+  the embedded text is ("the change since the previous review round … unchanged context
+  lines may still be earlier changes of this pull request"), and the depth-3 adversarial
+  sweep and an output-exhaustion split read the same delta text.
 - **What is reported and counted.** Findings are never filtered by delta location, and
   coverage identity stays the whole-PR patch hash, so a changed file the round did not
   read still forces `INCOMPLETE` (ADR-0007). The question pass and the synthesis call

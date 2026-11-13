@@ -18,7 +18,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from lintro.ai.review.delta import apply_delta_hunks, delta_hunks
-from lintro.ai.review.delta_lines import map_open_findings
+from lintro.ai.review.delta_lines import map_open_findings, pr_renames
 from lintro.ai.review.enums.delta_reason import DeltaReason
 from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.models.delta_plan import DeltaPlan
@@ -116,17 +116,24 @@ def _place_at_head(
         resume: The round's resume plan.
 
     Returns:
-        The resume plan carrying the relocations; unchanged without prior
-        state, a head, or a tree to ask git about.
+        The resume plan carrying the relocations; unchanged on a run that is
+        not a pull request (as :func:`lintro.ai.review.delta.plan_delta`
+        decides) and without prior state, a head, or a tree to ask git about.
     """
     head_sha = context.head_ref
-    if prior is None or not head_sha or context.checkout is ReviewCheckout.NONE:
+    if (
+        prior is None
+        or context.pr_metadata is None
+        or not head_sha
+        or context.checkout is ReviewCheckout.NONE
+    ):
         return resume
     mapped = map_open_findings(
         prior=prior,
         since_sha=head_sha,
         head_sha=head_sha,
         repo_root=repo_root,
+        renamed_from=pr_renames(changed_files=context.changed_files),
     )
     if not mapped.relocations:
         return resume

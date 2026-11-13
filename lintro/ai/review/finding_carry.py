@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.finding_identity import fingerprint_for
+from lintro.ai.review.models.delta_plan import LOCATION_HOLDS, LOCATION_UNCHECKED
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -22,7 +23,13 @@ if TYPE_CHECKING:
     from lintro.ai.review.models.finding_record import FindingRecord
     from lintro.ai.review.models.review_finding import ReviewFinding
 
-__all__ = ["_carry_absent", "_finding_positions", "_line_unread", "_relocate"]
+__all__ = [
+    "_carry_absent",
+    "_finding_positions",
+    "_held_location",
+    "_line_unread",
+    "_relocate",
+]
 
 
 def _finding_positions(
@@ -68,10 +75,15 @@ def _relocate(
 
     Returns:
         The record at its mapped location and coordinate head; resolved
-        records and records the round did not map are returned unchanged.
+        records, records the round did not map and records it held in place
+        (#3413) are returned unchanged.
     """
     moved = relocations.get(record.key) if relocations else None
-    if moved is None or record.status is not FindingStatus.OPEN:
+    if (
+        moved is None
+        or record.status is not FindingStatus.OPEN
+        or moved[2] in LOCATION_HOLDS
+    ):
         return record
     path, line, line_sha = moved
     if path == record.file:
@@ -94,10 +106,31 @@ def _relocate(
     )
 
 
+def _held_location(
+    *,
+    key: str,
+    relocations: Mapping[str, tuple[str, int, str]] | None,
+) -> str:
+    """Return the hold the round placed on a record's location, or ``""``.
+
+    Args:
+        key: The record's key.
+        relocations: ``{key: (path, line, line_sha)}`` from the round.
+
+    Returns:
+        :data:`~lintro.ai.review.models.delta_plan.LOCATION_UNMAPPED`,
+        :data:`~lintro.ai.review.models.delta_plan.LOCATION_UNCHECKED`, or
+        ``""`` when the round placed the record or did not touch it.
+    """
+    moved = relocations.get(key) if relocations else None
+    return moved[2] if moved is not None and moved[2] in LOCATION_HOLDS else ""
+
+
 def _carry_absent(
     *,
     record: FindingRecord,
     held: bool,
+    location_hold: str,
     reviewed_paths: frozenset[str] | None,
     departed_paths: frozenset[str] | None,
     reviewed_ranges: Mapping[str, tuple[tuple[int, int], ...]] | None,
@@ -109,6 +142,9 @@ def _carry_absent(
     Args:
         record: The prior open record nothing matched.
         held: Whether a note or a merged duplicate holds it open.
+        location_hold: :func:`_held_location` for the record. A record git
+            could not place is not fixed by its path leaving the diff, and one
+            beyond the mapping cap is never resolved (#3413).
         reviewed_paths: Files re-reviewed this round, or ``None``.
         departed_paths: Paths that left the diff, or ``None``.
         reviewed_ranges: Line ranges a delta round read per narrowed file.
@@ -123,8 +159,10 @@ def _carry_absent(
         True to carry it rather than resolve it.
     """
     path = record.file
-    left_diff = departed_paths is not None and path in departed_paths
-    unread = reviewed_paths is not None and path not in reviewed_paths
+    departed = departed_paths is not None and path in departed_paths
+    stranded = location_hold == LOCATION_UNCHECKED or (departed and bool(location_hold))
+    left_diff = departed and not stranded
+    unread = (reviewed_paths is not None and path not in reviewed_paths) or stranded
     line_unread = _line_unread(
         path=path,
         line=record.line,

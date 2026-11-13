@@ -27,6 +27,7 @@ from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.finding_carry import (
     _carry_absent,
     _finding_positions,
+    _held_location,
     _relocate,
 )
 from lintro.ai.review.finding_identity import (
@@ -312,7 +313,8 @@ def match_findings(
         relocations: Where the round placed each prior open finding,
             ``{key: (path, line, line_sha)}`` (#3403, #3413). A relocated record is
             matched, carried or resolved at that location, and persisted
-            there, so a line an unread round moved is never judged stale.
+            there, so a line an unread round moved is never judged stale. A
+            held location (``LOCATION_HOLDS``) keeps the record in place.
 
     Returns:
         The per-round transitions plus the merged record set to persist.
@@ -427,6 +429,7 @@ def match_findings(
         if _carry_absent(
             record=record,
             held=index in note_held or index in duplicate_held,
+            location_hold=_held_location(key=record.key, relocations=relocations),
             reviewed_paths=reviewed_paths,
             departed_paths=departed_paths,
             reviewed_ranges=reviewed_ranges,
