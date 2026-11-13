@@ -27,6 +27,7 @@ from lintro.ai.review.sticky import (
     build_sticky_comment,
     render_state_sticky,
 )
+from lintro.ai.review.sticky.footer import sticky_footer
 
 
 def _finding() -> ReviewFinding:
@@ -68,7 +69,10 @@ def test_complete_round_matches_variant_a(sample_review_result: ReviewResult) ->
     assert_that(body).contains("| model | transport | est. cost | tokens in / out |")
     assert_that(body).does_not_contain(STATE_MARKER_PREFIX)
     assert_that(body).contains("how to read this report")
-    assert_that(body).contains(STICKY_FOOTER)
+    # Nothing reached an inline thread, so the footer does not claim one
+    # (#3410).
+    assert_that(body).contains(sticky_footer(inline=0, sticky_only=1))
+    assert_that(body).does_not_contain(STICKY_FOOTER)
 
 
 def test_incomplete_round_matches_variant_b(sample_review_result: ReviewResult) -> None:

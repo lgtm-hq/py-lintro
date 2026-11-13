@@ -57,12 +57,25 @@ _FOOTER = (
     "did not bill)</sub>"
 )
 
-#: One-line footer of the v5 sticky comment (#1909). Names where finding detail
-#: actually lives, so the sticky is read as an index rather than a duplicate.
+#: Link to the reader's guide that closes every sticky footer.
+STICKY_HOW_TO_READ = (
+    "[how to read this report](https://github.com/lgtm-hq/py-lintro/blob/main/"
+    "docs/ai-review-report.md)"
+)
+
+#: One-line footer of the v5 sticky comment (#1909) for a round whose
+#: findings all reached inline threads. Names where finding detail actually
+#: lives, so the sticky is read as an index rather than a duplicate. Rounds
+#: that posted fewer inline comments get the variants built by
+#: :func:`lintro.ai.review.sticky.footer.round_footer` instead (#3410).
 STICKY_FOOTER = (
     "<sub>🤖 lintro review · findings are commented inline · "
-    "[how to read this report](https://github.com/lgtm-hq/py-lintro/blob/main/"
-    "docs/ai-review-report.md)</sub>"
+    f"{STICKY_HOW_TO_READ}</sub>"
 )
+
+#: Footer for a body that makes no claim about inline comments: a board
+#: re-rendered from stored state, the history archive, and a round with no
+#: findings (#3410).
+STICKY_FOOTER_NEUTRAL = f"<sub>🤖 lintro review · {STICKY_HOW_TO_READ}</sub>"
 
 _MENTION_RE = re.compile(r"(?<![\w/@.-])@(?=[A-Za-z0-9])")

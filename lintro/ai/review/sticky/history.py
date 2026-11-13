@@ -14,7 +14,7 @@ from lintro.ai.review.github_badges import format_int
 from lintro.ai.review.github_constants import (
     ARCHIVE_MARKER,
     MAX_COMMENT_CHARS,
-    STICKY_FOOTER,
+    STICKY_FOOTER_NEUTRAL,
 )
 from lintro.ai.review.github_notes import (
     format_timings_note,
@@ -461,7 +461,7 @@ def _archive_body(
                 )
                 for run in reversed(runs[:-1])
             ),
-            Section(name="footer", text=STICKY_FOOTER),
+            Section(name="footer", text=STICKY_FOOTER_NEUTRAL),
         ],
         budget=None,
     )
@@ -476,7 +476,7 @@ def _archive_body(
             "this-round content.",
         ),
     ]
-    footer = Section(name="footer", text=STICKY_FOOTER)
+    footer = Section(name="footer", text=STICKY_FOOTER_NEUTRAL)
     for run in reversed(runs[:-1]):
         name = f"round_{run.identity.round}"
         candidate = Section(name=name, text=_round_expander(run=run, records=records))

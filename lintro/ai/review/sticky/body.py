@@ -13,7 +13,7 @@ from __future__ import annotations
 from lintro.ai.review.agent_prompts import render_agent_prompt_panel
 from lintro.ai.review.enums.agent_prompt_scope_kind import AgentPromptScopeKind
 from lintro.ai.review.enums.finding_status import FindingStatus
-from lintro.ai.review.github_constants import STICKY_FOOTER, STICKY_MARKER
+from lintro.ai.review.github_constants import STICKY_FOOTER_NEUTRAL, STICKY_MARKER
 from lintro.ai.review.github_contract import RenderLimits
 from lintro.ai.review.github_notes import format_partial_review_label
 from lintro.ai.review.github_render import (
@@ -34,6 +34,7 @@ from lintro.ai.review.sticky.findings import (
     _degraded_details,
     _findings_round_section,
 )
+from lintro.ai.review.sticky.footer import round_footer
 from lintro.ai.review.sticky.history import _history_section, _this_run_section
 from lintro.ai.review.sticky.notes import _notes_section
 from lintro.ai.review.sticky.sections import (
@@ -166,7 +167,9 @@ def state_sections(
             text=_findings_round_section(plan=plan, limits=limits),
         ),
         *_history_sections(plan=plan, limits=limits),
-        Section(name="footer", text=STICKY_FOOTER),
+        # A state-only board describes no round's posting, so its footer
+        # makes no claim about inline comments (#3410).
+        Section(name="footer", text=STICKY_FOOTER_NEUTRAL),
     ]
 
 
@@ -288,5 +291,8 @@ def round_sections(
             ),
         ),
         *_history_sections(plan=plan, limits=limits, archive_only=archive_history),
-        Section(name="footer", text=STICKY_FOOTER),
+        Section(
+            name="footer",
+            text=round_footer(result=result, inline_failure=plan.inline_failure),
+        ),
     ]

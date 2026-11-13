@@ -22,7 +22,7 @@ from lintro.ai.review.github_constants import (
     MAX_STORED_RUNS,
     PRIMARY_SOFT_LIMIT,
     STATE_VERSION,
-    STICKY_FOOTER,
+    STICKY_FOOTER_NEUTRAL,
     STICKY_MARKER,
 )
 from lintro.ai.review.github_contract import (
@@ -347,7 +347,7 @@ def render_state_sticky(
                     name="banner",
                     text=banner or "> No stored review state is available yet.",
                 ),
-                Section(name="footer", text=STICKY_FOOTER),
+                Section(name="footer", text=STICKY_FOOTER_NEUTRAL),
             ],
             budget=None,
         )
