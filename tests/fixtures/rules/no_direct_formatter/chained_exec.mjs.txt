@@ -1,0 +1,12 @@
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+execSync('cd web && prettier --write .');
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+execSync("generate; black generated.py");
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+execSync(`test -d web || bunx oxfmt generated.mjs`);
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+execSync('generate "input"; black generated.py');
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+execSync('bunx prettier@3 --write .');
+// ruleid: lintro.scripts.no-direct-formatter.native-command
+execSync('cd web && uvx ruff format .');

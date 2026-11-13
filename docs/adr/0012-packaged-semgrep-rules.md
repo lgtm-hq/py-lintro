@@ -25,7 +25,10 @@ release and selected explicitly through `tools.semgrep.rule_packs`.
 errors. Packs augment native or explicitly selected Semgrep rules; selecting a pack
 replaces only the implicit `auto` registry lookup with local rules. An explicit
 `config=auto` is preserved alongside the packs. User rule IDs keep Semgrep's normal path
-prefixes; only marked packaged findings have installation-path prefixes removed.
+prefixes; only marked packaged findings have installation-path prefixes removed. A
+native rule that copies both the pack marker and an exact shipped rule ID is
+indistinguishable from the shipped rule and is reported under the shipped ID. The
+finding itself is kept, so Lintro does not also verify the source path prefix (#3353).
 
 The first pack, `python/none-coercion`, reports INFO candidates with review questions
 about empty versus unknown values. It does not prove a bug. It includes fixtures for all

@@ -17,3 +17,7 @@ oxfmt-helper generated.mjs
 # Biome has no builtin FORMAT declaration in this Lintro release.
 biome format generated.js
 biome check --write generated.js
+uvx lintro fmt generated.py
+uvx ruff check generated.py
+bunx prettier@3 --check generated.css
+black@example.com reviewed this script

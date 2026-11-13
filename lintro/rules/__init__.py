@@ -1,10 +1,33 @@
 """Discover and resolve Semgrep packs shipped with this Lintro version."""
 
+from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
+
+import yaml
 
 from lintro.exceptions.errors import ConfigurationError
 
 _RULES_ROOT = Path(__file__).parent
+
+
+@dataclass(frozen=True)
+class RulePackInfo:
+    """Facts Lintro reads from a shipped pack's YAML.
+
+    Attributes:
+        rule_ids: Rule IDs the shipped YAML defines.
+        discover_all_files: Whether a rule sets ``lintro_discover_all_files``
+            metadata, asking Lintro to hand Semgrep every candidate file so the
+            rule's ``paths.include`` globs, not file extensions, pick targets.
+        anchors_directories: Whether a ``paths.include`` glob names a directory
+            (``**/scripts/**``). Semgrep matches it against paths relative to
+            the scan root, so it needs a project marker to anchor that root.
+    """
+
+    rule_ids: frozenset[str]
+    discover_all_files: bool
+    anchors_directories: bool
 
 
 def available_rule_packs() -> list[str]:
@@ -61,3 +84,39 @@ def validate_rule_packs(value: object) -> list[str]:
         if name not in names:
             names.append(name)
     return names
+
+
+def rule_pack_info(name: str) -> RulePackInfo:
+    """Read a known pack's rule IDs and Lintro metadata, loading it once.
+
+    Args:
+        name: Language/pack name, without a file extension.
+
+    Returns:
+        The pack's rule IDs and the flags Lintro acts on.
+    """
+    return _load_rule_pack(resolve_rule_pack(name))
+
+
+@cache
+def _load_rule_pack(path: Path) -> RulePackInfo:
+    """Parse one installed pack file; shipped packs do not change at runtime.
+
+    Args:
+        path: Resolved pack YAML path, which also keys the cache.
+
+    Returns:
+        The pack's rule IDs and the flags Lintro acts on.
+    """
+    rules = yaml.safe_load(path.read_text(encoding="utf-8"))["rules"]
+    includes = [
+        glob for rule in rules for glob in rule.get("paths", {}).get("include", [])
+    ]
+    return RulePackInfo(
+        rule_ids=frozenset(rule["id"] for rule in rules),
+        discover_all_files=any(
+            rule.get("metadata", {}).get("lintro_discover_all_files") is True
+            for rule in rules
+        ),
+        anchors_directories=any("/" in glob.removeprefix("**/") for glob in includes),
+    )
