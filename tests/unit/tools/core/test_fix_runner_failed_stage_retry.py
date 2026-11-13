@@ -323,3 +323,76 @@ def test_declared_findings_exit_reads_only_stderr_diagnostics(
     if not failed:
         expected_fixed = int(fix.returncode == 0)
         assert_that(result.fixed_issues_count).is_equal_to(expected_fixed)
+
+
+_SPLIT_NAME = "query\nPermissionError: error permission denied.env"
+
+
+@pytest.mark.parametrize(
+    ("stderr", "failed"),
+    [
+        ("  == [{path}] ==\n  L:   1 | PRS | unparsable\n", False),
+        ("Fixing {path}: error, permission denied\n", False),
+        (
+            "Traceback (most recent call last):\n"
+            "PermissionError: [Errno 13] Permission denied: {path!r}\n",
+            True,
+        ),
+        ("  == [{path}] ==\nPermissionError: [Errno 13] denied\n", True),
+        ("{path}\n", True),
+    ],
+    ids=[
+        "echoed-path-split-by-newline",
+        "echoed-path-with-error-words",
+        "traceback-naming-the-path",
+        "exception-line-after-echoed-path",
+        "path-echoed-at-line-start",
+    ],
+)
+def test_echoed_multi_line_path_is_not_a_diagnostic(
+    tmp_path: Path,
+    stderr: str,
+    failed: bool,
+) -> None:
+    """A mid-line echo of the file path is masked; real diagnostics are not (#3414).
+
+    The name splits across lines into an exception-shaped fragment. Only an
+    echo that starts mid-line is the tool printing the path, so a line that
+    starts with the fragment is still read as a diagnostic: the runner fails
+    closed rather than passing a failed write.
+    """
+    env_file = tmp_path / _SPLIT_NAME
+    env_file.write_text("foo=1\n")
+    plugin = DotenvLinterPlugin()
+    ctx = plugin.prepare(paths=[str(env_file)], options={}, no_files_message="none")
+    assert not isinstance(ctx, ToolResult)
+    path = ctx.files[0]
+    fix = SubprocessResult(1, "", stderr.format(path=path), "")
+    errors: list[FixStageError] = []
+    with patch.object(
+        plugin,
+        "_run_subprocess_result",
+        side_effect=[subprocess_result(False, _DOTENV_FINDING), fix],
+    ):
+        result = run_per_file_fix(
+            ctx,
+            plugin=plugin,
+            check_command=plugin._check_command,
+            fix_command=plugin._fix_command,
+            parse=lambda output: parse_dotenv_linter_output(output=output),
+            errors=errors,
+            policy=PerFileFixPolicy(
+                check_failure_message="dotenv-linter check failed",
+                fix_findings_exit_codes=frozenset({1}),
+            ),
+        )
+
+    assert_that(path).contains("\nPermissionError: ")
+    assert_that(result.execution_failed).is_equal_to(failed)
+    assert_that(result.residual_unknown).is_equal_to(failed)
+    assert_that([error.stage for error in errors]).is_equal_to(
+        [FixStage.FIX] if failed else [],
+    )
+    if not failed:
+        assert_that(result.fixed_issues_count).is_zero()
+        assert_that(result.remaining_issues_count).is_equal_to(1)

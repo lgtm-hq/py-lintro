@@ -65,6 +65,36 @@ _ERROR_DIAGNOSTIC = re.compile(
     re.MULTILINE,
 )
 
+#: Stands in for a fix-command argument echoed on stderr (#3414).
+_ECHOED_ARGUMENT = "<argument>"
+
+
+def _mask_echoed_arguments(stderr: str, cmd: Sequence[str]) -> str:
+    """Hide the fix command's multi-line arguments where stderr echoes them.
+
+    A tool that echoes a file path mid-line (``sqlfluff fix`` prints
+    ``== [<path>] ==`` on stderr for a parse error) splits a path containing a
+    newline across two lines, and the continuation can look like an exception
+    line. Only echoes that start mid-line are masked, so text that begins a
+    line, where every real diagnostic starts, is never hidden. A traceback
+    prints a path as a ``repr`` with its newline escaped, so a genuine
+    exception line naming such a file still matches (#3414).
+
+    Args:
+        stderr: The fix command's stderr.
+        cmd: The fix command line, whose arguments include the file path.
+
+    Returns:
+        The stderr with every mid-line echo of a multi-line argument replaced.
+    """
+    for argument in {arg for arg in cmd if "\n" in arg}:
+        stderr = re.sub(
+            rf"(?<=[^\n]){re.escape(argument)}",
+            _ECHOED_ARGUMENT,
+            stderr,
+        )
+    return stderr
+
 
 class FixStage(StrEnum):
     """The step of the per-file fix loop that recorded an execution error.
@@ -386,12 +416,15 @@ def _verify_and_score(
 def _fix_exit_error(
     process: SubprocessResult,
     policy: PerFileFixPolicy,
+    cmd: Sequence[str],
 ) -> str | None:
     """Classify a completed fix command's exit.
 
     Args:
         process: The fix command's status and output.
         policy: Per-tool policy declaring the findings exit statuses.
+        cmd: The fix command line, whose echoed arguments are not
+            diagnostics.
 
     Returns:
         The execution error to record, or None when the exit is a clean fix
@@ -408,8 +441,9 @@ def _fix_exit_error(
         return f"Fix command failed (exit code {returncode})"
     # A declared findings status is shared with crashes by some tools
     # (``sqlfluff fix`` exits 1 for both). Only an error diagnostic on stderr
-    # separates them; the exit code is the structured verdict otherwise.
-    if _ERROR_DIAGNOSTIC.search(process.stderr):
+    # separates them; the exit code is the structured verdict otherwise. A
+    # file path the tool echoes is not a diagnostic, even split by a newline.
+    if _ERROR_DIAGNOSTIC.search(_mask_echoed_arguments(process.stderr, cmd)):
         return f"Fix command reported an error (exit code {returncode})"
     return None
 
@@ -470,11 +504,9 @@ def _fix_one_file(
             None,
         )
 
+    fix_cmd = fix_command(file_path)
     try:
-        process = plugin._run_subprocess_result(
-            cmd=fix_command(file_path),
-            timeout=timeout,
-        )
+        process = plugin._run_subprocess_result(cmd=fix_cmd, timeout=timeout)
     except subprocess.TimeoutExpired:
         failed = _failed_fix(
             initial_issues=initial_issues,
@@ -492,7 +524,7 @@ def _fix_one_file(
         return failed, FixStage.FIX
 
     fix_output = process.output
-    exit_error = _fix_exit_error(process, policy)
+    exit_error = _fix_exit_error(process, policy, fix_cmd)
     if exit_error is not None:
         # The fix may have rewritten the file before it failed, so nothing
         # measured what remains; a clean retry must not replace this (#3401).

@@ -74,9 +74,22 @@ def _restore_after_first_write(
     return run
 
 
-def test_permission_error_then_clean_retry_stays_unmeasured(project: Path) -> None:
-    """The failed write is not replaced by the retry that could have run."""
-    query = project / "query.sql"
+#: A writable name SQLFluff echoes on stderr across two lines, the second
+#: shaped like an exception line with error words in it (#3414).
+_SPLIT_NAME = "query\nPermissionError: error permission denied.sql"
+
+
+@pytest.mark.parametrize("name", ["query.sql", _SPLIT_NAME])
+def test_permission_error_then_clean_retry_stays_unmeasured(
+    project: Path,
+    name: str,
+) -> None:
+    """The failed write is not replaced by the retry that could have run.
+
+    A file name that splits into an exception-shaped line on stderr does not
+    hide the real traceback (#3414).
+    """
+    query = project / name
     query.write_text("select  1\n")
     project.chmod(stat.S_IRUSR | stat.S_IXUSR)
     plugin = SqlfluffPlugin()
@@ -136,4 +149,26 @@ def test_unfixable_violations_stay_measured(project: Path, name: str) -> None:
     assert_that(result.execution_failed).is_false()
     assert_that(result.residual_unknown).is_false()
     assert_that(result.residual_unknown_reason).is_none()
+    assert_that(result.remaining_issues_count).is_greater_than(0)
+
+
+@pytest.mark.parametrize("name", ["query.sql", _SPLIT_NAME])
+def test_parse_errors_stay_measured_when_stderr_echoes_the_path(
+    project: Path,
+    name: str,
+) -> None:
+    """A parse error echoes the path on stderr; that echo is not a diagnostic.
+
+    ``sqlfluff fix`` exits 1 and prints ``== [<path>] ==`` on stderr. A name
+    with a newline puts an exception-shaped fragment at the start of a line,
+    which must not turn the ordinary exit into an execution failure (#3414).
+    """
+    query = project / name
+    query.write_text("SELECT a FROM b WHERE (\n")
+
+    result = run_fix_with_retry(SqlfluffPlugin(), [str(query)], {}, 3)
+
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.residual_unknown).is_false()
+    assert_that(result.fixed_issues_count).is_zero()
     assert_that(result.remaining_issues_count).is_greater_than(0)
