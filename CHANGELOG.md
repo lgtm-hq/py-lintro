@@ -21,6 +21,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.23] - 2026-11-13
+
+### Fixed
+
+- **security**: bump astro to 7.4.7 and ignore semgrep's opentelemetry advisory (#3450)
+  (83cd354)
+- **semgrep**: close the gaps in the scripts/no-direct-formatter pack (#3436) (cce21e4)
+
 ## [0.180.22] - 2026-11-13
 
 ### Fixed
