@@ -18,7 +18,6 @@ from lintro.ai.review.finding_matcher import (
     derive_verdict,
     match_findings,
 )
-from lintro.ai.review.github_constants import STICKY_FOOTER
 from lintro.ai.review.github_contract import MAX_COMMENT_CHARS, TRUNCATION_NOTICE
 from lintro.ai.review.github_review_body import build_review_body
 from lintro.ai.review.lifecycle.markers import file_line_url
@@ -38,6 +37,7 @@ from lintro.ai.review.posting_policy import (
     select_inline,
 )
 from lintro.ai.review.sticky import build_sticky_comment
+from lintro.ai.review.sticky.footer import sticky_footer
 from lintro.ai.review.sticky.notes import _carried_tag
 from lintro.ai.review.verdict import derive_readiness_verdict
 from lintro.enums.confidence_level import ConfidenceLevel
@@ -815,7 +815,9 @@ def test_an_oversized_notes_block_is_pruned_rather_than_truncated(
 
     assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS)
     assert_that(body).contains("more notes not listed")
-    assert_that(body).contains(STICKY_FOOTER)
+    # Every note stays off inline threads, so the surviving footer is the one
+    # that claims none (#3410).
+    assert_that(body).contains(sticky_footer(inline=0, sticky_only=len(notes)))
     assert_that(body).does_not_contain(TRUNCATION_NOTICE)
 
 

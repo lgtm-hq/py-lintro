@@ -39,6 +39,10 @@ class StickyRequest:
         cost_basis: Provenance of the reported cost.
         inline_failure: Findings whose inline comments could not be posted.
         inline_comment_ids: Finding key to inline comment id.
+        inline_pending: True when this round's inline review has not been
+            confirmed posted yet, so the footer must not claim inline
+            comments (#3410). The poster sets it on the write that precedes
+            the inline POST and clears it on the refresh after success.
         repo: ``owner/name`` slug used to link finding titles to their threads.
         pr_number: Pull request number used for the same links.
         departed_paths: Paths that left the diff this round.
@@ -57,6 +61,7 @@ class StickyRequest:
     cost_basis: str = ""
     inline_failure: InlinePostFailure | None = None
     inline_comment_ids: Mapping[str, int] | None = None
+    inline_pending: bool = False
     repo: str = ""
     pr_number: int | None = None
     departed_paths: frozenset[str] | None = None
