@@ -363,7 +363,13 @@ def _lockfile_pins(lockfile: Path) -> list[_Pin]:
         ]
     data = tomllib.loads(text)
     entries = [*data.get("package", []), *data.get("packages", [])]
-    return [(lockfile, entry["name"], entry["version"]) for entry in entries]
+    # Editable, virtual and path entries can omit ``version``; they carry no
+    # registry pin for OSV to report, so skip them instead of failing.
+    return [
+        (lockfile, entry["name"], str(entry["version"]))
+        for entry in entries
+        if "name" in entry and entry.get("version")
+    ]
 
 
 def _affected_pins(root: Path, advisory: str) -> list[str]:
@@ -463,6 +469,26 @@ def _write_files(root: Path, files: dict[str, str]) -> None:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
+
+
+def test_lock_entries_without_a_version_are_skipped(tmp_path: Path) -> None:
+    """Editable or virtual lock entries have no version and are not pins.
+
+    Args:
+        tmp_path: Scratch repository root.
+    """
+    _write_files(
+        tmp_path,
+        {
+            "uv.lock": (
+                '[[package]]\nname = "my-app"\nsource = { editable = "." }\n\n'
+                '[[package]]\nname = "opentelemetry-api"\nversion = "1.45.1"\n'
+            ),
+        },
+    )
+    assert_that(_affected_pins(tmp_path, "GHSA-mf5v-w3w3-f6cg")).is_equal_to(
+        ["uv.lock: opentelemetry-api@1.45.1"],
+    )
 
 
 def test_any_filename_osv_reads_as_requirements_is_checked(tmp_path: Path) -> None:
