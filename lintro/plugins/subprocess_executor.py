@@ -103,6 +103,34 @@ UNSAFE_SHELL_CHARS: frozenset[str] = frozenset(
     },
 )
 
+#: Characters never legitimate anywhere in argv0, absolute or not.
+COMMAND_CONTROL_CHARS: frozenset[str] = frozenset({"\n", "\r"})
+
+#: Characters ``cmd.exe`` interprets in a batch file's own path. Windows runs a
+#: ``.cmd`` or ``.bat`` argv0 through ``cmd.exe /c`` even with ``shell=False``,
+#: and ``subprocess.list2cmdline`` leaves a path without spaces unquoted, so
+#: ``C:/a&whoami&/x.cmd`` would run ``whoami``. ``(``, ``)`` and space are not
+#: here: ``C:/Program Files (x86)/nodejs/prettier.cmd`` must keep running.
+BATCH_UNSAFE_CHARS: frozenset[str] = frozenset(
+    {"&", "|", "<", ">", "^", "%", '"', *COMMAND_CONTROL_CHARS},
+)
+
+#: argv0 suffixes Windows launches through ``cmd.exe``, compared lowercased.
+BATCH_SUFFIXES: frozenset[str] = frozenset({".cmd", ".bat"})
+
+
+def _is_batch_command(command: str) -> bool:
+    """Return whether Windows would launch *command* through ``cmd.exe``.
+
+    Args:
+        command: The command name, ``cmd[0]``.
+
+    Returns:
+        True when its suffix is ``.cmd`` or ``.bat`` in any letter case.
+    """
+    # PureWindowsPath splits on both separators, so mixed paths work too.
+    return PureWindowsPath(command).suffix.lower() in BATCH_SUFFIXES
+
 
 def _command_name_to_check(command: str) -> str:
     r"""Return the part of argv0 the unsafe-character check applies to.
@@ -121,6 +149,10 @@ def _command_name_to_check(command: str) -> str:
     """
     if PurePosixPath(command).is_absolute():
         return PurePosixPath(command).name
+    # A Windows-shaped path counts as absolute on a POSIX host too. That is
+    # harmless: under ``shell=False`` POSIX ``execve`` takes the string as one
+    # literal (relative) file name, and the batch check in
+    # :func:`validate_subprocess_command` still covers ``.cmd``/``.bat``.
     if PureWindowsPath(command).is_absolute():
         return PureWindowsPath(command).name
     return command
@@ -148,6 +180,16 @@ def validate_subprocess_command(cmd: list[str]) -> None:
       ``!`` directories run. No character is removed from
       :data:`UNSAFE_SHELL_CHARS`.
 
+    Two checks always cover the whole of argv0, whatever its shape:
+
+    - :data:`COMMAND_CONTROL_CHARS` (newline, carriage return) are rejected
+      anywhere; no real install path contains them.
+    - A ``.cmd`` or ``.bat`` argv0 is the exception to ``shell=False``:
+      Windows launches it through ``cmd.exe``, which parses the path itself.
+      Its whole path is checked against :data:`BATCH_UNSAFE_CHARS`, so a
+      directory such as ``C:/tools&whoami&/`` is rejected while ``(x86)``
+      still passes. This holds until lintro has a batch-safe launch strategy.
+
     Validation runs on the command as lintro built it. The npx ``--call``
     rewrite (:func:`lintro.utils.npx_call.npx_shell_safe_command`) keeps
     argv0, so the name checked is the name spawned.
@@ -166,7 +208,13 @@ def validate_subprocess_command(cmd: list[str]) -> None:
         if not isinstance(arg, str):
             raise ValueError("All command arguments must be strings")
 
-    checked = _command_name_to_check(cmd[0])
+    command = cmd[0]
+    if any(ch in command for ch in COMMAND_CONTROL_CHARS):
+        raise ValueError("Unsafe character detected in command name")
+    if _is_batch_command(command) and any(ch in command for ch in BATCH_UNSAFE_CHARS):
+        raise ValueError("Unsafe character detected in command name")
+
+    checked = _command_name_to_check(command)
     if any(ch in checked for ch in UNSAFE_SHELL_CHARS):
         raise ValueError("Unsafe character detected in command name")
 

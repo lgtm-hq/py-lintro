@@ -317,6 +317,75 @@ def test_validate_subprocess_command_non_absolute_argv0_checked_whole(
 @pytest.mark.parametrize(
     "argv0",
     [
+        pytest.param("C:/tools&whoami&/node_modules/.bin/prettier.cmd", id="amp"),
+        pytest.param(r"C:\tools|calc\prettier.cmd", id="pipe-bslash"),
+        pytest.param("C:/a%PATH%/prettier.cmd", id="percent"),
+        pytest.param("C:/a^b/prettier.cmd", id="caret"),
+        pytest.param('C:/a"b/prettier.cmd', id="quote"),
+        pytest.param("C:/a>b/prettier.cmd", id="redirect"),
+        pytest.param("C:/tools&whoami&/PRETTIER.BAT", id="upper-bat"),
+        pytest.param("C:/tools&whoami&/prettier.Cmd", id="mixed-case-cmd"),
+    ],
+)
+def test_validate_subprocess_command_batch_argv0_checked_on_full_path(
+    argv0: str,
+) -> None:
+    """A ``.cmd``/``.bat`` argv0 is parsed by ``cmd.exe``, directories included.
+
+    Args:
+        argv0: Absolute batch path with a cmd.exe metacharacter in a directory.
+    """
+    with pytest.raises(ValueError, match="Unsafe character"):
+        validate_subprocess_command([argv0])
+
+
+@pytest.mark.parametrize(
+    "argv0",
+    [
+        pytest.param("C:/Program Files (x86)/nodejs/prettier.cmd", id="x86-cmd"),
+        pytest.param(r"C:\Program Files (x86)\nodejs\TSC.BAT", id="x86-upper-bat"),
+        pytest.param("/opt/a&b/bin/tool", id="posix-amp-non-batch"),
+        pytest.param("C:/a&b/bin/tool.exe", id="windows-amp-exe"),
+    ],
+)
+def test_validate_subprocess_command_batch_rule_spares_safe_paths(
+    argv0: str,
+) -> None:
+    """``(x86)`` stays legal for batch files; ``&`` stays legal off ``cmd.exe``.
+
+    Args:
+        argv0: Absolute path that never reaches a shell parser unsafely.
+    """
+    accepted = True
+    try:
+        validate_subprocess_command([argv0])
+    except ValueError:
+        accepted = False
+    assert_that(accepted).described_as(argv0).is_true()
+
+
+@pytest.mark.parametrize(
+    "argv0",
+    [
+        pytest.param("/opt/a\nb/bin/prettier", id="posix-dir-newline"),
+        pytest.param("C:/a\rb/nodejs/prettier.exe", id="windows-dir-cr"),
+    ],
+)
+def test_validate_subprocess_command_control_chars_rejected_anywhere(
+    argv0: str,
+) -> None:
+    """Newline and carriage return are rejected even in an absolute directory.
+
+    Args:
+        argv0: Absolute path with a control character in a directory.
+    """
+    with pytest.raises(ValueError, match="Unsafe character"):
+        validate_subprocess_command([argv0])
+
+
+@pytest.mark.parametrize(
+    "argv0",
+    [
         pytest.param("/usr/local/bin/prettier$(id)", id="posix"),
         pytest.param("C:/Program Files (x86)/nodejs/prettier;calc.cmd", id="win"),
     ],
