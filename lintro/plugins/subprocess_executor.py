@@ -17,7 +17,7 @@ from loguru import logger
 
 from lintro.models.core.subprocess_result import SubprocessResult as SubprocessResult
 from lintro.plugins.subprocess_failure import format_subprocess_failure
-from lintro.utils.npx_call import npx_shell_safe_command
+from lintro.utils.npx_call import npx_child_env, npx_shell_safe_command
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -172,6 +172,9 @@ def run_subprocess(
     effective_env: dict[str, str] | None = None
     if env is not None:
         effective_env = {**os.environ, **env}
+    # Under the npx fallback, Node preloads must not stand in for the pinned
+    # tool: drop npm's node-options and code-loading NODE_OPTIONS (#3460).
+    effective_env = npx_child_env(cmd, effective_env)
 
     # npx runs the tool through ``sh -c``; quote its arguments, and keep any
     # script file the long form needs until the process has finished (#3439).
@@ -294,6 +297,9 @@ def run_subprocess_streaming(
     effective_env: dict[str, str] | None = None
     if env is not None:
         effective_env = {**os.environ, **env}
+    # Under the npx fallback, Node preloads must not stand in for the pinned
+    # tool: drop npm's node-options and code-loading NODE_OPTIONS (#3460).
+    effective_env = npx_child_env(cmd, effective_env)
 
     # npx runs the tool through ``sh -c``; quote its arguments, and keep any
     # script file the long form needs until the process has finished (#3439).

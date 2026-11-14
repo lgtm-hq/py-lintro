@@ -33,6 +33,7 @@ from lintro.tools.core.version_checking import (
     get_minimum_versions as _get_minimum_versions_impl,
 )
 from lintro.utils.env import get_subprocess_env
+from lintro.utils.npx_call import npx_child_env
 
 # Sentinel value for unknown/unspecified version requirements
 VERSION_UNKNOWN: str = "unknown"
@@ -430,7 +431,9 @@ def check_tool_version(
         # Run the tool with --version flag (unless caller already included it)
         version_cmd = command if not append_version else [*command, "--version"]
 
-        run_env = get_subprocess_env()
+        # The npx fallback probe gets the same preload-free environment as the
+        # real run, so a NODE_OPTIONS preload cannot fake the version (#3460).
+        run_env = npx_child_env(version_cmd, get_subprocess_env())
 
         result = _run_probe_with_retry(
             version_cmd,

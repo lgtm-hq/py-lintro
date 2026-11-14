@@ -51,8 +51,13 @@ REGISTRY_RUNNERS: frozenset[str] = frozenset({"bunx", "npx"})
 #: ``--bin-links=true`` makes the installed pin's executable exist;
 #: ``--global=false`` stops ``global=true`` breaking the run;
 #: ``--offline=false`` and ``--prefer-offline=false`` stop npx settling for
-#: whatever an existing cache holds. The cache itself is lintro's own per-pin
-#: directory, passed as ``--cache=<dir>`` by :func:`npx_runner_options` and
+#: whatever an existing cache holds; an empty ``--node-options=`` stops a
+#: ``node-options`` setting (``--require=<preload>``) being exported to the
+#: tool as ``NODE_OPTIONS`` (#3460; npm 10.9.9 and 11.20.0 export it only when
+#: the effective value is non-empty, and the command-line layer wins). The
+#: inherited ``NODE_OPTIONS`` itself is filtered at spawn time by
+#: :func:`lintro.utils.npx_call.npx_child_env`. The cache itself is lintro's
+#: own per-pin directory, passed as ``--cache=<dir>`` by :func:`npx_runner_options` and
 #: repaired before each run (:mod:`lintro.tools.core.npx_cache`). A
 #: ``workspace=<name>`` set in an npmrc file conflicts with
 #: ``--workspaces=false`` and npm exits with an error, which lintro reports as
@@ -64,6 +69,7 @@ NPX_ISOLATION_FLAGS: tuple[str, ...] = (
     "--global=false",
     "--offline=false",
     "--prefer-offline=false",
+    "--node-options=",
 )
 
 #: Prefix of the per-run npx cache option (see :func:`npx_runner_options`).

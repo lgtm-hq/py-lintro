@@ -1397,12 +1397,44 @@ Rationale:
 
    **Flags on the generated command.** Every npx fallback runs as `npx --yes`, then
    `--workspaces=false`, `--include-workspace-root=false`, `--bin-links=true`,
-   `--global=false`, `--offline=false`, `--prefer-offline=false` and
+   `--global=false`, `--offline=false`, `--prefer-offline=false`, `--node-options=` and
    `--cache=~/.lintro/cache/npx/<package>@<pinned>`, then
    `--package <package>@<pinned> <binary>`. Each flag overrides the same setting from
    the environment (`npm_config_*`) and from the project, user and global npmrc files,
-   so `workspaces`, `bin-links`, `global`, `offline`, `prefer-offline` and `cache`
-   cannot change what runs.
+   so `workspaces`, `bin-links`, `global`, `offline`, `prefer-offline`, `node-options`
+   and `cache` cannot change what runs.
+
+   **Node preloads cannot replace the tool.** npm hands its `node-options` setting to
+   the tool as `NODE_OPTIONS`, and Node honours an inherited `NODE_OPTIONS` in both npm
+   and the tool. A `--require` or `--import` preload set there could print an empty
+   result and exit 0 instead of running the pinned tool. Under the npx fallback, on
+   every platform:
+   - `--node-options=` empties npm's `node-options` from any npmrc file and from
+     `npm_config_node_options` (any letter case, or spelled `npm_config_node-options`);
+     Lintro also removes that variable from the tool's environment.
+   - Your own `NODE_OPTIONS` is filtered against an allowlist of flags that load no
+     code. Boolean flags: `--no-warnings`, `--no-deprecation`, `--trace-warnings`,
+     `--trace-deprecation`, `--trace-uncaught`, `--enable-source-maps`,
+     `--use-openssl-ca`, `--use-bundled-ca` and `--use-system-ca`. Flags that take a
+     value, written as `--flag=value`: `--max-old-space-size=<MB>`,
+     `--max-semi-space-size=<MB>`, `--stack-trace-limit=<n>`, `--disable-warning=<code>`
+     and `--dns-result-order=<order>`. The three numeric V8 flags also accept underscore
+     spellings such as `--max_old_space_size=4096`.
+   - Every other entry is dropped, including `--require`/`-r`, `--import`, `--loader`,
+     `--experimental-loader`, `--env-file` and `--inspect`. An allowlist is used because
+     a denylist misses any code-loading flag a later Node release adds. A value that
+     uses double quotes or backslashes is dropped whole rather than re-parsed, and so is
+     an entry joined to the next by a tab instead of a space. Lintro logs one warning
+     per run naming the entries it dropped.
+   - Some commonly set flags are dropped too, such as `--openssl-legacy-provider`,
+     `--experimental-strip-types`, `--experimental-vm-modules` and `--conditions`. If a
+     tool needs one of them, install the tool in the project (`node_modules/.bin`), put
+     it on `PATH`, or use bun. Those routes are not the npx fallback and receive your
+     `NODE_OPTIONS` unchanged.
+   - The version check that runs before the tool gets the same filtered environment, so
+     a preload cannot fake the version string it reads.
+   - `bunx`, project-local and `PATH` binaries receive your `NODE_OPTIONS` unchanged. If
+     a tool needs a preload, install it in the project.
 
    **Path arguments stay literal.** npx runs the tool through a shell (`sh -c`, or npm's
    `script-shell`) and quotes an argument only when it contains characters such as

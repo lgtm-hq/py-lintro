@@ -7,6 +7,9 @@ quotes only arguments carrying ``\t\n\r "#$&'()*;<>?\\`|~``. A name such as
 A ``script-shell`` set in a repository ``.npmrc`` or ``npm_config_script_shell``
 could also name any executable, which then ran instead of the pinned tool and
 printed whatever verdict it liked (#3441); lintro now forces ``/bin/sh``.
+A Node preload had the same power (#3460): npm exports ``node-options`` from
+any npmrc file or ``npm_config_node_options`` as ``NODE_OPTIONS``, and an
+inherited ``NODE_OPTIONS`` reaches npm and the tool alike.
 
 Each test builds the exact command lintro's Node builder generates for the npx
 fallback, appends path arguments, and runs it through lintro's own subprocess
@@ -228,6 +231,8 @@ def _npx_command(
     monkeypatch.setenv("npm_config_audit", "false")
     monkeypatch.setenv("npm_config_fund", "false")
     monkeypatch.delenv("npm_config_script_shell", raising=False)
+    for name in ("NODE_OPTIONS", "npm_config_node_options"):
+        monkeypatch.delenv(name, raising=False)
 
     project = tmp_path / cwd
     for name in (*_TARGETS, *_DECOYS):
@@ -385,3 +390,116 @@ def test_npx_fallback_runs_a_file_list_past_the_argument_limit(
     assert_that(received).is_equal_to(argv)
     if marker is not None:
         assert_that(marker.exists()).described_as("configured shell ran").is_false()
+
+
+def _preload(tmp_path: Path, suffix: str) -> tuple[Path, Path]:
+    """Write a Node preload that answers ``[]`` for the tool and leaves a marker.
+
+    Like the preload from the #3460 report it lets ``--version`` through, so a
+    version gate would still pass.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        suffix: ``.cjs`` for ``--require`` or ``.mjs`` for ``--import``.
+
+    Returns:
+        The preload's path and the marker it creates when Node loads it.
+    """
+    directory = tmp_path / "preload"
+    directory.mkdir(exist_ok=True)
+    marker = directory / f"loaded{suffix}"
+    preload = directory / f"preload{suffix}"
+    load = (
+        "const fs = require('node:fs');\n"
+        if suffix == ".cjs"
+        else "import fs from 'node:fs';\n"
+    )
+    preload.write_text(
+        f"{load}fs.writeFileSync({json.dumps(str(marker))}, '');\n"
+        "if (!process.argv.includes('--version')) {\n"
+        "  fs.writeFileSync(1, '[]\\n');\n"
+        "  process.exit(0);\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    return preload, marker
+
+
+@pytest.mark.parametrize(
+    ("vector", "flag"),
+    [
+        pytest.param("npmrc:proj", "--require", id="project-npmrc"),
+        pytest.param("npmrc:home", "--require", id="user-npmrc"),
+        pytest.param("env:npm_config_node_options", "--require", id="npm-env"),
+        pytest.param("env:NPM_CONFIG_NODE_OPTIONS", "--require", id="npm-env-upper"),
+        pytest.param("env:Npm_Config_Node_Options", "--import", id="npm-env-mixed"),
+        pytest.param("env:NODE_OPTIONS", "--require", id="node-options-require"),
+        pytest.param("env:NODE_OPTIONS", "--import", id="node-options-import"),
+    ],
+)
+def test_node_preload_cannot_replace_the_pinned_tool(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+    vector: str,
+    flag: str,
+) -> None:
+    """A preload from npm config or ``NODE_OPTIONS`` never runs (#3460).
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+        vector: Where the preload is configured: ``npmrc:<dir>`` or
+            ``env:<variable>``.
+        flag: Node option that loads it.
+    """
+    project, command = _npx_command(tmp_path, monkeypatch, registry)
+    preload, marker = _preload(tmp_path, ".cjs" if flag == "--require" else ".mjs")
+    option = f"{flag}={preload}"
+    kind, _, where = vector.partition(":")
+    if kind == "npmrc":
+        (tmp_path / where / ".npmrc").write_text(
+            f"node-options={option}\n",
+            encoding="utf-8",
+        )
+    else:
+        # Keep a safe flag beside the preload: it must not drag the preload in.
+        monkeypatch.setenv(where, f"--max-old-space-size=4096 {option}")
+    argv = ["--check", "[slug].css"]
+
+    result = run_subprocess([*command, *argv], timeout=180, cwd=str(project))
+
+    assert_that(result.returncode).described_as(result.output).is_zero()
+    received = json.loads(result.stdout.strip().splitlines()[-1])
+    assert_that(received).is_equal_to(argv)
+    assert_that(marker.exists()).described_as("preload ran").is_false()
+
+
+def test_streaming_npx_fallback_ignores_node_preloads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+) -> None:
+    """The streaming executor drops npmrc and inherited preloads together.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+    """
+    project, command = _npx_command(tmp_path, monkeypatch, registry)
+    preload, marker = _preload(tmp_path, ".cjs")
+    (project / ".npmrc").write_text(f"node-options=-r {preload}\n", encoding="utf-8")
+    monkeypatch.setenv("NODE_OPTIONS", f"-r {preload}")
+
+    result = run_subprocess_streaming(
+        [*command, "a{1,2}.css"],
+        timeout=180,
+        cwd=str(project),
+    )
+
+    assert_that(result.returncode).described_as(result.output).is_zero()
+    received = json.loads(result.stdout.strip().splitlines()[-1])
+    assert_that(received).is_equal_to(["a{1,2}.css"])
+    assert_that(marker.exists()).described_as("preload ran").is_false()
