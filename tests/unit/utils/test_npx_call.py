@@ -1,10 +1,9 @@
-"""Tests for quoting npx fallback arguments past npm's shell (#3439)."""
+"""Tests for quoting npx fallback arguments past npm's shell (#3439, #3441)."""
 
 from __future__ import annotations
 
 import os
 import shlex
-import shutil
 import subprocess  # nosec B404 - runs /bin/sh and a fake runner with fixed argv
 import sys
 import tempfile
@@ -20,7 +19,12 @@ from lintro.plugins.subprocess_executor import (
     run_subprocess_streaming,
 )
 from lintro.tools.core.node_fallback import npx_runner_options
-from lintro.utils.npx_call import NPX_INLINE_SCRIPT_LIMIT, npx_shell_safe_command
+from lintro.utils.npx_call import (
+    NPX_INLINE_SCRIPT_LIMIT,
+    NPX_SCRIPT_SHELL,
+    NPX_SCRIPT_SHELL_OPTION,
+    npx_shell_safe_command,
+)
 
 _SPEC = "prettier@3.9.4"
 _NAMES = ["[slug].ts", "a{1,2}.ts", "src/[...rest]/page.ts", "x,y.ts", "it's.ts"]
@@ -84,10 +88,12 @@ def test_npx_arguments_move_into_one_quoted_call_script() -> None:
 
     rewritten = _spawned(command)
 
-    prefix = command[: command.index(_SPEC) + 1]
-    assert_that(rewritten[: len(prefix)]).is_equal_to(prefix)
-    assert_that(rewritten[len(prefix) :]).is_length(2)
-    assert_that(rewritten[len(prefix)]).is_equal_to("--call")
+    package = command.index("--package")
+    assert_that(rewritten[:package]).is_equal_to(command[:package])
+    assert_that(rewritten[package:]).is_length(5)
+    assert_that(rewritten[package : package + 4]).is_equal_to(
+        [NPX_SCRIPT_SHELL_OPTION, "--package", _SPEC, "--call"],
+    )
     assert_that(shlex.split(rewritten[-1])).is_equal_to(
         ["prettier", "--check", *_NAMES],
     )
@@ -100,7 +106,15 @@ def test_npx_call_script_keeps_a_differing_binary_name() -> None:
     )
 
     assert_that(rewritten).is_equal_to(
-        ["/usr/bin/npx", "--yes", "-p", "typescript@6.0.3", "--call", "tsc '[id].ts'"],
+        [
+            "/usr/bin/npx",
+            "--yes",
+            NPX_SCRIPT_SHELL_OPTION,
+            "-p",
+            "typescript@6.0.3",
+            "--call",
+            "tsc '[id].ts'",
+        ],
     )
 
 
@@ -164,7 +178,15 @@ def test_long_script_is_sourced_from_a_file_deleted_on_exit(temp_dir: Path) -> N
         assert_that(files).is_length(1)
         content = files[0].read_bytes()
 
-    assert_that(spawned[:-1]).is_equal_to([*command[:-902], "--call"])
+    package = command.index("--package")
+    assert_that(spawned[:-1]).is_equal_to(
+        [
+            *command[:package],
+            NPX_SCRIPT_SHELL_OPTION,
+            *command[package:-902],
+            "--call",
+        ],
+    )
     assert_that(spawned[-1]).is_equal_to(f". {shlex.quote(str(files[0]))}")
     assert_that(len(spawned[-1])).is_less_than(NPX_INLINE_SCRIPT_LIMIT)
     assert_that(content).is_equal_to(
@@ -194,23 +216,32 @@ def test_script_file_is_deleted_when_the_run_raises(temp_dir: Path) -> None:
     assert_that(list(temp_dir.iterdir())).is_empty()
 
 
+def _forced_shell(argv: list[str]) -> str:
+    """Return the ``script-shell`` a rewritten npx command forces.
+
+    Args:
+        argv: Rewritten npx command.
+
+    Returns:
+        The shell named by its ``--script-shell=`` option.
+    """
+    options = [arg for arg in argv if arg.startswith("--script-shell=")]
+    assert_that(options).is_length(1)
+    return options[0].removeprefix("--script-shell=")
+
+
 @posix_only
 @pytest.mark.parametrize("inline_limit", [NPX_INLINE_SCRIPT_LIMIT, 0])
-@pytest.mark.parametrize("shell", ["sh", "bash"])
-def test_call_script_survives_the_shell_beside_decoys(
+def test_call_script_survives_the_forced_shell_beside_decoys(
     tmp_path: Path,
-    shell: str,
     inline_limit: int,
 ) -> None:
-    """The script npm hands to ``sh -c`` yields the names, never the decoys.
+    """Under the forced ``/bin/sh`` the script yields the names, never the decoys.
 
     Args:
         tmp_path: Temporary directory provided by pytest.
-        shell: Script shell npm would use; bash also brace-expands.
         inline_limit: Inline script limit; 0 forces the script file.
     """
-    if shutil.which(shell) is None:
-        pytest.skip(f"{shell} is not installed")
     for name in [*_NAMES, *_DECOYS]:
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).touch()
@@ -220,6 +251,7 @@ def test_call_script_survives_the_shell_beside_decoys(
         windows=False,
         inline_limit=inline_limit,
     ) as rewritten:
+        shell = _forced_shell(rewritten)
         result = subprocess.run(  # nosec B603 - fixed argv, shell=False
             [shell, "-c", rewritten[-1]],
             cwd=tmp_path,
@@ -229,16 +261,74 @@ def test_call_script_survives_the_shell_beside_decoys(
             timeout=30,
         )
 
+    assert_that(shell).is_equal_to(NPX_SCRIPT_SHELL)
+    assert_that(result.stdout.splitlines()).is_equal_to(_NAMES)
+
+
+#: A stand-in ``npx`` that picks the script shell the way npm does: a
+#: ``--script-shell=`` flag beats ``npm_config_script_shell``, which beats
+#: ``sh``. It reports the shell on stderr and runs the ``--call`` script with it.
+_NPM_LIKE_NPX = """shell=${npm_config_script_shell:-sh}
+for arg; do
+  case $arg in --script-shell=*) shell=${arg#--script-shell=} ;; esac
+  last=$arg
+done
+echo "script-shell: $shell" >&2
+exec "$shell" -c "$last"
+"""
+
+
+@posix_only
+@pytest.mark.parametrize("configured", ["bash", "fake"])
+def test_configured_script_shell_is_overridden_by_the_forced_shell(
+    tmp_path: Path,
+    configured: str,
+) -> None:
+    """A ``script-shell`` from npm configuration no longer runs the tool.
+
+    ``bash`` is the shell #3440's quoting was checked under; ``fake`` stands
+    for a repository ``.npmrc`` naming a script that prints ``[]``.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        configured: Script shell npm configuration names.
+    """
+    bin_dir = tmp_path / "bin"
+    npx = _executable(bin_dir, "npx", _NPM_LIKE_NPX)
+    fake = _executable(bin_dir, "fake-shell", "echo '[]'\n")
+    project = tmp_path / "project"
+    for name in [*_NAMES, *_DECOYS]:
+        (project / name).parent.mkdir(parents=True, exist_ok=True)
+        (project / name).touch()
+    script_shell = str(fake) if configured == "fake" else configured
+
+    result = run_subprocess(
+        [str(npx), "--yes", "--package", _SPEC, "printf", "%s\\n", *_NAMES],
+        timeout=30,
+        cwd=str(project),
+        env={"npm_config_script_shell": script_shell},
+    )
+
+    assert_that(result.stderr.strip()).is_equal_to(
+        f"script-shell: {NPX_SCRIPT_SHELL}",
+    )
     assert_that(result.stdout.splitlines()).is_equal_to(_NAMES)
 
 
 @posix_only
-@pytest.mark.parametrize("shell", ["sh", "bash", "dash"])
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        pytest.param("kill -TERM $$\n", 128 + 15, id="signal"),
+        pytest.param("exit 3\n", 3, id="exit-code"),
+    ],
+)
 def test_script_file_keeps_the_shell_as_the_tools_parent(
     tmp_path: Path,
-    shell: str,
+    body: str,
+    expected: int,
 ) -> None:
-    """A tool killed by a signal through the script file exits 128+N.
+    """Sourced under the forced shell, the tool's status survives: 128+N or N.
 
     The sourced file must not ``exec`` the tool: the shell stays its parent
     and reports the signal as an exit status, as ``sh -c`` does under dash,
@@ -246,11 +336,10 @@ def test_script_file_keeps_the_shell_as_the_tools_parent(
 
     Args:
         tmp_path: Temporary directory provided by pytest.
-        shell: Script shell npm would use.
+        body: Tool script body.
+        expected: Exit status npm should see.
     """
-    if shutil.which(shell) is None:
-        pytest.skip(f"{shell} is not installed")
-    tool = _executable(tmp_path, "self-kill", "kill -TERM $$\n")
+    tool = _executable(tmp_path, "tool", body)
 
     with npx_shell_safe_command(
         ["npx", "--yes", "--package", "x@1.0.0", str(tool), "a.css"],
@@ -258,7 +347,7 @@ def test_script_file_keeps_the_shell_as_the_tools_parent(
         inline_limit=0,
     ) as rewritten:
         result = subprocess.run(  # nosec B603 - fixed argv, shell=False
-            [shell, "-c", rewritten[-1]],
+            [_forced_shell(rewritten), "-c", rewritten[-1]],
             cwd=tmp_path,
             capture_output=True,
             text=True,
@@ -266,7 +355,8 @@ def test_script_file_keeps_the_shell_as_the_tools_parent(
             timeout=30,
         )
 
-    assert_that(result.returncode).is_equal_to(128 + 15)
+    assert_that(rewritten[-1]).starts_with(". ")
+    assert_that(result.returncode).is_equal_to(expected)
 
 
 def _executable(directory: Path, name: str, body: str) -> Path:
@@ -306,7 +396,14 @@ def test_executor_spawns_npx_with_the_call_script(tmp_path: Path) -> None:
     )
 
     assert_that(result.stdout.splitlines()).is_equal_to(
-        ["--yes", "--package", _SPEC, "--call", "prettier '[slug].ts'"],
+        [
+            "--yes",
+            NPX_SCRIPT_SHELL_OPTION,
+            "--package",
+            _SPEC,
+            "--call",
+            "prettier '[slug].ts'",
+        ],
     )
 
 
