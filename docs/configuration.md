@@ -1397,12 +1397,33 @@ Rationale:
 
    **Flags on the generated command.** Every npx fallback runs as `npx --yes`, then
    `--workspaces=false`, `--include-workspace-root=false`, `--bin-links=true`,
-   `--global=false`, `--offline=false`, `--prefer-offline=false` and
+   `--global=false`, `--offline=false`, `--prefer-offline=false`, `--node-options=` and
    `--cache=~/.lintro/cache/npx/<package>@<pinned>`, then
    `--package <package>@<pinned> <binary>`. Each flag overrides the same setting from
    the environment (`npm_config_*`) and from the project, user and global npmrc files,
-   so `workspaces`, `bin-links`, `global`, `offline`, `prefer-offline` and `cache`
-   cannot change what runs.
+   so `workspaces`, `bin-links`, `global`, `offline`, `prefer-offline`, `node-options`
+   and `cache` cannot change what runs.
+
+   **Node preloads cannot replace the tool.** npm hands its `node-options` setting to
+   the tool as `NODE_OPTIONS`, and Node honours an inherited `NODE_OPTIONS` in both npm
+   and the tool. A `--require` or `--import` preload set there could print an empty
+   result and exit 0 instead of running the pinned tool. Under the npx fallback, on
+   every platform:
+   - `--node-options=` empties npm's `node-options` from any npmrc file and from
+     `npm_config_node_options` (any letter case); Lintro also removes that variable from
+     the tool's environment.
+   - Your own `NODE_OPTIONS` is filtered against an allowlist of flags that load no
+     code: `--max-old-space-size`, `--max-semi-space-size`, `--stack-trace-limit`,
+     `--no-warnings`, `--no-deprecation`, `--trace-warnings`, `--trace-deprecation`,
+     `--trace-uncaught`, `--enable-source-maps`, `--disable-warning=<code>`,
+     `--use-openssl-ca`, `--use-bundled-ca`, `--use-system-ca` and
+     `--dns-result-order=<order>`, each in `--flag=value` form. Every other entry is
+     dropped, including `--require`/`-r`, `--import`, `--loader`,
+     `--experimental-loader`, `--env-file` and `--inspect`. An allowlist is used because
+     a denylist misses any code-loading flag a later Node release adds. A value that
+     uses double quotes or backslashes is dropped whole rather than re-parsed.
+   - `bunx`, project-local and `PATH` binaries receive your `NODE_OPTIONS` unchanged. If
+     a tool needs a preload, install it in the project.
 
    **Path arguments stay literal.** npx runs the tool through a shell (`sh -c`, or npm's
    `script-shell`) and quotes an argument only when it contains characters such as

@@ -37,16 +37,30 @@ flag precedence over the environment and every npmrc file (checked with npm
 
 Windows is left alone: there npm uses ``cmd.exe``, which does not glob, and
 POSIX quoting would be wrong for it.
+
+Node preloads are the other way to replace the pinned tool (#3460). npm exports
+its ``node-options`` setting (from any npmrc file or ``npm_config_node_options``
+in any letter case) to the tool as ``NODE_OPTIONS``, and an inherited
+``NODE_OPTIONS`` reaches both npm and the tool, so a ``--require`` preload could
+print ``[]`` and exit 0 in the tool's place. The builder passes an empty
+``--node-options=``, which outranks every npmrc file and the environment;
+:func:`npx_child_env` handles the environment. It drops every casing of
+``npm_config_node_options`` and keeps only the ``NODE_OPTIONS`` entries in
+:data:`SAFE_NODE_OPTIONS`, flags that load no code. Unlike the shell rewrite,
+this applies on Windows too, where the same variables reach Node.
 """
 
 from __future__ import annotations
 
 import contextlib
 import os
+import re
 import shlex
 import tempfile
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
+
+from loguru import logger
 
 #: npx/bunx flags that take the package spec as the next argument.
 PACKAGE_FLAGS: frozenset[str] = frozenset({"-p", "--package"})
@@ -66,6 +80,115 @@ NPX_SCRIPT_SHELL_OPTION: str = f"--script-shell={NPX_SCRIPT_SHELL}"
 #: A command line ready to spawn. A plain name keeps pydoclint from misreading
 #: the nested ``Iterator[list[str]]`` yield type as ``str`` (DOC404).
 Argv = list[str]
+
+#: Environment variable Node reads extra options from.
+NODE_OPTIONS_VAR: str = "NODE_OPTIONS"
+
+#: npm's environment spelling of its ``node-options`` setting. npm matches it
+#: in any letter case.
+NPM_NODE_OPTIONS_VAR: str = "npm_config_node_options"
+
+#: ``NODE_OPTIONS`` entries an npx fallback run keeps: memory limits, warning
+#: and diagnostic output, and TLS/DNS choices npm needs to reach the registry.
+#: None loads code. Everything else, including ``--require``, ``--import``,
+#: ``--loader``, ``--experimental-loader``, ``--env-file``, ``--inspect`` and
+#: any flag a later Node adds, is dropped: an allowlist cannot be outflanked by
+#: a new code-loading flag the way a denylist can.
+SAFE_NODE_OPTIONS: re.Pattern[str] = re.compile(
+    r"--max[-_]old[-_]space[-_]size=\d+"
+    r"|--max[-_]semi[-_]space[-_]size=\d+"
+    r"|--stack[-_]trace[-_]limit=\d+"
+    r"|--no-warnings|--no-deprecation|--trace-warnings|--trace-deprecation"
+    r"|--trace-uncaught|--enable-source-maps"
+    r"|--use-openssl-ca|--use-bundled-ca|--use-system-ca"
+    r"|--dns-result-order=(?:ipv4first|ipv6first|verbatim)"
+    r"|--disable-warning=[A-Za-z0-9_-]+",
+)
+
+
+def filter_node_options(value: str) -> str:
+    """Keep only the :data:`SAFE_NODE_OPTIONS` entries of a ``NODE_OPTIONS`` value.
+
+    Node splits ``NODE_OPTIONS`` on spaces and honours double quotes and
+    backslash escapes. A value using either is dropped whole rather than
+    re-parsed, since no kept flag needs them.
+
+    Args:
+        value: ``NODE_OPTIONS`` as inherited.
+
+    Returns:
+        The kept entries joined by single spaces, or ``""``.
+    """
+    if '"' in value or "\\" in value:
+        return ""
+    return " ".join(
+        token
+        for token in value.split(" ")
+        if token and SAFE_NODE_OPTIONS.fullmatch(token)
+    )
+
+
+def _package_flag_index(command: Sequence[str]) -> int | None:
+    """Find ``--package`` in lintro's npx fallback shape.
+
+    Args:
+        command: Command about to be spawned.
+
+    Returns:
+        Index of the package flag when *command* is ``[npx, *--options,
+        --package, ...]``, otherwise None.
+    """
+    if not command or Path(command[0]).name != "npx":
+        return None
+    for index in range(1, len(command)):
+        if command[index] in PACKAGE_FLAGS:
+            return index
+        if not command[index].startswith("--"):
+            # A positional before --package is not the shape lintro builds.
+            return None
+    return None
+
+
+def npx_child_env(
+    cmd: Sequence[str],
+    env: Mapping[str, str] | None,
+) -> dict[str, str] | None:
+    """Return the environment to spawn *cmd* with, without Node preloads.
+
+    For lintro's npx fallback the result is a copy of *env* (or of
+    ``os.environ`` when *env* is None) without ``npm_config_node_options`` in
+    any letter case, and with ``NODE_OPTIONS`` reduced by
+    :func:`filter_node_options` (removed when nothing is kept; other letter
+    casings of it are removed too). Every other
+    command, including ``bunx`` and direct binaries, gets *env* unchanged.
+
+    Args:
+        cmd: Command about to be spawned.
+        env: Full environment for the child, or None to inherit.
+
+    Returns:
+        The environment to pass to the child, or None to inherit.
+    """
+    if _package_flag_index(cmd) is None:
+        return None if env is None else dict(env)
+    source = os.environ if env is None else env
+    # Node reads ``NODE_OPTIONS`` case-insensitively on Windows only, where
+    # ``os.environ`` already upper-cases keys; other casings are dropped, never
+    # promoted.
+    dropped = {NODE_OPTIONS_VAR.casefold(), NPM_NODE_OPTIONS_VAR}
+    child = {
+        key: value for key, value in source.items() if key.casefold() not in dropped
+    }
+    original = source.get(NODE_OPTIONS_VAR, "")
+    kept = filter_node_options(original)
+    if kept != original:
+        logger.debug(
+            f"npx fallback: dropped NODE_OPTIONS entries that may load code; "
+            f"kept {kept!r}",
+        )
+    if kept:
+        child[NODE_OPTIONS_VAR] = kept
+    return child
 
 
 def _split_npx_fallback(
@@ -87,15 +210,8 @@ def _split_npx_fallback(
     command = list(cmd)
     if windows is None:
         windows = os.name == "nt"
-    if windows or not command or Path(command[0]).name != "npx":
-        return None
-    for index in range(1, len(command)):
-        if command[index] in PACKAGE_FLAGS:
-            break
-        if not command[index].startswith("--"):
-            # A positional before --package is not the shape lintro builds.
-            return None
-    else:
+    index = None if windows else _package_flag_index(command)
+    if index is None:
         return None
     script_start = index + 2
     if script_start >= len(command):
