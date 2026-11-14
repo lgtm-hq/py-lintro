@@ -42,6 +42,7 @@ from lintro.ai.review.group_labels import REL_DIRECTORY_PREFIX, REL_SINGLE_FILE
 from lintro.ai.review.models.delta_plan import DeltaPlan
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.pr_budget import run_cost_ceiling
+from lintro.ai.review.prior_head_fetch import fetch_prior_heads
 from lintro.ai.review.progress import NullReviewProgress
 from lintro.ai.review.prompts import estimate_prompt_overhead
 from lintro.ai.review.resume import filter_chunks, plan_resume
@@ -409,6 +410,13 @@ def plan_run(
     # A delta round (#2627) narrows what the surviving chunks embed to the
     # change since the prior round's head; coverage identity is untouched.
     repo_root = context.repo_root or os.getcwd()
+    # A shallow CI checkout lacks the heads earlier rounds reviewed and the
+    # base's history; fetch them so prior findings map forward (#3471).
+    fetch_prior_heads(
+        prior=options.prior_state,
+        context=context,
+        repo_root=repo_root,
+    )
     delta = plan_delta(
         prior=options.prior_state,
         context=context,

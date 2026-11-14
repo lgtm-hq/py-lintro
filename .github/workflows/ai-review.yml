@@ -517,9 +517,11 @@ jobs:
         with:
           ref: ${{ github.workflow_sha }}
           fetch-depth: 1
-          # Nothing after this step talks to git over the network — `gh` uses
-          # GH_TOKEN — so leaving the token in .git/config would only widen
-          # what a compromised review step could read.
+          # Git fetches after this step (the PR head, and the heads earlier
+          # review rounds recorded, #3471) are anonymous reads of this public
+          # repository — `gh` uses GH_TOKEN — so leaving the token in
+          # .git/config would only widen what a compromised review step
+          # could read.
           persist-credentials: false
 
       - name: Locate prior review-state run

@@ -1001,6 +1001,23 @@ resolve; it never narrows what it may report.**
   changes of this pull request"), and the depth-3 adversarial sweep and an
   output-exhaustion split read the same delta text.
 
+  **A shallow checkout fetches what mapping needs (#3471).** CI checks the base out at
+  depth 1 and fetches only the pull request's head, so after a rebase the head an
+  earlier round reviewed is missing and its findings would all be held as `"unmapped"`;
+  the base tip is a shallow boundary, so `merge-base(base, head)` is unknown too. Before
+  a `--pr` round plans its scope it fetches, by SHA and only when missing, the PR's base
+  and up to 8 recorded heads (`MAX_PRIOR_HEADS`: the last finished round's head, then
+  the heads open findings were placed at, most findings first). It then deepens a
+  shallow base in steps of 32, 128 and 512 commits until the merge-base resolves.
+  Nothing is fetched with `--depth`, which could cut the head's own history. The head
+  fetch already brought the PR's ancestry, so on py-lintro a head or base fetched by SHA
+  took under 0.7 s and 0.5 MB, and one `--deepen=32` 2.1 s and 0.5 MB. A head the remote
+  no longer serves (a force-push followed by garbage collection) is logged as a warning,
+  and its findings stay held as before. A complete checkout fetches nothing. An unmapped
+  finding whose file the PR's diff does not touch is already carried, since its file is
+  not reviewed. One whose file the PR does touch is judged as any other, so a finding
+  the PR fixed still resolves.
+
 - **What is reported and counted.** Findings are never filtered by delta location, and
   coverage identity stays the whole-PR patch hash, so a changed file the round did not
   read still forces `INCOMPLETE` (ADR-0007). The question pass and the synthesis call
