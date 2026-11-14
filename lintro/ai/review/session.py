@@ -242,6 +242,9 @@ class ReviewSessionOptions:
         synthesis: Cross-chunk synthesis configuration (#2269). ``None`` or a
             disabled config means no extra pass runs.
         verify: Which findings the verification pass re-checks (#2728).
+        verify_moved_findings: Whether a prior finding whose location was
+            inferred may be resolved by asking the provider (#3466); off
+            holds every such finding instead.
     """
 
     provider: BaseAIProvider
@@ -269,6 +272,7 @@ class ReviewSessionOptions:
     stop: asyncio.Event | None = None
     synthesis: ReviewSynthesisConfig | None = None
     verify: ReviewVerifyMode = ReviewVerifyMode.P1_AND_LOW_CONFIDENCE
+    verify_moved_findings: bool = True
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

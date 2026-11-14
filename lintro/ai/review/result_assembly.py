@@ -57,6 +57,7 @@ if TYPE_CHECKING:
     from lintro.ai.review.models.review_context import ReviewContext
     from lintro.ai.review.models.review_finding import ReviewFinding
     from lintro.ai.review.models.verification_outcome import VerificationSummary
+    from lintro.ai.review.moved_verification import MovedVerification
     from lintro.ai.review.question_pass import RunQuestions
     from lintro.ai.review.run_planning import ReviewRunPlan
     from lintro.ai.review.session import ReviewSessionOptions
@@ -85,6 +86,9 @@ class ReviewRunOutcome:
         synthesis_pass: The cross-chunk synthesis pass, when one ran (#2269).
         verification: The verification pass's summary, when the run reached
             the completed path (#2728); ``None`` on a stopped run.
+        moved: The moved-finding check's verdicts and counts (#3466), when
+            the run reached the completed path; ``None`` on a stopped run,
+            whose moved findings are then all held.
         merged: The merged chunk result the report's prose comes from.
         filtered_findings: Findings surviving the sensitivity policy, with the
             custom-agent and synthesis findings already appended.
@@ -104,6 +108,7 @@ class ReviewRunOutcome:
     questions: RunQuestions | None = None
     synthesis_pass: SynthesisPass | None = None
     verification: VerificationSummary | None = None
+    moved: MovedVerification | None = None
     merged: ReviewResult = field(
         default_factory=lambda: merge_review_results(partials=[]),
     )
@@ -143,6 +148,9 @@ def _run_usage(*, outcome: ReviewRunOutcome) -> tuple[int, int, float]:
     if outcome.verification is not None:
         check = outcome.verification
         usages.append((check.input_tokens, check.output_tokens, check.cost_estimate))
+    moved = outcome.moved.summary if outcome.moved is not None else None
+    if moved is not None:
+        usages.append((moved.input_tokens, moved.output_tokens, moved.cost_estimate))
     return (
         sum(item[0] for item in usages),
         sum(item[1] for item in usages),
@@ -251,6 +259,10 @@ def assemble_review_result(
         merge_base=plan.merge_base,
         reviewed_ranges=plan.reviewed_ranges,
         relocated_findings=plan.resume.relocations,
+        moved_verdicts=outcome.moved.verdicts if outcome.moved is not None else (),
+        moved_verification=(
+            outcome.moved.summary if outcome.moved is not None else None
+        ),
         custom_agents_skipped=(
             len(plan.agent_selection.skipped) + len(outcome.custom_agents_failed)
         ),

@@ -135,6 +135,19 @@ class ReviewRunPlan:
     merge_base: str = ""
     timings: ReviewTimingRecorder
 
+    @property
+    def moved_check_budget(self) -> int:
+        """Return the tokens the moved-finding check may show (#3466).
+
+        The check fails closed when its diff and files do not fit, so it
+        gets at least half the context window, not only the synthesis
+        pass's diff budget.
+
+        Returns:
+            The larger of the two.
+        """
+        return max(self.synthesis_diff_budget, self.context_window // 2)
+
 
 def resolve_review_chunks(
     *,

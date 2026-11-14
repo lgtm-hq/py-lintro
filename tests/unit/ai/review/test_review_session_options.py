@@ -69,6 +69,7 @@ EXPECTED_SESSION_DEFAULTS: dict[str, object] = {
     "stop": None,
     "synthesis": None,
     "verify": ReviewVerifyMode.P1_AND_LOW_CONFIDENCE,
+    "verify_moved_findings": True,
 }
 
 #: Fields a caller must supply. Every other field is in
@@ -266,6 +267,7 @@ def test_run_review_forwards_the_options_object_unchanged(
         stop=stop,
         synthesis=synthesis,
         verify=ReviewVerifyMode.P1,
+        verify_moved_findings=False,
     )
 
     orchestrator.run_review(
@@ -304,6 +306,7 @@ def test_run_review_forwards_the_options_object_unchanged(
         "stop": stop,
         "synthesis": synthesis,
         "verify": ReviewVerifyMode.P1,
+        "verify_moved_findings": False,
     }
     assert_that(captured).is_length(1)
     received = captured[0]

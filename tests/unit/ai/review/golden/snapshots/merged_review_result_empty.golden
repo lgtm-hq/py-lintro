@@ -46,6 +46,8 @@
     "merge_base": "",
     "reviewed_ranges": [],
     "relocated_findings": [],
+    "moved_verdicts": [],
+    "moved_verification": null,
     "custom_agents_run": 0,
     "custom_agents_skipped": 0,
     "reviewed_paths": [],

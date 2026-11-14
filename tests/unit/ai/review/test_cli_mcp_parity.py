@@ -510,6 +510,7 @@ SESSION_OPTION_SOURCES: dict[str, tuple[str, str]] = {
     "context_collection_seconds": ("prepared", "context_collection_seconds"),
     "synthesis": ("prepared", "synthesis"),
     "verify": ("prepared", "verify"),
+    "verify_moved_findings": ("prepared", "verify_moved_findings"),
     "context_window_override": ("policy", "context_window_override"),
     "progress": ("policy", "progress"),
     "prior_state": ("policy", "prior_state"),
@@ -557,6 +558,7 @@ def test_execute_review_forwards_every_prepared_and_policy_field(
         workspace_root=tmp_path / "elsewhere",
         context_collection_seconds=1.5,
         synthesis=ReviewSynthesisConfig(enabled=True),
+        verify_moved_findings=False,
     )
     policy = ReviewExecutionPolicy(
         progress=NullReviewProgress(),

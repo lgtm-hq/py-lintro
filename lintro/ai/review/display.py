@@ -36,7 +36,10 @@ from lintro.ai.review.severity_gate import (
 )
 from lintro.ai.review.synthesis_note import format_synthesis_note
 from lintro.ai.review.timings import format_timing_summary
-from lintro.ai.review.verification_note import format_verification_note
+from lintro.ai.review.verification_note import (
+    format_moved_verification_note,
+    format_verification_note,
+)
 
 __all__ = ["render_review_terminal"]
 
@@ -121,6 +124,9 @@ def render_review_terminal(
     verification_note = format_verification_note(metadata=metadata)
     if verification_note:
         output.print(f"[dim]{verification_note}[/dim]")
+    moved_note = format_moved_verification_note(metadata=metadata)
+    if moved_note:
+        output.print(f"[dim]{moved_note}[/dim]")
     narrative_note = format_narrative_note(metadata=metadata)
     if narrative_note:
         # Narrative notes: a failed question pass, a carried synthesis or

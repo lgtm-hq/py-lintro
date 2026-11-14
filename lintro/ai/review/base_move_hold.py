@@ -41,7 +41,11 @@ from lintro.ai.review.delta_lines import map_open_findings, pr_renames
 from lintro.ai.review.diff_gate import hunks_from_diff
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.git_line_map import file_hunks
-from lintro.ai.review.models.delta_plan import LOCATION_BASE_MOVED, LOCATION_HOLDS
+from lintro.ai.review.models.delta_plan import (
+    LOCATION_BASE_MOVED,
+    LOCATION_HOLDS,
+    LOCATION_UNPLACED,
+)
 
 if TYPE_CHECKING:
     from lintro.ai.review.git_line_map import Hunks
@@ -117,7 +121,12 @@ def hold_across_base_moves(
     holds: dict[str, Relocation] = {}
     for record in moved:
         placement = placed.get(record.key)
-        if placement is not None and placement[3] in LOCATION_HOLDS:
+        # An unplaced line is still judged here: a moved base can hold it.
+        if (
+            placement is not None
+            and placement[3] in LOCATION_HOLDS
+            and placement[3] != LOCATION_UNPLACED
+        ):
             continue
         path = record.file if placement is None else placement[1]
         if placement is None:

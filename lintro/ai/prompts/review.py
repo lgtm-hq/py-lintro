@@ -42,6 +42,8 @@ __all__ = [
     "REVIEW_SCHEMA_REMINDER_TEMPLATE",
     "REVIEW_SYNTHESIS_SYSTEM_PROMPT",
     "REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE",
+    "REVIEW_MOVED_VERIFICATION_SYSTEM_PROMPT",
+    "REVIEW_MOVED_VERIFICATION_USER_PROMPT_TEMPLATE",
     "REVIEW_VERIFICATION_SYSTEM_PROMPT",
     "REVIEW_VERIFICATION_USER_PROMPT_TEMPLATE",
     "REVIEW_SYSTEM",
@@ -141,6 +143,15 @@ REVIEW_VERIFICATION_SYSTEM_PROMPT = load_prompt_template(
 REVIEW_VERIFICATION_USER_PROMPT_TEMPLATE = load_prompt_template(
     "review",
     "verification_user.md",
+)
+
+REVIEW_MOVED_VERIFICATION_SYSTEM_PROMPT = load_prompt_template(
+    "review",
+    "moved_verification_system.md",
+)
+REVIEW_MOVED_VERIFICATION_USER_PROMPT_TEMPLATE = load_prompt_template(
+    "review",
+    "moved_verification_user.md",
 )
 
 REVIEW_SCHEMA_REMINDER_TEMPLATE = load_prompt_template(

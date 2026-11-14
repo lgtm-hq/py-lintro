@@ -43,12 +43,15 @@ class RoundLookups:
         renamed_from: The pull request's renames, source path to new path.
         renames: Renames per ``(from_sha, to_sha)`` range.
         hunks: Hunks per ``(from_sha, to_sha, old_path, new_path)``.
+        rewrites: Whether git reads a file as rewritten, per ``(from_sha,
+            to_sha, path)`` (#3466).
     """
 
     repo_root: str
     renamed_from: Mapping[str, str]
     renames: dict[tuple[str, str], Renames | None] = field(default_factory=dict)
     hunks: dict[tuple[str, str, str, str], Hunks] = field(default_factory=dict)
+    rewrites: dict[tuple[str, str, str], bool] = field(default_factory=dict)
 
 
 def cached_renames(

@@ -39,7 +39,12 @@ from lintro.ai.review.resume import plan_resume
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
 from lintro.ai.review.state_store import load_ci_state
 from tests.unit.ai.review import test_full_round_rename_3413 as harness
-from tests.unit.ai.review.scratch_repo_fixtures import commit, git, lines
+from tests.unit.ai.review.scratch_repo_fixtures import (
+    commit,
+    git,
+    lines,
+    moved_answer,
+)
 
 _MODES = [
     pytest.param(False, id="delta"),
@@ -567,6 +572,9 @@ def test_a_finding_fixed_after_a_rebase_still_resolves(
 ) -> None:
     """The pull request rewrites or deletes line 81 after the rebase: X resolves.
 
+    X followed the ``b.py -> c.py`` rename, so it resolves on the moved-finding
+    check's "fixed" (#3466), not on the silence alone.
+
     Args:
         tmp_path: Pytest temp dir.
         force_full: ``--full``.
@@ -581,6 +589,7 @@ def test_a_finding_fixed_after_a_rebase_still_resolves(
         prior=prior,
         reported=[],
         force_full=force_full,
+        moved=moved_answer(still_present="false"),
     )
 
     assert_that(fixed.counts).is_equal_to((0, 0, 1))

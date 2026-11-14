@@ -17,8 +17,10 @@ __all__ = [
     "REVIEW_CLI_SCHEMA",
     "SUMMARY_CLI_SCHEMA",
     "SYNTHESIS_CLI_SCHEMA",
+    "MOVED_VERIFICATION_CLI_SCHEMA",
     "VERIFICATION_CLI_SCHEMA",
     "cli_schema_for_fix",
+    "cli_schema_for_moved_verification",
     "cli_schema_for_review",
     "cli_schema_for_summary",
     "cli_schema_for_synthesis",
@@ -153,6 +155,31 @@ VERIFICATION_CLI_SCHEMA: dict[str, object] = {
                         "enum": ["refuted", "weakened", "unrefuted"],
                     },
                     "evidence": {"type": "string"},
+                },
+            },
+        },
+    },
+}
+
+MOVED_VERIFICATION_CLI_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "required": ["moved_findings"],
+    "additionalProperties": False,
+    "properties": {
+        "moved_findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["index", "still_present", "file", "line"],
+                "additionalProperties": False,
+                "properties": {
+                    "index": {"type": "integer"},
+                    "still_present": {
+                        "type": "string",
+                        "enum": ["true", "false", "unknown"],
+                    },
+                    "file": {"type": "string"},
+                    "line": {"type": "integer"},
                 },
             },
         },
@@ -371,6 +398,19 @@ def cli_schema_for_verification(
     return CliSchemaRequest(
         schema=VERIFICATION_CLI_SCHEMA,
         schema_name="lintro_verification",
+    )
+
+
+def cli_schema_for_moved_verification(
+    *,
+    transport: AITransport | None,
+) -> CliSchemaRequest | None:
+    """Return native moved-finding check schema args for CLI transport (#3466)."""
+    if transport != AITransport.CLI:
+        return None
+    return CliSchemaRequest(
+        schema=MOVED_VERIFICATION_CLI_SCHEMA,
+        schema_name="lintro_moved_verification",
     )
 
 

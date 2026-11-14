@@ -12,6 +12,10 @@ from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
 from lintro.ai.review.models.coverage_degradation import CoverageDegradation
+from lintro.ai.review.models.moved_verification import (
+    MovedVerdictEntry,
+    MovedVerificationSummary,
+)
 from lintro.ai.review.models.review_timings import ReviewTimings
 from lintro.ai.review.models.skipped_file import SkippedFile
 from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
@@ -107,6 +111,15 @@ class ReviewMetadata:
             ``"unmapped"``, ``"unchecked"`` or ``"base-moved"`` (#3467) holds
             the record where it was stored
             (:data:`~lintro.ai.review.models.delta_plan.LOCATION_HOLDS`).
+        moved_verdicts (tuple[MovedVerdictEntry, ...]): ``(key, verdict,
+            path, line, line_sha)`` for each prior open finding whose location
+            was inferred and that no report matched (#3466): the provider's
+            ``fixed`` / ``present`` / ``unknown`` answer, and the in-diff
+            location a ``present`` answer moved it to. The matcher resolves
+            such a finding only on ``fixed``.
+        moved_verification (MovedVerificationSummary | None): Counts for those
+            findings: verified fixed, verified present, held. ``None`` when
+            the round had none or never reached the completed path.
         custom_agents_run (int): Number of user-defined review agents that
             completed a pass in this run (issue #1245).
         custom_agents_skipped (int): Number of discovered agents that did not
@@ -209,6 +222,8 @@ class ReviewMetadata:
     relocated_findings: tuple[tuple[str, str, int, str], ...] = field(
         default_factory=tuple,
     )
+    moved_verdicts: tuple[MovedVerdictEntry, ...] = field(default_factory=tuple)
+    moved_verification: MovedVerificationSummary | None = None
     custom_agents_run: int = 0
     custom_agents_skipped: int = 0
     reviewed_paths: tuple[str, ...] = field(default_factory=tuple)

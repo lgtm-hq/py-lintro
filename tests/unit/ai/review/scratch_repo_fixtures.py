@@ -7,16 +7,30 @@ share live here rather than being imported from one another's test modules.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess  # nosec B404 - scratch repositories are driven with fixed git argv
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+from lintro.ai.prompts.review import REVIEW_MOVED_VERIFICATION_SYSTEM_PROMPT
 from lintro.ai.providers.capabilities import ProviderCapabilities
+from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.models.review_thread import ReviewThread
+from lintro.ai.review.moved_verification import MAX_MOVED_FINDINGS
 
-__all__ = ["ThreadHost", "commit", "fake_provider", "git", "lines"]
+__all__ = [
+    "ThreadHost",
+    "commit",
+    "fake_provider",
+    "git",
+    "lines",
+    "moved_answer",
+    "routed_calls",
+]
 
 _ENV = {
     "GIT_AUTHOR_NAME": "t",
@@ -142,3 +156,58 @@ def fake_provider() -> MagicMock:
     provider.name = "fake"
     provider.capabilities = ProviderCapabilities(supports_sessions=False)
     return provider
+
+
+def moved_answer(*, still_present: str, file: str = "", line: int = 0) -> AIResponse:
+    """The moved-finding check's answer, the same for every finding (#3466).
+
+    Args:
+        still_present: ``"true"``, ``"false"`` or ``"unknown"``.
+        file: The location a ``"true"`` answer names, or empty.
+        line: Its line, or 0.
+
+    Returns:
+        A canned response covering every position the check may ask about.
+    """
+    entries = [
+        {"index": index, "still_present": still_present, "file": file, "line": line}
+        for index in range(1, MAX_MOVED_FINDINGS + 1)
+    ]
+    return AIResponse(
+        content=json.dumps({"moved_findings": entries}),
+        model="fake-model",
+        provider="fake",
+        input_tokens=7,
+        output_tokens=3,
+        cost_estimate=0.002,
+    )
+
+
+def routed_calls(
+    *,
+    review: AIResponse,
+    moved: AIResponse | Exception | None,
+    seen: list[str] | None = None,
+) -> Callable[..., AIResponse]:
+    """Serve the review calls and the moved-finding check separately.
+
+    Args:
+        review: The answer to every review call.
+        moved: The moved-finding check's answer, an exception it raises, or
+            ``None`` to give it the review's answer (an off-schema reply).
+        seen: Receives the user prompt of each moved-finding check.
+
+    Returns:
+        A ``side_effect`` for ``provider_call.call_ai``.
+    """
+
+    def _call(**kwargs: Any) -> AIResponse:
+        if kwargs.get("system_prompt") != REVIEW_MOVED_VERIFICATION_SYSTEM_PROMPT:
+            return review
+        if seen is not None:
+            seen.append(str(kwargs.get("user_prompt", "")))
+        if isinstance(moved, Exception):
+            raise moved
+        return review if moved is None else moved
+
+    return _call

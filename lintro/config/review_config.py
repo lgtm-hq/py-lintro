@@ -317,6 +317,18 @@ class ReviewConfig(BaseModel):
             "scenario does not hold is moved to P2."
         ),
     )
+    verify_moved_findings: bool = Field(
+        default=True,
+        description=(
+            "Verify before resolve (#3466): a prior finding whose location had "
+            "to be inferred (its file renamed, moved, copied or deleted, or its "
+            "line unplaceable) is never resolved just because no report matched "
+            "it. One provider call per round, counted against the review "
+            "budget, asks whether each such issue still exists; only a 'fixed' "
+            "answer resolves it. Set false to skip the call and hold every such "
+            "finding open as 'not re-verified'."
+        ),
+    )
     synthesis: ReviewSynthesisConfig = Field(
         default_factory=ReviewSynthesisConfig,
         description=(

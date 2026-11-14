@@ -31,6 +31,7 @@ __all__ = [
     "literal_pathspec",
     "map_line",
     "range_renames",
+    "rewritten",
 ]
 
 #: Flags that fix a diff's text whatever the user's git configuration says.
@@ -159,6 +160,51 @@ def range_renames(*, repo_root: str, from_sha: str, to_sha: str) -> Renames | No
         moved=moved,
         ambiguous=frozenset(source for source in moved if source in touched),
         deleted=frozenset(deleted),
+    )
+
+
+#: Dissimilarity (``git diff -B``) at or above which a file counts as
+#: replaced rather than edited (#3466).
+REWRITE_SCORE = 50
+
+_REWRITE_RE = re.compile(r"^M(\d+)\t", re.MULTILINE)
+
+
+def rewritten(*, repo_root: str, from_sha: str, to_sha: str, path: str) -> bool:
+    """Tell whether git reads a file as rewritten between two commits.
+
+    A path refilled with unrelated content (the original moved elsewhere)
+    is a modification by name only; ``git diff -B`` breaks it into a rewrite
+    and reports its dissimilarity (``M100``). Plain ``-B`` reports a score
+    only from git's default 60%, so the threshold is passed explicitly
+    (``--break-rewrites=/50%``): a file 50-59% replaced is a rewrite too.
+
+    Args:
+        repo_root: The repository.
+        from_sha: The older commit.
+        to_sha: The newer commit.
+        path: The file, at the same path in both.
+
+    Returns:
+        True when git reports a rewrite of at least :data:`REWRITE_SCORE`,
+        or cannot answer: an unknown answer is no proof the file is in place.
+    """
+    text = git_text(
+        repo_root=repo_root,
+        args=[
+            "--no-renames",
+            # ``-B<n>/<m>``: <m> is the score from which git reports a rewrite.
+            f"--break-rewrites=/{REWRITE_SCORE}%",
+            "--name-status",
+            f"{from_sha}..{to_sha}",
+            "--",
+            literal_pathspec(path),
+        ],
+    )
+    if text is None:
+        return True
+    return any(
+        int(match.group(1)) >= REWRITE_SCORE for match in _REWRITE_RE.finditer(text)
     )
 
 

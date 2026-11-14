@@ -71,8 +71,10 @@ if TYPE_CHECKING:
 
 __all__ = [
     "MAX_VERIFICATION_FINDINGS",
+    "VerificationInterruptedError",
     "VerificationPass",
     "VerificationPassRequest",
+    "await_call_until_stop",
     "run_verification_pass",
     "select_for_verification",
     "verification_degradations",
@@ -141,7 +143,7 @@ class VerificationPass:
     summary: VerificationSummary
 
 
-class _VerificationInterruptedError(Exception):
+class VerificationInterruptedError(Exception):
     """The run's stop event won the race against the provider call."""
 
 
@@ -205,7 +207,7 @@ def verification_degradations(
     )
 
 
-async def _await_call_until_stop(
+async def await_call_until_stop(
     *,
     call: Coroutine[Any, Any, AIResponse],
     stop: asyncio.Event | None,
@@ -220,14 +222,14 @@ async def _await_call_until_stop(
         The provider response.
 
     Raises:
-        _VerificationInterruptedError: When the stop event won the race.
+        VerificationInterruptedError: When the stop event won the race.
     """
     if stop is None:
         return await call
     if stop.is_set():
         # Already stopping: do not start provider-side work only to cancel it.
         call.close()
-        raise _VerificationInterruptedError
+        raise VerificationInterruptedError
     call_task = asyncio.ensure_future(call)
     stop_task = asyncio.ensure_future(stop.wait())
     try:
@@ -236,7 +238,7 @@ async def _await_call_until_stop(
             return_when=asyncio.FIRST_COMPLETED,
         )
         if stop_task in done and stop.is_set() and not call_task.done():
-            raise _VerificationInterruptedError
+            raise VerificationInterruptedError
         return await call_task
     finally:
         for task in (call_task, stop_task):
@@ -330,7 +332,7 @@ async def run_verification_pass(
     )
     try:
         request.budget.check()
-        response = await _await_call_until_stop(
+        response = await await_call_until_stop(
             call=provider_call.call_ai(
                 provider=request.provider,
                 ai_config=request.ai_config,
@@ -347,7 +349,7 @@ async def run_verification_pass(
             ),
             stop=request.stop,
         )
-    except _VerificationInterruptedError:
+    except VerificationInterruptedError:
         logger.warning(
             "The verification pass was interrupted; findings kept unverified.",
         )
