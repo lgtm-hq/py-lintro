@@ -934,28 +934,25 @@ resolve; it never narrows what it may report.**
   add (a file renamed and heavily edited since that head), the pull request's own
   changed-file metadata moves it: a file reported as renamed takes the finding to its
   new path, at its stored line. That metadata names only the pull request's overall
-  rename, so a finding an earlier round already carried to a renamed file remembers the
-  path it was first tracked at (`FindingRecord.origin_path`, #3432). That is the first
-  path the review tracked the finding on, not necessarily its path at the pull request's
-  base: a finding first reported on a file the pull request had already renamed has no
-  lineage to follow. When git reads its current path as deleted and the pull request
-  renames that first path, the finding follows that rename too. The lookup is skipped,
-  and the finding held as before, when the first path's provenance cannot be verified or
-  could be ambiguous:
-  - git cannot walk the whole range since the finding's recorded head: the head is
-    unreachable, or the checkout is shallow and its boundary cuts into the range (the
-    recorded head is not an ancestor there, or a boundary commit lies inside it), even
-    when both ends of the range are readable;
-  - the first path exists at the start of the range;
-  - any commit in the range adds it or renames another file onto it, even if that file
-    moved on again before the range's end (`git log --diff-filter=A --no-renames` over
-    every commit, not the endpoint diff);
-  - git pairs the destination with another source in the range;
-  - another finding moves to the same destination that round.
+  rename, from the file's path at the base, so it applies only while the finding still
+  sits on that path.
 
-  Holding can leave a duplicate thread; it never resolves a live one. When that names no
-  rename either, the finding is held where it was stored (`line_sha` `"unmapped"` in
-  `relocated_findings`) and its path leaving the diff never counts as a fix: it stays
+  **A file renamed again with heavy edits is not followed.** Once a round has carried a
+  finding to a renamed file (`a.py -> b.py`), a later rename that git reads as a delete
+  plus an add (`b.py` gone, `c.py` new, the pull request now naming `a.py -> c.py`)
+  leaves the finding where it is: its old thread on `b.py` stays open, and the same
+  finding reported on `c.py` may get a new thread. The review cannot follow it reliably,
+  because nothing proves which file a delete plus an add continues. Rename metadata is a
+  similarity guess over the whole pull request, and the paths and adds and deletes git
+  shows can be produced by unrelated files (one rewritten into the destination, a live
+  file moved onto another existing path). Following that guess moved live findings onto
+  clean files and resolved their threads (#3432). The record still keeps the path it was
+  first tracked at (`FindingRecord.origin_path`), so a later content-based approach can
+  use it; nothing reads it today.
+
+  Holding can leave a duplicate thread; it never resolves a live one. When no rename
+  names the finding's own path, it is held where it was stored (`line_sha` `"unmapped"`
+  in `relocated_findings`) and its path leaving the diff never counts as a fix: it stays
   open and is marked not re-verified. A round maps at most 200 findings through git
   (`MAX_MAPPED_FINDINGS`, one `git diff -U0` per distinct recorded head and path); any
   beyond that are held (`"unchecked"`), carried unverified and never resolved that

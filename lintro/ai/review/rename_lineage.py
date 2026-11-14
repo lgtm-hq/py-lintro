@@ -8,13 +8,13 @@ all, the pull request's own rename metadata names the file's new path
 
 That metadata spans the whole pull request: ``a.py -> c.py`` even after an
 earlier round carried the finding across ``a.py -> b.py``. A carried record
-therefore keeps the path it was first tracked at
+keeps the path it was first tracked at
 (:attr:`~lintro.ai.review.models.finding_record.FindingRecord.origin_path`),
-and :func:`lineage_rename` looks that path up, but only across a range git
-can walk commit by commit. The lookup is skipped whenever the first path may
-now be a different file, git pairs the destination with another source, or
-the range's history is out of reach: holding the finding can leave a
-duplicate thread, while a wrong move can resolve a live one.
+but it is not looked up (#3432): paths and add/delete counts cannot prove
+which file a delete plus an add continues, and every guarded lookup tried
+moved some live finding onto an unrelated file and resolved its thread.
+Holding the finding can leave a duplicate thread; a wrong move resolves a
+live one.
 """
 
 from __future__ import annotations
@@ -22,22 +22,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from lintro.ai.review.git_line_map import (
-    Hunks,
-    Renames,
-    path_added_in_range,
-    path_exists,
-    range_renames,
-)
+from lintro.ai.review.git_line_map import Hunks, Renames, range_renames
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
 __all__ = [
     "RoundLookups",
-    "cached_exists",
     "cached_renames",
-    "lineage_rename",
     "unpaired_rename",
 ]
 
@@ -51,14 +43,12 @@ class RoundLookups:
         renamed_from: The pull request's renames, source path to new path.
         renames: Renames per ``(from_sha, to_sha)`` range.
         hunks: Hunks per ``(from_sha, to_sha, old_path, new_path)``.
-        exists: Whether a path exists, per ``(sha, path)`` (#3432).
     """
 
     repo_root: str
     renamed_from: Mapping[str, str]
     renames: dict[tuple[str, str], Renames | None] = field(default_factory=dict)
     hunks: dict[tuple[str, str, str, str], Hunks] = field(default_factory=dict)
-    exists: dict[tuple[str, str], bool | None] = field(default_factory=dict)
 
 
 def cached_renames(
@@ -89,26 +79,6 @@ def cached_renames(
     return lookups.renames[(from_sha, to_sha)]
 
 
-def cached_exists(*, lookups: RoundLookups, sha: str, path: str) -> bool | None:
-    """Tell whether a path exists at a commit, asking git once per pair.
-
-    Args:
-        lookups: The round's git answers.
-        sha: The commit.
-        path: Repository-relative path.
-
-    Returns:
-        Whether it exists, or ``None`` when git could not answer.
-    """
-    if (sha, path) not in lookups.exists:
-        lookups.exists[(sha, path)] = path_exists(
-            repo_root=lookups.repo_root,
-            sha=sha,
-            path=path,
-        )
-    return lookups.exists[(sha, path)]
-
-
 def unpaired_rename(
     *,
     lookups: RoundLookups,
@@ -132,56 +102,3 @@ def unpaired_rename(
     if renames is None or path not in renames.deleted:
         return ""
     return lookups.renamed_from.get(path, "")
-
-
-def lineage_rename(
-    *,
-    lookups: RoundLookups,
-    renames: Renames | None,
-    path: str,
-    origin_path: str,
-    from_sha: str,
-    to_sha: str,
-) -> str:
-    """Return the PR's rename of a record's first path, when unambiguous (#3432).
-
-    The lookup needs the range's own history: with no listing (the record's
-    head is unreachable) nothing shows that the first path still names the
-    record's file, so the record is held as before. It is also skipped
-    whenever the first path may now be a different file: it exists at the
-    range's start, the range's endpoints name it, or any commit in the range
-    adds it (re-created, or another file renamed onto it, even when that file
-    moved on again before the range's end). And it is skipped when git pairs
-    the destination with another source in the range, since that file's own
-    findings arrive there.
-
-    Args:
-        lookups: The round's git answers and the PR's renames.
-        renames: Renames git listed for the range, or ``None`` when git could
-            not list them.
-        path: The record's path at the range's start.
-        origin_path: The record's first path, or ``""``.
-        from_sha: The range's start.
-        to_sha: The range's end.
-
-    Returns:
-        The destination, or ``""`` when there is none or it is ambiguous.
-    """
-    dest = lookups.renamed_from.get(origin_path, "") if origin_path else ""
-    if not dest or dest == path or renames is None:
-        return ""
-    if (
-        path not in renames.deleted
-        or origin_path in renames.named
-        or dest in renames.moved.values()
-    ):
-        return ""
-    if cached_exists(lookups=lookups, sha=from_sha, path=origin_path) is not False:
-        return ""
-    added = path_added_in_range(
-        repo_root=lookups.repo_root,
-        from_sha=from_sha,
-        to_sha=to_sha,
-        path=origin_path,
-    )
-    return dest if added is False else ""
