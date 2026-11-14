@@ -795,6 +795,38 @@ def test_directory_excludes_are_mirrored_in_the_detection_prune_set() -> None:
     assert_that(sorted(directory_excludes - _VENDOR_SKIP_DIRS)).is_empty()
 
 
+def test_lintro_run_directory_is_pruned_but_dot_lintro_files_are_kept(
+    tmp_path: Path,
+) -> None:
+    """An all-files walk skips ``.lintro/run-*`` but keeps ``.lintro-*`` files.
+
+    Lintro writes per-run reports and an ``.active`` lock under
+    ``.lintro/run-*/``; an all-files scan (Semgrep's script pack) otherwise
+    reported that lock as a scanned target (#3437).
+
+    Args:
+        tmp_path: Temporary project directory.
+    """
+    run_dir = tmp_path / ".lintro" / "run-20260101-000000"
+    run_dir.mkdir(parents=True)
+    (run_dir / ".active").write_text("")
+    (run_dir / "report.json").write_text("{}\n")
+    (tmp_path / ".lintro-ignore").write_text("build/\n")
+    (tmp_path / "fmt.sh").write_text("echo ok\n")
+
+    discovered = walk_files_with_excludes(
+        paths=[str(tmp_path)],
+        file_patterns=["*"],
+        exclude_patterns=list(DEFAULT_EXCLUDE_PATTERNS),
+    )
+    detected = {path.name for path in _iter_project_files(tmp_path)}
+
+    assert_that(sorted(Path(path).name for path in discovered)).is_equal_to(
+        [".lintro-ignore", "fmt.sh"],
+    )
+    assert_that(detected).is_equal_to({".lintro-ignore", "fmt.sh"})
+
+
 def test_cache_excludes_skip_directories_but_keep_cache_named_sources(
     tmp_path: Path,
 ) -> None:

@@ -16,7 +16,7 @@ from lintro.plugins.file_discovery import discover_files
 from lintro.plugins.registry import ToolRegistry
 from lintro.rules import available_rule_packs, resolve_rule_pack, rule_pack_info
 from lintro.tools.semgrep.definition import SEMGREP_FILE_PATTERNS, SemgrepPlugin
-from lintro.tools.semgrep.scan_root import choose_scan_root
+from lintro.tools.semgrep.scan_root import hidden_pack_targets
 
 PACK = "scripts/no-direct-formatter"
 OTHER_PACK = "python/none-coercion"
@@ -135,78 +135,70 @@ def test_definition_reads_skip_pack_validation_until_packs_change(
     ],
     ids=["pyproject", "git", "unanchored-pack", "no-packs"],
 )
-def test_scan_root_keeps_project_root_or_packs_without_directories(
+def test_nothing_is_hidden_with_a_marker_or_without_directory_packs(
     tmp_path: Path,
     packs: list[str],
     marker: str | None,
 ) -> None:
-    """A marker, or no directory-scoped pack, leaves the scan exactly as chosen.
+    """A marker, or no directory-scoped pack, never makes a run incomplete.
 
     Args:
-        tmp_path: Started directory, holding the execution directory.
+        tmp_path: Holds the working directory.
         packs: Enabled packs.
-        marker: Project marker created in the execution directory, if any.
+        marker: Project marker created in the working directory, if any.
     """
     cwd = tmp_path / "scripts"
     cwd.mkdir()
     if marker is not None:
         (cwd / marker).touch()
-    scan = choose_scan_root(
-        packs=packs,
-        cwd=str(cwd),
-        files=["fmt.sh"],
-        run_cwd=str(tmp_path),
-    )
-    assert_that(scan.cwd).is_equal_to(str(cwd))
-    assert_that(scan.files).is_equal_to(["fmt.sh"])
-    assert_that(scan.warning).is_none()
+    reason = hidden_pack_targets(packs=packs, cwd=str(cwd), files=["fmt.sh"])
+    assert_that(reason).is_none()
 
 
 @pytest.mark.parametrize(
-    ("started", "files", "expected", "hidden"),
+    ("cwd", "files", "hidden"),
     [
-        ("tree", ["fmt.sh"], ["scripts/fmt.sh"], []),
-        ("tree", ["lib/a.sh"], ["scripts/lib/a.sh"], []),
-        ("tree/scripts", ["fmt.sh"], ["fmt.sh"], ["fmt.sh"]),
-        ("elsewhere", ["fmt.sh"], ["fmt.sh"], ["fmt.sh"]),
+        ("tree/scripts", ["fmt.sh", "lib/a.sh"], 2),
+        ("tree/scripts", ["nested/scripts/a.sh"], 0),
+        ("tree/scripts/lib", ["a.sh"], 0),
+        ("scripts/repo/packages/pkg", ["src/a.py"], 0),
+        ("tree", ["scripts/fmt.sh"], 0),
     ],
-    ids=["run-above", "nested", "run-inside", "run-outside"],
+    ids=[
+        "cwd-is-scripts",
+        "pack-directory-visible-below-cwd",
+        "scripts-above-cwd",
+        "unrelated-scripts-ancestor",
+        "cwd-above-scripts",
+    ],
 )
-def test_scan_root_without_marker_runs_from_start_or_reports_hidden_files(
+def test_hidden_targets_need_the_pack_directory_at_cwd_and_not_below(
     tmp_path: Path,
-    started: str,
+    cwd: str,
     files: list[str],
-    expected: list[str],
-    hidden: list[str],
+    hidden: int,
 ) -> None:
-    """Without a marker the started directory anchors scripts/, if it can (#3437).
+    """Only a pack directory at cwd, not above it nor inside the path, hides files.
 
     Args:
         tmp_path: Root of a marker-less tree.
-        started: Directory, relative to ``tmp_path``, lintro was started in.
-        files: Targets relative to the execution directory ``tree/scripts``.
-        expected: Targets Semgrep must receive.
-        hidden: Targets the pack cannot match from the chosen directory.
+        cwd: Working directory, relative to ``tmp_path``.
+        files: Targets relative to ``cwd``.
+        hidden: Targets the pack cannot match.
     """
-    cwd = tmp_path / "tree" / "scripts"
-    (cwd / "lib").mkdir(parents=True)
-    (tmp_path / "elsewhere").mkdir()
-    scan = choose_scan_root(
-        packs=[PACK],
-        cwd=str(cwd),
-        files=files,
-        run_cwd=str(tmp_path / started),
-    )
-    assert_that(scan.files).is_equal_to(expected)
-    assert_that(scan.hidden).is_equal_to(hidden)
+    root = tmp_path / cwd
+    root.mkdir(parents=True)
+    reason = hidden_pack_targets(packs=[PACK], cwd=str(root), files=files)
     if hidden:
-        assert_that(scan.warning).contains(
+        assert_that(reason).contains(
             PACK,
-            "1 file(s) under scripts/ were not checked",
+            f"{hidden} file(s) under scripts/ were not checked",
+            f"(first: {files[0]})",
+            str(root),
             "pyproject.toml",
         )
     else:
-        assert_that(scan.warning).is_none()
+        assert_that(reason).is_none()
 
 
 def test_pack_tracks_builtin_format_claimants() -> None:

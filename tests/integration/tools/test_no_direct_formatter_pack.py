@@ -250,93 +250,154 @@ def _markerless_script(tmp_path: Path) -> Path:
     return script
 
 
-@pytest.mark.parametrize("scope", [".", "scripts", "scripts/fmt.sh"])
-def test_tree_without_project_marker_reports_from_the_run_directory(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    scope: str,
-) -> None:
-    """Started above scripts/, a marker-less scan still reports the call (#3437).
-
-    Args:
-        tmp_path: Holds the marker-less tree and, beside it, Semgrep's state.
-        monkeypatch: Isolate current directory and Semgrep state.
-        scope: Path handed to the plugin, as in the reported reproduction.
-    """
-    script = _markerless_script(tmp_path)
-    _isolate_semgrep(monkeypatch, script.parent.parent, state=tmp_path)
-    result = SemgrepPlugin().check([scope], {"rule_packs": [PACK], "jobs": 1})
-    assert_that(result.success).is_true()
-    assert_that(
-        [Path(issue.file).as_posix() for issue in result.issues],
-    ).is_equal_to(["scripts/fmt.sh"])
-
-
-@pytest.mark.parametrize("scope", [".", "fmt.sh"])
-def test_tree_without_project_marker_is_incomplete_inside_scripts(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    scope: str,
-) -> None:
-    """Started inside scripts/, the pack cannot match, so nothing passes (#3437).
-
-    Args:
-        tmp_path: Holds the marker-less tree and, beside it, Semgrep's state.
-        monkeypatch: Isolate current directory and Semgrep state.
-        scope: Path handed to the plugin from inside ``scripts``.
-    """
-    script = _markerless_script(tmp_path)
-    _isolate_semgrep(monkeypatch, script.parent, state=tmp_path)
-    result = SemgrepPlugin().check([scope], {"rule_packs": [PACK], "jobs": 1})
-    assert_that(result.success).is_false()
-    assert_that(result.findings_complete).is_false()
-    assert_that(result.issues).is_empty()
-    assert_that(result.output).contains(PACK, "were not checked", "fmt.sh")
-
-
 @pytest.mark.parametrize(
-    ("run_from", "scope", "issues"),
-    [("tree", "scripts", 1), ("scripts", ".", 0)],
-    ids=["run-above-scripts", "run-inside-scripts"],
+    ("run_from", "scope"),
+    [
+        ("tree", "."),
+        ("tree", "scripts"),
+        ("tree", "scripts/fmt.sh"),
+        ("scripts", "."),
+        ("scripts", "fmt.sh"),
+    ],
 )
-def test_markerless_json_report_never_shows_a_clean_pass(
+def test_tree_without_project_marker_is_incomplete(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     run_from: str,
     scope: str,
-    issues: int,
 ) -> None:
-    """The JSON report fails with the finding or with the unchecked files (#3437).
+    """Semgrep runs inside scripts/, so the pack is incomplete, not clean (#3437).
 
     Args:
         tmp_path: Holds the marker-less tree and, beside it, Semgrep's state.
         monkeypatch: Isolate current directory and Semgrep state.
-        run_from: Directory the CLI starts in.
-        scope: Path handed to ``lintro check``.
-        issues: Findings the report must carry.
+        run_from: Directory the plugin is called from.
+        scope: Path handed to the plugin, as in the reported reproduction.
     """
     script = _markerless_script(tmp_path)
     start = script.parent if run_from == "scripts" else script.parent.parent
     _isolate_semgrep(monkeypatch, start, state=tmp_path)
-    output = tmp_path / "report.json"
+    result = SemgrepPlugin().check([scope], {"rule_packs": [PACK], "jobs": 1})
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.issues).is_empty()
+    assert_that(result.output).contains(
+        PACK,
+        "1 file(s) under scripts/ were not checked",
+        "(first: fmt.sh)",
+    )
+
+
+def test_markerless_checkout_below_a_scripts_ancestor_stays_clean(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``scripts`` directory above the scanned tree does not hide its files.
+
+    Args:
+        tmp_path: Holds the marker-less checkout and Semgrep's state.
+        monkeypatch: Isolate current directory and Semgrep state.
+    """
+    package = tmp_path / "scripts" / "repo" / "packages" / "pkg"
+    (package / "src").mkdir(parents=True)
+    (package / "src" / "a.py").write_text("VALUE = 1\n", encoding="utf-8")
+    if has_project_marker(get_execution_cwd([str(package / "src" / "a.py")])):
+        pytest.skip("an ancestor of the temporary directory holds a project marker")
+    _isolate_semgrep(monkeypatch, package, state=tmp_path)
+    result = SemgrepPlugin().check(["."], {"rule_packs": [PACK], "jobs": 1})
+    assert_that(result.success).described_as(str(result.output)).is_true()
+    assert_that(result.issues).is_empty()
+
+
+_RUN = ["check", "scripts", "--tools", "semgrep", "--tool-options"]
+
+
+@pytest.mark.parametrize("output_format", ["json", "plain"])
+def test_markerless_report_never_shows_a_clean_pass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    output_format: str,
+) -> None:
+    """Plain and JSON reports both fail and name the unchecked files (#3437).
+
+    Args:
+        tmp_path: Holds the marker-less tree and, beside it, Semgrep's state.
+        monkeypatch: Isolate current directory and Semgrep state.
+        output_format: Report format requested from ``lintro check``.
+    """
+    script = _markerless_script(tmp_path)
+    _isolate_semgrep(monkeypatch, script.parent.parent, state=tmp_path)
+    report = tmp_path / "report.json"
     result = CliRunner().invoke(
         cli,
         [
-            "check",
-            scope,
-            "--tools",
-            "semgrep",
-            "--tool-options",
+            *_RUN,
             f"semgrep:jobs=1,semgrep:rule_packs={PACK}|",
             "--output-format",
-            "json",
+            output_format,
             "--output",
-            str(output),
+            str(report),
         ],
     )
     assert_that(result.exit_code).described_as(result.output).is_equal_to(1)
-    semgrep = json.loads(output.read_text(encoding="utf-8"))["results"][0]
+    if output_format == "plain":
+        assert_that(result.output).contains("were not checked by these packs")
+        return
+    semgrep = json.loads(report.read_text(encoding="utf-8"))["results"][0]
     assert_that(semgrep["status"]).is_equal_to("failed")
-    assert_that(semgrep["issues_count"]).is_equal_to(issues)
-    if not issues:
-        assert_that(semgrep["output"]).contains("were not checked")
+    assert_that(semgrep["issues_count"]).is_equal_to(0)
+    assert_that(semgrep["output"]).contains("were not checked by these packs")
+
+
+@pytest.mark.parametrize(
+    "config",
+    ["", "semgrep:config=.semgrep.yaml,"],
+    ids=["native-discovery", "relative-config"],
+)
+def test_markerless_user_rules_resolve_as_before(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    config: str,
+) -> None:
+    """Rooted user filters and a relative config keep their findings (#3437).
+
+    Semgrep keeps running from the files' common directory, so a rooted
+    ``/src/**`` include, a rooted exclude and ``config=.semgrep.yaml`` all
+    resolve there as they did before; only the pack is reported incomplete.
+
+    Args:
+        tmp_path: Holds the marker-less tree and, beside it, Semgrep's state.
+        monkeypatch: Isolate current directory and Semgrep state.
+        config: Extra tool option selecting the user config explicitly, if any.
+    """
+    script = _markerless_script(tmp_path)
+    scripts = script.parent
+    (scripts / "src" / "skip").mkdir(parents=True)
+    (scripts / "src" / "a.py").write_text("danger(1)\n", encoding="utf-8")
+    (scripts / "src" / "skip" / "b.py").write_text("danger(2)\n", encoding="utf-8")
+    (scripts / ".semgrep.yaml").write_text(
+        "rules:\n  - id: danger-call\n    languages: [python]\n"
+        "    severity: WARNING\n    message: danger\n    pattern: danger(...)\n"
+        '    paths:\n      include: ["/src/**"]\n      exclude: ["/src/skip/**"]\n',
+        encoding="utf-8",
+    )
+    _isolate_semgrep(monkeypatch, scripts.parent, state=tmp_path)
+    report = tmp_path / "report.json"
+    result = CliRunner().invoke(
+        cli,
+        [
+            *_RUN,
+            f"{config}semgrep:jobs=1,semgrep:rule_packs={PACK}|",
+            "--output-format",
+            "json",
+            "--output",
+            str(report),
+        ],
+    )
+    assert_that(result.exit_code).described_as(result.output).is_equal_to(1)
+    semgrep = json.loads(report.read_text(encoding="utf-8"))["results"][0]
+    assert_that(
+        [(issue["file"], issue["code"]) for issue in semgrep["issues"]],
+    ).is_equal_to([("src/a.py", "danger-call")])
+    assert_that(semgrep["output"]).contains("were not checked by these packs")

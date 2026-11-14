@@ -61,6 +61,9 @@ DEFAULT_EXCLUDE_PATTERNS: tuple[str, ...] = (
     # `.lintro-cache` (see lintro/ai/cache.py, lintro/ai/audit.py).
     ".terragrunt-cache/",
     ".lintro-cache/",
+    # Lintro's own run directory: per-run reports and the `.active` lock under
+    # `.lintro/run-*/`, which an all-files scan would otherwise hand to tools.
+    ".lintro/",
     "*.pyc",
     "*.pyo",
     "*.pyd",

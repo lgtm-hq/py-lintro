@@ -36,7 +36,7 @@ from lintro.tools.core.option_validators import (
     validate_str,
 )
 from lintro.tools.core.readable_paths import with_unread_paths
-from lintro.tools.semgrep.scan_root import ScanRoot, choose_scan_root
+from lintro.tools.semgrep.scan_root import hidden_pack_targets
 
 # Constants for Semgrep configuration
 SEMGREP_DEFAULT_TIMEOUT: int = 300  # Semgrep needs more time on larger codebases
@@ -461,25 +461,20 @@ class SemgrepPlugin(BaseToolPlugin):
             return DocUrlTemplate.SEMGREP.format(code=url_quote(code, safe=""))
         return None
 
-    def _scan_command(self, ctx: PreparedExecution) -> tuple[ScanRoot, list[str]]:
-        """Pick Semgrep's directory and build its command for prepared files.
+    def _hidden_pack_reason(self, ctx: PreparedExecution) -> str | None:
+        """Name targets an enabled directory-scoped pack cannot match.
 
         Args:
-            ctx: Prepared execution context.
+            ctx: Prepared execution context; Semgrep runs from ``ctx.cwd``.
 
         Returns:
-            The scan root and the command to run from it.
+            Why the run is incomplete, or None when every pack can match.
         """
-        scan = choose_scan_root(
+        return hidden_pack_targets(
             packs=validate_rule_packs(self.options.get("rule_packs", [])),
             cwd=ctx.cwd,
             files=ctx.rel_files,
-            run_cwd=str(Path.cwd()),
         )
-        # Native configuration is still discovered in the execution directory.
-        cmd = self._build_check_command(files=scan.files, cwd=ctx.cwd)
-        logger.debug(f"[semgrep] Running: {' '.join(cmd[:10])}... (cwd={scan.cwd})")
-        return scan, cmd
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Semgrep for security issues and code quality.
@@ -502,7 +497,8 @@ class SemgrepPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        scan, cmd = self._scan_command(ctx)
+        cmd: list[str] = self._build_check_command(files=ctx.rel_files, cwd=ctx.cwd)
+        logger.debug(f"[semgrep] Running: {' '.join(cmd[:10])}... (cwd={ctx.cwd})")
 
         output: str
         returncode: int | None = None
@@ -511,7 +507,7 @@ class SemgrepPlugin(BaseToolPlugin):
             proc = self._run_subprocess_result(
                 cmd=cmd,
                 timeout=ctx.timeout,
-                cwd=scan.cwd,
+                cwd=ctx.cwd,
             )
             # Findings normally exit 0; accept exit 1 with findings for compatibility.
             returncode = proc.returncode
@@ -606,21 +602,23 @@ class SemgrepPlugin(BaseToolPlugin):
                 else True if issues else None
             )
 
-            result = ToolResult.from_outcome(
-                ToolOutcome(
-                    execution=Checked(
-                        success=execution_success,
-                        inspected_files=inspected_files,
-                    ),
-                    issues_count=issues_count,
-                ),
-                name=self.definition.name,
-                output=output if not execution_success else None,
-                issues=issues,
-                parse_failures_count=parse_failures_count or None,
-            )
             # A pack that could not see some targets is not a clean pass.
-            return _withhold_hidden(result, scan.warning)
+            return _withhold_hidden(
+                ToolResult.from_outcome(
+                    ToolOutcome(
+                        execution=Checked(
+                            success=execution_success,
+                            inspected_files=inspected_files,
+                        ),
+                        issues_count=issues_count,
+                    ),
+                    name=self.definition.name,
+                    output=output if not execution_success else None,
+                    issues=issues,
+                    parse_failures_count=parse_failures_count or None,
+                ),
+                self._hidden_pack_reason(ctx),
+            )
 
         except (json.JSONDecodeError, ValueError) as e:
             logger.error(f"Failed to parse semgrep output: {e}")
