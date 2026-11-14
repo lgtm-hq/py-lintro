@@ -20,6 +20,7 @@ from lintro.ai.review.models.delta_plan import (
     LOCATION_BASE_MOVED,
     LOCATION_HOLDS,
     LOCATION_UNCHECKED,
+    LOCATION_WEAK_RENAME,
 )
 
 if TYPE_CHECKING:
@@ -39,8 +40,11 @@ __all__ = [
 ]
 
 #: Holds that keep a record open even when its path left the diff: one beyond
-#: the mapping cap (#3413), and one a moved base pushed out of the diff (#3467).
-_NEVER_RESOLVED = frozenset({LOCATION_UNCHECKED, LOCATION_BASE_MOVED})
+#: the mapping cap (#3413), one a moved base pushed out of the diff (#3467),
+#: and one only a low-similarity rename would have moved (#3466).
+_NEVER_RESOLVED = frozenset(
+    {LOCATION_UNCHECKED, LOCATION_BASE_MOVED, LOCATION_WEAK_RENAME},
+)
 
 
 def _finding_positions(
@@ -87,14 +91,17 @@ def _relocate(
     Returns:
         The record at its mapped location and coordinate head; resolved
         records, records the round did not map and records it held in place
-        (#3413) are returned unchanged.
+        (#3413) are returned unchanged. A record behind a low-similarity
+        rename (:data:`LOCATION_WEAK_RENAME`, #3466) is moved to the rename's
+        destination with no coordinate head, so a report there pairs with it;
+        the matcher puts it back when nothing does.
     """
     moved = relocations.get(record.key) if relocations else None
-    if (
-        moved is None
-        or record.status is not FindingStatus.OPEN
-        or moved[2] in LOCATION_HOLDS
-    ):
+    if moved is None or record.status is not FindingStatus.OPEN:
+        return record
+    if moved[2] == LOCATION_WEAK_RENAME:
+        moved = (moved[0], moved[1], "")
+    elif moved[2] in LOCATION_HOLDS:
         return record
     path, line, line_sha = moved
     if path == record.file:
@@ -132,7 +139,8 @@ def _held_location(
     Returns:
         :data:`~lintro.ai.review.models.delta_plan.LOCATION_UNMAPPED`,
         :data:`~lintro.ai.review.models.delta_plan.LOCATION_UNCHECKED`,
-        :data:`~lintro.ai.review.models.delta_plan.LOCATION_BASE_MOVED`, or
+        :data:`~lintro.ai.review.models.delta_plan.LOCATION_BASE_MOVED`,
+        :data:`~lintro.ai.review.models.delta_plan.LOCATION_WEAK_RENAME`, or
         ``""`` when the round placed the record or did not touch it.
     """
     moved = relocations.get(key) if relocations else None
@@ -157,8 +165,9 @@ def _carry_absent(
         held: Whether a note or a merged duplicate holds it open.
         location_hold: :func:`_held_location` for the record. A record git
             could not place is not fixed by its path leaving the diff, and one
-            beyond the mapping cap (#3413) or pushed out of the diff by a
-            moved base (#3467) is never resolved.
+            beyond the mapping cap (#3413), pushed out of the diff by a
+            moved base (#3467) or moved only by a low-similarity rename
+            (#3466) is never resolved.
         reviewed_paths: Files re-reviewed this round, or ``None``.
         departed_paths: Paths that left the diff, or ``None``.
         reviewed_ranges: Line ranges a delta round read per narrowed file.

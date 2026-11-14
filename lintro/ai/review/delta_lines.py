@@ -15,7 +15,12 @@ round that carried it unread did not move it, so before the delta check the
 location is mapped forward to the delta's base through ``line_sha..since``,
 following a rename git reports. A full round maps every record to its own
 head the same way (#3413). The mapped location is also what the matcher
-judges the finding at (:attr:`MappedFindings.relocations`). When a location
+judges the finding at (:attr:`MappedFindings.relocations`). A rename git
+paired below :data:`~lintro.ai.review.git_line_map.WEAK_RENAME_SIMILARITY`
+moves a record only when the round reports it at the destination
+(:data:`~lintro.ai.review.models.delta_plan.LOCATION_WEAK_RENAME`, #3466):
+similarity alone can pair the record's file with an unrelated look-alike
+while the finding lives on in another file. When a location
 cannot be mapped (no recorded head, git cannot diff the range, the line
 itself was edited, or a rename is ambiguous) the file is read whole: failing
 open here is exactly the false "fixed" #3403 is about.
@@ -54,6 +59,7 @@ from lintro.ai.review.git_line_map import (
 from lintro.ai.review.models.delta_plan import (
     LOCATION_UNCHECKED,
     LOCATION_UNMAPPED,
+    LOCATION_WEAK_RENAME,
 )
 from lintro.ai.review.rename_lineage import (
     RoundLookups,
@@ -232,8 +238,14 @@ def _map_record(
         or bool(unpaired)
     )
     read_path = (unpaired or later.moved.get(path, path)) if later is not None else path
+    weak = hold == LOCATION_WEAK_RENAME or (
+        later is not None and path in later.weak and path not in later.ambiguous
+    )
     relocation: tuple[str, str, int, str] | None = None
-    if moved_on and read_path != record.file:
+    if weak:
+        # Only a report on the destination may carry the record there (#3466).
+        relocation = (record.key, read_path, record.line, LOCATION_WEAK_RENAME)
+    elif moved_on and read_path != record.file:
         relocation = (record.key, read_path, record.line, "")
     elif line is None and path != record.file:
         relocation = (record.key, path, record.line, "")
@@ -294,7 +306,9 @@ def _place(
     Returns:
         ``(path, line, hold)``; the line is ``None`` when it cannot be
         placed, and ``hold`` is :data:`LOCATION_UNMAPPED` when git could not
-        reach the record's head and no rename metadata moved it (#3413).
+        reach the record's head and no rename metadata moved it (#3413), or
+        :data:`LOCATION_WEAK_RENAME` when ``path`` is the destination of a
+        low-similarity rename git paired the record's file with (#3466).
     """
     if record.line_sha == since_sha:
         return record.file, record.line, ""
@@ -312,6 +326,8 @@ def _place(
     dest = renames.moved.get(record.file, record.file)
     if record.file in renames.ambiguous:
         return dest, None, ""
+    if record.file in renames.weak:
+        return dest, None, LOCATION_WEAK_RENAME
     unpaired = unpaired_rename(lookups=lookups, renames=renames, path=record.file)
     if unpaired:
         return unpaired, None, ""

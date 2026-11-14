@@ -106,7 +106,9 @@ class ReviewMetadata:
             than at its stale stored location. A ``line_sha`` of
             ``"unmapped"``, ``"unchecked"`` or ``"base-moved"`` (#3467) holds
             the record where it was stored
-            (:data:`~lintro.ai.review.models.delta_plan.LOCATION_HOLDS`).
+            (:data:`~lintro.ai.review.models.delta_plan.LOCATION_HOLDS`); one
+            of ``"weak-rename"`` (#3466) names a low-similarity rename's
+            destination, where only a report moves the record.
         custom_agents_run (int): Number of user-defined review agents that
             completed a pass in this run (issue #1245).
         custom_agents_skipped (int): Number of discovered agents that did not

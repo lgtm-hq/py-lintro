@@ -950,6 +950,17 @@ resolve; it never narrows what it may report.**
   first tracked at (`FindingRecord.origin_path`), so a later content-based approach can
   use it; nothing reads it today.
 
+  **A low-similarity rename never resolves a finding on its own (#3466).** Git pairs a
+  deleted file with an added one by content similarity, so an unrelated file that merely
+  resembles the finding's file can win that pairing while the finding lives on in
+  another file. When git scores the rename that would move a finding below 90%
+  (`WEAK_RENAME_SIMILARITY`), the finding moves to the destination only if the round
+  reports it there, keeping its key and thread as with any rename. If nothing reports it
+  there, it stays where it was stored (`"weak-rename"` in `relocated_findings`), carried
+  unverified and never resolved. That includes a real low-similarity rename whose bug
+  was fixed on the way: its thread stays open until someone resolves it. A rename git
+  scores at 90% or more carries and resolves findings as before.
+
   Holding can leave a duplicate thread; it never resolves a live one. When no rename
   names the finding's own path, it is held where it was stored (`line_sha` `"unmapped"`
   in `relocated_findings`) and its path leaving the diff never counts as a fix: it stays

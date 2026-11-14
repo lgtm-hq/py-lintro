@@ -24,6 +24,7 @@ from lintro.ai.review.exceptions import ReviewContextError
 
 __all__ = [
     "PINNED_DIFF_FLAGS",
+    "WEAK_RENAME_SIMILARITY",
     "Hunks",
     "Renames",
     "file_hunks",
@@ -42,6 +43,12 @@ PINNED_DIFF_FLAGS: tuple[str, ...] = (
     "--src-prefix=a/",
     "--dst-prefix=b/",
 )
+
+#: Git similarity score (percent) below which a rename is only a guess (#3466).
+#: Git pairs a deleted and an added file by content similarity alone, so an
+#: unrelated look-alike can take a finding's file; such a pairing may carry a
+#: finding that is reported again there, but its silence proves no fix.
+WEAK_RENAME_SIMILARITY = 90
 
 #: A unified-diff hunk header: old start/length, new length.
 _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,(\d+))? @@", re.MULTILINE)
@@ -64,11 +71,15 @@ class Renames:
             the finding.
         deleted: Paths git reports as deleted; a rename it did not pair
             (heavily edited on the way) shows up here (#3413).
+        weak: Source paths in ``moved`` that git paired below
+            :data:`WEAK_RENAME_SIMILARITY`, or without a readable score
+            (#3466).
     """
 
     moved: dict[str, str]
     ambiguous: frozenset[str]
     deleted: frozenset[str] = frozenset()
+    weak: frozenset[str] = frozenset()
 
 
 def literal_pathspec(path: str) -> str:
@@ -143,11 +154,14 @@ def range_renames(*, repo_root: str, from_sha: str, to_sha: str) -> Renames | No
     moved: dict[str, str] = {}
     touched: list[str] = []
     deleted: set[str] = set()
+    weak: set[str] = set()
     index = 0
     while index < len(tokens) and tokens[index]:
         status = tokens[index]
         if status.startswith(("R", "C")) and index + 2 < len(tokens):
             moved[tokens[index + 1]] = tokens[index + 2]
+            if _similarity(status=status) < WEAK_RENAME_SIMILARITY:
+                weak.add(tokens[index + 1])
             touched.append(tokens[index + 2])
             index += 3
         else:
@@ -159,7 +173,22 @@ def range_renames(*, repo_root: str, from_sha: str, to_sha: str) -> Renames | No
         moved=moved,
         ambiguous=frozenset(source for source in moved if source in touched),
         deleted=frozenset(deleted),
+        weak=frozenset(weak),
     )
+
+
+def _similarity(*, status: str) -> int:
+    """Return the similarity score of a ``--name-status`` rename or copy.
+
+    Args:
+        status: The status token, such as ``R067``.
+
+    Returns:
+        The score in percent, or ``0`` when the token carries none, so an
+        unreadable score never counts as a sure rename.
+    """
+    score = status[1:]
+    return int(score) if score.isdigit() else 0
 
 
 def file_hunks(
