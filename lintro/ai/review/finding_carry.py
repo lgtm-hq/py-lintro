@@ -15,7 +15,11 @@ from typing import TYPE_CHECKING
 
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.finding_identity import fingerprint_for
-from lintro.ai.review.models.delta_plan import LOCATION_HOLDS, LOCATION_UNCHECKED
+from lintro.ai.review.models.delta_plan import (
+    LOCATION_BASE_MOVED,
+    LOCATION_HOLDS,
+    LOCATION_UNCHECKED,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -30,6 +34,10 @@ __all__ = [
     "_line_unread",
     "_relocate",
 ]
+
+#: Holds that keep a record open even when its path left the diff: one beyond
+#: the mapping cap (#3413), and one a moved base pushed out of the diff (#3467).
+_NEVER_RESOLVED = frozenset({LOCATION_UNCHECKED, LOCATION_BASE_MOVED})
 
 
 def _finding_positions(
@@ -120,7 +128,8 @@ def _held_location(
 
     Returns:
         :data:`~lintro.ai.review.models.delta_plan.LOCATION_UNMAPPED`,
-        :data:`~lintro.ai.review.models.delta_plan.LOCATION_UNCHECKED`, or
+        :data:`~lintro.ai.review.models.delta_plan.LOCATION_UNCHECKED`,
+        :data:`~lintro.ai.review.models.delta_plan.LOCATION_BASE_MOVED`, or
         ``""`` when the round placed the record or did not touch it.
     """
     moved = relocations.get(key) if relocations else None
@@ -145,7 +154,8 @@ def _carry_absent(
         held: Whether a note or a merged duplicate holds it open.
         location_hold: :func:`_held_location` for the record. A record git
             could not place is not fixed by its path leaving the diff, and one
-            beyond the mapping cap is never resolved (#3413).
+            beyond the mapping cap (#3413) or pushed out of the diff by a
+            moved base (#3467) is never resolved.
         reviewed_paths: Files re-reviewed this round, or ``None``.
         departed_paths: Paths that left the diff, or ``None``.
         reviewed_ranges: Line ranges a delta round read per narrowed file.
@@ -161,7 +171,7 @@ def _carry_absent(
     """
     path = record.file
     departed = departed_paths is not None and path in departed_paths
-    stranded = location_hold == LOCATION_UNCHECKED or (departed and bool(location_hold))
+    stranded = location_hold in _NEVER_RESOLVED or (departed and bool(location_hold))
     left_diff = departed and not stranded
     unread = (reviewed_paths is not None and path not in reviewed_paths) or stranded
     line_unread = _line_unread(

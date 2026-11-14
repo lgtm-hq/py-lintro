@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from lintro.ai.review.base_move_hold import hold_across_base_moves
 from lintro.ai.review.delta import apply_delta_hunks, delta_hunks
 from lintro.ai.review.delta_lines import map_open_findings, pr_renames
 from lintro.ai.review.enums.delta_reason import DeltaReason
@@ -70,8 +71,18 @@ def narrow_round(
             ),
         )
     # The mapped locations hold whether or not anything is read: a finding
-    # carried unread is still persisted at its mapped location.
-    resume = replace(resume, relocations=delta.relocations)
+    # carried unread is still persisted at its mapped location. One a moved
+    # base pushed out of the diff is held instead (#3467).
+    resume = replace(
+        resume,
+        relocations=hold_across_base_moves(
+            prior=prior,
+            context=context,
+            repo_root=repo_root,
+            relocations=delta.relocations,
+            at_head=False,
+        ),
+    )
     if not chunks:
         return chunks, delta, resume
     hunks = delta_hunks(
@@ -135,6 +146,13 @@ def _place_at_head(
         repo_root=repo_root,
         renamed_from=pr_renames(changed_files=context.changed_files),
     )
-    if not mapped.relocations:
+    relocations = hold_across_base_moves(
+        prior=prior,
+        context=context,
+        repo_root=repo_root,
+        relocations=mapped.relocations,
+        at_head=True,
+    )
+    if not relocations:
         return resume
-    return replace(resume, relocations=mapped.relocations)
+    return replace(resume, relocations=relocations)

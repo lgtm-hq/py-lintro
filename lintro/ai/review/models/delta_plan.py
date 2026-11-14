@@ -7,7 +7,13 @@ from dataclasses import dataclass, field
 
 from lintro.ai.review.enums.delta_reason import DeltaReason
 
-__all__ = ["LOCATION_HOLDS", "LOCATION_UNCHECKED", "LOCATION_UNMAPPED", "DeltaPlan"]
+__all__ = [
+    "LOCATION_BASE_MOVED",
+    "LOCATION_HOLDS",
+    "LOCATION_UNCHECKED",
+    "LOCATION_UNMAPPED",
+    "DeltaPlan",
+]
 
 #: A relocation's ``line_sha`` when git could not reach the record's head and
 #: the pull request's rename metadata did not move it (#3413). The record is
@@ -19,8 +25,16 @@ LOCATION_UNMAPPED = "unmapped"
 #: was stored, carried unverified and never resolved that round (#3413).
 LOCATION_UNCHECKED = "unchecked"
 
+#: A relocation's ``line_sha`` for a record whose merge-base moved since its
+#: head and whose line now lies outside the pull request's diff (#3467): the
+#: diff gate would drop any re-report there, so it is kept where it was
+#: stored, carried unverified and never resolved that round.
+LOCATION_BASE_MOVED = "base-moved"
+
 #: The relocation ``line_sha`` values that hold a record in place.
-LOCATION_HOLDS = frozenset({LOCATION_UNMAPPED, LOCATION_UNCHECKED})
+LOCATION_HOLDS = frozenset(
+    {LOCATION_UNMAPPED, LOCATION_UNCHECKED, LOCATION_BASE_MOVED},
+)
 
 
 @dataclass(frozen=True, slots=True)

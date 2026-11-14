@@ -956,15 +956,29 @@ resolve; it never narrows what it may report.**
   open and is marked not re-verified. A round maps at most 200 findings through git
   (`MAX_MAPPED_FINDINGS`, one `git diff -U0` per distinct recorded head and path); any
   beyond that are held (`"unchecked"`), carried unverified and never resolved that
-  round. Every diff behind this pins its format against user configuration: literal
-  pathspecs (`odd[1].py` is never a glob), `--no-textconv`, `--no-ext-diff`,
-  `--no-color`, `--no-relative` and fixed `a/`/`b/` prefixes. Only the section whose
-  headers name the intended file is read. A record still carried without being read (its
-  file was not read this round) is stored with `unverified: true`. The sticky, including
-  a board rebuilt from stored state, marks it **⏸ not re-verified**. Its severity and
-  its weight in the verdict do not change. The prompt says what range the embedded text
-  is ("the change since the previous review round … unchanged context lines may still be
-  earlier changes of this pull request"), and the depth-3 adversarial sweep and an
+  round.
+
+  **A moved base never resolves a finding it pushed out of the diff (#3467).** Findings
+  outside the pull request's hunks are dropped before matching, so after a rebase onto a
+  base that already contains a finding's line (or a SIGTERM checkpoint resumed against a
+  newer base), the provider cannot report it again, even though the code is unchanged.
+  When the merge-base differs from the one the finding's recorded head was reviewed
+  under (a checkpoint's is derived from the base it was written with; an unknown one
+  counts as moved), and the finding's line at this head lies outside every hunk of its
+  file, or its file has no line hunks, the finding is held where it was stored
+  (`"base-moved"` in `relocated_findings`). It is carried unverified and never resolved
+  that round. A fix that rewrites or deletes the reported line still resolves, since git
+  cannot place that line at the new head and the change lies inside the diff.
+
+  Every diff behind this pins its format against user configuration: literal pathspecs
+  (`odd[1].py` is never a glob), `--no-textconv`, `--no-ext-diff`, `--no-color`,
+  `--no-relative` and fixed `a/`/`b/` prefixes. Only the section whose headers name the
+  intended file is read. A record still carried without being read (its file was not
+  read this round) is stored with `unverified: true`. The sticky, including a board
+  rebuilt from stored state, marks it **⏸ not re-verified**. Its severity and its weight
+  in the verdict do not change. The prompt says what range the embedded text is ("the
+  change since the previous review round … unchanged context lines may still be earlier
+  changes of this pull request"), and the depth-3 adversarial sweep and an
   output-exhaustion split read the same delta text.
 
 - **What is reported and counted.** Findings are never filtered by delta location, and
