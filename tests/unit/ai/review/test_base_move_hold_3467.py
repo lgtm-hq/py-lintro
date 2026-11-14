@@ -360,6 +360,65 @@ def test_a_line_the_base_rewrote_is_held(
 
 
 @pytest.mark.parametrize("force_full", _MODES)
+def test_a_wide_base_rewrite_the_pr_only_grazes_is_held(
+    tmp_path: Path,
+    force_full: bool,
+) -> None:
+    """The base rewrites lines 81-100, still buggy at 81; the PR edits line 100.
+
+    The base's replacement span reaches the pull request's hunk around line
+    100, but line 81's own position lies outside it: the re-report there is
+    dropped, and that is no fix.
+
+    Args:
+        tmp_path: Pytest temp dir.
+        force_full: ``--full``.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    rows = lines(300, label="base").splitlines(keepends=True)
+    (repo / "b.py").write_text("".join(rows))
+    base = commit(repo, "clean base")
+    rows[80] = _BUG
+    (repo / "b.py").write_text("".join(rows))
+    commit(repo, "introduce the bug")
+    first = harness._round(
+        repo=repo,
+        base=base,
+        prior=None,
+        reported=[harness._x(file="b.py")],
+        force_full=force_full,
+    )
+    prior = harness._with_thread(first.state)
+    rows[80] = "bug_at_81 = bool(1)\n"
+    for index in range(81, 100):
+        rows[index] = f"# the base rewrites line {index + 1}\n"
+    (repo / "b.py").write_text("".join(rows))
+    new_base = commit(repo, "the base rewrites lines 81-100, keeping the bug")
+    rows[99] = "# the pull request edits line 100\n"
+    (repo / "b.py").write_text("".join(rows))
+    commit(repo, "the pull request edits line 100")
+
+    after = harness._round(
+        repo=repo,
+        base=new_base,
+        prior=prior,
+        reported=[harness._x(file="b.py")],
+        force_full=force_full,
+    )
+
+    assert_that(after.result.metadata.diff_gate.outside_diff).is_equal_to(1)
+    assert_that(after.counts).is_equal_to((1, 0, 0))
+    assert_that(after.resolved_threads).is_empty()
+    (record,) = after.state.findings
+    assert_that(record.status).is_equal_to(FindingStatus.OPEN)
+    assert_that(record.inline_comment_id).is_equal_to(harness._THREAD_ID)
+    bug_line = (repo / "b.py").read_text().splitlines(keepends=True)[80]
+    assert_that(bug_line).is_equal_to("bug_at_81 = bool(1)\n")
+
+
+@pytest.mark.parametrize("force_full", _MODES)
 def test_a_mode_only_change_after_the_base_moved_holds_the_finding(
     tmp_path: Path,
     force_full: bool,

@@ -975,10 +975,11 @@ resolve; it never narrows what it may report.**
   - Its line, placed at this head, lies inside one of the pull request's hunks of the
     file. A binary or mode-only change has no hunks, so it never counts.
   - Git cannot place the line because it was rewritten or deleted since the finding's
-    head, and the pull request's own hunks cover the spot where that happened. This is
-    the pull request rewriting or deleting the reported line, and the finding then
-    resolves as usual. If the base rewrote the line and the pull request did not touch
-    it, the finding is held.
+    head, and one of the pull request's own hunks covers the line's own position in that
+    rewrite. This is the pull request rewriting or deleting the reported line, and the
+    finding then resolves as usual. If the base rewrote the line and the pull request
+    did not touch it, the finding is held, even when a wider base rewrite reaches into a
+    pull-request hunk further down.
 
   A held finding stays open, marked **⏸ not re-verified**, until the pull request
   changes the lines around it again or the provider reports it again. Some fixes never

@@ -24,9 +24,10 @@ unverified and never resolved, unless this round can still re-judge it:
   of its file, where a re-report survives the gate (a binary or mode-only
   section has no hunks, so it never qualifies); or
 * git cannot place the line because it was rewritten or deleted since the
-  record's head, and the pull request's own diff overlaps the region that
-  rewrite left at this head. That is a fix the pull request made. A rewrite
-  the base made, outside the pull request's hunks, is not, and is held.
+  record's head, and one of the pull request's own hunks covers the line's
+  position in that rewrite at this head. That is a fix the pull request
+  made. A rewrite the base made is not, and is held, even when a wider base
+  rewrite merely reaches into a pull-request hunk further down.
 
 A record already held for another reason keeps that hold.
 """
@@ -174,9 +175,10 @@ def _region_at_head(*, line: int, hunks: Hunks) -> Span | None:
             this head, or ``None`` when git could not diff the range.
 
     Returns:
-        The line itself when no hunk touched it, the new-side span of the
-        hunk that rewrote it, the two lines around a deletion, or ``None``
-        when the hunks are unknown.
+        The line itself when no hunk touched it, the line's own position in
+        the hunk that rewrote it (its offset from the hunk's old start,
+        capped at the replacement's last line), the two lines around a
+        deletion, or ``None`` when the hunks are unknown.
     """
     if hunks is None:
         return None
@@ -191,7 +193,10 @@ def _region_at_head(*, line: int, hunks: Hunks) -> Span | None:
             start = old_start + shift
             if new_len == 0:
                 return max(start - 1, 1), start
-            return start, start + new_len - 1
+            # The line's own position in the replacement, not the whole span:
+            # a wide rewrite the pull request only grazes is not its fix.
+            position = start + min(line - old_start, new_len - 1)
+            return position, position
         if old_end < line:
             shift += new_len - old_len
     return line + shift, line + shift
