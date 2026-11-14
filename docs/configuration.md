@@ -4447,10 +4447,12 @@ lintro check scripts --tools semgrep --tool-options 'semgrep:include=scripts/**'
 The directory globs are matched against paths relative to the project root: the nearest
 directory at or above the scanned files that holds `.git`, `pyproject.toml`,
 `package.json`, `setup.py`, `setup.cfg`, `go.mod`, or `Cargo.toml`. In a tree with no
-such marker, Semgrep runs from the files' common directory instead. Scanning only
-`scripts/` then hands Semgrep `fmt.sh` rather than `scripts/fmt.sh`, so `**/scripts/**`
-cannot match. Lintro prints a warning naming the pack and that directory in this case.
-Add a project marker to scan these trees reliably.
+such marker, Lintro runs Semgrep from the directory you started `lintro check` in, so
+`lintro check scripts` from the tree's top still hands Semgrep `scripts/fmt.sh`. When
+even that directory sits inside `scripts/` (for example `cd scripts && lintro check .`),
+`**/scripts/**` cannot match. Lintro then fails the Semgrep result as incomplete, with
+`status: "failed"` in JSON and a message naming the pack and the files it did not check,
+instead of reporting a clean pass. Add a project marker to scan these trees reliably.
 
 These filters narrow the shipped scope; they cannot widen it. For a different scope, use
 `lintro/rules/scripts/no-direct-formatter.yaml` as a starting point for a native Semgrep

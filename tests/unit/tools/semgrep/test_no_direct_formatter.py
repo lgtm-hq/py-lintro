@@ -15,11 +15,8 @@ from lintro.exceptions.errors import ConfigurationError
 from lintro.plugins.file_discovery import discover_files
 from lintro.plugins.registry import ToolRegistry
 from lintro.rules import available_rule_packs, resolve_rule_pack, rule_pack_info
-from lintro.tools.semgrep.definition import (
-    SEMGREP_FILE_PATTERNS,
-    SemgrepPlugin,
-    _unanchored_pack_warning,
-)
+from lintro.tools.semgrep.definition import SEMGREP_FILE_PATTERNS, SemgrepPlugin
+from lintro.tools.semgrep.scan_root import choose_scan_root
 
 PACK = "scripts/no-direct-formatter"
 OTHER_PACK = "python/none-coercion"
@@ -129,42 +126,87 @@ def test_definition_reads_skip_pack_validation_until_packs_change(
 
 
 @pytest.mark.parametrize(
-    ("packs", "marker", "warns"),
+    ("packs", "marker"),
     [
-        ([PACK], None, True),
-        ([PACK], "pyproject.toml", False),
-        ([PACK], ".git", False),
-        ([OTHER_PACK], None, False),
-        ([], None, False),
+        ([PACK], "pyproject.toml"),
+        ([PACK], ".git"),
+        ([OTHER_PACK], None),
+        ([], None),
     ],
-    ids=["no-marker", "pyproject", "git", "unanchored-pack", "no-packs"],
+    ids=["pyproject", "git", "unanchored-pack", "no-packs"],
 )
-def test_unanchored_pack_warning_needs_directory_globs_and_no_marker(
+def test_scan_root_keeps_project_root_or_packs_without_directories(
     tmp_path: Path,
     packs: list[str],
     marker: str | None,
-    warns: bool,
 ) -> None:
-    """Only directory-scoped packs in a marker-less working directory warn.
+    """A marker, or no directory-scoped pack, leaves the scan exactly as chosen.
 
     Args:
-        tmp_path: Working directory the Semgrep subprocess would use.
+        tmp_path: Started directory, holding the execution directory.
         packs: Enabled packs.
-        marker: Project marker created in the working directory, if any.
-        warns: Whether a warning is expected.
+        marker: Project marker created in the execution directory, if any.
     """
+    cwd = tmp_path / "scripts"
+    cwd.mkdir()
     if marker is not None:
-        (tmp_path / marker).touch()
-    message = _unanchored_pack_warning(packs, str(tmp_path))
-    if warns:
-        assert_that(message).contains(
-            f"findings under scripts/ may be missed because no project marker "
-            f"was found in {tmp_path}",
+        (cwd / marker).touch()
+    scan = choose_scan_root(
+        packs=packs,
+        cwd=str(cwd),
+        files=["fmt.sh"],
+        run_cwd=str(tmp_path),
+    )
+    assert_that(scan.cwd).is_equal_to(str(cwd))
+    assert_that(scan.files).is_equal_to(["fmt.sh"])
+    assert_that(scan.warning).is_none()
+
+
+@pytest.mark.parametrize(
+    ("started", "files", "expected", "hidden"),
+    [
+        ("tree", ["fmt.sh"], ["scripts/fmt.sh"], []),
+        ("tree", ["lib/a.sh"], ["scripts/lib/a.sh"], []),
+        ("tree/scripts", ["fmt.sh"], ["fmt.sh"], ["fmt.sh"]),
+        ("elsewhere", ["fmt.sh"], ["fmt.sh"], ["fmt.sh"]),
+    ],
+    ids=["run-above", "nested", "run-inside", "run-outside"],
+)
+def test_scan_root_without_marker_runs_from_start_or_reports_hidden_files(
+    tmp_path: Path,
+    started: str,
+    files: list[str],
+    expected: list[str],
+    hidden: list[str],
+) -> None:
+    """Without a marker the started directory anchors scripts/, if it can (#3437).
+
+    Args:
+        tmp_path: Root of a marker-less tree.
+        started: Directory, relative to ``tmp_path``, lintro was started in.
+        files: Targets relative to the execution directory ``tree/scripts``.
+        expected: Targets Semgrep must receive.
+        hidden: Targets the pack cannot match from the chosen directory.
+    """
+    cwd = tmp_path / "tree" / "scripts"
+    (cwd / "lib").mkdir(parents=True)
+    (tmp_path / "elsewhere").mkdir()
+    scan = choose_scan_root(
+        packs=[PACK],
+        cwd=str(cwd),
+        files=files,
+        run_cwd=str(tmp_path / started),
+    )
+    assert_that(scan.files).is_equal_to(expected)
+    assert_that(scan.hidden).is_equal_to(hidden)
+    if hidden:
+        assert_that(scan.warning).contains(
             PACK,
+            "1 file(s) under scripts/ were not checked",
             "pyproject.toml",
         )
     else:
-        assert_that(message).is_none()
+        assert_that(scan.warning).is_none()
 
 
 def test_pack_tracks_builtin_format_claimants() -> None:
