@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.28] - 2026-11-14
+
+### Changed
+
+- **html-validate**: run glob-named stdin calls in a bounded pool (#3457) (c9cbf4f)
+
+### Fixed
+
+- **ai/review**: stop following renames git cannot pair, to avoid false resolves (#3468)
+  (478765b)
+
 ## [0.180.27] - 2026-11-14
 
 ### Fixed
