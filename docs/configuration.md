@@ -2861,6 +2861,21 @@ The glob shapes are handled this way on every platform. The backslash is handled
 way on POSIX only: on Windows it is always a path separator, so those paths are passed
 as usual.
 
+Starting Node once per file is slow, so when html-validate resolves to a project-local
+or `PATH` binary Lintro validates all of these files in one Node process instead. A
+short script loads html-validate's own API from the package that binary runs and
+validates each file under its real path. File names reach the script on its standard
+input, never on a command line. Lintro uses the script only when it can prove it loads
+the same code the binary would run. The binary must be the package's unmodified
+`html-validate` entry, started with `node` from `PATH`, and the script must report the
+package's own version. Otherwise, and always under the `bunx`/`npx` fallback, each file
+gets its own `--stdin` process, with up to `min(CPU count, 8, execution.max_workers)` at
+once. Both routes give the same findings and output, and validate the same files: the
+allowlist below applies to both. A file the script gives no verdict for, because it
+crashed or threw, is validated again through `--stdin`. If one file takes longer than
+the timeout, its findings are lost and the rest are not started, just as when a
+`--stdin` call times out.
+
 Standard input does not behave exactly like a path argument: flat configs and transforms
 are matched against the name `/dev/stdin`, `.htmlvalidateignore` is skipped, and the
 working directory resolves symlinks. Lintro therefore uses standard input only for files

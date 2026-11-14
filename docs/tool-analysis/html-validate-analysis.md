@@ -56,13 +56,17 @@ a broken upstream release cannot take every consumer down at once.
 Files are passed as literal paths, never globs or directories. html-validate expands
 those through `fs.globSync`, which is missing on some Bun builds and aborts the run
 before any file is validated. A file whose name html-validate would read as a glob (such
-as a routed site's `[slug].html`) is validated through `--stdin` instead, one process
-per file, from the file's directory, with up to
+as a routed site's `[slug].html`) is not passed as an argument. When html-validate is a
+project-local or `PATH` binary whose package Lintro can verify, every such file is
+validated in one Node process that loads that package's API; the names travel on the
+script's standard input. Otherwise, as under the `bunx`/`npx` fallback, each goes
+through `--stdin`, one process per file, from the file's directory, with up to
 `min(CPU count, 8, execution.max_workers)` processes at once. Its name never appears on
 the command line, because the `npx` fallback runs html-validate through a shell that
-globs `[...]` arguments; Lintro renames the `/dev/stdin` report to the real path. See
-the html-validate section of `docs/configuration.md` for the cases that are still held
-back.
+globs `[...]` arguments; Lintro renames the `/dev/stdin` report to the real path. On 300
+glob-named files with html-validate 11.21.0, the one-process route adds about 1 s to a
+run; the `--stdin` pool adds about 20 s. See the html-validate section of
+`docs/configuration.md` for the cases that are still held back.
 
 ## Output format
 
