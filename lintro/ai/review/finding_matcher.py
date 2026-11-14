@@ -23,6 +23,7 @@ from dataclasses import replace
 
 from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
 from lintro.ai.review.enums.finding_status import FindingStatus
+from lintro.ai.review.enums.moved_verdict import MovedVerdict
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.finding_carry import (
     _carry_absent,
@@ -49,6 +50,7 @@ from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.moved_candidates import moved_verdict
 from lintro.ai.review.posting_tiers import is_inline_tier
 
 __all__ = [
@@ -314,7 +316,10 @@ def match_findings(
             ``{key: (path, line, line_sha)}`` (#3403, #3413). A relocated record is
             matched, carried or resolved at that location, and persisted
             there, so a line an unread round moved is never judged stale. A
-            held location (``LOCATION_HOLDS``) keeps the record in place.
+            held location (``LOCATION_HOLDS``) keeps the record in place. An
+            absent record not in place resolves only on the moved-finding
+            check's "fixed" verdict carried here (#3466,
+            :class:`~lintro.ai.review.moved_candidates.Placements`).
 
     Returns:
         The per-round transitions plus the merged record set to persist.
@@ -426,9 +431,27 @@ def match_findings(
             # pre-v4 state) is archived and never resolved or regressed.
             merged.append(record)
             continue
-        if _carry_absent(
+        held = index in note_held or index in duplicate_held
+        # Silence resolves only a finding in place; one whose location was
+        # inferred waits for the provider's word that it is gone (#3466).
+        verdict = (
+            None
+            if held or previous is None
+            else moved_verdict(
+                record=previous.findings[index],
+                relocations=relocations,
+                departed_paths=departed_paths,
+            )
+        )
+        if verdict is MovedVerdict.PRESENT or verdict is MovedVerdict.UNKNOWN:
+            kept = replace(record, unverified=verdict is MovedVerdict.UNKNOWN)
+            merged.append(kept)
+            carried.append(kept)
+            outcomes[kept.key] = FindingMatchOutcome.CARRIED
+            continue
+        if verdict is None and _carry_absent(
             record=record,
-            held=index in note_held or index in duplicate_held,
+            held=held,
             location_hold=_held_location(key=record.key, relocations=relocations),
             reviewed_paths=reviewed_paths,
             departed_paths=departed_paths,

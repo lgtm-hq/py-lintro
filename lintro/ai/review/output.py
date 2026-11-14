@@ -349,6 +349,10 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
         payload["synthesis"] = result.metadata.synthesis.to_dict()
     if result.metadata.verification is not None:
         payload["verification"] = result.metadata.verification.to_dict()
+    if result.metadata.moved_verification is not None:
+        # #3466: prior findings whose location was inferred, and what the
+        # verify-before-resolve check decided for them.
+        payload["moved_verification"] = result.metadata.moved_verification.to_dict()
     if result.coverage is not None:
         payload["coverage"] = result.coverage.to_dict()
         payload["partial"] = result.metadata.partial

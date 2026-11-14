@@ -14,7 +14,11 @@ from lintro.ai.review.agent_prompt_text import plural
 if TYPE_CHECKING:
     from lintro.ai.review.models.review_metadata import ReviewMetadata
 
-__all__ = ["VERIFICATION_NOTE_LABEL", "format_verification_note"]
+__all__ = [
+    "VERIFICATION_NOTE_LABEL",
+    "format_moved_verification_note",
+    "format_verification_note",
+]
 
 #: Short lead-in reused wherever the note is rendered with a label.
 VERIFICATION_NOTE_LABEL = "Verification"
@@ -49,3 +53,31 @@ def format_verification_note(*, metadata: ReviewMetadata) -> str:
     if summary.unanswered:
         parts.append(f"{summary.unanswered} unanswered")
     return f"{VERIFICATION_NOTE_LABEL} re-checked {checked}: {', '.join(parts)}."
+
+
+def format_moved_verification_note(*, metadata: ReviewMetadata) -> str:
+    """Describe what verify-before-resolve decided for moved findings (#3466).
+
+    Args:
+        metadata: Review run metadata carrying ``moved_verification``.
+
+    Returns:
+        A plain-text sentence, or an empty string when the round had no
+        prior finding whose location was inferred.
+    """
+    summary = metadata.moved_verification
+    if summary is None or summary.candidates == 0:
+        return ""
+    parts = [
+        f"{summary.verified_fixed} verified fixed",
+        f"{summary.verified_present} still present"
+        + (f" ({summary.moved} moved)" if summary.moved else ""),
+        f"{summary.held} held as not re-verified",
+    ]
+    lead = plural(count=summary.candidates, noun="moved finding")
+    reason = ""
+    if not summary.enabled:
+        reason = " (review.verify_moved_findings is off)"
+    elif summary.failed:
+        reason = " (the check did not complete)"
+    return f"Re-verified {lead}: {', '.join(parts)}{reason}."

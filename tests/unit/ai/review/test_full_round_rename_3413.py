@@ -64,6 +64,8 @@ from tests.unit.ai.review.scratch_repo_fixtures import (
     fake_provider,
     git,
     lines,
+    moved_answer,
+    routed_calls,
 )
 
 _THREAD_ID = 3413
@@ -188,6 +190,7 @@ def _round(
     prior: ReviewState | None,
     reported: list[dict[str, Any]],
     force_full: bool,
+    moved: AIResponse | Exception | None = None,
 ) -> _Round:
     """Run one real review round, its thread lifecycle and its sticky.
 
@@ -197,6 +200,8 @@ def _round(
         prior: State carried into the round.
         reported: Findings the provider returns.
         force_full: ``--full``.
+        moved: The moved-finding check's answer (#3466); ``None`` answers it
+            off-schema, which holds every moved finding.
 
     Returns:
         The round.
@@ -205,7 +210,7 @@ def _round(
     head = context.head_ref
     with patch(
         "lintro.ai.review.provider_call.call_ai",
-        return_value=_canned(reported),
+        side_effect=routed_calls(review=_canned(reported), moved=moved),
     ):
         result = run_review(
             context,
@@ -383,7 +388,11 @@ def test_delta_and_full_rounds_agree_on_a_rename(
     expected: tuple[int, int, int],
     verdict: ReviewVerdict,
 ) -> None:
-    """The same history gives the same counts, verdict and sticky outcome."""
+    """The same history gives the same counts, verdict and sticky outcome.
+
+    A renamed finding no report matched resolves only on the moved-finding
+    check's word (#3466), so the check answers "fixed" here.
+    """
     repo, base, prior = _first_round(tmp_path)
     git(repo, "mv", "a.py", "b.py")
     commit(repo, "rename")
@@ -395,6 +404,7 @@ def test_delta_and_full_rounds_agree_on_a_rename(
             prior=prior,
             reported=reported,
             force_full=force_full,
+            moved=moved_answer(still_present="false"),
         )
         for force_full in (False, True)
     }
@@ -670,7 +680,11 @@ def test_an_unreachable_head_on_a_deleted_file_is_not_a_fix(
 def test_an_unreachable_head_on_a_file_read_whole_is_judged(
     tmp_path: Path,
 ) -> None:
-    """X's head is gone but ``a.py`` is still in the diff and read: X resolves."""
+    """X's head is gone but ``a.py`` is still in the diff and read: X resolves.
+
+    Git could not place X, so its silence alone no longer resolves it
+    (#3466): it resolves on the moved-finding check's "fixed".
+    """
     repo, base, prior = _first_round(tmp_path)
     (x,) = prior.findings
     prior = replace(prior, findings=(replace(x, line_sha=_GONE),))
@@ -683,6 +697,7 @@ def test_an_unreachable_head_on_a_file_read_whole_is_judged(
         prior=prior,
         reported=[],
         force_full=True,
+        moved=moved_answer(still_present="false"),
     )
 
     assert_that(second.counts).is_equal_to((0, 0, 1))

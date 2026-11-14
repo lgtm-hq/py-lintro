@@ -175,6 +175,7 @@ class PreparedReview:
         synthesis: Cross-chunk synthesis configuration (#2269).
         verify: Which findings the verification pass re-checks (#2728).
         workspace_root: Absolute workspace root the review is anchored to.
+        verify_moved_findings: ``review.verify_moved_findings`` (#3466).
         lint_digest: ``--with-lint`` / ``--lint-report`` digest for the
             prompt, or None.
         lint_tool_count: Number of lint tools that ran for the digest.
@@ -201,6 +202,7 @@ class PreparedReview:
     synthesis: ReviewSynthesisConfig
     verify: ReviewVerifyMode
     workspace_root: Path
+    verify_moved_findings: bool = True
     lint_digest: str | None = None
     lint_tool_count: int = 0
     lint_issue_count: int = 0
@@ -385,6 +387,7 @@ def _prepare_from_context(
         run_builtin_checklist=custom_agent_mode != CustomAgentMode.ONLY,
         synthesis=review_config.synthesis,
         verify=review_config.verify,
+        verify_moved_findings=review_config.verify_moved_findings,
         workspace_root=request.workspace_root,
         lint_digest=lint_digest,
         lint_tool_count=lint_tool_count,
@@ -446,5 +449,6 @@ def execute_review(
             state_pr=policy.state_pr,
             synthesis=prepared.synthesis,
             verify=prepared.verify,
+            verify_moved_findings=prepared.verify_moved_findings,
         ),
     )

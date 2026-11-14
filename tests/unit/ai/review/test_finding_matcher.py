@@ -29,6 +29,7 @@ from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.moved_candidates import placements
 from lintro.ai.review.sticky import matcher_reviewed_paths
 
 
@@ -737,13 +738,31 @@ def test_unread_file_findings_carry_forward() -> None:
     assert_that(second.carried[0].status).is_equal_to(FindingStatus.OPEN)
 
 
-def test_departed_path_resolves_unread_finding() -> None:
-    """A deleted file's findings resolve even though it was not re-read."""
+@pytest.mark.parametrize(
+    ("verdict", "status"),
+    [
+        pytest.param(None, FindingStatus.OPEN, id="no-answer"),
+        pytest.param("unknown", FindingStatus.OPEN, id="unknown"),
+        pytest.param("present", FindingStatus.OPEN, id="present"),
+        pytest.param("fixed", FindingStatus.RESOLVED, id="fixed"),
+    ],
+)
+def test_departed_path_resolves_unread_finding_only_when_verified_fixed(
+    verdict: str | None,
+    status: FindingStatus,
+) -> None:
+    """A deleted file's finding resolves only on a "fixed" verdict (#3466).
+
+    Args:
+        verdict: The moved-finding check's answer, or ``None`` for none.
+        status: The status the finding ends the round in.
+    """
     first = match_findings(
         previous=None,
         findings=[_finding(title="Leak", file="src/gone.py")],
         round_number=1,
     )
+    (record,) = first.records
     second = match_findings(
         previous=ReviewState(findings=first.records),
         findings=[],
@@ -751,11 +770,18 @@ def test_departed_path_resolves_unread_finding() -> None:
         head_sha="sha2",
         reviewed_paths=frozenset(),
         departed_paths=frozenset({"src/gone.py"}),
+        relocations=placements(
+            relocations=None,
+            verdicts=() if verdict is None else ((record.key, verdict, "", 0, ""),),
+        ),
     )
 
-    assert_that(second.resolved).is_length(1)
-    assert_that(second.resolved[0].resolved_sha).is_equal_to("sha2")
-    assert_that(second.resolved[0].status).is_equal_to(FindingStatus.RESOLVED)
+    (after,) = second.records
+    assert_that(after.status).is_equal_to(status)
+    assert_that(after.resolved_sha).is_equal_to(
+        "sha2" if status is FindingStatus.RESOLVED else "",
+    )
+    assert_that(after.unverified).is_equal_to(verdict in {None, "unknown"})
 
 
 def test_zero_call_carried_round_does_not_resolve_findings(

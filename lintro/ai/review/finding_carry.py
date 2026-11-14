@@ -21,6 +21,7 @@ from lintro.ai.review.models.delta_plan import (
     LOCATION_HOLDS,
     LOCATION_UNCHECKED,
 )
+from lintro.ai.review.moved_candidates import verified_location
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -85,11 +86,14 @@ def _relocate(
         relocations: ``{key: (path, line, line_sha)}`` from the round.
 
     Returns:
-        The record at its mapped location and coordinate head; resolved
-        records, records the round did not map and records it held in place
-        (#3413) are returned unchanged.
+        The record at its mapped location and coordinate head, or at the
+        location the provider said a moved finding still sits (#3466);
+        resolved records, records the round did not map and records it held
+        in place (#3413) are returned unchanged.
     """
-    moved = relocations.get(record.key) if relocations else None
+    moved = verified_location(relocations=relocations, key=record.key) or (
+        relocations.get(record.key) if relocations else None
+    )
     if (
         moved is None
         or record.status is not FindingStatus.OPEN

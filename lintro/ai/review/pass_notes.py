@@ -16,6 +16,7 @@ from lintro.ai.review.github_notes import (
 )
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.sanitize import sanitize_comment_text
+from lintro.ai.review.verification_note import format_moved_verification_note
 
 __all__ = ["format_narrative_note_line", "format_pass_note_lines"]
 
@@ -37,6 +38,7 @@ def format_pass_note_lines(*, metadata: ReviewMetadata) -> list[str]:
     notes = (
         format_synthesis_note_line(metadata=metadata),
         format_verification_note_line(metadata=metadata),
+        _moved_note_line(metadata=metadata),
         format_narrative_note_line(metadata=metadata),
     )
     # Each helper renders at most one line; the pair is a blank line and it.
@@ -57,3 +59,19 @@ def format_narrative_note_line(*, metadata: ReviewMetadata) -> str:
     if not note:
         return ""
     return f"<sub>{sanitize_comment_text(note, limit=600)}</sub>"
+
+
+def _moved_note_line(*, metadata: ReviewMetadata) -> str:
+    """Render the moved-finding check's counts as a fine-print line (#3466).
+
+    Args:
+        metadata: Review run metadata carrying ``moved_verification``.
+
+    Returns:
+        The note wrapped in ``<sub>``, or an empty string when the round had
+        no moved finding to check.
+    """
+    note = format_moved_verification_note(metadata=metadata)
+    if not note:
+        return ""
+    return f"<sub>{sanitize_comment_text(note, limit=300)}</sub>"

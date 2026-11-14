@@ -117,19 +117,35 @@ def _x_carried(*, path: str, line: int, line_sha: str, since: str) -> ReviewStat
     )
 
 
-def _relocated(*, result: ReviewResult, plan: DeltaPlan) -> ReviewResult:
+def _relocated(
+    *,
+    result: ReviewResult,
+    plan: DeltaPlan,
+    verified_fixed: bool = False,
+) -> ReviewResult:
     """Attach a plan's relocations to a result, as the run assembler does.
 
     Args:
         result: The round's result.
         plan: The round's delta plan.
+        verified_fixed: Record the moved-finding check's "fixed" answer for
+            every relocated finding (#3466), as a round whose check said so.
 
     Returns:
-        The result carrying ``relocated_findings``.
+        The result carrying ``relocated_findings`` (and ``moved_verdicts``).
     """
+    verdicts = (
+        tuple((key, "fixed", "", 0, "") for key, *_ in plan.relocations)
+        if verified_fixed
+        else ()
+    )
     return replace(
         result,
-        metadata=replace(result.metadata, relocated_findings=plan.relocations),
+        metadata=replace(
+            result.metadata,
+            relocated_findings=plan.relocations,
+            moved_verdicts=verdicts,
+        ),
     )
 
 
@@ -290,6 +306,7 @@ def test_a_rename_in_an_unread_round_follows_the_file(tmp_path: Path) -> None:
                     eligible=1,
                 ),
                 plan=plan,
+                verified_fixed=True,
             ),
             head=h3,
         ),
@@ -301,7 +318,8 @@ def test_a_rename_in_an_unread_round_follows_the_file(tmp_path: Path) -> None:
     assert_that(applied.reread).is_equal_to(("new.py",))
     assert_that(applied.reviewed_ranges).is_empty()
     # Unread on old.py would have kept it "not re-verified"; on new.py, read
-    # whole and not re-reported, it is judged there.
+    # whole and not re-reported, it is judged there, and resolves once the
+    # moved-finding check says it is fixed (#3466).
     assert_that(after.findings[0].file).is_equal_to("new.py")
     assert_that(after.findings[0].status).is_equal_to(FindingStatus.RESOLVED)
 
@@ -646,12 +664,13 @@ def test_a_renamed_finding_reported_again_is_carried_with_its_thread(
 def test_a_renamed_finding_that_is_fixed_stamps_its_own_thread(
     tmp_path: Path,
 ) -> None:
-    """X not reported on ``new.py`` resolves, and its old thread is stamped."""
+    """X verified fixed on ``new.py`` resolves, and its old thread is stamped."""
     prior, plan, h2 = _renamed_round(tmp_path)
     (original,) = prior.findings
     result = _relocated(
         result=_round_result(reviewed_paths=("new.py",), eligible=1),
         plan=plan,
+        verified_fixed=True,
     )
     match = match_findings(
         previous=prior,

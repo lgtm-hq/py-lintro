@@ -811,6 +811,49 @@ What you see:
 - With `ai.transcript_logging` on, the pass's prompt and answer are logged like every
   other call, so a refutation can be read back in full.
 
+### Verify before resolve (moved findings)
+
+A finding from an earlier round resolves on silence only when it sits **in place**: its
+file was not renamed, moved, copied or deleted, git placed its line exactly, and it was
+never carried across a move before (#3466). Five attempts to decide from git's rename
+and copy output, or from path metadata, that a moved finding was gone could each be bent
+into a false resolve or a thread handed to a different finding: a recreated path, a
+similarity look-alike, a rebase, a shallow range. Git signals still decide where the
+round looks; they never decide that a finding is fixed.
+
+Every other prior open finding that no report matched this round needs the provider's
+word. After the verification pass the round makes **one more provider call**, batching
+all of them (at most 20; any beyond that are held). Each carries the original finding
+(title, description, rule and fingerprint, the path and line it was reported at and the
+code there), and the call also carries the pull request's diff and the current content
+of every file it added, modified or renamed, all redacted and fenced like the other
+passes. The provider answers `still_present: true | false | unknown` per finding, and
+can name a location when the answer is true.
+
+- `false`: the finding resolves, and its thread closes, as **verified fixed**.
+- `true` with a location inside the pull request's diff: the finding moves there and
+  keeps its key and thread. A location outside the diff, past the file's end, or already
+  claimed by a finding reported this round is ignored.
+- `true` without a usable location: the finding stays open as **still present**.
+- `unknown`, a provider error or timeout, an exhausted budget, an interrupt, an
+  off-schema answer, or the check turned off: the finding is held open and marked **⏸
+  not re-verified**. Nothing on this path ever resolves a finding. A round stopped by a
+  cost cap or a timeout never reaches the call, so its moved findings are held too, as
+  are the mid-run checkpoints.
+
+```yaml
+review:
+  verify_moved_findings: true # default; false skips the call and holds them all
+```
+
+The call counts against the review budget. The sticky, the review body and the terminal
+show
+`Re-verified 2 moved findings: 1 verified fixed, 1 still present, 0 held as not re-verified.`
+when the round had any, and `--output json` carries a `moved_verification` block
+(`candidates`, `verified_fixed`, `verified_present`, `moved`, `held`, `failed`, tokens
+and cost) plus `moved_verdicts` on the result metadata. Findings in place behave exactly
+as before and cost no call.
+
 ### Diff-bounded findings
 
 Every chunk's findings are bounded to that chunk's diff before the P1 evidence gate
@@ -949,6 +992,10 @@ resolve; it never narrows what it may report.**
   clean files and resolved their threads (#3432). The record still keeps the path it was
   first tracked at (`FindingRecord.origin_path`), so a later content-based approach can
   use it; nothing reads it today.
+
+  Wherever a finding was moved to, an absence there never resolves it on its own: it
+  resolves only when the moved-finding check says it is fixed (see _Verify before
+  resolve (moved findings)_ above, #3466).
 
   Holding can leave a duplicate thread; it never resolves a live one. When no rename
   names the finding's own path, it is held where it was stored (`line_sha` `"unmapped"`

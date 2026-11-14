@@ -16,11 +16,18 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from lintro.ai.review.finding_identity import normalize_file_path
+from lintro.ai.review.lifecycle.state import departed_paths
 from lintro.ai.review.merge import finalize_partials
+from lintro.ai.review.moved_candidates import select_candidates
+from lintro.ai.review.moved_verification import (
+    MovedVerificationRequest,
+    run_moved_verification,
+)
 from lintro.ai.review.repo_context import repo_context_source_for
 from lintro.ai.review.result_assembly import ReviewRunOutcome
 from lintro.ai.review.session import NOTHING_REVIEWED_REASON, warn_nothing_reviewed
 from lintro.ai.review.severity_gate import apply_severity_gates
+from lintro.ai.review.sticky.state import relocations_by_key
 from lintro.ai.review.synthesis import (
     SynthesisPassRequest,
     run_synthesis_pass,
@@ -36,6 +43,8 @@ from lintro.ai.review.verification import (
 if TYPE_CHECKING:
     from lintro.ai.review.merge import ChunkReviewPartial
     from lintro.ai.review.models.review_context import ReviewContext
+    from lintro.ai.review.models.review_finding import ReviewFinding
+    from lintro.ai.review.moved_verification import MovedVerification
     from lintro.ai.review.run_execution import RunProgress
     from lintro.ai.review.run_planning import ReviewRunPlan
     from lintro.ai.review.session import ReviewSessionOptions
@@ -295,10 +304,62 @@ async def _verify_and_gate(
             ),
         )
     findings = apply_severity_gates(findings=verification.findings) + carried + custom
+    moved = await _verify_moved(
+        context=context,
+        options=options,
+        plan=plan,
+        findings=findings,
+        interrupt=interrupt,
+    )
     return replace(
         outcome,
         verification=verification.summary,
+        moved=moved,
         filtered_findings=findings,
         custom_findings=custom,
         total_findings=len(findings),
     )
+
+
+async def _verify_moved(
+    *,
+    context: ReviewContext,
+    options: ReviewSessionOptions,
+    plan: ReviewRunPlan,
+    findings: tuple[ReviewFinding, ...],
+    interrupt: asyncio.Event,
+) -> MovedVerification:
+    """Ask whether each moved, unreported prior finding still exists (#3466).
+
+    Args:
+        context: Collected review diff context.
+        options: Session options for the run.
+        plan: The resolved run plan; its resume plan holds the relocations.
+        findings: The round's final findings.
+        interrupt: Event a SIGTERM/SIGINT handler sets to stop the run.
+
+    Returns:
+        The verdicts and counts; empty when no finding needs the check.
+    """
+    candidates = select_candidates(
+        prior=options.prior_state,
+        relocations=relocations_by_key(relocations=plan.resume.relocations),
+        departed_paths=departed_paths(context=context),
+        findings=findings,
+    )
+    with plan.timings.phase(name=ReviewPhase.VERIFICATION):
+        return await run_moved_verification(
+            request=MovedVerificationRequest(
+                context=context,
+                candidates=candidates,
+                findings=findings,
+                enabled=options.verify_moved_findings,
+                provider=options.provider,
+                ai_config=plan.ai_config,
+                budget=plan.budget,
+                repo_root=plan.repo_root,
+                content_budget_tokens=plan.synthesis_diff_budget,
+                no_tools=plan.tools_disabled,
+                stop=interrupt,
+            ),
+        )

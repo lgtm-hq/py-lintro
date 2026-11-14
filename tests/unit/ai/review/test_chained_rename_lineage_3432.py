@@ -32,7 +32,12 @@ from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_state import ReviewState
 from tests.unit.ai.review import test_full_round_rename_3413 as harness
-from tests.unit.ai.review.scratch_repo_fixtures import commit, git, lines
+from tests.unit.ai.review.scratch_repo_fixtures import (
+    commit,
+    git,
+    lines,
+    moved_answer,
+)
 
 _MODES = [
     pytest.param(False, id="delta"),
@@ -138,7 +143,11 @@ def test_deleting_the_reviewed_file_still_resolves_the_finding(
     tmp_path: Path,
     force_full: bool,
 ) -> None:
-    """``a.py`` deleted with no rename anywhere: X is fixed and its thread closes."""
+    """``a.py`` deleted with no rename anywhere: X is fixed and its thread closes.
+
+    A delete is not an in-place placement, so X resolves on the moved-finding
+    check's "fixed" (#3466), not on the delete alone.
+    """
     repo, base, prior = harness._first_round(tmp_path)
     git(repo, "rm", "-q", "a.py")
     (repo / "other.py").write_text("other = True\n")
@@ -150,6 +159,7 @@ def test_deleting_the_reviewed_file_still_resolves_the_finding(
         prior=prior,
         reported=[],
         force_full=force_full,
+        moved=moved_answer(still_present="false"),
     )
 
     assert_that(second.counts).is_equal_to((0, 0, 1))

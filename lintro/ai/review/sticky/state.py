@@ -15,6 +15,7 @@ from lintro.ai.review.finding_matcher import match_findings
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.moved_candidates import placements
 from lintro.ai.review.review_state_codec import decode_state
 
 
@@ -59,17 +60,23 @@ def matcher_reviewed_ranges(
 def matcher_relocations(
     *,
     result: ReviewResult,
-) -> dict[str, tuple[str, int, str]] | None:
+) -> Mapping[str, tuple[str, int, str]] | None:
     """Return where the round placed each prior open finding (#3403, #3413).
 
     Args:
         result: Current review result.
 
     Returns:
-        ``{key: (path, line, line_sha)}``, or ``None`` when the round mapped
+        ``{key: (path, line, line_sha)}`` carrying the round's moved-finding
+        verdicts (#3466), or ``None`` when the round mapped and verified
         nothing.
     """
-    return relocations_by_key(relocations=result.metadata.relocated_findings)
+    return placements(
+        relocations=relocations_by_key(
+            relocations=result.metadata.relocated_findings,
+        ),
+        verdicts=result.metadata.moved_verdicts,
+    )
 
 
 def relocations_by_key(
