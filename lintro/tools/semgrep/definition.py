@@ -461,11 +461,16 @@ class SemgrepPlugin(BaseToolPlugin):
             return DocUrlTemplate.SEMGREP.format(code=url_quote(code, safe=""))
         return None
 
-    def _hidden_pack_reason(self, ctx: PreparedExecution) -> str | None:
+    def _hidden_pack_reason(
+        self,
+        ctx: PreparedExecution,
+        paths: list[str],
+    ) -> str | None:
         """Name targets an enabled directory-scoped pack cannot match.
 
         Args:
             ctx: Prepared execution context; Semgrep runs from ``ctx.cwd``.
+            paths: Paths the user asked to scan, bounding the scan scope.
 
         Returns:
             Why the run is incomplete, or None when every pack can match.
@@ -474,6 +479,7 @@ class SemgrepPlugin(BaseToolPlugin):
             packs=validate_rule_packs(self.options.get("rule_packs", [])),
             cwd=ctx.cwd,
             files=ctx.rel_files,
+            scopes=paths,
         )
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -617,7 +623,7 @@ class SemgrepPlugin(BaseToolPlugin):
                     issues=issues,
                     parse_failures_count=parse_failures_count or None,
                 ),
-                self._hidden_pack_reason(ctx),
+                self._hidden_pack_reason(ctx, paths),
             )
 
         except (json.JSONDecodeError, ValueError) as e:

@@ -14,6 +14,7 @@ Usage:
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import shutil
 from collections.abc import Callable, Iterator
@@ -44,13 +45,37 @@ _VENDOR_SKIP_DIRS: frozenset[str] = frozenset(
         ".cache",
         ".terragrunt-cache",
         ".lintro-cache",
-        ".lintro",
         "htmlcov",
         # `terraform init` vendors provider plugins and remote modules here;
         # their .tf files are third-party and must not select checkov.
         ".terraform",
     },
 )
+
+#: Lintro's generated output inside a ``.lintro`` directory, as fnmatch globs:
+#: per-run reports and the ``.active`` lock, and the SARIF/JSON artifacts. The
+#: rest of ``.lintro`` (``review-agents/*.md``, ``severity-baseline.json``) is
+#: user config or deliberately kept state, so it is not pruned. Mirrors the
+#: ``**/.lintro/...`` excludes in :mod:`lintro.utils.path_filtering`.
+_LINTRO_GENERATED_DIRS: tuple[str, ...] = ("run-*", "artifacts")
+
+
+def _is_pruned(parent: str, name: str) -> bool:
+    """Report whether detection skips a directory.
+
+    Args:
+        parent: Directory holding ``name``.
+        name: Directory name.
+
+    Returns:
+        Whether ``name`` is vendored, a cache, or Lintro's generated output.
+    """
+    if name in _VENDOR_SKIP_DIRS:
+        return True
+    return os.path.basename(parent) == ".lintro" and any(
+        fnmatch.fnmatch(name, pattern) for pattern in _LINTRO_GENERATED_DIRS
+    )
+
 
 # JS/TS toolchain configs that must not count as application source.
 _JS_TOOLING_CONFIG_STEMS: frozenset[str] = frozenset(
@@ -106,10 +131,10 @@ def _iter_project_files(cwd: Path) -> Iterator[Path]:
         cwd: Project root to scan.
 
     Yields:
-        Path: File paths that are not inside ``_VENDOR_SKIP_DIRS``.
+        Path: File paths outside ``_VENDOR_SKIP_DIRS`` and Lintro's output.
     """
     for dirpath, dirnames, filenames in os.walk(cwd, topdown=True):
-        dirnames[:] = [name for name in dirnames if name not in _VENDOR_SKIP_DIRS]
+        dirnames[:] = [name for name in dirnames if not _is_pruned(dirpath, name)]
         for filename in filenames:
             yield Path(dirpath) / filename
 

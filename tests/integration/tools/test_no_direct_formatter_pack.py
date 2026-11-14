@@ -289,6 +289,38 @@ def test_tree_without_project_marker_is_incomplete(
     )
 
 
+@pytest.mark.parametrize(
+    ("run_from", "scope"),
+    [("tree", "scripts"), ("tree", "scripts/sub"), ("scripts", "."), ("tree", ".")],
+)
+def test_nested_script_without_marker_is_incomplete(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    run_from: str,
+    scope: str,
+) -> None:
+    """Semgrep runs from ``scripts/sub``, whose name is not the anchor (#3437).
+
+    Args:
+        tmp_path: Holds the marker-less tree and, beside it, Semgrep's state.
+        monkeypatch: Isolate current directory and Semgrep state.
+        run_from: Directory the plugin is called from.
+        scope: Path handed to the plugin.
+    """
+    script = tmp_path / "tree" / "scripts" / "sub" / "fmt.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text("black x.py\n", encoding="utf-8")
+    if has_project_marker(get_execution_cwd([str(script)])):
+        pytest.skip("an ancestor of the temporary directory holds a project marker")
+    start = tmp_path / "tree" / ("scripts" if run_from == "scripts" else "")
+    _isolate_semgrep(monkeypatch, start, state=tmp_path)
+    result = SemgrepPlugin().check([scope], {"rule_packs": [PACK], "jobs": 1})
+    assert_that(result.success).is_false()
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.issues).is_empty()
+    assert_that(result.output).contains(PACK, "(first: fmt.sh)")
+
+
 def test_markerless_checkout_below_a_scripts_ancestor_stays_clean(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

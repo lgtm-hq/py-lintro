@@ -151,44 +151,75 @@ def test_nothing_is_hidden_with_a_marker_or_without_directory_packs(
     cwd.mkdir()
     if marker is not None:
         (cwd / marker).touch()
-    reason = hidden_pack_targets(packs=packs, cwd=str(cwd), files=["fmt.sh"])
+    reason = hidden_pack_targets(
+        packs=packs,
+        cwd=str(cwd),
+        files=["fmt.sh"],
+        scopes=[str(cwd)],
+    )
     assert_that(reason).is_none()
 
 
 @pytest.mark.parametrize(
-    ("cwd", "files", "hidden"),
+    ("run_from", "scope", "cwd", "files", "hidden"),
     [
-        ("tree/scripts", ["fmt.sh", "lib/a.sh"], 2),
-        ("tree/scripts", ["nested/scripts/a.sh"], 0),
-        ("tree/scripts/lib", ["a.sh"], 0),
-        ("scripts/repo/packages/pkg", ["src/a.py"], 0),
-        ("tree", ["scripts/fmt.sh"], 0),
+        ("tree", "scripts", "scripts", ["fmt.sh", "lib/a.sh"], 2),
+        ("tree", "scripts", "scripts/sub", ["fmt.sh"], 1),
+        ("tree", "scripts/sub", "scripts/sub", ["fmt.sh"], 1),
+        ("tree", "scripts/sub/fmt.sh", "scripts/sub", ["fmt.sh"], 1),
+        ("tree/scripts", ".", "scripts/sub", ["fmt.sh"], 1),
+        ("tree/scripts", "sub", "scripts/sub", ["fmt.sh"], 0),
+        ("tree", "scripts", "scripts", ["nested/scripts/a.sh"], 0),
+        ("tree", ".", ".", ["scripts/fmt.sh"], 0),
+        ("tree/scripts/repo/pkg", ".", "scripts/repo/pkg", ["src/a.py"], 0),
+        ("tree", ".", "scripts/sub", ["fmt.sh"], 1),
+        ("tree", "tools/scripts", "tools", ["scripts"], 0),
     ],
     ids=[
         "cwd-is-scripts",
+        "scripts-scope-nested-cwd",
+        "typed-scripts-sub",
+        "typed-file-under-scripts",
+        "inside-scripts-nested-cwd",
+        "scripts-above-typed-scope",
         "pack-directory-visible-below-cwd",
-        "scripts-above-cwd",
-        "unrelated-scripts-ancestor",
         "cwd-above-scripts",
+        "unrelated-scripts-ancestor",
+        "dot-scope-nested-cwd",
+        "typed-file-named-scripts",
     ],
 )
-def test_hidden_targets_need_the_pack_directory_at_cwd_and_not_below(
+def test_hidden_targets_need_a_pack_directory_in_scope_above_cwd(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    run_from: str,
+    scope: str,
     cwd: str,
     files: list[str],
     hidden: int,
 ) -> None:
-    """Only a pack directory at cwd, not above it nor inside the path, hides files.
+    """A pack directory hides files only between the scan scope and cwd.
 
     Args:
         tmp_path: Root of a marker-less tree.
-        cwd: Working directory, relative to ``tmp_path``.
+        monkeypatch: Sets the directory lintro was started in.
+        run_from: Directory, relative to ``tmp_path``, lintro was started in.
+        scope: Path the user asked lintro to scan, relative to ``run_from``.
+        cwd: Semgrep's working directory, relative to ``tmp_path / "tree"``.
         files: Targets relative to ``cwd``.
         hidden: Targets the pack cannot match.
     """
-    root = tmp_path / cwd
-    root.mkdir(parents=True)
-    reason = hidden_pack_targets(packs=[PACK], cwd=str(root), files=files)
+    root = tmp_path / "tree" / cwd
+    for path in files:
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text("black x.py\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path / run_from)
+    reason = hidden_pack_targets(
+        packs=[PACK],
+        cwd=str(root),
+        files=files,
+        scopes=[scope],
+    )
     if hidden:
         assert_that(reason).contains(
             PACK,
@@ -199,6 +230,45 @@ def test_hidden_targets_need_the_pack_directory_at_cwd_and_not_below(
         )
     else:
         assert_that(reason).is_none()
+
+
+def test_absolute_scope_ignores_named_ancestors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An absolute scan path does not bring its ancestors into scope.
+
+    Args:
+        tmp_path: Holds a marker-less checkout below a ``scripts`` directory.
+        monkeypatch: Starts lintro outside the checkout.
+    """
+    package = tmp_path / "scripts" / "repo" / "pkg"
+    (package / "src").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    reason = hidden_pack_targets(
+        packs=[PACK],
+        cwd=str(package),
+        files=["src/a.py"],
+        scopes=[str(package)],
+    )
+    assert_that(reason).is_none()
+
+
+def test_target_outside_every_scope_falls_back_to_cwd(tmp_path: Path) -> None:
+    """Without a covering scope, a ``scripts`` working directory still counts.
+
+    Args:
+        tmp_path: Holds the marker-less working directory.
+    """
+    cwd = tmp_path / "scripts"
+    cwd.mkdir()
+    reason = hidden_pack_targets(
+        packs=[PACK],
+        cwd=str(cwd),
+        files=["fmt.sh"],
+        scopes=[],
+    )
+    assert_that(reason).contains("1 file(s) under scripts/ were not checked")
 
 
 def test_pack_tracks_builtin_format_claimants() -> None:
