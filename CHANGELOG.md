@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.34] - 2026-11-14
+
+### Changed
+
+- **html-validate**: validate glob-named files in one process (#3482) (adb28c3)
+
+### Fixed
+
+- **ai/review**: verify moved findings before resolving them (#3483) (2d1fcbc)
+
 ## [0.180.33] - 2026-11-14
 
 ### Changed
