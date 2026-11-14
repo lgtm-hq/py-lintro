@@ -30,10 +30,7 @@ from lintro.ai.review.cli_limits import (
     resolve_synthesis_diff_budget,
 )
 from lintro.ai.review.custom_agents import select_custom_agents
-from lintro.ai.review.delta import (
-    merge_base,
-    plan_delta,
-)
+from lintro.ai.review.delta import plan_delta
 from lintro.ai.review.delta_round import narrow_round
 from lintro.ai.review.enums.delta_reason import DeltaReason
 from lintro.ai.review.enums.review_checkout import ReviewCheckout
@@ -42,6 +39,7 @@ from lintro.ai.review.group_labels import REL_DIRECTORY_PREFIX, REL_SINGLE_FILE
 from lintro.ai.review.models.delta_plan import DeltaPlan
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.pr_budget import run_cost_ceiling
+from lintro.ai.review.prior_head_fetch import fetch_prior_heads
 from lintro.ai.review.progress import NullReviewProgress
 from lintro.ai.review.prompts import estimate_prompt_overhead
 from lintro.ai.review.resume import filter_chunks, plan_resume
@@ -409,6 +407,13 @@ def plan_run(
     # A delta round (#2627) narrows what the surviving chunks embed to the
     # change since the prior round's head; coverage identity is untouched.
     repo_root = context.repo_root or os.getcwd()
+    # A shallow CI checkout lacks the heads earlier rounds reviewed and the
+    # base's history; fetch them so prior findings map forward (#3471).
+    prepared = fetch_prior_heads(
+        prior=options.prior_state,
+        context=context,
+        repo_root=repo_root,
+    )
     delta = plan_delta(
         prior=options.prior_state,
         context=context,
@@ -416,18 +421,10 @@ def plan_run(
         force_full=options.force_full,
         reusable_rounds=reusable,
     )
-    # Asked once per round: recorded for the next round's base check, stamped
-    # on this round's sightings, and compared by the moved-base hold (#3467).
-    recorded_merge_base = (
-        merge_base(
-            repo_root=repo_root,
-            base_sha=context.base_ref,
-            head_sha=context.head_ref,
-        )
-        if context.pr_metadata is not None
-        and context.checkout is not ReviewCheckout.NONE
-        else ""
-    )
+    # Asked once per round, after any deepening: recorded for the next
+    # round's base check, stamped on this round's sightings, and compared by
+    # the moved-base hold (#3467).
+    recorded_merge_base = prepared.merge_base
     chunks, delta, resume = narrow_round(
         chunks=chunks,
         delta=delta,

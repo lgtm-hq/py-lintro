@@ -70,12 +70,15 @@ def _run_git(
     *,
     args: list[str],
     check: bool = True,
+    timeout: float = _GIT_GH_TIMEOUT_SECONDS,
 ) -> subprocess.CompletedProcess[str]:
     """Run a git subprocess and return captured output.
 
     Args:
         args: Git command arguments (excluding ``git`` itself).
         check: When True, raise on non-zero exit codes.
+        timeout: Seconds before the process is killed; a caller with a
+            tighter budget passes what is left of it.
 
     Returns:
         Completed process with stdout/stderr captured as text.
@@ -96,11 +99,11 @@ def _run_git(
             encoding="utf-8",
             errors="surrogateescape",
             check=False,
-            timeout=_GIT_GH_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
         raise ReviewContextError(
-            f"git {' '.join(args)} timed out after {_GIT_GH_TIMEOUT_SECONDS}s",
+            f"git {' '.join(args)} timed out after {timeout}s",
             code=ReviewContextErrorCode.GIT_COMMAND_FAILED,
         ) from exc
     except OSError as exc:

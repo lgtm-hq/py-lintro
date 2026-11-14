@@ -536,7 +536,7 @@ def test_an_unknown_merge_base_holds_a_finding_outside_the_diff(
         tmp_path: Pytest temp dir.
         force_full: ``--full``.
     """
-    with patch("lintro.ai.review.run_planning.merge_base", return_value=""):
+    with patch("lintro.ai.review.prior_head_fetch.merge_base", return_value=""):
         repo, base, prior = _reverted_in_place(tmp_path)
         assert_that(prior.findings[0].placement_merge_base).is_empty()
 
