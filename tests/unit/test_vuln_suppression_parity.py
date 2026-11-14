@@ -17,6 +17,8 @@ in lintro's own lockfiles too, so these rules carry their time box in
 from __future__ import annotations
 
 import datetime
+import fnmatch
+import os
 import re
 import tomllib
 from pathlib import Path
@@ -25,6 +27,8 @@ from typing import Any
 import pytest
 import yaml
 from assertpy import assert_that
+from packaging.specifiers import SpecifierSet
+from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -192,38 +196,184 @@ def test_markdownlint_dependency_lockfiles_remain_patched(
     assert_that(versions).is_not_empty()
 
 
-@pytest.mark.parametrize(
-    ("advisory", "fixed"),
-    [
-        ("GHSA-xcq7-p3pf-p88h", "1.45.1"),
-        ("GHSA-mf5v-w3w3-f6cg", "1.45.2"),
-    ],
-    ids=["tracestate", "traceparent"],
+# Advisories suppressed in .osv-scanner.toml only because Semgrep pins the
+# isolated requirements-semgrep.txt lock. OSV ignores are advisory-global, so
+# each entry records the package and the affected ranges (alternatives, any
+# one matching means affected) that no other Python lockfile may carry.
+_SEMGREP_LOCK = Path("requirements-semgrep.txt")
+_MCP_AFFECTED = ("<1.30.0", ">=2.0.0a0,<2.2.0")
+_SEMGREP_ONLY_ADVISORIES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "GHSA-xcq7-p3pf-p88h": ("opentelemetry-api", ("<1.45.1",)),
+    "GHSA-mf5v-w3w3-f6cg": ("opentelemetry-api", ("<1.45.2",)),
+    "GHSA-84m7-p3x7-pcfv": ("mcp", _MCP_AFFECTED),
+    "GHSA-5h93-6whr-6q8j": ("mcp", _MCP_AFFECTED),
+    "GHSA-rwrf-2pqf-9j8j": ("mcp", _MCP_AFFECTED),
+    "GHSA-w4fh-qvv9-3v23": ("mcp", _MCP_AFFECTED),
+}
+_LOCKFILE_PATTERNS = ("uv.lock", "requirements*.txt", "pylock*.toml")
+_SKIPPED_DIRS = frozenset(
+    {".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".nox"},
 )
-def test_semgrep_telemetry_ignore_cannot_hide_vulnerable_application_lock(
-    advisory: str,
-    fixed: str,
-) -> None:
-    """An advisory-global tool exception requires a patched application copy.
+_REQUIREMENT_PIN = re.compile(
+    r"^\s*(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?"
+    r"\s*===?\s*(?P<version>[^\s;#\\]+)",
+    re.MULTILINE,
+)
+
+
+def _semgrep_only_ids() -> list[str]:
+    """Return the OSV ignore ids whose reason confines them to the Semgrep lock.
+
+    Returns:
+        Sorted ids of ``[[IgnoredVulns]]`` entries naming the Semgrep lock.
+    """
+    return sorted(
+        vuln_id
+        for vuln_id, entry in _osv_entries().items()
+        if _SEMGREP_LOCK.name in str(entry.get("reason", ""))
+    )
+
+
+def _python_lockfiles(root: Path) -> list[Path]:
+    """Return every Python lockfile under *root* except the Semgrep lock.
 
     Args:
-        advisory: The OSV id of the Semgrep-only telemetry exception.
-        fixed: The first opentelemetry-api release that fixes the advisory.
+        root: Directory to search.
+
+    Returns:
+        Sorted paths matching ``uv.lock``, ``requirements*.txt`` or
+        ``pylock*.toml``, skipping virtualenvs and VCS metadata.
     """
-    if advisory not in _osv_entries():
-        return
-    lock = tomllib.loads((_REPO_ROOT / "uv.lock").read_text(encoding="utf-8"))
-    versions = [
-        Version(package["version"])
-        for package in lock["package"]
-        if package["name"] == "opentelemetry-api"
+    found: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames if name not in _SKIPPED_DIRS]
+        for filename in filenames:
+            if any(fnmatch.fnmatch(filename, pat) for pat in _LOCKFILE_PATTERNS):
+                found.append(Path(dirpath) / filename)
+    return sorted(path for path in found if path.relative_to(root) != _SEMGREP_LOCK)
+
+
+def _locked_versions(lockfile: Path, package: str) -> list[Version]:
+    """Return the versions of *package* pinned in a Python lockfile.
+
+    Args:
+        lockfile: A ``uv.lock``, ``pylock*.toml`` or ``requirements*.txt`` file.
+        package: Distribution name to look up.
+
+    Returns:
+        Every locked version of the package (empty when it is absent).
+    """
+    wanted = canonicalize_name(package)
+    text = lockfile.read_text(encoding="utf-8")
+    if lockfile.suffix == ".txt":
+        pins = [(m["name"], m["version"]) for m in _REQUIREMENT_PIN.finditer(text)]
+    else:
+        data = tomllib.loads(text)
+        entries = [*data.get("package", []), *data.get("packages", [])]
+        pins = [(entry["name"], entry["version"]) for entry in entries]
+    return [
+        Version(version) for name, version in pins if canonicalize_name(name) == wanted
     ]
-    assert_that(versions).is_not_empty()
-    for version in versions:
-        assert_that(version >= Version(fixed)).described_as(
-            f"The Semgrep-only exception must not hide {advisory} "
-            f"in uv.lock; patch application telemetry to at least {fixed}",
-        ).is_true()
+
+
+def _affected_pins(root: Path, advisory: str) -> list[str]:
+    """Return ``path: package@version`` for each lockfile pin *advisory* affects.
+
+    Args:
+        root: Repository root to scan.
+        advisory: Key of ``_SEMGREP_ONLY_ADVISORIES``.
+
+    Returns:
+        Affected pins outside the Semgrep lock (empty when none).
+    """
+    package, ranges = _SEMGREP_ONLY_ADVISORIES[advisory]
+    specifiers = [SpecifierSet(spec, prereleases=True) for spec in ranges]
+    return [
+        f"{lockfile.relative_to(root)}: {package}@{version}"
+        for lockfile in _python_lockfiles(root)
+        for version in _locked_versions(lockfile, package)
+        if any(version in spec for spec in specifiers)
+    ]
+
+
+def test_every_semgrep_only_ignore_records_its_affected_range() -> None:
+    """A Semgrep-only OSV ignore needs a package and range the guard can check."""
+    ids = _semgrep_only_ids()
+    assert_that(ids).is_not_empty()
+    for vuln_id in ids:
+        assert_that(_SEMGREP_ONLY_ADVISORIES).described_as(
+            f"{vuln_id} is confined to {_SEMGREP_LOCK} in .osv-scanner.toml; "
+            "record its package and affected ranges in _SEMGREP_ONLY_ADVISORIES",
+        ).contains_key(vuln_id)
+        package = _SEMGREP_ONLY_ADVISORIES[vuln_id][0]
+        reason = str(_osv_entries()[vuln_id]["reason"])
+        assert_that(reason).contains(package)
+
+
+def test_repo_python_lockfiles_exclude_only_the_semgrep_lock() -> None:
+    """The guard scans uv.lock and never the exempt Semgrep lock."""
+    found = [path.relative_to(_REPO_ROOT) for path in _python_lockfiles(_REPO_ROOT)]
+    assert_that(found).contains(Path("uv.lock"))
+    assert_that(found).does_not_contain(_SEMGREP_LOCK)
+    assert_that((_REPO_ROOT / _SEMGREP_LOCK).is_file()).is_true()
+
+
+def test_any_new_python_lockfile_with_an_affected_pin_is_reported(
+    tmp_path: Path,
+) -> None:
+    """A lockfile added anywhere, in any supported format, is checked.
+
+    Args:
+        tmp_path: Scratch repository root.
+    """
+    (tmp_path / _SEMGREP_LOCK).write_text(
+        "mcp==1.29.0 \\\n    --hash=sha256:00\nopentelemetry-api==1.37.0\n",
+        encoding="utf-8",
+    )
+    runtime = tmp_path / "review-runtime"
+    runtime.mkdir()
+    (runtime / "requirements.txt").write_text(
+        "opentelemetry-api==1.45.1 ; python_version >= '3.11'\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "pylock.toml").write_text(
+        '[[packages]]\nname = "MCP"\nversion = "2.1.1"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "uv.lock").write_text(
+        '[[package]]\nname = "mcp"\nversion = "2.3.0"\n'
+        '[[package]]\nname = "opentelemetry-api"\nversion = "1.45.2"\n',
+        encoding="utf-8",
+    )
+    assert_that(_affected_pins(tmp_path, "GHSA-xcq7-p3pf-p88h")).is_empty()
+    assert_that(_affected_pins(tmp_path, "GHSA-mf5v-w3w3-f6cg")).is_equal_to(
+        ["review-runtime/requirements.txt: opentelemetry-api@1.45.1"],
+    )
+    assert_that(_affected_pins(tmp_path, "GHSA-84m7-p3x7-pcfv")).is_equal_to(
+        ["pylock.toml: mcp@2.1.1"],
+    )
+
+
+@pytest.mark.parametrize("advisory", _semgrep_only_ids())
+def test_semgrep_telemetry_ignore_cannot_hide_vulnerable_application_lock(
+    advisory: str,
+) -> None:
+    """A Semgrep-only OSV ignore must not hide any other Python lockfile.
+
+    OSV ignores apply to every lockfile osv-scanner reads, so each advisory
+    confined to ``requirements-semgrep.txt`` (the opentelemetry-api telemetry
+    and mcp entries) must not affect a pin in ``uv.lock``, any
+    ``requirements*.txt`` or any ``pylock*.toml`` elsewhere in the repository.
+
+    Args:
+        advisory: The OSV id of a Semgrep-only exception.
+    """
+    assert_that(_SEMGREP_ONLY_ADVISORIES).contains_key(advisory)
+    package = _SEMGREP_ONLY_ADVISORIES[advisory][0]
+    assert_that(_affected_pins(_REPO_ROOT, advisory)).described_as(
+        f"The Semgrep-only exception {advisory} must not hide an affected "
+        f"{package} outside {_SEMGREP_LOCK}; patch these pins",
+    ).is_empty()
 
 
 def test_tooling_checkout_ignores_are_time_boxed() -> None:
