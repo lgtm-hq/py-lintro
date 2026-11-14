@@ -33,15 +33,13 @@ LOCATION_UNCHECKED = "unchecked"
 LOCATION_BASE_MOVED = "base-moved"
 
 #: A relocation's ``line_sha`` for a record whose file git paired with its new
-#: path by a low-similarity rename (#3466). The relocation names the rename's
-#: destination: a report there pairs with the record as with any rename. A
-#: record nothing reports there is kept where it was stored, carried
-#: unverified and never resolved that round, because an unrelated look-alike
-#: file can win git's similarity pairing while the finding lives elsewhere.
+#: path by a low-similarity rename (#3466): kept where it was stored, carried
+#: unverified and never resolved that round. An unrelated look-alike file can
+#: win git's similarity pairing while the finding lives elsewhere, so nothing
+#: is moved; a report on the destination opens a record of its own.
 LOCATION_WEAK_RENAME = "weak-rename"
 
-#: The relocation ``line_sha`` values that hold a record in place (a
-#: :data:`LOCATION_WEAK_RENAME` record only when nothing reports it there).
+#: The relocation ``line_sha`` values that hold a record in place.
 LOCATION_HOLDS = frozenset(
     {
         LOCATION_UNMAPPED,

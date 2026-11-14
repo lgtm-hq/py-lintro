@@ -45,7 +45,6 @@ from lintro.ai.review.finding_pairing import (
     notes_holding_prior_records,
     pair_group,
 )
-from lintro.ai.review.models.delta_plan import LOCATION_WEAK_RENAME
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
@@ -320,9 +319,9 @@ def match_findings(
     Returns:
         The per-round transitions plus the merged record set to persist.
     """
-    stored_records = previous.findings if previous is not None else ()
     prior_records = [
-        _relocate(record=record, relocations=relocations) for record in stored_records
+        _relocate(record=record, relocations=relocations)
+        for record in (previous.findings if previous is not None else ())
     ]
     # A sighting's line is in this head's coordinates (#3403).
     inline_records = [
@@ -427,16 +426,10 @@ def match_findings(
             # pre-v4 state) is archived and never resolved or regressed.
             merged.append(record)
             continue
-        held = index in note_held or index in duplicate_held
-        location_hold = _held_location(key=record.key, relocations=relocations)
-        if location_hold == LOCATION_WEAK_RENAME and not held:
-            # Nothing reported it at the rename's destination: a pairing by
-            # similarity alone proves no move, so it stays where it was (#3466).
-            record = stored_records[index]
         if _carry_absent(
             record=record,
-            held=held,
-            location_hold=location_hold,
+            held=index in note_held or index in duplicate_held,
+            location_hold=_held_location(key=record.key, relocations=relocations),
             reviewed_paths=reviewed_paths,
             departed_paths=departed_paths,
             reviewed_ranges=reviewed_ranges,

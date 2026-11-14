@@ -41,7 +41,8 @@ __all__ = [
 
 #: Holds that keep a record open even when its path left the diff: one beyond
 #: the mapping cap (#3413), one a moved base pushed out of the diff (#3467),
-#: and one only a low-similarity rename would have moved (#3466).
+#: and one git paired with its new path only by a low-similarity rename
+#: (#3466), whose stored path may still be read this round.
 _NEVER_RESOLVED = frozenset(
     {LOCATION_UNCHECKED, LOCATION_BASE_MOVED, LOCATION_WEAK_RENAME},
 )
@@ -91,17 +92,14 @@ def _relocate(
     Returns:
         The record at its mapped location and coordinate head; resolved
         records, records the round did not map and records it held in place
-        (#3413) are returned unchanged. A record behind a low-similarity
-        rename (:data:`LOCATION_WEAK_RENAME`, #3466) is moved to the rename's
-        destination with no coordinate head, so a report there pairs with it;
-        the matcher puts it back when nothing does.
+        (#3413) are returned unchanged.
     """
     moved = relocations.get(record.key) if relocations else None
-    if moved is None or record.status is not FindingStatus.OPEN:
-        return record
-    if moved[2] == LOCATION_WEAK_RENAME:
-        moved = (moved[0], moved[1], "")
-    elif moved[2] in LOCATION_HOLDS:
+    if (
+        moved is None
+        or record.status is not FindingStatus.OPEN
+        or moved[2] in LOCATION_HOLDS
+    ):
         return record
     path, line, line_sha = moved
     if path == record.file:
@@ -166,7 +164,7 @@ def _carry_absent(
         location_hold: :func:`_held_location` for the record. A record git
             could not place is not fixed by its path leaving the diff, and one
             beyond the mapping cap (#3413), pushed out of the diff by a
-            moved base (#3467) or moved only by a low-similarity rename
+            moved base (#3467) or held behind a low-similarity rename
             (#3466) is never resolved.
         reviewed_paths: Files re-reviewed this round, or ``None``.
         departed_paths: Paths that left the diff, or ``None``.
