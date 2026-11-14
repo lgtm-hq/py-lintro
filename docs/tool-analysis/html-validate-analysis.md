@@ -65,8 +65,15 @@ through `--stdin`, one process per file, from the file's directory, with up to
 the command line, because the `npx` fallback runs html-validate through a shell that
 globs `[...]` arguments; Lintro renames the `/dev/stdin` report to the real path. On 300
 glob-named files with html-validate 11.21.0, the one-process route adds about 1 s to a
-run; the `--stdin` pool adds about 20 s. See the html-validate section of
-`docs/configuration.md` for the cases that are still held back.
+run; the `--stdin` pool adds about 20 s.
+
+The one-process script uses this part of html-validate's public API, checked against the
+11.x line: the `CLI` class with `getFormatter("json")`, `getValidator()` and
+`isIgnored(filename)`, the validator's `validateFile`, `Reporter.merge`, and the
+`version` export. The route is used only when every `PATH` entry is absolute, so the
+binary's `#!/usr/bin/env node` and Lintro find the same `node`. When any check fails,
+Lintro logs the reason at debug level and uses the `--stdin` pool. See the html-validate
+section of `docs/configuration.md` for the cases that are still held back.
 
 ## Output format
 

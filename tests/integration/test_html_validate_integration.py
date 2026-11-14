@@ -28,7 +28,7 @@ from lintro.tools.html_validate.one_process import (
     OneProcessRuntime,
     one_process_runtime,
 )
-from tests.integration._tools import require_command
+from tests.integration._tools import in_tools_image, require_command
 
 SAMPLE_FILE = "test_samples/tools/web/html_validate/html_validate_violations.html"
 
@@ -993,6 +993,28 @@ def _write_tree(root: Path) -> list[Path]:
     return [root / name for name in _ONE_PROCESS_FILES]
 
 
+def _require_one_process(root: Path) -> None:
+    """Skip unless html-validate resolves to a package lintro can load.
+
+    Inside the tools image the route must be available, so a package the
+    route stopped accepting (a changed bin entry after an upgrade, say)
+    fails the test instead of skipping it.
+
+    Args:
+        root: The project directory html-validate is resolved from.
+    """
+    tool = ToolRegistry.get("html_validate")
+    command = tool._get_executable_command(tool_name="html_validate", cwd=str(root))
+    if one_process_runtime(command) is not None:
+        return
+    reason = (
+        f"html-validate ({command!r}) does not resolve to a package lintro can load"
+    )
+    if in_tools_image():
+        pytest.fail(f"{reason}; the tools image must support the one-process route")
+    pytest.skip(reason)
+
+
 def _check_without_one_process(
     paths: list[Path],
     monkeypatch: pytest.MonkeyPatch,
@@ -1027,16 +1049,7 @@ def test_html_validate_one_process_equals_stdin_byte_for_byte(
         monkeypatch: Pytest's patcher.
     """
     files = _write_tree(tmp_path)
-    if (
-        one_process_runtime(
-            ToolRegistry.get("html_validate")._get_executable_command(
-                tool_name="html_validate",
-                cwd=str(tmp_path),
-            ),
-        )
-        is None
-    ):
-        pytest.skip("html-validate does not resolve to a package lintro can load")
+    _require_one_process(tmp_path)
     for path in [[file] for file in files]:
         assert_that(_check(path)).is_equal_to(
             _check_without_one_process(path, monkeypatch),
@@ -1061,10 +1074,7 @@ def test_html_validate_validates_glob_named_files_in_one_process(
         monkeypatch: Pytest's patcher.
     """
     files = _write_tree(tmp_path)
-    tool = ToolRegistry.get("html_validate")
-    command = tool._get_executable_command(tool_name="html_validate", cwd=str(tmp_path))
-    if one_process_runtime(command) is None:
-        pytest.skip("html-validate does not resolve to a package lintro can load")
+    _require_one_process(tmp_path)
     calls: list[str] = []
     original = stdin_route.run_stdin_calls
 

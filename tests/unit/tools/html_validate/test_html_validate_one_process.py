@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.execution_preparation import PreparedExecution
@@ -41,6 +42,7 @@ _VERSION = "11.21.0"
 _BIN = '#!/usr/bin/env node\n\nimport "../dist/esm/html-validate.js";\n'
 _DIRTY = "<p><div></p>"
 _SLOW = "<!-- slow -->"
+_PAUSE = "<!-- pause -->"
 _BOOM = "<!-- boom -->"
 _CRASH = "<!-- crash -->"
 _IGNORED = "<!-- ignored -->"
@@ -62,6 +64,8 @@ for index, filename in enumerate(request["files"]):
         sys.exit(1)
     if "<!-- slow -->" in source:
         time.sleep(30)
+    if "<!-- pause -->" in source:
+        time.sleep(0.6)
     if "<!-- boom -->" in source:
         write({"index": index, "error": "Error: boom"})
         continue
@@ -231,6 +235,110 @@ def test_runner_and_relative_commands_keep_the_pool(
     assert_that(one_process_runtime(command)).is_none()
 
 
+def _node_dir(tmp_path: Path) -> Path:
+    """Put an executable ``node`` in its own directory.
+
+    Args:
+        tmp_path: Where to create the directory.
+
+    Returns:
+        The directory.
+    """
+    directory = tmp_path / "abs-bin"
+    directory.mkdir()
+    node = directory / "node"
+    node.write_text("#!/bin/sh\n", encoding="utf-8")
+    node.chmod(0o755)
+    return directory
+
+
+def test_an_absolute_path_finds_node_for_the_package(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With only absolute ``PATH`` entries, the runtime uses that ``node``.
+
+    Args:
+        tmp_path: Project directory.
+        monkeypatch: Pytest's patcher.
+    """
+    link = _package(tmp_path)
+    directory = _node_dir(tmp_path)
+    monkeypatch.setenv("PATH", str(directory))
+
+    runtime = one_process_runtime([str(link)])
+
+    assert_that(runtime).is_not_none()
+    assert_that(runtime.node if runtime else None).is_equal_to(
+        str(directory / "node"),
+    )
+
+
+@pytest.mark.parametrize(
+    "entries",
+    [
+        pytest.param(["review-node-bin", "{abs}"], id="relative-first"),
+        pytest.param(["{abs}", "./bin"], id="dot-relative-later"),
+        pytest.param(["", "{abs}"], id="empty-leading"),
+        pytest.param(["{abs}", ""], id="empty-trailing"),
+    ],
+)
+def test_a_working_directory_relative_path_keeps_the_pool(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    entries: list[str],
+) -> None:
+    """A relative or empty ``PATH`` entry can change which ``node`` runs.
+
+    The binary's ``#!/usr/bin/env node`` resolves ``PATH`` from the call's
+    working directory, not lintro's, so the route is refused.
+
+    Args:
+        tmp_path: Project directory.
+        monkeypatch: Pytest's patcher.
+        entries: ``PATH`` entries; ``{abs}`` is a directory holding node.
+    """
+    link = _package(tmp_path)
+    directory = _node_dir(tmp_path)
+    monkeypatch.setenv(
+        "PATH",
+        os.pathsep.join(entry.replace("{abs}", str(directory)) for entry in entries),
+    )
+    messages: list[str] = []
+    sink = logger.add(messages.append, level="DEBUG", format="{message}")
+    try:
+        runtime = one_process_runtime([str(link)])
+    finally:
+        logger.remove(sink)
+
+    assert_that(runtime).is_none()
+    assert_that("".join(messages)).contains(
+        "One-process route not used",
+        "working-directory-relative entry",
+    )
+
+
+def test_the_rejected_check_is_logged(tmp_path: Path) -> None:
+    """A package the route refuses says why at debug level.
+
+    Args:
+        tmp_path: Project directory.
+    """
+    link = _package(tmp_path, bin_text=_BIN + 'import "./patched.js";\n')
+    messages: list[str] = []
+    sink = logger.add(messages.append, level="DEBUG", format="{message}")
+    try:
+        runtime = one_process_runtime([str(link)])
+    finally:
+        logger.remove(sink)
+
+    assert_that(runtime).is_none()
+    assert_that("".join(messages)).contains(
+        "One-process route not used",
+        "is not html-validate's own bin entry",
+    )
+
+
 def _run(
     tmp_path: Path,
     files: dict[str, str],
@@ -296,6 +404,20 @@ def test_each_file_has_its_own_deadline(tmp_path: Path) -> None:
 
     assert_that(sorted(run.verdicts)).is_equal_to([0])
     assert_that(run.timed_out_at).is_equal_to(1)
+
+
+def test_the_deadline_restarts_after_each_file(tmp_path: Path) -> None:
+    """Files that each finish in time pass, though together they take longer.
+
+    Args:
+        tmp_path: Working directory.
+    """
+    files = {f"[p{index}].html": _PAUSE for index in range(4)}
+
+    run = _run(tmp_path, files, timeout=1.5)
+
+    assert_that(run.timed_out_at).is_none()
+    assert_that(sorted(run.verdicts)).is_equal_to([0, 1, 2, 3])
 
 
 def test_a_crash_ends_the_run_where_it_stopped(tmp_path: Path) -> None:

@@ -9,9 +9,18 @@ package's API and validates every file in one process instead.
 The script does what the html-validate binary does for one file: it builds
 ``new CLI({})`` (the binary's options when it is given none), gets the JSON
 formatter and the validator, runs ``validateFile`` on the real path, and
-merges the report with ``Reporter.merge``. ``cli.isIgnored`` is asked first,
-as the binary's own file expansion does. File names travel on the script's
-stdin as JSON, never on a command line.
+merges the report with ``Reporter.merge``. File names travel on the script's
+stdin as JSON, never on a command line. ``cli.isIgnored`` is asked first as a
+safeguard only: the stdin allowlist already holds back any file a
+``.htmlvalidateignore`` could match, so a file reaching the script is never
+expected to be ignored.
+
+The script relies on this public API of html-validate's main entry, checked
+against the 11.x line (11.21.0): the ``CLI`` class with ``getFormatter("json")``,
+``getValidator()`` and ``isIgnored(filename)``; ``HtmlValidate.validateFile``
+(through the validator); ``Reporter.merge``; and the ``version`` export. A
+major release that changes any of these makes the script fail or report a
+different version, and every file then goes to the stdin pool.
 
 The package is used only when every check below holds; otherwise the stdin
 pool runs as before (:func:`locate_package` returns None):
@@ -23,7 +32,12 @@ pool runs as before (:func:`locate_package` returns None):
   node`` shebang and one ``import "../dist/esm/html-validate.js";``, so it
   runs the CLI from the same files the script loads, on the same ``node``;
 - the package exports ``./dist/esm/index.js`` as its Node ESM entry;
-- ``node`` is on ``PATH``.
+- ``node`` is on ``PATH`` and every ``PATH`` entry is absolute. The binary's
+  ``#!/usr/bin/env node`` looks ``node`` up from the working directory of the
+  call, so a relative or empty entry (empty means the working directory)
+  could make it start a different ``node`` than the one lintro finds.
+
+When a check fails, :func:`one_process_runtime` logs which one at debug level.
 
 The script reports the version it loaded before validating anything, and the
 run is used only when that version is the package's own.
@@ -49,6 +63,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, cast
+
+from loguru import logger
 
 #: The html-validate binary's own entry, line by line (html-validate 11).
 _BIN_LINES: tuple[str, ...] = (
@@ -192,6 +208,41 @@ def _is_own_bin(path: Path) -> bool:
     return lines == _BIN_LINES
 
 
+def _locate(command: Sequence[str]) -> HtmlValidatePackage | str:
+    """Find the html-validate package a resolved command runs.
+
+    Args:
+        command: The resolved html-validate command.
+
+    Returns:
+        The package, or the check that rejected it.
+    """
+    if len(command) != 1 or not os.path.isabs(command[0]):
+        return f"the command {list(command)!r} is not one absolute path"
+    executable = Path(os.path.realpath(command[0]))
+    if not executable.is_file() or not _is_own_bin(executable):
+        return f"{executable} is not html-validate's own bin entry"
+    directory = executable.parent.parent
+    manifest = _manifest(directory)
+    if manifest is None or manifest.get("name") != "html-validate":
+        return f"{directory} is not the html-validate package"
+    bin_entry = _bin_entry(manifest)
+    if (
+        not isinstance(bin_entry, str)
+        or Path(os.path.realpath(directory / bin_entry)) != executable
+    ):
+        return f"{directory}'s html-validate bin entry is not {executable}"
+    version = manifest.get("version")
+    if not isinstance(version, str):
+        return f"{directory} has no version"
+    if _node_import(manifest) != _API_ENTRY:
+        return f"{directory} does not export {_API_ENTRY} for Node"
+    entry = directory / _API_ENTRY
+    if not entry.is_file():
+        return f"{entry} does not exist"
+    return HtmlValidatePackage(directory=directory, version=version, entry=entry)
+
+
 def locate_package(command: Sequence[str]) -> HtmlValidatePackage | None:
     """Find the html-validate package a resolved command runs.
 
@@ -203,31 +254,25 @@ def locate_package(command: Sequence[str]) -> HtmlValidatePackage | None:
         The package, or None unless every check in the module docstring
         holds.
     """
-    if len(command) != 1 or not os.path.isabs(command[0]):
-        return None
-    executable = Path(os.path.realpath(command[0]))
-    if not executable.is_file() or not _is_own_bin(executable):
-        return None
-    directory = executable.parent.parent
-    manifest = _manifest(directory)
-    if manifest is None or manifest.get("name") != "html-validate":
-        return None
-    bin_entry = _bin_entry(manifest)
-    if (
-        not isinstance(bin_entry, str)
-        or Path(
-            os.path.realpath(directory / bin_entry),
-        )
-        != executable
-    ):
-        return None
-    version = manifest.get("version")
-    if _node_import(manifest) != _API_ENTRY or not isinstance(version, str):
-        return None
-    entry = directory / _API_ENTRY
-    if not entry.is_file():
-        return None
-    return HtmlValidatePackage(directory=directory, version=version, entry=entry)
+    located = _locate(command)
+    return located if isinstance(located, HtmlValidatePackage) else None
+
+
+def _relative_path_entry(search_path: str | None) -> str | None:
+    """Find a ``PATH`` entry that depends on the working directory.
+
+    Args:
+        search_path: The ``PATH`` value; None when unset.
+
+    Returns:
+        The first relative or empty entry, or None when every entry is
+        absolute. An unset ``PATH`` uses ``os.defpath``, as ``env`` does.
+    """
+    value = os.defpath if search_path is None else search_path
+    for entry in value.split(os.pathsep):
+        if not entry or not os.path.isabs(entry):
+            return entry
+    return None
 
 
 def one_process_runtime(command: Sequence[str]) -> OneProcessRuntime | None:
@@ -237,13 +282,23 @@ def one_process_runtime(command: Sequence[str]) -> OneProcessRuntime | None:
         command: The resolved html-validate command.
 
     Returns:
-        The runtime, or None to keep the stdin pool.
+        The runtime, or None to keep the stdin pool; the reason is logged
+        at debug level.
     """
-    package = locate_package(command)
-    node = shutil.which("node")
-    if package is None or node is None:
-        return None
-    return OneProcessRuntime(node=node, package=package)
+    located = _locate(command)
+    search_path = os.environ.get("PATH")
+    relative = _relative_path_entry(search_path)
+    node = shutil.which("node", path=search_path) if relative is None else None
+    if isinstance(located, str):
+        reason = located
+    elif relative is not None:
+        reason = f"PATH holds the working-directory-relative entry {relative!r}"
+    elif node is None:
+        reason = "node is not on PATH"
+    else:
+        return OneProcessRuntime(node=node, package=located)
+    logger.debug(f"[HtmlValidatePlugin] One-process route not used: {reason}")
+    return None
 
 
 @dataclass(frozen=True)
