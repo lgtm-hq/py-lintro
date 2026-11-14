@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.30] - 2026-11-14
+
+### Changed
+
+- **review**: keep review-state artifacts for 90 days (#3443) (faf2980)
+
+### Fixed
+
+- **tools**: stop Node preloads from replacing the pinned tool under npx (#3473)
+  (fb6f714)
+
 ## [0.180.29] - 2026-11-14
 
 ### Fixed
