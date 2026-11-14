@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.29] - 2026-11-14
+
+### Fixed
+
+- **tools**: force npm's script-shell under the npx fallback (#3459) (17cbce5)
+
 ## [0.180.28] - 2026-11-14
 
 ### Changed
