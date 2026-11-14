@@ -170,18 +170,39 @@ def _read_dependencies(manifest: dict[str, object]) -> dict[str, str]:
 
 
 def search_chain(origin: Path) -> tuple[Path, ...]:
-    """Return the directories to search, stopped at a repository boundary.
+    """Return the directories to search, stopped at a project boundary.
 
     An unbounded walk to the filesystem root is dangerous here in a way it is
     not for read-only lookups: a stray ``package.json`` in ``$HOME`` would make
     lintro believe it is inside a Node project, switch from a global install to
     ``npm install -D``, and write a dev dependency into an unrelated manifest.
     A ``~/package-lock.json`` could likewise decide the manager for a project
-    that has none.
+    that has none, and a planted ``node_modules/.bin`` above a project could
+    run in place of its own tools.
 
-    The walk therefore stops at the first directory containing a ``.git`` entry
-    (inclusive — a repository root is a legitimate project root), and never
-    ascends above the user's home directory.
+    The boundary, in order:
+
+    1. The first directory containing a ``.git`` entry, inclusive: a repository
+       root is a legitimate project root.
+    2. ``$HOME``, exclusive, unless the walk starts there.
+    3. When the walk meets neither (a downloaded project in ``/tmp``, a ``/code``
+       container mount), the nearest ``package.json``, inclusive, exactly as
+       before #2040. An ancestor's ``workspaces`` declaration is deliberately
+       not trusted here: nothing vouches for a manifest above an unrooted
+       project, and ``"workspaces": ["**"]`` would claim any directory. With no
+       manifest at all the whole chain is returned, also as before.
+
+    Intermediate ``package.json`` files do not stop the walk under rules 1 and
+    2, because npm, yarn and pnpm workspaces hoist a member's bins to the
+    workspace root. A hoisted workspace in practice lives in a repository or
+    under ``$HOME``; one with neither (an unpacked tarball outside ``$HOME``)
+    resolves only from its nearest manifest.
+
+    This is the single project boundary for Node.js tooling: runtime bin
+    resolution,
+    :func:`~lintro.tools.core.command_builders.find_local_node_binary`,
+    searches exactly this chain, so a hoisted workspace bin that install
+    planning can see is also the one that runs (#2040).
 
     Args:
         origin: Directory to search from.
@@ -201,13 +222,29 @@ def search_chain(origin: Path) -> tuple[Path, ...]:
         # nested below it. Starting *in* ``$HOME`` is a different matter — that
         # is a deliberate cwd, so the manifest there is the one meant.
         if directory == home and chain:
-            break
+            return tuple(chain)
         chain.append(directory)
         # ``.git`` is a directory in a normal clone and a file in a worktree or
         # submodule, so existence is the right test.
         if (directory / ".git").exists() or directory == home:
-            break
-    return tuple(chain)
+            return tuple(chain)
+    return _bound_to_project(tuple(chain))
+
+
+def _bound_to_project(chain: tuple[Path, ...]) -> tuple[Path, ...]:
+    """Cut a walk that met no ``.git`` or ``$HOME`` at the nearest manifest.
+
+    Args:
+        chain: The origin followed by every ancestor up to the filesystem root.
+
+    Returns:
+        *chain* up to and including the nearest directory with a
+        ``package.json``, or unchanged when there is none.
+    """
+    for index, directory in enumerate(chain):
+        if (directory / "package.json").is_file():
+            return chain[: index + 1]
+    return chain
 
 
 def detect_node_project(start: Path | None = None) -> NodeProject | None:

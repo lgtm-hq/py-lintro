@@ -177,6 +177,33 @@ def test_detect_node_project_returns_none_without_a_manifest(tmp_path: Path) -> 
     assert_that(detect_node_project(nested)).is_none()
 
 
+def test_detect_node_project_ignores_lockfile_above_project_without_git(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Outside ``$HOME`` with no ``.git``, evidence above the project is ignored.
+
+    Install planning walks the same bounded chain as bin resolution (#2040), so
+    a stray lockfile beside a downloaded project cannot pick its manager.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))
+    (tmp_path / "yarn.lock").write_text("", encoding="utf-8")
+    project = tmp_path / "downloaded-project"
+    project.mkdir()
+    (project / "package.json").write_text("{}", encoding="utf-8")
+
+    detected = detect_node_project(project)
+
+    assert_that(detected).is_not_none()
+    assert detected is not None  # narrow type for mypy
+    assert_that(detected.root).is_equal_to(project.resolve())
+    assert_that(detected.lockfile_manager).is_none()
+
+
 def test_detect_node_project_survives_malformed_manifest(tmp_path: Path) -> None:
     """A package.json that is not valid JSON still identifies the project root.
 
@@ -650,9 +677,14 @@ def test_workspace_package_inherits_the_repository_lockfile(tmp_path: Path) -> N
     live at the repository root. Stopping the search at the nested manifest
     would downgrade the decision to "whichever manager is installed".
 
+    The root is a repository (``.git``): with neither ``.git`` nor ``$HOME``
+    in reach the walk stops at the nearest manifest, because nothing then
+    marks the ancestor as this project's root (#2040).
+
     Args:
         tmp_path: Temporary directory provided by pytest.
     """
+    (tmp_path / ".git").mkdir()
     _write_project(tmp_path, lockfile="package-lock.json")
     workspace = tmp_path / "packages" / "web"
     workspace.mkdir(parents=True)
