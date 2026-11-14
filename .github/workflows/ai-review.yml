@@ -756,4 +756,7 @@ jobs:
           name: lintro-review-state-pr-${{ env.AI_REVIEW_PR }}-attempt-${{ github.run_attempt }}-final
           path: ai-review-state/
           if-no-files-found: ignore
-          retention-days: 30
+          # 90 days (the public-repo maximum) keeps review history long
+          # enough to archive for review-quality analysis. Prior-state
+          # lookup still stops at RETENTION_DAYS in review_state_artifacts.py.
+          retention-days: 90
