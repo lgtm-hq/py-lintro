@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.31] - 2026-11-14
+
+### Fixed
+
+- **ai/review**: hold findings a moved base pushed out of the diff (#3470) (6e154e3)
+
 ## [0.180.30] - 2026-11-14
 
 ### Changed
