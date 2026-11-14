@@ -26,7 +26,7 @@ from lintro.models.core.claim import Claim
 from lintro.models.core.tool_outcome import Checked, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.semgrep.semgrep_parser import parse_semgrep_output
-from lintro.plugins.base import BaseToolPlugin
+from lintro.plugins.base import BaseToolPlugin, PreparedExecution
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.rules import resolve_rule_pack, rule_pack_info, validate_rule_packs
@@ -35,7 +35,8 @@ from lintro.tools.core.option_validators import (
     validate_list,
     validate_str,
 )
-from lintro.utils.execution_paths import has_project_marker, project_root_markers
+from lintro.tools.core.readable_paths import with_unread_paths
+from lintro.tools.semgrep.scan_root import hidden_pack_targets
 
 # Constants for Semgrep configuration
 SEMGREP_DEFAULT_TIMEOUT: int = 300  # Semgrep needs more time on larger codebases
@@ -123,35 +124,21 @@ def _restore_pack_rule_ids(data: dict[str, Any], packs: list[str]) -> None:
             result["check_id"] = marker + suffix
 
 
-def _unanchored_pack_warning(packs: list[str], cwd: str) -> str | None:
-    """Explain when directory-scoped packs run without a project root.
-
-    Semgrep matches ``paths.include`` against target paths relative to its
-    working directory. Without a project marker that directory falls back to
-    the files' common ancestor, so scanning ``scripts/`` hands Semgrep
-    ``fmt.sh`` and a ``**/scripts/**`` glob silently matches nothing.
+def _withhold_hidden(result: ToolResult, warning: str | None) -> ToolResult:
+    """Fail a result whose directory-scoped packs could not see some targets.
 
     Args:
-        packs: Validated, enabled pack names.
-        cwd: Working directory chosen for the Semgrep subprocess.
+        result: The parsed Semgrep result.
+        warning: Why some targets were hidden from a pack, or None.
 
     Returns:
-        A warning for the user, or None when no enabled pack is affected.
+        ``result`` unchanged without a warning, else an incomplete result
+        that keeps its findings and names the hidden files first.
     """
-    affected = [name for name in packs if rule_pack_info(name).anchored_directories]
-    if not affected or has_project_marker(cwd):
-        return None
-    directories = dict.fromkeys(
-        directory
-        for name in affected
-        for directory in rule_pack_info(name).anchored_directories
-    )
-    return (
-        f"[semgrep] {', '.join(affected)}: findings under "
-        f"{', '.join(directories)} may be missed because no project marker was "
-        f"found in {cwd}. Add one of {', '.join(project_root_markers())} at the "
-        "project root."
-    )
+    if warning is None:
+        return result
+    logger.warning(warning)
+    return with_unread_paths(result=result, reason=warning)
 
 
 def _has_unclosed_array(prefix: str) -> bool:
@@ -410,14 +397,6 @@ class SemgrepPlugin(BaseToolPlugin):
         # Output format - always use JSON for reliable parsing
         cmd.extend([f"--{SEMGREP_OUTPUT_FORMAT}"])
 
-        if cwd is not None:
-            unanchored = _unanchored_pack_warning(
-                validate_rule_packs(self.options.get("rule_packs", [])),
-                cwd,
-            )
-            if unanchored is not None:
-                logger.warning(unanchored)
-
         # Config option (required for semgrep to know what rules to use)
         for config in _rule_configs(self.options, cwd, self._config_explicit):
             cmd.extend(["--config", config])
@@ -481,6 +460,27 @@ class SemgrepPlugin(BaseToolPlugin):
         if "." in code and "/" not in code:
             return DocUrlTemplate.SEMGREP.format(code=url_quote(code, safe=""))
         return None
+
+    def _hidden_pack_reason(
+        self,
+        ctx: PreparedExecution,
+        paths: list[str],
+    ) -> str | None:
+        """Name targets an enabled directory-scoped pack cannot match.
+
+        Args:
+            ctx: Prepared execution context; Semgrep runs from ``ctx.cwd``.
+            paths: Paths the user asked to scan, bounding the scan scope.
+
+        Returns:
+            Why the run is incomplete, or None when every pack can match.
+        """
+        return hidden_pack_targets(
+            packs=validate_rule_packs(self.options.get("rule_packs", [])),
+            cwd=ctx.cwd,
+            files=ctx.rel_files,
+            scopes=paths,
+        )
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Semgrep for security issues and code quality.
@@ -608,18 +608,22 @@ class SemgrepPlugin(BaseToolPlugin):
                 else True if issues else None
             )
 
-            return ToolResult.from_outcome(
-                ToolOutcome(
-                    execution=Checked(
-                        success=execution_success,
-                        inspected_files=inspected_files,
+            # A pack that could not see some targets is not a clean pass.
+            return _withhold_hidden(
+                ToolResult.from_outcome(
+                    ToolOutcome(
+                        execution=Checked(
+                            success=execution_success,
+                            inspected_files=inspected_files,
+                        ),
+                        issues_count=issues_count,
                     ),
-                    issues_count=issues_count,
+                    name=self.definition.name,
+                    output=output if not execution_success else None,
+                    issues=issues,
+                    parse_failures_count=parse_failures_count or None,
                 ),
-                name=self.definition.name,
-                output=output if not execution_success else None,
-                issues=issues,
-                parse_failures_count=parse_failures_count or None,
+                self._hidden_pack_reason(ctx, paths),
             )
 
         except (json.JSONDecodeError, ValueError) as e:

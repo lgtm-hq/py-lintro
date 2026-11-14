@@ -17,7 +17,11 @@ from lintro.plugins.base import (
     PreparedExecution,
 )
 from lintro.utils.path_filtering import walk_files_with_excludes
-from lintro.utils.project_detection import _VENDOR_SKIP_DIRS, _iter_project_files
+from lintro.utils.project_detection import (
+    _LINTRO_GENERATED_DIRS,
+    _VENDOR_SKIP_DIRS,
+    _iter_project_files,
+)
 
 from .conftest import NoFixPlugin
 
@@ -784,7 +788,12 @@ def test_directory_excludes_are_mirrored_in_the_detection_prune_set() -> None:
     directory_excludes = {
         pattern.rstrip("/")
         for pattern in DEFAULT_EXCLUDE_PATTERNS
-        if pattern.endswith("/")
+        if pattern.endswith("/") and "/" not in pattern.rstrip("/")
+    }
+    lintro_output = {
+        pattern.rstrip("/").removeprefix("**/.lintro/")
+        for pattern in DEFAULT_EXCLUDE_PATTERNS
+        if pattern.startswith("**/.lintro/")
     }
 
     assert_that(directory_excludes).contains(
@@ -793,6 +802,60 @@ def test_directory_excludes_are_mirrored_in_the_detection_prune_set() -> None:
         ".lintro-cache",
     )
     assert_that(sorted(directory_excludes - _VENDOR_SKIP_DIRS)).is_empty()
+    # Nested excludes inside `.lintro/` are mirrored by the detection globs.
+    assert_that(lintro_output).is_equal_to(set(_LINTRO_GENERATED_DIRS))
+    assert_that(
+        [
+            pattern
+            for pattern in DEFAULT_EXCLUDE_PATTERNS
+            if "/" in pattern.rstrip("/") and not pattern.startswith("**/.lintro/")
+        ],
+    ).is_empty()
+
+
+@pytest.mark.parametrize("base", [".", "packages/pkg"], ids=["root", "nested"])
+def test_lintro_output_is_pruned_but_lintro_user_config_is_kept(
+    tmp_path: Path,
+    base: str,
+) -> None:
+    """Both walks skip Lintro's generated output but keep files users write.
+
+    Lintro writes per-run reports and an ``.active`` lock under
+    ``.lintro/run-*/`` and artifacts under ``.lintro/artifacts/``; an
+    all-files scan (Semgrep's script pack) reported that lock as a target
+    (#3437). ``.lintro/review-agents/*.md`` is documented user config and
+    ``severity-baseline.json`` is kept state, so both stay visible.
+
+    Args:
+        tmp_path: Temporary project directory.
+        base: Directory holding ``.lintro``, relative to ``tmp_path``.
+    """
+    lintro_dir = tmp_path / base / ".lintro"
+    generated = [
+        lintro_dir / "run-20260101-000000" / ".active",
+        lintro_dir / "run-20260101-000000" / "report.md",
+        lintro_dir / "artifacts" / "json" / "results.json",
+    ]
+    kept = [
+        lintro_dir / "review-agents" / "policy.md",
+        lintro_dir / "severity-baseline.json",
+        tmp_path / ".lintro-ignore",
+        tmp_path / "fmt.sh",
+    ]
+    for path in generated + kept:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x\n")
+
+    discovered = walk_files_with_excludes(
+        paths=[str(tmp_path)],
+        file_patterns=["*"],
+        exclude_patterns=list(DEFAULT_EXCLUDE_PATTERNS),
+    )
+    detected = set(_iter_project_files(tmp_path))
+
+    expected = sorted(str(path) for path in kept)
+    assert_that(sorted(str(Path(path)) for path in discovered)).is_equal_to(expected)
+    assert_that(sorted(str(path) for path in detected)).is_equal_to(expected)
 
 
 def test_cache_excludes_skip_directories_but_keep_cache_named_sources(
