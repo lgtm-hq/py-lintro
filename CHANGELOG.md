@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.33] - 2026-11-14
+
+### Changed
+
+- **security**: keep semgrep-only OSV ignores from hiding other Python lockfiles (#3478)
+  (184eb47)
+
+### Fixed
+
+- **semgrep**: fail as incomplete when a project marker is missing and packs can't match
+  (#3479) (2c69685)
+
 ## [0.180.32] - 2026-11-14
 
 ### Fixed
