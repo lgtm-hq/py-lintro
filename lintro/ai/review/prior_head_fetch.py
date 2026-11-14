@@ -17,26 +17,36 @@ It then deepens the base, a bounded number of commits, until
 new shallow boundary could cut the head's own history, which the mapping
 walks.
 
+Mapping a finding across a moved base can place it on a line that is now
+base content. The base-move hold (#3467) is what keeps such a finding open;
+this fetch makes more findings placeable, so it relies on that hold.
+
 The fetches add only what the checkout does not hold. The head fetch
 already brought the pull request's ancestry, so a previous head costs its
 own commits and the base costs the commits it gained since the branch
 point. Measured on py-lintro: under 0.7 s and 0.5 MB per commit fetched by
-id, and 2.1 s and 0.5 MB for one ``--deepen=32``. Each git call keeps the
-shared 120-second timeout. A head GitHub no longer serves (a force-push
-followed by garbage collection) is logged and left out: the findings
-recorded at it stay held where git cannot place them, as before.
+id, and 2.1 s and 0.5 MB for one ``--deepen=32``. All network calls share
+one deadline (:data:`PRIOR_FETCH_BUDGET_SECONDS`): each gets what is left of
+it, none starts once it is spent, and a timed-out call stops the rest,
+deepening included. A head GitHub no longer serves (a force-push followed by
+garbage collection) is logged and left out: the findings recorded at it stay
+held where git cannot place them, as before. ``LINTRO_REVIEW_NO_PRIOR_FETCH=1``
+turns the network calls off; the merge-base is still read from what the
+checkout holds.
 """
 
 from __future__ import annotations
 
+import os
 import re
+import time
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from lintro.ai.review.context.git_ops import _run_git
+from lintro.ai.review.context.git_ops import _GIT_GH_TIMEOUT_SECONDS, _run_git
 from lintro.ai.review.delta import merge_base
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_checkout import ReviewCheckout
@@ -51,6 +61,8 @@ if TYPE_CHECKING:
 __all__ = [
     "BASE_DEEPEN_STEPS",
     "MAX_PRIOR_HEADS",
+    "NO_PRIOR_FETCH_ENV",
+    "PRIOR_FETCH_BUDGET_SECONDS",
     "PriorHeadFetch",
     "fetch_prior_heads",
     "prior_heads",
@@ -63,6 +75,12 @@ MAX_PRIOR_HEADS = 8
 #: fetches and 672 commits past the base before the merge-base is left unknown.
 BASE_DEEPEN_STEPS = (32, 128, 512)
 
+#: Wall-clock seconds every network call of one round's preparation shares.
+PRIOR_FETCH_BUDGET_SECONDS = 60.0
+
+#: Set to ``1`` to skip the network calls (a developer's offline checkout).
+NO_PRIOR_FETCH_ENV = "LINTRO_REVIEW_NO_PRIOR_FETCH"
+
 _OID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 
@@ -74,12 +92,38 @@ class PriorHeadFetch:
         fetched: Commits that were missing and are now present.
         unreachable: Commits that were missing and could not be fetched.
         merge_base: ``merge-base(base, head)`` after any deepening, or
-            ``""`` when it is still unknown.
+            ``""`` when it is still unknown or the run is not a pull request
+            with a tree.
     """
 
     fetched: tuple[str, ...] = ()
     unreachable: tuple[str, ...] = ()
     merge_base: str = ""
+
+
+@dataclass(slots=True)
+class _Budget:
+    """The deadline the round's network calls share.
+
+    Attributes:
+        deadline: :func:`time.monotonic` value after which no call starts.
+        stalled: Set when a call timed out or git could not start; no
+            further call starts.
+    """
+
+    deadline: float
+    stalled: bool = field(default=False)
+
+    def timeout(self) -> float | None:
+        """Return the timeout for the next call, or ``None`` when spent.
+
+        Returns:
+            Seconds the next call may take, at most the shared git timeout.
+        """
+        left = self.deadline - time.monotonic()
+        if self.stalled or left <= 0:
+            return None
+        return min(left, _GIT_GH_TIMEOUT_SECONDS)
 
 
 def prior_heads(*, prior: ReviewState) -> tuple[str, ...]:
@@ -125,29 +169,35 @@ def fetch_prior_heads(
         repo_root: The repository the round resolves commits in.
 
     Returns:
-        What was fetched; empty on a run that is not a pull request or has
-        no tree to ask git about.
+        What was fetched, and the merge-base the round records; empty on a
+        run that is not a pull request or has no tree to ask git about.
     """
-    head = context.head_ref
-    if (
-        context.pr_metadata is None
-        or context.checkout is ReviewCheckout.NONE
-        or not _OID.fullmatch(head)
-    ):
+    if context.pr_metadata is None or context.checkout is ReviewCheckout.NONE:
         return PriorHeadFetch()
-    base = context.base_ref if _OID.fullmatch(context.base_ref) else ""
-    wanted = dict.fromkeys(
-        [*([base] if base else []), *(prior_heads(prior=prior) if prior else ())],
-    )
+    head = context.head_ref
+    base = context.base_ref
+    if os.environ.get(NO_PRIOR_FETCH_ENV, "").strip() == "1" or not (
+        _OID.fullmatch(head) and _OID.fullmatch(base)
+    ):
+        return PriorHeadFetch(
+            merge_base=merge_base(repo_root=repo_root, base_sha=base, head_sha=head),
+        )
+    budget = _Budget(deadline=time.monotonic() + PRIOR_FETCH_BUDGET_SECONDS)
+    wanted = dict.fromkeys([base, *(prior_heads(prior=prior) if prior else ())])
     missing = [sha for sha in wanted if not _has_commit(repo_root=repo_root, sha=sha)]
-    fetched, unreachable = _fetch(repo_root=repo_root, shas=missing)
+    fetched, unreachable = _fetch(repo_root=repo_root, shas=missing, budget=budget)
     for sha in unreachable:
         logger.warning(
             "Could not fetch {} recorded by an earlier review round; findings "
             "placed there stay held where git cannot map them.",
             sha[:12],
         )
-    found = _deepen_to_merge_base(repo_root=repo_root, base=base, head=head)
+    found = _deepen_to_merge_base(
+        repo_root=repo_root,
+        base=base,
+        head=head,
+        budget=budget,
+    )
     if fetched:
         logger.info(
             "Fetched {} commit(s) earlier review rounds recorded.",
@@ -180,58 +230,86 @@ def _has_commit(*, repo_root: str, sha: str) -> bool:
     return result.returncode == 0
 
 
-def _fetch(*, repo_root: str, shas: Sequence[str]) -> tuple[list[str], list[str]]:
+def _network_git(
+    *,
+    repo_root: str,
+    args: list[str],
+    budget: _Budget,
+) -> tuple[int, str] | None:
+    """Run one networked git call inside the shared budget.
+
+    Args:
+        repo_root: The repository.
+        args: Git arguments after ``-C <repo_root>``.
+        budget: The round's budget; marked stalled on a timeout.
+
+    Returns:
+        ``(returncode, stderr)``, or ``None`` when the budget was spent
+        before the call or the call timed out or could not start.
+    """
+    timeout = budget.timeout()
+    if timeout is None:
+        logger.warning(
+            "The {}-second budget for fetching earlier review heads is spent; "
+            "skipping git {}.",
+            PRIOR_FETCH_BUDGET_SECONDS,
+            args[0],
+        )
+        return None
+    try:
+        result = _run_git(
+            args=["-C", repo_root, *args],
+            check=False,
+            timeout=timeout,
+        )
+    except ReviewContextError as exc:
+        budget.stalled = True
+        logger.warning("Fetching earlier review heads stopped: {}", exc)
+        return None
+    return result.returncode, result.stderr
+
+
+def _fetch(
+    *,
+    repo_root: str,
+    shas: Sequence[str],
+    budget: _Budget,
+) -> tuple[list[str], list[str]]:
     """Fetch commits by id: all at once, then one by one when that fails.
 
     A single unservable id fails the whole batch, so a failed batch is
-    retried per commit. A timeout or a git that will not start stops the
-    fetching: the remote is not answering.
+    retried per commit while the budget lasts.
 
     Args:
         repo_root: The repository.
         shas: The missing commits.
+        budget: The round's budget.
 
     Returns:
         ``(fetched, unreachable)``.
     """
     if not shas:
         return [], []
-    ok = _fetch_batch(repo_root=repo_root, shas=shas)
-    if ok is False and len(shas) > 1:
-        for sha in shas:
-            if _fetch_batch(repo_root=repo_root, shas=[sha]) is None:
-                break
+    batches = [list(shas)]
+    for batch in batches:
+        result = _network_git(
+            repo_root=repo_root,
+            args=["fetch", "--no-tags", "origin", *batch],
+            budget=budget,
+        )
+        if result is None:
+            break
+        returncode, stderr = result
+        if returncode != 0:
+            logger.debug(
+                "git fetch of {} failed: {}",
+                ", ".join(sha[:12] for sha in batch),
+                stderr.strip()[:200],
+            )
+            if len(batch) > 1:
+                batches.extend([sha] for sha in batch)
     fetched = [sha for sha in shas if _has_commit(repo_root=repo_root, sha=sha)]
     return fetched, [sha for sha in shas if sha not in fetched]
-
-
-def _fetch_batch(*, repo_root: str, shas: Sequence[str]) -> bool | None:
-    """Run one ``git fetch`` of commits by id.
-
-    Args:
-        repo_root: The repository.
-        shas: The commits.
-
-    Returns:
-        True when git succeeded, False when it refused, and ``None`` when it
-        timed out or could not start.
-    """
-    try:
-        result = _run_git(
-            args=["-C", repo_root, "fetch", "--no-tags", "origin", *shas],
-            check=False,
-        )
-    except ReviewContextError as exc:
-        logger.warning("Fetching earlier review heads stopped: {}", exc)
-        return None
-    if result.returncode != 0:
-        logger.debug(
-            "git fetch of {} failed: {}",
-            ", ".join(sha[:12] for sha in shas),
-            result.stderr.strip()[:200],
-        )
-        return False
-    return True
 
 
 def _is_shallow(*, repo_root: str) -> bool:
@@ -253,43 +331,40 @@ def _is_shallow(*, repo_root: str) -> bool:
     return result.returncode == 0 and result.stdout.strip() == "true"
 
 
-def _deepen_to_merge_base(*, repo_root: str, base: str, head: str) -> str:
+def _deepen_to_merge_base(
+    *,
+    repo_root: str,
+    base: str,
+    head: str,
+    budget: _Budget,
+) -> str:
     """Deepen a shallow base, in bounded steps, until it meets the head.
 
     Args:
         repo_root: The repository.
-        base: The base tip, or ``""`` when unknown.
+        base: The base tip.
         head: The head under review.
+        budget: The round's budget; a stalled or spent one deepens nothing.
 
     Returns:
         ``merge-base(base, head)``, or ``""`` when it is still unknown.
     """
-    if not base:
-        return ""
     found = merge_base(repo_root=repo_root, base_sha=base, head_sha=head)
     for step in BASE_DEEPEN_STEPS:
         if found or not _is_shallow(repo_root=repo_root):
             break
-        try:
-            result = _run_git(
-                args=[
-                    "-C",
-                    repo_root,
-                    "fetch",
-                    "--no-tags",
-                    f"--deepen={step}",
-                    "origin",
-                    base,
-                ],
-                check=False,
-            )
-        except ReviewContextError as exc:
-            logger.warning("Deepening the base stopped: {}", exc)
+        result = _network_git(
+            repo_root=repo_root,
+            args=["fetch", "--no-tags", f"--deepen={step}", "origin", base],
+            budget=budget,
+        )
+        if result is None:
             break
-        if result.returncode != 0:
+        returncode, stderr = result
+        if returncode != 0:
             logger.warning(
                 "Could not deepen the base to find its merge-base with the " "head: {}",
-                result.stderr.strip()[:200],
+                stderr.strip()[:200],
             )
             break
         found = merge_base(repo_root=repo_root, base_sha=base, head_sha=head)

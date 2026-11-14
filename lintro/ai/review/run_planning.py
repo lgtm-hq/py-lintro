@@ -30,10 +30,7 @@ from lintro.ai.review.cli_limits import (
     resolve_synthesis_diff_budget,
 )
 from lintro.ai.review.custom_agents import select_custom_agents
-from lintro.ai.review.delta import (
-    merge_base,
-    plan_delta,
-)
+from lintro.ai.review.delta import plan_delta
 from lintro.ai.review.delta_round import narrow_round
 from lintro.ai.review.enums.delta_reason import DeltaReason
 from lintro.ai.review.enums.review_checkout import ReviewCheckout
@@ -412,7 +409,7 @@ def plan_run(
     repo_root = context.repo_root or os.getcwd()
     # A shallow CI checkout lacks the heads earlier rounds reviewed and the
     # base's history; fetch them so prior findings map forward (#3471).
-    fetch_prior_heads(
+    prepared = fetch_prior_heads(
         prior=options.prior_state,
         context=context,
         repo_root=repo_root,
@@ -424,18 +421,10 @@ def plan_run(
         force_full=options.force_full,
         reusable_rounds=reusable,
     )
-    # Asked once per round: recorded for the next round's base check, stamped
-    # on this round's sightings, and compared by the moved-base hold (#3467).
-    recorded_merge_base = (
-        merge_base(
-            repo_root=repo_root,
-            base_sha=context.base_ref,
-            head_sha=context.head_ref,
-        )
-        if context.pr_metadata is not None
-        and context.checkout is not ReviewCheckout.NONE
-        else ""
-    )
+    # Asked once per round, after any deepening: recorded for the next
+    # round's base check, stamped on this round's sightings, and compared by
+    # the moved-base hold (#3467).
+    recorded_merge_base = prepared.merge_base
     chunks, delta, resume = narrow_round(
         chunks=chunks,
         delta=delta,

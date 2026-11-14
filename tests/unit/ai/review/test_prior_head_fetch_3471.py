@@ -24,15 +24,21 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.review import prior_head_fetch
+from lintro.ai.review.context import git_ops
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_checkout import ReviewCheckout
+from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
+from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.models.delta_plan import LOCATION_UNMAPPED
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.pr_metadata import PRMetadata
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.prior_head_fetch import (
+    BASE_DEEPEN_STEPS,
     MAX_PRIOR_HEADS,
+    NO_PRIOR_FETCH_ENV,
     fetch_prior_heads,
     prior_heads,
 )
@@ -389,3 +395,85 @@ def test_prior_heads_skip_holds_and_closed_findings_and_stop_at_the_cap() -> Non
     assert_that(heads).is_length(MAX_PRIOR_HEADS)
     assert_that(heads[0]).is_equal_to(shas[-1])
     assert_that(heads).does_not_contain(LOCATION_UNMAPPED, "", "c" * 40)
+
+
+def test_the_off_switch_leaves_the_checkout_as_it_was(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``LINTRO_REVIEW_NO_PRIOR_FETCH=1``: nothing is fetched, X stays held."""
+    scenario = _rebased(tmp_path)
+    monkeypatch.setenv(NO_PRIOR_FETCH_ENV, "1")
+
+    second = _review(
+        scenario,
+        reported=[harness._x(file="a.py", line=81 + _SHIFT)],
+        force_full=True,
+    )
+
+    assert_that(_holds(scenario.clone, scenario.old_head)).is_false()
+    assert_that(matcher_relocations(result=second.result)).is_equal_to(
+        {scenario.key: ("a.py", 81, LOCATION_UNMAPPED)},
+    )
+    assert_that(second.state.runs[-1].identity.merge_base).is_empty()
+
+
+def test_a_spent_budget_starts_no_fetch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no time left the missing head is unreachable and nothing deepens."""
+    scenario = _rebased(tmp_path)
+    monkeypatch.setattr(prior_head_fetch, "PRIOR_FETCH_BUDGET_SECONDS", 0.0)
+    shallow_before = git(scenario.clone, "rev-parse", "--git-path", "shallow")
+    boundary = (scenario.clone / shallow_before).read_text()
+    context = harness._git_context(repo=scenario.clone, base=scenario.merge_base)
+
+    fetched = fetch_prior_heads(
+        prior=scenario.state,
+        context=replace(context, base_ref=scenario.base_tip),
+        repo_root=str(scenario.clone),
+    )
+
+    assert_that(fetched.unreachable).is_equal_to((scenario.old_head,))
+    assert_that(fetched.merge_base).is_empty()
+    assert_that((scenario.clone / shallow_before).read_text()).is_equal_to(boundary)
+
+
+def test_a_timed_out_fetch_stops_before_deepening(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A batch that times out ends the preparation: no retry and no deepen."""
+    scenario = _rebased(tmp_path)
+    started: list[list[str]] = []
+
+    def timing_out(
+        *,
+        args: list[str],
+        check: bool = True,
+        timeout: float = 120.0,
+    ) -> object:
+        if "fetch" in args:
+            started.append(args)
+            raise ReviewContextError(
+                "git fetch timed out after 1s",
+                code=ReviewContextErrorCode.GIT_COMMAND_FAILED,
+            )
+        return git_ops._run_git(args=args, check=check, timeout=timeout)
+
+    monkeypatch.setattr(prior_head_fetch, "_run_git", timing_out)
+    context = harness._git_context(repo=scenario.clone, base=scenario.merge_base)
+
+    fetched = fetch_prior_heads(
+        prior=scenario.state,
+        context=replace(context, base_ref=scenario.base_tip),
+        repo_root=str(scenario.clone),
+    )
+
+    assert_that(fetched.unreachable).is_equal_to((scenario.old_head,))
+    assert_that(fetched.merge_base).is_empty()
+    assert_that([arg for args in started for arg in args]).does_not_contain(
+        *[f"--deepen={step}" for step in BASE_DEEPEN_STEPS],
+    )
+    assert_that(started).is_length(1)

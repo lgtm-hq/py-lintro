@@ -1018,6 +1018,16 @@ resolve; it never narrows what it may report.**
   not reviewed. One whose file the PR does touch is judged as any other, so a finding
   the PR fixed still resolves.
 
+  All of these network calls share one 60-second budget (`PRIOR_FETCH_BUDGET_SECONDS`).
+  Each call gets what is left of it, no call starts once it is spent, and a call that
+  times out ends the preparation, deepening included. Set
+  `LINTRO_REVIEW_NO_PRIOR_FETCH=1` to skip the network calls; the merge-base is then
+  read from what the checkout already holds. In a developer's shallow clone the fetch
+  writes `FETCH_HEAD` and the deepening moves `.git/shallow`; a full clone is left
+  untouched. A finding the fetch makes placeable can land on a line the base absorbed,
+  outside the PR's diff: the base-move hold (#3467) keeps such a finding open, and this
+  fetch relies on it.
+
 - **What is reported and counted.** Findings are never filtered by delta location, and
   coverage identity stays the whole-PR patch hash, so a changed file the round did not
   read still forces `INCOMPLETE` (ADR-0007). The question pass and the synthesis call
