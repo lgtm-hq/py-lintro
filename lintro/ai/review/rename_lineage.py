@@ -15,11 +15,16 @@ can walk commit by commit. The lookup is skipped whenever the first path may
 now be a different file, git pairs the destination with another source, or
 the range's history is out of reach: holding the finding can leave a
 duplicate thread, while a wrong move can resolve a live one.
+
+A finding first reported on a file the pull request had already renamed
+never moves, so it would keep no first path. :func:`stamp_base_paths` gives
+such a new record the path its file had at the pull request's base instead
+(#3449), and the same guarded lookup applies to it.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from lintro.ai.review.git_line_map import (
@@ -33,11 +38,14 @@ from lintro.ai.review.git_line_map import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from lintro.ai.review.models.finding_match_result import FindingMatchResult
+
 __all__ = [
     "RoundLookups",
     "cached_exists",
     "cached_renames",
     "lineage_rename",
+    "stamp_base_paths",
     "unpaired_rename",
 ]
 
@@ -185,3 +193,41 @@ def lineage_rename(
         path=origin_path,
     )
     return dest if added is False else ""
+
+
+def stamp_base_paths(
+    *,
+    match: FindingMatchResult,
+    renamed_from: Mapping[str, str],
+) -> FindingMatchResult:
+    """Give each new record on a renamed file its path at the PR's base (#3449).
+
+    A record first created on ``b.py`` while the pull request renames
+    ``a.py -> b.py`` has not moved, so it would keep no
+    :attr:`~lintro.ai.review.models.finding_record.FindingRecord.origin_path`.
+    When ``b.py`` is later renamed again and git reads that as a delete plus
+    an add, the pull request's metadata names only ``a.py -> c.py``; recording
+    ``a.py`` lets :func:`lineage_rename` look it up, under every one of its
+    guards. Carried and regressed records keep the lineage they already have.
+
+    Args:
+        match: The round's matching result.
+        renamed_from: The pull request's renames, source path to new path.
+
+    Returns:
+        The result with ``origin_path`` set on every new record whose file
+        the pull request renamed; unchanged when there is none.
+    """
+    base_of = {new: old for old, new in renamed_from.items() if old and new != old}
+    stamped = {
+        record.key: replace(record, origin_path=base_of[record.file])
+        for record in match.new
+        if not record.origin_path and record.file in base_of
+    }
+    if not stamped:
+        return match
+    return replace(
+        match,
+        records=tuple(stamped.get(record.key, record) for record in match.records),
+        new=tuple(stamped.get(record.key, record) for record in match.new),
+    )

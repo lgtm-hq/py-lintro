@@ -20,6 +20,7 @@ from loguru import logger
 from lintro.ai.enums.cost_basis import SHADOW_COST_BASES, CostBasis
 from lintro.ai.providers.reported_model import ReportedModel
 from lintro.ai.review.coverage import inherit_same_round_paths
+from lintro.ai.review.delta_lines import pr_renames
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.finding_matcher import match_findings
 from lintro.ai.review.github_constants import MAX_STORED_RUNS
@@ -31,6 +32,7 @@ from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_outcome import RunOutcome
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.run_usage import RunUsage
+from lintro.ai.review.rename_lineage import stamp_base_paths
 from lintro.ai.review.resume import records_for_reviewed
 from lintro.ai.review.reuse_gate import inherit_model_evidence
 from lintro.ai.review.sensitivity import filter_findings_by_policy
@@ -181,6 +183,11 @@ def write_incremental_coverage_part(
         # A delta round (#2627) resolves only what it re-read, mid-run too.
         reviewed_ranges=ranges_by_path(reviewed_ranges=resume.reviewed_ranges),
         relocations=relocations_by_key(relocations=resume.relocations),
+    )
+    # A resumed round must not lose a new record's base path (#3449).
+    match = stamp_base_paths(
+        match=match,
+        renamed_from=pr_renames(changed_files=context.changed_files),
     )
     # A shadow figure is never spend (#2867, ADR-0011 B): a gateway's is
     # what the budget charged, priced per call on the shadow model, and a

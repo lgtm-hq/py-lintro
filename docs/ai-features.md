@@ -935,13 +935,16 @@ resolve; it never narrows what it may report.**
   changed-file metadata moves it: a file reported as renamed takes the finding to its
   new path, at its stored line. That metadata names only the pull request's overall
   rename, so a finding an earlier round already carried to a renamed file remembers the
-  path it was first tracked at (`FindingRecord.origin_path`, #3432). That is the first
-  path the review tracked the finding on, not necessarily its path at the pull request's
-  base: a finding first reported on a file the pull request had already renamed has no
-  lineage to follow. When git reads its current path as deleted and the pull request
-  renames that first path, the finding follows that rename too. The lookup is skipped,
-  and the finding held as before, when the first path's provenance cannot be verified or
-  could be ambiguous:
+  path it was first tracked at (`FindingRecord.origin_path`, #3432). A finding first
+  reported on a file the pull request had already renamed records that file's path at
+  the pull request's base instead (#3449, from the round's `pr_renames` metadata): first
+  reported on `b.py` while the pull request renames `a.py` to `b.py`, it records `a.py`,
+  so a later `b.py -> c.py` that git reads as a delete plus an add, while the pull
+  request names `a.py -> c.py`, still finds it. A finding on a file the pull request did
+  not rename records nothing. When git reads its current path as deleted and the pull
+  request renames that first path, the finding follows that rename too. The lookup is
+  skipped, and the finding held as before, when the first path's provenance cannot be
+  verified or could be ambiguous:
   - git cannot walk the whole range since the finding's recorded head: the head is
     unreachable, or the checkout is shallow and its boundary cuts into the range (the
     recorded head is not an ancestor there, or a boundary commit lies inside it), even

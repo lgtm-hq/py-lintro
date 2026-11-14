@@ -24,6 +24,7 @@ from lintro.ai.review.coverage import (
 )
 from lintro.ai.review.coverage_rounds import resolve_run_flags
 from lintro.ai.review.degradation_carry import carried_degradations
+from lintro.ai.review.delta_lines import pr_renames
 from lintro.ai.review.diff_gate import DiffGateCounts
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
@@ -251,6 +252,9 @@ def assemble_review_result(
         merge_base=plan.merge_base,
         reviewed_ranges=plan.reviewed_ranges,
         relocated_findings=plan.resume.relocations,
+        pr_renames=tuple(
+            sorted(pr_renames(changed_files=context.changed_files).items()),
+        ),
         custom_agents_skipped=(
             len(plan.agent_selection.skipped) + len(outcome.custom_agents_failed)
         ),

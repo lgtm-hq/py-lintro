@@ -54,6 +54,12 @@
   "merge_base": "",
   "reviewed_ranges": [],
   "relocated_findings": [],
+  "pr_renames": [
+    [
+      "src/auth/token_utils.py",
+      "src/auth/tokens.py"
+    ]
+  ],
   "custom_agents_run": 0,
   "custom_agents_skipped": 0,
   "reviewed_paths": [

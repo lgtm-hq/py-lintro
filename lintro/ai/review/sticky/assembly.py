@@ -36,6 +36,7 @@ from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.round_outcome import RoundOutcome
 from lintro.ai.review.models.sticky_plan import StickyPlan
 from lintro.ai.review.models.sticky_request import StickyRequest
+from lintro.ai.review.rename_lineage import stamp_base_paths
 from lintro.ai.review.reuse_gate import inherit_model_evidence
 from lintro.ai.review.run_record_factory import (
     RoundTotals,
@@ -93,6 +94,11 @@ def _round_outcome(*, request: StickyRequest) -> RoundOutcome:
         departed_paths=request.departed_paths,
         reviewed_ranges=matcher_reviewed_ranges(result=request.result),
         relocations=matcher_relocations(result=request.result),
+    )
+    # A record first seen on a renamed file keeps its base path (#3449).
+    match = stamp_base_paths(
+        match=match,
+        renamed_from=dict(request.result.metadata.pr_renames),
     )
     match = replace(
         match,
