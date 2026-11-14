@@ -956,15 +956,49 @@ resolve; it never narrows what it may report.**
   open and is marked not re-verified. A round maps at most 200 findings through git
   (`MAX_MAPPED_FINDINGS`, one `git diff -U0` per distinct recorded head and path); any
   beyond that are held (`"unchecked"`), carried unverified and never resolved that
-  round. Every diff behind this pins its format against user configuration: literal
-  pathspecs (`odd[1].py` is never a glob), `--no-textconv`, `--no-ext-diff`,
-  `--no-color`, `--no-relative` and fixed `a/`/`b/` prefixes. Only the section whose
-  headers name the intended file is read. A record still carried without being read (its
-  file was not read this round) is stored with `unverified: true`. The sticky, including
-  a board rebuilt from stored state, marks it **⏸ not re-verified**. Its severity and
-  its weight in the verdict do not change. The prompt says what range the embedded text
-  is ("the change since the previous review round … unchanged context lines may still be
-  earlier changes of this pull request"), and the depth-3 adversarial sweep and an
+  round.
+
+  **A moved base never resolves a finding it pushed out of the diff (#3467).** Findings
+  outside the pull request's hunks are dropped before matching, so after a rebase onto a
+  base that already contains a finding's line (or a SIGTERM checkpoint resumed against a
+  newer base), the provider cannot report it again, even though the code is unchanged.
+  Each finding stores the merge-base of the round that last reported it
+  (`placement_merge_base` in the stored state). Carries, holds, persistence and the
+  run-history cap all leave it unchanged, and only a new report replaces it. When it
+  differs from this round's merge-base, the finding is held where it was stored
+  (`"base-moved"` in `relocated_findings`) if the round cannot re-judge it. It stays
+  carried and unverified, and is never resolved. A merge-base git cannot name (a shallow
+  checkout, or state written before the field existed) counts as moved. The round can
+  re-judge the finding in three cases:
+
+  - The diff has no section for its file (a pure rename), so a report there survives.
+  - Its line, placed at this head, lies inside one of the pull request's hunks of the
+    file. A binary or mode-only change has no hunks, so it never counts.
+  - Git cannot place the line because it was rewritten or deleted since the finding's
+    head, and one of the pull request's own hunks covers the line's own position in that
+    rewrite. This is the pull request rewriting or deleting the reported line, and the
+    finding then resolves as usual. If the base rewrote the line and the pull request
+    did not touch it, the finding is held, even when a wider base rewrite reaches into a
+    pull-request hunk further down.
+
+  A held finding stays open, marked **⏸ not re-verified**, until the pull request
+  changes the lines around it again or the provider reports it again. Some fixes never
+  touch those lines and leave the thread held indefinitely: a fix in another file, a
+  dependency or configuration, or a pull request that reverts the code around the
+  finding to the base's text when the base cannot be confirmed unchanged. Once you have
+  checked the fix, resolve the thread by hand on the pull request. The review never
+  reopens it, but the sticky keeps listing the finding as not re-verified until a later
+  round can re-judge it.
+
+  Every diff behind this pins its format against user configuration: literal pathspecs
+  (`odd[1].py` is never a glob), `--no-textconv`, `--no-ext-diff`, `--no-color`,
+  `--no-relative` and fixed `a/`/`b/` prefixes. Only the section whose headers name the
+  intended file is read. A record still carried without being read (its file was not
+  read this round) is stored with `unverified: true`. The sticky, including a board
+  rebuilt from stored state, marks it **⏸ not re-verified**. Its severity and its weight
+  in the verdict do not change. The prompt says what range the embedded text is ("the
+  change since the previous review round … unchanged context lines may still be earlier
+  changes of this pull request"), and the depth-3 adversarial sweep and an
   output-exhaustion split read the same delta text.
 
 - **What is reported and counted.** Findings are never filtered by delta location, and

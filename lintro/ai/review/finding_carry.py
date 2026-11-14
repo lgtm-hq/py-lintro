@@ -4,7 +4,8 @@ Two decisions :func:`lintro.ai.review.finding_matcher.match_findings` makes
 on a delta round live here so the matcher stays within its size: which
 prior open finding is carried because the round read its file but not its
 line, and which record key each current finding was assigned so the JSON
-surface can carry it as ``finding_id``.
+surface can carry it as ``finding_id``. The merge-base stamp the persisting
+callers put on each reported record (#3467) lives here too.
 """
 
 from __future__ import annotations
@@ -15,11 +16,16 @@ from typing import TYPE_CHECKING
 
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.finding_identity import fingerprint_for
-from lintro.ai.review.models.delta_plan import LOCATION_HOLDS, LOCATION_UNCHECKED
+from lintro.ai.review.models.delta_plan import (
+    LOCATION_BASE_MOVED,
+    LOCATION_HOLDS,
+    LOCATION_UNCHECKED,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from lintro.ai.review.models.finding_match_result import FindingMatchResult
     from lintro.ai.review.models.finding_record import FindingRecord
     from lintro.ai.review.models.review_finding import ReviewFinding
 
@@ -29,7 +35,12 @@ __all__ = [
     "_held_location",
     "_line_unread",
     "_relocate",
+    "stamp_sightings",
 ]
+
+#: Holds that keep a record open even when its path left the diff: one beyond
+#: the mapping cap (#3413), and one a moved base pushed out of the diff (#3467).
+_NEVER_RESOLVED = frozenset({LOCATION_UNCHECKED, LOCATION_BASE_MOVED})
 
 
 def _finding_positions(
@@ -120,7 +131,8 @@ def _held_location(
 
     Returns:
         :data:`~lintro.ai.review.models.delta_plan.LOCATION_UNMAPPED`,
-        :data:`~lintro.ai.review.models.delta_plan.LOCATION_UNCHECKED`, or
+        :data:`~lintro.ai.review.models.delta_plan.LOCATION_UNCHECKED`,
+        :data:`~lintro.ai.review.models.delta_plan.LOCATION_BASE_MOVED`, or
         ``""`` when the round placed the record or did not touch it.
     """
     moved = relocations.get(key) if relocations else None
@@ -145,7 +157,8 @@ def _carry_absent(
         held: Whether a note or a merged duplicate holds it open.
         location_hold: :func:`_held_location` for the record. A record git
             could not place is not fixed by its path leaving the diff, and one
-            beyond the mapping cap is never resolved (#3413).
+            beyond the mapping cap (#3413) or pushed out of the diff by a
+            moved base (#3467) is never resolved.
         reviewed_paths: Files re-reviewed this round, or ``None``.
         departed_paths: Paths that left the diff, or ``None``.
         reviewed_ranges: Line ranges a delta round read per narrowed file.
@@ -161,7 +174,7 @@ def _carry_absent(
     """
     path = record.file
     departed = departed_paths is not None and path in departed_paths
-    stranded = location_hold == LOCATION_UNCHECKED or (departed and bool(location_hold))
+    stranded = location_hold in _NEVER_RESOLVED or (departed and bool(location_hold))
     left_diff = departed and not stranded
     unread = (reviewed_paths is not None and path not in reviewed_paths) or stranded
     line_unread = _line_unread(
@@ -202,3 +215,37 @@ def _line_unread(
     # A non-positive range is the "nothing shown" sentinel: it holds no line,
     # findings at line 0 included.
     return not any(start <= line <= end for start, end in ranges if start > 0)
+
+
+def stamp_sightings(
+    *,
+    match: FindingMatchResult,
+    merge_base: str,
+) -> FindingMatchResult:
+    """Record the merge-base each finding reported this round was seen under.
+
+    A record the round reported passed the diff gate under ``merge_base``,
+    so a later round can tell whether a moved base may have pushed it out of
+    the diff (``FindingRecord.placement_merge_base``, #3467). Records carried,
+    relocated or held without a report keep the merge-base they had.
+
+    Args:
+        match: The round's match.
+        merge_base: ``merge-base(base, head)`` for the round, or ``""`` when
+            unknown.
+
+    Returns:
+        The match with its reported records stamped.
+    """
+    sighted = frozenset(match.finding_ids)
+    return replace(
+        match,
+        records=tuple(
+            (
+                replace(record, placement_merge_base=merge_base)
+                if record.key in sighted and record.status is FindingStatus.OPEN
+                else record
+            )
+            for record in match.records
+        ),
+    )

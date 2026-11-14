@@ -123,6 +123,8 @@ def merge_pair(
         origin_path=prior.origin_path_at(path=current.file),
         line=current.line,
         line_sha=current.line_sha,
+        # A sighting passed the diff gate under this round's merge-base.
+        placement_merge_base=current.placement_merge_base,
         status=FindingStatus.OPEN,
         since_round=prior.since_round,
         resolved_sha=prior.resolved_sha,
