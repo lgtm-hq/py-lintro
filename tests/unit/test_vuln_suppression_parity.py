@@ -232,8 +232,10 @@ _SKIPPED_DIRS = frozenset(
 # osv-scanner 2.7.1 reports nothing for ranges. Includes are followed for
 # ``-r``/``--requirement`` and, more strictly than OSV, ``-c``/``--constraint``.
 _REQ_COMMENT = re.compile(r"(^|\s+)#.*$")
+# Long options take ``=``; short options keep a following ``=`` as part of the
+# path, as pip does (``-r=base.txt`` reads the file ``=base.txt``).
 _REQ_INCLUDE = re.compile(
-    r"^(?:-r|--requirement|-c|--constraint)(?:\s*=\s*|\s*)(?P<path>\S+)$",
+    r"^(?:(?:--requirement|--constraint)(?:\s*=\s*|\s+)|(?:-r|-c)\s*)(?P<path>\S+)$",
 )
 _REQ_OPTIONS = re.compile(r"(?:\s+|^)(?:--hash|--global-option|--config-settings|-C).*")
 _REQ_EXTRAS = re.compile(r"\[[^\[\]]*\]")
@@ -509,6 +511,25 @@ def test_requirements_includes_are_followed_without_looping(tmp_path: Path) -> N
     )
     assert_that(_affected_pins(tmp_path, "GHSA-5h93-6whr-6q8j")).is_equal_to(
         ["constraints.txt: mcp@1.29.0"],
+    )
+
+
+def test_short_include_keeps_an_equals_sign_in_the_path(tmp_path: Path) -> None:
+    """``-r=base.txt`` names the file ``=base.txt``, as pip and OSV read it.
+
+    Args:
+        tmp_path: Scratch repository root.
+    """
+    _write_files(
+        tmp_path,
+        {
+            "requirements.txt": "-r=base.txt\n",
+            "=base.txt": "opentelemetry-api==1.45.1\n",
+            "base.txt": "opentelemetry-api==1.45.2\n",
+        },
+    )
+    assert_that(_affected_pins(tmp_path, "GHSA-mf5v-w3w3-f6cg")).is_equal_to(
+        ["=base.txt: opentelemetry-api@1.45.1"],
     )
 
 
