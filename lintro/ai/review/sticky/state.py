@@ -133,6 +133,8 @@ def stamp_finding_ids(
     Returns:
         The result with ``finding_id`` set on every finding.
     """
+    # Only keys are read here, which ``origin_path`` never changes, so the
+    # base-path stamping of the persisted rounds (#3449) is not needed.
     match = match_findings(
         previous=prior_state,
         findings=result.findings,

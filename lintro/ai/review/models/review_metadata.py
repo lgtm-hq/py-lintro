@@ -106,11 +106,12 @@ class ReviewMetadata:
             than at its stale stored location. A ``line_sha`` of
             ``"unmapped"`` or ``"unchecked"`` holds the record where it was
             stored (:data:`~lintro.ai.review.models.delta_plan.LOCATION_HOLDS`).
-        pr_renames (tuple[tuple[str, str], ...]): ``(previous_path, path)``
-            for every file the pull request renames, from the round's
-            changed-file metadata (#3449). A finding first reported on a
-            renamed file records the path at the base as its lineage, so a
-            later rename git reads as a delete plus an add still finds it.
+        base_paths (tuple[tuple[str, str], ...]): ``(path, base_path)`` for
+            each file carrying a finding that the pull request renamed from
+            ``base_path``, kept only when git shows no commit since the merge
+            base re-creating ``base_path`` (#3449). A finding first reported
+            on such a file records ``base_path`` as its lineage, so a later
+            rename git reads as a delete plus an add still finds it.
         custom_agents_run (int): Number of user-defined review agents that
             completed a pass in this run (issue #1245).
         custom_agents_skipped (int): Number of discovered agents that did not
@@ -213,7 +214,7 @@ class ReviewMetadata:
     relocated_findings: tuple[tuple[str, str, int, str], ...] = field(
         default_factory=tuple,
     )
-    pr_renames: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    base_paths: tuple[tuple[str, str], ...] = field(default_factory=tuple)
     custom_agents_run: int = 0
     custom_agents_skipped: int = 0
     reviewed_paths: tuple[str, ...] = field(default_factory=tuple)

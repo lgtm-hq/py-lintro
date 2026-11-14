@@ -19,7 +19,8 @@ duplicate thread, while a wrong move can resolve a live one.
 A finding first reported on a file the pull request had already renamed
 never moves, so it would keep no first path. :func:`stamp_base_paths` gives
 such a new record the path its file had at the pull request's base instead
-(#3449), and the same guarded lookup applies to it.
+(#3449), once :func:`verified_base_paths` has shown that path kept naming the
+same file across the whole pull request; the same guarded lookup applies.
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ from lintro.ai.review.git_line_map import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Collection, Mapping
 
     from lintro.ai.review.models.finding_match_result import FindingMatchResult
 
@@ -46,6 +47,7 @@ __all__ = [
     "cached_renames",
     "lineage_rename",
     "stamp_base_paths",
+    "verified_base_paths",
     "unpaired_rename",
 ]
 
@@ -159,9 +161,14 @@ def lineage_rename(
     whenever the first path may now be a different file: it exists at the
     range's start, the range's endpoints name it, or any commit in the range
     adds it (re-created, or another file renamed onto it, even when that file
-    moved on again before the range's end). And it is skipped when git pairs
+    moved on again before the range's end). It is skipped when git pairs
     the destination with another source in the range, since that file's own
-    findings arrive there.
+    findings arrive there. And it is skipped when the range deletes any other
+    path git could not pair (#3449): the pull request's rename metadata is a
+    similarity guess over the whole pull request, so with ``b.py`` and an
+    unrelated ``e.py`` both gone and ``c.py`` new, ``a.py -> c.py`` may name
+    ``e.py``'s rewrite as well as ``b.py``'s, and nothing in the range tells
+    them apart.
 
     Args:
         lookups: The round's git answers and the PR's renames.
@@ -180,6 +187,7 @@ def lineage_rename(
         return ""
     if (
         path not in renames.deleted
+        or len(renames.deleted) > 1
         or origin_path in renames.named
         or dest in renames.moved.values()
     ):
@@ -195,10 +203,61 @@ def lineage_rename(
     return dest if added is False else ""
 
 
+def verified_base_paths(
+    *,
+    repo_root: str,
+    fork_sha: str,
+    head_sha: str,
+    renamed_from: Mapping[str, str],
+    files: Collection[str],
+) -> dict[str, str]:
+    """Return the base path of each given file the PR renamed, when provable.
+
+    The pull request's rename metadata compares the base with the head only:
+    ``a.py -> b.py``, then a new ``a.py`` renamed to an unrelated ``e.py``,
+    still reads ``a.py -> b.py`` although ``a.py`` has meanwhile named another
+    file. Recording ``a.py`` as the lineage of a finding first reported on
+    ``b.py`` would then let a later ``e.py -> c.py`` take that finding to
+    ``c.py`` and resolve its live thread (#3449). A base path is therefore
+    kept only when git walks the whole of ``fork_sha..head_sha``, from the
+    merge base (an ancestor of the head by construction) to the head the
+    finding is first recorded at, and no commit in it adds the path or
+    renames another file onto it (:func:`path_added_in_range`). An unknown
+    answer (no merge base, a shallow cut, a git failure) keeps nothing, and
+    the finding follows only its own path, as before #3449.
+
+    Args:
+        repo_root: The repository holding the commits.
+        fork_sha: ``merge-base(base, head)``, or ``""`` when unknown.
+        head_sha: The head the records are created at.
+        renamed_from: The pull request's renames, source path to new path.
+        files: Paths that carry a finding this round; only these are checked.
+
+    Returns:
+        New path to base path for every proven rename among ``files``.
+    """
+    if not repo_root or not fork_sha or not head_sha:
+        return {}
+    wanted = set(files)
+    proven: dict[str, str] = {}
+    for source, dest in sorted(renamed_from.items()):
+        if not source or source == dest or dest not in wanted:
+            continue
+        added = path_added_in_range(
+            repo_root=repo_root,
+            from_sha=fork_sha,
+            to_sha=head_sha,
+            path=source,
+        )
+        if added is False:
+            proven[dest] = source
+    return proven
+
+
 def stamp_base_paths(
     *,
     match: FindingMatchResult,
-    renamed_from: Mapping[str, str],
+    base_paths: Mapping[str, str],
 ) -> FindingMatchResult:
     """Give each new record on a renamed file its path at the PR's base (#3449).
 
@@ -212,17 +271,18 @@ def stamp_base_paths(
 
     Args:
         match: The round's matching result.
-        renamed_from: The pull request's renames, source path to new path.
+        base_paths: New path to base path, already proven by
+            :func:`verified_base_paths`.
 
     Returns:
         The result with ``origin_path`` set on every new record whose file
-        the pull request renamed; unchanged when there is none.
+        has a proven base path; unchanged when there is none.
     """
-    base_of = {new: old for old, new in renamed_from.items() if old and new != old}
     stamped = {
-        record.key: replace(record, origin_path=base_of[record.file])
+        record.key: replace(record, origin_path=base_paths[record.file])
         for record in match.new
-        if not record.origin_path and record.file in base_of
+        if not record.origin_path
+        and base_paths.get(record.file, record.file) != record.file
     }
     if not stamped:
         return match

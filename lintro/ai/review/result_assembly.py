@@ -12,6 +12,7 @@ input: what the run resolved to do, and what it actually did.
 
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -46,6 +47,7 @@ from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.pr_head import no_tree_degradations
 from lintro.ai.review.question_pass import question_pass_degradations
+from lintro.ai.review.rename_lineage import verified_base_paths
 from lintro.ai.review.resume import carried_truncated_paths, records_for_reviewed
 from lintro.ai.review.severity_gate import apply_cross_chunk_guard
 from lintro.ai.review.synthesis_prompt import guarded_changed_paths
@@ -252,9 +254,6 @@ def assemble_review_result(
         merge_base=plan.merge_base,
         reviewed_ranges=plan.reviewed_ranges,
         relocated_findings=plan.resume.relocations,
-        pr_renames=tuple(
-            sorted(pr_renames(changed_files=context.changed_files).items()),
-        ),
         custom_agents_skipped=(
             len(plan.agent_selection.skipped) + len(outcome.custom_agents_failed)
         ),
@@ -404,6 +403,19 @@ def assemble_review_result(
         ),
         reviewed_paths=actually_reviewed,
         files_reviewed=len(actually_reviewed),
+        # Checked for the findings that survived, the ones that become
+        # records (#3449).
+        base_paths=tuple(
+            sorted(
+                verified_base_paths(
+                    repo_root=context.repo_root or os.getcwd(),
+                    fork_sha=plan.merge_base,
+                    head_sha=context.head_ref,
+                    renamed_from=pr_renames(changed_files=context.changed_files),
+                    files={finding.file for finding in filtered_findings},
+                ).items(),
+            ),
+        ),
         duration_seconds=duration_seconds,
         timings=plan.timings.build(
             total_seconds=duration_seconds,

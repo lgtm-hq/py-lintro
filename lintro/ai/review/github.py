@@ -234,6 +234,8 @@ def post_review_to_github(
     # Matching is pure and deterministic over (prior_state, findings), so the
     # sticky, the review body and the inline comments all recompute the same
     # transitions and cannot disagree about what is new or carried over.
+    # No base-path stamping (#3449): these records are not persisted, and
+    # ``origin_path`` changes no key, outcome or thread.
     match = match_findings(
         previous=prior_state,
         findings=result.findings,

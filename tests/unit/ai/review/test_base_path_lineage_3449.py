@@ -8,7 +8,9 @@ edits: git reads a delete plus an add, the pull request's metadata names only
 open and new on ``c.py``. A new record now takes the path its file had at the
 pull request's base, so the lineage fallback of #3432 applies, with every one
 of its guards: where ``a.py`` was reused, the destination is contested, or the
-range's history is cut, X is held and no thread is resolved.
+range's history is cut, X is held and no thread is resolved. The base path
+itself is recorded only when no commit since the merge base re-created it:
+otherwise it may name an unrelated file by the time the PR renames it again.
 
 Every round runs through ``run_review`` on a scratch git repository, in delta
 and in full mode, with the harness of #3413.
@@ -31,7 +33,6 @@ from lintro.ai.review.incremental_coverage import (
 )
 from lintro.ai.review.merge import ChunkReviewPartial
 from lintro.ai.review.models.changed_file import ChangedFile
-from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.resume import plan_resume
@@ -85,6 +86,41 @@ _B_TEXT = _text(("case", 1, 100), ("base", 101, 300))
 _C_TEXT = _with_bug(_text(("base", 1, 170), ("heavy", 171, 300)))
 
 
+def _renamed_repo(tmp_path: Path, *, e_py: str = "") -> tuple[Path, str]:
+    """Rename ``a.py -> b.py``; optionally add an unrelated ``e.py`` too.
+
+    Args:
+        tmp_path: Pytest temp dir.
+        e_py: ``"reused-a"`` re-creates an unrelated ``a.py`` and renames it
+            to ``e.py``, ``"new"`` adds ``e.py`` directly, both before
+            anything is reviewed; ``""`` adds nothing.
+
+    Returns:
+        The repository and the base commit.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    (repo / "a.py").write_text(lines(300, label="base"))
+    base = commit(repo, "base")
+    git(repo, "mv", "a.py", "b.py")
+    (repo / "b.py").write_text(_B_TEXT)
+    commit(repo, "rename a.py to b.py")
+    if e_py == "reused-a":
+        (repo / "a.py").write_text(lines(300, label="ebase"))
+        commit(repo, "re-create an unrelated a.py")
+        git(repo, "mv", "a.py", "e.py")
+        commit(repo, "rename the new a.py to e.py")
+    elif e_py == "new":
+        (repo / "e.py").write_text(lines(300, label="ebase"))
+        commit(repo, "add an unrelated e.py")
+    # The PR still reads a.py -> b.py, whatever a.py named in between.
+    assert_that(
+        git(repo, "diff", "-M", "--name-status", f"{base}..HEAD"),
+    ).matches(r"R\d+\ta\.py\tb\.py")
+    return repo, base
+
+
 def _reported_on_b(
     tmp_path: Path,
     *,
@@ -100,17 +136,7 @@ def _reported_on_b(
         The repository, the base commit, the state after round one with X's
         thread, and X's key.
     """
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    git(repo, "init", "-q", "-b", "main")
-    (repo / "a.py").write_text(lines(300, label="base"))
-    base = commit(repo, "base")
-    git(repo, "mv", "a.py", "b.py")
-    (repo / "b.py").write_text(_B_TEXT)
-    commit(repo, "rename a.py to b.py")
-    assert_that(
-        git(repo, "diff", "-M", "--name-status", f"{base}..HEAD"),
-    ).matches(r"R\d+\ta\.py\tb\.py")
+    repo, base = _renamed_repo(tmp_path)
     first = harness._round(
         repo=repo,
         base=base,
@@ -122,6 +148,73 @@ def _reported_on_b(
     (record,) = state.findings
     assert_that((record.file, record.origin_path)).is_equal_to(("b.py", "a.py"))
     return repo, base, state, record.key
+
+
+def _move_b_away_and_e_onto_c(repo: Path) -> None:
+    """Rename a still-buggy ``b.py -> d.py`` and rewrite ``e.py`` into a clean ``c.py``.
+
+    The PR then reads ``a.py -> c.py``, while between the reviewed heads git
+    shows only deletes and adds.
+
+    Args:
+        repo: The repository.
+    """
+    git(repo, "mv", "b.py", "d.py")
+    (repo / "d.py").write_text(_with_bug(lines(300, label="rewritten")))
+    git(repo, "mv", "e.py", "c.py")
+    (repo / "c.py").write_text(_text(("base", 1, 170), ("heavy", 171, 300)))
+    commit(repo, "move b.py to d.py, rewrite e.py into a clean c.py")
+
+
+@pytest.mark.parametrize("force_full", _MODES)
+@pytest.mark.parametrize(
+    ("e_py", "origin"),
+    [
+        pytest.param("reused-a", "", id="a-reused-before-the-report"),
+        pytest.param("new", "a.py", id="a-never-reused"),
+    ],
+)
+def test_a_rewritten_unrelated_file_the_pr_now_pairs_with_a_never_takes_the_finding(
+    tmp_path: Path,
+    force_full: bool,
+    e_py: str,
+    origin: str,
+) -> None:
+    """``e.py`` rewritten into ``c.py`` makes the PR read ``a.py -> c.py``: X stays on ``b.py``.
+
+    Where ``a.py`` named ``e.py`` before X was first reported, no base path is
+    recorded. Where it never did, ``a.py`` is recorded, but the range deletes
+    ``e.py`` as well as ``b.py``, so ``c.py`` could be either one's rewrite.
+    """
+    repo, base = _renamed_repo(tmp_path, e_py=e_py)
+    first = harness._round(
+        repo=repo,
+        base=base,
+        prior=None,
+        reported=[harness._x(file="b.py")],
+        force_full=force_full,
+    )
+    state = harness._with_thread(first.state)
+    (record,) = state.findings
+    assert_that((record.file, record.origin_path)).is_equal_to(("b.py", origin))
+    reviewed_head = git(repo, "rev-parse", "HEAD")
+    _move_b_away_and_e_onto_c(repo)
+    assert_that(
+        git(repo, "diff", "-M", "--name-status", f"{base}..HEAD"),
+    ).matches(r"R\d+\ta\.py\tc\.py")
+    assert_that(
+        git(repo, "diff", "-M", "-B", "--name-status", f"{reviewed_head}..HEAD"),
+    ).contains("D\tb.py", "A\tc.py", "A\td.py")
+
+    second = harness._round(
+        repo=repo,
+        base=base,
+        prior=state,
+        reported=[harness._x(file="d.py")],
+        force_full=force_full,
+    )
+
+    lineage._assert_held_on_b(round_=second, key=record.key)
 
 
 def _rename_b_to_c(repo: Path) -> None:
@@ -353,55 +446,36 @@ def test_a_finding_on_a_file_the_pr_did_not_rename_has_no_base_path(
     ).is_equal_to([False, False])
 
 
-def test_a_checkpoint_records_the_base_path_a_resumed_round_inherits(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A SIGTERM checkpoint stores X on ``b.py`` with ``a.py``; ``n.py`` gets none."""
-    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
-    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
-    context = ReviewContext(
-        base_ref="main",
-        head_ref="feature",
-        changed_files=[
-            ChangedFile(
-                path="b.py",
-                status=ChangedFileStatus.RENAMED,
-                additions=1,
-                deletions=0,
-                previous_path="a.py",
-            ),
-            ChangedFile(path="n.py", status="added", additions=1, deletions=0),
-        ],
-        unified_diff="".join(
-            f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n"
-            "@@ -1 +1,2 @@\n x\n+y\n"
-            for path in ("b.py", "n.py")
-        ),
-    )
-    findings = tuple(
-        ReviewFinding(
-            severity=Severity.P2,
-            category="logic-bug",
-            file=path,
-            line=2,
-            title="X",
-            description="Reproducible bug",
-            cause="bad logic",
-            fix="repair the logic",
-            confidence="high",
-        )
-        for path in ("b.py", "n.py")
-    )
+def _checkpointed_on_b(repo: Path, base: str) -> ReviewState:
+    """Checkpoint X on ``b.py`` as a SIGTERM'd round does, reload it, and thread it.
 
+    Args:
+        repo: The repository at the round's head.
+        base: The base commit.
+
+    Returns:
+        The reloaded state, X carrying an inline thread.
+    """
+    context = harness._git_context(repo=repo, base=base)
+    finding = ReviewFinding(
+        severity=Severity.P2,
+        category="logic-bug",
+        file="b.py",
+        line=81,
+        title="X",
+        description="Reproducible bug",
+        cause="bad logic",
+        fix="repair the logic",
+        confidence="high",
+    )
     write_incremental_coverage_part(
         collected=[
             ChunkReviewPartial(
-                findings=findings,
+                findings=(finding,),
                 input_tokens=0,
                 output_tokens=0,
                 cost_estimate=0.0,
-                files=("b.py", "n.py"),
+                files=("b.py",),
             ),
         ],
         resume=plan_resume(context=context, prior=None),
@@ -410,10 +484,61 @@ def test_a_checkpoint_records_the_base_path_a_resumed_round_inherits(
         force_full=False,
         sequence=1,
         policy=resolve_sensitivity_policy(strictness=ReviewStrictness.BALANCED),
-        stamp=CheckpointStamp(pr_number=3449),
+        stamp=CheckpointStamp(pr_number=1),
+    )
+    loaded = load_ci_state(directory=repo.parent / "state", repo="o/r", pr_number=1)
+    return harness._with_thread(loaded)
+
+
+@pytest.fixture
+def state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Send checkpoints to ``tmp_path/state``, keyed on the harness's repo."""
+    directory = tmp_path / "state"
+    directory.mkdir()
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(directory))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    return directory
+
+
+@pytest.mark.usefixtures("state_dir")
+def test_a_checkpoint_records_the_base_path_a_resumed_round_follows(
+    tmp_path: Path,
+) -> None:
+    """X checkpointed on ``b.py`` keeps ``a.py`` and follows ``b.py -> c.py``."""
+    repo, base = _renamed_repo(tmp_path)
+    state = _checkpointed_on_b(repo, base)
+    (record,) = state.findings
+    assert_that((record.file, record.origin_path)).is_equal_to(("b.py", "a.py"))
+    _rename_b_to_c(repo)
+
+    second = harness._round(
+        repo=repo,
+        base=base,
+        prior=state,
+        reported=[harness._x(file="c.py")],
+        force_full=False,
     )
 
-    loaded = load_ci_state(directory=tmp_path, repo="lgtm-hq/py-lintro", pr_number=3449)
-    assert_that(
-        {record.file: record.origin_path for record in loaded.findings},
-    ).is_equal_to({"b.py": "a.py", "n.py": ""})
+    harness._assert_carried_with_thread(round_=second, key=record.key, file="c.py")
+
+
+@pytest.mark.usefixtures("state_dir")
+def test_a_checkpoint_does_not_record_a_base_path_reused_before_it(
+    tmp_path: Path,
+) -> None:
+    """X checkpointed on ``b.py`` after ``a.py`` was reused stays on ``b.py``."""
+    repo, base = _renamed_repo(tmp_path, e_py="reused-a")
+    state = _checkpointed_on_b(repo, base)
+    (record,) = state.findings
+    assert_that((record.file, record.origin_path)).is_equal_to(("b.py", ""))
+    _move_b_away_and_e_onto_c(repo)
+
+    second = harness._round(
+        repo=repo,
+        base=base,
+        prior=state,
+        reported=[harness._x(file="d.py")],
+        force_full=False,
+    )
+
+    lineage._assert_held_on_b(round_=second, key=record.key)

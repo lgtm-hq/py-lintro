@@ -30,14 +30,12 @@ from lintro.ai.review.cli_limits import (
     resolve_synthesis_diff_budget,
 )
 from lintro.ai.review.custom_agents import select_custom_agents
-from lintro.ai.review.delta import (
-    merge_base,
-    plan_delta,
-)
+from lintro.ai.review.delta import plan_delta
 from lintro.ai.review.delta_round import narrow_round
 from lintro.ai.review.enums.delta_reason import DeltaReason
 from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
+from lintro.ai.review.fork_point import recorded_merge_base
 from lintro.ai.review.group_labels import REL_DIRECTORY_PREFIX, REL_SINGLE_FILE
 from lintro.ai.review.models.delta_plan import DeltaPlan
 from lintro.ai.review.models.review_chunk import ReviewChunk
@@ -424,16 +422,7 @@ def plan_run(
         resume=resume,
         prior=options.prior_state,
     )
-    recorded_merge_base = (
-        merge_base(
-            repo_root=repo_root,
-            base_sha=context.base_ref,
-            head_sha=context.head_ref,
-        )
-        if context.pr_metadata is not None
-        and context.checkout is not ReviewCheckout.NONE
-        else ""
-    )
+    fork_point = recorded_merge_base(context=context, repo_root=repo_root)
     agent_selection = select_custom_agents(
         agents=options.custom_agents,
         changed_paths=tuple(file.path for file in context.changed_files),
@@ -482,6 +471,6 @@ def plan_run(
         tools_disabled=context.checkout is ReviewCheckout.NONE,
         delta=delta,
         reviewed_ranges=resume.reviewed_ranges,
-        merge_base=recorded_merge_base,
+        merge_base=fork_point,
         timings=timings,
     )

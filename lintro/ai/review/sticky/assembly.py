@@ -98,7 +98,7 @@ def _round_outcome(*, request: StickyRequest) -> RoundOutcome:
     # A record first seen on a renamed file keeps its base path (#3449).
     match = stamp_base_paths(
         match=match,
-        renamed_from=dict(request.result.metadata.pr_renames),
+        base_paths=dict(request.result.metadata.base_paths),
     )
     match = replace(
         match,
