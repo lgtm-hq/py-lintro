@@ -35,6 +35,7 @@ from lintro.ai.review.git_line_map import (
     path_exists,
     range_renames,
 )
+from lintro.ai.review.range_history import RangeChurn, range_churn
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping
@@ -62,6 +63,8 @@ class RoundLookups:
         renames: Renames per ``(from_sha, to_sha)`` range.
         hunks: Hunks per ``(from_sha, to_sha, old_path, new_path)``.
         exists: Whether a path exists, per ``(sha, path)`` (#3432).
+        churn: Paths each ``(from_sha, to_sha)`` range adds or deletes, commit
+            by commit (#3449).
     """
 
     repo_root: str
@@ -69,6 +72,7 @@ class RoundLookups:
     renames: dict[tuple[str, str], Renames | None] = field(default_factory=dict)
     hunks: dict[tuple[str, str, str, str], Hunks] = field(default_factory=dict)
     exists: dict[tuple[str, str], bool | None] = field(default_factory=dict)
+    churn: dict[tuple[str, str], RangeChurn | None] = field(default_factory=dict)
 
 
 def cached_renames(
@@ -157,18 +161,25 @@ def lineage_rename(
 
     The lookup needs the range's own history: with no listing (the record's
     head is unreachable) nothing shows that the first path still names the
-    record's file, so the record is held as before. It is also skipped
-    whenever the first path may now be a different file: it exists at the
-    range's start, the range's endpoints name it, or any commit in the range
-    adds it (re-created, or another file renamed onto it, even when that file
-    moved on again before the range's end). It is skipped when git pairs
-    the destination with another source in the range, since that file's own
-    findings arrive there. And it is skipped when the range deletes any other
-    path git could not pair (#3449): the pull request's rename metadata is a
-    similarity guess over the whole pull request, so with ``b.py`` and an
-    unrelated ``e.py`` both gone and ``c.py`` new, ``a.py -> c.py`` may name
-    ``e.py``'s rewrite as well as ``b.py``'s, and nothing in the range tells
-    them apart.
+    record's file, so the record is held as before. It is skipped whenever
+    the first path may now be a different file (it exists at the range's
+    start, or the range's endpoints name it) and when git pairs the
+    destination with another source in the range, since that file's own
+    findings arrive there.
+
+    The pull request's rename metadata is a similarity guess over the whole
+    pull request, and a range's endpoints can hide a file created and
+    renamed away inside it: with an unrelated ``e.py`` rewritten into a clean
+    ``c.py`` while ``b.py`` moved on, ``a.py -> c.py`` may name ``e.py``'s
+    rewrite rather than ``b.py``'s (#3449). So the move also needs every
+    commit of the range, read with rename detection off
+    (:func:`~lintro.ai.review.range_history.range_churn`), to add exactly the
+    destination and delete exactly ``path``, over a range git proves
+    complete and whose start is an ancestor of its end. Any other add or
+    delete, a path both added and deleted inside the range included, or an
+    unknown answer, holds the record: a duplicate thread at worst, never a
+    resolved live one. A re-created first path is any other add, so it is
+    covered too.
 
     Args:
         lookups: The round's git answers and the PR's renames.
@@ -187,20 +198,24 @@ def lineage_rename(
         return ""
     if (
         path not in renames.deleted
-        or len(renames.deleted) > 1
         or origin_path in renames.named
         or dest in renames.moved.values()
     ):
         return ""
     if cached_exists(lookups=lookups, sha=from_sha, path=origin_path) is not False:
         return ""
-    added = path_added_in_range(
-        repo_root=lookups.repo_root,
-        from_sha=from_sha,
-        to_sha=to_sha,
-        path=origin_path,
-    )
-    return dest if added is False else ""
+    if (from_sha, to_sha) not in lookups.churn:
+        lookups.churn[(from_sha, to_sha)] = range_churn(
+            repo_root=lookups.repo_root,
+            from_sha=from_sha,
+            to_sha=to_sha,
+        )
+    churn = lookups.churn[(from_sha, to_sha)]
+    # Only a range whose every commit does nothing but take ``path`` away
+    # and bring ``dest`` in is unambiguous (#3449).
+    if churn is None or churn.added != {dest} or churn.deleted != {path}:
+        return ""
+    return dest
 
 
 def verified_base_paths(

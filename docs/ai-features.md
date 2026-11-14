@@ -952,17 +952,22 @@ resolve; it never narrows what it may report.**
   rename too. The lookup is skipped, and the finding held as before, when the first
   path's provenance cannot be verified or could be ambiguous:
   - git cannot walk the whole range since the finding's recorded head: the head is
-    unreachable, or the checkout is shallow and its boundary cuts into the range (the
-    recorded head is not an ancestor there, or a boundary commit lies inside it), even
-    when both ends of the range are readable;
+    unreachable or no longer an ancestor of the new head (a rebase), or the checkout is
+    shallow and its boundary cuts into the range (a boundary commit lies inside it),
+    even when both ends of the range are readable;
   - the first path exists at the start of the range;
-  - any commit in the range adds it or renames another file onto it, even if that file
-    moved on again before the range's end (`git log --diff-filter=A --no-renames` over
-    every commit, not the endpoint diff);
   - git pairs the destination with another source in the range;
-  - the range deletes any other path git could not pair (#3449): the pull request's
-    rename is a similarity guess, so with `b.py` and an unrelated `e.py` both gone and
-    `c.py` new, `a.py -> c.py` may be `e.py`'s rewrite rather than `b.py`'s;
+  - the range's commits do anything besides delete the finding's current path and add
+    the destination (#3449). Every commit is read with rename detection off
+    (`git log --name-status --no-renames -m --diff-filter=AD`), not just the endpoint
+    diff, and the move needs exactly one added path, the destination, and exactly one
+    deleted path, the finding's own. The pull request's rename is a similarity guess
+    over the whole pull request: with an unrelated `e.py` created after the report and
+    rewritten into a clean `c.py` while `b.py` moved on, the endpoints show only `b.py`
+    deleted, yet `a.py -> c.py` may be `e.py`'s rewrite. Any other add or delete,
+    including a path both added and deleted inside the range, or a re-created first
+    path, holds the finding. A heavy-edit rename in a push that changes nothing else is
+    followed; a push that also adds, deletes or renames other files holds it;
   - another finding moves to the same destination that round.
 
   Holding can leave a duplicate thread; it never resolves a live one. When that names no

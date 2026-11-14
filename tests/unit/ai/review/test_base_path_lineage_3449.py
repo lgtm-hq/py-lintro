@@ -86,7 +86,12 @@ _B_TEXT = _text(("case", 1, 100), ("base", 101, 300))
 _C_TEXT = _with_bug(_text(("base", 1, 170), ("heavy", 171, 300)))
 
 
-def _renamed_repo(tmp_path: Path, *, e_py: str = "") -> tuple[Path, str]:
+def _renamed_repo(
+    tmp_path: Path,
+    *,
+    e_py: str = "",
+    replace_a: bool = False,
+) -> tuple[Path, str]:
     """Rename ``a.py -> b.py``; optionally add an unrelated ``e.py`` too.
 
     Args:
@@ -94,6 +99,8 @@ def _renamed_repo(tmp_path: Path, *, e_py: str = "") -> tuple[Path, str]:
         e_py: ``"reused-a"`` re-creates an unrelated ``a.py`` and renames it
             to ``e.py``, ``"new"`` adds ``e.py`` directly, both before
             anything is reviewed; ``""`` adds nothing.
+        replace_a: Replace ``a.py``'s whole content in one commit (a delete
+            and a re-add git records as a modification) before the rename.
 
     Returns:
         The repository and the base commit.
@@ -103,6 +110,10 @@ def _renamed_repo(tmp_path: Path, *, e_py: str = "") -> tuple[Path, str]:
     git(repo, "init", "-q", "-b", "main")
     (repo / "a.py").write_text(lines(300, label="base"))
     base = commit(repo, "base")
+    if replace_a:
+        (repo / "a.py").unlink()
+        (repo / "a.py").write_text(lines(300, label="replacement"))
+        commit(repo, "delete and re-add a.py in one commit")
     git(repo, "mv", "a.py", "b.py")
     (repo / "b.py").write_text(_B_TEXT)
     commit(repo, "rename a.py to b.py")
@@ -539,6 +550,80 @@ def test_a_checkpoint_does_not_record_a_base_path_reused_before_it(
         prior=state,
         reported=[harness._x(file="d.py")],
         force_full=False,
+    )
+
+    lineage._assert_held_on_b(round_=second, key=record.key)
+
+
+def _rebase_onto_a_new_base(repo: Path, base: str) -> str:
+    """Rebase the branch onto a base that gained an unrelated commit.
+
+    Args:
+        repo: The repository, on ``main``.
+        base: The current base commit.
+
+    Returns:
+        The new base commit.
+    """
+    git(repo, "checkout", "-q", "-b", "upstream", base)
+    (repo / "upstream.txt").write_text("new upstream base\n")
+    new_base = commit(repo, "advance the base")
+    git(repo, "checkout", "-q", "main")
+    git(repo, "rebase", "-q", "upstream")
+    return new_base
+
+
+@pytest.mark.parametrize("force_full", _MODES)
+@pytest.mark.parametrize("variant", ["late", "rebased", "a-replaced"])
+def test_an_unrelated_file_created_after_the_report_never_takes_the_finding(
+    tmp_path: Path,
+    force_full: bool,
+    variant: str,
+) -> None:
+    """``e.py`` appears after X's report and is rewritten into a clean ``c.py``.
+
+    The range's endpoints show only ``b.py`` deleted and ``c.py``/``d.py``
+    added, and the PR reads ``a.py -> c.py``; only the commits in between
+    show ``e.py`` was created and moved, so X is held on ``b.py``.
+    """
+    repo, base = _renamed_repo(tmp_path, replace_a=variant == "a-replaced")
+    first = harness._round(
+        repo=repo,
+        base=base,
+        prior=None,
+        reported=[harness._x(file="b.py")],
+        force_full=force_full,
+    )
+    state = harness._with_thread(first.state)
+    (record,) = state.findings
+    assert_that((record.file, record.origin_path)).is_equal_to(("b.py", "a.py"))
+    reviewed_head = git(repo, "rev-parse", "HEAD")
+    if variant == "rebased":
+        base = _rebase_onto_a_new_base(repo, base)
+    (repo / "e.py").write_text(lines(300, label="ebase"))
+    commit(repo, "add an unrelated e.py after the report")
+    _move_b_away_and_e_onto_c(repo)
+    assert_that(
+        git(repo, "diff", "-M", "--name-status", f"{base}..HEAD"),
+    ).matches(r"R\d+\ta\.py\tc\.py")
+    if variant != "rebased":
+        endpoints = git(
+            repo,
+            "diff",
+            "-M",
+            "-B",
+            "--name-status",
+            f"{reviewed_head}..HEAD",
+        )
+        assert_that(endpoints).contains("D\tb.py", "A\tc.py", "A\td.py")
+        assert_that(endpoints).does_not_contain("e.py")
+
+    second = harness._round(
+        repo=repo,
+        base=base,
+        prior=state,
+        reported=[harness._x(file="d.py")],
+        force_full=force_full,
     )
 
     lineage._assert_held_on_b(round_=second, key=record.key)
