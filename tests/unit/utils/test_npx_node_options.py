@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Callable
+import threading
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.plugins.subprocess_executor import (
@@ -19,6 +21,11 @@ from lintro.tools.core.node_fallback import (
     npx_runner_options,
     registry_fallback_spec,
 )
+from lintro.tools.core.version_parsing import (
+    check_tool_version,
+    get_minimum_versions,
+)
+from lintro.utils import npx_call
 from lintro.utils.npx_call import filter_node_options, npx_child_env
 
 _SPEC = "prettier@3.9.4"
@@ -95,6 +102,7 @@ def test_npx_child_env_scrubs_npm_and_node_preloads() -> None:
         "npm_config_node_options": _PRELOAD,
         "NPM_CONFIG_NODE_OPTIONS": _PRELOAD,
         "Npm_Config_Node_Options": _PRELOAD,
+        "npm_config_node-options": _PRELOAD,
         "npm_config_registry": "http://127.0.0.1/",
     }
 
@@ -219,3 +227,105 @@ def test_executor_leaves_bunx_environment_alone(
     result = run_subprocess([str(bunx), "--package", _SPEC, "prettier"], timeout=30)
 
     assert_that(result.stdout.strip()).is_equal_to(f"{_PRELOAD}|{_PRELOAD}")
+
+
+@pytest.fixture
+def drop_warnings(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
+    """Collect WARNING messages with the once-per-process drop warning re-armed.
+
+    Args:
+        monkeypatch: Scoped attribute override.
+
+    Yields:
+        list[str]: Messages logged at WARNING or above.
+    """
+    monkeypatch.setattr(npx_call, "_DROP_WARNED", threading.Event())
+    messages: list[str] = []
+    sink = logger.add(
+        lambda message: messages.append(str(message).strip()),
+        level="WARNING",
+        format="{message}",
+    )
+    try:
+        yield messages
+    finally:
+        logger.remove(sink)
+
+
+def test_dropped_entries_are_named_in_one_warning(drop_warnings: list[str]) -> None:
+    """The first drop is warned about with its entries and the docs; later ones not.
+
+    Args:
+        drop_warnings: Captured WARNING-level messages.
+    """
+    env = {"NODE_OPTIONS": f"--max-old-space-size=4096 {_PRELOAD} --import=x.mjs"}
+
+    for _ in range(3):
+        npx_child_env(_npx(), env)
+
+    assert_that(drop_warnings).is_length(1)
+    assert_that(drop_warnings[0]).contains(
+        repr(_PRELOAD),
+        "'--import=x.mjs'",
+        "docs/configuration.md#nodejs-tool-resolution",
+    )
+    assert_that(drop_warnings[0]).does_not_contain("--max-old-space-size")
+
+
+def test_extra_spaces_alone_are_not_a_drop(drop_warnings: list[str]) -> None:
+    """Collapsing extra spaces between kept flags warns about nothing.
+
+    Args:
+        drop_warnings: Captured WARNING-level messages.
+    """
+    child = npx_child_env(
+        _npx(),
+        {"NODE_OPTIONS": "  --no-warnings   --max-old-space-size=512 "},
+    )
+
+    assert_that(child).is_equal_to(
+        {"NODE_OPTIONS": "--no-warnings --max-old-space-size=512"},
+    )
+    assert_that(drop_warnings).is_empty()
+
+
+@posix_only
+def test_version_probe_cannot_be_faked_by_a_preload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The npx version probe gets the same preload-free environment as the run.
+
+    The fake npx answers with a fake version whenever ``NODE_OPTIONS`` still
+    carries ``--require``, and with the pin only when exactly the safe flag
+    survived.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+    """
+    pin = get_minimum_versions()["prettier"]
+    npx = tmp_path / "npx"
+    npx.write_text(
+        "#!/bin/sh\n"
+        'case "$NODE_OPTIONS" in\n'
+        "  *--require*) echo 999.0.0 ;;\n"
+        f"  --stack-trace-limit=7) echo {pin} ;;\n"
+        "  *) echo 0.0.1 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    npx.chmod(0o755)
+    monkeypatch.setenv("NODE_OPTIONS", f"{_PRELOAD} --stack-trace-limit=7")
+    command = [
+        str(npx),
+        "--yes",
+        *npx_runner_options(_SPEC),
+        "--package",
+        _SPEC,
+        "prettier",
+    ]
+
+    info = check_tool_version("prettier", command)
+
+    assert_that(info.current_version).is_equal_to(pin)

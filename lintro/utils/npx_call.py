@@ -57,6 +57,7 @@ import os
 import re
 import shlex
 import tempfile
+import threading
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
@@ -85,8 +86,19 @@ Argv = list[str]
 NODE_OPTIONS_VAR: str = "NODE_OPTIONS"
 
 #: npm's environment spelling of its ``node-options`` setting. npm matches it
-#: in any letter case.
+#: in any letter case, and the hyphen spelling ``npm_config_node-options`` is
+#: dropped too.
 NPM_NODE_OPTIONS_VAR: str = "npm_config_node_options"
+
+#: Where the ``NODE_OPTIONS`` policy is documented, for the drop warning.
+NODE_OPTIONS_DOCS: str = (
+    "docs/configuration.md#nodejs-tool-resolution "
+    '("Node preloads cannot replace the tool")'
+)
+
+#: Set once the drop warning has been logged; it is logged once per process.
+_DROP_WARNED = threading.Event()
+_DROP_WARNED_LOCK = threading.Lock()
 
 #: ``NODE_OPTIONS`` entries an npx fallback run keeps: memory limits, warning
 #: and diagnostic output, and TLS/DNS choices npm needs to reach the registry.
@@ -106,12 +118,35 @@ SAFE_NODE_OPTIONS: re.Pattern[str] = re.compile(
 )
 
 
-def filter_node_options(value: str) -> str:
-    """Keep only the :data:`SAFE_NODE_OPTIONS` entries of a ``NODE_OPTIONS`` value.
+def _partition_node_options(value: str) -> tuple[list[str], list[str]]:
+    """Split a ``NODE_OPTIONS`` value into kept and dropped entries.
 
     Node splits ``NODE_OPTIONS`` on spaces and honours double quotes and
     backslash escapes. A value using either is dropped whole rather than
-    re-parsed, since no kept flag needs them.
+    re-parsed, since no kept flag needs them; an entry joined to another by a
+    tab is one entry to Node, matches nothing and is dropped whole too. Extra
+    spaces are not entries, so they are never reported as dropped.
+
+    Args:
+        value: ``NODE_OPTIONS`` as inherited.
+
+    Returns:
+        The entries kept and the entries dropped, each in their original order.
+    """
+    if '"' in value or "\\" in value:
+        return [], [value]
+    kept: list[str] = []
+    dropped: list[str] = []
+    for token in value.split(" "):
+        if token:
+            (kept if SAFE_NODE_OPTIONS.fullmatch(token) else dropped).append(token)
+    return kept, dropped
+
+
+def filter_node_options(value: str) -> str:
+    """Keep only the :data:`SAFE_NODE_OPTIONS` entries of a ``NODE_OPTIONS`` value.
+
+    See :func:`_partition_node_options` for how the value is split.
 
     Args:
         value: ``NODE_OPTIONS`` as inherited.
@@ -119,12 +154,24 @@ def filter_node_options(value: str) -> str:
     Returns:
         The kept entries joined by single spaces, or ``""``.
     """
-    if '"' in value or "\\" in value:
-        return ""
-    return " ".join(
-        token
-        for token in value.split(" ")
-        if token and SAFE_NODE_OPTIONS.fullmatch(token)
+    return " ".join(_partition_node_options(value)[0])
+
+
+def _warn_dropped_once(dropped: Sequence[str]) -> None:
+    """Log one warning per process naming the dropped ``NODE_OPTIONS`` entries.
+
+    Args:
+        dropped: Entries removed from ``NODE_OPTIONS``.
+    """
+    with _DROP_WARNED_LOCK:
+        if _DROP_WARNED.is_set():
+            return
+        _DROP_WARNED.set()
+    logger.warning(
+        f"NODE_OPTIONS entries {', '.join(repr(entry) for entry in dropped)} are "
+        "not passed to Node tools run through lintro's npx fallback, because "
+        "they may load code in place of the pinned tool; see "
+        f"{NODE_OPTIONS_DOCS}",
     )
 
 
@@ -157,10 +204,11 @@ def npx_child_env(
 
     For lintro's npx fallback the result is a copy of *env* (or of
     ``os.environ`` when *env* is None) without ``npm_config_node_options`` in
-    any letter case, and with ``NODE_OPTIONS`` reduced by
+    any letter case or hyphen spelling, and with ``NODE_OPTIONS`` reduced by
     :func:`filter_node_options` (removed when nothing is kept; other letter
-    casings of it are removed too). Every other
-    command, including ``bunx`` and direct binaries, gets *env* unchanged.
+    casings of it are removed too). Dropped entries are named in one warning
+    per process. Every other command, including ``bunx`` and direct binaries,
+    gets *env* unchanged.
 
     Args:
         cmd: Command about to be spawned.
@@ -175,19 +223,17 @@ def npx_child_env(
     # Node reads ``NODE_OPTIONS`` case-insensitively on Windows only, where
     # ``os.environ`` already upper-cases keys; other casings are dropped, never
     # promoted.
-    dropped = {NODE_OPTIONS_VAR.casefold(), NPM_NODE_OPTIONS_VAR}
     child = {
-        key: value for key, value in source.items() if key.casefold() not in dropped
+        key: value
+        for key, value in source.items()
+        if key.casefold() != NODE_OPTIONS_VAR.casefold()
+        and key.casefold().replace("-", "_") != NPM_NODE_OPTIONS_VAR
     }
-    original = source.get(NODE_OPTIONS_VAR, "")
-    kept = filter_node_options(original)
-    if kept != original:
-        logger.debug(
-            f"npx fallback: dropped NODE_OPTIONS entries that may load code; "
-            f"kept {kept!r}",
-        )
+    kept, dropped = _partition_node_options(source.get(NODE_OPTIONS_VAR, ""))
+    if dropped:
+        _warn_dropped_once(dropped)
     if kept:
-        child[NODE_OPTIONS_VAR] = kept
+        child[NODE_OPTIONS_VAR] = " ".join(kept)
     return child
 
 
