@@ -840,6 +840,23 @@ can name a location when the answer is true.
   not re-verified**. Nothing on this path ever resolves a finding. A round stopped by a
   cost cap or a timeout never reaches the call, so its moved findings are held too, as
   are the mid-run checkpoints.
+- The material has to fit. The check gets the larger of
+  `ai.review_synthesis_diff_tokens` and half the model's context window. When the diff
+  is cut, or a changed file is left out or cannot be read at the head, a `false` answer
+  only means the issue was not in what the provider saw, so it is held as **⏸ not
+  re-verified** instead of resolving. With no budget at all no call is made.
+
+"In place" is strict. A finding whose line was edited or deleted, whose file git reads
+as rewritten (`git diff -B` dissimilarity of 50 or more, as when the original moved out
+and the path was refilled), or that has no recorded head is not in place (`"unplaced"`
+in `relocated_findings`) and also waits for a `false` answer.
+
+**Findings on deleted files are held until verified.** Before this check, a finding on a
+file the pull request deleted resolved with no call. Now it closes only on a `false`
+answer. While the check is off, out of budget, or answering off-schema, such a finding
+stays open as not re-verified on every round. The note counts them separately
+(`… held as not re-verified (2 on deleted files)`), and you can resolve the thread by
+hand once you have checked the deletion removed the issue.
 
 ```yaml
 review:
@@ -850,9 +867,9 @@ The call counts against the review budget. The sticky, the review body and the t
 show
 `Re-verified 2 moved findings: 1 verified fixed, 1 still present, 0 held as not re-verified.`
 when the round had any, and `--output json` carries a `moved_verification` block
-(`candidates`, `verified_fixed`, `verified_present`, `moved`, `held`, `failed`, tokens
-and cost) plus `moved_verdicts` on the result metadata. Findings in place behave exactly
-as before and cost no call.
+(`candidates`, `verified_fixed`, `verified_present`, `moved`, `held`, `held_deleted`,
+`failed`, `incomplete`, tokens and cost) plus `moved_verdicts` on the result metadata.
+Findings in place behave exactly as before and cost no call.
 
 ### Diff-bounded findings
 

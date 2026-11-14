@@ -56,6 +56,7 @@ from tests.unit.ai.review.scratch_repo_fixtures import commit as _commit
 from tests.unit.ai.review.scratch_repo_fixtures import fake_provider as _provider
 from tests.unit.ai.review.scratch_repo_fixtures import git as _git
 from tests.unit.ai.review.scratch_repo_fixtures import lines as _lines
+from tests.unit.ai.review.scratch_repo_fixtures import moved_answer, routed_calls
 from tests.unit.ai.review.test_carried_reverify_3403 import (
     _plan_round,
     _record,
@@ -381,6 +382,7 @@ def _review(
     base: str,
     prior: ReviewState | None,
     reported: list[dict[str, Any]],
+    moved: AIResponse | None = None,
 ) -> tuple[ReviewResult, ReviewState, str]:
     """Run one real review round with a canned provider answer.
 
@@ -389,22 +391,16 @@ def _review(
         base: The base commit.
         prior: State carried into the round.
         reported: Findings the provider returns.
+        moved: The moved-finding check's answer (#3466); ``None`` answers it
+            with the review's own reply, which holds.
 
     Returns:
         The result, the advanced state and the sticky body.
     """
     head = _git(repo, "rev-parse", "HEAD")
 
-    def canned(**kwargs: Any) -> AIResponse:
-        """Serve the round's canned findings, whatever the call asked.
-
-        Args:
-            **kwargs: Ignored provider call arguments.
-
-        Returns:
-            The canned response.
-        """
-        return AIResponse(
+    canned = routed_calls(
+        review=AIResponse(
             content=json.dumps(
                 {"summary": "Canned review", "checklist": [], "findings": reported},
             ),
@@ -413,7 +409,9 @@ def _review(
             input_tokens=10,
             output_tokens=5,
             cost_estimate=0.01,
-        )
+        ),
+        moved=moved,
+    )
 
     context = _context(repo=repo, base=base, head=head, paths=[_LARGE])
     with patch("lintro.ai.review.provider_call.call_ai", side_effect=canned):
@@ -449,7 +447,12 @@ def _review(
 
 
 def test_the_matcher_judges_a_fix_at_the_mapped_line(tmp_path: Path) -> None:
-    """X moved 81 → 91 in an unread round; the fix at 91 resolves it."""
+    """X moved 81 → 91 in an unread round; the fix at 91 resolves it.
+
+    The fix rewrites X's own line, so its absence alone no longer proves it
+    gone (#3466): it resolves on the moved-finding check's "fixed", and
+    stays stored at the coordinates it was last confirmed in.
+    """
     repo = tmp_path / "repo"
     base, _ = _repo(repo, [_LARGE])
     first, s1, _ = _review(
@@ -483,12 +486,18 @@ def test_the_matcher_judges_a_fix_at_the_mapped_line(tmp_path: Path) -> None:
     _edit_line(path, 90, "fixed_x = True\n")
     _commit(repo, "fix X at its current line 91")
 
-    third, s3, body = _review(repo=repo, base=base, prior=s2, reported=[])
+    third, s3, body = _review(
+        repo=repo,
+        base=base,
+        prior=s2,
+        reported=[],
+        moved=moved_answer(still_present="false"),
+    )
 
     assert_that(third.metadata.reviewed_ranges).contains((_LARGE, 88, 94))
     (x,) = s3.findings
     assert_that(x.status).is_equal_to(FindingStatus.RESOLVED)
-    assert_that(x.line).is_equal_to(91)
+    assert_that((x.line, x.line_sha)).is_equal_to((81, h1))
     assert_that(s3.runs[-1].outcome.verdict).is_equal_to(ReviewVerdict.READY)
     assert_that(body).contains("~~X~~")
     assert_that(body).does_not_contain("⏸ not re-verified")

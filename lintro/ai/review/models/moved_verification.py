@@ -34,7 +34,13 @@ class MovedVerificationSummary:
         moved: The subset of ``verified_present`` moved to the location the
             provider named, inside the diff.
         held: Findings with no usable answer, held as "not re-verified".
+        held_deleted: The subset of ``held`` on files the pull request
+            deletes; on main those resolved with no call, now they wait for
+            a "fixed" answer.
         failed: True when the call was made and produced no usable answer.
+        incomplete: True when the diff or a changed file could not be shown
+            whole (or there was no content budget), so no "fixed" answer
+            could resolve a finding.
         input_tokens: Prompt tokens the call consumed.
         output_tokens: Completion tokens the call produced.
         cost_estimate: Estimated USD cost of the call.
@@ -46,7 +52,9 @@ class MovedVerificationSummary:
     verified_present: int = 0
     moved: int = 0
     held: int = 0
+    held_deleted: int = 0
     failed: bool = False
+    incomplete: bool = False
     input_tokens: int = 0
     output_tokens: int = 0
     cost_estimate: float = 0.0
@@ -64,7 +72,9 @@ class MovedVerificationSummary:
             "verified_present": self.verified_present,
             "moved": self.moved,
             "held": self.held,
+            "held_deleted": self.held_deleted,
             "failed": self.failed,
+            "incomplete": self.incomplete,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "cost_estimate": self.cost_estimate,

@@ -371,6 +371,55 @@ def _base_rewrite(tmp_path: Path, force_full: bool) -> _Final:
     )
 
 
+def _replaced_path(tmp_path: Path, force_full: bool) -> _Final:
+    """The live bug moves into a rewritten ``d.py``; ``a.py`` is refilled.
+
+    Git reads the history as ``M100 a.py`` plus ``A d.py``: the stored path
+    still exists, so nothing reports a rename, yet the code there is gone.
+
+    Args:
+        tmp_path: Pytest temp dir.
+        force_full: ``--full`` for every round.
+
+    Returns:
+        The final round: X reported on ``d.py``, where the bug now lives.
+    """
+    repo, base, _ = harness._first_round(tmp_path)
+    text = (repo / "a.py").read_text()
+    (repo / "a.py").write_text(
+        text.replace("case_81 = 81", "can_read = lambda is_admin: is_admin or True"),
+    )
+    commit(repo, "introduce an executable authorization bug")
+    first = harness._round(
+        repo=repo,
+        base=base,
+        prior=None,
+        reported=[harness._x(file="a.py")],
+        force_full=force_full,
+    )
+    prior = harness._with_thread(first.state)
+    reviewed = git(repo, "rev-parse", "HEAD")
+    git(repo, "mv", "a.py", "d.py")
+    (repo / "d.py").write_text(
+        lines(300, label="rewritten").replace(
+            "rewritten_81 = 81",
+            "can_read = lambda is_admin: is_admin or True",
+        ),
+    )
+    (repo / "a.py").write_text(lines(300, label="unrelated"))
+    commit(repo, "move the live bug and refill the stored path")
+    status = git(repo, "diff", "-M", "-B", "--name-status", f"{reviewed}..HEAD")
+    assert_that(status).contains("M100\ta.py").contains("A\td.py")
+    return _Final(
+        repo=repo,
+        base=base,
+        prior=prior,
+        reported=[harness._x(file="d.py")],
+        threads={_THREAD: prior.findings[0].key},
+        live="d.py",
+    )
+
+
 _SCENARIOS: dict[str, Callable[[Path, bool], _Final]] = {
     "heuristic": lambda tmp, full: _heuristic(tmp, full, cut=200),
     "heuristic67": lambda tmp, full: _heuristic(tmp, full, cut=212),
@@ -380,6 +429,7 @@ _SCENARIOS: dict[str, Callable[[Path, bool], _Final]] = {
     "convergence": _convergence,
     "shallow": _shallow,
     "base-rewrite": _base_rewrite,
+    "replaced-path": _replaced_path,
 }
 
 
@@ -622,6 +672,7 @@ def _run_with(
     prior: ReviewState,
     moved: AIResponse | Exception | None,
     verify_moved_findings: bool = True,
+    context_window: int | None = None,
 ) -> tuple[Any, list[str]]:
     """Run one round with the check configured, recording its prompts.
 
@@ -631,6 +682,8 @@ def _run_with(
         prior: State carried into the round.
         moved: The moved-finding check's canned answer.
         verify_moved_findings: The config switch.
+        context_window: A context window to force, with the smallest
+            synthesis budget, so the check's material cannot fit.
 
     Returns:
         The result and the user prompt of every moved-finding check.
@@ -649,10 +702,12 @@ def _run_with(
                     review=True,
                     review_generated_questions=False,
                     transport=AITransport.API,
+                    review_synthesis_diff_tokens=1_000,
                 ),
                 checklist_items=[],
                 checklist_text="",
                 classifications=[],
+                context_window_override=context_window,
                 prior_state=prior,
                 enforce_cost_cap=False,
                 verify=ReviewVerifyMode.OFF,
@@ -714,7 +769,7 @@ def test_the_check_reads_the_original_finding_the_diff_and_the_files(
         "reported at: a.py:81",
         "81: case_81 = 81",
         "diff --git",
-        "File: b.py",
+        'file: "b.py"',
     )
     # Once in the diff, once in the file's current content.
     assert_that(prompt.count("edited_80 = 80")).is_equal_to(2)
@@ -747,11 +802,8 @@ def test_the_run_json_reports_the_counts(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("force_full", _MODES)
-def test_an_in_place_finding_resolves_without_the_check(
-    tmp_path: Path,
-    force_full: bool,
-) -> None:
-    """X fixed on its own unrenamed line resolves as before, with no extra call.
+def test_an_edited_line_is_not_in_place(tmp_path: Path, force_full: bool) -> None:
+    """X's own line rewritten: it waits for the check, and "fixed" resolves it.
 
     Args:
         tmp_path: Pytest temp dir.
@@ -761,7 +813,116 @@ def test_an_in_place_finding_resolves_without_the_check(
     rows = (repo / "a.py").read_text().splitlines(keepends=True)
     rows[80] = "fixed_81 = 81\n"
     (repo / "a.py").write_text("".join(rows))
-    commit(repo, "fix X in place")
+    commit(repo, "rewrite X's line")
+
+    held = harness._round(
+        repo=repo,
+        base=base,
+        prior=prior,
+        reported=[],
+        force_full=force_full,
+    )
+    fixed = harness._round(
+        repo=repo,
+        base=base,
+        prior=prior,
+        reported=[],
+        force_full=force_full,
+        moved=moved_answer(still_present="false"),
+    )
+
+    assert_that((held.counts, held.resolved_threads)).is_equal_to(((1, 0, 0), ()))
+    assert_that(held.state.findings[0].unverified).is_true()
+    assert_that(fixed.counts).is_equal_to((0, 0, 1))
+    assert_that(fixed.resolved_threads).is_equal_to((f"T{_THREAD}",))
+
+
+def _big_renamed_twice(tmp_path: Path) -> tuple[Path, str, ReviewState]:
+    """X on a 140 KB ``a.py`` whose two renamed copies differ only in the fix.
+
+    Args:
+        tmp_path: Pytest temp dir.
+
+    Returns:
+        The repository, the base commit and the state after round one.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    (repo / "a.py").write_text(lines(5000, label="base"))
+    base = commit(repo, "base")
+    body = lines(5000, label="case").splitlines(keepends=True)
+    body[80] = "value = eval(user_input)\n"
+    (repo / "a.py").write_text("".join(body))
+    commit(repo, "eval on user input")
+    first = harness._round(
+        repo=repo,
+        base=base,
+        prior=None,
+        reported=[harness._x(file="a.py")],
+        force_full=False,
+    )
+    git(repo, "mv", "a.py", "b.py")
+    (repo / "c.py").write_text("".join(body))
+    body[80] = "value = int(user_input)\n"
+    (repo / "b.py").write_text("".join(body))
+    commit(repo, "fix one copy, keep the eval in another")
+    return repo, base, harness._with_thread(first.state)
+
+
+def test_a_fixed_answer_over_a_cut_diff_holds(tmp_path: Path) -> None:
+    """The diff and files do not fit: "fixed" may not resolve X.
+
+    The live ``eval`` copy is past the cut, so the provider never saw it.
+
+    Args:
+        tmp_path: Pytest temp dir.
+    """
+    repo, base, prior = _big_renamed_twice(tmp_path)
+
+    result, seen = _run_with(
+        repo=repo,
+        base=base,
+        prior=prior,
+        moved=moved_answer(still_present="false"),
+        context_window=8_000,
+    )
+
+    (prompt,) = seen
+    assert_that(prompt).contains(
+        "[diff truncated]",
+        "not shown: over the prompt budget",
+    )
+    summary = result.metadata.moved_verification
+    assert summary is not None
+    assert_that(summary.to_dict()).contains_entry(
+        {"verified_fixed": 0},
+        {"held": 1},
+        {"incomplete": True},
+    )
+    verdicts = {entry[0]: entry[1] for entry in result.metadata.moved_verdicts}
+    assert_that(verdicts).is_equal_to({prior.findings[0].key: "unknown"})
+
+
+@pytest.mark.parametrize("force_full", _MODES)
+def test_an_in_place_finding_resolves_without_the_check(
+    tmp_path: Path,
+    force_full: bool,
+) -> None:
+    """X on an untouched line, no longer reported, resolves as before.
+
+    Its line maps exactly to the new head (the fix lands elsewhere in the
+    file), so the round needs no extra call.
+
+    Args:
+        tmp_path: Pytest temp dir.
+        force_full: ``--full``.
+    """
+    repo, base, prior = harness._first_round(tmp_path)
+    rows = (repo / "a.py").read_text().splitlines(keepends=True)
+    rows[199] = "guard_200 = True\n"
+    (repo / "a.py").write_text("".join(rows))
+    commit(repo, "fix X with a guard further down")
 
     # Were the check consulted, its "still present" would keep X open.
     round_ = harness._round(

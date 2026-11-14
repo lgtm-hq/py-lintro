@@ -24,6 +24,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.providers.response import AIResponse
 from lintro.ai.review import prior_head_fetch
 from lintro.ai.review.context import git_ops
 from lintro.ai.review.enums.finding_status import FindingStatus
@@ -44,7 +45,7 @@ from lintro.ai.review.prior_head_fetch import (
 )
 from lintro.ai.review.sticky.state import matcher_relocations
 from tests.unit.ai.review import test_full_round_rename_3413 as harness
-from tests.unit.ai.review.scratch_repo_fixtures import commit, git
+from tests.unit.ai.review.scratch_repo_fixtures import commit, git, moved_answer
 
 _MODES = [
     pytest.param(False, id="delta"),
@@ -205,6 +206,7 @@ def _review(
     *,
     reported: list[dict[str, object]],
     force_full: bool,
+    moved: AIResponse | None = None,
 ) -> harness._Round:
     """Run round two in the CI clone.
 
@@ -212,6 +214,7 @@ def _review(
         scenario: The scenario.
         reported: Findings the provider returns.
         force_full: ``--full``.
+        moved: The moved-finding check's answer (#3466), or ``None``.
 
     Returns:
         The round.
@@ -223,6 +226,7 @@ def _review(
             prior=scenario.state,
             reported=reported,
             force_full=force_full,
+            moved=moved,
         )
 
 
@@ -286,10 +290,19 @@ def test_a_finding_the_rebased_head_fixed_still_resolves(
     tmp_path: Path,
     force_full: bool,
 ) -> None:
-    """X's line was rewritten and nothing reports X: it resolves."""
+    """X's line was rewritten and nothing reports X: "fixed" resolves it.
+
+    A rewritten line is not in place (#3466), so the moved-finding check
+    answers here.
+    """
     scenario = _rebased(tmp_path, fix=True)
 
-    second = _review(scenario, reported=[], force_full=force_full)
+    second = _review(
+        scenario,
+        reported=[],
+        force_full=force_full,
+        moved=moved_answer(still_present="false"),
+    )
 
     assert_that(second.counts).is_equal_to((0, 0, 1))
     assert_that(second.resolved_threads).is_equal_to(

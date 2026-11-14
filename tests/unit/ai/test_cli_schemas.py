@@ -90,6 +90,7 @@ def test_the_cli_schema_registry_is_derived_and_complete() -> None:
         [
             "FIX_BATCH_CLI_SCHEMA",
             "FIX_CLI_SCHEMA",
+            "MOVED_VERIFICATION_CLI_SCHEMA",
             "REVIEW_CLI_SCHEMA",
             "SUMMARY_CLI_SCHEMA",
             "SYNTHESIS_CLI_SCHEMA",

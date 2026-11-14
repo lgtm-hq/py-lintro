@@ -358,7 +358,7 @@ async def _verify_moved(
                 ai_config=plan.ai_config,
                 budget=plan.budget,
                 repo_root=plan.repo_root,
-                content_budget_tokens=plan.synthesis_diff_budget,
+                content_budget_tokens=plan.moved_check_budget,
                 no_tools=plan.tools_disabled,
                 stop=interrupt,
             ),

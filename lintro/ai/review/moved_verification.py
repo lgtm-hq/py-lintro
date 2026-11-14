@@ -35,19 +35,20 @@ from lintro.ai.prompts.review import (
 )
 from lintro.ai.review import provider_call
 from lintro.ai.review.diff_gate import hunks_from_diff
+from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.enums.moved_verdict import MovedVerdict
 from lintro.ai.review.finding_identity import fingerprint_for
 from lintro.ai.review.models.moved_verification import MovedVerificationSummary
 from lintro.ai.review.moved_verification_prompt import (
+    Material,
     parse_moved_answer,
     render_candidates,
-    render_changed_files,
-    render_diff,
+    render_material,
 )
 from lintro.ai.review.prompt_redaction import redact_prompt_text
 from lintro.ai.review.verification import (
-    _await_call_until_stop,
-    _VerificationInterruptedError,
+    VerificationInterruptedError,
+    await_call_until_stop,
 )
 from lintro.ai.sanitize import make_boundary_marker
 
@@ -93,7 +94,9 @@ class MovedVerificationRequest:
         ai_config: AI configuration for retries, budget and timeouts.
         budget: Session cost budget the call counts against.
         repo_root: The repository under review.
-        content_budget_tokens: Tokens the diff and file content may use.
+        content_budget_tokens: Tokens the diff and file content may use; with
+            none the check holds every candidate without a call, and when
+            the material does not fit a "fixed" answer is held as unknown.
         no_tools: When True the call goes out without tools.
         stop: The run's interrupt event.
     """
@@ -124,33 +127,54 @@ class MovedVerification:
     summary: MovedVerificationSummary | None = None
 
 
+def _deleted_paths(*, context: ReviewContext) -> frozenset[str]:
+    """Return the paths the pull request deletes.
+
+    Args:
+        context: The round's context.
+
+    Returns:
+        The deleted paths.
+    """
+    return frozenset(
+        item.path
+        for item in context.changed_files
+        if item.status is ChangedFileStatus.DELETED
+    )
+
+
 def _held(
     *,
+    request: MovedVerificationRequest,
     candidates: Sequence[FindingRecord],
-    enabled: bool,
     failed: bool = False,
+    unverifiable: bool = False,
     usage: tuple[int, int, float] = (0, 0, 0.0),
 ) -> MovedVerification:
     """Hold every candidate as not re-verified.
 
     Args:
+        request: The check's inputs.
         candidates: The candidates.
-        enabled: Whether the check was allowed to run.
         failed: Whether a call was made and gave no usable answer.
+        unverifiable: Whether the material could not be shown whole.
         usage: Tokens and cost a failed call still consumed.
 
     Returns:
         The all-held result.
     """
+    deleted = _deleted_paths(context=request.context)
     return MovedVerification(
         verdicts=tuple(
             (record.key, MovedVerdict.UNKNOWN.value, "", 0, "") for record in candidates
         ),
         summary=MovedVerificationSummary(
-            enabled=enabled,
+            enabled=request.enabled,
             candidates=len(candidates),
             held=len(candidates),
+            held_deleted=sum(1 for record in candidates if record.file in deleted),
             failed=failed,
+            incomplete=unverifiable,
             input_tokens=usage[0],
             output_tokens=usage[1],
             cost_estimate=usage[2],
@@ -192,23 +216,25 @@ def _location(
     return None if claimed in taken else (path, line, head)
 
 
-def _user_prompt(*, request: MovedVerificationRequest, asked: int) -> str:
+def _user_prompt(
+    *,
+    request: MovedVerificationRequest,
+    asked: int,
+    material: Material,
+    boundary: str,
+) -> str:
     """Build the call's user prompt.
 
     Args:
         request: The check's inputs.
         asked: How many candidates are put to the provider.
+        material: The diff and file content to show.
+        boundary: The per-call fence marker the material was fenced with.
 
     Returns:
         The prompt.
     """
-    context = request.context
-    boundary = make_boundary_marker()
-    diff, left = render_diff(
-        context=context,
-        budget_tokens=request.content_budget_tokens,
-    )
-    metadata = context.pr_metadata
+    metadata = request.context.pr_metadata
     return REVIEW_MOVED_VERIFICATION_USER_PROMPT_TEMPLATE.format(
         finding_count=asked,
         boundary=boundary,
@@ -221,13 +247,8 @@ def _user_prompt(*, request: MovedVerificationRequest, asked: int) -> str:
             repo_root=request.repo_root,
             boundary=boundary,
         ),
-        diff=diff,
-        files=render_changed_files(
-            context=context,
-            repo_root=request.repo_root,
-            boundary=boundary,
-            budget_tokens=left,
-        ),
+        diff=material.diff,
+        files=material.files,
     )
 
 
@@ -242,23 +263,40 @@ async def run_moved_verification(
 
     Returns:
         A verdict per candidate and the round's counts. Every failure comes
-        back as held, never as an exception and never as a resolve.
+        back as held, never as an exception and never as a resolve. With no
+        content budget the material cannot be shown at all, so no call is
+        made and every candidate is held.
     """
     candidates = tuple(request.candidates)
     if not candidates:
         return MovedVerification()
     if not request.enabled:
-        return _held(candidates=candidates, enabled=False)
+        return _held(request=request, candidates=candidates)
+    if request.content_budget_tokens <= 0:
+        logger.warning("The moved-finding check has no content budget; held.")
+        return _held(request=request, candidates=candidates, unverifiable=True)
     asked = min(len(candidates), MAX_MOVED_FINDINGS)
+    boundary = make_boundary_marker()
+    material = render_material(
+        context=request.context,
+        repo_root=request.repo_root,
+        boundary=boundary,
+        budget_tokens=request.content_budget_tokens,
+    )
     logger.info("Moved-finding check: {} findings to re-verify", asked)
     try:
         request.budget.check()
-        response = await _await_call_until_stop(
+        response = await await_call_until_stop(
             call=provider_call.call_ai(
                 provider=request.provider,
                 ai_config=request.ai_config,
                 system_prompt=REVIEW_MOVED_VERIFICATION_SYSTEM_PROMPT,
-                user_prompt=_user_prompt(request=request, asked=asked),
+                user_prompt=_user_prompt(
+                    request=request,
+                    asked=asked,
+                    material=material,
+                    boundary=boundary,
+                ),
                 budget=request.budget,
                 max_tokens=_MAX_TOKENS,
                 repo_root=request.repo_root or None,
@@ -270,14 +308,14 @@ async def run_moved_verification(
             ),
             stop=request.stop,
         )
-    except _VerificationInterruptedError:
+    except VerificationInterruptedError:
         logger.warning("The moved-finding check was interrupted; findings held.")
-        return _held(candidates=candidates, enabled=True, failed=True)
+        return _held(request=request, candidates=candidates, failed=True)
     except AITurnLimitError as exc:
         logger.warning("The moved-finding check hit its turn limit; findings held.")
         return _held(
+            request=request,
             candidates=candidates,
-            enabled=True,
             failed=True,
             usage=(exc.input_tokens, exc.output_tokens, exc.cost_estimate),
         )
@@ -288,13 +326,29 @@ async def run_moved_verification(
         logger.opt(exception=True).warning(
             "The moved-finding check failed; findings held as not re-verified.",
         )
-        return _held(candidates=candidates, enabled=True, failed=True)
+        return _held(request=request, candidates=candidates, failed=True)
     usage = (response.input_tokens, response.output_tokens, response.cost_estimate)
     answers = parse_moved_answer(content=response.content, count=asked)
     if not answers:
         logger.warning("The moved-finding check answered outside its schema.")
-        return _held(candidates=candidates, enabled=True, failed=True, usage=usage)
-    return _decide(request=request, candidates=candidates, answers=answers, usage=usage)
+        return _held(
+            request=request,
+            candidates=candidates,
+            failed=True,
+            usage=usage,
+        )
+    if not material.complete:
+        logger.warning(
+            "The moved-finding check saw a cut or partial diff; no finding it "
+            "called fixed is resolved this round.",
+        )
+    return _decide(
+        request=request,
+        candidates=candidates,
+        answers=answers,
+        usage=usage,
+        complete=material.complete,
+    )
 
 
 def _decide(
@@ -303,6 +357,7 @@ def _decide(
     candidates: tuple[FindingRecord, ...],
     answers: dict[int, tuple[MovedVerdict, str, int]],
     usage: tuple[int, int, float],
+    complete: bool,
 ) -> MovedVerification:
     """Turn the parsed answers into verdicts and counts.
 
@@ -311,14 +366,20 @@ def _decide(
         candidates: Every candidate, the ones past the cap included.
         answers: ``position -> (verdict, file, line)``.
         usage: Tokens and cost of the call.
+        complete: Whether the provider saw all of the diff and the files.
+            Without that, "fixed" may only mean it did not find the issue
+            in what it was shown, so it is held as unknown.
 
     Returns:
         The result.
     """
+    deleted = _deleted_paths(context=request.context)
     entries: list[MovedVerdictEntry] = []
-    fixed = present = moved = 0
+    fixed = present = moved = held_deleted = 0
     for position, record in enumerate(candidates, start=1):
         verdict, path, line = answers.get(position, (MovedVerdict.UNKNOWN, "", 0))
+        if verdict is MovedVerdict.FIXED and not complete:
+            verdict = MovedVerdict.UNKNOWN
         place = (
             _location(record=record, path=path, line=line, request=request)
             if verdict is MovedVerdict.PRESENT
@@ -327,6 +388,7 @@ def _decide(
         fixed += verdict is MovedVerdict.FIXED
         present += verdict is MovedVerdict.PRESENT
         moved += place is not None
+        held_deleted += verdict is MovedVerdict.UNKNOWN and record.file in deleted
         target = place or ("", 0, "")
         entries.append((record.key, verdict.value, *target))
     return MovedVerification(
@@ -338,6 +400,8 @@ def _decide(
             verified_present=present,
             moved=moved,
             held=len(candidates) - fixed - present,
+            held_deleted=held_deleted,
+            incomplete=not complete,
             input_tokens=usage[0],
             output_tokens=usage[1],
             cost_estimate=usage[2],

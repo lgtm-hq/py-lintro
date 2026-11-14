@@ -12,6 +12,7 @@ __all__ = [
     "LOCATION_HOLDS",
     "LOCATION_UNCHECKED",
     "LOCATION_UNMAPPED",
+    "LOCATION_UNPLACED",
     "DeltaPlan",
 ]
 
@@ -31,9 +32,16 @@ LOCATION_UNCHECKED = "unchecked"
 #: stored, carried unverified and never resolved that round.
 LOCATION_BASE_MOVED = "base-moved"
 
+#: A relocation's ``line_sha`` for a record whose own file git could reach
+#: but whose line it could not confirm in place (#3466): the line was edited
+#: or deleted, the file was rewritten (``git diff -B``), or the record has no
+#: recorded head. Kept where it was stored; its absence resolves it only on
+#: the moved-finding check's "fixed" verdict.
+LOCATION_UNPLACED = "unplaced"
+
 #: The relocation ``line_sha`` values that hold a record in place.
 LOCATION_HOLDS = frozenset(
-    {LOCATION_UNMAPPED, LOCATION_UNCHECKED, LOCATION_BASE_MOVED},
+    {LOCATION_UNMAPPED, LOCATION_UNCHECKED, LOCATION_BASE_MOVED, LOCATION_UNPLACED},
 )
 
 

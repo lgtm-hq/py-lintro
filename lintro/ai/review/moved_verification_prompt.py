@@ -14,6 +14,7 @@ held), never the round its check.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from lintro.ai.json_response import strip_json_fences
@@ -24,6 +25,7 @@ from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.finding_identity import normalize_file_path
 from lintro.ai.review.models.delta_plan import LOCATION_HOLDS
 from lintro.ai.review.prompt_redaction import redact_prompt_text
+from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -32,17 +34,14 @@ if TYPE_CHECKING:
     from lintro.ai.review.models.review_context import ReviewContext
 
 __all__ = [
+    "Material",
     "parse_moved_answer",
-    "render_changed_files",
     "render_candidates",
-    "render_diff",
+    "render_material",
 ]
 
 #: Lines of recorded code shown on each side of a finding's line.
 _SNIPPET_RADIUS = 3
-
-#: Characters per token the budget assumes (:func:`estimate_tokens`'s rate).
-_CHARS_PER_TOKEN = 4
 
 #: Spellings of ``still_present`` that mean each verdict.
 _ANSWERS = {
@@ -132,58 +131,94 @@ def render_candidates(
     return "\n\n".join(blocks)
 
 
-def render_diff(*, context: ReviewContext, budget_tokens: int) -> tuple[str, int]:
-    """Return the pull request's diff, cut to the budget.
+@dataclass(frozen=True, slots=True)
+class Material:
+    """What the check shows of the pull request's current state.
+
+    Attributes:
+        diff: The redacted diff, cut to the budget.
+        files: The fenced head content of the added, modified and renamed
+            files.
+        complete: False when anything was cut, left out or unreadable. The
+            issue may have moved anywhere in that material, so an answer
+            given without it can never resolve a finding.
+    """
+
+    diff: str
+    files: str
+    complete: bool
+
+
+def _fenced(*, boundary: str, text: str) -> str:
+    """Redact a block and wrap it in the per-call fence.
 
     Args:
-        context: The round's context.
-        budget_tokens: Tokens the diff and the files may use together.
+        boundary: The fence marker.
+        text: The block, file name included.
 
     Returns:
-        The redacted diff and the tokens left for the files.
+        The fenced block.
     """
-    limit = max(budget_tokens, 0) * _CHARS_PER_TOKEN
-    diff = context.unified_diff
-    if len(diff) > limit:
-        diff = diff[:limit] + "\n[diff truncated]"
-    text = redact_prompt_text(text=diff, source="PR diff")
-    return text, max(budget_tokens - len(text) // _CHARS_PER_TOKEN, 0)
+    shown = redact_prompt_text(text=text, source="changed file")
+    return f"<{boundary}>\n{shown}\n</{boundary}>"
 
 
-def render_changed_files(
+def render_material(
     *,
     context: ReviewContext,
     repo_root: str,
     boundary: str,
     budget_tokens: int,
-) -> str:
-    """Render the head content of every added, modified or renamed file.
+) -> Material:
+    """Render the diff and the head content of every non-deleted changed file.
+
+    File names are JSON-quoted and sit inside the fence with their content,
+    so a name carrying a newline cannot step outside the data boundary.
 
     Args:
         context: The round's context.
         repo_root: The repository holding the head.
         boundary: The per-call fence marker.
-        budget_tokens: Tokens the files may use; a file past it is named but
-            not shown.
+        budget_tokens: Tokens the diff and the files may use together; zero
+            or less leaves nothing to verify against.
 
     Returns:
-        The fenced files.
+        The material, and whether all of it fit.
     """
-    left = max(budget_tokens, 0) * _CHARS_PER_TOKEN
+    if budget_tokens <= 0:
+        return Material(diff="", files="", complete=False)
+    complete = True
+    diff = context.unified_diff
+    tokens = estimate_tokens(diff)
+    if tokens > budget_tokens:
+        diff = diff[: len(diff) * budget_tokens // tokens] + "\n[diff truncated]"
+        complete = False
+    diff = redact_prompt_text(text=diff, source="PR diff")
+    left = budget_tokens - estimate_tokens(diff)
     blocks: list[str] = []
     for item in context.changed_files:
         if item.status is ChangedFileStatus.DELETED:
             continue
+        name = json.dumps(item.path)
         text = _git_show(repo_root=repo_root, sha=context.head_ref, path=item.path)
         if text is None:
+            complete = False
+            note = f"file: {name}\n(not readable at the head)"
+            blocks.append(_fenced(boundary=boundary, text=note))
             continue
-        if len(text) > left:
-            blocks.append(f"File: {item.path} (not shown: over the prompt budget)")
+        cost = estimate_tokens(text)
+        if cost > left:
+            complete = False
+            note = f"file: {name}\n(not shown: over the prompt budget)"
+            blocks.append(_fenced(boundary=boundary, text=note))
             continue
-        left -= len(text)
-        shown = redact_prompt_text(text=text, source="changed file")
-        blocks.append(f"File: {item.path}\n<{boundary}>\n{shown}\n</{boundary}>")
-    return "\n\n".join(blocks) or "(no file content available)"
+        left -= cost
+        blocks.append(_fenced(boundary=boundary, text=f"file: {name}\n{text}"))
+    return Material(
+        diff=diff,
+        files="\n\n".join(blocks) or "(no added, modified or renamed file)",
+        complete=complete,
+    )
 
 
 def parse_moved_answer(

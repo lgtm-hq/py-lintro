@@ -68,11 +68,14 @@ def format_moved_verification_note(*, metadata: ReviewMetadata) -> str:
     summary = metadata.moved_verification
     if summary is None or summary.candidates == 0:
         return ""
+    held = f"{summary.held} held as not re-verified"
+    if summary.held_deleted:
+        held += f" ({summary.held_deleted} on deleted files)"
     parts = [
         f"{summary.verified_fixed} verified fixed",
         f"{summary.verified_present} still present"
         + (f" ({summary.moved} moved)" if summary.moved else ""),
-        f"{summary.held} held as not re-verified",
+        held,
     ]
     lead = plural(count=summary.candidates, noun="moved finding")
     reason = ""
@@ -80,4 +83,6 @@ def format_moved_verification_note(*, metadata: ReviewMetadata) -> str:
         reason = " (review.verify_moved_findings is off)"
     elif summary.failed:
         reason = " (the check did not complete)"
+    elif summary.incomplete:
+        reason = " (the diff or a changed file did not fit, so nothing resolved)"
     return f"Re-verified {lead}: {', '.join(parts)}{reason}."
