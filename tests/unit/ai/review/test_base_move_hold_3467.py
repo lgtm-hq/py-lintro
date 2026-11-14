@@ -501,9 +501,6 @@ def test_a_revert_to_the_base_resolves_while_the_base_stays_put(
 ) -> None:
     """With a known, unchanged merge-base, reverting the line is a fix.
 
-    The revert rewrites X's own line, so it resolves on the moved-finding
-    check's "fixed" (#3466).
-
     Args:
         tmp_path: Pytest temp dir.
         force_full: ``--full``.
@@ -524,7 +521,6 @@ def test_a_revert_to_the_base_resolves_while_the_base_stays_put(
         prior=prior,
         reported=[],
         force_full=force_full,
-        moved=moved_answer(still_present="false"),
     )
 
     assert_that(after.counts).is_equal_to((0, 0, 1))

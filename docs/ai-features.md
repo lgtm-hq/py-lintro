@@ -846,10 +846,14 @@ can name a location when the answer is true.
   only means the issue was not in what the provider saw, so it is held as **⏸ not
   re-verified** instead of resolving. With no budget at all no call is made.
 
-"In place" is strict. A finding whose line was edited or deleted, whose file git reads
-as rewritten (`git diff -B` dissimilarity of 50 or more, as when the original moved out
-and the path was refilled), or that has no recorded head is not in place (`"unplaced"`
-in `relocated_findings`) and also waits for a `false` answer.
+An ordinary fix is in place. Editing or deleting the finding's own line, in a file that
+was not rewritten, resolves it as before with no call: the round re-reads that hunk, so
+its silence is the evidence. The evidence is missing only when git reads the finding's
+own file as rewritten (`git diff -B` dissimilarity of 50 or more, or no answer from
+git), since the head that reported it or within a delta round, as when the original code
+moved out and the path was refilled; or when the finding has no recorded head. Such a
+finding is not in place (`"unplaced"` in `relocated_findings`) and also waits for a
+`false` answer.
 
 **Findings on deleted files are held until verified.** Before this check, a finding on a
 file the pull request deleted resolved with no call. Now it closes only on a `false`

@@ -227,18 +227,16 @@ def _map_record(
     path, line, hold = _place(record=record, since_sha=since_sha, lookups=lookups)
     if (
         not hold
-        and line is not None
         and path == record.file
         and not _in_place_at_head(
             path=path,
-            line=line,
             since_sha=since_sha,
             head_sha=head_sha,
             lookups=lookups,
         )
     ):
-        # A delta's own edits can rewrite the line or refill the file too.
-        # The line still names what the delta must show; only the record's
+        # The delta itself can refill the file after its code moved out. The
+        # line still names what the delta must show; only the record's
         # absence stops counting as a fix.
         hold = LOCATION_UNPLACED
     later = cached_renames(lookups=lookups, from_sha=since_sha, to_sha=head_sha)
@@ -270,48 +268,64 @@ def _map_record(
 def _in_place_at_head(
     *,
     path: str,
-    line: int,
     since_sha: str,
     head_sha: str,
     lookups: RoundLookups,
 ) -> bool:
-    """Tell whether a line placed at the base is still in place at this head.
+    """Tell whether a delta left a record's own file in place (#3466).
+
+    Editing or deleting the finding's line is an ordinary in-place fix: the
+    round re-reads that hunk, so silence there is evidence. Only a rewrite
+    (``git diff -B``), or a range git cannot answer for, removes the
+    evidence.
 
     Args:
         path: The record's own path.
-        line: Its line at ``since_sha``.
         since_sha: The delta's base (this head on a full round).
         head_sha: This round's head.
         lookups: The round's git answers.
 
     Returns:
-        True when the range left the line untouched and did not rewrite the
-        file (#3466); always True on a full round, already placed at head.
+        False when git reads the file as rewritten since the base or cannot
+        say; True otherwise, and always on a full round.
     """
     if since_sha == head_sha:
         return True
     later = cached_renames(lookups=lookups, from_sha=since_sha, to_sha=head_sha)
-    if later is None or path in later.moved or path in later.ambiguous:
-        # A rename since the base is followed (and checked) as a move.
-        return later is not None
-    key = (since_sha, head_sha, path, path)
-    if key not in lookups.hunks:
-        lookups.hunks[key] = file_hunks(
-            repo_root=lookups.repo_root,
-            from_sha=since_sha,
-            to_sha=head_sha,
-            old_path=path,
-            new_path=path,
-        )
-    hunks = lookups.hunks[key]
-    if hunks == ():
+    if later is None:
+        return False
+    if path in later.moved or path in later.ambiguous:
+        # A rename since the base is followed, and judged, as a move.
         return True
-    return map_line(line=line, hunks=hunks) is not None and not rewritten(
-        repo_root=lookups.repo_root,
+    return not _rewritten(
+        lookups=lookups,
         from_sha=since_sha,
         to_sha=head_sha,
         path=path,
     )
+
+
+def _rewritten(*, lookups: RoundLookups, from_sha: str, to_sha: str, path: str) -> bool:
+    """Ask git once per range and path whether the file was rewritten.
+
+    Args:
+        lookups: The round's git answers.
+        from_sha: The older commit.
+        to_sha: The newer commit.
+        path: The file.
+
+    Returns:
+        :func:`~lintro.ai.review.git_line_map.rewritten`'s answer.
+    """
+    key = (from_sha, to_sha, path)
+    if key not in lookups.rewrites:
+        lookups.rewrites[key] = rewritten(
+            repo_root=lookups.repo_root,
+            from_sha=from_sha,
+            to_sha=to_sha,
+            path=path,
+        )
+    return lookups.rewrites[key]
 
 
 def _collect(*, placements: Iterable[_Placement]) -> MappedFindings:
@@ -361,8 +375,9 @@ def _place(
         placed, and ``hold`` is :data:`LOCATION_UNMAPPED` when git could not
         reach the record's head and no rename metadata moved it (#3413), or
         :data:`LOCATION_UNPLACED` when the record stays on its own path but
-        its line cannot be confirmed there: no recorded head, the line was
-        edited or deleted, or git reads the file as rewritten (#3466).
+        the evidence that it is in place is missing: no recorded head, or
+        git reads the file as rewritten (#3466). An edited or deleted line
+        in a file that was not rewritten is in place, with no line.
     """
     if record.line_sha == since_sha:
         return record.file, record.line, ""
@@ -397,14 +412,11 @@ def _place(
             new_path=dest,
         )
     line = map_line(line=record.line, hunks=lookups.hunks[key])
-    if dest == record.file and (
-        line is None
-        or rewritten(
-            repo_root=lookups.repo_root,
-            from_sha=record.line_sha,
-            to_sha=since_sha,
-            path=record.file,
-        )
+    if dest == record.file and _rewritten(
+        lookups=lookups,
+        from_sha=record.line_sha,
+        to_sha=since_sha,
+        path=record.file,
     ):
         return dest, None, LOCATION_UNPLACED
     return dest, line, ""

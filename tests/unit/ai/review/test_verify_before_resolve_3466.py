@@ -801,40 +801,48 @@ def test_the_run_json_reports_the_counts(tmp_path: Path) -> None:
     assert_that(payload["moved_verification"]["cost_estimate"]).is_greater_than(0)
 
 
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        pytest.param("fixed_81 = 81\n", id="line-edited"),
+        pytest.param("", id="line-deleted"),
+    ],
+)
 @pytest.mark.parametrize("force_full", _MODES)
-def test_an_edited_line_is_not_in_place(tmp_path: Path, force_full: bool) -> None:
-    """X's own line rewritten: it waits for the check, and "fixed" resolves it.
+def test_an_ordinary_fix_of_the_line_resolves_without_the_check(
+    tmp_path: Path,
+    force_full: bool,
+    replacement: str,
+) -> None:
+    """Editing or deleting X's own line, file not rewritten: resolves as on main.
+
+    The round re-reads that hunk, so its silence is the evidence; no
+    moved-finding call is made (its "still present" would keep X open).
 
     Args:
         tmp_path: Pytest temp dir.
         force_full: ``--full``.
+        replacement: What line 81 becomes.
     """
     repo, base, prior = harness._first_round(tmp_path)
     rows = (repo / "a.py").read_text().splitlines(keepends=True)
-    rows[80] = "fixed_81 = 81\n"
+    rows[80] = replacement
     (repo / "a.py").write_text("".join(rows))
-    commit(repo, "rewrite X's line")
+    commit(repo, "fix X on its own line")
 
-    held = harness._round(
+    round_ = harness._round(
         repo=repo,
         base=base,
         prior=prior,
         reported=[],
         force_full=force_full,
-    )
-    fixed = harness._round(
-        repo=repo,
-        base=base,
-        prior=prior,
-        reported=[],
-        force_full=force_full,
-        moved=moved_answer(still_present="false"),
+        moved=moved_answer(still_present="true"),
     )
 
-    assert_that((held.counts, held.resolved_threads)).is_equal_to(((1, 0, 0), ()))
-    assert_that(held.state.findings[0].unverified).is_true()
-    assert_that(fixed.counts).is_equal_to((0, 0, 1))
-    assert_that(fixed.resolved_threads).is_equal_to((f"T{_THREAD}",))
+    assert_that(round_.counts).is_equal_to((0, 0, 1))
+    assert_that(round_.resolved_threads).is_equal_to((f"T{_THREAD}",))
+    assert_that(round_.result.metadata.moved_verification).is_none()
+    assert_that(round_.result.metadata.moved_verdicts).is_empty()
 
 
 def _big_renamed_twice(tmp_path: Path) -> tuple[Path, str, ReviewState]:
