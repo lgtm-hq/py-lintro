@@ -325,6 +325,10 @@ def test_validate_subprocess_command_non_absolute_argv0_checked_whole(
         pytest.param("C:/a>b/prettier.cmd", id="redirect"),
         pytest.param("C:/tools&whoami&/PRETTIER.BAT", id="upper-bat"),
         pytest.param("C:/tools&whoami&/prettier.Cmd", id="mixed-case-cmd"),
+        pytest.param("C:/tools&whoami&/prettier.cmd.", id="trailing-dot"),
+        pytest.param("C:/tools&whoami&/prettier.cmd. .", id="trailing-dot-space"),
+        pytest.param("C:/tools&whoami&/prettier.cmd ", id="trailing-space"),
+        pytest.param(r"C:\tools&whoami&\PRETTIER.BAT..", id="upper-bat-dots"),
     ],
 )
 def test_validate_subprocess_command_batch_argv0_checked_on_full_path(

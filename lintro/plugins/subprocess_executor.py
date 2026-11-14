@@ -126,10 +126,15 @@ def _is_batch_command(command: str) -> bool:
         command: The command name, ``cmd[0]``.
 
     Returns:
-        True when its suffix is ``.cmd`` or ``.bat`` in any letter case.
+        True when its suffix is ``.cmd`` or ``.bat`` in any letter case,
+        ignoring trailing dots and spaces.
     """
     # PureWindowsPath splits on both separators, so mixed paths work too.
-    return PureWindowsPath(command).suffix.lower() in BATCH_SUFFIXES
+    # Windows strips trailing dots and spaces from a path's final component,
+    # so ``prettier.cmd.``, ``prettier.cmd. .`` and ``prettier.cmd `` all
+    # launch ``prettier.cmd`` through cmd.exe.
+    name = PureWindowsPath(command).name.rstrip(". ")
+    return PureWindowsPath(name).suffix.lower() in BATCH_SUFFIXES
 
 
 def _command_name_to_check(command: str) -> str:
