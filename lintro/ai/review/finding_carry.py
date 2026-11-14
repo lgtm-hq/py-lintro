@@ -4,7 +4,8 @@ Two decisions :func:`lintro.ai.review.finding_matcher.match_findings` makes
 on a delta round live here so the matcher stays within its size: which
 prior open finding is carried because the round read its file but not its
 line, and which record key each current finding was assigned so the JSON
-surface can carry it as ``finding_id``.
+surface can carry it as ``finding_id``. The merge-base stamp the persisting
+callers put on each reported record (#3467) lives here too.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from lintro.ai.review.models.delta_plan import (
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from lintro.ai.review.models.finding_match_result import FindingMatchResult
     from lintro.ai.review.models.finding_record import FindingRecord
     from lintro.ai.review.models.review_finding import ReviewFinding
 
@@ -33,6 +35,7 @@ __all__ = [
     "_held_location",
     "_line_unread",
     "_relocate",
+    "stamp_sightings",
 ]
 
 #: Holds that keep a record open even when its path left the diff: one beyond
@@ -212,3 +215,37 @@ def _line_unread(
     # A non-positive range is the "nothing shown" sentinel: it holds no line,
     # findings at line 0 included.
     return not any(start <= line <= end for start, end in ranges if start > 0)
+
+
+def stamp_sightings(
+    *,
+    match: FindingMatchResult,
+    merge_base: str,
+) -> FindingMatchResult:
+    """Record the merge-base each finding reported this round was seen under.
+
+    A record the round reported passed the diff gate under ``merge_base``,
+    so a later round can tell whether a moved base may have pushed it out of
+    the diff (``FindingRecord.placement_merge_base``, #3467). Records carried,
+    relocated or held without a report keep the merge-base they had.
+
+    Args:
+        match: The round's match.
+        merge_base: ``merge-base(base, head)`` for the round, or ``""`` when
+            unknown.
+
+    Returns:
+        The match with its reported records stamped.
+    """
+    sighted = frozenset(match.finding_ids)
+    return replace(
+        match,
+        records=tuple(
+            (
+                replace(record, placement_merge_base=merge_base)
+                if record.key in sighted and record.status is FindingStatus.OPEN
+                else record
+            )
+            for record in match.records
+        ),
+    )

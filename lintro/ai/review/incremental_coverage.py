@@ -21,6 +21,7 @@ from lintro.ai.enums.cost_basis import SHADOW_COST_BASES, CostBasis
 from lintro.ai.providers.reported_model import ReportedModel
 from lintro.ai.review.coverage import inherit_same_round_paths
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
+from lintro.ai.review.finding_carry import stamp_sightings
 from lintro.ai.review.finding_matcher import match_findings
 from lintro.ai.review.github_constants import MAX_STORED_RUNS
 from lintro.ai.review.merge import truncated_paths
@@ -172,15 +173,18 @@ def write_incremental_coverage_part(
     actually_reviewed = frozenset(
         path for path in resume.queue if path in completed_files
     )
-    match = match_findings(
-        previous=seed,
-        findings=findings,
-        round_number=seed.next_round,
-        head_sha=context.head_ref,
-        reviewed_paths=actually_reviewed,
-        # A delta round (#2627) resolves only what it re-read, mid-run too.
-        reviewed_ranges=ranges_by_path(reviewed_ranges=resume.reviewed_ranges),
-        relocations=relocations_by_key(relocations=resume.relocations),
+    match = stamp_sightings(
+        match=match_findings(
+            previous=seed,
+            findings=findings,
+            round_number=seed.next_round,
+            head_sha=context.head_ref,
+            reviewed_paths=actually_reviewed,
+            # A delta round (#2627) resolves only what it re-read, mid-run too.
+            reviewed_ranges=ranges_by_path(reviewed_ranges=resume.reviewed_ranges),
+            relocations=relocations_by_key(relocations=resume.relocations),
+        ),
+        merge_base=resume.merge_base,
     )
     # A shadow figure is never spend (#2867, ADR-0011 B): a gateway's is
     # what the budget charged, priced per call on the shadow model, and a

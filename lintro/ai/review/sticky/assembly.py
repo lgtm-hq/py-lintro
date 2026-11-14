@@ -17,6 +17,7 @@ from dataclasses import replace
 
 from lintro.ai.review.convergence import score_records
 from lintro.ai.review.enums.finding_status import FindingStatus
+from lintro.ai.review.finding_carry import stamp_sightings
 from lintro.ai.review.finding_matcher import derive_verdict, match_findings
 from lintro.ai.review.github_constants import (
     MAX_STORED_RUNS,
@@ -93,6 +94,10 @@ def _round_outcome(*, request: StickyRequest) -> RoundOutcome:
         departed_paths=request.departed_paths,
         reviewed_ranges=matcher_reviewed_ranges(result=request.result),
         relocations=matcher_relocations(result=request.result),
+    )
+    match = stamp_sightings(
+        match=match,
+        merge_base=request.result.metadata.merge_base,
     )
     match = replace(
         match,

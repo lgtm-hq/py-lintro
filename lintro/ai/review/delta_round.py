@@ -49,7 +49,8 @@ def narrow_round(
         delta: The round's scope decision.
         context: The collected context (head and changed files).
         repo_root: The repository the range is resolved in.
-        resume: The round's resume plan.
+        resume: The round's resume plan; its ``merge_base`` is the round's,
+            which decides which findings a moved base holds (#3467).
         prior: State of the previous rounds; on a full round its open
             findings are placed at this head (#3413).
 
@@ -81,6 +82,7 @@ def narrow_round(
             repo_root=repo_root,
             relocations=delta.relocations,
             at_head=False,
+            merge_base=resume.merge_base,
         ),
     )
     if not chunks:
@@ -152,6 +154,7 @@ def _place_at_head(
         repo_root=repo_root,
         relocations=mapped.relocations,
         at_head=True,
+        merge_base=resume.merge_base,
     )
     if not relocations:
         return resume

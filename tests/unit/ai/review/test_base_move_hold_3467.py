@@ -17,7 +17,9 @@ in delta and in full mode, with the harness of #3413.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
@@ -28,7 +30,9 @@ from lintro.ai.review.incremental_coverage import (
     CheckpointStamp,
     write_incremental_coverage_part,
 )
+from lintro.ai.review.lifecycle.state import persist_review_state
 from lintro.ai.review.merge import ChunkReviewPartial
+from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.resume import plan_resume
@@ -208,8 +212,9 @@ def test_a_checkpoint_resumed_against_a_newer_base_holds_the_live_finding(
 ) -> None:
     """A SIGTERM checkpoint written under the old base does not resolve X.
 
-    The checkpoint holds no finished run, only the base it was written under,
-    so the record's merge-base comes from that base.
+    The checkpoint holds no finished run. The held state is then persisted
+    and reloaded as CI does, which rewrites the state's ``base_sha``, and a
+    harmless later round still holds X: the evidence lives on the record.
 
     Args:
         tmp_path: Pytest temp dir.
@@ -251,23 +256,265 @@ def test_a_checkpoint_resumed_against_a_newer_base_holds_the_live_finding(
         reported=[harness._x(file="c.py")],
         force_full=force_full,
     )
-
     _assert_held(round_=resumed, key=prior.findings[0].key, repo=repo)
+    persisted = tmp_path / "persisted"
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(persisted))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    persist_review_state(
+        result=resumed.result,
+        context=harness._git_context(repo=repo, base=new_base),
+        prior=prior,
+        pr_number=1,
+        repo="o/r",
+    )
+    reloaded = load_ci_state(directory=persisted, repo="o/r", pr_number=1)
+    assert_that(reloaded.base_sha).is_equal_to(new_base)
+    (repo / "c.py").write_text((repo / "c.py").read_text() + "# later\n")
+    commit(repo, "harmless change after the reload")
+
+    later = harness._round(
+        repo=repo,
+        base=new_base,
+        prior=reloaded,
+        reported=[harness._x(file="c.py")],
+        force_full=force_full,
+    )
+
+    _assert_held(round_=later, key=prior.findings[0].key, repo=repo)
 
 
 @pytest.mark.parametrize("force_full", _MODES)
-def test_a_finding_fixed_after_a_rebase_still_resolves(
+def test_a_hold_survives_the_run_history_dropping_its_round(
     tmp_path: Path,
     force_full: bool,
 ) -> None:
-    """The pull request rewrites line 81 after the rebase: X resolves.
+    """Pruning the round that reported X from the run history keeps X held.
+
+    The stored run history is capped, so the round a finding was reported in
+    is eventually evicted; the hold must not depend on it.
+
+    Args:
+        tmp_path: Pytest temp dir.
+        force_full: ``--full`` for the later round.
+    """
+    repo, _, prior = _reported_on_b(tmp_path)
+    new_base = _rebase_and_rename(repo, line_81=_BUG)
+    held = harness._round(
+        repo=repo,
+        base=new_base,
+        prior=prior,
+        reported=[harness._x(file="c.py")],
+        force_full=False,
+    )
+    pruned = replace(held.state, runs=held.state.runs[-1:], base_sha=new_base)
+    (repo / "c.py").write_text((repo / "c.py").read_text() + "# later\n")
+    commit(repo, "harmless change after the prune")
+
+    later = harness._round(
+        repo=repo,
+        base=new_base,
+        prior=pruned,
+        reported=[harness._x(file="c.py")],
+        force_full=force_full,
+    )
+
+    _assert_held(round_=later, key=prior.findings[0].key, repo=repo)
+
+
+@pytest.mark.parametrize("force_full", _MODES)
+def test_a_line_the_base_rewrote_is_held(
+    tmp_path: Path,
+    force_full: bool,
+) -> None:
+    """The base rewrites the reported line, still wrong; the PR does not touch it.
+
+    Git cannot map line 81 from X's head, but the rewrite lies outside the
+    pull request's hunks, so it is the base's change, not a fix.
 
     Args:
         tmp_path: Pytest temp dir.
         force_full: ``--full``.
     """
     repo, _, prior = _reported_on_b(tmp_path)
-    new_base = _rebase_and_rename(repo, line_81=_FIX)
+    git(repo, "mv", "b.py", "c.py")
+    base_text = _with_line_81(_pr_text(), line="bug_at_81 = bool(1)\n")
+    (repo / "c.py").write_text(base_text)
+    new_base = commit(repo, "the base renames b.py and rewrites the bug")
+    (repo / "c.py").write_text(base_text + "# PR change\n")
+    commit(repo, "the pull request appends a line")
+
+    after = harness._round(
+        repo=repo,
+        base=new_base,
+        prior=prior,
+        reported=[harness._x(file="c.py")],
+        force_full=force_full,
+    )
+
+    assert_that(after.counts).is_equal_to((1, 0, 0))
+    assert_that(after.resolved_threads).is_empty()
+    (record,) = after.state.findings
+    assert_that(record.status).is_equal_to(FindingStatus.OPEN)
+    assert_that(record.inline_comment_id).is_equal_to(harness._THREAD_ID)
+    assert_that((repo / "c.py").read_text()).contains("bug_at_81 = bool(1)\n")
+
+
+@pytest.mark.parametrize("force_full", _MODES)
+def test_a_mode_only_change_after_the_base_moved_holds_the_finding(
+    tmp_path: Path,
+    force_full: bool,
+) -> None:
+    """The file's only remaining change is its mode: it has no line hunks.
+
+    The diff gate drops every line-anchored report on such a file.
+
+    Args:
+        tmp_path: Pytest temp dir.
+        force_full: ``--full``.
+    """
+    repo, _, prior = _reported_on_b(tmp_path)
+    new_base = git(repo, "rev-parse", "HEAD")
+    git(repo, "update-index", "--chmod=+x", "b.py")
+    git(repo, "commit", "-q", "-m", "mode only")
+
+    after = harness._round(
+        repo=repo,
+        base=new_base,
+        prior=prior,
+        reported=[harness._x(file="b.py")],
+        force_full=force_full,
+    )
+
+    assert_that(after.result.metadata.diff_gate.outside_diff).is_equal_to(1)
+
+    assert_that(after.counts).is_equal_to((1, 0, 0))
+    assert_that(after.resolved_threads).is_empty()
+    (record,) = after.state.findings
+    assert_that(record.status).is_equal_to(FindingStatus.OPEN)
+    assert_that(record.unverified).is_true()
+
+
+def _reverted_in_place(tmp_path: Path) -> tuple[Path, str, ReviewState]:
+    """Report X on ``a.py:81``, then revert line 81 to the base's text.
+
+    Line 200 stays changed, so ``a.py`` remains in the diff; line 81 is now
+    base content outside every hunk, while the base itself never moved.
+
+    Args:
+        tmp_path: Pytest temp dir.
+
+    Returns:
+        The repository, the base commit and the state after round one.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    base_text = lines(300, label="base")
+    (repo / "a.py").write_text(base_text)
+    base = commit(repo, "base")
+    rows = base_text.splitlines(keepends=True)
+    rows[80] = _BUG
+    rows[199] = "changed_200 = 200\n"
+    (repo / "a.py").write_text("".join(rows))
+    commit(repo, "bug at 81, change at 200")
+    first = harness._round(
+        repo=repo,
+        base=base,
+        prior=None,
+        reported=[harness._x(file="a.py")],
+        force_full=False,
+    )
+    rows[80] = base_text.splitlines(keepends=True)[80]
+    (repo / "a.py").write_text("".join(rows))
+    commit(repo, "revert line 81 to the base")
+    return repo, base, harness._with_thread(first.state)
+
+
+@pytest.mark.parametrize("force_full", _MODES)
+def test_a_revert_to_the_base_resolves_while_the_base_stays_put(
+    tmp_path: Path,
+    force_full: bool,
+) -> None:
+    """With a known, unchanged merge-base, reverting the line is a fix.
+
+    Args:
+        tmp_path: Pytest temp dir.
+        force_full: ``--full``.
+    """
+    repo, base, prior = _reverted_in_place(tmp_path)
+    (record,) = prior.findings
+    assert_that(record.placement_merge_base).is_equal_to(base)
+    payload = record.to_dict()
+    assert_that(FindingRecord.from_dict(payload)).is_equal_to(record)
+    legacy = {k: v for k, v in payload.items() if k != "placement_merge_base"}
+    restored = FindingRecord.from_dict(legacy)
+    assert_that(restored).is_not_none()
+    assert_that(restored.placement_merge_base if restored else None).is_empty()
+
+    after = harness._round(
+        repo=repo,
+        base=base,
+        prior=prior,
+        reported=[],
+        force_full=force_full,
+    )
+
+    assert_that(after.counts).is_equal_to((0, 0, 1))
+    assert_that(after.resolved_threads).is_equal_to((f"T{harness._THREAD_ID}",))
+
+
+@pytest.mark.parametrize("force_full", _MODES)
+def test_an_unknown_merge_base_holds_a_finding_outside_the_diff(
+    tmp_path: Path,
+    force_full: bool,
+) -> None:
+    """A shallow checkout cannot name the merge-base: X is held, not resolved.
+
+    CI checks out at depth 1, so ``git merge-base`` answers nothing in every
+    round; two unknown merge-bases prove nothing about the base staying put.
+
+    Args:
+        tmp_path: Pytest temp dir.
+        force_full: ``--full``.
+    """
+    with patch("lintro.ai.review.run_planning.merge_base", return_value=""):
+        repo, base, prior = _reverted_in_place(tmp_path)
+        assert_that(prior.findings[0].placement_merge_base).is_empty()
+
+        after = harness._round(
+            repo=repo,
+            base=base,
+            prior=prior,
+            reported=[],
+            force_full=force_full,
+        )
+
+    assert_that(after.counts).is_equal_to((1, 0, 0))
+    assert_that(after.resolved_threads).is_empty()
+    (record,) = after.state.findings
+    assert_that(record.status).is_equal_to(FindingStatus.OPEN)
+    assert_that(record.unverified).is_true()
+
+
+@pytest.mark.parametrize(
+    "line_81",
+    [pytest.param(_FIX, id="rewritten"), pytest.param("", id="deleted")],
+)
+@pytest.mark.parametrize("force_full", _MODES)
+def test_a_finding_fixed_after_a_rebase_still_resolves(
+    tmp_path: Path,
+    force_full: bool,
+    line_81: str,
+) -> None:
+    """The pull request rewrites or deletes line 81 after the rebase: X resolves.
+
+    Args:
+        tmp_path: Pytest temp dir.
+        force_full: ``--full``.
+        line_81: The pull request's replacement for line 81.
+    """
+    repo, _, prior = _reported_on_b(tmp_path)
+    new_base = _rebase_and_rename(repo, line_81=line_81)
 
     fixed = harness._round(
         repo=repo,

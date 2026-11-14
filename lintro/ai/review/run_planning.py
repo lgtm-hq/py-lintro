@@ -12,7 +12,7 @@ re-derived.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -416,14 +416,8 @@ def plan_run(
         force_full=options.force_full,
         reusable_rounds=reusable,
     )
-    chunks, delta, resume = narrow_round(
-        chunks=chunks,
-        delta=delta,
-        context=context,
-        repo_root=repo_root,
-        resume=resume,
-        prior=options.prior_state,
-    )
+    # Asked once per round: recorded for the next round's base check, stamped
+    # on this round's sightings, and compared by the moved-base hold (#3467).
     recorded_merge_base = (
         merge_base(
             repo_root=repo_root,
@@ -433,6 +427,14 @@ def plan_run(
         if context.pr_metadata is not None
         and context.checkout is not ReviewCheckout.NONE
         else ""
+    )
+    chunks, delta, resume = narrow_round(
+        chunks=chunks,
+        delta=delta,
+        context=context,
+        repo_root=repo_root,
+        resume=replace(resume, merge_base=recorded_merge_base),
+        prior=options.prior_state,
     )
     agent_selection = select_custom_agents(
         agents=options.custom_agents,

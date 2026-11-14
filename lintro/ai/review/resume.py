@@ -61,6 +61,10 @@ class ResumePlan:
         relocations: ``(key, path, line, line_sha)`` locations the round
             mapped prior open findings to (:attr:`DeltaPlan.relocations`,
             #3403, #3413), so the checkpoints judge them where the final round does.
+        merge_base: ``merge-base(base, head)`` of the round, or ``""`` when
+            unknown; the checkpoints stamp it on the findings they persist
+            (``FindingRecord.placement_merge_base``, #3467) as the final
+            round does.
     """
 
     classified: tuple[ClassifiedFile, ...]
@@ -70,6 +74,7 @@ class ResumePlan:
     reviewed_ranges: tuple[tuple[str, int, int], ...] = ()
     coverage: tuple[CoverageRecord, ...] = ()
     relocations: tuple[tuple[str, str, int, str], ...] = ()
+    merge_base: str = ""
 
     def counts(self, *, reviewed_now: Sequence[str]) -> CoverageCounts:
         """Return counters after the provider finished *reviewed_now*."""

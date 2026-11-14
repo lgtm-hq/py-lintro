@@ -108,6 +108,14 @@ class FindingRecord:
             content-based lookup. Empty while the record sits at its first
             path, and on records written before the field existed.
             Serialized only when set.
+        placement_merge_base: ``merge-base(base, head)`` of the round that
+            last reported the finding, so its line passed the diff gate under
+            that merge-base (#3467). Kept through carries, relocations and
+            holds; only a fresh sighting rewrites it. A round whose merge-base
+            differs holds the finding while its line lies outside the diff,
+            so a moved base never reads as a fix. Empty means unknown (a
+            record written before the field existed, or a round git could not
+            answer), which counts as moved. Serialized only when set.
     """
 
     fingerprint: str
@@ -140,6 +148,7 @@ class FindingRecord:
     unverified: bool = False
     match_fingerprint: str = ""
     origin_path: str = ""
+    placement_merge_base: str = ""
 
     @property
     def key(self) -> str:
@@ -262,6 +271,8 @@ class FindingRecord:
             payload["match_fingerprint"] = self.match_fingerprint
         if self.origin_path:
             payload["origin_path"] = self.origin_path
+        if self.placement_merge_base:
+            payload["placement_merge_base"] = self.placement_merge_base
         return payload
 
     @classmethod
@@ -318,6 +329,7 @@ class FindingRecord:
             unverified=payload.get("unverified") is True,
             match_fingerprint=str(payload.get("match_fingerprint", "")),
             origin_path=str(payload.get("origin_path", "")),
+            placement_merge_base=str(payload.get("placement_merge_base", "")),
         )
 
 

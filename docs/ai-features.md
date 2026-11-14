@@ -962,13 +962,32 @@ resolve; it never narrows what it may report.**
   outside the pull request's hunks are dropped before matching, so after a rebase onto a
   base that already contains a finding's line (or a SIGTERM checkpoint resumed against a
   newer base), the provider cannot report it again, even though the code is unchanged.
-  When the merge-base differs from the one the finding's recorded head was reviewed
-  under (a checkpoint's is derived from the base it was written with; an unknown one
-  counts as moved), and the finding's line at this head lies outside every hunk of its
-  file, or its file has no line hunks, the finding is held where it was stored
-  (`"base-moved"` in `relocated_findings`). It is carried unverified and never resolved
-  that round. A fix that rewrites or deletes the reported line still resolves, since git
-  cannot place that line at the new head and the change lies inside the diff.
+  Each finding stores the merge-base of the round that last reported it
+  (`placement_merge_base` in the stored state). Carries, holds, persistence and the
+  run-history cap all leave it unchanged, and only a new report replaces it. When it
+  differs from this round's merge-base, the finding is held where it was stored
+  (`"base-moved"` in `relocated_findings`) if the round cannot re-judge it. It stays
+  carried and unverified, and is never resolved. A merge-base git cannot name (a shallow
+  checkout, or state written before the field existed) counts as moved. The round can
+  re-judge the finding in three cases:
+
+  - The diff has no section for its file (a pure rename), so a report there survives.
+  - Its line, placed at this head, lies inside one of the pull request's hunks of the
+    file. A binary or mode-only change has no hunks, so it never counts.
+  - Git cannot place the line because it was rewritten or deleted since the finding's
+    head, and the pull request's own hunks cover the spot where that happened. This is
+    the pull request rewriting or deleting the reported line, and the finding then
+    resolves as usual. If the base rewrote the line and the pull request did not touch
+    it, the finding is held.
+
+  A held finding stays open, marked **⏸ not re-verified**, until the pull request
+  changes the lines around it again or the provider reports it again. Some fixes never
+  touch those lines and leave the thread held indefinitely: a fix in another file, a
+  dependency or configuration, or a pull request that reverts the code around the
+  finding to the base's text when the base cannot be confirmed unchanged. Once you have
+  checked the fix, resolve the thread by hand on the pull request. The review never
+  reopens it, but the sticky keeps listing the finding as not re-verified until a later
+  round can re-judge it.
 
   Every diff behind this pins its format against user configuration: literal pathspecs
   (`odd[1].py` is never a glob), `--no-textconv`, `--no-ext-diff`, `--no-color`,
