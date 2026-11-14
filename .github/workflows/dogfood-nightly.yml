@@ -103,12 +103,12 @@ jobs:
     # Same reusable workflow and tool options as the docker-ci.yml full run
     # (dogfooding-lint) so nightly coverage matches the pre-merge gate.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@b830ca6972f0c9cbaeb1363283de594f68d66acf # v0.87.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@8a48e818c43efe4ac3b2669b2be31bee0b99cb15 # v0.98.7
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: 'b830ca6972f0c9cbaeb1363283de594f68d66acf' # v0.87.0
+      tooling-ref: '8a48e818c43efe4ac3b2669b2be31bee0b99cb15' # v0.98.7
       job-name: '🌙 Nightly Dogfooding Lint'
       # Same startup protection as docker-ci; metrics stay auto (#2521).
       semgrep-enable-version-check: '0'
@@ -150,12 +150,12 @@ jobs:
         )
       )
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@b830ca6972f0c9cbaeb1363283de594f68d66acf # v0.87.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@8a48e818c43efe4ac3b2669b2be31bee0b99cb15 # v0.98.7
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: 'b830ca6972f0c9cbaeb1363283de594f68d66acf' # v0.87.0
+      tooling-ref: '8a48e818c43efe4ac3b2669b2be31bee0b99cb15' # v0.98.7
       job-name: '🌙 Nightly Dogfooding Lint (retry)'
       semgrep-enable-version-check: '0'
       # black:timeout=120: the 30s default timed out on the full repo (#2352).
@@ -579,7 +579,7 @@ jobs:
     # first failure opens `fix(ci): main workflow failed: dogfood-nightly`,
     # repeat failures comment on the open issue instead of piling up.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@b830ca6972f0c9cbaeb1363283de594f68d66acf # v0.87.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@8a48e818c43efe4ac3b2669b2be31bee0b99cb15 # v0.98.7
     permissions:
       actions: read # read workflow/job metadata for the failure context
       contents: read # repository context for the issue body
@@ -587,4 +587,4 @@ jobs:
     with:
       egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       workflow-key: dogfood-nightly
-      tooling-ref: 'b830ca6972f0c9cbaeb1363283de594f68d66acf' # v0.87.0
+      tooling-ref: '8a48e818c43efe4ac3b2669b2be31bee0b99cb15' # v0.98.7
