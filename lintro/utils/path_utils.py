@@ -40,6 +40,30 @@ def absolute_path_without_resolving(path: Path) -> str:
     return str(Path(absolute_path.anchor, *normalized_parts))
 
 
+def normalize_command_path(path: str | Path) -> str:
+    r"""Return an executable path as the forward-slash string lintro spawns.
+
+    The one place lintro turns a resolved executable path (a project-local
+    ``node_modules/.bin`` entry or a ``shutil.which`` hit) into ``cmd[0]``.
+    ``Path.as_posix`` converts separators for the host's own path flavour;
+    the explicit backslash replacement also covers a Windows-shaped string
+    handled on POSIX, where ``Path`` keeps ``\`` as an ordinary character.
+
+    This is for executable paths only. ``path_filtering`` and ``module_size``
+    normalise strings they compare (exclude-pattern candidates, baseline
+    entries) with a plain replacement instead: ``Path`` would also turn ``""``
+    into ``"."``, drop a leading ``./`` and a trailing ``/`` and collapse
+    ``//``, changing which strings compare equal.
+
+    Args:
+        path: Executable path as resolved.
+
+    Returns:
+        The path with forward slashes only.
+    """
+    return Path(path).as_posix().replace("\\", "/")
+
+
 def find_file_upward(
     start: Path,
     filenames: Sequence[str],

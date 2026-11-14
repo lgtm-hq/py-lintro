@@ -408,6 +408,41 @@ def test_executor_spawns_npx_with_the_call_script(tmp_path: Path) -> None:
 
 
 @posix_only
+@pytest.mark.parametrize("executor", [run_subprocess, run_subprocess_streaming])
+def test_executors_run_npx_installed_under_shell_characters(
+    tmp_path: Path,
+    executor: Callable[..., SubprocessResult],
+) -> None:
+    """An absolute npx under ``(x86)``, ``~`` and ``!`` passes validation and runs.
+
+    The npx ``--call`` rewrite keeps argv0, so the name validated is the name
+    spawned (#2040).
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        executor: lintro subprocess entry point.
+    """
+    npx = _executable(tmp_path / "Program Files (x86)" / "~node!", "npx", _PRINT_ARGS)
+
+    result = executor(
+        [str(npx), "--yes", "--package", _SPEC, "prettier", "[slug].ts"],
+        timeout=30,
+    )
+
+    assert_that(result.returncode).described_as(result.output).is_zero()
+    assert_that(result.stdout.splitlines()).is_equal_to(
+        [
+            "--yes",
+            NPX_SCRIPT_SHELL_OPTION,
+            "--package",
+            _SPEC,
+            "--call",
+            "prettier '[slug].ts'",
+        ],
+    )
+
+
+@posix_only
 def test_streaming_executor_leaves_bunx_arguments_alone(tmp_path: Path) -> None:
     """Under bunx the tool's argv is spawned exactly as built.
 

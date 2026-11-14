@@ -14,6 +14,7 @@ from loguru import logger
 
 from lintro._tool_versions import get_tool_version
 from lintro.enums.tool_name import ToolName
+from lintro.plugins.subprocess_executor import validate_subprocess_command
 from lintro.tools.core.command_builders import (
     CargoBuilder,
     CommandBuilder,
@@ -35,6 +36,7 @@ from lintro.tools.core.node_fallback import (
     reset_registry_fallback_notices,
     split_npm_spec,
 )
+from lintro.utils.path_utils import normalize_command_path
 
 
 def _mock_which_for_venv(
@@ -1112,17 +1114,21 @@ def test_node_path_branch_normalizes_windows_which_path(
             from resolution.
     """
     builder = NodeJSBuilder()
+    which_hit = r"C:\Program Files (x86)\nodejs\prettier.cmd"
 
     def _windows_which(name: str, *_args: object, **_kwargs: object) -> str | None:
         if name == "prettier":
-            return r"C:\Users\me\AppData\Roaming\npm\prettier.cmd"
+            return which_hit
         return None
 
     with patch("shutil.which", _windows_which):
         cmd = builder.get_command("prettier", ToolName.PRETTIER)
 
-    assert_that("\\" in cmd[0]).is_false()
-    assert_that(cmd[0]).contains("prettier.cmd")
+    assert_that(cmd).is_equal_to([normalize_command_path(which_hit)])
+    assert_that(cmd[0]).is_equal_to("C:/Program Files (x86)/nodejs/prettier.cmd")
+    # The ``(x86)`` directory no longer trips argv0 validation (#2040); a
+    # rejection raises ValueError and fails the test.
+    validate_subprocess_command(cmd)
 
 
 def test_node_tool_prefers_local_install_over_path(tmp_path: Path) -> None:

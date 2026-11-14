@@ -258,3 +258,76 @@ def test_validate_subprocess_command_shell_injection_args_safe_with_shell_false(
     validate_subprocess_command(["echo", "`whoami`"])
     validate_subprocess_command(["echo", "$(cat /etc/passwd)"])
     validate_subprocess_command(["echo", "data > /etc/crontab"])
+
+
+# =============================================================================
+# argv0 shape: absolute paths are checked on their basename only (#2040)
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "argv0",
+    [
+        pytest.param("C:/Program Files (x86)/nodejs/prettier.cmd", id="win-x86"),
+        pytest.param(r"C:\Program Files (x86)\nodejs\prettier.cmd", id="win-bslash"),
+        pytest.param("//server/share (x86)/bin/prettier.cmd", id="unc"),
+        pytest.param("/home/dev/~tools/bin/prettier", id="posix-tilde"),
+        pytest.param("/opt/build!/bin/prettier", id="posix-bang"),
+        pytest.param("/opt/{a}[b]/$x*?/bin/prettier", id="posix-glob-dirs"),
+    ],
+)
+def test_validate_subprocess_command_absolute_argv0_checks_basename_only(
+    argv0: str,
+) -> None:
+    """An absolute argv0 with shell characters in its directories is accepted.
+
+    Args:
+        argv0: Absolute command path whose directories hold shell characters.
+    """
+    accepted = True
+    try:
+        validate_subprocess_command([argv0, "--check", "a.ts"])
+    except ValueError:
+        accepted = False
+    assert_that(accepted).described_as(argv0).is_true()
+
+
+@pytest.mark.parametrize(
+    "argv0",
+    [
+        pytest.param("prettier$(id)", id="bare-subst"),
+        pytest.param("$(id)", id="bare-only-subst"),
+        pytest.param("bin/prettier$(id)", id="relative-subst"),
+        pytest.param("./node_modules (x86)/.bin/prettier", id="relative-dir-paren"),
+        pytest.param("~/bin/prettier", id="home-relative"),
+    ],
+)
+def test_validate_subprocess_command_non_absolute_argv0_checked_whole(
+    argv0: str,
+) -> None:
+    """A bare or relative argv0 is still checked character by character.
+
+    Args:
+        argv0: Command name that is not an absolute path.
+    """
+    with pytest.raises(ValueError, match="Unsafe character"):
+        validate_subprocess_command([argv0])
+
+
+@pytest.mark.parametrize(
+    "argv0",
+    [
+        pytest.param("/usr/local/bin/prettier$(id)", id="posix"),
+        pytest.param("C:/Program Files (x86)/nodejs/prettier;calc.cmd", id="win"),
+    ],
+)
+def test_validate_subprocess_command_absolute_argv0_unsafe_basename_rejected(
+    argv0: str,
+) -> None:
+    """The basename of an absolute argv0 keeps the full character check.
+
+    Args:
+        argv0: Absolute command path with a shell character in its basename.
+    """
+    with pytest.raises(ValueError, match="Unsafe character"):
+        validate_subprocess_command([argv0])
