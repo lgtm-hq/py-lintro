@@ -34,6 +34,7 @@ __all__ = [
     "TsconfigInfo",
     "create_temp_tsconfig",
     "discover_tsconfigs",
+    "enables_check_js",
     "has_explicit_scoping",
     "parse_tsconfig",
     "partition_files",
@@ -87,8 +88,26 @@ def parse_tsconfig(path: Path) -> TsconfigInfo:
         files_list=fields["files"],
         references=[Path(r) for r in fields["references"]],
         is_composite=fields["composite"],
+        compiler_options=_compiler_options_from_raw(content),
         raw_config=content,
     )
+
+
+def _compiler_options_from_raw(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """Copy ``compilerOptions`` from a parsed tsconfig dict.
+
+    Args:
+        raw: Parsed tsconfig content, or ``None``.
+
+    Returns:
+        A shallow copy of ``compilerOptions``, or ``{}`` when absent.
+    """
+    if not raw:
+        return {}
+    opts = raw.get("compilerOptions")
+    if isinstance(opts, dict):
+        return dict(opts)
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -104,10 +123,13 @@ def resolve_extends_chain(
     """Recursively resolve the ``extends`` chain for a tsconfig.
 
     Walks up the ``extends`` hierarchy to compute the effective
-    ``include``, ``exclude``, and ``files`` fields.  The child's values
-    override the parent's (matching TypeScript semantics).
+    ``include``, ``exclude``, ``files``, and ``compilerOptions`` fields.
+    The child's values override the parent's (matching TypeScript
+    semantics). ``compilerOptions`` is merged per-key; later entries in a
+    TS 5.0+ array ``extends`` list override earlier ones.
 
-    Circular references are detected and short-circuited.
+    Circular references are detected and short-circuited. Unresolvable
+    ``extends`` targets set :attr:`TsconfigInfo.unresolved_extends`.
 
     Args:
         path: Path to the tsconfig.json file.
@@ -145,13 +167,20 @@ def resolve_extends_chain(
     merged_include: list[str] | None = None
     merged_exclude: list[str] | None = None
     merged_files: list[str] | None = None
+    merged_compiler: dict[str, Any] = {}
+    unresolved_extends = False
 
     for ext in extends_list:
-        parent_path = _resolve_extends_path(ext, info.project_dir)
+        parent_path = _resolve_extends_path(
+            extends=ext,
+            base_dir=info.project_dir,
+        )
         if parent_path is None:
+            unresolved_extends = True
             continue
         # Pass a copy so sibling extends branches don't share visited state
         parent_info = resolve_extends_chain(parent_path, _seen=set(_seen))
+        unresolved_extends = unresolved_extends or parent_info.unresolved_extends
         # Parent values become the base (None means parent didn't set it)
         if parent_info.include_patterns is not None:
             merged_include = parent_info.include_patterns
@@ -159,6 +188,7 @@ def resolve_extends_chain(
             merged_exclude = parent_info.exclude_patterns
         if parent_info.files_list is not None:
             merged_files = parent_info.files_list
+        merged_compiler.update(parent_info.compiler_options)
 
     # Child overrides parent if it explicitly set the field ([] clears parent)
     if info.include_patterns is not None:
@@ -167,6 +197,7 @@ def resolve_extends_chain(
         merged_exclude = info.exclude_patterns
     if info.files_list is not None:
         merged_files = info.files_list
+    merged_compiler.update(info.compiler_options)
 
     return TsconfigInfo(
         path=info.path,
@@ -176,6 +207,8 @@ def resolve_extends_chain(
         files_list=merged_files,
         references=info.references,
         is_composite=info.is_composite,
+        compiler_options=merged_compiler,
+        unresolved_extends=unresolved_extends,
         raw_config=info.raw_config,
     )
 
@@ -523,6 +556,33 @@ def partition_files(
 
 
 # ---------------------------------------------------------------------------
+# Compiler-option helpers
+# ---------------------------------------------------------------------------
+
+
+def enables_check_js(path: Path) -> bool:
+    """Return whether effective ``compilerOptions.checkJs`` is ``true``.
+
+    Uses :func:`resolve_extends_chain` so ``checkJs`` follows the same
+    string/array ``extends`` walk, package.json ``tsconfig`` field lookup,
+    and cycle handling as include/exclude/files.
+
+    Unresolved ``extends`` targets do **not** enable ``checkJs``. Callers
+    that skip work based on this result must also inspect
+    :attr:`TsconfigInfo.unresolved_extends` and fail closed (proceed to
+    install / run tsc) when a parent config could not be loaded.
+
+    Args:
+        path: Path to a tsconfig.json (or extended config) file.
+
+    Returns:
+        ``True`` when the effective ``checkJs`` option is enabled.
+    """
+    info = resolve_extends_chain(path)
+    return info.compiler_options.get("checkJs") is True
+
+
+# ---------------------------------------------------------------------------
 # Scoping predicate
 # ---------------------------------------------------------------------------
 
@@ -570,6 +630,7 @@ def create_temp_tsconfig(
     *,
     prefix: str = ".lintro-tsc-",
     tool_label: str = "tsc",
+    extra_compiler_options: dict[str, Any] | None = None,
 ) -> Path:
     """Create a temporary tsconfig.json extending a base config.
 
@@ -586,6 +647,8 @@ def create_temp_tsconfig(
         cwd: Working directory for resolving paths.
         prefix: Filename prefix for the temp file.
         tool_label: Label used in log messages (``"tsc"`` or ``"vue-tsc"``).
+        extra_compiler_options: Additional compiler options merged into the
+            temp config (for example ``allowJs`` when JS files are targeted).
 
     Returns:
         Path to the temporary tsconfig.json file.
@@ -603,6 +666,9 @@ def create_temp_tsconfig(
         # Ensure noEmit is set (type checking only)
         "noEmit": True,
     }
+    if extra_compiler_options:
+        compiler_options.update(extra_compiler_options)
+        compiler_options["noEmit"] = True
 
     # Read typeRoots from the base tsconfig once, up-front, and reuse the
     # extracted value in both the main and the read-only-fallback paths
