@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.27] - 2026-11-14
+
+### Fixed
+
+- **ai/review**: follow chained renames git reads as delete/add (#3448) (15ecb64)
+
 ## [0.180.26] - 2026-11-14
 
 ### Fixed
