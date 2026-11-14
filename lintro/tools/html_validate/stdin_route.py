@@ -31,18 +31,29 @@ allowlist proves none of that can matter (checked against html-validate
 Anything else, including a file that cannot be read, is held back as before
 #3396: the run fails and names the file as not inspected. Rules see the
 source's filename as ``/dev/stdin``; only the report carries the real path.
+
+The calls run in a bounded pool (:func:`run_stdin_calls`, #3433). Every
+file, and so every directory's pin check, is judged before the first call
+starts, and results are merged in input order, so the merged result does
+not depend on which call finished first. Under the ``npx`` fallback the
+calls run one at a time until one has run html-validate and parsed its
+report, so the pool never installs a cold package concurrently.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from collections.abc import Sequence
+import threading
+from collections.abc import Callable, Hashable, Sequence
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Generic, TypeVar
 
 import pathspec
 
+from lintro.config.config_loader import get_config
 from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
@@ -383,6 +394,218 @@ class StdinRoute:
             if problem is not None:
                 return f"{CONFIG_NOT_ALLOWED}: {config_file} {problem}"
         return None
+
+
+#: The most stdin calls that run at once (#3433).
+MAX_STDIN_WORKERS: int = 8
+
+_Item = TypeVar("_Item")
+
+
+def stdin_workers() -> int:
+    """Size the stdin worker pool for this machine and configuration.
+
+    Returns:
+        ``min(os.cpu_count(), MAX_STDIN_WORKERS, execution.max_workers)``,
+        and at least 1, so ``max_workers: 1`` runs the calls one at a time.
+    """
+    configured = get_config().execution.max_workers
+    return max(1, min(os.cpu_count() or 1, MAX_STDIN_WORKERS, configured))
+
+
+def finished_without_timeout(result: ToolResult) -> bool:
+    """Accept any call that did not hit its deadline as a warm-up.
+
+    Args:
+        result: A finished stdin call.
+
+    Returns:
+        True unless the call timed out.
+    """
+    return not result.timed_out
+
+
+def ran_html_validate(result: ToolResult) -> bool:
+    """Accept only a call that ran html-validate and parsed its report.
+
+    A file that could not be opened, a runner that could not start, and a
+    call that printed no report or a malformed one are all execution
+    failures, so none of them proves the runner's package is installed.
+
+    Args:
+        result: A finished stdin call.
+
+    Returns:
+        True for a call with a complete verdict.
+    """
+    return not (result.execution_failed or result.timed_out)
+
+
+@dataclass
+class _Schedule(Generic[_Item]):
+    """The bookkeeping of one :func:`run_stdin_calls` run.
+
+    Attributes:
+        items: Every item, in input order.
+        group: The warm-up group of an item.
+        ready: Whether a warm-up call's result opens its group to the pool.
+        stop: Set by a worker the moment its call times out.
+        waiting: Indices not yet submitted, in input order.
+        unstarted: Indices a worker picked up after ``stop`` was set.
+        results: Results of the calls that ran, by index.
+        open_groups: Groups whose items may share the pool.
+        warming: Each group's warm-up call in flight, by future.
+    """
+
+    items: Sequence[_Item]
+    group: Callable[[_Item], Hashable]
+    ready: Callable[[ToolResult], bool]
+    stop: threading.Event = field(default_factory=threading.Event)
+    waiting: list[int] = field(default_factory=list)
+    unstarted: list[int] = field(default_factory=list)
+    results: dict[int, ToolResult] = field(default_factory=dict)
+    open_groups: set[Hashable] = field(default_factory=set)
+    warming: dict[Future[ToolResult | None], Hashable] = field(default_factory=dict)
+
+    def next_batch(self, free: int) -> list[tuple[int, bool]]:
+        """Pick the items to submit now, in input order.
+
+        Args:
+            free: How many calls may start.
+
+        Returns:
+            ``(index, is_warm_up)`` pairs: an item of an open group, or the
+            first waiting item of a group with no warm-up in flight. Empty
+            once ``stop`` is set.
+        """
+        batch: list[tuple[int, bool]] = []
+        claimed = set(self.warming.values())
+        for index in self.waiting:
+            if len(batch) >= free or self.stop.is_set():
+                break
+            key = self.group(self.items[index])
+            if key in self.open_groups:
+                batch.append((index, False))
+            elif key not in claimed:
+                claimed.add(key)
+                batch.append((index, True))
+        if self.stop.is_set():
+            return []
+        for index, _ in batch:
+            self.waiting.remove(index)
+        return batch
+
+    def start(
+        self,
+        index: int,
+        call: Callable[[_Item], ToolResult],
+    ) -> ToolResult | None:
+        """Run one call on a worker unless a timeout came first.
+
+        Args:
+            index: The item to validate.
+            call: Validates one item.
+
+        Returns:
+            The call's result, or None when ``stop`` was already set when
+            the worker picked the item up; nothing is launched then.
+        """
+        if self.stop.is_set():
+            return None
+        result = call(self.items[index])
+        if result.timed_out:
+            self.stop.set()
+        return result
+
+    def finish(self, future: Future[ToolResult | None], index: int) -> None:
+        """Record one finished call.
+
+        Args:
+            future: The call's future.
+            index: Its item.
+        """
+        warm_up = future in self.warming
+        key = self.warming.pop(future, None)
+        result = future.result()
+        if result is None:
+            self.unstarted.append(index)
+            return
+        self.results[index] = result
+        if warm_up and self.ready(result):
+            self.open_groups.add(key)
+
+
+def _one_group(item: object) -> Hashable:
+    """Put every item in the same warm-up group.
+
+    Args:
+        item: Any item.
+
+    Returns:
+        The single group key.
+    """
+    del item
+    return None
+
+
+def run_stdin_calls(
+    items: Sequence[_Item],
+    call: Callable[[_Item], ToolResult],
+    *,
+    workers: int,
+    group: Callable[[_Item], Hashable] = _one_group,
+    ready: Callable[[ToolResult], bool] = finished_without_timeout,
+) -> tuple[list[ToolResult], list[_Item]]:
+    """Run one stdin call per item, at most ``workers`` at a time (#3433).
+
+    Items warm up per ``group``: a group's items run one at a time, in
+    input order, until one call's result is ``ready``; only then do the rest
+    of that group share the pool. A cold registry runner therefore installs
+    once per pinned spec rather than once per worker, and a first call that
+    hangs costs one deadline.
+
+    The first timeout sets a shared event from the worker that saw it. The
+    main thread checks it before every submission, and each worker checks
+    it before launching anything, so no call starts after it; calls already
+    running finish and keep their results.
+
+    Args:
+        items: What to validate, in the order the run lists them.
+        call: Validates one item; must not raise for a failed call.
+        workers: The most calls in flight at once; below 1 counts as 1.
+        group: The warm-up group of an item; one group by default.
+        ready: Whether a warm-up call opens its group to the pool; by
+            default any call that did not time out.
+
+    Returns:
+        The result of every call that ran, in input order whatever order
+        they finished in, and the items never started, also in input order.
+    """
+    workers = max(1, workers)
+    schedule = _Schedule(
+        items=items,
+        group=group,
+        ready=ready,
+        waiting=list(range(len(items))),
+    )
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        running: dict[Future[ToolResult | None], int] = {}
+        while True:
+            for index, warm_up in schedule.next_batch(workers - len(running)):
+                future = pool.submit(schedule.start, index, call)
+                running[future] = index
+                if warm_up:
+                    schedule.warming[future] = group(items[index])
+            if not running:
+                break
+            done, _ = wait(running, return_when=FIRST_COMPLETED)
+            for future in done:
+                schedule.finish(future, running.pop(future))
+    never = sorted([*schedule.unstarted, *schedule.waiting])
+    return (
+        [schedule.results[index] for index in sorted(schedule.results)],
+        [items[index] for index in never],
+    )
 
 
 def _sum_parse_failures(results: Sequence[ToolResult]) -> int | None:

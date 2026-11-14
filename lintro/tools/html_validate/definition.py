@@ -58,6 +58,7 @@ from lintro.tools.core.incomplete_run import (
 from lintro.tools.core.node_fallback import (
     is_registry_fallback_command,
     registry_fallback_guidance,
+    registry_fallback_spec,
 )
 from lintro.tools.core.readable_paths import (
     run_on_readable_paths,
@@ -65,9 +66,13 @@ from lintro.tools.core.readable_paths import (
 )
 from lintro.tools.html_validate.stdin_route import (
     StdinRoute,
+    finished_without_timeout,
     merge_results,
+    ran_html_validate,
     rename_stdin_report,
+    run_stdin_calls,
     stdin_command,
+    stdin_workers,
 )
 
 # Constants for html-validate configuration
@@ -490,20 +495,42 @@ class HtmlValidatePlugin(BaseToolPlugin):
                 ),
             )
         pending = [path for path in passed if not matches_itself(path)]
-        for position, path in enumerate(pending):
-            if results and results[-1].timed_out:
-                # One deadline already passed; starting the rest could take
-                # the per-call timeout once per remaining file.
-                results.append(self._not_started(pending[position:], cwd=ctx.cwd))
-                break
-            results.append(
-                self._check_stdin(
-                    str(route.absolute(path)),
-                    invocation=invocation,
-                    timeout=ctx.timeout,
-                    cwd=ctx.cwd,
-                ),
-            )
+        if results and results[-1].timed_out:
+            # One deadline already passed; starting the rest could take
+            # the per-call timeout once per remaining file.
+            results.append(self._not_started(pending, cwd=ctx.cwd))
+            return merge_results(results, name=self.definition.name, cwd=ctx.cwd)
+        # ``run_on_readable_paths`` judged every pending path, and with it
+        # each directory's npx pin check, before this method was called; the
+        # workers only open files and run html-validate (#3433).
+        targets = {path: str(route.absolute(path)) for path in pending}
+        # npx installs a cold package on first use, and concurrent installs
+        # into one cache can leave a call with no report. Its files run one
+        # at a time per pinned spec until a call parses a real report. One
+        # run resolves one command, so every file shares that spec; the
+        # per-directory pin check above made sure each runs it.
+        npx_spec = (
+            registry_fallback_spec(invocation.resolved)
+            if invocation.resolved and os.path.basename(invocation.resolved[0]) == "npx"
+            else None
+        )
+        finished, unstarted = run_stdin_calls(
+            pending,
+            lambda path: self._check_stdin(
+                targets[path],
+                invocation=invocation,
+                timeout=ctx.timeout,
+                cwd=ctx.cwd,
+            ),
+            workers=stdin_workers(),
+            group=lambda _path: npx_spec,
+            ready=(
+                ran_html_validate if npx_spec is not None else finished_without_timeout
+            ),
+        )
+        results.extend(finished)
+        if unstarted:
+            results.append(self._not_started(unstarted, cwd=ctx.cwd))
         return merge_results(results, name=self.definition.name, cwd=ctx.cwd)
 
     def _not_started(self, paths: list[str], *, cwd: str) -> ToolResult:
