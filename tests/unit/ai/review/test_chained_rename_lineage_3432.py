@@ -1,15 +1,15 @@
-"""A finding follows a second rename git reads as a delete plus an add (#3432).
+"""A second rename git reads as a delete plus an add is not followed (#3432).
 
 Round one reports X on ``a.py``. Round two carries it across ``a.py -> b.py``.
 Round three renames ``b.py -> c.py`` with heavy edits, so git sees a delete
 plus an add, while the pull request's rename metadata only names
-``a.py -> c.py``. X was stored on ``b.py``, so the metadata did not apply to it
-and the round reported X twice: once new on ``c.py``, once carried on
-``b.py`` with its thread left open. The record now keeps the path it was first
-tracked at (``FindingRecord.origin_path``), and that path is looked up too,
-except where it could name a different file or another record already arrives
-at the destination: there the round holds X as before, which can duplicate a
-thread but never resolves a live one.
+``a.py -> c.py``. X is stored on ``b.py``, so the metadata does not apply to
+it, and the round reports X twice: carried on ``b.py`` with its thread open,
+and new on ``c.py``. The record keeps the path it was first tracked at
+(``FindingRecord.origin_path``), but that path is not looked up: #3448 did,
+and with every guard it gained a live finding could still be moved onto an
+unrelated file and its thread resolved. These tests expect the pre-#3448
+duplicate thread, ``(1, 1, 0)``, and that no case resolves a live thread.
 
 Every round runs through ``run_review`` on a scratch git repository, in delta
 and in full mode, with the harness of #3413.
@@ -95,11 +95,15 @@ def _with_pr_files(
 
 
 @pytest.mark.parametrize("force_full", _MODES)
-def test_a_second_rename_read_as_delete_plus_add_carries_the_finding(
+def test_a_second_rename_read_as_delete_plus_add_holds_the_finding(
     tmp_path: Path,
     force_full: bool,
 ) -> None:
-    """``b.py -> c.py`` loses git pairing; the PR's ``a.py -> c.py`` holds."""
+    """``b.py -> c.py`` loses git pairing; X stays on ``b.py`` with its thread.
+
+    Pre-#3448 counts: ``(1, 1, 0)``, the old thread open and X new on
+    ``c.py``. The PR's ``a.py -> c.py`` is not applied to the first path.
+    """
     repo, base, state, key = _carried_to_b(tmp_path, force_full=force_full)
     old_head = git(repo, "rev-parse", "HEAD")
     git(repo, "mv", "b.py", "c.py")
@@ -122,9 +126,11 @@ def test_a_second_rename_read_as_delete_plus_add_carries_the_finding(
         force_full=force_full,
     )
 
-    harness._assert_carried_with_thread(round_=third, key=key, file="c.py")
-    (carried,) = third.state.findings
-    assert_that((carried.file, carried.origin_path)).is_equal_to(("c.py", "a.py"))
+    _assert_held_on_b(round_=third, key=key)
+    assert_that(third.match.new[0].file).is_equal_to("c.py")
+    # The first path is still recorded, for a future content-based lookup.
+    (carried,) = third.match.carried
+    assert_that(carried.origin_path).is_equal_to("a.py")
 
 
 @pytest.mark.parametrize("force_full", _MODES)
@@ -560,11 +566,15 @@ def test_a_reuse_hidden_by_the_shallow_boundary_holds_the_finding(
 
 
 @pytest.mark.parametrize("force_full", _MODES)
-def test_a_shallow_clone_holding_the_whole_range_follows_the_first_path(
+def test_a_shallow_clone_holding_the_whole_range_holds_the_finding(
     tmp_path: Path,
     force_full: bool,
 ) -> None:
-    """A clone shallow only below the base still proves ``a.py`` was never re-created."""
+    """A clone shallow only below the base holds X on ``b.py`` too.
+
+    Pre-#3448 counts: ``(1, 1, 0)``. A complete history does not make the
+    first path's rename a provenance proof.
+    """
     (tmp_path / "source").mkdir()
     repo, base, state, key = _carried_to_b(tmp_path / "source", force_full=force_full)
     git(repo, "mv", "b.py", "c.py")
@@ -582,7 +592,7 @@ def test_a_shallow_clone_holding_the_whole_range_follows_the_first_path(
         force_full=force_full,
     )
 
-    harness._assert_carried_with_thread(round_=third, key=key, file="c.py")
+    _assert_held_on_b(round_=third, key=key)
 
 
 def test_a_record_stored_before_origin_paths_loads_without_one() -> None:
@@ -613,3 +623,69 @@ def test_an_origin_path_round_trips_through_the_state_blob() -> None:
     restored = FindingRecord.from_dict(record.to_dict())
 
     assert_that(restored).is_equal_to(record)
+
+
+@pytest.mark.parametrize("force_full", _MODES)
+def test_a_live_finding_moved_onto_an_existing_file_keeps_its_thread(
+    tmp_path: Path,
+    force_full: bool,
+) -> None:
+    """Still-buggy ``b.py`` overwrites the existing ``d.py`` while a clean ``c.py`` is added.
+
+    Git reads ``D b.py / A c.py / M d.py`` and the PR reads ``a.py -> c.py``.
+    Following X's first path moved X onto the clean ``c.py`` and resolved its
+    live thread on main after #3448, ``(0, 1, 1)``. X is held on ``b.py``.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    base_text = lines(300, label="base").splitlines(keepends=True)
+    case_text = lines(300, label="case").splitlines(keepends=True)
+    (repo / "a.py").write_text("".join(base_text))
+    (repo / "d.py").write_text(lines(300, label="existing"))
+    base = commit(repo, "base holds a.py and an independent d.py")
+    reported = case_text[:100] + base_text[100:]
+    reported[80] = "bug_at_81 = True\n"
+    (repo / "a.py").write_text("".join(reported))
+    commit(repo, "X lands on a.py")
+    first = harness._round(
+        repo=repo,
+        base=base,
+        prior=None,
+        reported=[harness._x(file="a.py")],
+        force_full=force_full,
+    )
+    key = first.state.findings[0].key
+    git(repo, "mv", "a.py", "b.py")
+    commit(repo, "plain rename")
+    second = harness._round(
+        repo=repo,
+        base=base,
+        prior=harness._with_thread(first.state),
+        reported=[harness._x(file="b.py")],
+        force_full=force_full,
+    )
+    harness._assert_carried_with_thread(round_=second, key=key, file="b.py")
+    reviewed_head = git(repo, "rev-parse", "HEAD")
+    git(repo, "mv", "-f", "b.py", "d.py")
+    rewritten = lines(300, label="rewritten").splitlines(keepends=True)
+    rewritten[80] = "bug_at_81 = True\n"
+    (repo / "d.py").write_text("".join(rewritten))
+    heavy = lines(300, label="heavy").splitlines(keepends=True)
+    (repo / "c.py").write_text("".join(base_text[:170] + heavy[170:]))
+    commit(repo, "live b.py overwrites d.py, a clean c.py is added")
+    endpoints = git(repo, "diff", "-M", "-B", "--name-status", f"{reviewed_head}..HEAD")
+    assert_that(endpoints).contains("D\tb.py", "A\tc.py").matches(r"M\d*\td\.py")
+    assert_that(
+        git(repo, "diff", "-M", "--name-status", f"{base}..HEAD"),
+    ).matches(r"R\d+\ta\.py\tc\.py")
+
+    third = harness._round(
+        repo=repo,
+        base=base,
+        prior=second.state,
+        reported=[harness._x(file="d.py")],
+        force_full=force_full,
+    )
+
+    _assert_held_on_b(round_=third, key=key)

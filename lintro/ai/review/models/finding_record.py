@@ -101,13 +101,13 @@ class FindingRecord:
             its current path. Empty for every record that never moved, and
             serialized only when set.
         origin_path: The path the record was first tracked at, kept once a
-            rename moves it elsewhere (#3432). A file renamed in one round and
-            renamed again, heavily edited, in a later one reads to git as a
-            delete plus an add, and the pull request's rename metadata names
-            only the first path; this is the path that metadata is looked up
-            under. Empty while the record sits at its first path, and on
-            records written before the field existed, which then follow only
-            their current path. Serialized only when set.
+            rename moves it elsewhere (#3432). Recorded only: placement does
+            not look it up, because a path cannot prove which file a later
+            delete plus an add continues, and following it resolved live
+            threads. Kept for state compatibility and for a future
+            content-based lookup. Empty while the record sits at its first
+            path, and on records written before the field existed.
+            Serialized only when set.
     """
 
     fingerprint: str

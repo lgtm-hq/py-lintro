@@ -23,12 +23,12 @@ open here is exactly the false "fixed" #3403 is about.
 When git reads a rename as a delete plus an add, or cannot reach a record's
 head at all (a rewritten branch in a shallow checkout), the pull request's
 own rename metadata moves the record to its file's new path. That metadata
-spans the whole pull request, so on a delete plus an add a record an earlier
-round carried across a rename is also looked up under the path it was first
-tracked at (#3432), unless git cannot walk the range, that path may now be
-another file, or the destination is contested
-(:func:`~lintro.ai.review.rename_lineage.lineage_rename`,
-:func:`_contested_lineage`). When that names no rename either, the record is
+spans the whole pull request and names only a file's path at the base, so it
+moves a record only while the record still sits there. A record an earlier
+round carried across a rename is not looked up under the path it was first
+tracked at (``FindingRecord.origin_path``): path metadata cannot prove which
+file a delete plus an add continues, and guessing resolved live threads
+(#3432). When no rename names the record's own path, the record is
 held where it is (:data:`~lintro.ai.review.models.delta_plan.LOCATION_UNMAPPED`)
 and its path leaving the diff never counts as a fix. A round maps at most
 :data:`MAX_MAPPED_FINDINGS` records through git; any beyond that are held
@@ -40,7 +40,6 @@ resolved that round. The git primitives live in
 
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -59,7 +58,6 @@ from lintro.ai.review.models.delta_plan import (
 from lintro.ai.review.rename_lineage import (
     RoundLookups,
     cached_renames,
-    lineage_rename,
     unpaired_rename,
 )
 
@@ -118,15 +116,12 @@ class _Placement:
             read whole.
         relocation: ``(key, path, line, line_sha)`` when its stored location
             changes or is held, else ``None``.
-        lineage: True when only the rename of the record's first path moved
-            it (#3432).
     """
 
     record: FindingRecord
     read_path: str
     line: int | None
     relocation: tuple[str, str, int, str] | None
-    lineage: bool = False
 
 
 def pr_renames(*, changed_files: Iterable[ChangedFile]) -> dict[str, str]:
@@ -158,11 +153,7 @@ def map_open_findings(
 
     Every open record counts, posted inline or not: a finding shown only in
     the sticky has no thread to re-litigate it, so re-reading its line is the
-    only way a later round can see that it was fixed. A record moved only by
-    its first path's rename (#3432) is placed again without that rename when
-    another record arrives at the same file this round: two threads on one
-    path could pair the wrong way, and holding the record is never a false
-    "fixed".
+    only way a later round can see that it was fixed.
 
     Args:
         prior: State of the previous rounds, or ``None``.
@@ -208,26 +199,9 @@ def map_open_findings(
                 since_sha=since_sha,
                 head_sha=head_sha,
                 lookups=lookups,
-                lineage=True,
             ),
         )
-    contested = _contested_lineage(placements=placements)
-    return _collect(
-        placements=[
-            (
-                _map_record(
-                    record=placement.record,
-                    since_sha=since_sha,
-                    head_sha=head_sha,
-                    lookups=lookups,
-                    lineage=False,
-                )
-                if placement.record.key in contested
-                else placement
-            )
-            for placement in placements
-        ],
-    )
+    return _collect(placements=placements)
 
 
 def _map_record(
@@ -236,7 +210,6 @@ def _map_record(
     since_sha: str,
     head_sha: str,
     lookups: RoundLookups,
-    lineage: bool,
 ) -> _Placement:
     """Place one open record at ``since_sha`` and name the file to read.
 
@@ -245,29 +218,13 @@ def _map_record(
         since_sha: The head to place it at.
         head_sha: This round's head.
         lookups: The round's git answers.
-        lineage: Whether the rename of the record's first path may move it.
 
     Returns:
         The record's placement.
     """
-    path, line, hold, by_lineage = _place(
-        record=record,
-        since_sha=since_sha,
-        lookups=lookups,
-        lineage=lineage,
-    )
+    path, line, hold = _place(record=record, since_sha=since_sha, lookups=lookups)
     later = cached_renames(lookups=lookups, from_sha=since_sha, to_sha=head_sha)
     unpaired = unpaired_rename(lookups=lookups, renames=later, path=path)
-    if not unpaired and lineage:
-        unpaired = lineage_rename(
-            lookups=lookups,
-            renames=later,
-            path=path,
-            origin_path=record.origin_path,
-            from_sha=since_sha,
-            to_sha=head_sha,
-        )
-        by_lineage = by_lineage or bool(unpaired)
     moved_on = (
         later is None
         or path in later.moved
@@ -289,36 +246,6 @@ def _map_record(
         read_path=read_path,
         line=None if moved_on else line,
         relocation=relocation,
-        lineage=by_lineage,
-    )
-
-
-def _contested_lineage(*, placements: Iterable[_Placement]) -> frozenset[str]:
-    """Return the keys moved by lineage onto a file another record reaches.
-
-    A record arrives at a file when a rename moves it there this round. Two
-    arrivals at one path, one of them through lineage alone, leave the
-    pairing free to hand one record's sighting to the other's thread and
-    resolve the thread that was still live (#3432).
-
-    Args:
-        placements: The round's placements.
-
-    Returns:
-        Keys of the lineage moves to undo.
-    """
-    arrivals: dict[str, list[_Placement]] = defaultdict(list)
-    for placement in placements:
-        if placement.read_path and (
-            placement.lineage or placement.read_path != placement.record.file
-        ):
-            arrivals[placement.read_path].append(placement)
-    return frozenset(
-        placement.record.key
-        for group in arrivals.values()
-        if len(group) > 1
-        for placement in group
-        if placement.lineage
     )
 
 
@@ -356,53 +283,38 @@ def _place(
     record: FindingRecord,
     since_sha: str,
     lookups: RoundLookups,
-    lineage: bool,
-) -> tuple[str, int | None, str, bool]:
+) -> tuple[str, int | None, str]:
     """Return a record's path and line at ``since_sha``.
 
     Args:
         record: An open record.
         since_sha: The head to place it at.
         lookups: The round's git answers.
-        lineage: Whether the rename of the record's first path may move it.
 
     Returns:
-        ``(path, line, hold, by_lineage)``; the line is ``None`` when it
-        cannot be placed, ``hold`` is :data:`LOCATION_UNMAPPED` when git could
-        not reach the record's head and no rename metadata moved it (#3413),
-        and ``by_lineage`` is True when only its first path's rename did
-        (#3432).
+        ``(path, line, hold)``; the line is ``None`` when it cannot be
+        placed, and ``hold`` is :data:`LOCATION_UNMAPPED` when git could not
+        reach the record's head and no rename metadata moved it (#3413).
     """
     if record.line_sha == since_sha:
-        return record.file, record.line, "", False
+        return record.file, record.line, ""
     renames = cached_renames(
         lookups=lookups,
         from_sha=record.line_sha,
         to_sha=since_sha,
     )
     if renames is None or not record.line_sha:
-        # No history to check a first path's provenance against: only the
-        # record's own path follows the PR's renames (#3432).
+        # Only the record's own path follows the PR's renames (#3432).
         moved = lookups.renamed_from.get(record.file)
         if moved:
-            return moved, None, "", False
-        return record.file, None, LOCATION_UNMAPPED if record.line_sha else "", False
+            return moved, None, ""
+        return record.file, None, LOCATION_UNMAPPED if record.line_sha else ""
     dest = renames.moved.get(record.file, record.file)
     if record.file in renames.ambiguous:
-        return dest, None, "", False
+        return dest, None, ""
     unpaired = unpaired_rename(lookups=lookups, renames=renames, path=record.file)
     if unpaired:
-        return unpaired, None, "", False
-    unpaired = lineage_rename(
-        lookups=lookups,
-        renames=renames,
-        path=record.file,
-        origin_path=record.origin_path if lineage else "",
-        from_sha=record.line_sha,
-        to_sha=since_sha,
-    )
-    if unpaired:
-        return unpaired, None, "", True
+        return unpaired, None, ""
     key = (record.line_sha, since_sha, record.file, dest)
     if key not in lookups.hunks:
         lookups.hunks[key] = file_hunks(
@@ -412,7 +324,7 @@ def _place(
             old_path=record.file,
             new_path=dest,
         )
-    return dest, map_line(line=record.line, hunks=lookups.hunks[key]), "", False
+    return dest, map_line(line=record.line, hunks=lookups.hunks[key]), ""
 
 
 def shows_every_line(
