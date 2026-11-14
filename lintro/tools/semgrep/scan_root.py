@@ -51,10 +51,12 @@ def _is_within(path: str, ancestor: str) -> bool:
 def _scoped_directories(target: str, cwd: str, scopes: list[str]) -> set[str]:
     """Name the in-scope directories at or above Semgrep's working directory.
 
-    These are the directories the user named in the scan path, the scope root,
-    and every directory between it and ``cwd``. Ancestors above the scope are
-    not in scope, so an unrelated ``scripts`` directory high above a checkout
-    never counts.
+    The scope starts at the directory lintro was started in when that contains
+    the scanned path, so it covers the invocation directory itself and every
+    directory a relative scan path names. A path outside the invocation
+    directory starts the scope at its own root. Directories between that start
+    and ``cwd`` count; ancestors above the start do not, so an unrelated
+    ``scripts`` directory high above a checkout never counts.
 
     Args:
         target: Absolute target path.
@@ -64,23 +66,16 @@ def _scoped_directories(target: str, cwd: str, scopes: list[str]) -> set[str]:
     Returns:
         Directory names in the scan scope that Semgrep's relative paths omit.
     """
-    covering = [
-        (scope, root)
-        for scope in scopes
-        if _is_within(target, root := _scope_root(scope))
-    ]
-    if not covering:
+    roots = [root for scope in scopes if _is_within(target, root := _scope_root(scope))]
+    if not roots:
         return {PurePath(cwd).name}
-    scope, root = max(covering, key=lambda pair: len(pair[1]))
-    if not _is_within(cwd, root):
-        return set()
-    named = {PurePath(root).name, *PurePath(os.path.relpath(cwd, root)).parts}
-    typed = os.path.normpath(scope)
-    if not os.path.isabs(typed) and not typed.startswith(".."):
-        parts = PurePath(typed).parts
-        named.update(parts if os.path.isdir(scope) else parts[:-1])
-    named.discard(".")
-    return named
+    # The widest covering scope: every directory the user asked to scan counts.
+    root = min(roots, key=len)
+    invoked = os.path.abspath(os.getcwd())
+    start = invoked if _is_within(root, invoked) else root
+    # When cwd lies above ``start``, this adds only "..": the target's relative
+    # path then passes through ``start``, so a pack directory there is visible.
+    return {PurePath(start).name, *PurePath(os.path.relpath(cwd, start)).parts}
 
 
 def hidden_pack_targets(

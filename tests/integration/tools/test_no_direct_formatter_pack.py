@@ -291,7 +291,13 @@ def test_tree_without_project_marker_is_incomplete(
 
 @pytest.mark.parametrize(
     ("run_from", "scope"),
-    [("tree", "scripts"), ("tree", "scripts/sub"), ("scripts", "."), ("tree", ".")],
+    [
+        ("tree", "scripts"),
+        ("tree", "scripts/sub"),
+        ("scripts", "."),
+        ("scripts", "sub"),
+        ("tree", "."),
+    ],
 )
 def test_nested_script_without_marker_is_incomplete(
     tmp_path: Path,
@@ -319,6 +325,51 @@ def test_nested_script_without_marker_is_incomplete(
     assert_that(result.findings_complete).is_false()
     assert_that(result.issues).is_empty()
     assert_that(result.output).contains(PACK, "(first: fmt.sh)")
+
+
+def test_started_inside_scripts_scanning_sub_exits_incomplete(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``cd scripts && lintro check sub`` fails the run instead of passing (#3437).
+
+    The invocation directory is ``scripts``, so it is in scope even though the
+    scanned path names only ``sub``.
+
+    Args:
+        tmp_path: Holds the marker-less tree and, beside it, Semgrep's state.
+        monkeypatch: Isolate current directory and Semgrep state.
+    """
+    script = tmp_path / "tree" / "scripts" / "sub" / "fmt.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text("black x.py\n", encoding="utf-8")
+    if has_project_marker(get_execution_cwd([str(script)])):
+        pytest.skip("an ancestor of the temporary directory holds a project marker")
+    _isolate_semgrep(monkeypatch, script.parent.parent, state=tmp_path)
+    report = tmp_path / "report.json"
+    result = CliRunner().invoke(
+        cli,
+        [
+            "check",
+            "sub",
+            "--tools",
+            "semgrep",
+            "--tool-options",
+            f"semgrep:jobs=1,semgrep:rule_packs={PACK}|",
+            "--output-format",
+            "json",
+            "--output",
+            str(report),
+        ],
+    )
+    assert_that(result.exit_code).described_as(result.output).is_equal_to(1)
+    semgrep = json.loads(report.read_text(encoding="utf-8"))["results"][0]
+    assert_that(semgrep["status"]).is_equal_to("failed")
+    assert_that(semgrep["issues_count"]).is_equal_to(0)
+    assert_that(semgrep["output"]).contains(
+        "were not checked by these packs",
+        "(first: fmt.sh)",
+    )
 
 
 def test_markerless_checkout_below_a_scripts_ancestor_stays_clean(

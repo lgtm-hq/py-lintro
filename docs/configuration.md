@@ -4453,9 +4453,10 @@ against. Scanning only `scripts/` then hands Semgrep `fmt.sh` rather than
 `scripts/fmt.sh`, so `**/scripts/**` cannot match. Lintro does not move Semgrep to
 compensate. It fails the Semgrep result as incomplete instead: `status: "failed"` in
 JSON, with a message naming the pack and the files it did not check. Findings from other
-rules are still reported. This also covers a nested `scripts/sub/`. A `scripts`
-directory above the path you scan, and not named in it, does not count. Add a project
-marker to scan these trees with the pack.
+rules are still reported. This also covers a nested `scripts/sub/`, and starting inside
+`scripts/` to scan a subdirectory. A `scripts` directory counts when it is the directory
+you started `lintro check` in or lies between it and the scanned path; one above that
+directory does not. Add a project marker to scan these trees with the pack.
 
 These filters narrow the shipped scope; they cannot widen it. For a different scope, use
 `lintro/rules/scripts/no-direct-formatter.yaml` as a starting point for a native Semgrep

@@ -168,7 +168,7 @@ def test_nothing_is_hidden_with_a_marker_or_without_directory_packs(
         ("tree", "scripts/sub", "scripts/sub", ["fmt.sh"], 1),
         ("tree", "scripts/sub/fmt.sh", "scripts/sub", ["fmt.sh"], 1),
         ("tree/scripts", ".", "scripts/sub", ["fmt.sh"], 1),
-        ("tree/scripts", "sub", "scripts/sub", ["fmt.sh"], 0),
+        ("tree/scripts", "sub", "scripts/sub", ["fmt.sh"], 1),
         ("tree", "scripts", "scripts", ["nested/scripts/a.sh"], 0),
         ("tree", ".", ".", ["scripts/fmt.sh"], 0),
         ("tree/scripts/repo/pkg", ".", "scripts/repo/pkg", ["src/a.py"], 0),
@@ -181,7 +181,7 @@ def test_nothing_is_hidden_with_a_marker_or_without_directory_packs(
         "typed-scripts-sub",
         "typed-file-under-scripts",
         "inside-scripts-nested-cwd",
-        "scripts-above-typed-scope",
+        "invocation-directory-is-scripts",
         "pack-directory-visible-below-cwd",
         "cwd-above-scripts",
         "unrelated-scripts-ancestor",
@@ -232,26 +232,51 @@ def test_hidden_targets_need_a_pack_directory_in_scope_above_cwd(
         assert_that(reason).is_none()
 
 
-def test_absolute_scope_ignores_named_ancestors(
+@pytest.mark.parametrize(
+    ("started", "scopes", "hidden"),
+    [
+        ("elsewhere", ["scripts/repo/pkg"], False),
+        (".", ["scripts/repo/pkg"], True),
+        ("scripts/repo/pkg/src", ["scripts"], True),
+        ("elsewhere", ["scripts", "scripts/repo/pkg"], True),
+    ],
+    ids=[
+        "outside-invocation-directory",
+        "below-invocation-directory",
+        "scope-above-invocation-directory",
+        "widest-covering-scope",
+    ],
+)
+def test_absolute_scopes_count_directories_from_their_start(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    started: str,
+    scopes: list[str],
+    hidden: bool,
 ) -> None:
-    """An absolute scan path does not bring its ancestors into scope.
+    """An absolute scan path starts at the invocation directory or its own root.
 
     Args:
         tmp_path: Holds a marker-less checkout below a ``scripts`` directory.
-        monkeypatch: Starts lintro outside the checkout.
+        monkeypatch: Sets the directory lintro was started in.
+        started: Invocation directory, relative to ``tmp_path``.
+        scopes: Scanned directories, relative to ``tmp_path``, passed absolute.
+        hidden: Whether ``scripts`` lies in scope above Semgrep's cwd.
     """
     package = tmp_path / "scripts" / "repo" / "pkg"
     (package / "src").mkdir(parents=True)
-    monkeypatch.chdir(tmp_path)
+    (tmp_path / "elsewhere").mkdir()
+    monkeypatch.chdir(tmp_path / started)
     reason = hidden_pack_targets(
         packs=[PACK],
         cwd=str(package),
         files=["src/a.py"],
-        scopes=[str(package)],
+        scopes=[str(tmp_path / scope) for scope in scopes],
     )
-    assert_that(reason).is_none()
+    if hidden:
+        assert_that(reason).contains("1 file(s) under scripts/ were not checked")
+    else:
+        assert_that(reason).is_none()
 
 
 def test_target_outside_every_scope_falls_back_to_cwd(tmp_path: Path) -> None:
