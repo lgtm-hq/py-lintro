@@ -64,6 +64,13 @@ from lintro.tools.core.readable_paths import (
     run_on_readable_paths,
     unread_paths_reason,
 )
+from lintro.tools.html_validate.one_process import (
+    FileVerdict,
+    OneProcessRun,
+    OneProcessRuntime,
+    one_process_runtime,
+    run_one_process,
+)
 from lintro.tools.html_validate.stdin_route import (
     StdinRoute,
     finished_without_timeout,
@@ -504,34 +511,238 @@ class HtmlValidatePlugin(BaseToolPlugin):
         # each directory's npx pin check, before this method was called; the
         # workers only open files and run html-validate (#3433).
         targets = {path: str(route.absolute(path)) for path in pending}
+        settled, leftover, unstarted = self._check_one_process(
+            pending,
+            targets=targets,
+            invocation=invocation,
+            ctx=ctx,
+        )
+        if leftover:
+            pooled, never = self._check_pool(
+                leftover,
+                targets=targets,
+                invocation=invocation,
+                ctx=ctx,
+            )
+            settled.update(pooled)
+            unstarted = [*unstarted, *never]
+        results.extend(settled[path] for path in pending if path in settled)
+        if unstarted:
+            order = {path: index for index, path in enumerate(pending)}
+            unstarted.sort(key=order.__getitem__)
+            results.append(self._not_started(unstarted, cwd=ctx.cwd))
+        return merge_results(results, name=self.definition.name, cwd=ctx.cwd)
+
+    def _check_pool(
+        self,
+        pending: list[str],
+        *,
+        targets: dict[str, str],
+        invocation: _Invocation,
+        ctx: PreparedExecution,
+    ) -> tuple[dict[str, ToolResult], list[str]]:
+        """Validate files through stdin, one process per file, in a pool.
+
+        Args:
+            pending: Glob-named paths as passed, in input order.
+            targets: Each path's absolute path.
+            invocation: The resolved html-validate command.
+            ctx: The prepared execution context.
+
+        Returns:
+            The result of every call that ran, by path, and the paths never
+            started after a timeout.
+        """
         # npx installs a cold package on first use, and concurrent installs
         # into one cache can leave a call with no report. Its files run one
         # at a time per pinned spec until a call parses a real report. One
         # run resolves one command, so every file shares that spec; the
-        # per-directory pin check above made sure each runs it.
+        # per-directory pin check made sure each runs it.
         npx_spec = (
             registry_fallback_spec(invocation.resolved)
             if invocation.resolved and os.path.basename(invocation.resolved[0]) == "npx"
             else None
         )
-        finished, unstarted = run_stdin_calls(
-            pending,
-            lambda path: self._check_stdin(
+        settled: dict[str, ToolResult] = {}
+
+        def call(path: str) -> ToolResult:
+            """Validate one file and record its result.
+
+            Args:
+                path: The path as passed.
+
+            Returns:
+                The call's result.
+            """
+            settled[path] = self._check_stdin(
                 targets[path],
                 invocation=invocation,
                 timeout=ctx.timeout,
                 cwd=ctx.cwd,
-            ),
+            )
+            return settled[path]
+
+        _, unstarted = run_stdin_calls(
+            pending,
+            call,
             workers=stdin_workers(),
             group=lambda _path: npx_spec,
             ready=(
                 ran_html_validate if npx_spec is not None else finished_without_timeout
             ),
         )
-        results.extend(finished)
-        if unstarted:
-            results.append(self._not_started(unstarted, cwd=ctx.cwd))
-        return merge_results(results, name=self.definition.name, cwd=ctx.cwd)
+        return settled, unstarted
+
+    def _check_one_process(
+        self,
+        pending: list[str],
+        *,
+        targets: dict[str, str],
+        invocation: _Invocation,
+        ctx: PreparedExecution,
+    ) -> tuple[dict[str, ToolResult], list[str], list[str]]:
+        """Validate files in one Node process when the package allows it.
+
+        See :mod:`lintro.tools.html_validate.one_process` for when the
+        package can be loaded. Each verdict is evaluated exactly as a stdin
+        call's report would be.
+
+        Args:
+            pending: Glob-named paths as passed, in input order.
+            targets: Each path's absolute path.
+            invocation: The resolved html-validate command.
+            ctx: The prepared execution context.
+
+        Returns:
+            Results by path; the paths left for the stdin pool (every path
+            when the script cannot be used); and the paths never started
+            after a timeout.
+        """
+        runtime = one_process_runtime(invocation.resolved)
+        if runtime is None:
+            return {}, list(pending), []
+        try:
+            run = self._run_one_process(
+                runtime,
+                files=[targets[path] for path in pending],
+                cwd=ctx.cwd,
+                timeout=ctx.timeout,
+            )
+        except OSError as error:
+            logger.debug(f"[HtmlValidatePlugin] One-process run not started: {error}")
+            return {}, list(pending), []
+        if run.timed_out_at is None and run.version is None:
+            logger.debug(f"[HtmlValidatePlugin] One-process run unused: {run.failure}")
+            return {}, list(pending), []
+        settled = {
+            pending[index]: self._one_process_result(
+                targets[pending[index]],
+                verdict=verdict,
+                invocation=invocation,
+                cwd=ctx.cwd,
+            )
+            for index, verdict in run.verdicts.items()
+        }
+        if run.timed_out_at is None:
+            if run.failure is not None:
+                logger.debug(f"[HtmlValidatePlugin] One-process run: {run.failure}")
+            return settled, [p for p in pending if p not in settled], []
+        for index, why in run.errors.items():
+            settled[pending[index]] = incomplete_run_result(
+                name=self.definition.name,
+                reason=(
+                    f"{targets[pending[index]]}: html-validate gave no verdict "
+                    f"({tool_message_excerpt(why)}), so the file was not "
+                    "inspected."
+                ),
+                cwd=ctx.cwd,
+            )
+        stuck = pending[run.timed_out_at]
+        settled[stuck] = _naming(
+            targets[stuck],
+            self._timed_out(
+                cmd=stdin_command(invocation.cmd),
+                timeout=ctx.timeout,
+                cwd=ctx.cwd,
+                invocation=invocation,
+            ),
+        )
+        return settled, [], pending[run.timed_out_at + 1 :]
+
+    def _run_one_process(
+        self,
+        runtime: OneProcessRuntime,
+        *,
+        files: list[str],
+        cwd: str,
+        timeout: float,
+    ) -> OneProcessRun:
+        """Run the one-process script over absolute paths.
+
+        Args:
+            runtime: The verified package and ``node``.
+            files: Absolute paths, in input order.
+            cwd: The run's working directory.
+            timeout: The per-file deadline, in seconds.
+
+        Returns:
+            What the run settled.
+        """
+        logger.debug(
+            f"[HtmlValidatePlugin] Validating {len(files)} file(s) in one process "
+            f"with html-validate {runtime.package.version} "
+            f"({runtime.package.directory})",
+        )
+        return run_one_process(
+            runtime.argv(),
+            entry=runtime.package.entry,
+            expected_version=runtime.package.version,
+            files=files,
+            cwd=cwd,
+            timeout=self._get_effective_timeout(timeout),
+        )
+
+    def _one_process_result(
+        self,
+        target: str,
+        *,
+        verdict: FileVerdict,
+        invocation: _Invocation,
+        cwd: str,
+    ) -> ToolResult:
+        """Evaluate one script verdict as a stdin call's report.
+
+        Args:
+            target: Absolute path of the file.
+            verdict: The script's verdict.
+            invocation: The resolved html-validate command.
+            cwd: The run's working directory.
+
+        Returns:
+            The result a stdin call with the same report and exit status
+            gives; "no files" for a file html-validate's ignore excludes.
+        """
+        if verdict.ignored:
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=NoFiles()),
+                name=self.definition.name,
+                output=HTML_VALIDATE_ALL_IGNORED_MESSAGE,
+                cwd=cwd,
+            )
+        try:
+            stdout = json.dumps(json.loads(verdict.report))
+        except ValueError:
+            stdout = verdict.report
+        result = SubprocessResult(
+            returncode=0 if verdict.valid else 1,
+            stdout=stdout,
+            stderr="",
+            output=stdout,
+        )
+        return _naming(
+            target,
+            self._evaluate(result, invocation=invocation, cwd=cwd, file_args=[]),
+        )
 
     def _not_started(self, paths: list[str], *, cwd: str) -> ToolResult:
         """Name the stdin files skipped after an earlier call timed out.

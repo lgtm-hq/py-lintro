@@ -21,7 +21,14 @@ from lintro.parsers.html_validate.html_validate_issue import HtmlValidateIssue
 from lintro.plugins import ToolRegistry
 from lintro.tools.core.command_builders import pinned_npm_spec
 from lintro.tools.core.node_fallback import npx_runner_options
-from tests.integration._tools import require_command
+from lintro.tools.html_validate import definition, stdin_route
+from lintro.tools.html_validate.definition import HtmlValidatePlugin
+from lintro.tools.html_validate.one_process import (
+    OneProcessRun,
+    OneProcessRuntime,
+    one_process_runtime,
+)
+from tests.integration._tools import in_tools_image, require_command
 
 SAMPLE_FILE = "test_samples/tools/web/html_validate/html_validate_violations.html"
 
@@ -176,8 +183,10 @@ def _check(
 
     Args:
         paths: Files to check.
-        stdin_files: When given, how many files must go through ``--stdin``.
-            Each such call must name no file at all.
+        stdin_files: When given, how many files must be validated without
+            their name on any command line: through ``--stdin``, or by the
+            one-process script, which reads them from its own stdin (#3433).
+            No such call may name a file at all.
         command: A resolved html-validate command to use instead of the
             plugin's own resolution, such as the real npx fallback.
 
@@ -185,9 +194,13 @@ def _check(
         The plugin's result.
     """
     tool = ToolRegistry.get("html_validate")
+    if not isinstance(tool, HtmlValidatePlugin):
+        pytest.fail("html_validate should be an HtmlValidatePlugin")
     tool.exclude_patterns = []
     calls: list[list[str]] = []
+    batches: list[tuple[list[str], list[str]]] = []
     original = tool._run_subprocess_result
+    original_batch = tool._run_one_process
 
     def recording(**kwargs: Any) -> SubprocessResult:
         """Record each html-validate argv, then run it.
@@ -200,6 +213,19 @@ def _check(
         """
         calls.append([str(arg) for arg in kwargs["cmd"]])
         return original(**kwargs)
+
+    def recording_batch(runtime: OneProcessRuntime, **kwargs: Any) -> OneProcessRun:
+        """Record each one-process argv and its files, then run it.
+
+        Args:
+            runtime: The verified package and node.
+            **kwargs: The plugin's one-process arguments.
+
+        Returns:
+            The real run.
+        """
+        batches.append((runtime.argv(), list(kwargs["files"])))
+        return original_batch(runtime, **kwargs)
 
     def resolved(**kwargs: Any) -> list[str]:
         """Return the forced command.
@@ -215,19 +241,23 @@ def _check(
 
     # Instance attributes shadow the methods for this one run.
     object.__setattr__(tool, "_run_subprocess_result", recording)
+    object.__setattr__(tool, "_run_one_process", recording_batch)
     if command is not None:
         object.__setattr__(tool, "_get_executable_command", resolved)
     try:
         result = tool.check([str(path) for path in paths], {})
     finally:
         object.__delattr__(tool, "_run_subprocess_result")
+        object.__delattr__(tool, "_run_one_process")
         if command is not None:
             object.__delattr__(tool, "_get_executable_command")
     if stdin_files is not None:
         piped = [cmd for cmd in calls if "--stdin" in cmd]
-        assert_that(piped).is_length(stdin_files)
+        batched = [name for _, files in batches for name in files]
+        assert_that(len(piped) + len(batched)).is_equal_to(stdin_files)
         for cmd in piped:
             assert_that(cmd[-1]).is_equal_to("--stdin")
+        for cmd in [*piped, *(argv for argv, _ in batches)]:
             assert_that(" ".join(cmd)).does_not_contain(*(str(p) for p in paths))
     return result
 
@@ -931,3 +961,164 @@ def test_html_validate_validates_paths_with_bare_parentheses(
     assert_that(
         {Path(issue.file).relative_to(tmp_path).as_posix() for issue in result.issues},
     ).is_equal_to({name})
+
+
+_ONE_PROCESS_FILES: dict[str, str] = {
+    "[a].html": _FINDINGS,
+    "[b].html": _CLEAN,
+    "c{1,2}.html": '<img src="x">\n<button>x</button>\n',
+    "[d]/page.html": '<p>calf\u00e9 <div></p><img src="x">\n',
+    "[e]/x?.html": '<p id="a"></p><p id="a"></p>\n',
+}
+
+
+def _write_tree(root: Path) -> list[Path]:
+    """Write glob-named files, one directory carrying its own config.
+
+    Args:
+        root: The project directory.
+
+    Returns:
+        The written files, in order.
+    """
+    for name, content in _ONE_PROCESS_FILES.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(content, encoding="utf-8")
+    (root / "[d]" / ".htmlvalidate.json").write_text(
+        json.dumps(
+            {"extends": ["html-validate:a11y"], "rules": {"close-order": "off"}},
+        ),
+        encoding="utf-8",
+    )
+    return [root / name for name in _ONE_PROCESS_FILES]
+
+
+def _require_one_process(root: Path) -> None:
+    """Skip unless html-validate resolves to a package lintro can load.
+
+    Inside the tools image the route must be available, so a package the
+    route stopped accepting (a changed bin entry after an upgrade, say)
+    fails the test instead of skipping it.
+
+    Args:
+        root: The project directory html-validate is resolved from.
+    """
+    tool = ToolRegistry.get("html_validate")
+    command = tool._get_executable_command(tool_name="html_validate", cwd=str(root))
+    if one_process_runtime(command) is not None:
+        return
+    reason = (
+        f"html-validate ({command!r}) does not resolve to a package lintro can load"
+    )
+    if in_tools_image():
+        pytest.fail(f"{reason}; the tools image must support the one-process route")
+    pytest.skip(reason)
+
+
+def _check_without_one_process(
+    paths: list[Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> ToolResult:
+    """Run the plugin with the one-process route disabled.
+
+    Args:
+        paths: Files to check.
+        monkeypatch: Pytest's patcher, undone after the run.
+
+    Returns:
+        The stdin route's result.
+    """
+    with monkeypatch.context() as patched:
+        patched.setattr(definition, "one_process_runtime", lambda _command: None)
+        return _check(paths)
+
+
+@pytest.mark.html_validate
+def test_html_validate_one_process_equals_stdin_byte_for_byte(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each file's one-process result is its stdin result, field for field.
+
+    Run file by file and all together, the one-process route and the stdin
+    route give equal ToolResults: findings, output text, inspection and
+    failure state (#3433).
+
+    Args:
+        tmp_path: Pytest-managed temporary directory.
+        monkeypatch: Pytest's patcher.
+    """
+    files = _write_tree(tmp_path)
+    _require_one_process(tmp_path)
+    for path in [[file] for file in files]:
+        assert_that(_check(path)).is_equal_to(
+            _check_without_one_process(path, monkeypatch),
+        )
+    together = _check(files)
+
+    assert_that(together).is_equal_to(_check_without_one_process(files, monkeypatch))
+    assert_that(_reported(together, tmp_path)).is_equal_to(
+        {"[a].html", "c{1,2}.html", "[d]/page.html", "[e]/x?.html"},
+    )
+
+
+@pytest.mark.html_validate
+def test_html_validate_validates_glob_named_files_in_one_process(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With a loadable package, no file reaches the stdin pool.
+
+    Args:
+        tmp_path: Pytest-managed temporary directory.
+        monkeypatch: Pytest's patcher.
+    """
+    files = _write_tree(tmp_path)
+    _require_one_process(tmp_path)
+    calls: list[str] = []
+    original = stdin_route.run_stdin_calls
+
+    def recording(items: list[str], *args: Any, **kwargs: Any) -> Any:
+        """Record the files handed to the stdin pool, then run it.
+
+        Args:
+            items: The files.
+            *args: The pool's other arguments.
+            **kwargs: The pool's keyword arguments.
+
+        Returns:
+            The pool's result.
+        """
+        calls.extend(items)
+        return original(items, *args, **kwargs)
+
+    monkeypatch.setattr(
+        "lintro.tools.html_validate.definition.run_stdin_calls",
+        recording,
+    )
+    result = _check(files, stdin_files=len(files))
+
+    assert_that(calls).is_empty()
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.inspected_files).is_true()
+
+
+@pytest.mark.html_validate
+@pytest.mark.skipif(os.name == "nt", reason="uses a POSIX shell wrapper")
+def test_html_validate_falls_back_to_stdin_for_an_unlocatable_binary(
+    tmp_path: Path,
+) -> None:
+    """A wrapper binary has no package to load, so each file uses stdin.
+
+    Args:
+        tmp_path: Pytest-managed temporary directory.
+    """
+    _wrap_html_validate(tmp_path, ":")
+    files = _write_tree(tmp_path)
+
+    result = _check(files, stdin_files=len(files))
+
+    assert_that(result.execution_failed).is_false()
+    assert_that(_reported(result, tmp_path)).is_equal_to(
+        {"[a].html", "c{1,2}.html", "[d]/page.html", "[e]/x?.html"},
+    )
