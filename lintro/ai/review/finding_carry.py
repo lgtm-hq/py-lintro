@@ -103,6 +103,7 @@ def _relocate(
         match_fingerprint=(
             "" if moved_fingerprint == record.fingerprint else moved_fingerprint
         ),
+        origin_path=record.origin_path_at(path=path),
     )
 
 

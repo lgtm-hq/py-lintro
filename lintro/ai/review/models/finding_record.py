@@ -100,6 +100,14 @@ class FindingRecord:
             inline thread marker carry) but is matched under the identity of
             its current path. Empty for every record that never moved, and
             serialized only when set.
+        origin_path: The path the record was first tracked at, kept once a
+            rename moves it elsewhere (#3432). A file renamed in one round and
+            renamed again, heavily edited, in a later one reads to git as a
+            delete plus an add, and the pull request's rename metadata names
+            only the first path; this is the path that metadata is looked up
+            under. Empty while the record sits at its first path, and on
+            records written before the field existed, which then follow only
+            their current path. Serialized only when set.
     """
 
     fingerprint: str
@@ -131,6 +139,7 @@ class FindingRecord:
     line_sha: str = ""
     unverified: bool = False
     match_fingerprint: str = ""
+    origin_path: str = ""
 
     @property
     def key(self) -> str:
@@ -141,6 +150,19 @@ class FindingRecord:
     def pairing_fingerprint(self) -> str:
         """Return the fingerprint a current finding must carry to pair."""
         return self.match_fingerprint or self.fingerprint
+
+    def origin_path_at(self, *, path: str) -> str:
+        """Return the :attr:`origin_path` the record keeps at ``path`` (#3432).
+
+        Args:
+            path: The path the record is moving to.
+
+        Returns:
+            The first path the record was tracked at, or ``""`` when that is
+            ``path`` itself.
+        """
+        origin = self.origin_path or self.file
+        return "" if origin == path else origin
 
     @property
     def is_question(self) -> bool:
@@ -238,6 +260,8 @@ class FindingRecord:
             payload["unverified"] = True
         if self.match_fingerprint:
             payload["match_fingerprint"] = self.match_fingerprint
+        if self.origin_path:
+            payload["origin_path"] = self.origin_path
         return payload
 
     @classmethod
@@ -293,6 +317,7 @@ class FindingRecord:
             line_sha=str(payload.get("line_sha", "")),
             unverified=payload.get("unverified") is True,
             match_fingerprint=str(payload.get("match_fingerprint", "")),
+            origin_path=str(payload.get("origin_path", "")),
         )
 
 

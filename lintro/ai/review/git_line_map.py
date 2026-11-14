@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from loguru import logger
 
@@ -30,6 +31,8 @@ __all__ = [
     "git_text",
     "literal_pathspec",
     "map_line",
+    "path_added_in_range",
+    "path_exists",
     "range_renames",
 ]
 
@@ -64,11 +67,15 @@ class Renames:
             the finding.
         deleted: Paths git reports as deleted; a rename it did not pair
             (heavily edited on the way) shows up here (#3413).
+        named: Every path the range names, rename and copy sources
+            included, so a caller can tell a path the range never touched
+            (#3432).
     """
 
     moved: dict[str, str]
     ambiguous: frozenset[str]
     deleted: frozenset[str] = frozenset()
+    named: frozenset[str] = frozenset()
 
 
 def literal_pathspec(path: str) -> str:
@@ -159,7 +166,161 @@ def range_renames(*, repo_root: str, from_sha: str, to_sha: str) -> Renames | No
         moved=moved,
         ambiguous=frozenset(source for source in moved if source in touched),
         deleted=frozenset(deleted),
+        named=frozenset((*moved, *touched)),
     )
+
+
+def path_added_in_range(
+    *,
+    repo_root: str,
+    from_sha: str,
+    to_sha: str,
+    path: str,
+) -> bool | None:
+    """Tell whether any commit in a range adds a path (#3432).
+
+    Compares every commit, not the range's endpoints, so a file created
+    and renamed away again within the range still counts. Rename detection
+    is off, so a rename onto the path is reported as adding it, and merge
+    commits are compared with each parent.
+
+    Args:
+        repo_root: The repository.
+        from_sha: The older commit (excluded).
+        to_sha: The newer commit.
+        path: Repository-relative path.
+
+    Returns:
+        Whether some commit adds the path, or ``None`` when git could not
+        walk the range or a shallow clone may not hold all of it
+        (:func:`_range_is_complete`).
+    """
+    if not from_sha or not to_sha or not path:
+        return None
+    try:
+        if not _range_is_complete(
+            repo_root=repo_root,
+            from_sha=from_sha,
+            to_sha=to_sha,
+        ):
+            return None
+        result = _run_git(
+            args=[
+                "-C",
+                repo_root,
+                "-c",
+                "core.quotePath=false",
+                "log",
+                "--format=",
+                "--name-only",
+                "-z",
+                "-m",
+                "--no-renames",
+                "--diff-filter=A",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--no-relative",
+                f"{from_sha}..{to_sha}",
+                "--",
+                literal_pathspec(path),
+            ],
+            check=False,
+        )
+    except ReviewContextError as exc:
+        logger.debug("Could not walk {}..{} for {}: {}", from_sha, to_sha, path, exc)
+        return None
+    if result.returncode != 0:
+        return None
+    return path in result.stdout.split("\0")
+
+
+def _range_is_complete(*, repo_root: str, from_sha: str, to_sha: str) -> bool:
+    """Tell whether the repository holds every commit of ``from_sha..to_sha``.
+
+    A shallow clone answers ``git log`` over a range cut short by its
+    boundary without an error: both ends can be readable while the commits
+    between them were never fetched. In a shallow repository the range is
+    complete only when ``from_sha`` is an ancestor of ``to_sha`` there and no
+    shallow boundary commit lies inside the range (#3432).
+
+    Args:
+        repo_root: The repository.
+        from_sha: The older commit (excluded).
+        to_sha: The newer commit.
+
+    Returns:
+        True when every commit is present; False when one may be missing or
+        git could not tell. A failure to run git at all propagates to
+        :func:`path_added_in_range`, which reports it as unknown.
+    """
+    shallow = _run_git(
+        args=["-C", repo_root, "rev-parse", "--is-shallow-repository"],
+        check=False,
+    )
+    if shallow.returncode != 0:
+        return False
+    if shallow.stdout.strip() != "true":
+        return True
+    ancestor = _run_git(
+        args=["-C", repo_root, "merge-base", "--is-ancestor", from_sha, to_sha],
+        check=False,
+    )
+    shallow_file = _run_git(
+        args=["-C", repo_root, "rev-parse", "--git-path", "shallow"],
+        check=False,
+    )
+    walked = _run_git(
+        args=["-C", repo_root, "rev-list", f"{from_sha}..{to_sha}"],
+        check=False,
+    )
+    if (
+        ancestor.returncode != 0
+        or shallow_file.returncode != 0
+        or walked.returncode != 0
+    ):
+        return False
+    try:
+        # ``--git-path`` answers relative to the directory git ran in.
+        shallow_path = Path(repo_root) / shallow_file.stdout.strip()
+        boundary = set(shallow_path.read_text().split())
+    except OSError as exc:
+        logger.debug("Could not read the shallow boundary: {}", exc)
+        return False
+    return boundary.isdisjoint(walked.stdout.split())
+
+
+def path_exists(*, repo_root: str, sha: str, path: str) -> bool | None:
+    """Tell whether a commit's tree holds a path (#3432).
+
+    Args:
+        repo_root: The repository.
+        sha: The commit.
+        path: Repository-relative path.
+
+    Returns:
+        Whether the path exists at ``sha``, or ``None`` when git could not
+        answer (no commit given, a commit the repository does not hold, or
+        git failed to run).
+    """
+    if not sha or not path:
+        return None
+    try:
+        found = _run_git(
+            args=["-C", repo_root, "cat-file", "-e", f"{sha}:{path}"],
+            check=False,
+        )
+        if found.returncode == 0:
+            return True
+        # The same exit status covers a missing path and a missing commit;
+        # only a tree git can read makes the path's absence an answer.
+        tree = _run_git(
+            args=["-C", repo_root, "cat-file", "-e", f"{sha}^{{tree}}"],
+            check=False,
+        )
+    except ReviewContextError as exc:
+        logger.debug("Could not look up {} at {}: {}", path, sha, exc)
+        return None
+    return False if tree.returncode == 0 else None
 
 
 def file_hunks(
