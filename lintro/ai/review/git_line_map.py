@@ -175,7 +175,9 @@ def rewritten(*, repo_root: str, from_sha: str, to_sha: str, path: str) -> bool:
 
     A path refilled with unrelated content (the original moved elsewhere)
     is a modification by name only; ``git diff -B`` breaks it into a rewrite
-    and reports its dissimilarity (``M100``).
+    and reports its dissimilarity (``M100``). Plain ``-B`` reports a score
+    only from git's default 60%, so the threshold is passed explicitly
+    (``--break-rewrites=/50%``): a file 50-59% replaced is a rewrite too.
 
     Args:
         repo_root: The repository.
@@ -191,7 +193,8 @@ def rewritten(*, repo_root: str, from_sha: str, to_sha: str, path: str) -> bool:
         repo_root=repo_root,
         args=[
             "--no-renames",
-            "-B",
+            # ``-B<n>/<m>``: <m> is the score from which git reports a rewrite.
+            f"--break-rewrites=/{REWRITE_SCORE}%",
             "--name-status",
             f"{from_sha}..{to_sha}",
             "--",

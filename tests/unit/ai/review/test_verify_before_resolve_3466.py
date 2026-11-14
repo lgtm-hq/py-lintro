@@ -845,6 +845,149 @@ def test_an_ordinary_fix_of_the_line_resolves_without_the_check(
     assert_that(round_.result.metadata.moved_verdicts).is_empty()
 
 
+_AUTH_BUG = "can_read = lambda is_admin: is_admin or True"
+
+
+def _row(text: str) -> str:
+    """One fixed-width line, so a replaced share of lines is its score.
+
+    Args:
+        text: The line's code.
+
+    Returns:
+        The padded line.
+    """
+    return text.ljust(63) + "\n"
+
+
+def _rows(label: str) -> list[str]:
+    """Two hundred equal-width lines.
+
+    Args:
+        label: Prefix that keeps each file's text distinct.
+
+    Returns:
+        The lines.
+    """
+    return [_row(f"{label}_{index:04d} = {index}") for index in range(1, 201)]
+
+
+def _partly_replaced(tmp_path: Path, *, percent: int, force_full: bool) -> _Final:
+    """Move X's bug to ``d.py`` while replacing ``percent``% of ``a.py``.
+
+    Args:
+        tmp_path: Pytest temp dir.
+        percent: Share of ``a.py``'s lines replaced, which is git's
+            dissimilarity score for the change.
+        force_full: ``--full`` for every round.
+
+    Returns:
+        The final round: X reported on ``d.py`` only.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    (repo / "a.py").write_text("".join(_rows("base")))
+    base = commit(repo, "base")
+    rows = _rows("case")
+    rows[80] = _row(_AUTH_BUG)
+    (repo / "a.py").write_text("".join(rows))
+    reviewed = commit(repo, "introduce the live bug")
+    first = harness._round(
+        repo=repo,
+        base=base,
+        prior=None,
+        reported=[harness._x(file="a.py")],
+        force_full=force_full,
+    )
+    prior = harness._with_thread(first.state)
+    rows[40 : 40 + percent * 2] = _rows("safe")[40 : 40 + percent * 2]
+    (repo / "a.py").write_text("".join(rows))
+    dest = _rows("dest")
+    dest[80] = _row(_AUTH_BUG)
+    (repo / "d.py").write_text("".join(dest))
+    commit(repo, "move the bug while partly replacing a.py")
+    span = f"{reviewed}..HEAD"
+    score = git(repo, "diff", "--no-renames", "-B/1%", "--name-status", span)
+    assert_that(score).contains(f"M{percent:03d}\ta.py")
+    assert_that((repo / "a.py").read_text()).does_not_contain(_AUTH_BUG)
+    return _Final(
+        repo=repo,
+        base=base,
+        prior=prior,
+        reported=[harness._x(file="d.py")],
+        threads={_THREAD: prior.findings[0].key},
+        live="d.py",
+    )
+
+
+@pytest.mark.parametrize("force_full", _MODES)
+def test_a_file_replaced_below_half_stays_in_place(
+    tmp_path: Path,
+    force_full: bool,
+) -> None:
+    """49% replaced is an edit: X resolves as on main, with no call.
+
+    Args:
+        tmp_path: Pytest temp dir.
+        force_full: ``--full``.
+    """
+    final = _partly_replaced(tmp_path, percent=49, force_full=force_full)
+
+    round_ = harness._round(
+        repo=final.repo,
+        base=final.base,
+        prior=final.prior,
+        reported=final.reported,
+        force_full=force_full,
+        moved=moved_answer(still_present="true"),
+    )
+
+    assert_that(round_.resolved_threads).is_equal_to((f"T{_THREAD}",))
+    assert_that(round_.result.metadata.moved_verification).is_none()
+
+
+@pytest.mark.parametrize("answer", ["still-present", "provider-error", "fixed"])
+@pytest.mark.parametrize("percent", [50, 59])
+@pytest.mark.parametrize("force_full", _MODES)
+def test_a_file_replaced_from_half_up_is_unplaced(
+    tmp_path: Path,
+    force_full: bool,
+    percent: int,
+    answer: str,
+) -> None:
+    """50% and 59% replaced (below git's default 60%) wait for the check.
+
+    Args:
+        tmp_path: Pytest temp dir.
+        force_full: ``--full``.
+        percent: Share of ``a.py`` replaced.
+        answer: The moved-finding check's answer.
+    """
+    final = _partly_replaced(tmp_path, percent=percent, force_full=force_full)
+    canned: dict[str, AIResponse | Exception] = {
+        "still-present": moved_answer(still_present="true"),
+        "provider-error": RuntimeError("provider unavailable"),
+        "fixed": moved_answer(still_present="false"),
+    }
+
+    round_ = harness._round(
+        repo=final.repo,
+        base=final.base,
+        prior=final.prior,
+        reported=final.reported,
+        force_full=force_full,
+        moved=canned[answer],
+    )
+
+    relocations = round_.result.metadata.relocated_findings
+    assert_that(relocations).contains((final.threads[_THREAD], "a.py", 81, "unplaced"))
+    if answer == "fixed":
+        assert_that(round_.resolved_threads).is_equal_to((f"T{_THREAD}",))
+    else:
+        _assert_threads_kept(round_=round_, final=final)
+
+
 def _big_renamed_twice(tmp_path: Path) -> tuple[Path, str, ReviewState]:
     """X on a 140 KB ``a.py`` whose two renamed copies differ only in the fix.
 
