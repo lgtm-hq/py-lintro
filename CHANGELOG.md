@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.32] - 2026-11-14
+
+### Fixed
+
+- **ai/review**: fetch prior reviewed heads in shallow checkouts (#3475) (4bb9e0d)
+
 ## [0.180.31] - 2026-11-14
 
 ### Fixed
