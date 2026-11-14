@@ -14,8 +14,89 @@ from lintro.utils.path_utils import (
     find_file_upward,
     find_lintro_ignore,
     load_lintro_ignore,
+    normalize_command_path,
     normalize_file_path_for_display,
 )
+
+# =============================================================================
+# Tests for normalize_command_path
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        pytest.param(
+            r"C:\Users\me\AppData\Roaming\npm\prettier.cmd",
+            "C:/Users/me/AppData/Roaming/npm/prettier.cmd",
+            id="windows-backslashes",
+        ),
+        pytest.param(
+            r"C:\Program Files (x86)/nodejs\prettier.cmd",
+            "C:/Program Files (x86)/nodejs/prettier.cmd",
+            id="mixed-separators",
+        ),
+        pytest.param(
+            "/usr/local/bin/prettier",
+            "/usr/local/bin/prettier",
+            id="posix-unchanged",
+        ),
+        pytest.param(Path("/opt/~tools!/bin/x"), "/opt/~tools!/bin/x", id="path-obj"),
+    ],
+)
+def test_normalize_command_path_returns_forward_slashes(
+    raw: str | Path,
+    expected: str,
+) -> None:
+    """Every separator in a command path becomes a forward slash.
+
+    Args:
+        raw: Path as resolved.
+        expected: Normalised command string.
+    """
+    assert_that(normalize_command_path(raw)).is_equal_to(expected)
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="backslash is a separator on Windows, a file-name character on POSIX",
+)
+def test_normalize_command_path_keeps_posix_backslash() -> None:
+    r"""A POSIX ``\`` is part of a name, so converting it could change the binary."""
+    raw = "/tmp/a\\b/node_modules/.bin/prettier"
+
+    assert_that(normalize_command_path(raw)).is_equal_to(raw)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        pytest.param(
+            r"\\server\share\npm\prettier.cmd",
+            "//server/share/npm/prettier.cmd",
+            id="unc",
+        ),
+        pytest.param(r"D:\bin\tsc.cmd", "D:/bin/tsc.cmd", id="drive"),
+    ],
+)
+def test_normalize_command_path_converts_windows_rooted_input(
+    raw: str,
+    expected: str,
+) -> None:
+    """A drive or UNC root marks a path Windows-shaped on any host.
+
+    Args:
+        raw: Windows-shaped path as ``shutil.which`` returns it.
+        expected: Forward-slash form.
+    """
+    assert_that(normalize_command_path(raw)).is_equal_to(expected)
+
+
+def test_normalize_command_path_is_idempotent() -> None:
+    """Normalising an already-normalised path returns it unchanged."""
+    once = normalize_command_path(r"D:\tools\bin\tsc.cmd")
+    assert_that(normalize_command_path(once)).is_equal_to(once)
+
 
 # =============================================================================
 # Tests for absolute_path_without_resolving
