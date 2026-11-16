@@ -14,6 +14,10 @@ from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.tools import tool_manager
+from lintro.utils.execution.result_shaping import (
+    mark_refused_command,
+    refused_command_failure,
+)
 from lintro.utils.execution.tool_configuration import (
     configure_tool_for_execution,
     get_tools_to_run,
@@ -139,6 +143,8 @@ def run_lint_on_changed_files(
         except (KeyError, ValueError):
             continue
 
+        # The configured instance that ran, read for a refused command (#3493).
+        attempted: object = None
         try:
             tool = configure_tool_for_execution(
                 tool=tool,
@@ -155,15 +161,23 @@ def run_lint_on_changed_files(
                 auto_install=False,
                 lintro_config=lintro_config,
             )
+            attempted = tool
             result = tool.check(paths=changed_files, options={})
         except Exception:
-            logger.warning(
-                "Lint bridge skipped {} after check failure",
-                tool_name,
-                exc_info=True,
-            )
+            # A refused command is reported as an execution failure, not
+            # dropped like an ordinary crash (#3486).
+            refused = refused_command_failure(attempted, name=tool_name, fix=False)
+            if refused is None:
+                logger.warning(
+                    "Lint bridge skipped {} after check failure",
+                    tool_name,
+                    exc_info=True,
+                )
+                continue
+            # Already marked by ``refused_command_failure``.
+            results.append(refused)
             continue
-        results.append(result)
+        results.append(mark_refused_command(attempted, result, fix=False))
 
     return results
 

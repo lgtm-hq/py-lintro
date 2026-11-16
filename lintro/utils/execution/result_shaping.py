@@ -25,11 +25,11 @@ from lintro.models.core.tool_outcome import (
     ToolOutcome,
     Unavailable,
 )
+from lintro.models.core.tool_result import ToolResult
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from lintro.models.core.tool_result import ToolResult
     from lintro.parsers.base_issue import BaseIssue
     from lintro.plugins.base import BaseToolPlugin
 
@@ -173,6 +173,49 @@ def classify_runner_failure(
     )
 
 
+def command_refusal(tool: object) -> UnsafeCommandError | None:
+    """Return the command *tool* refused to spawn during its run, if any.
+
+    Args:
+        tool: Plugin instance that ran, or None when none was built.
+
+    Returns:
+        The recorded :class:`UnsafeCommandError`, or None.
+    """
+    refusal = getattr(tool, "command_refusal", None)
+    return refusal if isinstance(refusal, UnsafeCommandError) else None
+
+
+def refused_command_failure(
+    tool: object,
+    *,
+    name: str,
+    fix: bool,
+) -> ToolResult | None:
+    """Build the result for a refusal that escaped the plugin as an exception.
+
+    A caller running a plugin outside the executors uses this in its
+    exception handler, so an escaped refusal is reported the same way the
+    executors report it instead of as a skip or a crash (#3493).
+
+    Args:
+        tool: Plugin instance that ran, or None when none was built.
+        name: Tool name for the result.
+        fix: Whether the run was a fix.
+
+    Returns:
+        A failed result marked by :func:`mark_refused_command`, or None when
+        the plugin refused no command and the exception is something else.
+    """
+    if command_refusal(tool) is None:
+        return None
+    failed = ToolResult.from_outcome(
+        ToolOutcome(execution=Checked(success=False)),
+        name=name,
+    )
+    return mark_refused_command(tool, failed, fix=fix)
+
+
 def mark_refused_command(
     tool: object,
     result: ToolResult,
@@ -199,8 +242,8 @@ def mark_refused_command(
     Returns:
         The result, marked as an execution failure when a command was refused.
     """
-    refusal = getattr(tool, "command_refusal", None)
-    if not isinstance(refusal, UnsafeCommandError):
+    refusal = command_refusal(tool)
+    if refusal is None:
         return result
     reason = f"lintro refused to run {result.name}: {refusal}"
     accounting: FixAccounting = (
