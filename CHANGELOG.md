@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.181.1] - 2026-11-16
+
+### Fixed
+
+- **ai**: reject incomplete results as fix confirmation and isolate re-run checks
+  (#3505) (a8fd107)
+
 ## [0.181.0] - 2026-11-16
 
 ### Added
