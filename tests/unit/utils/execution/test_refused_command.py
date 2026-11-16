@@ -17,8 +17,11 @@ from typing import Any, cast
 import pytest
 from assertpy import assert_that
 
+import lintro.utils.execution.advisory as advisory_module
 import lintro.utils.execution.parallel_executor as parallel_module
 import lintro.utils.tool_executor as sequential_module
+from lintro.ai.review import lint_bridge
+from lintro.config.lintro_config import LintroConfig
 from lintro.enums.action import Action
 from lintro.exceptions.errors import UnsafeCommandError
 from lintro.models.core.tool_outcome import Checked, ToolOutcome
@@ -27,7 +30,10 @@ from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.tools import tool_manager
 from lintro.utils.execution.exit_codes import determine_exit_code
-from lintro.utils.execution.result_shaping import mark_refused_command
+from lintro.utils.execution.result_shaping import (
+    mark_refused_command,
+    refused_command_failure,
+)
 from lintro.utils.execution.run_context import RunContext
 from lintro.utils.unified_config import UnifiedConfigManager
 
@@ -240,3 +246,127 @@ def test_refusal_keeps_output_that_already_echoes_it() -> None:
     assert_that(marked.output).starts_with(f"lintro refused to run tsc: {refusal}")
     assert_that(marked.output).contains(finding)
     assert_that(marked.execution_failed).is_true()
+
+
+def _copy_configured(**kwargs: object) -> BaseToolPlugin:
+    """Stand in for configuration: a fresh per-run copy, as the real one makes.
+
+    Args:
+        **kwargs: ``configure_tool_for_execution`` keyword arguments.
+
+    Returns:
+        A per-run copy of the template tool.
+    """
+    return cast(BaseToolPlugin, kwargs["tool"]).copy_for_execution()
+
+
+def _run_lint_bridge(
+    monkeypatch: pytest.MonkeyPatch,
+    tools: dict[str, BaseToolPlugin],
+) -> list[ToolResult]:
+    """Run *tools* through the AI review lint bridge.
+
+    Args:
+        monkeypatch: Pytest patch fixture.
+        tools: Plugins by name.
+
+    Returns:
+        The bridge's results.
+    """
+    monkeypatch.setattr(
+        lint_bridge,
+        "get_tools_to_run",
+        lambda **_: SimpleNamespace(to_run=list(tools)),
+    )
+    monkeypatch.setattr(
+        lint_bridge,
+        "UnifiedConfigManager",
+        lambda: SimpleNamespace(
+            get_tool_config=lambda _: SimpleNamespace(lintro_tool_config={}),
+        ),
+    )
+    monkeypatch.setattr(lint_bridge, "resolve_python_formatting", lambda *_, **__: None)
+    monkeypatch.setattr(tool_manager, "get_tool", tools.__getitem__)
+    monkeypatch.setattr(lint_bridge, "configure_tool_for_execution", _copy_configured)
+    return lint_bridge.run_lint_on_changed_files(
+        changed_files=["src/app.ts"],
+        lintro_config=LintroConfig(),
+    )
+
+
+def _run_advisory(
+    monkeypatch: pytest.MonkeyPatch,
+    tools: dict[str, BaseToolPlugin],
+) -> list[ToolResult]:
+    """Run *tools* through the advisory runner used by ``lintro review``.
+
+    Args:
+        monkeypatch: Pytest patch fixture.
+        tools: Plugins by name.
+
+    Returns:
+        The runner's results.
+    """
+    monkeypatch.setattr(advisory_module, "UnifiedConfigManager", lambda: object())
+    monkeypatch.setattr(tool_manager, "get_tool", tools.__getitem__)
+    monkeypatch.setattr(
+        advisory_module,
+        "configure_tool_for_execution",
+        _copy_configured,
+    )
+    return advisory_module.run_advisory_tools(
+        paths=["src"],
+        tool_names=list(tools),
+        lintro_config=LintroConfig(),
+    )
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [_run_lint_bridge, _run_advisory],
+    ids=["lint-bridge", "advisory"],
+)
+@pytest.mark.parametrize("catch_error", [True, False], ids=["caught", "escaped"])
+def test_direct_callers_report_a_refused_command_as_an_execution_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    runner: Any,
+    catch_error: bool,
+) -> None:
+    """Callers outside the executors report a refusal the same way (#3493).
+
+    Args:
+        monkeypatch: Pytest patch fixture.
+        runner: Caller that runs plugins without the tool executor.
+        catch_error: Whether the plugin turns the error into its own verdict.
+    """
+    results = runner(
+        monkeypatch,
+        {
+            "shim-plugin": _ShimPlugin(catch_error=catch_error),
+            "healthy-plugin": _ShimPlugin(
+                tool_name="healthy-plugin",
+                command=(sys.executable, "-c", "pass"),
+            ),
+        },
+    )
+
+    by_name = {result.name: result for result in results}
+    assert_that(by_name).contains_key("shim-plugin", "healthy-plugin")
+    assert_that(by_name["healthy-plugin"].execution_failed).is_false()
+    assert_that(by_name["healthy-plugin"].success).is_true()
+    refused = by_name["shim-plugin"]
+    assert_that(refused.execution_failed).is_true()
+    assert_that(refused.findings_complete).is_false()
+    assert_that(refused.success).is_false()
+    assert_that(refused.inspected_paths).is_none()
+    assert_that(refused.output).starts_with("lintro refused to run shim-plugin: ")
+    assert_that(refused.output).contains("cmd.exe would interpret '&' in it")
+
+
+def test_escaped_failure_without_a_refusal_is_not_a_refused_command() -> None:
+    """An ordinary exception leaves the caller's own handling in place."""
+    tool = _ShimPlugin(command=(sys.executable, "-c", "pass"))
+    tool.check([], {})
+
+    assert_that(refused_command_failure(tool, name="shim-plugin", fix=False)).is_none()
+    assert_that(refused_command_failure(None, name="shim-plugin", fix=False)).is_none()

@@ -32,6 +32,7 @@ from lintro.enums.tool_run_status import ToolRunStatus, tool_run_status
 from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools import tool_manager
+from lintro.utils.execution.result_shaping import mark_refused_command
 from lintro.utils.execution.tool_configuration import (
     SkippedTool,
     configure_tool_for_execution,
@@ -211,6 +212,8 @@ def run_advisory_tools(
         check_options["ai_config"] = ai_config
     results: list[ToolResult] = []
     for tool_name in tool_names:
+        # The configured instance that ran, read for a refused command (#3493).
+        attempted: object = None
         # Lookup and configuration are inside the guard too: a plugin that
         # raises while building its option state must not abort the whole
         # review any more than one that raises inside check().
@@ -227,16 +230,18 @@ def run_advisory_tools(
                 selected_tools=set(),
                 lintro_config=config,
             )
-            results.append(tool.check(paths, check_options))
+            attempted = tool
+            result = tool.check(paths, check_options)
         except Exception as exc:
             logger.warning("[{}] advisory tool failed: {}", tool_name, exc)
-            results.append(
-                ToolResult.from_outcome(
-                    ToolOutcome(execution=Checked(success=False)),
-                    name=tool_name,
-                    output=f"{tool_name} failed: {exc}",
-                ),
+            result = ToolResult.from_outcome(
+                ToolOutcome(execution=Checked(success=False)),
+                name=tool_name,
+                output=f"{tool_name} failed: {exc}",
             )
+        # A command lintro refused to spawn is an execution failure, whether
+        # the plugin caught the refusal or let it escape (#3486).
+        results.append(mark_refused_command(attempted, result, fix=False))
     return results
 
 
