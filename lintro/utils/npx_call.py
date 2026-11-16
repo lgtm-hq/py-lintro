@@ -58,15 +58,18 @@ import re
 import shlex
 import tempfile
 import threading
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
 from loguru import logger
 
+from lintro.utils.npx_install_lock import install_lock
 from lintro.utils.npx_integrity import (
     NpxIntegrityError,
     check_unchanged,
     verified_cache,
+    wait_limit,
 )
 
 #: npx/bunx flags that take the package spec as the next argument.
@@ -315,8 +318,11 @@ def npx_shell_safe_command(
     When the command carries a ``--cache``, its contents are verified against
     their lockfile before the argv is yielded, and must be unchanged when the
     context exits normally (:mod:`lintro.utils.npx_integrity`, #3406), on
-    every platform. Waiting for a concurrent npx's lock on the cache counts
-    against *timeout*.
+    every platform. A cache with no entry yet is installed into under lintro's
+    exclusive per-pin lock, held until the run has been checked
+    (:mod:`lintro.utils.npx_install_lock`, #3421); a warm cache is checked
+    under the shared lock and runs without it. Waiting for that lock and for a
+    concurrent npx's lock on the cache counts against *timeout*.
 
     Args:
         cmd: Command about to be spawned.
@@ -329,21 +335,50 @@ def npx_shell_safe_command(
 
     Raises:
         NpxIntegrityError: The cache failed its check before the spawn, or
-            after the run, when it is marked after_run.
+            after the run, when it is marked after_run, or another lintro
+            run's first install held the per-pin lock past *timeout*
+            (:class:`~lintro.utils.npx_install_lock.NpxInstallLockTimeoutError`).
     """
     cache = npx_cache_option(cmd)
     if cache is None:
         with _quoted_argv(cmd, windows=windows, inline_limit=inline_limit) as argv:
             yield argv
         return
-    before = verified_cache(cache, timeout=timeout)
-    with _quoted_argv(cmd, windows=windows, inline_limit=inline_limit) as argv:
-        yield argv
-    try:
-        check_unchanged(cache, before, timeout=timeout)
-    except NpxIntegrityError as exc:
-        exc.after_run = True
-        raise
+    deadline = time.monotonic() + wait_limit(timeout)
+    with install_lock(cache, shared=True, deadline=deadline):
+        before = verified_cache(cache, timeout=_remaining(deadline))
+    with contextlib.ExitStack() as cold_install:
+        if not before.entries:
+            # A cold pin: install it under the exclusive lock, held until the
+            # run is checked, so no other lintro run sees npx's half-written
+            # entry (#3421). Check again once the lock is held: the run that
+            # held it may have installed the pin meanwhile.
+            cold_install.enter_context(
+                install_lock(cache, shared=False, deadline=deadline),
+            )
+            before = verified_cache(cache, timeout=_remaining(deadline))
+        with _quoted_argv(cmd, windows=windows, inline_limit=inline_limit) as argv:
+            yield argv
+        try:
+            check_unchanged(cache, before, timeout=timeout)
+        except NpxIntegrityError as exc:
+            exc.after_run = True
+            raise
+
+
+def _remaining(deadline: float) -> float:
+    """Return the wait budget left before *deadline*, never zero.
+
+    :func:`~lintro.utils.npx_integrity.wait_limit` reads zero as "no limit",
+    so a spent budget is passed as a tiny positive one instead.
+
+    Args:
+        deadline: :func:`time.monotonic` time when the budget runs out.
+
+    Returns:
+        Seconds left, at least a millisecond.
+    """
+    return max(deadline - time.monotonic(), 0.001)
 
 
 @contextlib.contextmanager

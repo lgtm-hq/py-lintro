@@ -1562,6 +1562,22 @@ Rationale:
    the check costs about 0.1–0.25 s the first time in a process for html-validate (13
    packages, 944 files) and 10–30 ms per spawn after that.
 
+   **One first install per pin at a time.** npx leaves a new `_npx` entry unlocked for a
+   moment after creating it, and again while it finishes writing it, so another Lintro
+   run that reached the entry then could remove it from under npx or refuse it as
+   broken. Lintro therefore keeps an OS file lock per pin,
+   `~/.lintro/cache/npx/.<package>@<pinned>.lintro-install.lock`. A run whose cache
+   holds no entry yet takes it exclusively and keeps it until npx has exited and its
+   install has been checked; other runs of that pin wait for it, then run the entry it
+   installed. A warm cache is checked under a shared lock and npx runs without it, so
+   warm runs never wait for one another. The cache repair before the run never waits for
+   this lock: while a first install holds it, the repair leaves the cache alone. The
+   wait counts against the same budget as the wait for npm's lock (the tool's timeout,
+   at most five minutes); if it runs out, the run is an execution failure saying another
+   Lintro run is still installing the pin. The operating system releases the lock when
+   its holder exits, so a killed run never leaves one behind. On Windows the lock has no
+   shared mode, so there warm checks of the same pin take turns.
+
    **Trust model.** Lintro's npx cache (`~/.lintro/cache/npx/<package>@<pinned>`) is
    trusted the same way as Lintro's own installation. The lockfile and the cached
    tarballs live in that same directory. The check catches a partial change, such as a

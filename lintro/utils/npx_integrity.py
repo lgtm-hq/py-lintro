@@ -1421,7 +1421,7 @@ def _changed_message(subject: str) -> str:
     )
 
 
-def _wait_limit(timeout: float | None) -> float:
+def wait_limit(timeout: float | None) -> float:
     """Return the longest wait for an npm lock.
 
     Args:
@@ -1566,7 +1566,7 @@ def verified_cache(cache: Path, *, timeout: float | None = None) -> CacheState:
     # directory, whatever it is about to install.
     _modules_above(real, ran=False)
     listed = _entries(real, ran=False)
-    deadline = time.monotonic() + _wait_limit(timeout)
+    deadline = time.monotonic() + wait_limit(timeout)
     for entry in listed:
         _await_npm(entry, real, deadline)
     directories = _directory_rows(real)
@@ -1621,7 +1621,7 @@ def check_unchanged(
             raise NpxIntegrityError(
                 _changed_message(f"lintro's npm cache entry {entry}"),
             )
-    deadline = time.monotonic() + _wait_limit(timeout)
+    deadline = time.monotonic() + wait_limit(timeout)
     for entry in _entries(real, ran=True):
         if entry.name not in before.entries:
             _await_npm(entry, real, deadline)
