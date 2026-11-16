@@ -21,6 +21,7 @@ from enum import StrEnum, auto
 
 from lintro.ai.exceptions import (
     AIAuthenticationError,
+    AINotAvailableError,
     AIProviderRequiredError,
     AIRateLimitError,
 )
@@ -333,8 +334,9 @@ KIND_COPY: dict[ReviewErrorKind, tuple[str, str]] = {
         "different model via `ai.model`.",
     ),
     ReviewErrorKind.PROVIDER_UNAVAILABLE: (
-        "no AI provider is configured",
-        "Set `ai.provider` in config, LINTRO_AI_PROVIDER, or --provider.",
+        "no AI provider is configured, or the configured one cannot run here",
+        "Set `ai.provider` in config, LINTRO_AI_PROVIDER, or --provider; if one "
+        "is set, follow the cause above to install or repair it.",
     ),
     ReviewErrorKind.CONTEXT_UNAVAILABLE: (
         "the review context could not be collected",
@@ -388,6 +390,9 @@ def resolve_cause_text(*, error: Exception) -> str:
         return str(error)
     if isinstance(error, ReviewExecutionError) and error.cause_message:
         return error.cause_message
+    for current in _iter_cause_chain(error=error):
+        if isinstance(current, AINotAvailableError):  # carries the remedy (#3494)
+            return str(current)
     cause = error.__cause__
     if isinstance(cause, BaseException):
         cause_text = str(cause).strip()
@@ -396,14 +401,6 @@ def resolve_cause_text(*, error: Exception) -> str:
         # asyncio.TimeoutError() stringifies to "" — keep the wrapper
         # message so "CLI timed out after Ns" still classifies (#2156).
     return str(error)
-
-
-def _resolve_cause_exception(*, error: Exception) -> BaseException:
-    """Return the deepest chained cause exception (for ``isinstance`` checks)."""
-    current: BaseException = error
-    while isinstance(current.__cause__, BaseException):
-        current = current.__cause__
-    return current
 
 
 def _iter_cause_chain(*, error: BaseException) -> tuple[BaseException, ...]:
@@ -437,9 +434,10 @@ def _chain_has(*, error: Exception, typ: type[BaseException]) -> bool:
 def classify_provider_error(*, provider: str, error: Exception) -> ReviewErrorKind:
     """Classify a review error into a canonical :class:`ReviewErrorKind`.
 
-    Context failures take precedence over provider signatures. Otherwise a
-    resolved execution kind wins, followed by provider signatures, typed AI
-    exceptions, timeouts, server errors and shared signatures.
+    Context failures, then ``AINotAvailableError``, take precedence over
+    everything. Otherwise a resolved execution kind wins, followed by provider
+    signatures, typed AI exceptions, timeouts, server errors and shared
+    signatures.
 
     Args:
         provider: Provider identifier (e.g. ``"anthropic"``); case-insensitive.
@@ -450,12 +448,15 @@ def classify_provider_error(*, provider: str, error: Exception) -> ReviewErrorKi
     """
     if _chain_has(error=error, typ=ReviewContextError):
         return ReviewErrorKind.CONTEXT_UNAVAILABLE
+    # Before cause unwrapping: a refused shim chains a ValueError (#3494).
+    if _chain_has(error=error, typ=AINotAvailableError):
+        return ReviewErrorKind.PROVIDER_UNAVAILABLE
     if isinstance(error, ReviewExecutionError) and error.error_kind is not None:
         return error.error_kind
 
     text = resolve_cause_text(error=error).lower()
     status = _extract_status(text=text)
-    cause_exc = _resolve_cause_exception(error=error)
+    cause_exc = _iter_cause_chain(error=error)[-1]  # deepest chained cause
 
     signatures = PROVIDER_ERROR_SIGNATURES.get((provider or "").lower(), {})
     for kind in _KIND_PRIORITY:

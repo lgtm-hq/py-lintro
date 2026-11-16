@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import subprocess  # nosec B404 - CompletedProcess fixtures; one real spawn of sys.executable
 import sys
 from pathlib import Path
@@ -15,7 +16,6 @@ from lintro.ai.enums import AITransport, CliBareMode
 from lintro.ai.exceptions import (
     AIBatchShimRefusedError,
     AINotAvailableError,
-    AIProviderError,
 )
 from lintro.ai.fix import generate_fixes
 from lintro.ai.json_response import CliSchemaRequest
@@ -143,24 +143,21 @@ async def test_claude_call_runs_when_no_argument_reaches_cmd_exe(
 
 
 @pytest.mark.parametrize(
-    ("binary", "workspace_arg", "child_cwd"),
+    ("binary", "via_cwd"),
     [
-        pytest.param(_AGENT_SHIM, ".", "C:/work/R&D %TEMP%", id="batch-shim"),
-        pytest.param(
-            "/usr/local/bin/agent",
-            "C:/work/R&D %TEMP%",
-            None,
-            id="native-binary",
-        ),
+        pytest.param(_AGENT_SHIM, True, id="batch-shim"),
+        pytest.param("/usr/local/bin/agent", False, id="native-binary"),
     ],
 )
 async def test_cursor_workspace_path_stays_off_a_batch_command_line(
+    tmp_path: Path,
     binary: str,
-    workspace_arg: str,
-    child_cwd: str | None,
+    via_cwd: bool,
 ) -> None:
     """On a shim the repository is the child's cwd, not a ``--workspace`` value."""
-    repo_root = "C:/work/R&D %TEMP%"
+    repo = tmp_path / "R&D %TEMP%"
+    repo.mkdir()
+    repo_root = str(repo)
     provider = _cursor(binary)
     with patch_cli_exec() as mock_run:
         mock_run.return_value = _completed(_CURSOR_OK)
@@ -169,9 +166,9 @@ async def test_cursor_workspace_path_stays_off_a_batch_command_line(
     assert_that(response.content).is_equal_to("ok")
     call = mock_run.transport_calls[-1]
     assert_that(call.cmd[call.cmd.index("--workspace") + 1]).is_equal_to(
-        workspace_arg,
+        "." if via_cwd else repo_root,
     )
-    assert_that(call.cwd).is_equal_to(child_cwd)
+    assert_that(call.cwd).is_equal_to(repo_root if via_cwd else None)
 
 
 @pytest.mark.parametrize(
@@ -356,23 +353,38 @@ class _EchoTransport(CliTransport):
         return stdout
 
 
+@pytest.mark.parametrize(
+    "windows_error",
+    [
+        pytest.param(None, id="posix-real-spawn"),
+        pytest.param(
+            NotADirectoryError(267, "The directory name is invalid"),
+            id="windows-winerror-267",
+        ),
+    ],
+)
 async def test_missing_working_directory_is_not_reported_as_a_missing_binary(
     tmp_path: Path,
+    windows_error: OSError | None,
 ) -> None:
-    """A vanished repository root is named as such, not "CLI not found on PATH"."""
+    """A vanished repository root is named, and not as a retried provider error."""
     transport = _EchoTransport(
         binary_path=sys.executable,
         binary_name="Agent",
         install_hint="install it",
     )
     missing = str(tmp_path / "gone")
-
-    with pytest.raises(AIProviderError) as excinfo:
-        await transport.run(
-            [sys.executable, "-c", "pass"],
-            timeout=30,
-            cwd=missing,
+    spawn = (
+        patch(
+            "lintro.ai.providers.cli_transport.asyncio.create_subprocess_exec",
+            side_effect=windows_error,
         )
+        if windows_error is not None
+        else contextlib.nullcontext()
+    )
+
+    with spawn, pytest.raises(AINotAvailableError) as excinfo:
+        await transport.run([sys.executable, "-c", "pass"], timeout=30, cwd=missing)
 
     assert_that(str(excinfo.value)).contains("working directory", missing)
     assert_that(str(excinfo.value)).does_not_contain("not found on PATH")

@@ -48,6 +48,12 @@ def _require_surface(
         unmet_precondition(
             f"{report.contract.binary} is not on PATH ({report.contract.upgrade_hint})",
         )
+    if report.refused_reason is not None:
+        # A refused .cmd/.bat shim was never run; say why, not "did not exit
+        # cleanly" (#3494).
+        unmet_precondition(
+            f"{report.contract.binary} was not probed: {report.refused_reason}",
+        )
     if not report.help_readable:
         unmet_precondition(
             f"{report.contract.binary} "

@@ -350,8 +350,9 @@ class CliTransport(ABC):
             Completed subprocess result.
 
         Raises:
-            AIProviderError: On timeout, or when *cwd* does not exist.
-            AINotAvailableError: When the binary disappears from ``PATH``, or
+            AIProviderError: On timeout.
+            AINotAvailableError: When the binary disappears from ``PATH``, when
+                *cwd* does not exist, or
                 when it is a ``.cmd``/``.bat`` shim and an argument holds a
                 character ``cmd.exe`` would interpret (#3494).
             asyncio.CancelledError: Re-raised after the child is stopped.
@@ -389,28 +390,28 @@ class CliTransport(ABC):
                     cwd=cwd,
                     **spawn_kwargs,
                 )
-            except FileNotFoundError as exc:
-                # A missing cwd raises the same error as a missing binary; a
-                # Cursor shim now runs in the repository (#3494), so say which.
+            except OSError as exc:
+                # A missing cwd fails the spawn as FileNotFoundError on POSIX,
+                # which reads like a missing binary, and as NotADirectoryError
+                # (WinError 267) on Windows. Neither it nor a missing binary is
+                # retried: every call in the run would fail the same way (#3494).
                 if cwd is not None and not os.path.isdir(cwd):
-                    raise AIProviderError(
-                        f"{self._binary_name} CLI could not start: its working "
+                    raise AINotAvailableError(
+                        f"{self._binary_name} CLI cannot start: its working "
                         f"directory {cwd!r} does not exist.",
                     ) from exc
-                raise AINotAvailableError(
-                    f"{self._binary_name} CLI not found on PATH. {self._install_hint}",
-                ) from exc
-            except OSError as exc:
+                if isinstance(exc, FileNotFoundError):
+                    raise AINotAvailableError(
+                        f"{self._binary_name} CLI not found on PATH. "
+                        f"{self._install_hint}",
+                    ) from exc
                 # Defense in depth for #1967: even after stdin prompt delivery,
                 # a leftover oversized argv element (or a huge env) can still
                 # raise E2BIG / "Argument list too long". Map it to a provider
                 # error instead of leaking a raw OSError to callers.
                 if (
                     exc.errno == errno.E2BIG
-                    or "argument list too long"
-                    in str(
-                        exc,
-                    ).lower()
+                    or "argument list too long" in str(exc).lower()
                 ):
                     raise AIProviderError(
                         f"{self._binary_name} CLI could not spawn because the "

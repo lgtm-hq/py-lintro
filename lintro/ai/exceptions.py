@@ -62,8 +62,11 @@ class AINotAvailableError(AIError):
     the declared version floor, or lintro refuses to launch it, as for an
     agent CLI on a ``.cmd``/``.bat`` shim whose arguments ``cmd.exe`` would
     interpret (#3494). The message says what to install or change. Every
-    call to the same provider would fail the same way, so it is not retried
-    per call and is not swallowed per issue.
+    call to the same provider would fail the same way, so it is never
+    retried. Fix generation and the lint summary let it propagate to the
+    orchestrator rather than swallowing it per issue. Stages that run after
+    fixes are on disk (refinement and the post-fix summary) stay
+    best-effort: they log it and keep the applied fixes.
     """
 
 
