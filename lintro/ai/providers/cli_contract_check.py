@@ -28,9 +28,9 @@ import shutil
 from dataclasses import dataclass
 from enum import StrEnum, auto
 
-from lintro.ai.exceptions import AINotAvailableError
+from lintro.ai.exceptions import AIBatchShimRefusedError
 from lintro.ai.provider_enum import AIProvider
-from lintro.ai.providers.batch_shim import refuse_unsafe_batch_argv
+from lintro.ai.providers.batch_shim import refuse_unsafe_batch_path
 from lintro.ai.providers.cli_capabilities import PROBE_TIMEOUT
 from lintro.ai.providers.cli_contracts import (
     CliContract,
@@ -75,6 +75,10 @@ class CliSurfaceReport:
         unadvertised_optional_flags: Declared optional flags the help text does
             not advertise. Informational: the guard gates these before sending
             them, so their absence degrades a call rather than breaking it.
+        refused_reason: Why lintro did not run the binary at all, such as a
+            ``.cmd``/``.bat`` shim whose path ``cmd.exe`` would interpret
+            (#3494); ``None`` when the probes ran. Not a contract violation:
+            it describes this machine's install, not the CLI's flag surface.
     """
 
     provider: AIProvider
@@ -84,6 +88,7 @@ class CliSurfaceReport:
     help_readable: bool
     missing_required_flags: tuple[str, ...] = ()
     unadvertised_optional_flags: tuple[str, ...] = ()
+    refused_reason: str | None = None
 
     @property
     def binary_present(self) -> bool:
@@ -164,6 +169,8 @@ class CliSurfaceReport:
         """
         if not self.binary_present:
             return f"{self.contract.binary}: not installed"
+        if self.refused_reason is not None:
+            return f"{self.contract.binary}: not probed: {self.refused_reason}"
         if self.violations:
             state = "; ".join(self.violations)
         elif self.version is None:
@@ -205,11 +212,6 @@ async def _probe(*, binary_path: str, args: tuple[str, ...]) -> str | None:
     Raises:
         asyncio.CancelledError: Re-raised after the child is stopped.
     """
-    try:
-        # A batch shim whose path cmd.exe would interpret is not run (#3494).
-        refuse_unsafe_batch_argv([binary_path, *args], binary_name=binary_path)
-    except AINotAvailableError:
-        return None
     try:
         process = await asyncio.create_subprocess_exec(  # nosec B603 - fixed argv from a declared contract, shell=False
             binary_path,
@@ -265,6 +267,19 @@ async def probe_cli_surface(*, provider: AIProvider) -> CliSurfaceReport:
             binary_path=None,
             version=None,
             help_readable=False,
+        )
+
+    try:
+        refuse_unsafe_batch_path(binary_path, binary_name=contract.display_name)
+    except AIBatchShimRefusedError as exc:
+        # Report why nothing ran instead of an unexplained unreadable help.
+        return CliSurfaceReport(
+            provider=provider,
+            contract=contract,
+            binary_path=binary_path,
+            version=None,
+            help_readable=False,
+            refused_reason=str(exc),
         )
 
     # Both probes are free, independent, and read-only, so there is no reason to

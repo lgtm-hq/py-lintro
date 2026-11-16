@@ -350,7 +350,7 @@ class CliTransport(ABC):
             Completed subprocess result.
 
         Raises:
-            AIProviderError: On timeout.
+            AIProviderError: On timeout, or when *cwd* does not exist.
             AINotAvailableError: When the binary disappears from ``PATH``, or
                 when it is a ``.cmd``/``.bat`` shim and an argument holds a
                 character ``cmd.exe`` would interpret (#3494).
@@ -390,6 +390,13 @@ class CliTransport(ABC):
                     **spawn_kwargs,
                 )
             except FileNotFoundError as exc:
+                # A missing cwd raises the same error as a missing binary; a
+                # Cursor shim now runs in the repository (#3494), so say which.
+                if cwd is not None and not os.path.isdir(cwd):
+                    raise AIProviderError(
+                        f"{self._binary_name} CLI could not start: its working "
+                        f"directory {cwd!r} does not exist.",
+                    ) from exc
                 raise AINotAvailableError(
                     f"{self._binary_name} CLI not found on PATH. {self._install_hint}",
                 ) from exc

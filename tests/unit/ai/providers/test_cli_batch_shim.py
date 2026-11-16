@@ -2,20 +2,38 @@
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 - CompletedProcess fixtures only; no process spawn
-from unittest.mock import AsyncMock, MagicMock, patch
+import subprocess  # nosec B404 - CompletedProcess fixtures; one real spawn of sys.executable
+import sys
+from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
 
 from lintro.ai.enums import AITransport, CliBareMode
-from lintro.ai.exceptions import AINotAvailableError
+from lintro.ai.exceptions import (
+    AIBatchShimRefusedError,
+    AINotAvailableError,
+    AIProviderError,
+)
+from lintro.ai.fix import generate_fixes
 from lintro.ai.json_response import CliSchemaRequest
+from lintro.ai.liveness import LivenessState
+from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers.anthropic.provider import AnthropicProvider
 from lintro.ai.providers.batch_shim import refuse_unsafe_batch_argv
-from lintro.ai.providers.cli_contract_check import _probe
+from lintro.ai.providers.cli_contract_check import probe_cli_surface
+from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.providers.cursor.provider import CursorProvider
-from tests.unit.ai.conftest import CLAUDE_HELP, patch_cli_exec
+from lintro.ai.summary import generate_summary
+from lintro.models.core.tool_result import ToolResult
+from tests.unit.ai.conftest import (
+    CLAUDE_HELP,
+    MockAIProvider,
+    MockIssue,
+    patch_cli_exec,
+)
 
 #: npm's global shim directory under an ordinary, parenthesised install path.
 _SHIM_DIR = "C:/Program Files (x86)/nodejs"
@@ -208,18 +226,153 @@ def test_refuse_unsafe_batch_argv_passes_what_cmd_exe_cannot_misread(
     assert_that(cmd).is_equal_to(original)
 
 
-async def test_contract_probe_does_not_run_a_shim_whose_path_cmd_exe_would_parse() -> (
+# -- Review round 1 ---------------------------------------------------------
+
+
+class _RefusedProvider(MockAIProvider):
+    """A provider whose CLI is a refused batch shim: every call raises."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.refusals = 0
+
+    async def complete(self, prompt: str, **kwargs: Any) -> Any:
+        self.refusals += 1
+        raise AIBatchShimRefusedError("claude.cmd refused: --json-schema")
+
+
+@pytest.mark.parametrize(
+    ("layout", "max_workers", "max_calls"),
+    [
+        pytest.param({"a.py": 1}, 1, 1, id="single-issue"),
+        # The batch refusal is not retried issue by issue in single-issue mode.
+        pytest.param({"a.py": 2}, 1, 1, id="batch-per-file"),
+        pytest.param(
+            {"a.py": 1, "b.py": 1, "c.py": 1},
+            3,
+            3,
+            id="concurrent-workers",
+        ),
+    ],
+)
+async def test_ai_fix_surfaces_a_refused_provider_instead_of_no_suggestions(
+    tmp_path: Path,
+    layout: dict[str, int],
+    max_workers: int,
+    max_calls: int,
+) -> None:
+    """A refusal reaches the caller; it is not read as "nothing to fix"."""
+    issues: list[MockIssue] = []
+    for name, count in layout.items():
+        source = tmp_path / name
+        source.write_text("x = 1\ny = 2\n")
+        issues.extend(
+            MockIssue(file=str(source), line=line, code="B101", message="m")
+            for line in range(1, count + 1)
+        )
+    provider = _RefusedProvider()
+
+    with pytest.raises(AINotAvailableError, match="--json-schema"):
+        await generate_fixes(
+            issues,
+            provider,
+            tool_name="ruff",
+            max_workers=max_workers,
+            workspace_root=tmp_path,
+        )
+
+    assert_that(provider.refusals).is_between(1, max_calls)
+
+
+async def test_ai_summary_surfaces_a_refused_provider() -> None:
+    """The summary call lets the refusal through to the orchestrator."""
+    result = ToolResult(
+        name="ruff",
+        success=True,
+        issues_count=1,
+        issues=[MockIssue(file="a.py", line=1, message="bad", code="E501")],
+    )
+
+    with pytest.raises(AIBatchShimRefusedError, match="claude.cmd"):
+        await generate_summary([result], _RefusedProvider())
+
+
+@pytest.mark.parametrize(
+    ("binary", "message_part"),
+    [
+        pytest.param(_CLAUDE_SHIM, "pass --json-schema", id="schema-flag"),
+        pytest.param("C:/R&D/npm/claude.cmd", "whose path holds", id="shim-path"),
+    ],
+)
+async def test_doctor_liveness_reports_a_refused_claude_shim(
+    binary: str,
+    message_part: str,
+) -> None:
+    """``lintro doctor`` shows the refusal and the shim remedy, not "ok"."""
+    provider = _claude(binary)
+    with patch_cli_exec(help_text=CLAUDE_HELP) as mock_run:
+        mock_run.return_value = _completed("claude 2.1.0")
+        result = await provider.check_liveness()
+
+    assert_that(result.state).is_equal_to(LivenessState.INCOMPATIBLE_CLI)
+    assert_that(result.message).contains(message_part)
+    assert_that(result.hint).contains("instead of a .cmd/.bat shim")
+    assert_that(result.hint).does_not_contain("npm install")
+
+
+async def test_shim_under_metacharacter_path_reports_the_path_not_unreadable_help() -> (
     None
 ):
-    """The contract check reports no help text instead of launching the shim."""
-    process = MagicMock(returncode=0)
-    process.communicate = AsyncMock(return_value=(b"  --print\n", b""))
-    with patch(
-        "lintro.ai.providers.cli_contract_check.asyncio.create_subprocess_exec",
-        AsyncMock(return_value=process),
-    ):
-        refused = await _probe(binary_path="C:/a&b/claude.cmd", args=("--help",))
-        allowed = await _probe(binary_path=_CLAUDE_SHIM, args=("--help",))
+    """The provider names the shim path instead of an unreadable ``--help``."""
+    provider = _claude("C:/R&D/npm/claude.cmd")
+    with patch_cli_exec(help_text=CLAUDE_HELP) as mock_run:
+        mock_run.return_value = _completed(_CLAUDE_OK)
+        with pytest.raises(AINotAvailableError) as excinfo:
+            await provider.complete("Review", system="Be concise")
 
-    assert_that(refused).is_none()
-    assert_that(allowed).is_equal_to("  --print\n")
+    message = str(excinfo.value)
+    assert_that(message).contains("whose path holds", "instead of a .cmd/.bat shim")
+    assert_that(message).does_not_contain("could not be read")
+    assert_that(message).does_not_contain("npm install")
+
+
+async def test_contract_check_names_why_a_shim_was_not_probed() -> None:
+    """The surface report carries the refusal instead of a bare unreadable help."""
+    with patch(
+        "lintro.ai.providers.cli_contract_check.shutil.which",
+        return_value="C:/a&b/claude.cmd",
+    ):
+        report = await probe_cli_surface(provider=AIProvider.ANTHROPIC)
+
+    assert_that(report.refused_reason).contains("whose path holds")
+    assert_that(report.describe()).contains("not probed", "C:/a&b/claude.cmd")
+    assert_that(report.help_readable).is_false()
+
+
+class _EchoTransport(CliTransport):
+    """Concrete transport for spawning a real child."""
+
+    def parse_stdout(self, stdout: str, *, model: str) -> Any:
+        return stdout
+
+
+async def test_missing_working_directory_is_not_reported_as_a_missing_binary(
+    tmp_path: Path,
+) -> None:
+    """A vanished repository root is named as such, not "CLI not found on PATH"."""
+    transport = _EchoTransport(
+        binary_path=sys.executable,
+        binary_name="Agent",
+        install_hint="install it",
+    )
+    missing = str(tmp_path / "gone")
+
+    with pytest.raises(AIProviderError) as excinfo:
+        await transport.run(
+            [sys.executable, "-c", "pass"],
+            timeout=30,
+            cwd=missing,
+        )
+
+    assert_that(str(excinfo.value)).contains("working directory", missing)
+    assert_that(str(excinfo.value)).does_not_contain("not found on PATH")

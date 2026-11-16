@@ -110,6 +110,11 @@ class CliContract:
             bounds rather than conveniences: they must be *confirmed* by a
             readable help surface, so an unreadable ``--help`` makes the
             binary incompatible instead of unknown (#2685).
+        batch_unsafe_flags (tuple[str, ...]): Flags lintro sends with a value
+            that always holds a character ``cmd.exe`` interprets, such as an
+            inline JSON schema. On a ``.cmd``/``.bat`` shim every call
+            carrying one is refused, and the liveness probe reports it before
+            any call is made (#3494).
     """
 
     binary: str
@@ -121,6 +126,7 @@ class CliContract:
     required_flags: tuple[str, ...] = field(default=())
     optional_flags: tuple[OptionalCliFlag, ...] = field(default=())
     fail_closed_flags: tuple[str, ...] = field(default=())
+    batch_unsafe_flags: tuple[str, ...] = field(default=())
 
     def __post_init__(self) -> None:
         """Enforce that every fail-closed flag is also a required flag.

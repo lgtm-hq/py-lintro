@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from pathlib import PureWindowsPath
 
-from lintro.ai.exceptions import AINotAvailableError
+from lintro.ai.exceptions import AIBatchShimRefusedError
 from lintro.exceptions.errors import UnsafeCommandError
 from lintro.plugins.subprocess_executor import (
     BATCH_UNSAFE_CHARS,
@@ -29,7 +29,28 @@ from lintro.plugins.subprocess_executor import (
     validate_subprocess_command,
 )
 
-__all__ = ["refuse_unsafe_batch_argv"]
+__all__ = [
+    "batch_shim_remedy",
+    "refuse_unsafe_batch_argv",
+    "refuse_unsafe_batch_path",
+    "refused_batch_flags_reason",
+]
+
+
+def batch_shim_remedy(binary_name: str) -> str:
+    """Return the guidance shown with every batch-shim refusal.
+
+    Args:
+        binary_name: Human-readable binary name.
+
+    Returns:
+        What the user can change so lintro launches the CLI.
+    """
+    return (
+        f"Install the {binary_name} CLI so it resolves to an executable "
+        "instead of a .cmd/.bat shim, or use `--transport api` where the "
+        "provider offers it."
+    )
 
 
 def _argument_label(cmd: list[str], index: int) -> str:
@@ -54,53 +75,97 @@ def _argument_label(cmd: list[str], index: int) -> str:
     return f"argument {index}"
 
 
+def refuse_unsafe_batch_path(binary_path: str, *, binary_name: str) -> None:
+    """Refuse a batch shim whose own path ``cmd.exe`` would interpret.
+
+    Does nothing unless *binary_path* is a ``.cmd`` or ``.bat`` file. Spaces
+    and parentheses are not interpreted, so
+    ``C:/Program Files (x86)/nodejs/claude.cmd`` passes.
+
+    Args:
+        binary_path: Resolved path to the CLI.
+        binary_name: Human-readable binary name for the error message.
+
+    Raises:
+        AIBatchShimRefusedError: When the shim path holds such a character.
+    """
+    if not is_batch_command(binary_path):
+        return
+    try:
+        validate_subprocess_command([binary_path])
+    except UnsafeCommandError as exc:
+        raise AIBatchShimRefusedError(
+            f"{binary_name} CLI resolves to the batch shim {binary_path!r}, "
+            f"whose path holds characters cmd.exe would interpret, so lintro "
+            f"does not launch it. {batch_shim_remedy(binary_name)}",
+        ) from exc
+
+
+def refused_batch_flags_reason(
+    binary_path: str,
+    *,
+    binary_name: str,
+    flags: tuple[str, ...],
+) -> str | None:
+    """Describe why calls carrying *flags* are refused on a batch shim.
+
+    For flags whose value always holds a character ``cmd.exe`` interprets,
+    such as ``claude --json-schema`` (JSON always contains ``"``), so a
+    health check can report the refusal before any call is made.
+
+    Args:
+        binary_path: Resolved path to the CLI.
+        binary_name: Human-readable binary name.
+        flags: The contract's batch-unsafe flags.
+
+    Returns:
+        The reason, or ``None`` when *binary_path* is not a batch shim or no
+        such flag is declared.
+    """
+    if not flags or not is_batch_command(binary_path):
+        return None
+    shim = PureWindowsPath(binary_path).name
+    return (
+        f"{binary_name} CLI resolves to the batch shim {shim!r}, which Windows "
+        f"runs through cmd.exe, and lintro's calls pass {', '.join(flags)} "
+        "with a value cmd.exe would interpret, so those calls are refused"
+    )
+
+
 def refuse_unsafe_batch_argv(cmd: list[str], *, binary_name: str) -> None:
     """Refuse an argv that ``cmd.exe`` would interpret on a batch argv0.
 
     Does nothing unless ``cmd[0]`` is a ``.cmd`` or ``.bat`` file, so a
     native executable keeps receiving any argument it did before. On a batch
     argv0 the command path and every argument are checked against
-    :data:`~lintro.plugins.subprocess_executor.BATCH_UNSAFE_CHARS`; spaces
-    and parentheses are not in that set, so
-    ``C:/Program Files (x86)/nodejs/claude.cmd`` still runs.
+    :data:`~lintro.plugins.subprocess_executor.BATCH_UNSAFE_CHARS`.
 
-    The refusal is an :class:`~lintro.ai.exceptions.AINotAvailableError`:
-    the installed binary cannot serve this call, and a retry or a fallback
-    model on the same binary would be refused the same way.
+    The refusal is an :class:`~lintro.ai.exceptions.AIBatchShimRefusedError`,
+    an ``AINotAvailableError``: the installed binary cannot serve this call,
+    and a retry or a fallback model on the same binary would be refused the
+    same way.
 
     Args:
         cmd: Full argv including the binary path.
         binary_name: Human-readable binary name for the error message.
 
     Raises:
-        AINotAvailableError: Naming the offending flag and the characters
-            ``cmd.exe`` would interpret in its value.
+        AIBatchShimRefusedError: Naming the shim path, or the offending flag
+            and the characters ``cmd.exe`` would interpret in its value.
     """
     if not cmd or not is_batch_command(cmd[0]):
         return
+    refuse_unsafe_batch_path(cmd[0], binary_name=binary_name)
     shim = PureWindowsPath(cmd[0]).name
-    remedy = (
-        f"Install the {binary_name} CLI so it resolves to an executable "
-        "instead of a .cmd/.bat shim, or use `--transport api` where the "
-        "provider offers it."
-    )
-    try:
-        validate_subprocess_command([cmd[0]])
-    except UnsafeCommandError as exc:
-        raise AINotAvailableError(
-            f"{binary_name} CLI resolves to the batch shim {cmd[0]!r}, whose "
-            f"path holds characters cmd.exe would interpret, so lintro does "
-            f"not launch it. {remedy}",
-        ) from exc
     for index, arg in enumerate(cmd[1:], start=1):
         found = sorted({ch for ch in arg if ch in BATCH_UNSAFE_CHARS})
         if not found:
             continue
         chars = " ".join(repr(ch) for ch in found)
-        raise AINotAvailableError(
+        raise AIBatchShimRefusedError(
             f"{binary_name} CLI resolves to the batch shim {shim!r}, which "
             f"Windows runs through cmd.exe, and {_argument_label(cmd, index)} "
             f"contains {chars} that cmd.exe would interpret as a command "
             f"separator, redirection, escape, quote or variable, so lintro "
-            f"does not launch it. {remedy}",
+            f"does not launch it. {batch_shim_remedy(binary_name)}",
         )
