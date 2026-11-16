@@ -11,6 +11,7 @@ import json
 import re
 import shutil
 import subprocess  # nosec B404 - used safely with shell disabled
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -156,6 +157,7 @@ def check_line_length_violations(
     cwd: str | None = None,
     line_length: int | None = None,
     timeout: int = 30,
+    validate_command: Callable[[list[str]], None] | None = None,
 ) -> list[LineLengthViolation]:
     """Check files for line length violations using Ruff's E501 rule.
 
@@ -169,6 +171,12 @@ def check_line_length_violations(
             as relative to the current directory.
         line_length: Maximum line length. If None, uses Ruff's default (88).
         timeout: Timeout in seconds for the Ruff subprocess.
+        validate_command: Called with the full argv before Ruff is launched.
+            The argv carries repository file names, so callers pass their
+            plugin's command validation; a ``ValueError`` it raises (for
+            example a batch ``ruff.cmd`` receiving a ``cmd.exe``
+            metacharacter, #3486) stops the launch and is reported as
+            ``LineLengthCheckUnavailableError``.
 
     Returns:
         List of LineLengthViolation objects representing E501 violations.
@@ -219,6 +227,8 @@ def check_line_length_violations(
     logger.debug(f"Running line length check: {' '.join(cmd)}")
 
     try:
+        if validate_command is not None:
+            validate_command(cmd)
         result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
             cmd,
             capture_output=True,
