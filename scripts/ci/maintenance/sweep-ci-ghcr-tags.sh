@@ -696,6 +696,9 @@ report_progress() {
 				"(${stop_reason}). The next run starts from another package" \
 				"(#3492)."
 		fi
+	elif [[ "$sweep_errors" -ne 0 ]]; then
+		line="Sweep finished with errors: ${swept_count} ${verb}"
+		echo "$line"
 	else
 		line="Sweep complete: ${swept_count} ${verb}"
 		echo "$line"

@@ -1174,6 +1174,9 @@ def test_sweep_ci_ghcr_tags_fails_on_query_error(tmp_path: Path) -> None:
     assert_that(run.result.returncode).is_equal_to(1)
     assert_that(run.result.stderr).contains("Failed to query versions")
     assert_that(run.gh_log).does_not_contain("--method DELETE")
+    # The summary must not call a failed run complete.
+    assert_that(run.result.stdout).contains("Sweep finished with errors: 0 deleted")
+    assert_that(run.result.stdout).does_not_contain("Sweep complete")
 
 
 def test_sweep_ci_ghcr_tags_deletes_nothing_when_a_later_page_fails(
