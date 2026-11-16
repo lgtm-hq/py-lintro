@@ -45,7 +45,9 @@ An entry that runs the pin must also match its lockfile: every installed file
 is compared with the tarball whose integrity the entry's ``package-lock.json``
 records (:mod:`lintro.utils.npx_integrity`, #3406). An entry that does not
 match, or cannot be checked because its tarball is gone, is removed like any
-other bad entry, so npx installs the pin afresh. The same check runs again
+other bad entry, so npx installs the pin afresh. One whose mismatch a fresh
+install would reproduce (a shim format lintro does not recognise) is kept
+instead, and the spawn-time check refuses it. The same check runs again
 right before each npx spawn, and the entry must be unchanged once the tool
 exits, so an entry replaced after this repair cannot run under the pin.
 
@@ -453,7 +455,7 @@ def _entry_trusted(
     binary: str,
     npm_cache: Path,
 ) -> bool:
-    """Report whether an entry runs the pin from the published files.
+    """Report whether the repair keeps an entry rather than removing it.
 
     Args:
         entry: ``<cache>/_npx/<hash>`` under the resolved cache, locked by
@@ -464,8 +466,12 @@ def _entry_trusted(
         npm_cache: The cache path as npx is given it.
 
     Returns:
-        True when :func:`entry_runs_pin` holds and every installed file
-        matches its lockfile integrity (:mod:`lintro.utils.npx_integrity`).
+        True when :func:`entry_runs_pin` holds and either every installed
+        file matches its lockfile integrity (:mod:`lintro.utils.npx_integrity`)
+        or the mismatch is one a reinstall would reproduce, such as a shim
+        format lintro does not recognise. Such an entry is kept so npx does
+        not rewrite it on every run; the spawn-time check refuses it as an
+        execution failure, so it is never run.
     """
     if not entry_runs_pin(entry, package=package, pin=pin, binary=binary):
         return False
