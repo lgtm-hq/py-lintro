@@ -361,6 +361,7 @@ def test_direct_callers_report_a_refused_command_as_an_execution_failure(
     assert_that(refused.inspected_paths).is_none()
     assert_that(refused.output).starts_with("lintro refused to run shim-plugin: ")
     assert_that(refused.output).contains("cmd.exe would interpret '&' in it")
+    assert_that(refused.output.count("lintro refused to run")).is_equal_to(1)
 
 
 def test_escaped_failure_without_a_refusal_is_not_a_refused_command() -> None:

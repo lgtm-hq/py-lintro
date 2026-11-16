@@ -174,7 +174,9 @@ def run_lint_on_changed_files(
                     exc_info=True,
                 )
                 continue
-            result = refused
+            # Already marked by ``refused_command_failure``.
+            results.append(refused)
+            continue
         results.append(mark_refused_command(attempted, result, fix=False))
 
     return results
