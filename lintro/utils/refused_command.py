@@ -3,7 +3,8 @@
 These helpers sit outside :mod:`lintro.utils.execution`, whose package
 imports the executors and therefore :mod:`lintro.tools`, so the verify pass
 in ``lintro.tools.core`` can mark a refused check without an import cycle
-(#3498). :mod:`lintro.utils.execution.result_shaping` re-exports them.
+(#3498). They moved here from :mod:`lintro.utils.execution.result_shaping`;
+import them from this module.
 """
 
 from __future__ import annotations
