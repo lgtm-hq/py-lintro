@@ -35,6 +35,7 @@ from lintro.utils.execution.parallel_executor import run_tools_parallel
 from lintro.utils.execution.result_shaping import (
     classify_runner_failure,
     executed_command,
+    mark_refused_command,
 )
 from lintro.utils.execution.result_shaping import (
     enrich_issues_with_doc_urls as _enrich_issues_with_doc_urls,
@@ -299,8 +300,11 @@ def _execute_tools_sequential(
 
     for tool_name in tools_to_run:
         attempt_started = time.monotonic()
+        # The instance that ran, read for a refused command after the run.
+        attempted: object = None
         try:
             tool = tool_manager.get_tool(tool_name)
+            attempted = tool
 
             # Print tool header before execution
             logger.print_tool_header(
@@ -326,6 +330,7 @@ def _execute_tools_sequential(
                 lintro_config=ctx.lintro_config,
                 diff_base=diff_base,
             )
+            attempted = tool
 
             # Execute the tool
             started = time.monotonic()
@@ -380,6 +385,9 @@ def _execute_tools_sequential(
                 ),
                 duration_seconds=time.monotonic() - attempt_started,
             )
+        # A command lintro refused to spawn is an execution failure, however
+        # the plugin reported it or whether it escaped as an exception (#3486).
+        result = mark_refused_command(attempted, result, fix=ctx.action == Action.FIX)
         all_results.append(result)
         # Report normalized failures too. Caller callbacks remain outside the
         # plugin exception boundary so renderer errors propagate unchanged.

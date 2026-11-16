@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.exceptions.errors import UnsafeCommandError
 from lintro.models.core.subprocess_result import SubprocessResult as SubprocessResult
 from lintro.plugins.subprocess_failure import format_subprocess_failure
 from lintro.utils.npx_call import npx_child_env, npx_shell_safe_command
@@ -106,11 +107,21 @@ UNSAFE_SHELL_CHARS: frozenset[str] = frozenset(
 #: Characters never legitimate anywhere in argv0, absolute or not.
 COMMAND_CONTROL_CHARS: frozenset[str] = frozenset({"\n", "\r"})
 
-#: Characters ``cmd.exe`` interprets in a batch file's own path. Windows runs a
-#: ``.cmd`` or ``.bat`` argv0 through ``cmd.exe /c`` even with ``shell=False``,
-#: and ``subprocess.list2cmdline`` leaves a path without spaces unquoted, so
-#: ``C:/a&whoami&/x.cmd`` would run ``whoami``. ``(``, ``)`` and space are not
-#: here: ``C:/Program Files (x86)/nodejs/prettier.cmd`` must keep running.
+#: Characters ``cmd.exe`` interprets on a batch file's command line. Windows
+#: runs a ``.cmd`` or ``.bat`` argv0 through ``cmd.exe /c`` even with
+#: ``shell=False``, and ``subprocess.list2cmdline`` quotes for the C runtime,
+#: not for ``cmd.exe``: it leaves a value without spaces unquoted and escapes
+#: ``"`` as ``\"``, which ``cmd.exe`` reads as a plain quote that toggles its
+#: quoting. So ``C:/a&whoami&/x.cmd`` or the argument ``a&whoami&b`` would run
+#: ``whoami`` (BatBadBut, CVE-2024-24576). ``%`` is here because ``cmd.exe``
+#: expands ``%NAME%`` even inside quotes. ``(``, ``)`` and space are not:
+#: ``C:/Program Files (x86)/nodejs/prettier.cmd`` must keep running, and
+#: ``list2cmdline`` quotes any value with a space. ``!`` is not either: it
+#: only expands under delayed expansion, which ``cmd.exe /c`` leaves off by
+#: default. A machine-wide ``DelayedExpansion`` setting or a shim that runs
+#: ``setlocal enabledelayedexpansion`` can turn it on, and then ``!NAME!``
+#: in an argument expands to a variable's value; that can alter or disclose
+#: a value but cannot start a command without one of the characters below.
 BATCH_UNSAFE_CHARS: frozenset[str] = frozenset(
     {"&", "|", "<", ">", "^", "%", '"', *COMMAND_CONTROL_CHARS},
 )
@@ -168,9 +179,11 @@ def validate_subprocess_command(cmd: list[str]) -> None:
 
     Every lintro subprocess runs with ``shell=False``: the argv list goes to
     ``execve`` (``CreateProcess`` on Windows) without a shell, so no element
-    is expanded, split or interpreted. Shell metacharacters are therefore not
-    an injection vector anywhere in the command, including argv0. Arguments
-    are not checked at all, so ``$``, ``*``, ``{`` and ``}`` in them are fine.
+    is expanded, split or interpreted, with one exception: Windows launches a
+    ``.cmd`` or ``.bat`` argv0 through ``cmd.exe``, which parses the whole
+    command line. For any other argv0, shell metacharacters are not an
+    injection vector anywhere in the command, and arguments are not checked,
+    so ``$``, ``*``, ``{``, ``}`` and ``&`` in them are fine.
 
     The command name keeps a check as a guard against a malformed or
     smuggled name, and its scope depends on the name's shape (#2040):
@@ -193,7 +206,19 @@ def validate_subprocess_command(cmd: list[str]) -> None:
       Windows launches it through ``cmd.exe``, which parses the path itself.
       Its whole path is checked against :data:`BATCH_UNSAFE_CHARS`, so a
       directory such as ``C:/tools&whoami&/`` is rejected while ``(x86)``
-      still passes. This holds until lintro has a batch-safe launch strategy.
+      still passes.
+
+    For a batch argv0 every argument is checked against
+    :data:`BATCH_UNSAFE_CHARS` too (#3486), so
+    ``["prettier.cmd", "a&whoami&b"]`` is refused instead of running
+    ``whoami``, while ``C:/Program Files (x86)/repo/a.ts`` still passes.
+    lintro refuses rather than escaping, since ``cmd.exe`` quoting cannot be
+    made safe for every batch script (CVE-2024-24576).
+
+    The batch rules apply on every platform, not only on Windows: the suffix
+    is what ``CreateProcess`` acts on, so a command is refused the same way
+    wherever it is validated, and lintro's own resolution never produces a
+    ``.cmd`` or ``.bat`` argv0 off Windows.
 
     Validation runs on the command as lintro built it. The npx ``--call``
     rewrite (:func:`lintro.utils.npx_call.npx_shell_safe_command`) keeps
@@ -203,8 +228,10 @@ def validate_subprocess_command(cmd: list[str]) -> None:
         cmd: Command and arguments to validate.
 
     Raises:
-        ValueError: If command is invalid or the checked part of the command
-            name contains unsafe characters.
+        ValueError: If command is not a non-empty list of strings.
+        UnsafeCommandError: A ``ValueError`` raised when the checked part of
+            the command name, or an argument passed to a batch file, contains
+            unsafe characters.
     """
     if not cmd or not isinstance(cmd, list):
         raise ValueError("Command must be a non-empty list of strings")
@@ -215,13 +242,41 @@ def validate_subprocess_command(cmd: list[str]) -> None:
 
     command = cmd[0]
     if any(ch in command for ch in COMMAND_CONTROL_CHARS):
-        raise ValueError("Unsafe character detected in command name")
-    if _is_batch_command(command) and any(ch in command for ch in BATCH_UNSAFE_CHARS):
-        raise ValueError("Unsafe character detected in command name")
+        raise UnsafeCommandError("Unsafe character detected in command name")
+    is_batch = _is_batch_command(command)
+    if is_batch and any(ch in command for ch in BATCH_UNSAFE_CHARS):
+        raise UnsafeCommandError("Unsafe character detected in command name")
 
     checked = _command_name_to_check(command)
     if any(ch in checked for ch in UNSAFE_SHELL_CHARS):
-        raise ValueError("Unsafe character detected in command name")
+        raise UnsafeCommandError("Unsafe character detected in command name")
+
+    if is_batch:
+        _reject_batch_unsafe_arguments(cmd)
+
+
+def _reject_batch_unsafe_arguments(cmd: list[str]) -> None:
+    """Refuse arguments ``cmd.exe`` would interpret for a batch argv0 (#3486).
+
+    Args:
+        cmd: Command whose argv0 is a ``.cmd`` or ``.bat`` file.
+
+    Raises:
+        UnsafeCommandError: Naming the first offending argument, its position
+            and the characters ``cmd.exe`` would interpret in it.
+    """
+    tool = PureWindowsPath(cmd[0]).name
+    for index, arg in enumerate(cmd[1:], start=1):
+        found = sorted({ch for ch in arg if ch in BATCH_UNSAFE_CHARS})
+        if found:
+            chars = " ".join(repr(ch) for ch in found)
+            raise UnsafeCommandError(
+                f"Refusing to pass argument {index} ({arg!r}) to batch file "
+                f"{tool!r}: cmd.exe would interpret {chars} in it as a command "
+                "separator, redirection, escape or variable. Rename the path, "
+                "or install the tool so it resolves to an executable instead "
+                "of a .cmd/.bat shim.",
+            )
 
 
 def run_subprocess(

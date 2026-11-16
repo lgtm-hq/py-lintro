@@ -221,6 +221,7 @@ class BlackPlugin(BaseToolPlugin):
             cwd=cwd,
             line_length=line_length_val,
             timeout=timeout_val,
+            validate_command=self._validate_subprocess_command,
         )
 
         black_issues: list[BlackIssue] = []
