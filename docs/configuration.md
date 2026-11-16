@@ -1578,6 +1578,29 @@ Rationale:
    its holder exits, so a killed run never leaves one behind. On Windows the lock has no
    shared mode, so there warm checks of the same pin take turns.
 
+   npx installs a cold pin and runs the tool in the same process, so the first run holds
+   the exclusive lock for its whole tool run, not only for the install. A run that waits
+   for it therefore fails once its own timeout runs out, even if the install itself
+   finished earlier; this only happens while a pin is cold.
+
+   A lock Lintro cannot use fails the run as an execution failure naming the lock path,
+   never as an unavailable tool or a run without the lock. That covers a directory or a
+   symbolic link at the lock path (the lock is never opened through a link), a directory
+   Lintro cannot write, and a filesystem whose `flock` is unsupported, as some network
+   and FUSE home directories are. Move `~/.lintro/cache` to a local filesystem if that
+   happens. The lock follows the file it was taken on, so after taking it Lintro checks
+   that the file is still the one at the path, and otherwise locks the new file instead.
+   A first install checks once more right before npx starts and fails the run if the
+   lock was deleted or replaced. Lintro never deletes the lock file itself. The limit: a
+   process of the same user that deletes the lock while npx is installing lets another
+   run take a fresh lock and meet the half-written entry; do not delete it while Lintro
+   runs.
+
+   A warm run cannot install a second entry unlocked without being caught. Each per-pin
+   cache only ever sees one package spec, so npx always uses the same entry. If that
+   entry is removed between a warm run's check and npx starting, npx reinstalls it, and
+   the check after the run reports the cache as changed, an execution failure.
+
    **Trust model.** Lintro's npx cache (`~/.lintro/cache/npx/<package>@<pinned>`) is
    trusted the same way as Lintro's own installation. The lockfile and the cached
    tarballs live in that same directory. The check catches a partial change, such as a

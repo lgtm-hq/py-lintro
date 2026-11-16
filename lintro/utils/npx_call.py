@@ -337,7 +337,9 @@ def npx_shell_safe_command(
         NpxIntegrityError: The cache failed its check before the spawn, or
             after the run, when it is marked after_run, or another lintro
             run's first install held the per-pin lock past *timeout*
-            (:class:`~lintro.utils.npx_install_lock.NpxInstallLockTimeoutError`).
+            (:class:`~lintro.utils.npx_install_lock.NpxInstallLockTimeoutError`),
+            or that lock cannot be used or was replaced
+            (:class:`~lintro.utils.npx_install_lock.NpxInstallLockError`).
     """
     cache = npx_cache_option(cmd)
     if cache is None:
@@ -353,13 +355,16 @@ def npx_shell_safe_command(
             # run is checked, so no other lintro run sees npx's half-written
             # entry (#3421). Check again once the lock is held: the run that
             # held it may have installed the pin meanwhile.
-            cold_install.enter_context(
+            held = cold_install.enter_context(
                 install_lock(cache, shared=False, deadline=deadline),
             )
             before = verified_cache(cache, timeout=_remaining(deadline))
             if before.entries:
                 # Installed while this run waited: run warm, without the lock.
                 cold_install.close()
+            else:
+                # Last check before npx installs: the lock is still ours.
+                held.check()
         with _quoted_argv(cmd, windows=windows, inline_limit=inline_limit) as argv:
             yield argv
         try:

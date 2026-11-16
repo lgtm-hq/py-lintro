@@ -8,6 +8,7 @@ Real-npx coverage, two ``lintro chk`` processes on one cold cache, is in
 
 from __future__ import annotations
 
+import errno
 import math
 import os
 import subprocess  # nosec B404 - runs this interpreter with a fixed argv; shell=False
@@ -27,6 +28,7 @@ from lintro.tools.core.npx_cache import (
 from lintro.utils import file_cache, npx_call
 from lintro.utils.npx_call import npx_shell_safe_command
 from lintro.utils.npx_install_lock import (
+    NpxInstallLockError,
     NpxInstallLockTimeoutError,
     install_lock,
     install_lock_path,
@@ -260,3 +262,241 @@ def test_lock_of_a_killed_install_never_blocks_later_runs(cache: Path) -> None:
     with install_lock(cache, shared=False, deadline=time.monotonic() + 5):
         pass
     assert_that(install_lock_path(cache).is_file()).is_true()
+
+
+def _lock_is_a_directory(cache: Path, tmp_path: Path) -> str:
+    install_lock_path(cache).mkdir(parents=True)
+    return "it is a directory"
+
+
+def _lock_is_a_symlink(cache: Path, tmp_path: Path) -> str:
+    target = tmp_path / "elsewhere.lock"
+    target.write_text("not lintro's", encoding="utf-8")
+    install_lock_path(cache).parent.mkdir(parents=True)
+    install_lock_path(cache).symlink_to(target)
+    return "symbolic link"
+
+
+def _lock_is_a_dangling_symlink(cache: Path, tmp_path: Path) -> str:
+    install_lock_path(cache).parent.mkdir(parents=True)
+    install_lock_path(cache).symlink_to(tmp_path / "never-created.lock")
+    return "symbolic link"
+
+
+def _lock_directory_is_unwritable(cache: Path, tmp_path: Path) -> str:
+    directory = install_lock_path(cache).parent
+    directory.mkdir(parents=True)
+    directory.chmod(0o555)
+    return "Permission denied"
+
+
+_UNUSABLE = [
+    pytest.param(_lock_is_a_directory, id="directory"),
+    pytest.param(_lock_is_a_symlink, id="symlink"),
+    pytest.param(_lock_is_a_dangling_symlink, id="dangling-symlink"),
+    pytest.param(
+        _lock_directory_is_unwritable,
+        id="unwritable-directory",
+        marks=pytest.mark.skipif(
+            sys.platform == "win32" or os.geteuid() == 0,
+            reason="POSIX permissions that bind the running user",
+        ),
+    ),
+]
+
+
+@pytest.mark.parametrize("hazard", _UNUSABLE)
+def test_unusable_lock_fails_the_run_naming_the_lock(
+    cache: Path,
+    tmp_path: Path,
+    hazard: Callable[[Path, Path], str],
+) -> None:
+    """A lock lintro cannot use is an execution failure before npx starts.
+
+    It is never followed through a link, so nothing outside lintro's cache
+    is created or locked.
+
+    Args:
+        cache: Per-pin npm cache, cold.
+        tmp_path: Temporary directory provided by pytest.
+        hazard: Puts the hazard in place and returns the reason expected.
+    """
+    reason = hazard(cache, tmp_path)
+    try:
+        with (
+            pytest.raises(NpxIntegrityError) as caught,
+            npx_shell_safe_command(_command(cache), timeout=5),
+        ):
+            pytest.fail("npx would have spawned without a usable lock")
+    finally:
+        install_lock_path(cache).parent.chmod(0o755)
+
+    assert_that(caught.value).is_instance_of(NpxInstallLockError)
+    assert_that(str(caught.value)).contains(
+        str(install_lock_path(cache)),
+        reason,
+        "findings are incomplete",
+    )
+    assert_that((tmp_path / "never-created.lock").exists()).is_false()
+    if (tmp_path / "elsewhere.lock").exists():
+        assert_that(
+            (tmp_path / "elsewhere.lock").read_text(encoding="utf-8"),
+        ).is_equal_to(
+            "not lintro's",
+        )
+
+
+def test_filesystem_without_file_locks_fails_the_run(
+    cache: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``flock`` refused by the filesystem is a failure, never an unlocked run.
+
+    Args:
+        cache: Per-pin npm cache, cold.
+        monkeypatch: Scoped stand-in for a filesystem without ``flock``.
+    """
+    fcntl = pytest.importorskip("fcntl")
+
+    def unsupported(fd: int, operation: int) -> None:
+        raise OSError(errno.ENOTSUP, os.strerror(errno.ENOTSUP))
+
+    monkeypatch.setattr(fcntl, "flock", unsupported)
+
+    with (
+        pytest.raises(NpxInstallLockError, match="cannot be locked") as caught,
+        npx_shell_safe_command(_command(cache), timeout=5),
+    ):
+        pytest.fail("npx would have spawned unlocked")
+
+    assert_that(str(caught.value)).contains(str(install_lock_path(cache)))
+
+
+def test_cache_gate_hands_an_unusable_lock_to_the_spawn_check(cache: Path) -> None:
+    """The gate does not report the tool unavailable over its lock.
+
+    Args:
+        cache: Per-pin npm cache.
+    """
+    entry = write_npx_entry(cache, [tool_package()])
+    install_lock_path(cache).mkdir()
+
+    with pytest.raises(NpxCacheLockError, match="spawn-time check"):
+        repair_npx_cache(
+            cache,
+            package="prettier",
+            pin="3.9.4",
+            binary="prettier",
+            pathsep=":",
+            lock_wait=0.0,
+        )
+
+    assert_that(entry.is_dir()).is_true()
+
+
+def test_lock_replaced_before_npx_installs_fails_the_run(
+    cache: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lock deleted and recreated while held is caught before npx starts.
+
+    Args:
+        cache: Per-pin npm cache, cold.
+        monkeypatch: Scoped override of the check npx_call runs.
+    """
+    calls: list[Path] = []
+
+    def replace_lock_on_second_check(target: Path, *, timeout: float) -> CacheState:
+        calls.append(target)
+        if len(calls) == 2:
+            lock = install_lock_path(cache)
+            lock.unlink()
+            lock.write_bytes(b"")
+        return verified_cache(target, timeout=timeout)
+
+    monkeypatch.setattr(npx_call, "verified_cache", replace_lock_on_second_check)
+
+    with (
+        pytest.raises(NpxInstallLockError, match="deleted or replaced") as caught,
+        npx_shell_safe_command(_command(cache), timeout=5),
+    ):
+        pytest.fail("npx would have installed without the lock")
+
+    assert_that(caught.value).is_instance_of(NpxIntegrityError)
+    assert_that(_exclusive_free(cache)).is_true()
+
+
+#: Waits for the install lock, then writes argv[2] and holds it until killed.
+_WAITER = """
+import math, sys, time
+from pathlib import Path
+from lintro.utils.npx_install_lock import install_lock
+with install_lock(Path(sys.argv[1]), shared=False, deadline=time.monotonic() + 60):
+    Path(sys.argv[2]).write_text("held")
+    time.sleep(120)
+"""
+
+
+def _wait_until(condition: Callable[[], bool], seconds: float) -> bool:
+    until = time.monotonic() + seconds
+    while not condition():
+        if time.monotonic() >= until:
+            return False
+        time.sleep(0.05)
+    return True
+
+
+def test_waiter_on_a_deleted_lock_waits_for_the_new_holder(
+    cache: Path,
+    tmp_path: Path,
+) -> None:
+    """A run waiting on a lock file that was deleted never shares the lock.
+
+    Run 1 holds the lock; run 2 waits on that file; the file is deleted and
+    run 3 takes a lock on the new one. When run 1 exits, run 2 must not take
+    the orphaned file's lock while run 3 holds the real one.
+
+    Args:
+        cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    marker = tmp_path / "waiter-held"
+    started: list[subprocess.Popen[str]] = []
+    try:
+        first = subprocess.Popen(  # nosec B603 - this interpreter, fixed argv
+            [sys.executable, "-c", _HOLDER, str(cache)],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        started.append(first)
+        assert first.stdout is not None
+        assert_that(first.stdout.readline().strip()).is_equal_to("HELD")
+        waiter = subprocess.Popen(  # nosec B603 - this interpreter, fixed argv
+            [sys.executable, "-c", _WAITER, str(cache), str(marker)],
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        started.append(waiter)
+        assert waiter.stderr is not None
+        assert_that(waiter.stderr.readline()).contains("Waiting up to")
+        install_lock_path(cache).unlink()
+        third = subprocess.Popen(  # nosec B603 - this interpreter, fixed argv
+            [sys.executable, "-c", _HOLDER, str(cache)],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        started.append(third)
+        assert third.stdout is not None
+        assert_that(third.stdout.readline().strip()).is_equal_to("HELD")
+
+        first.kill()
+        shared_while_third_held = _wait_until(marker.exists, 3)
+        third.kill()
+        held_after_third = _wait_until(marker.exists, 10)
+    finally:
+        for process in started:
+            process.kill()
+            process.communicate(timeout=30)
+
+    assert_that(shared_while_third_held).is_false()
+    assert_that(held_after_third).is_true()

@@ -72,7 +72,10 @@ from pathlib import Path
 
 from loguru import logger
 
-from lintro.utils.npx_install_lock import shared_install_lock_now
+from lintro.utils.npx_install_lock import (
+    NpxInstallLockError,
+    shared_install_lock_now,
+)
 from lintro.utils.npx_integrity import (
     FUTURE_LOCK_SECONDS,
     STALE_PREFIX,
@@ -706,12 +709,21 @@ def repair_npx_cache(
     cache is left alone and the spawn-time check, which waits, takes over.
 
     Raises:
-        NpxCacheLockError: Another lintro run holds the install lock.
+        NpxCacheLockError: Another lintro run holds the install lock, or the
+            lock cannot be used; the spawn-time check then fails the run.
     """
     real = check_cache_location(cache, pathsep=pathsep)
     if not real.is_dir():
         return
-    with shared_install_lock_now(cache) as held:
+    with contextlib.ExitStack() as stack:
+        try:
+            held = stack.enter_context(shared_install_lock_now(cache))
+        except NpxInstallLockError as exc:
+            # Not a reason to call the tool unavailable: the spawn-time check
+            # meets the same lock and fails the run as an execution failure.
+            raise NpxCacheLockError(
+                f"{exc} The spawn-time check reports it.",
+            ) from exc
         if not held:
             # Another lintro run is installing the pin and npx's entry may be
             # half-written; the spawn-time check waits for it instead (#3421).
