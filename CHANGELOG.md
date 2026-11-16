@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.35] - 2026-11-16
+
+### Fixed
+
+- **plugins**: check only the basename of an absolute argv0 (#3484) (8cb2bfb)
+
 ## [0.180.34] - 2026-11-14
 
 ### Changed
