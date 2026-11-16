@@ -1497,12 +1497,41 @@ Rationale:
    `C:\Users\…` is fine), is not a directory, or has an entry npx could run that cannot
    be locked or repaired.
 
+   **Installed files checked against the lockfile.** npx writes a `package-lock.json`
+   into each `_npx` entry, recording the `integrity` hash of every package's tarball,
+   and keeps those tarballs in the same cache (`_cacache`). An entry is kept only when,
+   for every package in its lockfile, the cached tarball matches that hash and every
+   file in the tarball is installed with the same bytes. Each installed file must also
+   be a regular file with no other hard link. The checks also refuse:
+
+   - a file or symlink that is not in the published package, unless the lockfile marks
+     the package `hasInstallScript`;
+   - a package directory that is not in the lockfile;
+   - a `.bin` executable that no locked package declares, such as a planted `.bin/node`.
+
+   An entry that fails is removed like any other bad entry, so npx installs the pin
+   afresh; an entry whose tarball is no longer cached is treated the same way.
+
+   The check is repeated right before each npx spawn and is bound to the run. Lintro
+   records the inode, size, mtime and ctime of everything in the entry. An entry whose
+   record still matches one already verified in this process is not hashed again. If
+   anything in the entry changed by the time the tool exits, the result is an
+   **execution failure** with incomplete findings, never a pass. A file replaced and
+   then put back also counts as a change. The same applies to a refused check at spawn
+   time; there npx never starts. On a cold cache, npx installs the pin during the run
+   (npm checks the download against the registry's integrity) and Lintro verifies the
+   new entry once the run ends. On a warm cache the check costs about 0.1–0.25 s the
+   first time in a process for html-validate (13 packages, 944 files) and 10–30 ms per
+   spawn after that.
+
    **Trust model.** Lintro's npx cache (`~/.lintro/cache/npx/<package>@<pinned>`) is
-   trusted the same way as Lintro's own installation. Lintro verifies that the installed
-   package is exactly the pinned version and repairs entries that do not match, but it
-   does not checksum the executable's contents. A local user who can write to that
-   directory can therefore change what runs, just as they could by editing Lintro itself
-   or the project's `node_modules`. Verifying package integrity is tracked in #3406.
+   trusted the same way as Lintro's own installation. The lockfile and the cached
+   tarballs live in that same directory. The check catches a partial change, such as a
+   replaced executable under an unchanged `package.json`. It cannot catch a local user
+   who rewrites the lockfile, the tarball and the installed files so that they agree.
+   Such a user can already change what runs, just as they could by editing Lintro itself
+   or the project's `node_modules`. On Windows the change record relies on size, mtime
+   and inode, because `st_ctime` there is the creation time.
 
    **Refusal when npx could still reuse something.** The pin is trusted only when all of
    these hold, and the tool is **unavailable** otherwise:

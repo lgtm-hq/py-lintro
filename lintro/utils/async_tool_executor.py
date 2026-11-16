@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from lintro.models.core.tool_result import ToolResult
+from lintro.utils.npx_integrity import NpxIntegrityError
 
 if TYPE_CHECKING:
     from lintro.enums.action import Action
@@ -180,6 +181,7 @@ class AsyncToolExecutor:
             message: str,
             *,
             duration_seconds: float,
+            execution_failed: bool = False,
         ) -> tuple[str, ToolResult]:
             """Build a failed ``ToolResult`` entry for the given tool.
 
@@ -188,6 +190,8 @@ class AsyncToolExecutor:
                 message: Human-readable failure description.
                 duration_seconds: Elapsed time before the failure, so crashed
                     tools still appear in the ``--profile`` table/JSON.
+                execution_failed: Mark the result as an execution failure
+                    with incomplete findings.
 
             Returns:
                 A ``(tool_name, ToolResult)`` tuple with ``success=False``.
@@ -204,6 +208,7 @@ class AsyncToolExecutor:
                         "tool crashed" if action == Action.FIX else None
                     ),
                     duration_seconds=duration_seconds,
+                    execution_failed=execution_failed,
                 ),
             )
 
@@ -249,6 +254,8 @@ class AsyncToolExecutor:
                     name=name,
                     message=f"Parallel execution failed: {type(exc).__name__}: {exc}",
                     duration_seconds=time.monotonic() - started_at[name],
+                    # The npx cache failed its integrity check (#3406).
+                    execution_failed=isinstance(exc, NpxIntegrityError),
                 )
                 # A refused command is an execution failure, not a crash (#3486).
                 from lintro.utils.execution.result_shaping import (

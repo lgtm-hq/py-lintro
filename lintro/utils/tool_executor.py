@@ -64,6 +64,7 @@ from lintro.utils.execution.tool_configuration import (
 )
 from lintro.utils.execution_paths import get_execution_cwd
 from lintro.utils.gates import execute_gates
+from lintro.utils.npx_integrity import NpxIntegrityError
 from lintro.utils.output import OutputManager
 from lintro.utils.python_formatting import resolve_python_formatting
 from lintro.utils.unified_config import UnifiedConfigManager
@@ -373,12 +374,15 @@ def _execute_tools_sequential(
             logger.console_output(f"Error running {tool_name}: {e}")
 
             # Create a failed result for this tool. Duration is recorded so
-            # crashed tools still appear in the ``--profile`` table/JSON.
+            # crashed tools still appear in the ``--profile`` table/JSON. An
+            # npx cache that failed its integrity check ran nothing lintro can
+            # vouch for, so it is an execution failure (#3406).
             result = ToolResult(
                 name=tool_name,
                 success=False,
                 output=f"Tool execution failed: {type(e).__name__}: {e}",
                 issues_count=0,
+                execution_failed=isinstance(e, NpxIntegrityError),
                 residual_unknown=ctx.action == Action.FIX,
                 residual_unknown_reason=(
                     "tool crashed" if ctx.action == Action.FIX else None

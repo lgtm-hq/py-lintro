@@ -22,7 +22,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from lintro.utils.npx_call import PACKAGE_FLAGS
+from lintro.utils.npx_call import NPX_CACHE_OPTION, PACKAGE_FLAGS
 
 #: An exact npm pin: ``MAJOR.MINOR.PATCH`` with an optional prerelease and
 #: build suffix. Partial versions (``1.2``), wildcards (``1.x``), ranges
@@ -71,9 +71,6 @@ NPX_ISOLATION_FLAGS: tuple[str, ...] = (
     "--prefer-offline=false",
     "--node-options=",
 )
-
-#: Prefix of the per-run npx cache option (see :func:`npx_runner_options`).
-NPX_CACHE_OPTION: str = "--cache="
 
 # Boolean runner flags that may precede the package spec or ``--package``.
 # Skipped when recovering the spec from a resolved command. ``--yes`` / ``-y``

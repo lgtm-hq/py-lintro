@@ -41,6 +41,14 @@ it, is deleted in place and never renamed again, so concurrent repairs cannot
 grow names (#3419); an entry another repair already moved or removed counts
 as repaired.
 
+An entry that runs the pin must also match its lockfile: every installed file
+is compared with the tarball whose integrity the entry's ``package-lock.json``
+records (:mod:`lintro.utils.npx_integrity`, #3406). An entry that does not
+match, or cannot be checked because its tarball is gone, is removed like any
+other bad entry, so npx installs the pin afresh. The same check runs again
+right before each npx spawn, and the entry must be unchanged once the tool
+exits, so an entry replaced after this repair cannot run under the pin.
+
 Any failure to lock, validate or remove an entry npx could run is reported,
 and the caller refuses the fallback. A leftover aside that cannot be deleted
 only logs a warning: it has no npm entry name, so it cannot change what runs.
@@ -62,6 +70,8 @@ from pathlib import Path
 
 from loguru import logger
 
+from lintro.utils.npx_integrity import STALE_PREFIX, verify_entry
+
 #: npm treats a lock whose mtime is older than this as abandoned.
 _STALE_LOCK_SECONDS: float = 60.0
 
@@ -69,7 +79,7 @@ _STALE_LOCK_SECONDS: float = 60.0
 _LOCK_WAIT_SECONDS: float = 30.0
 
 #: Prefix for entries renamed aside before deletion.
-_STALE_PREFIX: str = ".lintro-stale-"
+_STALE_PREFIX: str = STALE_PREFIX
 
 #: Characters of the original name kept in an aside name, for debugging.
 _ASIDE_BASE_CHARS: int = 32
@@ -417,6 +427,40 @@ def entry_runs_pin(entry: Path, *, package: str, pin: str, binary: str) -> bool:
     return _bin_belongs_to(entry, package_dir, binary, package)
 
 
+def _entry_trusted(
+    entry: Path,
+    *,
+    package: str,
+    pin: str,
+    binary: str,
+    npm_cache: Path,
+) -> bool:
+    """Report whether an entry runs the pin from the published files.
+
+    Args:
+        entry: ``<cache>/_npx/<hash>`` under the resolved cache, locked by
+            the caller.
+        package: npm package name.
+        pin: Exact pinned version.
+        binary: Executable name.
+        npm_cache: The cache path as npx is given it.
+
+    Returns:
+        True when :func:`entry_runs_pin` holds and every installed file
+        matches its lockfile integrity (:mod:`lintro.utils.npx_integrity`).
+    """
+    if not entry_runs_pin(entry, package=package, pin=pin, binary=binary):
+        return False
+    verified = verify_entry(entry, entry.parent.parent, npm_cache=npm_cache)
+    if isinstance(verified, str):
+        logger.warning(
+            f"lintro's npm cache entry {entry} {verified}; removing it so npx "
+            f"reinstalls {package}@{pin}",
+        )
+        return False
+    return True
+
+
 def _aside_name(name: str) -> str:
     """Build a unique name, of bounded length, for an entry set aside.
 
@@ -534,7 +578,14 @@ def _clear_unless_directory(path: Path) -> bool:
     raise NpxCacheError(f"cannot remove npm cache entry {path}: {failure}")
 
 
-def _repair_entry(entry: Path, *, package: str, pin: str, binary: str) -> None:
+def _repair_entry(
+    entry: Path,
+    *,
+    package: str,
+    pin: str,
+    binary: str,
+    npm_cache: Path,
+) -> None:
     """Keep one ``_npx`` entry if it runs the pin, otherwise remove it.
 
     Args:
@@ -542,6 +593,7 @@ def _repair_entry(entry: Path, *, package: str, pin: str, binary: str) -> None:
         package: npm package name.
         pin: Exact pinned version.
         binary: Executable name.
+        npm_cache: The cache path as npx is given it.
 
     Raises:
         NpxCacheError: The entry could not be locked or removed, or kept
@@ -561,7 +613,13 @@ def _repair_entry(entry: Path, *, package: str, pin: str, binary: str) -> None:
             continue
         moved = False
         try:
-            if not entry_runs_pin(entry, package=package, pin=pin, binary=binary):
+            if not _entry_trusted(
+                entry,
+                package=package,
+                pin=pin,
+                binary=binary,
+                npm_cache=npm_cache,
+            ):
                 if not _holds(lock, held):
                     raise NpxCacheError(
                         f"lintro lost its lock {lock} on npm cache entry {entry}; "
@@ -620,4 +678,10 @@ def repair_npx_cache(
             # Already aside, so no npx run uses it: delete it where it is.
             _delete(entry)
         else:
-            _repair_entry(entry, package=package, pin=pin, binary=binary)
+            _repair_entry(
+                entry,
+                package=package,
+                pin=pin,
+                binary=binary,
+                npm_cache=cache,
+            )

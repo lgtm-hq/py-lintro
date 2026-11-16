@@ -29,6 +29,7 @@ test uses ``require_command``.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -51,10 +52,12 @@ from lintro._tool_versions import get_tool_version
 from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.models.core.tool_snapshot import ToolSnapshot
+from lintro.plugins.subprocess_executor import run_subprocess
 from lintro.tools.core import snapshots
 from lintro.tools.core.npx_cache import npx_cache_dir
 from lintro.utils import file_cache
 from lintro.utils.execution.result_shaping import classify_runner_failure
+from lintro.utils.npx_integrity import NpxIntegrityError
 from tests.integration._tools import NO_MIN_VERSION, require_command
 
 _PIN = get_tool_version("prettier") or ""
@@ -105,6 +108,7 @@ def registry() -> Iterator[str]:
         str: The registry URL.
     """
     tarball = _pinned_tarball()
+    integrity = "sha512-" + base64.b64encode(hashlib.sha512(tarball).digest()).decode()
     ports: list[int] = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -120,10 +124,14 @@ def registry() -> Iterator[str]:
                                 "name": "prettier",
                                 "version": _PIN,
                                 "bin": {"prettier": "bin.js"},
+                                # As the npm registry does: npm records the
+                                # integrity in the lockfile lintro checks the
+                                # installed files against (#3406).
                                 "dist": {
                                     "tarball": (
                                         f"http://127.0.0.1:{port}/prettier-{_PIN}.tgz"
                                     ),
+                                    "integrity": integrity,
                                 },
                             },
                         },
@@ -1361,6 +1369,75 @@ def test_tampered_lintro_cache_is_repaired_before_npx_runs(
     assert_that(snapshot.version).is_equal_to(_PIN)
     assert_that((code, launched)).is_equal_to((0, f"registry {_PIN}"))
     _assert_never_a_false_pass(snapshot, launched, code)
+
+
+def _replace_pinned_bin(cache: Path) -> None:
+    """Swap the cached pin's ``bin.js`` and leave its ``package.json`` alone.
+
+    This is the #3406 reproduction: the entry still names the pin.
+
+    Args:
+        cache: lintro's per-pin npm cache.
+    """
+    key = hashlib.sha512(f"prettier@{_PIN}".encode()).hexdigest()[:16]
+    bin_js = cache / "_npx" / key / "node_modules" / "prettier" / "bin.js"
+    bin_js.write_text(
+        '#!/usr/bin/env node\nconsole.log("substituted")\n',
+        encoding="utf-8",
+    )
+
+
+@requires_npx
+def test_replaced_executable_under_the_pinned_manifest_is_reinstalled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+) -> None:
+    """Raw npx runs the swapped file; after lintro's gate npx runs the pin.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+    """
+    _require_clean_ancestry(tmp_path)
+    project, env, command = _warm(tmp_path, monkeypatch, registry)
+    cache = npx_cache_dir(f"prettier@{_PIN}")
+
+    _replace_pinned_bin(cache)
+    raw = _run(command, project, env)
+    _replace_pinned_bin(cache)
+    snapshot = snapshots.probe_tool("prettier", search_root=project)
+    code, launched = _run(list(snapshot.command), project, env)
+
+    assert_that(raw).is_equal_to((0, "substituted"))
+    assert_that(snapshot.version).is_equal_to(_PIN)
+    assert_that((code, launched)).is_equal_to((0, f"registry {_PIN}"))
+    _assert_never_a_false_pass(snapshot, launched, code)
+
+
+@requires_npx
+def test_executable_replaced_after_the_gate_is_refused_at_spawn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+) -> None:
+    """A swap between the gate and the spawn cannot run under the pin.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+    """
+    _require_clean_ancestry(tmp_path)
+    project, env, _command = _warm(tmp_path, monkeypatch, registry)
+    snapshot = snapshots.probe_tool("prettier", search_root=project)
+    _replace_pinned_bin(npx_cache_dir(f"prettier@{_PIN}"))
+
+    with pytest.raises(NpxIntegrityError, match="bin.js changed"):
+        run_subprocess(list(snapshot.command), timeout=180, cwd=str(project), env=env)
+
+    assert_that(snapshot.version).is_equal_to(_PIN)
 
 
 @requires_npx

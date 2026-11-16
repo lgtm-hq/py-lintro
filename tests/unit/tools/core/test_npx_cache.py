@@ -7,7 +7,6 @@ Real-npx coverage is in ``tests/integration/test_registry_runner_hoisted_bin.py`
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess  # nosec B404 - runs this interpreter with a fixed argv; shell=False
 import sys
@@ -27,6 +26,7 @@ from lintro.tools.core.npx_cache import (
     repair_npx_cache,
 )
 from lintro.utils import file_cache
+from tests.npx_entries import tool_package, write_npx_entry
 
 _PIN = "3.9.4"
 _SPEC = f"prettier@{_PIN}"
@@ -60,6 +60,9 @@ def _entry(
 ) -> Path:
     """Create an ``_npx`` entry the way npm lays one out.
 
+    The package is packed into a real tarball whose integrity the entry's
+    lockfile records (:mod:`tests.npx_entries`).
+
     Args:
         cache: Per-pin cache.
         name: Entry (hash) directory name.
@@ -70,18 +73,15 @@ def _entry(
     Returns:
         The entry directory.
     """
-    entry = cache / "_npx" / name
-    package = entry / "node_modules" / "prettier"
-    package.mkdir(parents=True)
-    (package / "package.json").write_text(
-        json.dumps({"name": package_name, "version": version}),
-        encoding="utf-8",
+    entry = write_npx_entry(
+        cache,
+        [tool_package(version=version, manifest_name=package_name)],
+        name=name,
     )
-    (package / "bin.js").write_text("", encoding="utf-8")
+    link = entry / "node_modules" / ".bin" / "prettier"
+    link.unlink()
     if bin_target is not None:
-        bin_dir = entry / "node_modules" / ".bin"
-        bin_dir.mkdir()
-        (bin_dir / "prettier").symlink_to(bin_target)
+        link.symlink_to(bin_target)
     return entry
 
 
@@ -206,6 +206,37 @@ def test_repair_keeps_a_valid_entry_untouched(cache: Path) -> None:
 
     assert_that(manifest.stat().st_ino).is_equal_to(inode)
     assert_that((entry / "concurrency.lock").exists()).is_false()
+
+
+def test_repair_removes_an_entry_whose_executable_was_replaced(
+    cache: Path,
+    logged_warnings: list[str],
+) -> None:
+    """The #3406 reproduction: the pinned manifest stays, the code does not.
+
+    ``package.json`` still names the pin and the link still points into the
+    package, so the version check alone keeps the entry. Its ``bin.js`` no
+    longer matches the tarball the lockfile's integrity names, so the repair
+    removes it and npx installs the pin afresh.
+
+    Args:
+        cache: Per-pin cache.
+        logged_warnings: Warnings logged during the repair.
+    """
+    entry = _entry(cache)
+    (entry / "node_modules" / "prettier" / "bin.js").write_text(
+        "console.log('[]');\n",
+        encoding="utf-8",
+    )
+    runs_pin_before = _runs_pin(entry)
+
+    _repair(cache)
+
+    assert_that(runs_pin_before).is_true()
+    assert_that(entry.exists()).is_false()
+    assert_that(" ".join(logged_warnings)).contains(
+        "bin.js changed from the published package",
+    ).contains("reinstalls prettier@3.9.4")
 
 
 def test_repair_deletes_every_entry_that_would_not_run_the_pin(cache: Path) -> None:
@@ -696,10 +727,13 @@ def test_repair_never_moves_an_entry_npx_is_installing(
     installs: list[threading.Thread] = []
 
     staged = _entry(tmp_path / "staging", entry.name)
+    # npm's content cache already holds the tarballs the install unpacks.
+    (tmp_path / "staging" / "_cacache").rename(cache / "_cacache")
 
     def npx_installs() -> None:
         time.sleep(0.3)
         (staged / "node_modules").rename(entry / "node_modules")
+        (staged / "package-lock.json").rename(entry / "package-lock.json")
         (entry / "concurrency.lock").rmdir()
 
     def race(path: _PathArg) -> None:
@@ -743,7 +777,9 @@ def test_repair_removes_an_npx_directory_left_aside_beside_it(cache: Path) -> No
     _repair(cache)
 
     assert_that(leftover.exists()).is_false()
-    assert_that(sorted(p.name for p in cache.iterdir())).is_equal_to(["_npx"])
+    assert_that(sorted(p.name for p in cache.iterdir())).is_equal_to(
+        ["_cacache", "_npx"],
+    )
     assert_that(_runs_pin(good)).is_true()
 
 
