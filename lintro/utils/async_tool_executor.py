@@ -131,12 +131,14 @@ class AsyncToolExecutor:
         from lintro.utils.execution.result_shaping import (
             classify_runner_failure,
             executed_command,
+            mark_refused_command,
         )
 
         result = classify_runner_failure(
             result,
             command=executed_command(tool, result),
         )
+        result = mark_refused_command(tool, result, fix=action == Action.FIX)
         return replace(result, duration_seconds=time.monotonic() - started)
 
     async def run_tools_parallel(
@@ -243,10 +245,20 @@ class AsyncToolExecutor:
                 raise
             except BaseException as exc:
                 logger.exception(f"Tool {name} failed with exception: {exc}")
-                return _make_failed_result(
+                failed_name, failed = _make_failed_result(
                     name=name,
                     message=f"Parallel execution failed: {type(exc).__name__}: {exc}",
                     duration_seconds=time.monotonic() - started_at[name],
+                )
+                # A refused command is an execution failure, not a crash (#3486).
+                from lintro.utils.execution.result_shaping import (
+                    mark_refused_command,
+                )
+
+                return failed_name, mark_refused_command(
+                    tool,
+                    failed,
+                    fix=action == Action.FIX,
                 )
             if on_result:
                 on_result(name, result)

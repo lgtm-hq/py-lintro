@@ -2,7 +2,8 @@
 
 These tests verify that the subprocess command validation properly blocks
 shell metacharacters in the command name while allowing them in arguments
-(since shell=False passes arguments literally without shell interpretation).
+(since shell=False passes arguments literally without shell interpretation),
+except for arguments to a ``.cmd``/``.bat`` file, which cmd.exe parses.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
+from lintro.exceptions.errors import UnsafeCommandError
 from lintro.plugins.subprocess_executor import (
     UNSAFE_SHELL_CHARS,
     validate_subprocess_command,
@@ -404,3 +406,108 @@ def test_validate_subprocess_command_absolute_argv0_unsafe_basename_rejected(
     """
     with pytest.raises(ValueError, match="Unsafe character"):
         validate_subprocess_command([argv0])
+
+
+# =============================================================================
+# Arguments passed to a batch argv0 are parsed by cmd.exe (#3486)
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("argv0", "arg", "char"),
+    [
+        pytest.param("C:/safe/prettier.cmd", "a&whoami&b", "'&'", id="amp"),
+        pytest.param("C:/safe/prettier.cmd", "a|calc", "'|'", id="pipe"),
+        pytest.param("C:/safe/prettier.cmd", "a>out.txt", "'>'", id="redirect-out"),
+        pytest.param("C:/safe/prettier.cmd", "a<in.txt", "'<'", id="redirect-in"),
+        pytest.param("C:/safe/prettier.cmd", "a^&b", "'&' '^'", id="caret"),
+        pytest.param("C:/safe/prettier.cmd", "%PATH%", "'%'", id="percent-var"),
+        pytest.param("C:/safe/prettier.cmd", 'a" & calc & "', "'\"' '&'", id="quote"),
+        pytest.param("C:/safe/prettier.cmd", "a\rb", "'\\r'", id="cr"),
+        pytest.param("C:/safe/prettier.cmd", "a\nb", "'\\n'", id="lf"),
+        pytest.param(r"C:\safe\PRETTIER.CMD.", "a&b", "'&'", id="upper-cmd-dot"),
+        pytest.param("C:/safe/prettier.bat ", "a&b", "'&'", id="bat-space"),
+        pytest.param("C:/safe/prettier.Bat. .", "a&b", "'&'", id="bat-dot-space"),
+        pytest.param("prettier.cmd", "a&b", "'&'", id="bare-batch-name"),
+        pytest.param(
+            "C:/Program Files (x86)/nodejs/prettier.cmd",
+            "C:/repo/a&b.ts",
+            "'&'",
+            id="x86-argv0-amp-path",
+        ),
+    ],
+)
+def test_validate_subprocess_command_batch_argument_with_metachar_rejected(
+    argv0: str,
+    arg: str,
+    char: str,
+) -> None:
+    """A batch tool never receives an argument cmd.exe would interpret.
+
+    Args:
+        argv0: A ``.cmd``/``.bat`` command, in any suffix spelling Windows runs.
+        arg: Argument holding a cmd.exe metacharacter.
+        char: The offending characters as the error message lists them.
+    """
+    with pytest.raises(UnsafeCommandError) as excinfo:
+        validate_subprocess_command([argv0, "--check", arg])
+    message = str(excinfo.value)
+    assert_that(message).contains(f"argument 2 ({arg!r})")
+    assert_that(message).contains(f"cmd.exe would interpret {char} in it")
+    assert_that(excinfo.value).is_instance_of(ValueError)
+
+
+@pytest.mark.parametrize(
+    "argv0",
+    [
+        pytest.param("prettier", id="bare"),
+        pytest.param("/usr/local/bin/prettier", id="posix-abs"),
+        pytest.param("C:/safe/prettier.exe", id="windows-exe"),
+        pytest.param("C:/safe/prettier.cmd.exe", id="cmd-then-exe"),
+        pytest.param("C:/safe/prettier.cmdx", id="cmdx"),
+    ],
+)
+def test_validate_subprocess_command_metachar_argument_allowed_off_batch(
+    argv0: str,
+) -> None:
+    """The same arguments stay legal when argv0 never reaches cmd.exe.
+
+    Args:
+        argv0: A command Windows runs directly, without cmd.exe.
+    """
+    args = ["a&whoami&b", "%PATH%", 'say "hi"', "a^b", "x|y", "<in>"]
+    accepted = True
+    try:
+        validate_subprocess_command([argv0, *args])
+    except ValueError:
+        accepted = False
+    assert_that(accepted).described_as(argv0).is_true()
+
+
+@pytest.mark.parametrize(
+    "arg",
+    [
+        pytest.param("C:/Program Files (x86)/repo/src/a.ts", id="x86-forward"),
+        pytest.param(r"C:\Program Files (x86)\repo\src\a.ts", id="x86-backslash"),
+        pytest.param("--config=C:/Users/dev/My Project (2)/.prettierrc", id="flag"),
+        pytest.param("src/{a,b}/*.ts", id="glob"),
+        pytest.param("README!.md", id="bang"),
+        pytest.param("--check", id="plain-flag"),
+    ],
+)
+def test_validate_subprocess_command_ordinary_batch_arguments_allowed(
+    arg: str,
+) -> None:
+    """Ordinary paths, ``(x86)`` included, still reach a batch tool.
+
+    Args:
+        arg: An argument with no cmd.exe metacharacter.
+    """
+    accepted = True
+    try:
+        validate_subprocess_command(
+            ["C:/Program Files (x86)/nodejs/prettier.cmd", "--check", arg],
+        )
+    except ValueError:
+        accepted = False
+    assert_that(accepted).described_as(arg).is_true()

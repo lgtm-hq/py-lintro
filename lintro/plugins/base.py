@@ -31,6 +31,7 @@ import click
 from loguru import logger
 
 from lintro.config.lintro_config import LintroConfig
+from lintro.exceptions.errors import UnsafeCommandError
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.execution_preparation import (
     DEFAULT_TIMEOUT,
@@ -140,11 +141,21 @@ class BaseToolPlugin(ABC):
         options: Current tool options (merged from defaults and runtime).
         exclude_patterns: Patterns to exclude from file discovery.
         include_venv: Whether to include virtual environment files.
+        command_refusal: First command this instance refused to spawn, or None.
     """
 
     options: dict[str, object] = field(default_factory=dict, init=False)
     exclude_patterns: list[str] = field(default_factory=list, init=False)
     include_venv: bool = field(default=False, init=False)
+    #: First command this instance refused to spawn (#3486). The tool
+    #: executor reads it after the run, so a refusal is reported as an
+    #: execution failure however the plugin handled the ``ValueError``.
+    command_refusal: UnsafeCommandError | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         """Initialize plugin with defaults from definition."""
@@ -238,6 +249,7 @@ class BaseToolPlugin(ABC):
         clone.options = dict(self.options)
         clone.exclude_patterns = list(self.exclude_patterns)
         clone.include_venv = self.include_venv
+        clone.command_refusal = None
         clone._isolate_execution_state()
         return clone
 
@@ -406,6 +418,7 @@ class BaseToolPlugin(ABC):
             SubprocessResult with the return code and separated stdout/stderr.
         """
         effective_timeout = self._get_effective_timeout(timeout)
+        self._validate_subprocess_command(cmd)
         return run_subprocess(
             cmd,
             effective_timeout,
@@ -468,6 +481,7 @@ class BaseToolPlugin(ABC):
             SubprocessResult with the return code and captured output.
         """
         effective_timeout = self._get_effective_timeout(timeout)
+        self._validate_subprocess_command(cmd)
         return run_subprocess_streaming(cmd, effective_timeout, cwd, env, line_handler)
 
     def _run_subprocess_streaming(
@@ -520,10 +534,22 @@ class BaseToolPlugin(ABC):
     def _validate_subprocess_command(self, cmd: list[str]) -> None:
         """Validate a subprocess command for safety.
 
+        A refusal is kept on :attr:`command_refusal` (the first one wins)
+        before it propagates, so the tool executor can report the run as an
+        execution failure even when the plugin catches the ``ValueError``.
+
         Args:
             cmd: Command and arguments to validate.
+
+        Raises:
+            UnsafeCommandError: If the command cannot be spawned safely.
         """
-        validate_subprocess_command(cmd)
+        try:
+            validate_subprocess_command(cmd)
+        except UnsafeCommandError as exc:
+            if self.command_refusal is None:
+                self.command_refusal = exc
+            raise
 
     def _validate_paths(self, paths: list[str]) -> None:
         """Validate that paths exist and are accessible.

@@ -13,12 +13,16 @@ import re
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from lintro.exceptions.errors import UnsafeCommandError
 from lintro.models.core.tool_outcome import (
     Checked,
+    FixAccounting,
+    FixPartial,
     FixUnmeasured,
     NoFiles,
     Skipped,
     TimedOut,
+    ToolOutcome,
     Unavailable,
 )
 
@@ -166,6 +170,56 @@ def classify_runner_failure(
         execution_failed=True,
         findings_complete=False,
         output=f"{reason}{detail}",
+    )
+
+
+def mark_refused_command(
+    tool: object,
+    result: ToolResult,
+    *,
+    fix: bool,
+) -> ToolResult:
+    """Report a run that lintro refused to spawn as an execution failure.
+
+    :func:`~lintro.plugins.subprocess_executor.validate_subprocess_command`
+    refuses a command it cannot run safely, for example an argument that
+    ``cmd.exe`` would interpret when the tool is a ``.cmd`` shim (#3486). The
+    plugin records the refusal on ``command_refusal``. Plugins handle the
+    ``ValueError`` in different ways, and some turn it into an ordinary
+    failed verdict, so the executor applies this after every run: the tool
+    never saw that command, so its result is marked ``execution_failed`` with
+    incomplete findings and unknown inspection. Findings the tool really
+    reported on other invocations are kept, and the refusal leads the output.
+
+    Args:
+        tool: Plugin that produced *result*, or None when none was built.
+        result: Its result, or the failed result built for an exception.
+        fix: Whether the run was a fix, whose accounting is then unmeasured.
+
+    Returns:
+        The result, marked as an execution failure when a command was refused.
+    """
+    refusal = getattr(tool, "command_refusal", None)
+    if not isinstance(refusal, UnsafeCommandError):
+        return result
+    reason = f"lintro refused to run {result.name}: {refusal}"
+    accounting: FixAccounting = (
+        FixUnmeasured(reason=reason, initial=result.initial_issues_count)
+        if fix
+        else FixPartial()
+    )
+    outcome = ToolOutcome(
+        execution=Checked(success=False, inspected_files=None),
+        accounting=accounting,
+        issues_count=result.issues_count,
+    )
+    prior = (result.output or "").strip()
+    return replace(
+        result.with_outcome(outcome),
+        execution_failed=True,
+        findings_complete=False,
+        inspected_paths=None,
+        output=f"{reason}\n{prior}" if prior and str(refusal) not in prior else reason,
     )
 
 
