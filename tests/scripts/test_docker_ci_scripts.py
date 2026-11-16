@@ -793,6 +793,8 @@ def _run_sweep_validation(
             "ALLOW_SHORT_RETENTION",
             "DRY_RUN",
             "VOLATILE_TAG_PREFIXES",
+            "TIME_BUDGET_SECONDS",
+            "MAX_DELETES",
         )
         if name not in env
     }
@@ -1249,10 +1251,23 @@ _SWEEP_VERIFY_GH_STUB = (
 )
 
 
+# Fake clock for the per-run time budget (#3492): ``date`` reads the epoch from
+# ``$CLOCK_FILE`` and every DELETE advances it by ``$GH_DELETE_COST`` seconds,
+# so a test can spend the budget without sleeping.
+_SWEEP_CLOCK_DATE_STUB = 'cat "$CLOCK_FILE"'
+_SWEEP_CLOCK_GH_PREFIX = (
+    'if [[ "$*" == *"DELETE"* ]]; then\n'
+    '  echo $(( $(cat "$CLOCK_FILE") + GH_DELETE_COST )) > "$CLOCK_FILE"\n'
+    "fi\n"
+)
+
+
 def _run_sweep_with_persistent_tags(
     tmp_path: Path,
     gh_log: Path,
     env: dict[str, str],
+    *,
+    clock: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run the sweep against a ``gh`` stub that scripts the persistent listings.
 
@@ -1264,13 +1279,20 @@ def _run_sweep_with_persistent_tags(
         tmp_path: Pytest temporary directory for the PATH shim.
         gh_log: File the stub appends every ``gh`` invocation to.
         env: Extra environment variables, typically ``GH_PERSISTENT_*``.
+        clock: When given, ``date`` is shadowed by a fake clock read from this
+            file, and each DELETE advances it by ``GH_DELETE_COST`` seconds.
 
     Returns:
         subprocess.CompletedProcess[str]: The completed process.
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    _write_stub(bin_dir, "gh", _SWEEP_VERIFY_GH_STUB)
+    gh_stub = _SWEEP_VERIFY_GH_STUB
+    if clock is not None:
+        gh_stub = _SWEEP_CLOCK_GH_PREFIX + gh_stub
+        _write_stub(bin_dir, "date", _SWEEP_CLOCK_DATE_STUB)
+        env = {"CLOCK_FILE": str(clock), **env}
+    _write_stub(bin_dir, "gh", gh_stub)
 
     return _run_with_stubs(
         "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
@@ -1445,6 +1467,115 @@ def test_sweep_ci_ghcr_tags_rejects_unsafe_volatile_prefix(
 
     assert_that(result.returncode).is_equal_to(2)
     assert_that(result.stderr).contains("VOLATILE_TAG_PREFIXES entries must match")
+
+
+# --- Per-run bound (#3492) ----------------------------------------------------
+
+#: Four aged, sole-tagged CI versions. The verify stub's recheck answers every
+#: id with ``2026-01-02T00:00:00Z`` / ``ci-old``, so each one is deletable.
+_SWEEP_BACKLOG_TSV = "\n".join(
+    f"{vid}\t2026-01-02T00:00:00Z\tci-{vid}" for vid in (301, 302, 303, 304)
+)
+
+
+@pytest.mark.parametrize(
+    ("knob", "value"),
+    [
+        ("TIME_BUDGET_SECONDS", "ten"),
+        ("TIME_BUDGET_SECONDS", "-1"),
+        ("MAX_DELETES", "1.5"),
+        ("MAX_DELETES", "-3"),
+    ],
+)
+def test_sweep_ci_ghcr_tags_rejects_invalid_run_bound(
+    tmp_path: Path,
+    knob: str,
+    value: str,
+) -> None:
+    """A malformed budget or cap must fail validation rather than run unbounded."""
+    result = _run_sweep_validation(tmp_path, {knob: value})
+
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stderr).contains(f"{knob} must be a non-negative integer")
+
+
+def test_sweep_ci_ghcr_tags_is_bounded_by_default(tmp_path: Path) -> None:
+    """With no knobs set, the sweep still runs under a budget and a cap (#3492)."""
+    result = _run_sweep_validation(tmp_path, {})
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("time_budget=720s, max_deletes=500")
+    assert_that(result.stdout).contains("Sweep complete: 0 deleted")
+
+
+def test_sweep_ci_ghcr_tags_stops_at_the_delete_cap(tmp_path: Path) -> None:
+    """At MAX_DELETES the sweep stops, verifies, and exits 0 as partial (#3492)."""
+    gh_log = tmp_path / "gh.log"
+    step_summary = tmp_path / "summary.md"
+
+    result = _run_sweep_with_persistent_tags(
+        tmp_path,
+        gh_log,
+        {
+            "GH_VERSIONS_TSV": _SWEEP_BACKLOG_TSV,
+            "MAX_DELETES": "2",
+            "TIME_BUDGET_SECONDS": "0",
+            "GITHUB_STEP_SUMMARY": str(step_summary),
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("Deleted py-lintro version 301")
+    assert_that(result.stdout).contains("Deleted py-lintro version 302")
+    log = gh_log.read_text()
+    assert_that(log).does_not_contain("py-lintro/versions/303")
+    assert_that(log).does_not_contain("py-lintro/versions/304")
+    expected = (
+        "Partial sweep, resumes next run: 2 deleted, 2 remaining"
+        " (cap of 2 deletions reached)"
+    )
+    assert_that(result.stdout).contains(f"::notice::{expected}")
+    assert_that(step_summary.read_text()).contains(f"ci-* sweep: {expected}")
+    # What was deleted is still verified: baseline plus one confirmation.
+    assert_that(log.count(_PERSISTENT_QUERY_MARKER)).is_equal_to(2)
+    # Listings ask for the API's largest page so pagination stays short.
+    assert_that(log).contains("py-lintro/versions?per_page=100")
+
+
+def test_sweep_ci_ghcr_tags_stops_when_the_time_budget_is_spent(
+    tmp_path: Path,
+) -> None:
+    """A spent budget stops deletions and skips unlisted packages (#3492).
+
+    Each DELETE costs 400 fake seconds against a 720s budget, so the run
+    deletes two versions, leaves two for the next run, and never lists the
+    second package — and still exits 0 instead of being cancelled.
+    """
+    gh_log = tmp_path / "gh.log"
+    clock = tmp_path / "clock"
+    clock.write_text("1000000000\n")
+
+    result = _run_sweep_with_persistent_tags(
+        tmp_path,
+        gh_log,
+        {
+            "PACKAGES": "py-lintro py-lintro-base",
+            "GH_VERSIONS_TSV": _SWEEP_BACKLOG_TSV,
+            "TIME_BUDGET_SECONDS": "720",
+            "MAX_DELETES": "0",
+            "GH_DELETE_COST": "400",
+        },
+        clock=clock,
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("Deleted py-lintro version 302")
+    assert_that(result.stdout).does_not_contain("Deleted py-lintro version 303")
+    assert_that(result.stdout).contains(
+        "::notice::Partial sweep, resumes next run: 2 deleted, 2 remaining"
+        " (time budget of 720s spent); not listed this run: py-lintro-base",
+    )
+    assert_that(gh_log.read_text()).does_not_contain("py-lintro-base")
 
 
 #: Environment of a GitHub Actions job on a GitHub-hosted runner.

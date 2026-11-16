@@ -913,6 +913,37 @@ def test_ghcr_cleanup_sweeps_ephemeral_ci_tags() -> None:
     )
 
 
+@pytest.mark.parametrize("job_name", ["sweep-ci-tags", "sweep-sha-tags"])
+def test_ghcr_cleanup_tag_sweeps_finish_inside_their_timeout(job_name: str) -> None:
+    """Each tag sweep is bounded well inside its job timeout (#3492).
+
+    A 10-minute timeout cancelled the ci-* sweep mid-pagination in 4 of 6
+    weekly runs and turned main red. The script now stops at
+    ``TIME_BUDGET_SECONDS`` / ``MAX_DELETES`` and then re-lists the package
+    to verify its deletions, so the job timeout must leave room for that
+    verification after the budget is spent.
+    """
+    cleanup = _load_workflow(name="ghcr-cleanup.yml")
+    job = cleanup["jobs"][job_name]
+    sweep_env = next(
+        (step.get("env") or {})
+        for step in job["steps"]
+        if isinstance(step, dict)
+        and step.get("run") == "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh"
+    )
+
+    budget = sweep_env.get("TIME_BUDGET_SECONDS")
+    cap = sweep_env.get("MAX_DELETES")
+    assert_that(budget).described_as(job_name).is_instance_of(int)
+    assert_that(cap).described_as(job_name).is_instance_of(int)
+    assert isinstance(budget, int)  # narrow for the arithmetic below
+    assert_that(budget).described_as(job_name).is_greater_than(0)
+    assert_that(cap).described_as(job_name).is_greater_than(0)
+    assert_that(job["timeout-minutes"] * 60).described_as(
+        job_name,
+    ).is_greater_than_or_equal_to(2 * budget)
+
+
 @pytest.mark.parametrize(
     ("dispatch_input", "expected"),
     [

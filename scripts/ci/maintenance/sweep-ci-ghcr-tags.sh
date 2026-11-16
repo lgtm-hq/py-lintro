@@ -44,6 +44,15 @@ set -euo pipefail
 # runs. The package's persistent tag set is snapshotted before the deletions
 # and re-read after them; a tag that vanished means the residual race actually
 # fired, and that is reported as an ::error:: which fails the job.
+#
+# Bounded per run (#3492): a backlog of thousands of aged tags made the weekly
+# job hit its timeout mid-pagination and get cancelled, which reported main as
+# red. Each run now stops starting new work once TIME_BUDGET_SECONDS has
+# elapsed or MAX_DELETES versions are gone, still verifies what it deleted,
+# and exits 0 with a "partial, resumes next run" summary. The next run lists
+# the registry afresh and carries on, so the backlog drains over several runs.
+# Listings request 100 versions per page (the API maximum; the default is 30)
+# because pagination, not deletion, was most of the run time.
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	cat <<'EOF'
@@ -78,6 +87,16 @@ Environment:
                  sees the other's deletions; without this the sha-* sweep
                  would report swept ci-* tags as lost (#1652). Each entry must
                  match ^[A-Za-z0-9._-]+$ (interpolated into the jq filter).
+  TIME_BUDGET_SECONDS
+                 Stop starting new deletions (and new package listings) once
+                 this many seconds have passed since the script started
+                 (default: 720). 0 disables the budget. Deletions already
+                 made are still verified, so keep the job timeout well above
+                 the budget.
+  MAX_DELETES    Delete at most this many versions per run, across all
+                 packages (default: 500). 0 disables the cap.
+                 A run that stops at the budget or the cap exits 0 and prints
+                 "Partial sweep, resumes next run: N deleted, M remaining".
   DRY_RUN        When "true", log candidates without deleting (default: false)
 EOF
 	exit 0
@@ -90,7 +109,14 @@ tag_prefix="${TAG_PREFIX:-ci-}"
 min_age_days="${MIN_AGE_DAYS:-91}"
 volatile_prefixes="${VOLATILE_TAG_PREFIXES:-ci- sha-}"
 dry_run="${DRY_RUN:-false}"
+time_budget_seconds="${TIME_BUDGET_SECONDS:-720}"
+max_deletes="${MAX_DELETES:-500}"
 sweep_errors=0
+# Run-wide progress for the per-run bound (#3492).
+swept_count=0
+remaining_count=0
+stop_reason=""
+unreached_packages=""
 
 # Actions keeps runs for 90 days from completion; GHCR updated_at reflects the
 # push, so +1 day covers the skew. Sweeping below this window deletes
@@ -151,7 +177,38 @@ for prefix in $volatile_prefixes; do
 done
 readonly volatile_prefixes_jq
 
-cutoff_epoch=$(($(date -u +%s) - min_age_days * 86400))
+if ! [[ "$time_budget_seconds" =~ ^[0-9]+$ ]]; then
+	echo "TIME_BUDGET_SECONDS must be a non-negative integer," \
+		"got: ${time_budget_seconds}" >&2
+	exit 2
+fi
+if ! [[ "$max_deletes" =~ ^[0-9]+$ ]]; then
+	echo "MAX_DELETES must be a non-negative integer, got: ${max_deletes}" >&2
+	exit 2
+fi
+
+now_epoch() {
+	date -u +%s
+}
+
+start_epoch="$(now_epoch)"
+cutoff_epoch=$((start_epoch - min_age_days * 86400))
+
+# Set stop_reason once the run has used up its budget or cap (#3492). Once
+# set it stays set: the remaining work is left for the next scheduled run.
+check_run_bound() {
+	[[ -n "$stop_reason" ]] && return 0
+	if [[ "$max_deletes" -gt 0 && "$swept_count" -ge "$max_deletes" ]]; then
+		stop_reason="cap of ${max_deletes} deletions reached"
+		return 0
+	fi
+	if [[ "$time_budget_seconds" -gt 0 ]] &&
+		[[ $(($(now_epoch) - start_epoch)) -ge "$time_budget_seconds" ]]; then
+		stop_reason="time budget of ${time_budget_seconds}s spent"
+		return 0
+	fi
+	return 1
+}
 
 tags_are_ci_only() {
 	local tags="$1"
@@ -182,7 +239,7 @@ fetch_version_state() {
 fetch_persistent_tags() {
 	local pkg="$1"
 	gh api \
-		"orgs/${org}/packages/container/${pkg}/versions" \
+		"orgs/${org}/packages/container/${pkg}/versions?per_page=100" \
 		--paginate \
 		--jq ".[]
 			| (.metadata.container.tags // [])[]
@@ -279,8 +336,14 @@ sweep_package() {
 	# the while-read loop (CodeRabbit on #1645).
 	local query_err_file=""
 	query_err_file="$(mktemp)"
+	if check_run_bound; then
+		echo "Not listing ${pkg}: ${stop_reason}; it resumes next run"
+		unreached_packages+="${pkg} "
+		return
+	fi
+	echo "Listing ${pkg} versions"
 	if ! query_output=$(gh api \
-		"orgs/${org}/packages/container/${pkg}/versions" \
+		"orgs/${org}/packages/container/${pkg}/versions?per_page=100" \
 		--paginate \
 		--jq ".[]
 			| select(
@@ -346,8 +409,14 @@ sweep_package() {
 				"[${tags}] (#1138/#1652)"
 			continue
 		fi
+		# Per-run bound (#3492): once spent, only count what is left.
+		if check_run_bound; then
+			remaining_count=$((remaining_count + 1))
+			continue
+		fi
 		if [[ "$dry_run" == "true" ]]; then
 			echo "[dry-run] Would delete ${pkg} version ${vid} (tags: ${tags})"
+			swept_count=$((swept_count + 1))
 			continue
 		fi
 		# Re-check immediately before deleting: promotion (#1358) or a
@@ -418,6 +487,7 @@ sweep_package() {
 			>/dev/null 2>"${delete_err_file}"; then
 			rm -f "${delete_err_file}"
 			deleted_ids+="${vid} "
+			swept_count=$((swept_count + 1))
 			echo "Deleted ${pkg} version ${vid} (tags: ${current_tags})"
 		else
 			echo "::error::Failed to delete ${pkg} version ${vid}: $(cat "${delete_err_file}")" >&2
@@ -432,10 +502,36 @@ sweep_package() {
 	fi
 }
 
-echo "Sweeping ${tag_prefix}* tags older than ${min_age_days}d (dry_run=${dry_run})"
+# Print the run summary and mirror it to the job summary when there is one.
+report_progress() {
+	local verb="deleted"
+	local line=""
+	[[ "$dry_run" == "true" ]] && verb="would delete"
+	if [[ -n "$stop_reason" ]]; then
+		line="Partial sweep, resumes next run: ${swept_count} ${verb},"
+		line+=" ${remaining_count} remaining (${stop_reason})"
+		if [[ -n "$unreached_packages" ]]; then
+			line+="; not listed this run: ${unreached_packages% }"
+		fi
+		echo "::notice::${line}"
+	else
+		line="Sweep complete: ${swept_count} ${verb}"
+		echo "$line"
+	fi
+	if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+		printf '%s\n' "${tag_prefix}* sweep: ${line}" >>"$GITHUB_STEP_SUMMARY" ||
+			true
+	fi
+}
+
+echo "Sweeping ${tag_prefix}* tags older than ${min_age_days}d" \
+	"(dry_run=${dry_run}, time_budget=${time_budget_seconds}s," \
+	"max_deletes=${max_deletes})"
 for pkg in $packages; do
 	sweep_package "$pkg"
 done
+
+report_progress
 
 if [[ "$sweep_errors" -ne 0 ]]; then
 	echo "::error::GHCR CI-tag sweep completed with errors" >&2
