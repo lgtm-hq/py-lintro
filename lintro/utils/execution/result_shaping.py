@@ -131,16 +131,18 @@ def mark_npx_refusals(
     Returns:
         The result, marked when a refusal was recorded for the tool's cache.
     """
-    if result.success:
-        return result
+    # Taken even from a passing result, so a refusal can never linger and
+    # be pinned on a later run of the same tool.
     try:
-        command = tool._get_executable_command(
-            tool.definition.name,
-            cwd=result.cwd or os.getcwd(),
+        command = list(
+            tool._get_executable_command(
+                tool.definition.name,
+                cwd=result.cwd or os.getcwd(),
+            ),
         )
+        refusals = take_npx_refusals(command)
     except (OSError, ValueError, RuntimeError, AttributeError, TypeError):
         return result
-    refusals = take_npx_refusals(list(command))
     if not refusals:
         return result
     return _refused_result(result, refusals[-1], fix=fix)

@@ -1307,12 +1307,16 @@ def ancestor_modules(entry: Path) -> list[Path]:
     Returns:
         The directories found, nearest first.
     """
-    home = Path.home()
     candidates = [
         directory / "node_modules"
         for directory in Path(os.path.realpath(entry)).parents
     ]
-    candidates += [home / ".node_modules", home / ".node_libraries"]
+    try:
+        home = Path.home()
+    except RuntimeError:
+        home = None  # No home directory, so Node has no home folders either.
+    if home is not None:
+        candidates += [home / ".node_modules", home / ".node_libraries"]
     return [candidate for candidate in candidates if os.path.lexists(candidate)]
 
 

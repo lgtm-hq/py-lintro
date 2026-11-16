@@ -762,6 +762,55 @@ def test_a_refusal_the_tool_caught_still_fails_the_run(cache: Path, fix: bool) -
 
 
 @posix_only
+def test_a_refusal_is_never_left_for_a_later_run(cache: Path) -> None:
+    """A passing result still takes its cache's refusal, and is failed by it.
+
+    Args:
+        cache: Per-pin npm cache.
+    """
+    entry = _install(cache)
+    _replace_file(_package(entry) / "bin.js", "console.log('[]');\n")
+    with pytest.raises(NpxIntegrityError):
+        verified_cache(cache)
+    tool = SimpleNamespace(
+        definition=SimpleNamespace(name="prettier"),
+        _get_executable_command=lambda _name, cwd: _command(cache),
+    )
+    passing = ToolResult(name="prettier", success=True, output="", issues_count=0)
+
+    marked = mark_npx_refusals(tool, passing)  # type: ignore[arg-type]
+    later = mark_npx_refusals(tool, passing)  # type: ignore[arg-type]
+
+    assert_that(marked.execution_failed).is_true()
+    assert_that(marked.success).is_false()
+    assert_that(later.execution_failed).is_false()
+
+
+@posix_only
+def test_no_home_directory_skips_only_the_home_folders(
+    cache: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a home directory the check still runs, as a refusal or a pass.
+
+    Args:
+        cache: Per-pin npm cache.
+        monkeypatch: Makes ``Path.home`` fail as it does with no ``HOME`` and
+            no passwd entry.
+    """
+    _install(cache)
+    (cache / "node_modules").mkdir()
+
+    def no_home() -> Path:
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(Path, "home", staticmethod(no_home))
+
+    with pytest.raises(NpxIntegrityError, match="Remove or rename"):
+        verified_cache(cache)
+
+
+@posix_only
 def test_lockfile_keys_through_a_symlinked_cache_path_are_understood(
     tmp_path: Path,
 ) -> None:
