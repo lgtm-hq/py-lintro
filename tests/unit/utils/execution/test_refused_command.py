@@ -34,11 +34,11 @@ from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.tools import tool_manager
 from lintro.utils.execution.exit_codes import determine_exit_code
-from lintro.utils.execution.result_shaping import (
+from lintro.utils.execution.run_context import RunContext
+from lintro.utils.refused_command import (
     mark_refused_command,
     refused_command_failure,
 )
-from lintro.utils.execution.run_context import RunContext
 from lintro.utils.unified_config import UnifiedConfigManager
 from tests.npx_entries import tool_package, write_npx_entry
 

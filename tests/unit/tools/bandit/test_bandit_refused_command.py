@@ -17,7 +17,7 @@ from assertpy import assert_that
 
 from lintro.exceptions.errors import UnsafeCommandError
 from lintro.tools.bandit.definition import BanditPlugin
-from lintro.utils.execution.result_shaping import mark_refused_command
+from lintro.utils.refused_command import mark_refused_command
 
 
 def test_batch_bandit_never_launches_with_a_metacharacter_file_name(

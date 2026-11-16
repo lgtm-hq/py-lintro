@@ -98,6 +98,7 @@ from lintro.utils.path_filtering import (
     setup_exclude_patterns,
     walk_files_with_excludes,
 )
+from lintro.utils.refused_command import mark_refused_command
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -144,6 +145,14 @@ CRASHED_REASON: str = "the verify check could not run ({error})"
 #: Why a residual is unknown: the ``CHECK`` burned its deadline. A partial
 #: answer over part of the scope is not an answer over the scope.
 TIMED_OUT_REASON: str = "the verify check timed out"
+
+#: Why a residual is unknown: the ``CHECK`` ran but did not complete, for
+#: example a refused command or a crash on part of its scope (#3498). The
+#: findings it did report are kept; its residual is not a measurement.
+INCOMPLETE_REASON: str = "the verify check did not complete ({detail})"
+
+#: Longest failure detail quoted in an incomplete verify check's reason.
+_INCOMPLETE_DETAIL_LIMIT: int = 200
 
 #: Why a residual is unknown: the ``CHECK`` returned without executing, a
 #: version gate being the usual cause.
@@ -728,7 +737,9 @@ def run_verify_pass(
         started = time.monotonic()
         try:
             tool = configure(tool_name=name)
-            result = tool.check(files, {})
+            # A refusal the plugin caught still marks the run incomplete, so
+            # it never reads as a verdict (#3497, #3498).
+            result = mark_refused_command(tool, tool.check(files, {}), fix=False)
             ToolResult.validate_outcome(result)
             execution = result.outcome.execution
         except (TypeError, AttributeError):
@@ -768,6 +779,20 @@ def run_verify_pass(
                     result=None,
                     status=VerifyStatus.UNKNOWN,
                     unknown_reason=TIMED_OUT_REASON,
+                ),
+            )
+            continue
+        if result.execution_failed or result.residual_unknown:
+            # The check ran but did not complete: a refused command, or a
+            # crash on part of the scope. Its findings are real but partial,
+            # so it is no verdict over the scope. Keep the result so the fold
+            # retains those findings beside the pre-fix ones (#3498).
+            outcomes.append(
+                VerifyOutcome(
+                    tool=name,
+                    result=result,
+                    status=VerifyStatus.UNKNOWN,
+                    unknown_reason=_incomplete_reason(result),
                 ),
             )
             continue
@@ -816,6 +841,24 @@ def run_verify_pass(
             ),
         )
     return outcomes
+
+
+def _incomplete_reason(result: ToolResult) -> str:
+    """Name why an incomplete verify check is no verdict.
+
+    Args:
+        result: A verify ``CHECK`` result marked as an execution failure or
+            with an unknown residual.
+
+    Returns:
+        :data:`INCOMPLETE_REASON` quoting the first line of the check's own
+        output, which carries the refusal or failure, when it has any.
+    """
+    lines = (result.output or "").strip().splitlines()
+    detail = lines[0].strip() if lines else ""
+    if len(detail) > _INCOMPLETE_DETAIL_LIMIT:
+        detail = detail[: _INCOMPLETE_DETAIL_LIMIT - 1].rstrip() + "…"
+    return INCOMPLETE_REASON.format(detail=detail or "execution failed")
 
 
 def _verified_paths(
@@ -1018,6 +1061,22 @@ def _fold_one(
         )
     if outcome.status is VerifyStatus.UNKNOWN:
         return _fold_unknown(mutation=mutation, outcome=outcome)
+    if verify is not None and (verify.execution_failed or verify.residual_unknown):
+        # A failed check (a refused command, a crash on part of the scope)
+        # reported only the findings of the invocations that finished. That
+        # is no residual over the scope: the survivors arithmetic below would
+        # report the stale pre-fix findings as measured and drop the real
+        # ones (#3498). ``run_verify_pass`` already routes such a check to
+        # ``UNKNOWN``; this covers a hand-built ``VERIFIED`` outcome.
+        return _fold_unknown(
+            mutation=mutation,
+            outcome=VerifyOutcome(
+                tool=mutation.name,
+                result=verify,
+                status=VerifyStatus.UNKNOWN,
+                unknown_reason=_incomplete_reason(verify),
+            ),
+        )
     # An ``UNCHANGED`` outcome carries no result: nothing was rewritten, or
     # the tool discovered none of the scope's files, so its pre-fix findings
     # stand as its post-fix findings. Everything that could not answer at all

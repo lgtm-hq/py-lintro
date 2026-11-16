@@ -16,6 +16,7 @@ from loguru import logger
 
 from lintro.models.core.tool_outcome import FixMeasured, FixPartial, ToolOutcome
 from lintro.utils.check_answered import check_answered
+from lintro.utils.refused_command import mark_refused_command
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
@@ -57,20 +58,19 @@ def rerun_tools(
     working directory (and therefore the same config) as the original run,
     without mutating the process-global cwd.
 
-    Args:
-        by_tool: Dict mapping tool name to (result, issues) pairs.
-
     Each check runs on a per-run copy of the registry tool, so a refused
     command recorded during the re-run never sticks on the shared singleton
     (#3498), and a refusal the plugin swallowed is marked as an incomplete
     result that cannot confirm or reject a fix.
+
+    Args:
+        by_tool: Dict mapping tool name to (result, issues) pairs.
 
     Returns:
         List of fresh tool results from re-running checks.
     """
     try:
         from lintro.tools import tool_manager
-        from lintro.utils.execution.result_shaping import mark_refused_command
     except ImportError:
         return None
 

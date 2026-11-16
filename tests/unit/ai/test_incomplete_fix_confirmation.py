@@ -83,6 +83,7 @@ class _PartialPlugin(BaseToolPlugin):
         return ToolResult(
             name=_TOOL,
             success=False,
+            output="partial-tool crashed on b.py",
             issues=[finding],
             issues_count=1,
             execution_failed=True,
@@ -162,6 +163,12 @@ _INCOMPLETE_MODES = [
     pytest.param("execution_failed", id="failed-run-with-partial-findings"),
 ]
 
+#: The reason each incomplete mode puts beside an unmeasured fix.
+_REASONS = {
+    "refused": f"lintro refused to run {_TOOL}: Refusing to pass argument",
+    "execution_failed": "partial-tool crashed on b.py",
+}
+
 
 @pytest.mark.parametrize("mode", _INCOMPLETE_MODES)
 def test_validation_does_not_confirm_a_fix_from_partial_findings(
@@ -169,7 +176,7 @@ def test_validation_does_not_confirm_a_fix_from_partial_findings(
     tmp_path: Path,
     mode: str,
 ) -> None:
-    """A fixed issue missing from an incomplete run stays unverified.
+    """A fixed issue missing from an incomplete run stays unverified, and why.
 
     Args:
         monkeypatch: Pytest patch fixture.
@@ -186,7 +193,10 @@ def test_validation_does_not_confirm_a_fix_from_partial_findings(
     assert_that(result.verified).is_equal_to(0)
     assert_that(result.unverified_by_tool).is_equal_to({_TOOL: 1})
     assert_that(result.new_issues).is_equal_to(0)
-    assert_that(result.details).is_equal_to(["[E2] main.py:5 — tool check unmeasured"])
+    assert_that(result.details).is_length(1)
+    assert_that(result.details[0]).starts_with(
+        f"[E2] main.py:5 — tool check unmeasured ({_REASONS[mode]}",
+    )
 
 
 @pytest.mark.parametrize("mode", _INCOMPLETE_MODES)
@@ -225,6 +235,7 @@ def test_rerun_keeps_original_counts_for_partial_findings(
         pytest.fail("Expected a validation result")
     assert_that(result.verified).is_equal_to(0)
     assert_that(result.unverified).is_equal_to(1)
+    assert_that(result.details[0]).contains(_REASONS[mode])
     assert_that(by_tool[_TOOL][0]).is_same_as(original)
     assert_that(by_tool[_TOOL][0].issues_count).is_equal_to(2)
 

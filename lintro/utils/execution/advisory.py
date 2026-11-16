@@ -32,11 +32,11 @@ from lintro.enums.tool_run_status import ToolRunStatus, tool_run_status
 from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools import tool_manager
-from lintro.utils.execution.result_shaping import mark_refused_command
 from lintro.utils.execution.tool_configuration import (
     SkippedTool,
     configure_tool_for_execution,
 )
+from lintro.utils.refused_command import mark_refused_command
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:

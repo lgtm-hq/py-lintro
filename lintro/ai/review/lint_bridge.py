@@ -14,16 +14,16 @@ from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.tools import tool_manager
-from lintro.utils.execution.result_shaping import (
-    mark_refused_command,
-    refused_command_failure,
-)
 from lintro.utils.execution.tool_configuration import (
     configure_tool_for_execution,
     get_tools_to_run,
 )
 from lintro.utils.execution_paths import get_execution_cwd
 from lintro.utils.python_formatting import resolve_python_formatting
+from lintro.utils.refused_command import (
+    mark_refused_command,
+    refused_command_failure,
+)
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
