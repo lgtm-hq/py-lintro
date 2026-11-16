@@ -116,8 +116,12 @@ COMMAND_CONTROL_CHARS: frozenset[str] = frozenset({"\n", "\r"})
 #: ``whoami`` (BatBadBut, CVE-2024-24576). ``%`` is here because ``cmd.exe``
 #: expands ``%NAME%`` even inside quotes. ``(``, ``)`` and space are not:
 #: ``C:/Program Files (x86)/nodejs/prettier.cmd`` must keep running, and
-#: ``list2cmdline`` quotes any value with a space. ``!`` is not either; it
-#: only expands under delayed expansion, which ``cmd.exe /c`` leaves off.
+#: ``list2cmdline`` quotes any value with a space. ``!`` is not either: it
+#: only expands under delayed expansion, which ``cmd.exe /c`` leaves off by
+#: default. A machine-wide ``DelayedExpansion`` setting or a shim that runs
+#: ``setlocal enabledelayedexpansion`` can turn it on, and then ``!NAME!``
+#: in an argument expands to a variable's value; that can alter or disclose
+#: a value but cannot start a command without one of the characters below.
 BATCH_UNSAFE_CHARS: frozenset[str] = frozenset(
     {"&", "|", "<", ">", "^", "%", '"', *COMMAND_CONTROL_CHARS},
 )

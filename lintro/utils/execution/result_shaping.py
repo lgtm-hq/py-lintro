@@ -219,7 +219,9 @@ def mark_refused_command(
         execution_failed=True,
         findings_complete=False,
         inspected_paths=None,
-        output=f"{reason}\n{prior}" if prior and str(refusal) not in prior else reason,
+        # Keep the tool's own text even when it already echoes the refusal:
+        # it may carry real findings from the invocations that did run.
+        output=f"{reason}\n{prior}" if prior else reason,
     )
 
 

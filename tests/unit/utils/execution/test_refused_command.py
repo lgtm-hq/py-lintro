@@ -20,12 +20,14 @@ from assertpy import assert_that
 import lintro.utils.execution.parallel_executor as parallel_module
 import lintro.utils.tool_executor as sequential_module
 from lintro.enums.action import Action
+from lintro.exceptions.errors import UnsafeCommandError
 from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.tools import tool_manager
 from lintro.utils.execution.exit_codes import determine_exit_code
+from lintro.utils.execution.result_shaping import mark_refused_command
 from lintro.utils.execution.run_context import RunContext
 from lintro.utils.unified_config import UnifiedConfigManager
 
@@ -220,3 +222,21 @@ def test_copy_for_execution_does_not_inherit_a_refusal() -> None:
 
     assert_that(template.command_refusal).is_not_none()
     assert_that(fresh.command_refusal).is_none()
+
+
+def test_refusal_keeps_output_that_already_echoes_it() -> None:
+    """Real findings text survives when the plugin also echoed the refusal."""
+    refusal = UnsafeCommandError("argument 1 ('a&b') would be interpreted")
+    tool = SimpleNamespace(command_refusal=refusal)
+    finding = "src/ok.ts:3:1 TS2322 Type 'string' is not assignable"
+    result = ToolResult(
+        name="tsc",
+        success=False,
+        output=f"{finding}\nChunk 2 failed: {refusal}",
+    )
+
+    marked = mark_refused_command(tool, result, fix=False)
+
+    assert_that(marked.output).starts_with(f"lintro refused to run tsc: {refusal}")
+    assert_that(marked.output).contains(finding)
+    assert_that(marked.execution_failed).is_true()
