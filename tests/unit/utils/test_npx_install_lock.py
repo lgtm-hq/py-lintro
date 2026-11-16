@@ -24,7 +24,7 @@ from lintro.tools.core.npx_cache import (
     npx_cache_dir,
     repair_npx_cache,
 )
-from lintro.utils import file_cache
+from lintro.utils import file_cache, npx_call
 from lintro.utils.npx_call import npx_shell_safe_command
 from lintro.utils.npx_install_lock import (
     NpxInstallLockTimeoutError,
@@ -32,7 +32,7 @@ from lintro.utils.npx_install_lock import (
     install_lock_path,
     shared_install_lock_now,
 )
-from lintro.utils.npx_integrity import NpxIntegrityError
+from lintro.utils.npx_integrity import CacheState, NpxIntegrityError, verified_cache
 from tests.npx_entries import tool_package, write_npx_entry
 
 _SPEC = "prettier@3.9.4"
@@ -161,6 +161,34 @@ def test_warm_run_spawns_without_holding_the_lock(cache: Path) -> None:
         cache: Per-pin npm cache.
     """
     write_npx_entry(cache, [tool_package()])
+
+    with npx_shell_safe_command(_command(cache), timeout=5):
+        free_during_run = _exclusive_free(cache)
+
+    assert_that(free_during_run).is_true()
+
+
+def test_run_that_finds_the_pin_installed_after_waiting_runs_warm(
+    cache: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run that waited for another run's install releases the lock to run.
+
+    The other run installs the pin between this run's first check, which
+    finds no entry, and its second check under the exclusive lock.
+
+    Args:
+        cache: Per-pin npm cache, cold.
+        monkeypatch: Scoped override of the check npx_call runs.
+    """
+
+    def install_after_first_check(target: Path, *, timeout: float) -> CacheState:
+        state = verified_cache(target, timeout=timeout)
+        if not state.entries:
+            write_npx_entry(cache, [tool_package()])
+        return state
+
+    monkeypatch.setattr(npx_call, "verified_cache", install_after_first_check)
 
     with npx_shell_safe_command(_command(cache), timeout=5):
         free_during_run = _exclusive_free(cache)

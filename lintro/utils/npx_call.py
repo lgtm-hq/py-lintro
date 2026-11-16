@@ -357,6 +357,9 @@ def npx_shell_safe_command(
                 install_lock(cache, shared=False, deadline=deadline),
             )
             before = verified_cache(cache, timeout=_remaining(deadline))
+            if before.entries:
+                # Installed while this run waited: run warm, without the lock.
+                cold_install.close()
         with _quoted_argv(cmd, windows=windows, inline_limit=inline_limit) as argv:
             yield argv
         try:
