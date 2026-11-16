@@ -51,13 +51,17 @@ set -euo pipefail
 #   - Every gh call runs under timeout(1) and is killed after
 #     GH_CALL_TIMEOUT_SECONDS (C).
 #   - Listings are paged by hand (PAGE_SIZE per request; 100 is the API
-#     maximum, the default is 30) so the clock is checked between pages. One
-#     listing yields both the candidates and the persistent-tag baseline.
+#     maximum, the default is 30) so the clock is checked between pages, and
+#     only an empty page ends one. One listing yields both the candidates and
+#     the persistent-tag baseline.
 #   - With H = TIME_BUDGET_SECONDS and R = VERIFY_RESERVE_SECONDS, new work
 #     (a listing page, a recheck-and-delete) only starts while fewer than
-#     H - R seconds have passed. Inside a package, deletions stop even earlier
-#     when twice that package's own listing time would not fit before H, so
-#     its verification still has room.
+#     H - R seconds have passed. Inside a package whose listing took L
+#     seconds, deletions only start before H - max(R, 2L), so its
+#     verification (up to two listings) still has room. A package listed
+#     first therefore deletes nothing once L >= H/3 (400s at the default
+#     1200s); a later one reaches that point sooner. Such a package stops on
+#     its own and the next package still gets the rest of the work window.
 #   - Verification listings only start before H.
 #   Since R >= 3C is enforced, the work phase ends by H, so the script returns
 #   within H + C plus local overhead, and the job timeout only has to exceed
@@ -128,6 +132,9 @@ Environment:
   DRY_RUN        When "true", log candidates without deleting (default: false)
 
 All numbers are read as base-10 integers; leading zeros are allowed.
+A DELETE that times out or gets no definitive (4xx) answer may have
+committed: it counts against MAX_DELETES, is verified, stops further
+deletions, and fails the run naming the version.
 A run that stops at the budget or the cap exits 0 and prints
 "Partial sweep, resumes next run: N deleted, M remaining".
 EOF
@@ -146,6 +153,12 @@ swept_count=0
 remaining_count=0
 stop_reason=""
 unreached_packages=""
+# Per-package stops (a package whose listing left too little of the budget to
+# verify its deletions). They do not stop the next package from being listed.
+package_stops=""
+# "<pkg>:<id>" of DELETEEs whose outcome is unknown (timed out, no definitive
+# HTTP answer): they may have committed remotely, so they count as deleted.
+uncertain_deletes=""
 
 # Actions keeps runs for 90 days from completion; GHCR updated_at reflects the
 # push, so +1 day covers the skew. Sweeping below this window deletes
@@ -277,10 +290,15 @@ before_deadline() {
 gh_call() {
 	local rc=0
 	timeout --kill-after=5 "$gh_call_timeout" gh "$@" || rc=$?
-	if ((rc == 124 || rc == 137)); then
+	if is_timeout_status "$rc"; then
 		echo "gh call timed out after ${gh_call_timeout}s" >&2
 	fi
 	return "$rc"
+}
+
+# timeout(1) exits 124 when it stopped the call and 137 when it had to kill it.
+is_timeout_status() {
+	(($1 == 124 || $1 == 137))
 }
 
 # One TSV row per version: <id>\t<updated_at>\t<updated epoch>\t<tags>.
@@ -292,7 +310,10 @@ readonly LIST_JQ='.[]
 	| @tsv'
 
 # List every version of package $1 into file $3, a page at a time, checking
-# deadline $2 (seconds since start) before each page.
+# deadline $2 (seconds since start) before each page. Only an empty page ends
+# the listing: the API may return a short page before the last one, and
+# stopping there would silently drop versions from the persistent-tag
+# baseline. That costs one extra request per listing.
 # Returns 0 when complete, 3 when the deadline came first, and gh's status
 # (with its stderr) when a request failed.
 list_versions() {
@@ -317,7 +338,7 @@ list_versions() {
 			printf '%s\n' "$line" >>"$out"
 			count=$((count + 1))
 		done <<<"$rows"
-		if ((count < page_size)); then
+		if ((count == 0)); then
 			return 0
 		fi
 		page=$((page + 1))
@@ -472,22 +493,33 @@ verify_persistent_tags_survived() {
 	sweep_errors=1
 }
 
-# Set stop_reason once the run may start no more work (#3492): the delete cap
-# is reached (dry runs are exempt) or deadline $1 has passed. Once set it
+# Set stop_reason once the run may start no more work at all (#3492): the
+# delete cap is reached (dry runs are exempt) or the work window
+# (TIME_BUDGET_SECONDS minus VERIFY_RESERVE_SECONDS) has passed. Once set it
 # stays set; what is left belongs to the next scheduled run.
 check_run_bound() {
-	local deadline="$1"
 	[[ -n "$stop_reason" ]] && return 0
 	if [[ "$dry_run" != "true" ]] && ((max_deletes > 0)) &&
 		((swept_count >= max_deletes)); then
 		stop_reason="cap of ${max_deletes} deletions reached"
 		return 0
 	fi
-	if ! before_deadline "$deadline"; then
-		stop_reason="time budget of ${time_budget_seconds}s spent"
+	if ! before_deadline "$work_deadline"; then
+		stop_reason="time budget for new work spent: ${work_deadline}s of"
+		stop_reason+=" ${time_budget_seconds}s"
 		return 0
 	fi
 	return 1
+}
+
+# Every reason this run stopped short, run-wide first, "; "-joined.
+stop_reasons() {
+	local reasons="$stop_reason"
+	if [[ -n "$package_stops" ]]; then
+		[[ -n "$reasons" ]] && reasons+="; "
+		reasons+="${package_stops%; }"
+	fi
+	printf '%s' "$reasons"
 }
 
 sweep_package() {
@@ -500,8 +532,9 @@ sweep_package() {
 	local versions=""
 	local delete_deadline="$work_deadline"
 	local reserve=0
+	local package_stopped=""
 
-	if check_run_bound "$work_deadline"; then
+	if check_run_bound; then
 		echo "Not listing ${pkg}: ${stop_reason}; it resumes next run"
 		unreached_packages+="${pkg} "
 		return
@@ -515,7 +548,7 @@ sweep_package() {
 		list_rc=$?
 	list_seconds=$(($(now_epoch) - list_started))
 	if ((list_rc == 3)); then
-		check_run_bound "$work_deadline" || true
+		check_run_bound || true
 		echo "Listing ${pkg} did not finish within the time budget" \
 			"(${list_seconds}s); it resumes next run"
 		unreached_packages+="${pkg} "
@@ -580,7 +613,21 @@ sweep_package() {
 			continue
 		fi
 		# Per-run bound (#3492): once spent, only count what is left.
-		if check_run_bound "$delete_deadline"; then
+		if check_run_bound; then
+			remaining_count=$((remaining_count + 1))
+			continue
+		fi
+		# Per-package bound: past this package's delete deadline its
+		# verification might not fit, but the next package may still
+		# have time to list and delete, so only this package stops.
+		if [[ -n "$package_stopped" ]] ||
+			! before_deadline "$delete_deadline"; then
+			if [[ -z "$package_stopped" ]]; then
+				package_stopped=1
+				package_stops+="${pkg}: its ${list_seconds}s listing leaves"
+				package_stops+=" too little of the ${time_budget_seconds}s"
+				package_stops+=" budget to verify deletions; "
+			fi
 			remaining_count=$((remaining_count + 1))
 			continue
 		fi
@@ -599,15 +646,22 @@ sweep_package() {
 		local current_tags=""
 		local safe_to_delete=1
 		local recheck_err_file=""
+		local recheck_rc=0
 		# Dual recheck narrows the promotion/TOCTOU window before DELETE.
 		for _ in 1 2; do
 			recheck_err_file="$(mktemp)"
-			if ! state=$(fetch_version_state "$pkg" "$vid" 2>"${recheck_err_file}"); then
+			recheck_rc=0
+			state=$(fetch_version_state "$pkg" "$vid" \
+				2>"${recheck_err_file}") || recheck_rc=$?
+			if ((recheck_rc != 0)); then
 				# 404 = already deleted by a prior sweep/manual cleanup —
-				# benign for a reclaim job. Auth/network/rate-limit still
+				# benign for a reclaim job. A call that timed out has no
+				# definitive answer whatever it printed first, so it is
+				# never read as a 404 (#3492). Auth/network/rate-limit still
 				# fail closed so we do not silently under-delete.
-				if grep -Eqi 'HTTP[[:space:]]*404|Not Found \(HTTP 404\)' \
-					"${recheck_err_file}"; then
+				if ! is_timeout_status "$recheck_rc" &&
+					grep -Eqi 'HTTP[[:space:]]*404|Not Found \(HTTP 404\)' \
+						"${recheck_err_file}"; then
 					echo "Skipping version ${vid} (${pkg}): already deleted" \
 						"(404 on recheck)"
 					rm -f "${recheck_err_file}"
@@ -651,19 +705,38 @@ sweep_package() {
 			continue
 		fi
 		local delete_err_file=""
+		local delete_rc=0
 		delete_err_file="$(mktemp)"
-		if gh_call api --method DELETE \
+		delete_rc=0
+		gh_call api --method DELETE \
 			"orgs/${org}/packages/container/${pkg}/versions/${vid}" \
-			>/dev/null 2>"${delete_err_file}"; then
-			rm -f "${delete_err_file}"
+			>/dev/null 2>"${delete_err_file}" || delete_rc=$?
+		if ((delete_rc == 0)); then
 			deleted_ids+="${vid} "
 			swept_count=$((swept_count + 1))
 			echo "Deleted ${pkg} version ${vid} (tags: ${current_tags})"
-		else
-			echo "::error::Failed to delete ${pkg} version ${vid}: $(cat "${delete_err_file}")" >&2
-			rm -f "${delete_err_file}"
+		elif ! is_timeout_status "$delete_rc" &&
+			grep -Eq 'HTTP[[:space:]]*4[0-9][0-9]' "${delete_err_file}"; then
+			# A 4xx is a definitive refusal: nothing was deleted.
+			echo "::error::Failed to delete ${pkg} version ${vid}:" \
+				"$(cat "${delete_err_file}")" >&2
 			sweep_errors=1
+		else
+			# Timed out, 5xx, or no HTTP answer at all: the DELETE may have
+			# committed remotely before the response was lost (#3492). Count
+			# it against the cap, verify it like a deletion, start no more
+			# deletes this run, and fail the job naming the version.
+			echo "::error::DELETE of ${pkg} version ${vid} has an uncertain" \
+				"outcome and may have committed; treating it as deleted," \
+				"verifying it, and stopping deletions:" \
+				"$(cat "${delete_err_file}")" >&2
+			deleted_ids+="${vid} "
+			uncertain_deletes+="${pkg}:${vid} "
+			swept_count=$((swept_count + 1))
+			sweep_errors=1
+			stop_reason="a DELETE had an uncertain outcome"
 		fi
+		rm -f "${delete_err_file}"
 	done <<<"$versions"
 
 	if [[ -n "$deleted_ids" ]]; then
@@ -678,30 +751,45 @@ sweep_package() {
 report_progress() {
 	local verb="deleted"
 	local line=""
+	local reasons=""
+	reasons="$(stop_reasons)"
 	[[ "$dry_run" == "true" ]] && verb="would delete"
-	if [[ -n "$stop_reason" ]]; then
-		line="Partial sweep, resumes next run: ${swept_count} ${verb},"
-		line+=" ${remaining_count} remaining (${stop_reason})"
+	# Errors win over "partial" so a failed run is never summarised as a
+	# healthy partial one; the progress numbers are kept either way.
+	if [[ "$sweep_errors" -ne 0 ]]; then
+		line="Sweep finished with errors: ${swept_count} ${verb}"
+	elif [[ -n "$reasons" ]]; then
+		line="Partial sweep, resumes next run: ${swept_count} ${verb}"
+	else
+		line="Sweep complete: ${swept_count} ${verb}"
+	fi
+	if [[ -n "$reasons" ]]; then
+		line+=", ${remaining_count} remaining (${reasons})"
 		if [[ -n "$unreached_packages" ]]; then
 			line+="; not swept this run: ${unreached_packages% }"
 		fi
+	fi
+	if [[ -n "$uncertain_deletes" ]]; then
+		line+="; uncertain DELETE outcome: ${uncertain_deletes% }"
+	fi
+	if [[ "$sweep_errors" -ne 0 ]]; then
+		echo "::error::${line}"
+	elif [[ -n "$reasons" ]]; then
 		echo "::notice::${line}"
+	else
+		echo "$line"
+	fi
+	if [[ -n "$reasons" ]]; then
 		if ((swept_count == 0)); then
 			echo "::warning::The ${tag_prefix}* sweep made no progress this" \
-				"run (${stop_reason}). If this repeats, the backlog is not" \
+				"run (${reasons}). If this repeats, the backlog is not" \
 				"draining (#3492)."
 		fi
 		if [[ -n "$unreached_packages" ]]; then
 			echo "::warning::Not swept this run: ${unreached_packages% }" \
-				"(${stop_reason}). The next run starts from another package" \
+				"(${reasons}). The next run starts from another package" \
 				"(#3492)."
 		fi
-	elif [[ "$sweep_errors" -ne 0 ]]; then
-		line="Sweep finished with errors: ${swept_count} ${verb}"
-		echo "$line"
-	else
-		line="Sweep complete: ${swept_count} ${verb}"
-		echo "$line"
 	fi
 	if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
 		printf '%s\n' "${tag_prefix}* sweep: ${line}" >>"$GITHUB_STEP_SUMMARY" ||
