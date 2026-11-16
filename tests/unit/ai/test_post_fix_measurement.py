@@ -68,6 +68,8 @@ def test_standalone_unmeasured_rerun_cannot_verify(
         **(vars(unmeasured_rerun) | {"issues": empty_issues}),
     )
     tool = MagicMock()
+    # Re-runs check a per-run copy of the registry tool (#3498).
+    tool.copy_for_execution.return_value = tool
     tool.check.return_value = unmeasured_rerun
     with patch("lintro.tools.tool_manager.get_tool", return_value=tool):
         result = validate_applied_fixes(suggestions)
@@ -120,6 +122,8 @@ def test_unified_unmeasured_rerun_preserves_original_result(
     )
     before = deepcopy(original)
     tool = MagicMock()
+    # Re-runs check a per-run copy of the registry tool (#3498).
+    tool.copy_for_execution.return_value = tool
     tool.check.return_value = unmeasured_rerun
     with patch("lintro.tools.tool_manager.get_tool", return_value=tool):
         result = verify_fixes(
@@ -180,6 +184,8 @@ def test_unified_missing_rerun_is_unverified_not_skipped(
     }
     before = deepcopy(by_tool["ruff"])
     peer_tool = MagicMock()
+    # Re-runs check a per-run copy of the registry tool (#3498).
+    peer_tool.copy_for_execution.return_value = peer_tool
     peer_tool.check.return_value = ToolResult(
         name="bandit",
         success=peer_remaining == 0,
@@ -187,6 +193,8 @@ def test_unified_missing_rerun_is_unverified_not_skipped(
         issues_count=peer_remaining,
     )
     missing_tool = MagicMock()
+    # Re-runs check a per-run copy of the registry tool (#3498).
+    missing_tool.copy_for_execution.return_value = missing_tool
     missing_tool.check.side_effect = RuntimeError("No rerun verdict")
     with patch(
         "lintro.tools.tool_manager.get_tool",
@@ -254,6 +262,8 @@ def test_post_fix_measurement_handles_real_findings(
         "ruff": (original, list(sample_issues)),
     }
     tool = MagicMock()
+    # Re-runs check a per-run copy of the registry tool (#3498).
+    tool.copy_for_execution.return_value = tool
     tool.check.return_value = rerun
     with patch("lintro.tools.tool_manager.get_tool", return_value=tool):
         if path == "standalone":

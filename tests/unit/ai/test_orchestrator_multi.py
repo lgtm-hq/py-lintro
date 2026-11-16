@@ -405,6 +405,9 @@ def test_rerun_context_rerun_passes_absolute_paths_without_chdir(
     captured: dict[str, object] = {}
 
     class _FakeTool:
+        def copy_for_execution(self) -> _FakeTool:
+            return self
+
         def check(self, paths: Any, options: Any) -> ToolResult:
             captured["cwd"] = os.getcwd()
             captured["paths"] = paths
@@ -450,11 +453,17 @@ def test_rerun_context_rerun_continues_on_tool_failure(mock_get_tool, tmp_path):
     call_count = {"failing": 0, "passing": 0}
 
     class _FailingTool:
+        def copy_for_execution(self) -> _FailingTool:
+            return self
+
         def check(self, paths: Any, options: Any) -> ToolResult:
             call_count["failing"] += 1
             raise RuntimeError("boom")
 
     class _PassingTool:
+        def copy_for_execution(self) -> _PassingTool:
+            return self
+
         def check(self, paths: Any, options: Any) -> ToolResult:
             call_count["passing"] += 1
             return ToolResult(

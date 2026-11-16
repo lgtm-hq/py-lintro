@@ -133,8 +133,8 @@ class AsyncToolExecutor:
         from lintro.utils.execution.result_shaping import (
             classify_runner_failure,
             executed_command,
-            mark_refused_command,
         )
+        from lintro.utils.refused_command import mark_refused_command
 
         result = classify_runner_failure(
             result,
@@ -255,7 +255,7 @@ class AsyncToolExecutor:
                     logger.opt(exception=exc).debug(f"Tool {name} was refused: {exc}")
                 else:
                     logger.exception(f"Tool {name} failed with exception: {exc}")
-                from lintro.utils.execution.result_shaping import (
+                from lintro.utils.refused_command import (
                     command_refusal,
                     mark_refused_command,
                 )

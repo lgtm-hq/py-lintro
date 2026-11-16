@@ -102,6 +102,9 @@ def test_ai_rerun_does_not_chdir(
     captured: dict[str, Any] = {}
 
     class _FakeTool:
+        def copy_for_execution(self) -> _FakeTool:
+            return self
+
         def check(self, paths: Any, options: Any) -> ToolResult:
             captured["paths"] = paths
             return ToolResult(name="ruff", success=True, issues_count=0, issues=[])

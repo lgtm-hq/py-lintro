@@ -92,12 +92,14 @@ from lintro.models.core.tool_outcome import (
 )
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
+from lintro.parsers.base_parser import quote_first_line
 from lintro.utils.check_answered import check_answered
 from lintro.utils.file_cache import FingerprintSnapshot, snapshot_fingerprints
 from lintro.utils.path_filtering import (
     setup_exclude_patterns,
     walk_files_with_excludes,
 )
+from lintro.utils.refused_command import mark_refused_command
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -144,6 +146,14 @@ CRASHED_REASON: str = "the verify check could not run ({error})"
 #: Why a residual is unknown: the ``CHECK`` burned its deadline. A partial
 #: answer over part of the scope is not an answer over the scope.
 TIMED_OUT_REASON: str = "the verify check timed out"
+
+#: Why a residual is unknown: the ``CHECK`` ran but did not complete, for
+#: example a refused command or a crash on part of its scope (#3498). The
+#: findings it did report are kept; its residual is not a measurement.
+INCOMPLETE_REASON: str = "the verify check did not complete ({detail})"
+
+#: Longest failure detail quoted in an incomplete verify check's reason.
+_INCOMPLETE_DETAIL_LIMIT: int = 200
 
 #: Why a residual is unknown: the ``CHECK`` returned without executing, a
 #: version gate being the usual cause.
@@ -728,7 +738,9 @@ def run_verify_pass(
         started = time.monotonic()
         try:
             tool = configure(tool_name=name)
-            result = tool.check(files, {})
+            # A refusal the plugin caught still marks the run incomplete, so
+            # it never reads as a verdict (#3497, #3498).
+            result = mark_refused_command(tool, tool.check(files, {}), fix=False)
             ToolResult.validate_outcome(result)
             execution = result.outcome.execution
         except (TypeError, AttributeError):
@@ -768,6 +780,20 @@ def run_verify_pass(
                     result=None,
                     status=VerifyStatus.UNKNOWN,
                     unknown_reason=TIMED_OUT_REASON,
+                ),
+            )
+            continue
+        if result.execution_failed or result.residual_unknown:
+            # The check ran but did not complete: a refused command, or a
+            # crash on part of the scope. Its findings are real but partial,
+            # so it is no verdict over the scope. Keep the result so the fold
+            # retains those findings beside the pre-fix ones (#3498).
+            outcomes.append(
+                VerifyOutcome(
+                    tool=name,
+                    result=result,
+                    status=VerifyStatus.UNKNOWN,
+                    unknown_reason=_incomplete_reason(result),
                 ),
             )
             continue
@@ -816,6 +842,33 @@ def run_verify_pass(
             ),
         )
     return outcomes
+
+
+def _incomplete_reason(result: ToolResult) -> str:
+    """Name why an incomplete verify check is no verdict.
+
+    Args:
+        result: A verify ``CHECK`` result marked as an execution failure or
+            with an unknown residual.
+
+    Returns:
+        :data:`INCOMPLETE_REASON` quoting the first line of the check's own
+        output, which carries the refusal or failure, when it has any.
+    """
+    detail = quote_first_line(result.output, limit=_INCOMPLETE_DETAIL_LIMIT)
+    return INCOMPLETE_REASON.format(detail=detail or "execution failed")
+
+
+def _join_reasons(*reasons: str) -> str:
+    """Join the distinct non-empty reasons a residual is unknown, in order.
+
+    Args:
+        *reasons: Reasons from the mutation and the verify pass.
+
+    Returns:
+        The reasons joined with ``"; "``, each once.
+    """
+    return "; ".join(dict.fromkeys(reason for reason in reasons if reason))
 
 
 def _verified_paths(
@@ -996,15 +1049,11 @@ def _fold_one(
             parse_failures_count=(mutation.parse_failures_count or 0)
             + verify.parse_failures_count,
         )
+    # A fix that could not be measured keeps its own reason beside the verify
+    # pass's, so a crashed fix whose check also failed names both causes.
+    mutation_reason = accounting.reason if isinstance(accounting, FixUnmeasured) else ""
     if mutation.parse_failures_count:
-        mutation_reason = (
-            accounting.reason if isinstance(accounting, FixUnmeasured) else ""
-        )
-        unknown_reason = "; ".join(
-            dict.fromkeys(
-                reason for reason in (mutation_reason, outcome.unknown_reason) if reason
-            ),
-        )
+        unknown_reason = _join_reasons(mutation_reason, outcome.unknown_reason)
         return _fold_unknown(
             mutation=mutation,
             outcome=VerifyOutcome(
@@ -1017,7 +1066,33 @@ def _fold_one(
             ),
         )
     if outcome.status is VerifyStatus.UNKNOWN:
-        return _fold_unknown(mutation=mutation, outcome=outcome)
+        return _fold_unknown(
+            mutation=mutation,
+            outcome=replace(
+                outcome,
+                unknown_reason=_join_reasons(mutation_reason, outcome.unknown_reason),
+            ),
+        )
+    if verify is not None and is_incomplete_result(verify):
+        # An incomplete check (a timeout, a refused command, a crash on part
+        # of the scope) reported only the findings of the invocations that
+        # finished. That is no residual over the scope: the survivors
+        # arithmetic below would report the stale pre-fix findings as
+        # measured and drop the real ones (#3498). ``run_verify_pass``
+        # already routes such a check to ``UNKNOWN``; this covers a
+        # hand-built ``VERIFIED`` outcome.
+        verify_reason = (
+            TIMED_OUT_REASON if verify.timed_out else _incomplete_reason(verify)
+        )
+        return _fold_unknown(
+            mutation=mutation,
+            outcome=VerifyOutcome(
+                tool=mutation.name,
+                result=verify,
+                status=VerifyStatus.UNKNOWN,
+                unknown_reason=_join_reasons(mutation_reason, verify_reason),
+            ),
+        )
     # An ``UNCHANGED`` outcome carries no result: nothing was rewritten, or
     # the tool discovered none of the scope's files, so its pre-fix findings
     # stand as its post-fix findings. Everything that could not answer at all

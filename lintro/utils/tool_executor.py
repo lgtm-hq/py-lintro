@@ -35,9 +35,7 @@ from lintro.utils.execution.fix_retry import (
 from lintro.utils.execution.parallel_executor import run_tools_parallel
 from lintro.utils.execution.result_shaping import (
     classify_runner_failure,
-    command_refusal,
     executed_command,
-    mark_refused_command,
 )
 from lintro.utils.execution.result_shaping import (
     enrich_issues_with_doc_urls as _enrich_issues_with_doc_urls,
@@ -69,6 +67,7 @@ from lintro.utils.gates import execute_gates
 from lintro.utils.npx_integrity import NpxIntegrityError
 from lintro.utils.output import OutputManager
 from lintro.utils.python_formatting import resolve_python_formatting
+from lintro.utils.refused_command import command_refusal, mark_refused_command
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:

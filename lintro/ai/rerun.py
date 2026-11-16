@@ -16,6 +16,7 @@ from loguru import logger
 
 from lintro.models.core.tool_outcome import FixMeasured, FixPartial, ToolOutcome
 from lintro.utils.check_answered import check_answered
+from lintro.utils.refused_command import mark_refused_command
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
@@ -57,6 +58,11 @@ def rerun_tools(
     working directory (and therefore the same config) as the original run,
     without mutating the process-global cwd.
 
+    Each check runs on a per-run copy of the registry tool, so a refused
+    command recorded during the re-run never sticks on the shared singleton
+    (#3498), and a refusal the plugin swallowed is marked as an incomplete
+    result that cannot confirm or reject a fix.
+
     Args:
         by_tool: Dict mapping tool name to (result, issues) pairs.
 
@@ -77,8 +83,9 @@ def rerun_tools(
         rerun_paths = absolute_paths_for_context(file_paths=file_paths)
 
         try:
-            tool = tool_manager.get_tool(tool_name)
-            rerun_results.append(tool.check(rerun_paths, {}))
+            tool = tool_manager.get_tool(tool_name).copy_for_execution()
+            result = tool.check(rerun_paths, {})
+            rerun_results.append(mark_refused_command(tool, result, fix=False))
         except (KeyError, ImportError):
             logger.debug(
                 f"AI post-fix rerun skipped for {tool_name}: tool not available",

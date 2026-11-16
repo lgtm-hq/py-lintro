@@ -12,14 +12,17 @@ from __future__ import annotations
 
 import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.models.core.result_completeness import is_incomplete_result
+from lintro.parsers.base_parser import quote_first_line
 from lintro.utils.check_answered import check_answered
+from lintro.utils.refused_command import mark_refused_command
 
 if TYPE_CHECKING:
     from lintro.ai.models import AIFixSuggestion
@@ -28,6 +31,9 @@ if TYPE_CHECKING:
 
 
 IssueMatchKey = tuple[str, str, int | None]
+
+#: Longest failure detail quoted beside an unmeasured fix.
+_REASON_LIMIT = 160
 
 
 @dataclass
@@ -91,13 +97,20 @@ def verify_fixes(
 
     # Build a lookup from tool name -> fresh remaining issues for validation.
     fresh_issues_by_tool: dict[str, list[object] | None] = {}
+    unmeasured_reasons: dict[str, str] = {}
     for result in fresh_results:
-        fresh_issues_by_tool[result.name] = (
-            list(result.issues) if check_answered(result) else None
-        )
+        answered = check_answered(result)
+        fresh_issues_by_tool[result.name] = list(result.issues) if answered else None
+        reason = None if answered else _incomplete_reason(result)
+        if reason:
+            unmeasured_reasons[result.name] = reason
 
     # Step 2: Validate each applied suggestion using the fresh results.
-    return _validate_suggestions(applied_suggestions, fresh_issues_by_tool)
+    return _validate_suggestions(
+        applied_suggestions,
+        fresh_issues_by_tool,
+        unmeasured_reasons=unmeasured_reasons,
+    )
 
 
 def validate_applied_fixes(
@@ -131,12 +144,17 @@ def validate_applied_fixes(
 
     # Run each tool and collect fresh issues
     fresh_issues_by_tool: dict[str, list[object] | None] = {}
+    unmeasured_reasons: dict[str, str] = {}
     for tool_name, suggestions in by_tool_suggestions.items():
         if tool_name == "unknown":
             continue
 
         file_paths = list({s.file for s in suggestions})
-        remaining_issues = _run_tool_check(tool_name, file_paths)
+        remaining_issues = _run_tool_check(
+            tool_name,
+            file_paths,
+            unmeasured_reasons=unmeasured_reasons,
+        )
 
         if remaining_issues is None:
             logger.debug(f"Validation unmeasured for {tool_name}: tool check failed")
@@ -146,12 +164,39 @@ def validate_applied_fixes(
     if not fresh_issues_by_tool:
         return None
 
-    return _validate_suggestions(applied_suggestions, fresh_issues_by_tool)
+    return _validate_suggestions(
+        applied_suggestions,
+        fresh_issues_by_tool,
+        unmeasured_reasons=unmeasured_reasons,
+    )
+
+
+def _incomplete_reason(result: ToolResult) -> str | None:
+    """Name why an incomplete check result cannot measure a fix.
+
+    Args:
+        result: A fresh check result that did not answer.
+
+    Returns:
+        The first line of the check's own output (a refusal or failure
+        names itself there), a timeout note, or None when the result is not
+        incomplete but merely unanswered (a skip or an empty scope).
+    """
+    if not is_incomplete_result(result):
+        return None
+    if result.timed_out:
+        return "the check timed out"
+    return (
+        quote_first_line(result.output, limit=_REASON_LIMIT)
+        or "the check did not complete"
+    )
 
 
 def _validate_suggestions(
     applied_suggestions: Sequence[AIFixSuggestion],
     fresh_issues_by_tool: dict[str, list[object] | None],
+    *,
+    unmeasured_reasons: Mapping[str, str] | None = None,
 ) -> ValidationResult:
     """Core validation logic: compare applied suggestions against fresh issues.
 
@@ -159,6 +204,8 @@ def _validate_suggestions(
         applied_suggestions: Suggestions that were applied.
         fresh_issues_by_tool: Mapping of tool name to remaining issues
             from a fresh tool run, or None for an unmeasured check.
+        unmeasured_reasons: Why a tool's check could not measure its fixes,
+            by tool name, quoted beside each unmeasured fix when known.
 
     Returns:
         ValidationResult with per-fix verification status.
@@ -179,8 +226,14 @@ def _validate_suggestions(
         if remaining_issues is None:
             result.unverified += len(suggestions)
             result.unverified_by_tool[tool_name] = len(suggestions)
+            reason = (unmeasured_reasons or {}).get(tool_name)
+            status = (
+                f"tool check unmeasured ({reason})"
+                if reason
+                else "tool check unmeasured"
+            )
             result.details.extend(
-                f"[{s.code}] {Path(s.file).name}:{s.line} — tool check unmeasured"
+                f"[{s.code}] {Path(s.file).name}:{s.line} — {status}"
                 for s in suggestions
             )
             continue
@@ -291,27 +344,38 @@ def _normalize_file_path(file_path: str) -> str:
 def _run_tool_check(
     tool_name: str,
     file_paths: list[str],
+    *,
+    unmeasured_reasons: dict[str, str] | None = None,
 ) -> list[object] | None:
     """Run a tool's check on specific files.
 
     Args:
         tool_name: Name of the tool to run (e.g. "ruff").
         file_paths: Absolute paths to files to check.
+        unmeasured_reasons: When given, receives why an incomplete check
+            could not measure its scope, keyed by ``tool_name``.
 
     Returns:
         List of issues found, or None if the tool is not available
-        or the check did not measure its scope.
+        or the check did not measure its scope, including an incomplete
+        check such as one that refused a command.
     """
     try:
         from lintro.tools import tool_manager
 
-        tool = tool_manager.get_tool(tool_name)
+        # A per-run copy keeps a refusal recorded by this check off the
+        # shared registry singleton (#3498).
+        tool = tool_manager.get_tool(tool_name).copy_for_execution()
     except (KeyError, ImportError):
         logger.debug(f"Validation: tool {tool_name!r} not available")
         return None
 
     try:
-        tool_result = tool.check(file_paths, {})
+        tool_result = mark_refused_command(
+            tool,
+            tool.check(file_paths, {}),
+            fix=False,
+        )
     except (OSError, subprocess.SubprocessError, ValueError, RuntimeError):
         logger.debug(
             f"Validation: {tool_name} check failed",
@@ -320,5 +384,8 @@ def _run_tool_check(
         return None
     else:
         if not check_answered(tool_result):
+            reason = _incomplete_reason(tool_result)
+            if reason and unmeasured_reasons is not None:
+                unmeasured_reasons[tool_name] = reason
             return None
         return list(tool_result.issues)

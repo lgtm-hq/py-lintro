@@ -251,6 +251,7 @@ def test_run_tool_check_returns_issues(mock_get_tool):
         issues=[mock_issue],
     )
     mock_tool = MagicMock()
+    mock_tool.copy_for_execution.return_value = mock_tool
     mock_tool.check.return_value = mock_result
     mock_get_tool.return_value = mock_tool
 
@@ -264,6 +265,7 @@ def test_run_tool_check_returns_none_on_error(mock_get_tool):
     from lintro.ai.validation import _run_tool_check
 
     mock_tool = MagicMock()
+    mock_tool.copy_for_execution.return_value = mock_tool
     mock_tool.check.side_effect = RuntimeError("fail")
     mock_get_tool.return_value = mock_tool
 

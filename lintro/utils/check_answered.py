@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from loguru import logger
 
+from lintro.models.core.result_completeness import is_incomplete_result
 from lintro.models.core.tool_outcome import (
     Checked,
     NoFiles,
@@ -22,11 +23,14 @@ def check_answered(result: ToolResult | None) -> bool:
 
     Returns:
         True for a completed clean check or one reporting real findings.
-        Skips, empty scopes, timeouts (even with partial findings), and
-        execution failures without findings do not answer the check. Reports
-        with parse failures never answer, even when they retain usable findings.
+        Skips, empty scopes and failures without findings do not answer the
+        check. Neither does an incomplete result (#3498): a timeout, a run
+        marked ``execution_failed`` (for example a refused command), an
+        unknown residual, or a report with parse failures never answers,
+        even when it retains usable findings. Its findings are partial, so
+        they can neither confirm nor reject a fix.
     """
-    if result is None or result.parse_failures_count:
+    if result is None or is_incomplete_result(result):
         return False
     try:
         execution = result.outcome.execution
