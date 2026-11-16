@@ -34,6 +34,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
 )
 from lintro.ai.liveness import LivenessResult
+from lintro.ai.providers.batch_shim import refuse_unsafe_batch_argv
 from lintro.ai.providers.cli_capabilities import (
     PROBE_TIMEOUT,
     UNKNOWN_OPTION_PATTERNS,
@@ -350,9 +351,14 @@ class CliTransport(ABC):
 
         Raises:
             AIProviderError: On timeout.
-            AINotAvailableError: When the binary disappears from ``PATH``.
+            AINotAvailableError: When the binary disappears from ``PATH``, or
+                when it is a ``.cmd``/``.bat`` shim and an argument holds a
+                character ``cmd.exe`` would interpret (#3494).
             asyncio.CancelledError: Re-raised after the child is stopped.
         """
+        # Windows runs a batch argv0 through cmd.exe even without a shell, so
+        # this is refused before anything is spawned (#3494).
+        refuse_unsafe_batch_argv(cmd, binary_name=self._binary_name)
         env = os.environ.copy()
         if extra_env:
             env.update(extra_env)

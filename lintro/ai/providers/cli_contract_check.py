@@ -28,7 +28,9 @@ import shutil
 from dataclasses import dataclass
 from enum import StrEnum, auto
 
+from lintro.ai.exceptions import AINotAvailableError
 from lintro.ai.provider_enum import AIProvider
+from lintro.ai.providers.batch_shim import refuse_unsafe_batch_argv
 from lintro.ai.providers.cli_capabilities import PROBE_TIMEOUT
 from lintro.ai.providers.cli_contracts import (
     CliContract,
@@ -203,6 +205,11 @@ async def _probe(*, binary_path: str, args: tuple[str, ...]) -> str | None:
     Raises:
         asyncio.CancelledError: Re-raised after the child is stopped.
     """
+    try:
+        # A batch shim whose path cmd.exe would interpret is not run (#3494).
+        refuse_unsafe_batch_argv([binary_path, *args], binary_name=binary_path)
+    except AINotAvailableError:
+        return None
     try:
         process = await asyncio.create_subprocess_exec(  # nosec B603 - fixed argv from a declared contract, shell=False
             binary_path,

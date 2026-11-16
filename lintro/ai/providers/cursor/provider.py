@@ -56,6 +56,7 @@ from lintro.ai.providers.cursor.sdk_transport import (
 from lintro.ai.raw_response import CLI_ENVELOPE_STAGE, describe_raw_response
 from lintro.ai.token_budget import estimate_tokens
 from lintro.ai.transcript import TranscriptDirection, log_transcript_event
+from lintro.plugins.subprocess_executor import is_batch_command
 
 CURSOR_MIN_TIMEOUT = 600.0
 
@@ -399,6 +400,11 @@ class CursorProvider(BaseAIProvider):
             and self._durable_repo_root is not None
         )
 
+        # On a .cmd/.bat shim the repository path would be parsed by cmd.exe,
+        # and a legal Windows path may hold ``&`` or ``%`` (#3494). There the
+        # child starts in the repository and ``--workspace .`` names it, so
+        # the path never reaches the command line.
+        via_cwd = is_batch_command(self._cli._binary_path)
         cmd = [
             self._cli._binary_path,
             "--print",
@@ -409,7 +415,7 @@ class CursorProvider(BaseAIProvider):
             "--model",
             effective_model,
             "--workspace",
-            effective_root,
+            "." if via_cwd else effective_root,
         ]
 
         candidates: list[OptionalArg] = []
@@ -435,6 +441,7 @@ class CursorProvider(BaseAIProvider):
             optional_args=optional_args,
             input_text=combined_prompt,
             timeout=effective_timeout,
+            cwd=effective_root if via_cwd else None,
         )
         self._cli.check_exit_code(
             result,
