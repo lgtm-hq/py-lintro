@@ -330,17 +330,18 @@ sweep_package() {
 	local query_output=""
 	local versions=""
 
+	if check_run_bound; then
+		echo "Not listing ${pkg}: ${stop_reason}; it resumes next run"
+		unreached_packages+="${pkg} "
+		return
+	fi
+
 	# One TSV line per candidate: <id>\t<updated_at>\t<space-joined tags>
 	# Embed prefix/cutoff via shell interpolation (gh api has no --arg).
 	# Keep stderr out of the TSV payload so diagnostic noise cannot corrupt
 	# the while-read loop (CodeRabbit on #1645).
 	local query_err_file=""
 	query_err_file="$(mktemp)"
-	if check_run_bound; then
-		echo "Not listing ${pkg}: ${stop_reason}; it resumes next run"
-		unreached_packages+="${pkg} "
-		return
-	fi
 	echo "Listing ${pkg} versions"
 	if ! query_output=$(gh api \
 		"orgs/${org}/packages/container/${pkg}/versions?per_page=100" \
