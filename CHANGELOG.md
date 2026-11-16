@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.36] - 2026-11-16
+
+### Fixed
+
+- **plugins**: refuse cmd.exe metacharacters in batch tool arguments (#3491) (c04c4dd)
+
 ## [0.180.35] - 2026-11-16
 
 ### Fixed
