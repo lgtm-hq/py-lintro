@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.181.0] - 2026-11-16
+
+### Added
+
+- **tools**: verify npx cache contents against lockfile integrity (#3490) (6bb01ed)
+
 ## [0.180.37] - 2026-11-16
 
 ### Fixed
