@@ -41,6 +41,7 @@ from lintro.tools.core.node_fallback import (
     notify_registry_fallback_selected,
     npx_runner_options,
 )
+from lintro.utils.path_utils import normalize_command_path
 
 if TYPE_CHECKING:
     from lintro.enums.tool_name import ToolName
@@ -505,7 +506,7 @@ def find_local_node_binary(
             # to PATH or a registry runner with no trace of why.
             logger.debug(f"Skipping non-executable local {binary_name}: {candidate}")
             continue
-        return candidate.as_posix()
+        return normalize_command_path(candidate)
     return None
 
 
@@ -679,7 +680,7 @@ class NodeJSBuilder(CommandBuilder):
 
         tool_path = shutil.which(binary_name)
         if tool_path:
-            posix_path = Path(tool_path).as_posix().replace("\\", "/")
+            posix_path = normalize_command_path(tool_path)
             logger.debug(f"Using {binary_name} from PATH: {posix_path}")
             return [posix_path]
 

@@ -3,9 +3,10 @@
 Small helpers to normalize paths for display consistency and path safety validation.
 """
 
+import os
 from collections.abc import Iterable, Sequence
 from itertools import islice
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from loguru import logger
 
@@ -38,6 +39,37 @@ def absolute_path_without_resolving(path: Path) -> str:
         normalized_parts.append(part)
 
     return str(Path(absolute_path.anchor, *normalized_parts))
+
+
+def normalize_command_path(path: str | Path) -> str:
+    r"""Return a resolved Node command path as the string lintro spawns.
+
+    The one place lintro turns a resolved Node command path (a project-local
+    ``node_modules/.bin`` entry or a ``shutil.which`` hit) into ``cmd[0]``.
+    ``Path.as_posix`` converts separators for the host's own path flavour.
+    Backslashes are replaced only in Windows-shaped input: on Windows, or
+    when the path has a drive or UNC root (``C:\...``, ``\\server\share``),
+    as a ``shutil.which`` result handled on POSIX would. On POSIX ``\`` is
+    an ordinary file-name character, so ``/tmp/a\b/prettier`` is kept as is;
+    turning it into ``/tmp/a/b/prettier`` could name a different binary.
+
+    This is for executable paths only. ``path_filtering`` and ``module_size``
+    normalise strings they compare (exclude-pattern candidates, baseline
+    entries) with a plain replacement instead: ``Path`` would also turn ``""``
+    into ``"."``, drop a leading ``./`` and a trailing ``/`` and collapse
+    ``//``, changing which strings compare equal.
+
+    Args:
+        path: Executable path as resolved.
+
+    Returns:
+        The path with forward slashes for Windows-shaped input, otherwise
+        the host's POSIX form unchanged.
+    """
+    text = Path(path).as_posix()
+    if os.name == "nt" or PureWindowsPath(text).drive:
+        return text.replace("\\", "/")
+    return text
 
 
 def find_file_upward(

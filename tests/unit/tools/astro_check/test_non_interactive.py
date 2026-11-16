@@ -163,12 +163,18 @@ def test_get_astro_command_passes_subprocess_validation_on_windows(
     validate_subprocess_command(cmd)
 
 
-def test_validate_subprocess_command_rejects_windows_backslash_executable() -> None:
-    """Backslash executable paths are rejected; POSIX form is accepted."""
-    with pytest.raises(ValueError, match="Unsafe character"):
-        validate_subprocess_command([r"C:\proj\node_modules\.bin\astro.cmd", "check"])
+def test_validate_subprocess_command_backslash_only_allowed_in_absolute_dirs() -> None:
+    r"""An absolute Windows path's separators pass; a relative backslash does not.
 
+    Only the basename of an absolute argv0 is checked (#2040), so both
+    separator styles of ``C:\proj\...\astro.cmd`` are accepted, while a
+    relative ``node_modules\.bin\astro.cmd`` is still checked whole.
+    """
+    validate_subprocess_command([r"C:\proj\node_modules\.bin\astro.cmd", "check"])
     validate_subprocess_command([r"C:/proj/node_modules/.bin/astro.cmd", "check"])
+
+    with pytest.raises(ValueError, match="Unsafe character"):
+        validate_subprocess_command([r"node_modules\.bin\astro.cmd", "check"])
 
 
 def test_check_windows_shell_shim_falls_back_to_global(

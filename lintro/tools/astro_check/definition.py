@@ -131,8 +131,8 @@ class AstroCheckPlugin(BaseToolPlugin):
         Returns:
             Command arguments for astro check.
         """
-        # ``_get_executable_command`` returns a POSIX path for a local binary:
-        # backslashes in cmd[0] fail validate_subprocess_command.
+        # ``_get_executable_command`` returns a forward-slash path for a local
+        # binary (``normalize_command_path``), which is what lintro spawns.
         return [
             *self._get_executable_command(tool_name="astro-check", cwd=cwd),
             "check",
