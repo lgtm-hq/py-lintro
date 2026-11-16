@@ -15,7 +15,9 @@ loudly. Real-runner coverage is in
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import time
 from pathlib import Path
 
 import pytest
@@ -23,7 +25,7 @@ from assertpy import assert_that
 
 from lintro._tool_versions import get_tool_version
 from lintro.plugins.execution_preparation import verify_tool_version
-from lintro.tools.core import snapshots
+from lintro.tools.core import npx_cache, snapshots
 from lintro.tools.core.node_fallback import (
     NPX_ISOLATION_FLAGS,
     npx_pin_refusal,
@@ -33,6 +35,7 @@ from lintro.tools.core.node_fallback import (
 from lintro.tools.core.npx_cache import npx_cache_dir
 from lintro.tools.prettier.definition import PrettierPlugin
 from lintro.utils import file_cache
+from tests.npx_entries import tool_package, write_npx_entry
 
 _PIN = get_tool_version("prettier") or ""
 
@@ -586,3 +589,69 @@ def test_bunx_keeps_its_pin_beside_a_node_modules_tree(
     assert_that(snapshot.command[0]).is_equal_to("bunx")
     assert_that(snapshot.available).is_true()
     assert_that(snapshot.version).is_equal_to(_PIN)
+
+
+# ---------------------------------------------------------------------------
+# What the gate leaves to the spawn-time check (#3406)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "lock_age",
+    [-3600.0, 3600.0],
+    ids=["dated-in-the-future", "abandoned"],
+)
+def test_npm_lock_on_an_entry_never_makes_the_pin_unavailable(
+    clean_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    lock_age: float,
+) -> None:
+    """A lock the gate cannot take is the spawn check's to wait for or refuse.
+
+    Refusing here would report the tool as unavailable and skip it; the
+    spawn-time check fails the run instead when the lock still blocks it.
+
+    Args:
+        clean_dir: Project without npm state above it.
+        monkeypatch: Shortens the gate's wait.
+        lock_age: Seconds since the lock was last touched (negative: future).
+    """
+    monkeypatch.setattr(npx_cache, "_LOCK_WAIT_SECONDS", 0.2)
+    entry = write_npx_entry(npx_cache_dir(_SPEC), [tool_package(version=_PIN)])
+    lock = entry / "concurrency.lock"
+    lock.mkdir()
+    touched = time.time() - lock_age
+    os.utime(lock, (touched, touched))
+
+    assert_that(_cache_refusal(clean_dir)).is_none()
+    assert_that(lock.is_dir()).is_true()
+
+
+def test_node_modules_above_both_project_and_cache_is_left_to_the_spawn(
+    clean_dir: Path,
+) -> None:
+    """``~/node_modules`` above a project in HOME fails the run, not the gate.
+
+    The spawn-time check refuses it before npx starts, as an execution
+    failure naming the directory; here it would only skip the tool.
+
+    Args:
+        clean_dir: Project without npm state above it.
+    """
+    shared = Path(os.path.realpath(clean_dir.parent)) / "node_modules"
+    shared.mkdir()
+
+    assert_that(_cache_refusal(clean_dir)).is_none()
+
+
+def test_node_modules_only_above_the_project_is_still_refused(
+    clean_dir: Path,
+) -> None:
+    """A tree npx could reuse that lintro's cache does not sit under.
+
+    Args:
+        clean_dir: Project without npm state above it.
+    """
+    (clean_dir / "node_modules").mkdir()
+
+    assert_that(_cache_refusal(clean_dir)).contains("a node_modules tree exists")

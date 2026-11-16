@@ -9,7 +9,6 @@ them out of the executor lets the execute phase read as orchestration only
 
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import replace
 from typing import TYPE_CHECKING
@@ -27,7 +26,6 @@ from lintro.models.core.tool_outcome import (
     Unavailable,
 )
 from lintro.models.core.tool_result import ToolResult
-from lintro.utils.npx_call import take_npx_refusals
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -106,46 +104,6 @@ def executed_command(tool: BaseToolPlugin, result: ToolResult) -> list[str] | No
         return list(tool._get_executable_command(tool.definition.name, cwd=result.cwd))
     except (OSError, ValueError, RuntimeError, AttributeError):
         return None
-
-
-def mark_npx_refusals(
-    tool: BaseToolPlugin,
-    result: ToolResult,
-    *,
-    fix: bool = False,
-) -> ToolResult:
-    """Report a run lintro's npx integrity check refused as an execution failure.
-
-    The check raises :class:`~lintro.utils.npx_integrity.NpxIntegrityError`
-    before, or after, an npx spawn whose cache cannot be trusted, and records
-    why. A tool that catches the error returns an ordinary failed result, so
-    the record is taken here: the result keeps any findings that really ran,
-    but is marked ``execution_failed`` with incomplete findings and the
-    refusal as its reason (#3406). Never a pass, and never a skip.
-
-    Args:
-        tool: Plugin that produced *result*.
-        result: Its result.
-        fix: Whether the run was a fix, whose accounting is then unmeasured.
-
-    Returns:
-        The result, marked when a refusal was recorded for the tool's cache.
-    """
-    # Taken even from a passing result, so a refusal can never linger and
-    # be pinned on a later run of the same tool.
-    try:
-        command = list(
-            tool._get_executable_command(
-                tool.definition.name,
-                cwd=result.cwd or os.getcwd(),
-            ),
-        )
-        refusals = take_npx_refusals(command)
-    except (OSError, ValueError, RuntimeError, AttributeError, TypeError):
-        return result
-    if not refusals:
-        return result
-    return _refused_result(result, refusals[-1], fix=fix)
 
 
 def _runner_failure_reason(command: Sequence[str], output: str) -> str | None:

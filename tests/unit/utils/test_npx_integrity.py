@@ -15,22 +15,18 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from assertpy import assert_that
 from loguru import logger
 
 from lintro.models.core.subprocess_result import SubprocessResult
-from lintro.models.core.tool_result import ToolResult
-from lintro.parsers.base_issue import BaseIssue
 from lintro.plugins.subprocess_executor import (
     run_subprocess,
     run_subprocess_streaming,
 )
 from lintro.tools.core.version_parsing import _run_probe_with_retry
 from lintro.utils import npx_integrity
-from lintro.utils.execution.result_shaping import mark_npx_refusals
 from lintro.utils.npx_call import npx_shell_safe_command
 from lintro.utils.npx_integrity import (
     NpxIntegrityError,
@@ -630,8 +626,55 @@ def test_node_modules_node_would_search_is_refused_with_its_path(
     assert_that(str(refusal.value)).contains(
         f": {planted}.",
         "Remove or rename that directory",
-        "lintro did not run the tool",
+        "Lintro did not run the tool",
     ).does_not_contain("reinstalls")
+
+
+@posix_only
+def test_node_modules_above_a_cold_cache_is_refused_before_npx_starts(
+    cache: Path,
+    tmp_path: Path,
+) -> None:
+    """With nothing installed yet, npx never starts beside such a directory.
+
+    Args:
+        cache: Per-pin npm cache, still empty.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    (tmp_path / "node_modules").mkdir()
+    spawned: list[list[str]] = []
+
+    with (
+        pytest.raises(NpxIntegrityError, match="Lintro did not run the tool"),
+        npx_shell_safe_command(_command(cache)) as argv,
+    ):
+        spawned.append(argv)
+
+    assert_that(spawned).is_empty()
+
+
+@posix_only
+def test_node_modules_appearing_during_the_run_is_reported_as_run(
+    cache: Path,
+    tmp_path: Path,
+) -> None:
+    """After the run the message says npx ran the tool, not that it did not.
+
+    Args:
+        cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    _install(cache)
+
+    with (
+        pytest.raises(NpxIntegrityError) as refusal,
+        npx_shell_safe_command(_command(cache)),
+    ):
+        (tmp_path / "node_modules").mkdir()
+
+    assert_that(str(refusal.value)).contains(
+        "Npx ran the tool, but its findings cannot be trusted",
+    ).does_not_contain("did not run")
 
 
 @posix_only
@@ -699,8 +742,8 @@ def test_a_held_lock_is_waited_for_once_within_the_tool_timeout(
 
 
 @posix_only
-def test_a_lock_touched_in_the_future_is_treated_as_stale(cache: Path) -> None:
-    """A skewed clock cannot keep a lock fresh for ever.
+def test_a_lock_dated_in_the_future_fails_the_run_at_once(cache: Path) -> None:
+    """Npm would wait on it for ever; lintro refuses it without waiting.
 
     Args:
         cache: Per-pin npm cache.
@@ -712,102 +755,14 @@ def test_a_lock_touched_in_the_future_is_treated_as_stale(cache: Path) -> None:
     os.utime(lock, (future, future))
     started = time.monotonic()
 
-    state = verified_cache(cache, timeout=30)
+    with pytest.raises(NpxIntegrityError) as refusal:
+        verified_cache(cache, timeout=30)
 
     assert_that(time.monotonic() - started).is_less_than(5)
-    assert_that(list(state.entries)).is_equal_to([entry.name])
-
-
-@posix_only
-@pytest.mark.parametrize("fix", [False, True], ids=["check", "fix"])
-def test_a_refusal_the_tool_caught_still_fails_the_run(cache: Path, fix: bool) -> None:
-    """A tool's own handler cannot turn a refusal into a plain failure.
-
-    prettier, oxlint and oxfmt run through the batch runner, which catches
-    the error and returns an ordinary failed result. The executor marks it
-    from the recorded refusal, keeping the findings that really ran; in a
-    fix run what remains is unmeasured.
-
-    Args:
-        cache: Per-pin npm cache.
-        fix: Whether the refused run was a fix.
-    """
-    entry = _install(cache)
-    _replace_file(_package(entry) / "bin.js", "console.log('[]');\n")
-    with pytest.raises(NpxIntegrityError):
-        verified_cache(cache)
-    tool = SimpleNamespace(
-        definition=SimpleNamespace(name="prettier"),
-        _get_executable_command=lambda _name, cwd: _command(cache),
+    assert_that(str(refusal.value)).contains(
+        "in the future",
+        f"Delete {lock} once no npm or npx process is running",
     )
-    issue = BaseIssue(file="a.js", line=1, message="real finding")
-    caught = ToolResult(
-        name="prettier",
-        success=False,
-        output="Prettier execution failed",
-        issues_count=1,
-        issues=[issue],
-        cwd=str(cache),
-    )
-
-    marked = mark_npx_refusals(tool, caught, fix=fix)  # type: ignore[arg-type]
-    again = mark_npx_refusals(tool, caught, fix=fix)  # type: ignore[arg-type]
-
-    assert_that(marked.execution_failed).is_true()
-    assert_that(marked.findings_complete).is_false()
-    assert_that(marked.issues).is_equal_to([issue])
-    assert_that(marked.output).contains("bin.js changed", "did not run it")
-    assert_that(again.execution_failed).is_false()
-    assert_that(marked.residual_unknown).is_equal_to(fix)
-
-
-@posix_only
-def test_a_refusal_is_never_left_for_a_later_run(cache: Path) -> None:
-    """A passing result still takes its cache's refusal, and is failed by it.
-
-    Args:
-        cache: Per-pin npm cache.
-    """
-    entry = _install(cache)
-    _replace_file(_package(entry) / "bin.js", "console.log('[]');\n")
-    with pytest.raises(NpxIntegrityError):
-        verified_cache(cache)
-    tool = SimpleNamespace(
-        definition=SimpleNamespace(name="prettier"),
-        _get_executable_command=lambda _name, cwd: _command(cache),
-    )
-    passing = ToolResult(name="prettier", success=True, output="", issues_count=0)
-
-    marked = mark_npx_refusals(tool, passing)  # type: ignore[arg-type]
-    later = mark_npx_refusals(tool, passing)  # type: ignore[arg-type]
-
-    assert_that(marked.execution_failed).is_true()
-    assert_that(marked.success).is_false()
-    assert_that(later.execution_failed).is_false()
-
-
-@posix_only
-def test_no_home_directory_skips_only_the_home_folders(
-    cache: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Without a home directory the check still runs, as a refusal or a pass.
-
-    Args:
-        cache: Per-pin npm cache.
-        monkeypatch: Makes ``Path.home`` fail as it does with no ``HOME`` and
-            no passwd entry.
-    """
-    _install(cache)
-    (cache / "node_modules").mkdir()
-
-    def no_home() -> Path:
-        raise RuntimeError("Could not determine home directory.")
-
-    monkeypatch.setattr(Path, "home", staticmethod(no_home))
-
-    with pytest.raises(NpxIntegrityError, match="Remove or rename"):
-        verified_cache(cache)
 
 
 @posix_only

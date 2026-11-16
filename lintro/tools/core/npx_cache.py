@@ -70,7 +70,12 @@ from pathlib import Path
 
 from loguru import logger
 
-from lintro.utils.npx_integrity import STALE_PREFIX, is_repairable, verify_entry
+from lintro.utils.npx_integrity import (
+    FUTURE_LOCK_SECONDS,
+    STALE_PREFIX,
+    is_repairable,
+    verify_entry,
+)
 
 #: npm treats a lock whose mtime is older than this as abandoned.
 _STALE_LOCK_SECONDS: float = 60.0
@@ -102,6 +107,15 @@ _AT_FDCWD: int = -100
 
 class NpxCacheError(Exception):
     """lintro's npm cache cannot be trusted or repaired."""
+
+
+class NpxCacheLockError(NpxCacheError):
+    """Another process's npm lock stopped the repair of one entry.
+
+    lintro never removes such a lock. The pin gate does not refuse the tool
+    over it: the spawn-time check waits for the lock within the tool's
+    timeout and verifies the entry, or fails the run (#3406).
+    """
 
 
 def npx_cache_root() -> Path:
@@ -280,8 +294,8 @@ def _acquire(lock: Path) -> _LockId:
         The identity of the lock directory created, for :func:`_release`.
 
     Raises:
-        NpxCacheError: Another process's lock is abandoned, or stayed held
-            past the wait. lintro never removes it.
+        NpxCacheLockError: Another process's lock is abandoned, dated in the
+            future, or stayed held past the wait. lintro never removes it.
     """
     deadline = time.monotonic() + _LOCK_WAIT_SECONDS
     while True:
@@ -296,9 +310,13 @@ def _acquire(lock: Path) -> _LockId:
         except FileNotFoundError:
             continue
         if age > _STALE_LOCK_SECONDS:
-            raise NpxCacheError(_not_ours(lock, "looks abandoned")) from None
+            raise NpxCacheLockError(_not_ours(lock, "looks abandoned")) from None
+        if age < -FUTURE_LOCK_SECONDS:
+            raise NpxCacheLockError(
+                _not_ours(lock, "is dated in the future"),
+            ) from None
         if time.monotonic() > deadline:
-            raise NpxCacheError(_not_ours(lock, "stayed locked")) from None
+            raise NpxCacheLockError(_not_ours(lock, "stayed locked")) from None
         time.sleep(0.1)
 
 

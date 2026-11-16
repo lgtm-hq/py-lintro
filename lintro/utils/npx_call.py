@@ -63,7 +63,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from lintro.utils.npx_integrity import check_unchanged, take_refusals, verified_cache
+from lintro.utils.npx_integrity import check_unchanged, verified_cache
 
 #: npx/bunx flags that take the package spec as the next argument.
 PACKAGE_FLAGS: frozenset[str] = frozenset({"-p", "--package"})
@@ -287,20 +287,6 @@ def npx_cache_option(cmd: Sequence[str]) -> Path | None:
         return None
     caches = [arg for arg in cmd[1:index] if arg.startswith(NPX_CACHE_OPTION)]
     return Path(caches[-1].removeprefix(NPX_CACHE_OPTION)) if caches else None
-
-
-def take_npx_refusals(cmd: Sequence[str] | None) -> list[str]:
-    """Return and forget the integrity refusals raised for a command's cache.
-
-    Args:
-        cmd: A command lintro resolved for a tool, or None.
-
-    Returns:
-        The refusal messages recorded for its ``--cache`` in this process,
-        oldest first; empty for any other command.
-    """
-    cache = npx_cache_option(cmd) if cmd else None
-    return take_refusals(cache) if cache is not None else []
 
 
 @contextlib.contextmanager

@@ -67,11 +67,11 @@ mistaken for a broken one; the wait is logged and bounded by the tool's
 timeout. After the process exits, every entry and both directories must be as
 they were before the spawn. An entry that appeared during the run, which is
 npx's first install of the pin, is verified then. Any failure raises
-:class:`NpxIntegrityError` with a message naming its cause and remedy, and is
-recorded for the executor (:func:`take_refusals`), so it is reported as an
-execution failure with incomplete findings even when the tool catches the
-error itself. It is never treated as a pass or a skip, and never produces
-findings.
+:class:`NpxIntegrityError` with a message naming its cause and remedy. It
+is an ``UnsafeCommandError``: the plugin records it on its per-run
+``command_refusal``, so it is reported as an execution failure with
+incomplete findings even when the tool catches the error itself. It is
+never treated as a pass or a skip, and never produces findings.
 
 **Limits.** The lockfile and the tarballs live in the same user-writable
 cache as the install. This check catches a partial change, such as the one in
@@ -110,6 +110,8 @@ from pathlib import Path, PurePosixPath
 
 from loguru import logger
 
+from lintro.exceptions.errors import UnsafeCommandError
+
 #: Prefix lintro gives entries and locks it has set aside before deletion.
 STALE_PREFIX: str = ".lintro-stale-"
 
@@ -123,9 +125,10 @@ _STALE_LOCK_SECONDS: float = 60.0
 #: shorter, bounds it too.
 _INSTALL_WAIT_SECONDS: float = 300.0
 
-#: A lock touched further in the future than this is treated as stale: a
-#: clock skewed that far would otherwise keep it fresh for ever.
-_FUTURE_LOCK_SECONDS: float = 5.0
+#: A lock touched further in the future than this is refused: npm calls a
+#: lock stale only once its mtime is 60 seconds in the past, so it would wait
+#: on this one for ever.
+FUTURE_LOCK_SECONDS: float = 5.0
 
 #: ``cmd-shim`` releases whose shims lintro recognises: 7.0.0 and 8.0.0
 #: (npm 10 and 11) write the same text as each other, and 9.x (npm 12)
@@ -229,13 +232,15 @@ _VERIFIED: dict[tuple[str, str], Fingerprint] = {}
 _VERIFIED_LOCK = threading.Lock()
 
 
-#: Refusal messages raised for each resolved cache, until the executor that
-#: ran the tool takes them (:func:`take_refusals`).
-_REFUSALS: dict[str, list[str]] = {}
+class NpxIntegrityError(UnsafeCommandError):
+    """lintro refuses an npx fallback run whose cache it cannot trust.
 
-
-class NpxIntegrityError(RuntimeError):
-    """What npx would run from lintro's cache does not match its lockfile."""
+    An :class:`~lintro.exceptions.errors.UnsafeCommandError`, so the plugin
+    that spawned the command records it on ``command_refusal`` for the run's
+    own copy (``BaseToolPlugin.copy_for_execution`` clears it), and every
+    caller reports that run as an execution failure however the plugin
+    handled the error (#3486, #3406).
+    """
 
 
 class Refusal(str):
@@ -269,38 +274,6 @@ def is_repairable(reason: str) -> bool:
         False for a :class:`Refusal`, True for any other reason.
     """
     return not isinstance(reason, Refusal)
-
-
-def _recorded(cache: Path, message: str) -> str:
-    """Record a refusal for *cache* and return its message, to raise.
-
-    Args:
-        cache: The per-pin cache, resolved.
-        message: The complete, cause-specific message.
-
-    Returns:
-        *message*.
-    """
-    with _VERIFIED_LOCK:
-        _REFUSALS.setdefault(str(cache), []).append(message)
-    return message
-
-
-def take_refusals(cache: Path) -> list[str]:
-    """Return and forget the refusals raised for a cache in this process.
-
-    A tool may catch :class:`NpxIntegrityError` and return an ordinary failed
-    result; the executor takes these to report that result as an execution
-    failure instead (``lintro.utils.execution.result_shaping``).
-
-    Args:
-        cache: The ``--cache`` an npx command carries.
-
-    Returns:
-        The messages, oldest first.
-    """
-    with _VERIFIED_LOCK:
-        return _REFUSALS.pop(os.path.realpath(cache), [])
 
 
 @dataclass(frozen=True)
@@ -1311,31 +1284,50 @@ def ancestor_modules(entry: Path) -> list[Path]:
         directory / "node_modules"
         for directory in Path(os.path.realpath(entry)).parents
     ]
-    try:
-        home = Path.home()
-    except RuntimeError:
-        home = None  # No home directory, so Node has no home folders either.
-    if home is not None:
-        candidates += [home / ".node_modules", home / ".node_libraries"]
+    home = Path.home()
+    candidates += [home / ".node_modules", home / ".node_libraries"]
     return [candidate for candidate in candidates if os.path.lexists(candidate)]
 
 
-def _ancestor_message(entry: Path, found: list[Path]) -> str:
-    """Explain a refusal over ``node_modules`` directories above an entry.
+def _outcome(*, ran: bool) -> str:
+    """Say what happened to the tool, for a refusal's message.
 
     Args:
-        entry: The ``_npx`` entry.
-        found: The directories, from :func:`ancestor_modules`.
+        ran: Whether npx already ran the tool.
 
     Returns:
-        The message, naming every directory and how to clear it.
+        A sentence fragment.
     """
+    if ran:
+        return "npx ran the tool, but its findings cannot be trusted"
+    return "lintro did not run the tool, so its findings are incomplete"
+
+
+def _modules_above(cache: Path, *, ran: bool) -> None:
+    """Refuse when Node could load packages from above any entry of *cache*.
+
+    Every entry, and any entry npx is about to install, sits in ``_npx``, so
+    the directories above ``_npx/<entry>`` are the same for all of them and
+    are checked once, before the spawn as well as after it.
+
+    Args:
+        cache: The per-pin cache, resolved.
+        ran: Whether npx already ran the tool.
+
+    Raises:
+        NpxIntegrityError: Such a ``node_modules`` exists; the message names
+            every one and how to clear it.
+    """
+    found = ancestor_modules(cache / "_npx" / "entry")
+    if not found:
+        return
     names = ", ".join(str(path) for path in found)
     which = "that directory" if len(found) == 1 else "those directories"
-    return (
+    outcome = _outcome(ran=ran)
+    raise NpxIntegrityError(
         f"Node could load packages for lintro's npx fallback from outside its "
-        f"npm cache entry {entry}: {names}. lintro did not run the tool, so its "
-        f"findings are incomplete. Remove or rename {which} and run lintro again."
+        f"npm cache {cache}: {names}. {outcome[0].upper()}{outcome[1:]}. Remove "
+        f"or rename {which} and run lintro again.",
     )
 
 
@@ -1442,9 +1434,10 @@ def _await_npm(entry: Path, cache: Path, limit: float) -> None:
 
     A concurrent npx installing or checking the pin holds the lock; its
     install is checked once the lock is released. A lock npm itself would
-    call stale (untouched for 60 seconds, or touched in the future past a
-    small allowance for clock skew) is not waited for: npx reclaims it, and
-    the entry is checked as it is.
+    call stale (untouched for 60 seconds) is not waited for: npx reclaims it,
+    and the entry is checked as it is. A lock touched in the future, past a
+    small allowance for clock skew, is refused at once: npm would never call
+    it stale.
 
     Args:
         entry: The ``_npx`` entry.
@@ -1452,7 +1445,8 @@ def _await_npm(entry: Path, cache: Path, limit: float) -> None:
         limit: Longest wait, in seconds.
 
     Raises:
-        NpxIntegrityError: The lock was still held when *limit* ran out.
+        NpxIntegrityError: The lock was still held when *limit* ran out, or
+            is dated in the future.
     """
     lock = entry / NPM_LOCK_NAME
     started = time.monotonic()
@@ -1462,18 +1456,22 @@ def _await_npm(entry: Path, cache: Path, limit: float) -> None:
             age = time.time() - os.lstat(lock).st_mtime
         except FileNotFoundError:
             return
-        if age > _STALE_LOCK_SECONDS or age < -_FUTURE_LOCK_SECONDS:
+        if age < -FUTURE_LOCK_SECONDS:
+            raise NpxIntegrityError(
+                f"npm's lock {lock} on lintro's npm cache entry {entry} is dated "
+                f"{-age:.0f}s in the future, so npm would wait on it for ever. "
+                "lintro did not run the tool, so its findings are incomplete. "
+                f"Delete {lock} once no npm or npx process is running.",
+            )
+        if age > _STALE_LOCK_SECONDS:
             return
         waited = time.monotonic() - started
         if waited >= limit:
             raise NpxIntegrityError(
-                _recorded(
-                    cache,
-                    f"npm's lock {lock} on lintro's npm cache entry {entry} stayed "
-                    f"held for {waited:.0f}s, so lintro did not run the tool and its "
-                    "findings are incomplete. Run lintro again once the other npm or "
-                    f"npx process finishes, or delete {lock} once none is running.",
-                ),
+                f"npm's lock {lock} on lintro's npm cache entry {entry} stayed "
+                f"held for {waited:.0f}s, so lintro did not run the tool and its "
+                "findings are incomplete. Run lintro again once the other npm or "
+                f"npx process finishes, or delete {lock} once none is running.",
             )
         if not announced:
             announced = True
@@ -1491,7 +1489,7 @@ def _verified(
     *,
     fresh: bool,
 ) -> Fingerprint:
-    """Verify an entry and its surroundings, or refuse.
+    """Verify an entry, or refuse.
 
     Args:
         entry: The ``_npx`` entry, its npm lock already waited for.
@@ -1508,19 +1506,17 @@ def _verified(
     result = verify_entry(entry, cache, npm_cache=npm_cache)
     if isinstance(result, str):
         raise NpxIntegrityError(
-            _recorded(cache, _content_message(entry, result, fresh=fresh)),
+            _content_message(entry, result, fresh=fresh),
         )
-    found = ancestor_modules(entry)
-    if found:
-        raise NpxIntegrityError(_recorded(cache, _ancestor_message(entry, found)))
     return result
 
 
-def _entries(cache: Path) -> list[Path]:
-    """List a cache's entries, recording a refusal if ``_npx`` is unusable.
+def _entries(cache: Path, *, ran: bool) -> list[Path]:
+    """List a cache's entries, refusing if ``_npx`` is unusable.
 
     Args:
         cache: The per-pin cache, resolved.
+        ran: Whether npx already ran the tool.
 
     Returns:
         The entries.
@@ -1531,9 +1527,7 @@ def _entries(cache: Path) -> list[Path]:
     try:
         return cache_entries(cache)
     except NpxIntegrityError as exc:
-        raise NpxIntegrityError(
-            _recorded(cache, f"{exc}; lintro did not run the tool"),
-        ) from exc
+        raise NpxIntegrityError(f"{exc}; {_outcome(ran=ran)}") from exc
 
 
 def verified_cache(cache: Path, *, timeout: float | None = None) -> CacheState:
@@ -1553,11 +1547,13 @@ def verified_cache(cache: Path, *, timeout: float | None = None) -> CacheState:
 
     Raises:
         NpxIntegrityError: An entry, or its surroundings, cannot be trusted,
-            or the cache changed during the check. The message is also
-            recorded for :func:`take_refusals`.
+            or the cache changed during the check.
     """
     real = Path(os.path.realpath(cache))
-    listed = _entries(real)
+    # Checked even on a cold cache, so npx never starts beside such a
+    # directory, whatever it is about to install.
+    _modules_above(real, ran=False)
+    listed = _entries(real, ran=False)
     limit = _wait_limit(timeout)
     for entry in listed:
         _await_npm(entry, real, limit)
@@ -1567,7 +1563,7 @@ def verified_cache(cache: Path, *, timeout: float | None = None) -> CacheState:
     }
     if entries and _directory_rows(real) != directories:
         raise NpxIntegrityError(
-            _recorded(real, _changed_message(f"lintro's npm cache {real}")),
+            _changed_message(f"lintro's npm cache {real}"),
         )
     return CacheState(entries=entries, directories=directories)
 
@@ -1596,16 +1592,12 @@ def check_unchanged(
     Raises:
         NpxIntegrityError: An entry or the cache changed during the run, a new
             entry does not match its lockfile, or a ``node_modules`` appeared
-            above an entry. The message is also recorded for
-            :func:`take_refusals`.
+            above an entry.
     """
     real = Path(os.path.realpath(cache))
     if before.entries and _directory_rows(real) != before.directories:
         raise NpxIntegrityError(
-            _recorded(
-                real,
-                _changed_message(f"lintro's npm cache {real} (an entry was moved)"),
-            ),
+            _changed_message(f"lintro's npm cache {real} (an entry was moved)"),
         )
     for name, fingerprint in before.entries.items():
         entry = real / "_npx" / name
@@ -1615,14 +1607,11 @@ def check_unchanged(
             unchanged = False
         if not unchanged:
             raise NpxIntegrityError(
-                _recorded(real, _changed_message(f"lintro's npm cache entry {entry}")),
+                _changed_message(f"lintro's npm cache entry {entry}"),
             )
     limit = _wait_limit(timeout)
-    for entry in _entries(real):
+    for entry in _entries(real, ran=True):
         if entry.name not in before.entries:
             _await_npm(entry, real, limit)
             _verified(entry, real, cache, fresh=True)
-            continue
-        found = ancestor_modules(entry)
-        if found:
-            raise NpxIntegrityError(_recorded(real, _ancestor_message(entry, found)))
+    _modules_above(real, ran=True)

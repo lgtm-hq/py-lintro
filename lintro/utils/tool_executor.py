@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from lintro.enums.action import Action, normalize_action
+from lintro.exceptions.errors import UnsafeCommandError
 from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools import tool_manager, verify_pass
@@ -35,7 +36,6 @@ from lintro.utils.execution.parallel_executor import run_tools_parallel
 from lintro.utils.execution.result_shaping import (
     classify_runner_failure,
     executed_command,
-    mark_npx_refusals,
     mark_refused_command,
 )
 from lintro.utils.execution.result_shaping import (
@@ -349,7 +349,6 @@ def _execute_tools_sequential(
             # Reject them before any consumer
             # (including the live callback) can lose the rest of the run.
             ToolResult.validate_outcome(result)
-            result = mark_npx_refusals(tool, result, fix=ctx.action == Action.FIX)
             result = classify_runner_failure(
                 result,
                 command=executed_command(tool, result),
@@ -371,7 +370,12 @@ def _execute_tools_sequential(
             # Includes invalid plugin result collections and legacy read-only
             # fixable properties, even if a plugin bypassed API negotiation.
             # Log full exception with traceback to debug.log via loguru
-            loguru_logger.exception(f"Error running {tool_name}")
+            if isinstance(e, UnsafeCommandError):
+                # An expected refusal: its one-line reason is the report, so
+                # the traceback goes to the debug log only.
+                loguru_logger.opt(exception=e).debug(f"Error running {tool_name}")
+            else:
+                loguru_logger.exception(f"Error running {tool_name}")
             # Show user-friendly error message on console
             logger.console_output(f"Error running {tool_name}: {e}")
 

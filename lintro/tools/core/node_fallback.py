@@ -201,6 +201,7 @@ def _cache_reason(
     """
     from lintro.tools.core.npx_cache import (
         NpxCacheError,
+        NpxCacheLockError,
         npx_cache_dir,
         repair_npx_cache,
     )
@@ -217,6 +218,11 @@ def _cache_reason(
             binary=command[-1],
             pathsep=pathsep,
         )
+    except NpxCacheLockError as exc:
+        # Not a reason to skip the tool: the spawn-time check waits for the
+        # lock within the tool's timeout and verifies the entry, or fails the
+        # run as an execution failure (#3406).
+        logger.warning(f"{exc} The npx run checks the entry itself first.")
     except (NpxCacheError, OSError) as exc:
         return f"lintro's npm cache cannot be trusted ({exc})"
     return None
@@ -242,12 +248,21 @@ def _workspace_env_reason(env: Mapping[str, str]) -> str | None:
     return None
 
 
-def _project_reason(cwd: Path, package: str) -> str | None:
+def _project_reason(
+    cwd: Path,
+    package: str,
+    *,
+    checked_at_spawn: frozenset[Path] = frozenset(),
+) -> str | None:
     """Refuse when npm's project tree could already hold something to run.
 
     Args:
         cwd: Directory npx would run in.
         package: npm package the spec names.
+        checked_at_spawn: Directories whose ``node_modules`` the spawn-time
+            check of lintro's npx cache refuses itself, before npx starts and
+            as an execution failure (#3406); they are not refused here, where
+            a refusal would skip the tool.
 
     Returns:
         Why npx cannot be trusted, or None.
@@ -255,7 +270,7 @@ def _project_reason(cwd: Path, package: str) -> str | None:
     origin = cwd.resolve()
     for directory in (origin, *origin.parents):
         tree = directory / "node_modules"
-        if tree.exists():
+        if tree.exists() and directory not in checked_at_spawn:
             return f"a node_modules tree exists at {tree.as_posix()}"
         manifest = directory / "package.json"
         if not manifest.exists():
@@ -272,6 +287,30 @@ def _project_reason(cwd: Path, package: str) -> str | None:
         if data.get("name") == package:
             return f"{manifest.as_posix()} is the {package} package itself"
     return None
+
+
+def _spawn_checked_directories(
+    package: str,
+    pin: str,
+    command: Sequence[str] | None,
+) -> frozenset[Path]:
+    """Return the directories the npx spawn check refuses ``node_modules`` in.
+
+    Args:
+        package: npm package the spec names.
+        pin: Exact pinned version.
+        command: The generated npx command, or None when it is not known.
+
+    Returns:
+        Every directory above lintro's ``_npx`` for the pin, and ``_npx``
+        itself, when *command* runs from that cache; otherwise none.
+    """
+    from lintro.tools.core.npx_cache import npx_cache_dir
+
+    if command is None:
+        return frozenset()
+    npx_root = Path(os.path.realpath(npx_cache_dir(f"{package}@{pin}"))) / "_npx"
+    return frozenset((npx_root, *npx_root.parents))
 
 
 def npx_pin_refusal(
@@ -322,7 +361,11 @@ def npx_pin_refusal(
     """
     env = os.environ if environ is None else environ
     reason = (
-        _project_reason(cwd, package)
+        _project_reason(
+            cwd,
+            package,
+            checked_at_spawn=_spawn_checked_directories(package, pin, command),
+        )
         or _workspace_env_reason(env)
         or (
             _cache_reason(command, package=package, pin=pin, pathsep=pathsep)

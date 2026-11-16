@@ -1531,9 +1531,12 @@ Rationale:
    `node_modules` above it, up to the filesystem root, and then in `~/.node_modules` and
    `~/.node_libraries`. Which requests a tool makes cannot be known in advance, so if
    any of those directories exists, for example a stray `~/node_modules` or a
-   `/node_modules` in a container, the npx fallback is refused for every tool. The
-   message names each directory: remove or rename it and run Lintro again. Lintro's own
-   Docker images have none.
+   `/node_modules` in a container, the npx fallback is refused for every tool, before
+   npx starts, as an execution failure with a non-zero exit (never as an unavailable
+   tool). This holds even when the project itself sits below that directory, as a
+   project in your home folder does below `~/node_modules`. The message names each
+   directory: remove or rename it and run Lintro again. Lintro's own Docker images have
+   none.
 
    The check is repeated right before each npx spawn and is bound to the run. Lintro
    records the inode, size, mtime and ctime of everything in the entry. An entry whose
@@ -1546,15 +1549,18 @@ Rationale:
    as an execution failure with a non-zero exit, never as unavailable or skipped, even
    when the tool's own error handling catches the refusal. An entry whose npm lock is
    held, because another npx is installing it, is waited for once, for at most the
-   tool's timeout or five minutes, whichever is shorter, with a warning naming the lock;
-   a lock npm would call stale, or one touched in the future, is not waited for. If the
-   lock is still held when the wait ends, the run is an execution failure naming the
-   lock. On a cold cache, npx installs the pin during the run (npm checks the download
-   against the registry's integrity) and Lintro verifies the new entry once the run
-   ends. That first run has nothing earlier to compare with, so a byte-identical swap
-   made and undone while it runs is not detected; npx installs and runs in one process.
-   On a warm cache the check costs about 0.1–0.25 s the first time in a process for
-   html-validate (13 packages, 944 files) and 10–30 ms per spawn after that.
+   tool's timeout or five minutes, whichever is shorter, with a warning naming the lock.
+   A lock npm would call stale (untouched for 60 seconds) is not waited for: npx
+   reclaims it. A lock dated in the future fails the run at once, since npm would wait
+   on it for ever. If the lock is still held when the wait ends, the run is an execution
+   failure naming the lock. A lock never makes the tool unavailable: the cache repair
+   before the run skips an entry it cannot lock and leaves it to this check. On a cold
+   cache, npx installs the pin during the run (npm checks the download against the
+   registry's integrity) and Lintro verifies the new entry once the run ends. That first
+   run has nothing earlier to compare with, so a byte-identical swap made and undone
+   while it runs is not detected; npx installs and runs in one process. On a warm cache
+   the check costs about 0.1–0.25 s the first time in a process for html-validate (13
+   packages, 944 files) and 10–30 ms per spawn after that.
 
    **Trust model.** Lintro's npx cache (`~/.lintro/cache/npx/<package>@<pinned>`) is
    trusted the same way as Lintro's own installation. The lockfile and the cached

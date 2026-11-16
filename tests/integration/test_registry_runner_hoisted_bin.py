@@ -1521,6 +1521,132 @@ def test_stray_home_node_modules_fails_the_run_and_never_skips_it(
     assert_that(prettier["output"]).contains(str(stray), "Remove or rename")
 
 
+def _lintro_chk_json(
+    project: Path,
+    env: dict[str, str],
+) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
+    """Run the real ``lintro chk`` on ``a.css`` with prettier, as JSON.
+
+    Args:
+        project: Directory to run in.
+        env: Environment from :func:`_isolate`.
+
+    Returns:
+        The finished process and prettier's row of the JSON report.
+    """
+    result = subprocess.run(  # nosec B603 - fixed argv, shell=False
+        [
+            sys.executable,
+            "-m",
+            "lintro",
+            "chk",
+            "a.css",
+            "--tools",
+            "prettier",
+            "--output-format",
+            "json",
+        ],
+        cwd=project,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    report = json.loads(result.stdout[result.stdout.index("{") :])
+    row = next(row for row in report["results"] if row["tool"] == "prettier")
+    return result, row
+
+
+def _css_project(directory: Path) -> Path:
+    """Create a clean project with one CSS file for prettier.
+
+    Args:
+        directory: Where the project goes.
+
+    Returns:
+        The project.
+    """
+    (directory / ".git").mkdir(parents=True)
+    _package(directory, "1.0.0", name="proj")
+    (directory / "a.css").write_text("a {\n  color: red;\n}\n", encoding="utf-8")
+    return directory
+
+
+@requires_npx
+def test_npm_lock_dated_in_the_future_fails_the_run_instead_of_skipping(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+) -> None:
+    """A lock npm would wait on for ever fails ``lintro chk``, at once.
+
+    Fable's round-3 reproduction: with the warm entry's ``concurrency.lock``
+    dated 2030, the gate gave up on it, the tool was reported unavailable and
+    ``lintro chk`` exited 0.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+    """
+    _require_clean_ancestry(tmp_path)
+    assert _NPX is not None and _NODE is not None
+    project = _css_project(tmp_path / "proj")
+    env = _isolate(monkeypatch, tmp_path, {"npx": _NPX, "node": _NODE}, registry, {})
+    _lintro_chk_json(project, env)  # warm the pin
+    cache = Path(env["HOME"]) / ".lintro" / "cache" / "npx" / f"prettier@{_PIN}"
+    key = hashlib.sha512(f"prettier@{_PIN}".encode()).hexdigest()[:16]
+    lock = cache / "_npx" / key / "concurrency.lock"
+    lock.mkdir()
+    future = time.time() + 3 * 365 * 24 * 3600
+    os.utime(lock, (future, future))
+    started = time.monotonic()
+
+    result, prettier = _lintro_chk_json(project, env)
+
+    assert_that(time.monotonic() - started).is_less_than(60)
+    assert_that(result.returncode).described_as(result.stderr).is_not_zero()
+    assert_that(prettier.get("execution_failed")).is_true()
+    assert_that(str(prettier["output"])).contains("in the future", str(lock))
+
+
+@requires_npx
+def test_home_node_modules_above_a_project_in_home_fails_the_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+) -> None:
+    """The usual layout: the project inside HOME, beside ``~/node_modules``.
+
+    Fable's round-3 reproduction: the project check found ``~/node_modules``
+    first and reported the tool unavailable ("npx may run an unpinned copy"),
+    exit 0. It is the same directory the npx cache check refuses, so the run
+    fails as an execution failure naming it, before npx starts.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+    """
+    _require_clean_ancestry(tmp_path)
+    assert _NPX is not None and _NODE is not None
+    env = _isolate(monkeypatch, tmp_path, {"npx": _NPX, "node": _NODE}, registry, {})
+    home = Path(env["HOME"])
+    project = _css_project(home / "work" / "proj")
+    stray = home / "node_modules"
+    stray.mkdir()
+
+    result, prettier = _lintro_chk_json(project, env)
+
+    assert_that(result.returncode).described_as(result.stderr).is_not_zero()
+    assert_that(prettier.get("execution_failed")).is_true()
+    assert_that(str(prettier["output"])).contains(
+        str(stray),
+        "Remove or rename",
+    ).does_not_contain("unpinned copy")
+
+
 @requires_npx
 def test_executable_replaced_after_the_gate_is_refused_at_spawn(
     tmp_path: Path,

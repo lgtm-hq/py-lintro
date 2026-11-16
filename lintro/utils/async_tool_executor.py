@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from lintro.exceptions.errors import UnsafeCommandError
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.npx_integrity import NpxIntegrityError
 
@@ -132,11 +133,9 @@ class AsyncToolExecutor:
         from lintro.utils.execution.result_shaping import (
             classify_runner_failure,
             executed_command,
-            mark_npx_refusals,
             mark_refused_command,
         )
 
-        result = mark_npx_refusals(tool, result, fix=action == Action.FIX)
         result = classify_runner_failure(
             result,
             command=executed_command(tool, result),
@@ -251,7 +250,11 @@ class AsyncToolExecutor:
             except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
                 raise
             except BaseException as exc:
-                logger.exception(f"Tool {name} failed with exception: {exc}")
+                if isinstance(exc, UnsafeCommandError):
+                    # An expected refusal: keep its traceback out of the console.
+                    logger.opt(exception=exc).debug(f"Tool {name} was refused: {exc}")
+                else:
+                    logger.exception(f"Tool {name} failed with exception: {exc}")
                 failed_name, failed = _make_failed_result(
                     name=name,
                     message=f"Parallel execution failed: {type(exc).__name__}: {exc}",
