@@ -486,6 +486,11 @@ class BanditPlugin(BaseToolPlugin):
         execution_failure: bool = False
         returncode: int | None = None
         try:
+            # The argv carries repository file names, so it goes through the
+            # same validation as every other launch (a batch-file Bandit must
+            # never receive cmd.exe metacharacters, #3486). A refusal is kept
+            # on ``command_refusal`` and reported as an execution failure.
+            self._validate_subprocess_command(cmd)
             # Run subprocess directly to capture stdout and stderr separately.
             # Bandit outputs JSON to stdout, but stderr may contain info/warning
             # messages that would corrupt JSON parsing if combined.
