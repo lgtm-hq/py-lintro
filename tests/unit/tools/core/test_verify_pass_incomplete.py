@@ -8,6 +8,7 @@ never fold the stale pre-fix findings in as a measured after-count.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
@@ -15,6 +16,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from assertpy import assert_that
 
+import lintro.plugins.base as plugin_base
 import lintro.tools as lintro_tools
 from lintro.enums.capability import Cap
 from lintro.enums.verify_status import VerifyStatus
@@ -32,6 +34,7 @@ from lintro.tools.core.verify_pass import (
     fold_verify_results,
     run_verify_pass,
 )
+from lintro.utils.npx_integrity import NpxIntegrityError
 
 if TYPE_CHECKING:
     from lintro.tools.core.verify_pass import VerifiableTool
@@ -63,7 +66,13 @@ def _finding(path: str, line: int, message: str) -> BaseIssue:
 
 @dataclass
 class _RefusingCheck(BaseToolPlugin):
-    """Verify check that keeps one finding and swallows a refused command."""
+    """Verify check that keeps one finding and swallows a refused command.
+
+    Attributes:
+        command: The command its second invocation runs.
+    """
+
+    command: tuple[str, ...] = _REFUSED_COMMAND
 
     @property
     def definition(self) -> ToolDefinition:
@@ -86,7 +95,7 @@ class _RefusingCheck(BaseToolPlugin):
             plugins report a launch ``ValueError``.
         """
         try:
-            self._run_subprocess(list(_REFUSED_COMMAND))
+            self._run_subprocess(list(self.command))
         except ValueError as exc:
             return ToolResult.from_outcome(
                 ToolOutcome(execution=Checked(success=False), issues_count=1),
@@ -169,13 +178,44 @@ def test_failed_verify_check_keeps_its_findings_and_leaves_residual_unknown() ->
     assert_that(folded.success).is_false()
 
 
+class _AfterRunIntegrityError(NpxIntegrityError):
+    """An npx integrity refusal found after the tool ran, as ``npx_call`` marks it."""
+
+    after_run = True
+
+
+def _untrusted_npx_cache(*_args: object, **_kwargs: object) -> None:
+    """Fail the way an npx run whose cache changed underneath it fails.
+
+    Args:
+        *_args: Ignored ``run_subprocess`` arguments.
+        **_kwargs: Ignored ``run_subprocess`` keyword arguments.
+
+    Raises:
+        _AfterRunIntegrityError: Always, after the "run".
+    """
+    raise _AfterRunIntegrityError("npx cache entry changed during the run")
+
+
+@pytest.mark.parametrize(
+    "after_run",
+    [
+        pytest.param(False, id="refused-before-spawn"),
+        pytest.param(True, id="npx-integrity-after-run"),
+    ],
+)
 def test_refused_verify_check_is_unknown_and_never_verified(
     monkeypatch: pytest.MonkeyPatch,
+    after_run: bool,
 ) -> None:
     """A refusal the plugin swallows never yields a VERIFIED residual.
 
+    That holds both for a command refused before the spawn and for an npx
+    run whose cache failed its integrity check after the tool ran (#3406).
+
     Args:
         monkeypatch: Pytest patch fixture.
+        after_run: Whether the refusal came after the tool ran.
     """
     # The registry entry only has to declare the claims that make the tool
     # a verifying one; the configured copy is what runs.
@@ -190,6 +230,11 @@ def test_refused_verify_check_is_unknown_and_never_verified(
         SimpleNamespace(get_tool={_TOOL: registered}.__getitem__),
     )
     check = _RefusingCheck()
+    lead = f"lintro refused to run {_TOOL}"
+    if after_run:
+        check = _RefusingCheck(command=(sys.executable, "-c", "pass"))
+        monkeypatch.setattr(plugin_base, "run_subprocess", _untrusted_npx_cache)
+        lead = f"lintro cannot trust {_TOOL}'s results"
 
     outcomes = run_verify_pass(
         tools_to_run=[_TOOL],
@@ -200,7 +245,7 @@ def test_refused_verify_check_is_unknown_and_never_verified(
     assert_that(outcomes).is_length(1)
     outcome = outcomes[0]
     assert_that(outcome.status).is_equal_to(VerifyStatus.UNKNOWN)
-    assert_that(outcome.unknown_reason).contains(f"lintro refused to run {_TOOL}")
+    assert_that(outcome.unknown_reason).contains(lead)
     folded = _fold(outcome)
     assert_that(folded.residual_unknown).is_true()
     assert_that(folded.remaining_issues_count).is_none()
