@@ -54,9 +54,13 @@ reaps ephemeral `pr-*` / `mq-*` / `dispatch-*` cache exports from `py-lintro` an
 `py-lintro-base` while preserving referenced digests and the permanent `:cache` tag.
 Ephemeral run-scoped `ci-*` tags from docker-ci are retained for partial reruns and
 reclaimed by `sweep-ci-ghcr-tags.sh` (age-based, default 91 days; #1138). Each run is
-bounded by `TIME_BUDGET_SECONDS` and `MAX_DELETES`; a run that reaches either exits 0
-with a "partial, resumes next run" notice and the next weekly run continues the backlog
-(#3492).
+bounded (#3492): every `gh` call is killed after `GH_CALL_TIMEOUT_SECONDS`, listings are
+paged by hand with the clock checked between pages, new work stops at
+`TIME_BUDGET_SECONDS` minus `VERIFY_RESERVE_SECONDS`, and at most `MAX_DELETES` versions
+go per run. A run that stops early still verifies its deletions and exits 0 with a
+"partial, resumes next run" notice. `PACKAGE_ROTATION` (the run number) changes which
+package goes first, and a partial run that deleted nothing or skipped a package raises a
+warning.
 
 ## Code Quality Gate
 

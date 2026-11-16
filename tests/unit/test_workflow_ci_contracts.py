@@ -913,15 +913,21 @@ def test_ghcr_cleanup_sweeps_ephemeral_ci_tags() -> None:
     )
 
 
+#: Seconds a GitHub-hosted job spends before the sweep step starts (runner
+#: provisioning, harden-runner, checkout) plus slack for the step's own exit.
+_SWEEP_JOB_OVERHEAD_SECONDS = 300
+
+
 @pytest.mark.parametrize("job_name", ["sweep-ci-tags", "sweep-sha-tags"])
 def test_ghcr_cleanup_tag_sweeps_finish_inside_their_timeout(job_name: str) -> None:
-    """Each tag sweep is bounded well inside its job timeout (#3492).
+    """Each tag sweep provably ends inside its job timeout (#3492).
 
     A 10-minute timeout cancelled the ci-* sweep mid-pagination in 4 of 6
-    weekly runs and turned main red. The script now stops at
-    ``TIME_BUDGET_SECONDS`` / ``MAX_DELETES`` and then re-lists the package
-    to verify its deletions, so the job timeout must leave room for that
-    verification after the budget is spent.
+    weekly runs and turned main red. The script now kills every gh call at
+    ``GH_CALL_TIMEOUT_SECONDS`` (C), starts listing pages and deletes only
+    before ``TIME_BUDGET_SECONDS`` (H) minus ``VERIFY_RESERVE_SECONDS`` (R),
+    and starts verification pages only before H, so it returns within H + C
+    as long as R >= 3C. The job timeout must exceed that plus runner overhead.
     """
     cleanup = _load_workflow(name="ghcr-cleanup.yml")
     job = cleanup["jobs"][job_name]
@@ -932,16 +938,36 @@ def test_ghcr_cleanup_tag_sweeps_finish_inside_their_timeout(job_name: str) -> N
         and step.get("run") == "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh"
     )
 
-    budget = sweep_env.get("TIME_BUDGET_SECONDS")
-    cap = sweep_env.get("MAX_DELETES")
-    assert_that(budget).described_as(job_name).is_instance_of(int)
-    assert_that(cap).described_as(job_name).is_instance_of(int)
-    assert isinstance(budget, int)  # narrow for the arithmetic below
-    assert_that(budget).described_as(job_name).is_greater_than(0)
-    assert_that(cap).described_as(job_name).is_greater_than(0)
+    knobs = {
+        name: sweep_env.get(name)
+        for name in (
+            "TIME_BUDGET_SECONDS",
+            "VERIFY_RESERVE_SECONDS",
+            "GH_CALL_TIMEOUT_SECONDS",
+            "MAX_DELETES",
+        )
+    }
+    for name, value in knobs.items():
+        assert_that(value).described_as(f"{job_name} {name}").is_instance_of(int)
+        assert_that(value).described_as(f"{job_name} {name}").is_greater_than(0)
+    budget = int(str(knobs["TIME_BUDGET_SECONDS"]))
+    reserve = int(str(knobs["VERIFY_RESERVE_SECONDS"]))
+    call_timeout = int(str(knobs["GH_CALL_TIMEOUT_SECONDS"]))
+
+    assert_that(reserve).described_as(job_name).is_greater_than_or_equal_to(
+        3 * call_timeout,
+    )
+    assert_that(reserve).described_as(job_name).is_less_than(budget)
     assert_that(job["timeout-minutes"] * 60).described_as(
         job_name,
-    ).is_greater_than_or_equal_to(2 * budget)
+    ).is_greater_than_or_equal_to(
+        budget + call_timeout + _SWEEP_JOB_OVERHEAD_SECONDS,
+    )
+    # Rotating the first package by run number stops a slow package starving
+    # the next one every week.
+    assert_that(str(sweep_env.get("PACKAGE_ROTATION"))).contains(
+        "github.run_number",
+    )
 
 
 @pytest.mark.parametrize(

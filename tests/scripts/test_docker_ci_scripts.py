@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import datetime
 import os
 import re
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -794,7 +796,12 @@ def _run_sweep_validation(
             "DRY_RUN",
             "VOLATILE_TAG_PREFIXES",
             "TIME_BUDGET_SECONDS",
+            "VERIFY_RESERVE_SECONDS",
+            "GH_CALL_TIMEOUT_SECONDS",
             "MAX_DELETES",
+            "PAGE_SIZE",
+            "PACKAGE_ROTATION",
+            "GITHUB_STEP_SUMMARY",
         )
         if name not in env
     }
@@ -889,442 +896,346 @@ def test_sweep_ci_ghcr_tags_accepts_safe_tag_prefix(
     assert_that(result.stdout).contains(f"Sweeping {tag_prefix}* tags")
 
 
-def test_sweep_ci_ghcr_tags_deletes_ci_only_versions(
-    tmp_path: Path,
-) -> None:
-    """Sweep should delete CI-only versions after dual pre-delete rechecks."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    gh_log = tmp_path / "gh.log"
-    _write_stub(
-        bin_dir,
-        "gh",
-        (
-            'echo "$*" >> "$GH_LOG"\n'
-            'if [[ "$*" == *"DELETE"* ]]; then\n'
-            "  exit 0\n"
-            "fi\n"
-            # Match /versions/<id> (not the list endpoint .../versions).
-            'if [[ "$*" =~ /versions/([0-9]+) ]]; then\n'
-            '  vid="${BASH_REMATCH[1]}"\n'
-            '  case "$vid" in\n'
-            "  201) printf '%s\\t%s\\n' '2026-01-01T00:00:00Z' 'ci-1 ci-2' ;;\n"
-            "  202) printf '%s\\t%s\\n' '2026-01-02T00:00:00Z' 'ci-old' ;;\n"
-            '  *) echo "unexpected version $vid" >&2; exit 99 ;;\n'
-            "  esac\n"
-            "  exit 0\n"
-            "fi\n"
-            'printf "%s\\n" "$GH_VERSIONS_TSV"'
-        ),
-    )
+#: Fake ``gh`` for the sweep (#1138, #1652, #3492). It serves the paged
+#: listing (``versions?per_page=N&page=P``) by slicing ``$GH_VERSIONS`` rows
+#: (``id\tupdated_at\tepoch\ttags``), or ``$GH_LIST_<n>`` for the n-th listing
+#: request; fails listing request n when n is in ``$GH_LIST_FAIL``; answers a
+#: recheck from ``$GH_STATE_<id>`` (default: the version's row), or fails it
+#: with ``$GH_RECHECK_FAIL_<id>`` on stderr. With ``$CLOCK_FILE`` set, every
+#: call advances the fake clock: listing requests by ``$GH_LIST_COST``
+#: (per package via ``$GH_LIST_COSTS="pkg=s ..."``, or ``$GH_LIST_SLOW_COST``
+#: from request ``$GH_LIST_SLOW_FROM`` on), deletes by ``$GH_DELETE_COST``.
+_SWEEP_GH_STUB = r"""
+echo "$*" >> "$GH_LOG"
+clock_add() {
+  [[ -n "${CLOCK_FILE:-}" ]] || return 0
+  echo $(( $(cat "$CLOCK_FILE") + $1 )) > "$CLOCK_FILE"
+}
+if [[ -n "${GH_SLEEP:-}" ]]; then
+  exec sleep "$GH_SLEEP"
+fi
+if [[ "$*" == *"--method DELETE"* ]]; then
+  clock_add "${GH_DELETE_COST:-0}"
+  exit 0
+fi
+list_re='/packages/container/([^/]+)/versions[?]per_page=([0-9]+)&page=([0-9]+)'
+if [[ "$*" =~ $list_re ]]; then
+  pkg="${BASH_REMATCH[1]}"
+  per="${BASH_REMATCH[2]}"
+  page="${BASH_REMATCH[3]}"
+  n=$(( $(cat "$GH_LIST_COUNT" 2>/dev/null || echo 0) + 1 ))
+  echo "$n" > "$GH_LIST_COUNT"
+  cost="${GH_LIST_COST:-0}"
+  for spec in ${GH_LIST_COSTS:-}; do
+    if [[ "${spec%%=*}" == "$pkg" ]]; then cost="${spec#*=}"; fi
+  done
+  if [[ -n "${GH_LIST_SLOW_FROM:-}" ]] && (( n >= GH_LIST_SLOW_FROM )); then
+    cost="$GH_LIST_SLOW_COST"
+  fi
+  clock_add "$cost"
+  case " ${GH_LIST_FAIL:-} " in
+  *" $n "*) echo "API rate limit exceeded" >&2; exit 1 ;;
+  esac
+  var="GH_LIST_${n}"
+  rows="${!var:-$GH_VERSIONS}"
+  printf '%s\n' "$rows" |
+    awk -v s="$(( (page - 1) * per ))" -v p="$per" 'NF && ++i > s && i <= s + p'
+  exit 0
+fi
+if [[ "$*" =~ /versions/([0-9]+) ]]; then
+  vid="${BASH_REMATCH[1]}"
+  fail_var="GH_RECHECK_FAIL_${vid}"
+  if [[ -n "${!fail_var:-}" ]]; then
+    echo "${!fail_var}" >&2
+    exit 1
+  fi
+  state_var="GH_STATE_${vid}"
+  if [[ -n "${!state_var:-}" ]]; then
+    printf '%s\n' "${!state_var}"
+  else
+    printf '%s\n' "$GH_VERSIONS" |
+      awk -F'\t' -v id="$vid" '$1 == id { print $2 "\t" $4 }'
+  fi
+  exit 0
+fi
+echo "unexpected gh call: $*" >&2
+exit 99
+"""
 
+#: Sweep knobs blanked by default so the developer's or CI's environment
+#: (``GITHUB_STEP_SUMMARY`` is set on every Actions runner) cannot leak in.
+_SWEEP_KNOBS = (
+    "TAG_PREFIX",
+    "DRY_RUN",
+    "VOLATILE_TAG_PREFIXES",
+    "TIME_BUDGET_SECONDS",
+    "VERIFY_RESERVE_SECONDS",
+    "GH_CALL_TIMEOUT_SECONDS",
+    "MAX_DELETES",
+    "PAGE_SIZE",
+    "PACKAGE_ROTATION",
+    "GITHUB_STEP_SUMMARY",
+)
+
+
+def _version_row(vid: int, tags: str, updated_at: str = "2026-01-02T00:00:00Z") -> str:
+    """Build one listing row the way the script's jq program prints it.
+
+    Args:
+        vid: Package version id.
+        tags: Space-joined tags ("" for an untagged version).
+        updated_at: ISO-8601 UTC timestamp.
+
+    Returns:
+        str: The tab-separated id, updated_at, epoch and tags.
+    """
+    epoch = int(
+        datetime.datetime.strptime(updated_at, "%Y-%m-%dT%H:%M:%SZ")
+        .replace(tzinfo=datetime.UTC)
+        .timestamp(),
+    )
+    return f"{vid}\t{updated_at}\t{epoch}\t{tags}"
+
+
+def _rows(*rows: str) -> str:
+    """Join listing rows into the newline-separated ``GH_VERSIONS`` value.
+
+    Args:
+        *rows: Rows from :func:`_version_row`.
+
+    Returns:
+        str: The joined rows.
+    """
+    return "\n".join(rows)
+
+
+#: Persistent tags every fixture package carries.
+_PERSISTENT_ROWS = (_version_row(900, "latest"), _version_row(901, "0.9.9"))
+
+
+def _sole_ci_rows(*vids: int) -> tuple[str, ...]:
+    """Aged, sole-tagged CI versions: the only deletable kind.
+
+    Args:
+        *vids: Version ids.
+
+    Returns:
+        tuple[str, ...]: One row per id, tagged ``ci-<id>``.
+    """
+    return tuple(_version_row(vid, f"ci-{vid}") for vid in vids)
+
+
+@dataclass(frozen=True)
+class _SweepRun:
+    """Outcome of one sweep run against the fake ``gh``.
+
+    Attributes:
+        result: The completed process.
+        gh_log: Every ``gh`` argv, one per line.
+        list_calls: Number of listing requests made.
+        clock: Final fake-clock reading minus the start, or None without one.
+    """
+
+    result: subprocess.CompletedProcess[str]
+    gh_log: str
+    list_calls: int
+    clock: int | None
+
+
+_CLOCK_START = 1_900_000_000
+
+
+def _run_sweep(
+    work_dir: Path,
+    env: dict[str, str],
+    *,
+    clock: bool = False,
+) -> _SweepRun:
+    """Run the sweep against :data:`_SWEEP_GH_STUB` in ``work_dir``.
+
+    Args:
+        work_dir: Fresh directory for the PATH shim and the stub's state.
+        env: Variables layered over the defaults (one package, ages waived).
+        clock: Shadow ``date`` with a fake clock the stub advances.
+
+    Returns:
+        _SweepRun: The run's outcome.
+    """
+    bin_dir = work_dir / "bin"
+    bin_dir.mkdir(parents=True)
+    _write_stub(bin_dir, "gh", _SWEEP_GH_STUB)
+    gh_log = work_dir / "gh.log"
+    gh_log.touch()
+    list_count = work_dir / "list.count"
+    clock_file = work_dir / "clock"
+    base = {
+        **dict.fromkeys(_SWEEP_KNOBS, ""),
+        "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
+        "PACKAGES": "py-lintro",
+        "MIN_AGE_DAYS": "0",
+        "ALLOW_SHORT_RETENTION": "true",
+        "GH_LOG": str(gh_log),
+        "GH_LIST_COUNT": str(list_count),
+        "GH_VERSIONS": _rows(*_PERSISTENT_ROWS, *_sole_ci_rows(202)),
+    }
+    if clock:
+        _write_stub(bin_dir, "date", 'cat "$CLOCK_FILE"')
+        clock_file.write_text(f"{_CLOCK_START}\n")
+        base["CLOCK_FILE"] = str(clock_file)
     result = _run_with_stubs(
         "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
         bin_dir,
+        {**base, **env},
+    )
+    return _SweepRun(
+        result=result,
+        gh_log=gh_log.read_text(),
+        list_calls=int(list_count.read_text()) if list_count.exists() else 0,
+        clock=int(clock_file.read_text()) - _CLOCK_START if clock else None,
+    )
+
+
+def test_sweep_ci_ghcr_tags_deletes_only_aged_sole_ci_versions(
+    tmp_path: Path,
+) -> None:
+    """Only aged versions whose sole tag is a CI tag are deleted (#1138)."""
+    run = _run_sweep(
+        tmp_path,
         {
-            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
-            "PACKAGES": "py-lintro",
-            "MIN_AGE_DAYS": "0",
-            "ALLOW_SHORT_RETENTION": "true",
-            "GH_LOG": str(gh_log),
-            # id\\tupdated_at\\ttags (jq filtering is stubbed).
-            "GH_VERSIONS_TSV": (
-                "201\t2026-01-01T00:00:00Z\tci-1 ci-2\n"
-                "202\t2026-01-02T00:00:00Z\tci-old"
+            "GH_VERSIONS": _rows(
+                *_PERSISTENT_ROWS,
+                _version_row(201, "ci-1 ci-2"),
+                _version_row(202, "ci-old"),
+                _version_row(203, "ci-mixed 0.9.8"),
+                _version_row(204, ""),
+                _version_row(205, "ci-young", "2999-01-01T00:00:00Z"),
             ),
         },
     )
 
-    assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stdout).contains("Deleted py-lintro version 202")
-    assert_that(result.stdout).contains("not sole-tagged")
-    assert_that(result.stdout).does_not_contain("Deleted py-lintro version 201")
-    log = gh_log.read_text()
-    assert_that(log).contains("versions/202")
-    # Two rechecks per deleted (sole-tag) version before DELETE.
-    assert_that(log.count("versions/202")).is_greater_than_or_equal_to(2)
-    assert_that(log).does_not_contain(
-        "--method DELETE orgs/lgtm-hq/packages/container/py-lintro/versions/201",
-    )
+    assert_that(run.result.returncode).is_equal_to(0)
+    assert_that(run.result.stdout).contains("Deleted py-lintro version 202")
+    assert_that(run.result.stdout).contains("not sole-tagged")
+    assert_that(run.result.stdout).contains("Sweep complete: 1 deleted")
+    # Two rechecks, then the DELETE, for 202 alone.
+    assert_that(run.gh_log.count("py-lintro/versions/202")).is_equal_to(3)
+    for vid in (201, 203, 204, 205):
+        assert_that(run.gh_log).does_not_contain(f"py-lintro/versions/{vid}")
 
 
-def test_sweep_ci_ghcr_tags_recheck_aborts_on_persistent_tag(
-    tmp_path: Path,
-) -> None:
-    """A persistent tag attached between list and delete must abort delete."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    gh_log = tmp_path / "gh.log"
-    _write_stub(
-        bin_dir,
-        "gh",
+@pytest.mark.parametrize(
+    ("recheck_env", "expected"),
+    [
+        # Promotion attached main between snapshot and delete.
         (
-            'echo "$*" >> "$GH_LOG"\n'
-            'if [[ "$*" == *"DELETE"* ]]; then\n'
-            "  exit 0\n"
-            "fi\n"
-            'if [[ "$*" == *"/versions/"* ]]; then\n'
-            '  echo "$GH_VERSION_STATE"\n'
-            "  exit 0\n"
-            "fi\n"
-            'printf "%s\\n" "$GH_VERSIONS_TSV"'
+            {"GH_STATE_202": "2026-01-02T00:00:00Z\tci-202 main"},
+            "tags changed since snapshot",
         ),
-    )
-
-    result = _run_with_stubs(
-        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
-        bin_dir,
-        {
-            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
-            "PACKAGES": "py-lintro",
-            "MIN_AGE_DAYS": "0",
-            "ALLOW_SHORT_RETENTION": "true",
-            "GH_LOG": str(gh_log),
-            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
-            # Promotion attached main between snapshot and delete.
-            "GH_VERSION_STATE": "2026-01-02T00:00:00Z\tci-old main",
-        },
-    )
-
-    assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stdout).contains("tags changed since snapshot")
-    assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
-
-
-def test_sweep_ci_ghcr_tags_recheck_aborts_on_updated_at_change(
-    tmp_path: Path,
-) -> None:
-    """An updated_at change between list and delete must abort delete."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    gh_log = tmp_path / "gh.log"
-    _write_stub(
-        bin_dir,
-        "gh",
         (
-            'echo "$*" >> "$GH_LOG"\n'
-            'if [[ "$*" == *"DELETE"* ]]; then\n'
-            "  exit 0\n"
-            "fi\n"
-            'if [[ "$*" == *"/versions/"* ]]; then\n'
-            '  echo "$GH_VERSION_STATE"\n'
-            "  exit 0\n"
-            "fi\n"
-            'printf "%s\\n" "$GH_VERSIONS_TSV"'
+            {"GH_STATE_202": "2026-01-03T00:00:00Z\tci-202"},
+            "updated_at changed since snapshot",
         ),
-    )
-
-    result = _run_with_stubs(
-        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
-        bin_dir,
-        {
-            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
-            "PACKAGES": "py-lintro",
-            "MIN_AGE_DAYS": "0",
-            "ALLOW_SHORT_RETENTION": "true",
-            "GH_LOG": str(gh_log),
-            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
-            "GH_VERSION_STATE": "2026-01-03T00:00:00Z\tci-old",
-        },
-    )
-
-    assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stdout).contains("updated_at changed since snapshot")
-    assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
-
-
-def test_sweep_ci_ghcr_tags_fails_on_query_error(
-    tmp_path: Path,
-) -> None:
-    """Package version query failures must fail the sweep job."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    _write_stub(
-        bin_dir,
-        "gh",
-        ('echo "boom" >&2\nexit 1\n'),
-    )
-
-    result = _run_with_stubs(
-        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
-        bin_dir,
-        {
-            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
-            "PACKAGES": "py-lintro",
-            "MIN_AGE_DAYS": "0",
-            "ALLOW_SHORT_RETENTION": "true",
-        },
-    )
-
-    assert_that(result.returncode).is_equal_to(1)
-    assert_that(result.stderr).contains("Failed to query versions")
-
-
-def test_sweep_ci_ghcr_tags_recheck_404_is_benign(
-    tmp_path: Path,
-) -> None:
-    """A 404 on pre-delete recheck means the version is already gone."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    gh_log = tmp_path / "gh.log"
-    _write_stub(
-        bin_dir,
-        "gh",
+        # A concurrent build attached another ci-* tag.
         (
-            'echo "$*" >> "$GH_LOG"\n'
-            'if [[ "$*" == *"DELETE"* ]]; then\n'
-            "  exit 0\n"
-            "fi\n"
-            'if [[ "$*" == *"/versions/"* ]]; then\n'
-            '  echo "gh: Not Found (HTTP 404)" >&2\n'
-            "  exit 1\n"
-            "fi\n"
-            'printf "%s\\n" "$GH_VERSIONS_TSV"'
+            {"GH_STATE_202": "2026-01-02T00:00:00Z\tci-202 ci-new"},
+            "no longer sole-tagged",
         ),
-    )
-
-    result = _run_with_stubs(
-        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
-        bin_dir,
-        {
-            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
-            "PACKAGES": "py-lintro",
-            "MIN_AGE_DAYS": "0",
-            "ALLOW_SHORT_RETENTION": "true",
-            "GH_LOG": str(gh_log),
-            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
-        },
-    )
-
-    assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stdout).contains("already deleted")
-    assert_that(result.stderr).does_not_contain("Failed to re-check")
-    assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
-
-
-def test_sweep_ci_ghcr_tags_recheck_hard_error_fails(
+        # Already deleted by a prior sweep or a manual cleanup: benign.
+        ({"GH_RECHECK_FAIL_202": "gh: Not Found (HTTP 404)"}, "already deleted"),
+    ],
+)
+def test_sweep_ci_ghcr_tags_recheck_aborts_the_delete(
     tmp_path: Path,
+    recheck_env: dict[str, str],
+    expected: str,
 ) -> None:
+    """A version that changed (or vanished) since the listing is not deleted."""
+    run = _run_sweep(tmp_path, recheck_env)
+
+    assert_that(run.result.returncode).is_equal_to(0)
+    assert_that(run.result.stdout).contains(expected)
+    assert_that(run.result.stderr).does_not_contain("Failed to re-check")
+    assert_that(run.gh_log).does_not_contain("--method DELETE")
+
+
+def test_sweep_ci_ghcr_tags_recheck_hard_error_fails(tmp_path: Path) -> None:
     """Non-404 recheck failures must fail closed (auth/network/rate-limit)."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    _write_stub(
-        bin_dir,
-        "gh",
-        (
-            'if [[ "$*" == *"/versions/"* && "$*" != *"DELETE"* ]]; then\n'
-            '  echo "API rate limit exceeded" >&2\n'
-            "  exit 1\n"
-            "fi\n"
-            'printf "%s\\n" "$GH_VERSIONS_TSV"'
-        ),
-    )
+    run = _run_sweep(tmp_path, {"GH_RECHECK_FAIL_202": "API rate limit exceeded"})
 
-    result = _run_with_stubs(
-        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
-        bin_dir,
-        {
-            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
-            "PACKAGES": "py-lintro",
-            "MIN_AGE_DAYS": "0",
-            "ALLOW_SHORT_RETENTION": "true",
-            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
-        },
-    )
-
-    assert_that(result.returncode).is_equal_to(1)
-    assert_that(result.stderr).contains("Failed to re-check")
+    assert_that(run.result.returncode).is_equal_to(1)
+    assert_that(run.result.stderr).contains("Failed to re-check")
+    assert_that(run.gh_log).does_not_contain("--method DELETE")
 
 
-def test_sweep_ci_ghcr_tags_recheck_aborts_on_second_ci_tag(
+def test_sweep_ci_ghcr_tags_fails_on_query_error(tmp_path: Path) -> None:
+    """Package version query failures must fail the sweep job."""
+    run = _run_sweep(tmp_path, {"GH_LIST_FAIL": "1"})
+
+    assert_that(run.result.returncode).is_equal_to(1)
+    assert_that(run.result.stderr).contains("Failed to query versions")
+    assert_that(run.gh_log).does_not_contain("--method DELETE")
+
+
+def test_sweep_ci_ghcr_tags_deletes_nothing_when_a_later_page_fails(
     tmp_path: Path,
 ) -> None:
-    """A second ci-* tag attached between list and delete must abort delete."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    gh_log = tmp_path / "gh.log"
-    _write_stub(
-        bin_dir,
-        "gh",
-        (
-            'echo "$*" >> "$GH_LOG"\n'
-            'if [[ "$*" == *"DELETE"* ]]; then\n'
-            "  exit 0\n"
-            "fi\n"
-            'if [[ "$*" =~ /versions/([0-9]+) ]]; then\n'
-            '  echo "$GH_VERSION_STATE"\n'
-            "  exit 0\n"
-            "fi\n"
-            'printf "%s\\n" "$GH_VERSIONS_TSV"'
-        ),
-    )
+    """A listing that breaks mid-pagination is incomplete, so nothing is deleted.
 
-    result = _run_with_stubs(
-        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
-        bin_dir,
-        {
-            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
-            "PACKAGES": "py-lintro",
-            "MIN_AGE_DAYS": "0",
-            "ALLOW_SHORT_RETENTION": "true",
-            "GH_LOG": str(gh_log),
-            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
-            # Concurrent build attached another ci-* tag.
-            "GH_VERSION_STATE": "2026-01-02T00:00:00Z\tci-old ci-new",
-        },
-    )
-
-    assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stdout).contains("no longer sole-tagged")
-    assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
-
-
-def test_sweep_ci_ghcr_tags_dry_run_skips_delete(
-    tmp_path: Path,
-) -> None:
-    """DRY_RUN=true should log candidates without calling DELETE."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    gh_log = tmp_path / "gh.log"
-    _write_stub(
-        bin_dir,
-        "gh",
-        ('echo "$*" >> "$GH_LOG"\nprintf "%s\\n" "$GH_VERSIONS_TSV"'),
-    )
-
-    result = _run_with_stubs(
-        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
-        bin_dir,
-        {
-            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
-            "PACKAGES": "py-lintro",
-            "MIN_AGE_DAYS": "0",
-            "ALLOW_SHORT_RETENTION": "true",
-            "DRY_RUN": "true",
-            "GH_LOG": str(gh_log),
-            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
-        },
-    )
-
-    assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stdout).contains("[dry-run] Would delete")
-    assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
-    # A dry run deletes nothing, so it must not pay for a baseline listing.
-    assert_that(gh_log.read_text()).does_not_contain(_PERSISTENT_QUERY_MARKER)
-
-
-# The persistent-tag listing is the only gh call whose jq program binds the tag
-# to ``$tag``; the candidate query filters with ``all(startswith(...))``.
-_PERSISTENT_QUERY_MARKER = ". as $tag"
-
-_SWEEP_VERIFY_GH_STUB = (
-    'echo "$*" >> "$GH_LOG"\n'
-    'if [[ "$*" == *"DELETE"* ]]; then\n'
-    "  exit 0\n"
-    "fi\n"
-    f'if [[ "$*" == *"{_PERSISTENT_QUERY_MARKER}"* ]]; then\n'
-    "  n=0\n"
-    '  if [[ -f "$GH_PERSISTENT_COUNT" ]]; then\n'
-    '    n="$(cat "$GH_PERSISTENT_COUNT")"\n'
-    "  fi\n"
-    "  n=$((n + 1))\n"
-    '  echo "$n" > "$GH_PERSISTENT_COUNT"\n'
-    '  case " ${GH_PERSISTENT_FAIL} " in\n'
-    '  *" ${n} "*)\n'
-    '    echo "API rate limit exceeded" >&2\n'
-    "    exit 1\n"
-    "    ;;\n"
-    "  esac\n"
-    '  var="GH_PERSISTENT_${n}"\n'
-    '  if [[ -n "${!var:-}" ]]; then\n'
-    '    printf "%s\\n" "${!var}"\n'
-    "  else\n"
-    '    printf "%s\\n" "$GH_PERSISTENT_DEFAULT"\n'
-    "  fi\n"
-    "  exit 0\n"
-    "fi\n"
-    'if [[ "$*" =~ /versions/([0-9]+) ]]; then\n'
-    "  printf '%s\\t%s\\n' '2026-01-02T00:00:00Z' 'ci-old'\n"
-    "  exit 0\n"
-    "fi\n"
-    'printf "%s\\n" "$GH_VERSIONS_TSV"'
-)
-
-
-# Fake clock for the per-run time budget (#3492): ``date`` reads the epoch from
-# ``$CLOCK_FILE`` and every DELETE advances it by ``$GH_DELETE_COST`` seconds,
-# so a test can spend the budget without sleeping.
-_SWEEP_CLOCK_DATE_STUB = 'cat "$CLOCK_FILE"'
-_SWEEP_CLOCK_GH_PREFIX = (
-    'if [[ "$*" == *"DELETE"* ]]; then\n'
-    '  echo $(( $(cat "$CLOCK_FILE") + GH_DELETE_COST )) > "$CLOCK_FILE"\n'
-    "fi\n"
-)
-
-
-def _run_sweep_with_persistent_tags(
-    tmp_path: Path,
-    gh_log: Path,
-    env: dict[str, str],
-    *,
-    clock: Path | None = None,
-) -> subprocess.CompletedProcess[str]:
-    """Run the sweep against a ``gh`` stub that scripts the persistent listings.
-
-    The stub answers the persistent-tag listing from ``GH_PERSISTENT_<n>``
-    (1-based call order, falling back to ``GH_PERSISTENT_DEFAULT``) so a test
-    can make a tag vanish, come back, or make a read fail outright.
-
-    Args:
-        tmp_path: Pytest temporary directory for the PATH shim.
-        gh_log: File the stub appends every ``gh`` invocation to.
-        env: Extra environment variables, typically ``GH_PERSISTENT_*``.
-        clock: When given, ``date`` is shadowed by a fake clock read from this
-            file, and each DELETE advances it by ``GH_DELETE_COST`` seconds.
-
-    Returns:
-        subprocess.CompletedProcess[str]: The completed process.
+    The baseline comes from the same listing, so a partial one would leave the
+    post-delete verification blind to tags on the pages never read (#1652).
     """
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    gh_stub = _SWEEP_VERIFY_GH_STUB
-    if clock is not None:
-        gh_stub = _SWEEP_CLOCK_GH_PREFIX + gh_stub
-        _write_stub(bin_dir, "date", _SWEEP_CLOCK_DATE_STUB)
-        env = {"CLOCK_FILE": str(clock), **env}
-    _write_stub(bin_dir, "gh", gh_stub)
+    run = _run_sweep(tmp_path, {"PAGE_SIZE": "1", "GH_LIST_FAIL": "2"})
 
-    return _run_with_stubs(
-        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
-        bin_dir,
+    assert_that(run.result.returncode).is_equal_to(1)
+    assert_that(run.result.stderr).contains("Failed to query versions")
+    assert_that(run.gh_log).contains("per_page=1&page=2")
+    assert_that(run.gh_log).does_not_contain("--method DELETE")
+
+
+def test_sweep_ci_ghcr_tags_pages_through_the_listing(tmp_path: Path) -> None:
+    """Candidates on any page are found, and paging stops at a short page."""
+    run = _run_sweep(
+        tmp_path,
         {
-            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
-            "PACKAGES": "py-lintro",
-            "MIN_AGE_DAYS": "0",
-            "ALLOW_SHORT_RETENTION": "true",
-            "GH_LOG": str(gh_log),
-            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
-            "GH_PERSISTENT_COUNT": str(tmp_path / "persistent.count"),
-            "GH_PERSISTENT_DEFAULT": "latest\n0.9.9",
-            "GH_PERSISTENT_FAIL": "",
-            **env,
+            "PAGE_SIZE": "2",
+            "GH_VERSIONS": _rows(*_PERSISTENT_ROWS, *_sole_ci_rows(301, 302, 303)),
         },
     )
+
+    assert_that(run.result.returncode).is_equal_to(0)
+    assert_that(run.result.stdout).contains("Sweep complete: 3 deleted")
+    # Five rows at two per page: pages 1-3 for the listing and again for the
+    # verification; the short third page ends each pass.
+    assert_that(run.list_calls).is_equal_to(6)
+    assert_that(run.gh_log).does_not_contain("page=4")
+
+
+def test_sweep_ci_ghcr_tags_dry_run_skips_delete(tmp_path: Path) -> None:
+    """DRY_RUN=true should log candidates without calling DELETE."""
+    run = _run_sweep(tmp_path, {"DRY_RUN": "true"})
+
+    assert_that(run.result.returncode).is_equal_to(0)
+    assert_that(run.result.stdout).contains("[dry-run] Would delete")
+    assert_that(run.gh_log).does_not_contain("--method DELETE")
+    # A dry run deletes nothing, so it pays for no verification listing.
+    assert_that(run.list_calls).is_equal_to(1)
 
 
 def test_sweep_ci_ghcr_tags_verifies_persistent_tags_after_delete(
     tmp_path: Path,
 ) -> None:
     """A clean sweep still re-reads the persistent tags and stays green (#1652)."""
-    gh_log = tmp_path / "gh.log"
+    run = _run_sweep(tmp_path, {})
 
-    result = _run_sweep_with_persistent_tags(tmp_path, gh_log, {})
+    assert_that(run.result.returncode).is_equal_to(0)
+    assert_that(run.result.stdout).contains("Deleted py-lintro version 202")
+    assert_that(run.result.stderr).does_not_contain("Persistent tags disappeared")
+    # The listing doubles as the baseline; one confirmation after the delete.
+    assert_that(run.list_calls).is_equal_to(2)
 
-    assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stdout).contains("Deleted py-lintro version 202")
-    assert_that(result.stderr).does_not_contain("Persistent tags disappeared")
-    # Baseline before the delete, one confirmation after it.
-    assert_that(gh_log.read_text().count(_PERSISTENT_QUERY_MARKER)).is_equal_to(2)
+
+#: The package after the delete with the 0.9.9 release tag gone.
+_LISTING_WITHOUT_RELEASE = _rows(_PERSISTENT_ROWS[0])
 
 
 def test_sweep_ci_ghcr_tags_alerts_when_a_persistent_tag_disappears(
@@ -1336,24 +1247,18 @@ def test_sweep_ci_ghcr_tags_alerts_when_a_persistent_tag_disappears(
     close: GHCR has no conditional delete, so a promotion landing in the
     window takes its tag down with the CI version.
     """
-    gh_log = tmp_path / "gh.log"
-
-    result = _run_sweep_with_persistent_tags(
+    run = _run_sweep(
         tmp_path,
-        gh_log,
-        {
-            # Baseline sees the release tag; both post-delete reads do not.
-            "GH_PERSISTENT_1": "latest\n0.9.9",
-            "GH_PERSISTENT_2": "latest",
-            "GH_PERSISTENT_3": "latest",
-        },
+        {"GH_LIST_2": _LISTING_WITHOUT_RELEASE, "GH_LIST_3": _LISTING_WITHOUT_RELEASE},
     )
 
-    assert_that(result.returncode).is_equal_to(1)
-    assert_that(result.stdout).contains("Deleted py-lintro version 202")
-    assert_that(result.stderr).contains("Persistent tags disappeared from py-lintro")
-    assert_that(result.stderr).contains("0.9.9")
-    assert_that(result.stderr).contains("202")
+    assert_that(run.result.returncode).is_equal_to(1)
+    assert_that(run.result.stdout).contains("Deleted py-lintro version 202")
+    assert_that(run.result.stderr).contains(
+        "Persistent tags disappeared from py-lintro",
+    )
+    assert_that(run.result.stderr).contains("0.9.9")
+    assert_that(run.result.stderr).contains("202")
 
 
 def test_sweep_ci_ghcr_tags_tolerates_a_transient_listing_gap(
@@ -1364,102 +1269,76 @@ def test_sweep_ci_ghcr_tags_tolerates_a_transient_listing_gap(
     A paginated listing on a busy registry can momentarily under-report, and a
     false "we deleted a release tag" alarm is worse than no alarm at all.
     """
-    gh_log = tmp_path / "gh.log"
+    run = _run_sweep(tmp_path, {"GH_LIST_2": _LISTING_WITHOUT_RELEASE})
 
-    result = _run_sweep_with_persistent_tags(
-        tmp_path,
-        gh_log,
-        {
-            "GH_PERSISTENT_1": "latest\n0.9.9",
-            "GH_PERSISTENT_2": "latest",
-            "GH_PERSISTENT_3": "latest\n0.9.9",
-        },
-    )
-
-    assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stderr).does_not_contain("Persistent tags disappeared")
-    assert_that(gh_log.read_text().count(_PERSISTENT_QUERY_MARKER)).is_equal_to(3)
-
-
-def test_sweep_ci_ghcr_tags_skips_deletes_when_the_baseline_fails(
-    tmp_path: Path,
-) -> None:
-    """Without a baseline the verification is blind, so nothing is deleted."""
-    gh_log = tmp_path / "gh.log"
-
-    result = _run_sweep_with_persistent_tags(
-        tmp_path,
-        gh_log,
-        {"GH_PERSISTENT_FAIL": "1"},
-    )
-
-    assert_that(result.returncode).is_equal_to(1)
-    assert_that(result.stderr).contains("Failed to snapshot persistent tags")
-    assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
+    assert_that(run.result.returncode).is_equal_to(0)
+    assert_that(run.result.stderr).does_not_contain("Persistent tags disappeared")
+    assert_that(run.list_calls).is_equal_to(3)
 
 
 def test_sweep_ci_ghcr_tags_fails_when_verification_cannot_read(
     tmp_path: Path,
 ) -> None:
     """An unreadable post-delete listing fails closed without claiming a loss."""
-    gh_log = tmp_path / "gh.log"
+    run = _run_sweep(tmp_path, {"GH_LIST_FAIL": "2"})
 
-    result = _run_sweep_with_persistent_tags(
-        tmp_path,
-        gh_log,
-        {"GH_PERSISTENT_FAIL": "2"},
-    )
-
-    assert_that(result.returncode).is_equal_to(1)
-    assert_that(result.stderr).contains("Could not verify persistent tags")
+    assert_that(run.result.returncode).is_equal_to(1)
+    assert_that(run.result.stderr).contains("Could not verify persistent tags")
     # Never accuse the sweep of a deletion it did not observe.
-    assert_that(result.stderr).does_not_contain("Persistent tags disappeared")
+    assert_that(run.result.stderr).does_not_contain("Persistent tags disappeared")
 
 
 def test_sweep_ci_ghcr_tags_fails_when_the_confirmation_read_cannot_run(
     tmp_path: Path,
 ) -> None:
     """A failed confirmation read must not be treated as proof of loss."""
-    gh_log = tmp_path / "gh.log"
-
-    result = _run_sweep_with_persistent_tags(
+    run = _run_sweep(
         tmp_path,
-        gh_log,
-        {
-            "GH_PERSISTENT_1": "latest\n0.9.9",
-            "GH_PERSISTENT_2": "latest",
-            "GH_PERSISTENT_FAIL": "3",
-        },
+        {"GH_LIST_2": _LISTING_WITHOUT_RELEASE, "GH_LIST_FAIL": "3"},
     )
 
-    assert_that(result.returncode).is_equal_to(1)
-    assert_that(result.stderr).contains("Could not confirm persistent tags")
-    assert_that(result.stderr).does_not_contain("Persistent tags disappeared")
+    assert_that(run.result.returncode).is_equal_to(1)
+    assert_that(run.result.stderr).contains("Could not confirm persistent tags")
+    assert_that(run.result.stderr).does_not_contain("Persistent tags disappeared")
 
 
+@pytest.mark.parametrize(
+    ("volatile_prefixes", "expected_returncode"),
+    [
+        ("", 0),  # default "ci- sha-": the sibling sha-* sweep's deletion
+        ("ci-", 1),  # sha- not volatile: the vanished sha tag is reported
+    ],
+)
 def test_sweep_ci_ghcr_tags_baseline_excludes_volatile_prefixes(
     tmp_path: Path,
+    volatile_prefixes: str,
+    expected_returncode: int,
 ) -> None:
     """The baseline must ignore tag families a sibling sweep may delete (#1652).
 
     ghcr-cleanup.yml runs the ci-* and sha-* sweeps as parallel jobs. Without
-    the exclusion the sha-* sweep would report the ci-* sweep's legitimate
+    the exclusion the ci-* sweep would report the sha-* sweep's legitimate
     deletions as lost release tags — exactly the false alarm to avoid.
     """
-    gh_log = tmp_path / "gh.log"
+    with_sha = _rows(*_PERSISTENT_ROWS, _version_row(950, "sha-abc"))
+    run = _run_sweep(
+        tmp_path,
+        {
+            "VOLATILE_TAG_PREFIXES": volatile_prefixes,
+            "GH_VERSIONS": _rows(with_sha, *_sole_ci_rows(202)),
+            "GH_LIST_2": _rows(*_PERSISTENT_ROWS),
+            "GH_LIST_3": _rows(*_PERSISTENT_ROWS),
+        },
+    )
 
-    result = _run_sweep_with_persistent_tags(tmp_path, gh_log, {})
-
-    assert_that(result.returncode).is_equal_to(0)
-    listing = gh_log.read_text()
-    assert_that(listing).contains('"ci-"')
-    assert_that(listing).contains('"sha-"')
+    assert_that(run.result.returncode).is_equal_to(expected_returncode)
+    assert_that(run.result.stdout).contains("Deleted py-lintro version 202")
 
 
 def test_sweep_ci_ghcr_tags_rejects_unsafe_volatile_prefix(
     tmp_path: Path,
 ) -> None:
-    """VOLATILE_TAG_PREFIXES is interpolated into jq, so it must be validated."""
+    """VOLATILE_TAG_PREFIXES entries must stay inside the tag character set."""
     result = _run_sweep_validation(
         tmp_path,
         {"VOLATILE_TAG_PREFIXES": 'ci-" or true or "'},
@@ -1471,32 +1350,47 @@ def test_sweep_ci_ghcr_tags_rejects_unsafe_volatile_prefix(
 
 # --- Per-run bound (#3492) ----------------------------------------------------
 
-#: Four aged, sole-tagged CI versions. The verify stub's recheck answers every
-#: id with ``2026-01-02T00:00:00Z`` / ``ci-old``, so each one is deletable.
-_SWEEP_BACKLOG_TSV = "\n".join(
-    f"{vid}\t2026-01-02T00:00:00Z\tci-{vid}" for vid in (301, 302, 303, 304)
-)
-
 
 @pytest.mark.parametrize(
-    ("knob", "value"),
+    ("knobs", "expected"),
     [
-        ("TIME_BUDGET_SECONDS", "ten"),
-        ("TIME_BUDGET_SECONDS", "-1"),
-        ("MAX_DELETES", "1.5"),
-        ("MAX_DELETES", "-3"),
+        ({"TIME_BUDGET_SECONDS": "ten"}, "TIME_BUDGET_SECONDS must be a non-negative"),
+        ({"TIME_BUDGET_SECONDS": "-1"}, "TIME_BUDGET_SECONDS must be a non-negative"),
+        ({"MAX_DELETES": "1.5"}, "MAX_DELETES must be a non-negative integer"),
+        ({"MAX_DELETES": "1234567890"}, "MAX_DELETES must be a non-negative"),
+        ({"MAX_DELETES": "100001"}, "MAX_DELETES must be between 0 and 100000"),
+        (
+            {"TIME_BUDGET_SECONDS": "86401"},
+            "TIME_BUDGET_SECONDS must be between 0 and 86400",
+        ),
+        ({"PAGE_SIZE": "0"}, "PAGE_SIZE must be between 1 and 100"),
+        ({"PAGE_SIZE": "101"}, "PAGE_SIZE must be between 1 and 100"),
+        (
+            {"GH_CALL_TIMEOUT_SECONDS": "0"},
+            "GH_CALL_TIMEOUT_SECONDS must be between 1 and 3600",
+        ),
+        ({"PACKAGE_ROTATION": "x"}, "PACKAGE_ROTATION must be a non-negative"),
+        ({"MIN_AGE_DAYS": "36501"}, "MIN_AGE_DAYS must be between 0 and 36500"),
+        (
+            {"TIME_BUDGET_SECONDS": "300", "VERIFY_RESERVE_SECONDS": "300"},
+            "must be below TIME_BUDGET_SECONDS (300)",
+        ),
+        (
+            {"VERIFY_RESERVE_SECONDS": "100", "GH_CALL_TIMEOUT_SECONDS": "60"},
+            "must be at least 3 x GH_CALL_TIMEOUT_SECONDS (60)",
+        ),
     ],
 )
 def test_sweep_ci_ghcr_tags_rejects_invalid_run_bound(
     tmp_path: Path,
-    knob: str,
-    value: str,
+    knobs: dict[str, str],
+    expected: str,
 ) -> None:
-    """A malformed budget or cap must fail validation rather than run unbounded."""
-    result = _run_sweep_validation(tmp_path, {knob: value})
+    """A malformed or out-of-range bound fails validation instead of running."""
+    result = _run_sweep_validation(tmp_path, knobs)
 
     assert_that(result.returncode).is_equal_to(2)
-    assert_that(result.stderr).contains(f"{knob} must be a non-negative integer")
+    assert_that(result.stderr).contains(expected)
 
 
 def test_sweep_ci_ghcr_tags_is_bounded_by_default(tmp_path: Path) -> None:
@@ -1504,78 +1398,300 @@ def test_sweep_ci_ghcr_tags_is_bounded_by_default(tmp_path: Path) -> None:
     result = _run_sweep_validation(tmp_path, {})
 
     assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stdout).contains("time_budget=720s, max_deletes=500")
+    assert_that(result.stdout).contains("time_budget=1200s, max_deletes=500")
     assert_that(result.stdout).contains("Sweep complete: 0 deleted")
+
+
+@pytest.mark.parametrize("max_deletes", ["08", "09", "0003"])
+def test_sweep_ci_ghcr_tags_reads_a_leading_zero_cap_as_decimal(
+    tmp_path: Path,
+    max_deletes: str,
+) -> None:
+    """``08`` means eight, not invalid octal that silently disables the cap."""
+    run = _run_sweep(
+        tmp_path,
+        {
+            "MAX_DELETES": max_deletes,
+            "GH_VERSIONS": _rows(*_PERSISTENT_ROWS, *_sole_ci_rows(*range(301, 313))),
+        },
+    )
+
+    cap = int(max_deletes)
+    assert_that(run.result.returncode).is_equal_to(0)
+    assert_that(run.result.stdout).contains(
+        f"Partial sweep, resumes next run: {cap} deleted, {12 - cap} remaining"
+        f" (cap of {cap} deletions reached)",
+    )
+    assert_that(run.gh_log.count("--method DELETE")).is_equal_to(cap)
+    assert_that(run.result.stderr).does_not_contain("value too great for base")
+
+
+def test_sweep_ci_ghcr_tags_reads_a_leading_zero_budget_as_decimal(
+    tmp_path: Path,
+) -> None:
+    """``0900`` is a 900-second budget, not invalid octal that disables it.
+
+    Deletes cost 100 fake seconds; new deletions stop at 900 - 300 (reserve).
+    """
+    run = _run_sweep(
+        tmp_path,
+        {
+            "TIME_BUDGET_SECONDS": "0900",
+            "MAX_DELETES": "0",
+            "GH_DELETE_COST": "100",
+            "GH_VERSIONS": _rows(*_PERSISTENT_ROWS, *_sole_ci_rows(*range(301, 313))),
+        },
+        clock=True,
+    )
+
+    assert_that(run.result.returncode).is_equal_to(0)
+    assert_that(run.result.stdout).contains(
+        "Partial sweep, resumes next run: 6 deleted, 6 remaining"
+        " (time budget of 900s spent)",
+    )
+    assert_that(run.result.stderr).does_not_contain("value too great for base")
 
 
 def test_sweep_ci_ghcr_tags_stops_at_the_delete_cap(tmp_path: Path) -> None:
     """At MAX_DELETES the sweep stops, verifies, and exits 0 as partial (#3492)."""
-    gh_log = tmp_path / "gh.log"
     step_summary = tmp_path / "summary.md"
 
-    result = _run_sweep_with_persistent_tags(
-        tmp_path,
-        gh_log,
+    run = _run_sweep(
+        tmp_path / "run",
         {
-            "GH_VERSIONS_TSV": _SWEEP_BACKLOG_TSV,
+            "GH_VERSIONS": _rows(*_PERSISTENT_ROWS, *_sole_ci_rows(301, 302, 303, 304)),
             "MAX_DELETES": "2",
-            "TIME_BUDGET_SECONDS": "0",
             "GITHUB_STEP_SUMMARY": str(step_summary),
         },
     )
 
-    assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stdout).contains("Deleted py-lintro version 301")
-    assert_that(result.stdout).contains("Deleted py-lintro version 302")
-    log = gh_log.read_text()
-    assert_that(log).does_not_contain("py-lintro/versions/303")
-    assert_that(log).does_not_contain("py-lintro/versions/304")
+    assert_that(run.result.returncode).is_equal_to(0)
+    assert_that(run.result.stdout).contains("Deleted py-lintro version 301")
+    assert_that(run.result.stdout).contains("Deleted py-lintro version 302")
+    assert_that(run.gh_log).does_not_contain("py-lintro/versions/303")
+    assert_that(run.gh_log).does_not_contain("py-lintro/versions/304")
     expected = (
         "Partial sweep, resumes next run: 2 deleted, 2 remaining"
         " (cap of 2 deletions reached)"
     )
-    assert_that(result.stdout).contains(f"::notice::{expected}")
+    assert_that(run.result.stdout).contains(f"::notice::{expected}")
     assert_that(step_summary.read_text()).contains(f"ci-* sweep: {expected}")
-    # What was deleted is still verified: baseline plus one confirmation.
-    assert_that(log.count(_PERSISTENT_QUERY_MARKER)).is_equal_to(2)
+    # What was deleted is still verified.
+    assert_that(run.list_calls).is_equal_to(2)
     # Listings ask for the API's largest page so pagination stays short.
-    assert_that(log).contains("py-lintro/versions?per_page=100")
+    assert_that(run.gh_log).contains("py-lintro/versions?per_page=100&page=1")
+
+
+def test_sweep_ci_ghcr_tags_zero_disables_both_limits(tmp_path: Path) -> None:
+    """``0`` turns the cap and the budget off: a slow backlog is drained whole."""
+    run = _run_sweep(
+        tmp_path,
+        {
+            "MAX_DELETES": "0",
+            "TIME_BUDGET_SECONDS": "0",
+            "GH_DELETE_COST": "5000",
+            "GH_VERSIONS": _rows(*_PERSISTENT_ROWS, *_sole_ci_rows(301, 302, 303, 304)),
+        },
+        clock=True,
+    )
+
+    assert_that(run.result.returncode).is_equal_to(0)
+    assert_that(run.result.stdout).contains("Sweep complete: 4 deleted")
+    assert_that(run.clock).is_equal_to(20000)
+
+
+def test_sweep_ci_ghcr_tags_dry_run_is_exempt_from_the_cap(tmp_path: Path) -> None:
+    """A dry run previews every candidate rather than stopping at MAX_DELETES."""
+    run = _run_sweep(
+        tmp_path,
+        {
+            "DRY_RUN": "true",
+            "MAX_DELETES": "1",
+            "GH_VERSIONS": _rows(*_PERSISTENT_ROWS, *_sole_ci_rows(301, 302, 303, 304)),
+        },
+    )
+
+    assert_that(run.result.returncode).is_equal_to(0)
+    assert_that(run.result.stdout.count("[dry-run] Would delete")).is_equal_to(4)
+    assert_that(run.result.stdout).contains("Sweep complete: 4 would delete")
+    assert_that(run.gh_log).does_not_contain("--method DELETE")
 
 
 def test_sweep_ci_ghcr_tags_stops_when_the_time_budget_is_spent(
     tmp_path: Path,
 ) -> None:
-    """A spent budget stops deletions and skips unlisted packages (#3492).
+    """A spent budget stops deletions, still verifies, and skips the next package.
 
-    Each DELETE costs 400 fake seconds against a 720s budget, so the run
-    deletes two versions, leaves two for the next run, and never lists the
-    second package — and still exits 0 instead of being cancelled.
+    Each DELETE costs 200 fake seconds. With a 720s budget and the 300s
+    verification reserve, deletions stop at 420s: three go (at 0, 200 and
+    400), one is left, and the second package is never listed.
     """
-    gh_log = tmp_path / "gh.log"
-    clock = tmp_path / "clock"
-    clock.write_text("1000000000\n")
-
-    result = _run_sweep_with_persistent_tags(
+    run = _run_sweep(
         tmp_path,
-        gh_log,
         {
             "PACKAGES": "py-lintro py-lintro-base",
-            "GH_VERSIONS_TSV": _SWEEP_BACKLOG_TSV,
+            "GH_VERSIONS": _rows(*_PERSISTENT_ROWS, *_sole_ci_rows(301, 302, 303, 304)),
             "TIME_BUDGET_SECONDS": "720",
             "MAX_DELETES": "0",
-            "GH_DELETE_COST": "400",
+            "GH_DELETE_COST": "200",
         },
-        clock=clock,
+        clock=True,
     )
 
-    assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stdout).contains("Deleted py-lintro version 302")
-    assert_that(result.stdout).does_not_contain("Deleted py-lintro version 303")
-    assert_that(result.stdout).contains(
-        "::notice::Partial sweep, resumes next run: 2 deleted, 2 remaining"
-        " (time budget of 720s spent); not listed this run: py-lintro-base",
+    assert_that(run.result.returncode).is_equal_to(0)
+    assert_that(run.result.stdout).contains("Deleted py-lintro version 303")
+    assert_that(run.result.stdout).does_not_contain("Deleted py-lintro version 304")
+    assert_that(run.result.stdout).contains(
+        "::notice::Partial sweep, resumes next run: 3 deleted, 1 remaining"
+        " (time budget of 720s spent); not swept this run: py-lintro-base",
     )
-    assert_that(gh_log.read_text()).does_not_contain("py-lintro-base")
+    assert_that(run.result.stdout).contains(
+        "::warning::Not swept this run: py-lintro-base",
+    )
+    assert_that(run.gh_log).does_not_contain("py-lintro-base")
+    # The deletions were verified: the listing plus one confirmation.
+    assert_that(run.list_calls).is_equal_to(2)
+    assert_that(run.result.stderr).does_not_contain("Could not verify")
+
+
+def test_sweep_ci_ghcr_tags_stops_a_listing_that_overruns_the_budget(
+    tmp_path: Path,
+) -> None:
+    """A listing too slow for the budget stops between pages as a partial run.
+
+    Fifty one-version pages at 100 fake seconds each would take 5,000s against
+    a 1,200s budget. New pages stop at 1,200 - 300 = 900s, nothing is deleted
+    from the half-read package, and the run exits 0 well inside the job
+    timeout instead of being cancelled mid-pagination.
+    """
+    run = _run_sweep(
+        tmp_path,
+        {
+            "PAGE_SIZE": "1",
+            "GH_LIST_COST": "100",
+            "GH_VERSIONS": _rows(*_PERSISTENT_ROWS, *_sole_ci_rows(*range(301, 349))),
+        },
+        clock=True,
+    )
+
+    assert_that(run.result.returncode).is_equal_to(0)
+    assert_that(run.list_calls).is_equal_to(9)
+    assert_that(run.gh_log).does_not_contain("--method DELETE")
+    assert_that(run.result.stdout).contains("did not finish within the time budget")
+    assert_that(run.result.stdout).contains(
+        "::warning::The ci-* sweep made no progress this run",
+    )
+    assert_that(run.clock).is_less_than_or_equal_to(1200)
+
+
+def test_sweep_ci_ghcr_tags_keeps_room_to_verify_after_a_slow_listing(
+    tmp_path: Path,
+) -> None:
+    """Deletions stop early enough that the verification listing still fits.
+
+    The listing takes 200s, so the package reserves twice that (400s) of its
+    1,200s budget for verification: deletes at 100s each run until 800s,
+    and the verification listing then ends at 1,000s — inside the budget.
+    """
+    run = _run_sweep(
+        tmp_path,
+        {
+            "GH_LIST_COST": "200",
+            "GH_DELETE_COST": "100",
+            "MAX_DELETES": "0",
+            "GH_VERSIONS": _rows(*_PERSISTENT_ROWS, *_sole_ci_rows(*range(301, 321))),
+        },
+        clock=True,
+    )
+
+    assert_that(run.result.returncode).is_equal_to(0)
+    assert_that(run.gh_log.count("--method DELETE")).is_equal_to(6)
+    assert_that(run.result.stdout).contains("6 deleted, 14 remaining")
+    assert_that(run.list_calls).is_equal_to(2)
+    assert_that(run.clock).is_equal_to(1000)
+
+
+def test_sweep_ci_ghcr_tags_bounds_a_verification_that_cannot_finish(
+    tmp_path: Path,
+) -> None:
+    """A verification listing that outruns the budget stops and fails closed.
+
+    The listing is fast but the registry then slows to 60s a page (the
+    per-call timeout): verification pages stop starting at the 1,200s budget,
+    so the run ends by budget + one call and reports it could not verify.
+    """
+    run = _run_sweep(
+        tmp_path,
+        {
+            "PAGE_SIZE": "10",
+            "GH_LIST_COST": "1",
+            "GH_LIST_SLOW_FROM": "10",
+            "GH_LIST_SLOW_COST": "60",
+            "GH_DELETE_COST": "100",
+            "MAX_DELETES": "0",
+            "GH_VERSIONS": _rows(
+                *_PERSISTENT_ROWS,
+                *(_version_row(vid, f"rel-{vid}") for vid in range(1000, 1070)),
+                *_sole_ci_rows(*range(301, 310)),
+            ),
+        },
+        clock=True,
+    )
+
+    assert_that(run.result.returncode).is_equal_to(1)
+    assert_that(run.result.stderr).contains("Could not verify persistent tags")
+    assert_that(run.result.stderr).contains("budget ran out")
+    assert_that(run.result.stderr).does_not_contain("Persistent tags disappeared")
+    assert_that(run.clock).is_less_than_or_equal_to(1200 + 60)
+
+
+def test_sweep_ci_ghcr_tags_kills_a_hung_gh_call(tmp_path: Path) -> None:
+    """A gh call that hangs is killed after GH_CALL_TIMEOUT_SECONDS."""
+    run = _run_sweep(tmp_path, {"GH_SLEEP": "30", "GH_CALL_TIMEOUT_SECONDS": "1"})
+
+    assert_that(run.result.returncode).is_equal_to(1)
+    assert_that(run.result.stderr).contains("gh call timed out after 1s")
+
+
+def test_sweep_ci_ghcr_tags_rotation_stops_a_slow_package_starving_the_next(
+    tmp_path: Path,
+) -> None:
+    """Rotating the start package lets a later package drain (#3492).
+
+    py-lintro's listing takes 1,000 fake seconds, so a run that starts with it
+    leaves no time for anything else. The next run (the next run number)
+    starts with py-lintro-base instead and deletes its backlog.
+    """
+    env = {
+        "PACKAGES": "py-lintro py-lintro-base",
+        "GH_LIST_COSTS": "py-lintro=1000 py-lintro-base=1",
+        "GH_VERSIONS": _rows(*_PERSISTENT_ROWS, *_sole_ci_rows(301, 302)),
+    }
+
+    first = _run_sweep(tmp_path / "run1", {**env, "PACKAGE_ROTATION": "0"}, clock=True)
+    second = _run_sweep(
+        tmp_path / "run2",
+        {**env, "PACKAGE_ROTATION": "1"},
+        clock=True,
+    )
+
+    assert_that(first.result.returncode).is_equal_to(0)
+    assert_that(first.result.stdout).contains(
+        "Package order this run: py-lintro py-lintro-base",
+    )
+    assert_that(first.gh_log).does_not_contain("--method DELETE")
+    assert_that(first.result.stdout).contains(
+        "::warning::The ci-* sweep made no progress this run",
+    )
+    assert_that(first.result.stdout).contains(
+        "::warning::Not swept this run: py-lintro-base",
+    )
+    assert_that(second.result.returncode).is_equal_to(0)
+    assert_that(second.result.stdout).contains(
+        "Package order this run: py-lintro-base py-lintro",
+    )
+    assert_that(second.result.stdout).contains("Deleted py-lintro-base version 301")
+    assert_that(second.result.stdout).contains("Deleted py-lintro-base version 302")
 
 
 #: Environment of a GitHub Actions job on a GitHub-hosted runner.

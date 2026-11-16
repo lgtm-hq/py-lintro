@@ -47,12 +47,28 @@ set -euo pipefail
 #
 # Bounded per run (#3492): a backlog of thousands of aged tags made the weekly
 # job hit its timeout mid-pagination and get cancelled, which reported main as
-# red. Each run now stops starting new work once TIME_BUDGET_SECONDS has
-# elapsed or MAX_DELETES versions are gone, still verifies what it deleted,
-# and exits 0 with a "partial, resumes next run" summary. The next run lists
-# the registry afresh and carries on, so the backlog drains over several runs.
-# Listings request 100 versions per page (the API maximum; the default is 30)
-# because pagination, not deletion, was most of the run time.
+# red. The run is now bounded end to end:
+#   - Every gh call runs under timeout(1) and is killed after
+#     GH_CALL_TIMEOUT_SECONDS (C).
+#   - Listings are paged by hand (PAGE_SIZE per request; 100 is the API
+#     maximum, the default is 30) so the clock is checked between pages. One
+#     listing yields both the candidates and the persistent-tag baseline.
+#   - With H = TIME_BUDGET_SECONDS and R = VERIFY_RESERVE_SECONDS, new work
+#     (a listing page, a recheck-and-delete) only starts while fewer than
+#     H - R seconds have passed. Inside a package, deletions stop even earlier
+#     when twice that package's own listing time would not fit before H, so
+#     its verification still has room.
+#   - Verification listings only start before H.
+#   Since R >= 3C is enforced, the work phase ends by H, so the script returns
+#   within H + C plus local overhead, and the job timeout only has to exceed
+#   that.
+# A run that stops at the budget or at MAX_DELETES still verifies what it
+# deleted and exits 0 with a "partial, resumes next run" notice; the next run
+# lists the registry afresh and continues. Packages are visited starting at
+# PACKAGE_ROTATION mod N (the workflow passes the run number), so a package
+# whose listing eats the budget cannot starve the others week after week, and
+# a partial run that deleted nothing or skipped a package raises a ::warning::
+# so a stuck sweep never looks healthy.
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	cat <<'EOF'
@@ -67,8 +83,7 @@ Environment:
   PACKAGES       Space-separated package names
                  (default: "py-lintro py-lintro-base")
   TAG_PREFIX     Only sweep tags starting with this (default: ci-).
-                 Must match ^[A-Za-z0-9._-]+$ because it is interpolated
-                 into the gh api --jq filter program.
+                 Must match ^[A-Za-z0-9._-]+$ (container tag characters).
   MIN_AGE_DAYS   Only delete versions older than N days (default: 91).
                  Values below 91 are rejected unless ALLOW_SHORT_RETENTION
                  is "true" (see below).
@@ -86,18 +101,35 @@ Environment:
                  runs the ci-* and sha-* sweeps as parallel jobs, so each one
                  sees the other's deletions; without this the sha-* sweep
                  would report swept ci-* tags as lost (#1652). Each entry must
-                 match ^[A-Za-z0-9._-]+$ (interpolated into the jq filter).
+                 match ^[A-Za-z0-9._-]+$.
   TIME_BUDGET_SECONDS
-                 Stop starting new deletions (and new package listings) once
-                 this many seconds have passed since the script started
-                 (default: 720). 0 disables the budget. Deletions already
-                 made are still verified, so keep the job timeout well above
-                 the budget.
-  MAX_DELETES    Delete at most this many versions per run, across all
-                 packages (default: 500). 0 disables the cap.
-                 A run that stops at the budget or the cap exits 0 and prints
-                 "Partial sweep, resumes next run: N deleted, M remaining".
+                 Total run budget, 0-86400 (default: 1200; 0 disables it).
+                 New work stops at TIME_BUDGET_SECONDS minus
+                 VERIFY_RESERVE_SECONDS and verification stops at the budget,
+                 so the script returns within the budget plus one
+                 GH_CALL_TIMEOUT_SECONDS.
+  VERIFY_RESERVE_SECONDS
+                 Seconds kept back from the budget for post-delete
+                 verification, 0-86400 (default: 300). With a budget set it
+                 must be below the budget and at least three times
+                 GH_CALL_TIMEOUT_SECONDS.
+  GH_CALL_TIMEOUT_SECONDS
+                 Kill any single gh call after this many seconds, 1-3600
+                 (default: 60). A killed call is an error.
+  MAX_DELETES    Delete at most this many versions per run across all
+                 packages, 0-100000 (default: 500; 0 disables the cap).
+                 DRY_RUN is exempt from the cap so it previews every
+                 candidate; the time budget still applies to it.
+  PAGE_SIZE      Versions per listing request, 1-100 (default: 100).
+  PACKAGE_ROTATION
+                 Non-negative integer; the run starts with package number
+                 PACKAGE_ROTATION mod N of PACKAGES (default: 0).
+                 ghcr-cleanup.yml passes the run number.
   DRY_RUN        When "true", log candidates without deleting (default: false)
+
+All numbers are read as base-10 integers; leading zeros are allowed.
+A run that stops at the budget or the cap exits 0 and prints
+"Partial sweep, resumes next run: N deleted, M remaining".
 EOF
 	exit 0
 fi
@@ -106,11 +138,8 @@ gh_token="${GH_TOKEN:-}"
 org="${ORG:-lgtm-hq}"
 packages="${PACKAGES:-py-lintro py-lintro-base}"
 tag_prefix="${TAG_PREFIX:-ci-}"
-min_age_days="${MIN_AGE_DAYS:-91}"
 volatile_prefixes="${VOLATILE_TAG_PREFIXES:-ci- sha-}"
 dry_run="${DRY_RUN:-false}"
-time_budget_seconds="${TIME_BUDGET_SECONDS:-720}"
-max_deletes="${MAX_DELETES:-500}"
 sweep_errors=0
 # Run-wide progress for the per-run bound (#3492).
 swept_count=0
@@ -128,12 +157,63 @@ if [[ -z "$gh_token" ]]; then
 	exit 2
 fi
 
-if ! [[ "$min_age_days" =~ ^[0-9]+$ ]]; then
-	echo "MIN_AGE_DAYS must be a non-negative integer, got: ${min_age_days}" >&2
-	exit 2
+# Validate a non-negative integer and store it, normalised to base 10, in the
+# variable named by $1. Bash arithmetic reads a leading zero as octal, so an
+# unnormalised "08" is an arithmetic error, and inside [[ -gt ]] that error
+# quietly evaluates false — which is how MAX_DELETES=08 disabled the cap.
+parse_uint() {
+	local var="$1"
+	local name="$2"
+	local value="$3"
+	local min="$4"
+	local max="$5"
+	if ! [[ "$value" =~ ^[0-9]{1,9}$ ]]; then
+		echo "${name} must be a non-negative integer, got: ${value}" >&2
+		exit 2
+	fi
+	value=$((10#$value))
+	if ((value < min || value > max)); then
+		echo "${name} must be between ${min} and ${max}, got: ${value}" >&2
+		exit 2
+	fi
+	printf -v "$var" '%d' "$value"
+}
+
+min_age_days=0
+time_budget_seconds=0
+verify_reserve_seconds=0
+gh_call_timeout=0
+max_deletes=0
+page_size=0
+package_rotation=0
+parse_uint min_age_days MIN_AGE_DAYS "${MIN_AGE_DAYS:-91}" 0 36500
+parse_uint time_budget_seconds TIME_BUDGET_SECONDS \
+	"${TIME_BUDGET_SECONDS:-1200}" 0 86400
+parse_uint verify_reserve_seconds VERIFY_RESERVE_SECONDS \
+	"${VERIFY_RESERVE_SECONDS:-300}" 0 86400
+parse_uint gh_call_timeout GH_CALL_TIMEOUT_SECONDS \
+	"${GH_CALL_TIMEOUT_SECONDS:-60}" 1 3600
+parse_uint max_deletes MAX_DELETES "${MAX_DELETES:-500}" 0 100000
+parse_uint page_size PAGE_SIZE "${PAGE_SIZE:-100}" 1 100
+parse_uint package_rotation PACKAGE_ROTATION "${PACKAGE_ROTATION:-0}" \
+	0 999999999
+
+if ((time_budget_seconds > 0)); then
+	if ((verify_reserve_seconds >= time_budget_seconds)); then
+		echo "VERIFY_RESERVE_SECONDS (${verify_reserve_seconds}) must be below" \
+			"TIME_BUDGET_SECONDS (${time_budget_seconds})" >&2
+		exit 2
+	fi
+	# A recheck-and-delete is up to three calls; the reserve must absorb one
+	# that starts just before the work deadline, or verification has no room.
+	if ((verify_reserve_seconds < 3 * gh_call_timeout)); then
+		echo "VERIFY_RESERVE_SECONDS (${verify_reserve_seconds}) must be at" \
+			"least 3 x GH_CALL_TIMEOUT_SECONDS (${gh_call_timeout})" >&2
+		exit 2
+	fi
 fi
 
-if [[ "$min_age_days" -lt "$SAFE_MIN_AGE_DAYS" ]]; then
+if ((min_age_days < SAFE_MIN_AGE_DAYS)); then
 	if [[ "${ALLOW_SHORT_RETENTION:-false}" != "true" ]]; then
 		echo "MIN_AGE_DAYS=${min_age_days} is below the ${SAFE_MIN_AGE_DAYS}d" \
 			"rerun-retention window (#1138)." >&2
@@ -148,10 +228,8 @@ if [[ "$min_age_days" -lt "$SAFE_MIN_AGE_DAYS" ]]; then
 		"workflows that are still re-runnable (#1138)." >&2
 fi
 
-# TAG_PREFIX is interpolated into the gh api --jq program below (gh has no
-# --arg equivalent), so constrain it to characters that cannot terminate the
-# jq string literal or alter the filter's semantics. This also subsumes the
-# previous non-empty check.
+# Prefixes are matched against tags literally; restricting them to the
+# container-tag character set keeps globs and quotes out of the matching.
 if ! [[ "$tag_prefix" =~ ^[A-Za-z0-9._-]+$ ]]; then
 	echo "TAG_PREFIX must match ^[A-Za-z0-9._-]+\$, got: ${tag_prefix}" >&2
 	exit 2
@@ -160,30 +238,21 @@ fi
 # The verification baseline must ignore every tag family that some sweep may
 # legitimately delete, otherwise a sibling job's work reads as a lost tag
 # (#1652). TAG_PREFIX is always excluded; the rest come from
-# VOLATILE_TAG_PREFIXES and are interpolated into jq, so apply the same
-# character class.
-volatile_prefixes_jq="\"${tag_prefix}\""
+# VOLATILE_TAG_PREFIXES.
+volatile_list="$tag_prefix"
 for prefix in $volatile_prefixes; do
 	if ! [[ "$prefix" =~ ^[A-Za-z0-9._-]+$ ]]; then
 		echo "VOLATILE_TAG_PREFIXES entries must match" \
 			"^[A-Za-z0-9._-]+\$, got: ${prefix}" >&2
 		exit 2
 	fi
-	# The default VOLATILE_TAG_PREFIXES repeats the default TAG_PREFIX, so
-	# skip what the seed already covers. `any` short-circuits either way;
-	# this just keeps the array matching what the comment above promises.
 	[[ "$prefix" == "$tag_prefix" ]] && continue
-	volatile_prefixes_jq+=",\"${prefix}\""
+	volatile_list+=" ${prefix}"
 done
-readonly volatile_prefixes_jq
+readonly volatile_list
 
-if ! [[ "$time_budget_seconds" =~ ^[0-9]+$ ]]; then
-	echo "TIME_BUDGET_SECONDS must be a non-negative integer," \
-		"got: ${time_budget_seconds}" >&2
-	exit 2
-fi
-if ! [[ "$max_deletes" =~ ^[0-9]+$ ]]; then
-	echo "MAX_DELETES must be a non-negative integer, got: ${max_deletes}" >&2
+if ! command -v timeout >/dev/null 2>&1; then
+	echo "timeout(1) is required to bound each gh call (#3492)" >&2
 	exit 2
 fi
 
@@ -193,21 +262,116 @@ now_epoch() {
 
 start_epoch="$(now_epoch)"
 cutoff_epoch=$((start_epoch - min_age_days * 86400))
+# Seconds since start after which no new work / no verification starts.
+work_deadline=$((time_budget_seconds - verify_reserve_seconds))
+verify_deadline="$time_budget_seconds"
 
-# Set stop_reason once the run has used up its budget or cap (#3492). Once
-# set it stays set: the remaining work is left for the next scheduled run.
-check_run_bound() {
-	[[ -n "$stop_reason" ]] && return 0
-	if [[ "$max_deletes" -gt 0 && "$swept_count" -ge "$max_deletes" ]]; then
-		stop_reason="cap of ${max_deletes} deletions reached"
-		return 0
+# Succeed while fewer than $1 seconds have passed (always, with no budget).
+before_deadline() {
+	local limit="$1"
+	((time_budget_seconds == 0)) && return 0
+	(($(now_epoch) - start_epoch < limit))
+}
+
+# Run gh under timeout(1) so one hung call cannot outlive the budget.
+gh_call() {
+	local rc=0
+	timeout --kill-after=5 "$gh_call_timeout" gh "$@" || rc=$?
+	if ((rc == 124 || rc == 137)); then
+		echo "gh call timed out after ${gh_call_timeout}s" >&2
 	fi
-	if [[ "$time_budget_seconds" -gt 0 ]] &&
-		[[ $(($(now_epoch) - start_epoch)) -ge "$time_budget_seconds" ]]; then
-		stop_reason="time budget of ${time_budget_seconds}s spent"
-		return 0
+	return "$rc"
+}
+
+# One TSV row per version: <id>\t<updated_at>\t<updated epoch>\t<tags>.
+readonly LIST_JQ='.[]
+	| [(.id | tostring),
+		.updated_at,
+		(.updated_at | fromdateiso8601 | tostring),
+		((.metadata.container.tags // []) | join(" "))]
+	| @tsv'
+
+# List every version of package $1 into file $3, a page at a time, checking
+# deadline $2 (seconds since start) before each page.
+# Returns 0 when complete, 3 when the deadline came first, and gh's status
+# (with its stderr) when a request failed.
+list_versions() {
+	local pkg="$1"
+	local deadline="$2"
+	local out="$3"
+	local page=1
+	local rows=""
+	local line=""
+	local count=0
+	: >"$out"
+	while true; do
+		if ! before_deadline "$deadline"; then
+			return 3
+		fi
+		rows=$(gh_call api \
+			"orgs/${org}/packages/container/${pkg}/versions?per_page=${page_size}&page=${page}" \
+			--jq "$LIST_JQ") || return $?
+		count=0
+		while IFS= read -r line; do
+			[[ -z "$line" ]] && continue
+			printf '%s\n' "$line" >>"$out"
+			count=$((count + 1))
+		done <<<"$rows"
+		if ((count < page_size)); then
+			return 0
+		fi
+		page=$((page + 1))
+	done
+}
+
+# Print the persistent tags (those carrying none of the volatile prefixes) in
+# listing file $1, one per line, sorted. This is the invariant the post-delete
+# verification checks: the sweep only deletes sole-ci-tagged versions, so this
+# set may never shrink (#1652).
+persistent_tags_from() {
+	awk -F'\t' -v prefixes="$volatile_list" '
+		BEGIN { n = split(prefixes, p, " ") }
+		{
+			m = split($4, tags, " ")
+			for (i = 1; i <= m; i++) {
+				volatile = 0
+				for (j = 1; j <= n; j++) {
+					if (index(tags[i], p[j]) == 1) { volatile = 1; break }
+				}
+				if (!volatile) print tags[i]
+			}
+		}' "$1" | LC_ALL=C sort -u
+}
+
+# Print "<id>\t<updated_at>\t<tags>" for each version in listing file $1 that
+# has tags, only TAG_PREFIX tags, and is older than the cutoff.
+candidates_from() {
+	awk -F'\t' -v prefix="$tag_prefix" -v cutoff="$cutoff_epoch" '
+		$4 != "" && ($3 + 0) < cutoff {
+			m = split($4, tags, " ")
+			for (i = 1; i <= m; i++) {
+				if (index(tags[i], prefix) != 1) next
+			}
+			printf "%s\t%s\t%s\n", $1, $2, $4
+		}' "$1"
+}
+
+# Print package $1's persistent tags from a fresh listing bounded by the
+# verification deadline.
+fetch_persistent_tags() {
+	local pkg="$1"
+	local rows_file=""
+	local rc=0
+	rows_file="$(mktemp)"
+	list_versions "$pkg" "$verify_deadline" "$rows_file" || rc=$?
+	if ((rc == 0)); then
+		persistent_tags_from "$rows_file"
+	elif ((rc == 3)); then
+		echo "the ${time_budget_seconds}s budget ran out before the listing" \
+			"finished" >&2
 	fi
-	return 1
+	rm -f "$rows_file"
+	return "$rc"
 }
 
 tags_are_ci_only() {
@@ -227,27 +391,9 @@ tags_are_ci_only() {
 fetch_version_state() {
 	local pkg="$1"
 	local vid="$2"
-	gh api \
+	gh_call api \
 		"orgs/${org}/packages/container/${pkg}/versions/${vid}" \
 		--jq '[.updated_at, ((.metadata.container.tags // []) | join(" "))] | @tsv'
-}
-
-# Print the package's persistent tags (those carrying none of the volatile
-# prefixes), one per line, sorted. This is the invariant the post-delete
-# verification checks: the sweep only deletes sole-ci-tagged versions, so this
-# set may never shrink (#1652).
-fetch_persistent_tags() {
-	local pkg="$1"
-	gh api \
-		"orgs/${org}/packages/container/${pkg}/versions?per_page=100" \
-		--paginate \
-		--jq ".[]
-			| (.metadata.container.tags // [])[]
-			| . as \$tag
-			| select([${volatile_prefixes_jq}]
-				| any(. as \$p | \$tag | startswith(\$p))
-				| not)" |
-		LC_ALL=C sort -u
 }
 
 # Print the entries of newline-separated list "$1" absent from list "$2".
@@ -274,8 +420,9 @@ tags_missing_from() {
 # A false "we deleted a release tag" alarm is worse than no alarm, so a tag is
 # only reported after it is missing from two independent reads — a paginated
 # listing on a busy registry can momentarily under-report. A read that fails
-# outright is reported as "could not verify" and still fails the job, keeping
-# the sweep fail-closed without claiming a loss that was never observed.
+# outright, or cannot finish inside the budget, is reported as "could not
+# verify" and still fails the job, keeping the sweep fail-closed without
+# claiming a loss that was never observed.
 #
 # Known limit: a tag first created after the baseline read and destroyed by a
 # DELETE in the same run is invisible to this check. That is the deliberate
@@ -325,70 +472,92 @@ verify_persistent_tags_survived() {
 	sweep_errors=1
 }
 
+# Set stop_reason once the run may start no more work (#3492): the delete cap
+# is reached (dry runs are exempt) or deadline $1 has passed. Once set it
+# stays set; what is left belongs to the next scheduled run.
+check_run_bound() {
+	local deadline="$1"
+	[[ -n "$stop_reason" ]] && return 0
+	if [[ "$dry_run" != "true" ]] && ((max_deletes > 0)) &&
+		((swept_count >= max_deletes)); then
+		stop_reason="cap of ${max_deletes} deletions reached"
+		return 0
+	fi
+	if ! before_deadline "$deadline"; then
+		stop_reason="time budget of ${time_budget_seconds}s spent"
+		return 0
+	fi
+	return 1
+}
+
 sweep_package() {
 	local pkg="$1"
-	local query_output=""
+	local rows_file=""
+	local err_file=""
+	local list_rc=0
+	local list_started=0
+	local list_seconds=0
 	local versions=""
+	local delete_deadline="$work_deadline"
+	local reserve=0
 
-	if check_run_bound; then
+	if check_run_bound "$work_deadline"; then
 		echo "Not listing ${pkg}: ${stop_reason}; it resumes next run"
 		unreached_packages+="${pkg} "
 		return
 	fi
 
-	# One TSV line per candidate: <id>\t<updated_at>\t<space-joined tags>
-	# Embed prefix/cutoff via shell interpolation (gh api has no --arg).
-	# Keep stderr out of the TSV payload so diagnostic noise cannot corrupt
-	# the while-read loop (CodeRabbit on #1645).
-	local query_err_file=""
-	query_err_file="$(mktemp)"
 	echo "Listing ${pkg} versions"
-	if ! query_output=$(gh api \
-		"orgs/${org}/packages/container/${pkg}/versions?per_page=100" \
-		--paginate \
-		--jq ".[]
-			| select(
-				((.metadata.container.tags // []) | length) > 0
-				and ((.metadata.container.tags // [])
-					| all(startswith(\"${tag_prefix}\")))
-				and ((.updated_at | fromdateiso8601) < ${cutoff_epoch})
-			)
-			| [( .id | tostring),
-				.updated_at,
-				((.metadata.container.tags // []) | join(\" \"))]
-			| @tsv" 2>"${query_err_file}"); then
-		echo "::error::Failed to query versions for ${pkg}: $(cat "${query_err_file}")" >&2
-		rm -f "${query_err_file}"
+	rows_file="$(mktemp)"
+	err_file="$(mktemp)"
+	list_started="$(now_epoch)"
+	list_versions "$pkg" "$work_deadline" "$rows_file" 2>"${err_file}" ||
+		list_rc=$?
+	list_seconds=$(($(now_epoch) - list_started))
+	if ((list_rc == 3)); then
+		check_run_bound "$work_deadline" || true
+		echo "Listing ${pkg} did not finish within the time budget" \
+			"(${list_seconds}s); it resumes next run"
+		unreached_packages+="${pkg} "
+		rm -f "${rows_file}" "${err_file}"
+		return
+	fi
+	if ((list_rc != 0)); then
+		echo "::error::Failed to query versions for ${pkg}: $(cat "${err_file}")" >&2
+		rm -f "${rows_file}" "${err_file}"
 		sweep_errors=1
 		return
 	fi
-	rm -f "${query_err_file}"
-	versions="$query_output"
+	rm -f "${err_file}"
+	echo "Listed $(wc -l <"${rows_file}" | tr -d ' ') ${pkg} versions in" \
+		"${list_seconds}s"
 
+	versions="$(candidates_from "${rows_file}")"
 	if [[ -z "$versions" ]]; then
 		echo "No ${tag_prefix}* tags older than ${min_age_days}d for ${pkg}"
+		rm -f "${rows_file}"
 		return
 	fi
 
-	# Snapshot the persistent tags that must survive the deletions (#1652).
-	# Fail closed: without a baseline the post-delete verification is blind,
-	# so skip the package rather than delete unverifiably. DRY_RUN deletes
-	# nothing, so it needs no baseline.
+	# The persistent tags that must survive the deletions (#1652), taken from
+	# the same listing as the candidates, so no extra pass is paid. DRY_RUN
+	# deletes nothing, so it needs no baseline.
 	local baseline_tags=""
 	local deleted_ids=""
 	if [[ "$dry_run" != "true" ]]; then
-		local baseline_err_file=""
-		baseline_err_file="$(mktemp)"
-		if ! baseline_tags=$(fetch_persistent_tags "$pkg" \
-			2>"${baseline_err_file}"); then
-			echo "::error::Failed to snapshot persistent tags for ${pkg};" \
-				"skipping its deletions: $(cat "${baseline_err_file}")" \
-				"(#1652)" >&2
-			rm -f "${baseline_err_file}"
-			sweep_errors=1
-			return
+		baseline_tags="$(persistent_tags_from "${rows_file}")"
+	fi
+	rm -f "${rows_file}"
+
+	# Leave this package's verification (up to two listings) room before
+	# the budget ends: stop deleting at the larger of the fixed reserve and
+	# twice the listing time just measured.
+	if ((time_budget_seconds > 0)); then
+		reserve="$verify_reserve_seconds"
+		if ((2 * list_seconds > reserve)); then
+			reserve=$((2 * list_seconds))
 		fi
-		rm -f "${baseline_err_file}"
+		delete_deadline=$((time_budget_seconds - reserve))
 	fi
 
 	while IFS=$'\t' read -r vid snap_updated tags; do
@@ -411,7 +580,7 @@ sweep_package() {
 			continue
 		fi
 		# Per-run bound (#3492): once spent, only count what is left.
-		if check_run_bound; then
+		if check_run_bound "$delete_deadline"; then
 			remaining_count=$((remaining_count + 1))
 			continue
 		fi
@@ -483,7 +652,7 @@ sweep_package() {
 		fi
 		local delete_err_file=""
 		delete_err_file="$(mktemp)"
-		if gh api --method DELETE \
+		if gh_call api --method DELETE \
 			"orgs/${org}/packages/container/${pkg}/versions/${vid}" \
 			>/dev/null 2>"${delete_err_file}"; then
 			rm -f "${delete_err_file}"
@@ -504,6 +673,8 @@ sweep_package() {
 }
 
 # Print the run summary and mirror it to the job summary when there is one.
+# A partial run that deleted nothing, or left a package unswept, is also a
+# ::warning:: so a sweep that is stuck week after week does not look healthy.
 report_progress() {
 	local verb="deleted"
 	local line=""
@@ -512,9 +683,19 @@ report_progress() {
 		line="Partial sweep, resumes next run: ${swept_count} ${verb},"
 		line+=" ${remaining_count} remaining (${stop_reason})"
 		if [[ -n "$unreached_packages" ]]; then
-			line+="; not listed this run: ${unreached_packages% }"
+			line+="; not swept this run: ${unreached_packages% }"
 		fi
 		echo "::notice::${line}"
+		if ((swept_count == 0)); then
+			echo "::warning::The ${tag_prefix}* sweep made no progress this" \
+				"run (${stop_reason}). If this repeats, the backlog is not" \
+				"draining (#3492)."
+		fi
+		if [[ -n "$unreached_packages" ]]; then
+			echo "::warning::Not swept this run: ${unreached_packages% }" \
+				"(${stop_reason}). The next run starts from another package" \
+				"(#3492)."
+		fi
 	else
 		line="Sweep complete: ${swept_count} ${verb}"
 		echo "$line"
@@ -528,9 +709,20 @@ report_progress() {
 echo "Sweeping ${tag_prefix}* tags older than ${min_age_days}d" \
 	"(dry_run=${dry_run}, time_budget=${time_budget_seconds}s," \
 	"max_deletes=${max_deletes})"
-for pkg in $packages; do
-	sweep_package "$pkg"
-done
+
+read -r -a package_list <<<"$packages"
+package_count="${#package_list[@]}"
+if ((package_count > 0)); then
+	first=$((package_rotation % package_count))
+	ordered=()
+	for ((i = 0; i < package_count; i++)); do
+		ordered+=("${package_list[$(((first + i) % package_count))]}")
+	done
+	echo "Package order this run: ${ordered[*]}"
+	for pkg in "${ordered[@]}"; do
+		sweep_package "$pkg"
+	done
+fi
 
 report_progress
 
