@@ -742,6 +742,41 @@ def test_a_held_lock_is_waited_for_once_within_the_tool_timeout(
 
 
 @posix_only
+def test_locked_entries_share_one_wait_budget(cache: Path) -> None:
+    """Three locked entries cannot each wait the tool's whole timeout.
+
+    Sol's reproduction: locks released 0.2 s apart passed after 0.64 s with a
+    0.3 s timeout. The pass has one deadline, so the second lock, still held
+    when it runs out, fails the run.
+
+    Args:
+        cache: Per-pin npm cache.
+    """
+    entries = [_install(cache, name=f"{index:016x}") for index in range(3)]
+    locks = [entry / "concurrency.lock" for entry in entries]
+    for lock in locks:
+        lock.mkdir()
+
+    def npm_releases() -> None:
+        for lock in locks:
+            time.sleep(0.2)
+            lock.rmdir()
+
+    releaser = threading.Thread(target=npm_releases)
+    releaser.start()
+    started = time.monotonic()
+    try:
+        with pytest.raises(NpxIntegrityError) as refusal:
+            verified_cache(cache, timeout=0.3)
+        elapsed = time.monotonic() - started
+    finally:
+        releaser.join()
+
+    assert_that(elapsed).is_less_than(0.55)
+    assert_that(str(refusal.value)).contains(f"npm's lock {locks[1]}", "stayed held")
+
+
+@posix_only
 def test_a_lock_dated_in_the_future_fails_the_run_at_once(cache: Path) -> None:
     """Npm would wait on it for ever; lintro refuses it without waiting.
 

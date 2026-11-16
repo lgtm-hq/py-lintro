@@ -1435,8 +1435,11 @@ def _wait_limit(timeout: float | None) -> float:
     return min(timeout, _INSTALL_WAIT_SECONDS)
 
 
-def _await_npm(entry: Path, cache: Path, limit: float) -> None:
-    """Wait once, within *limit*, while npm holds an entry's lock.
+def _await_npm(entry: Path, cache: Path, deadline: float) -> None:
+    """Wait, until *deadline* at the latest, while npm holds an entry's lock.
+
+    One deadline is shared by every entry of a verification pass, so locked
+    entries never add up past the tool's timeout (#3502).
 
     A concurrent npx installing or checking the pin holds the lock; its
     install is checked once the lock is released. A lock npm itself would
@@ -1448,11 +1451,12 @@ def _await_npm(entry: Path, cache: Path, limit: float) -> None:
     Args:
         entry: The ``_npx`` entry.
         cache: The per-pin cache, resolved.
-        limit: Longest wait, in seconds.
+        deadline: :func:`time.monotonic` time when the pass's wait budget
+            runs out.
 
     Raises:
-        NpxIntegrityError: The lock was still held when *limit* ran out, or
-            is dated in the future.
+        NpxIntegrityError: The lock was still held at *deadline*, or is dated
+            in the future.
     """
     lock = entry / NPM_LOCK_NAME
     started = time.monotonic()
@@ -1471,8 +1475,9 @@ def _await_npm(entry: Path, cache: Path, limit: float) -> None:
             )
         if age > _STALE_LOCK_SECONDS:
             return
-        waited = time.monotonic() - started
-        if waited >= limit:
+        now = time.monotonic()
+        waited = now - started
+        if now >= deadline:
             raise NpxIntegrityError(
                 f"npm's lock {lock} on lintro's npm cache entry {entry} stayed "
                 f"held for {waited:.0f}s, so lintro did not run the tool and its "
@@ -1482,10 +1487,11 @@ def _await_npm(entry: Path, cache: Path, limit: float) -> None:
         if not announced:
             announced = True
             logger.warning(
-                f"Waiting up to {limit:.0f}s for npm's lock {lock}: another npm "
-                "or npx process is installing or checking this pinned package.",
+                f"Waiting up to {deadline - now:.0f}s for npm's lock {lock}: "
+                "another npm or npx process is installing or checking this "
+                "pinned package.",
             )
-        time.sleep(0.1)
+        time.sleep(min(0.1, deadline - now))
 
 
 def _verified(
@@ -1539,7 +1545,7 @@ def _entries(cache: Path, *, ran: bool) -> list[Path]:
 def verified_cache(cache: Path, *, timeout: float | None = None) -> CacheState:
     """Verify every entry npx could run from a cache, before a spawn.
 
-    Each entry's npm lock is waited for once, within the tool's timeout, and
+    Entries' npm locks are waited for within one budget, the tool's timeout, and
     only then are the cache directories recorded: a concurrent first install
     also writes beside ``_npx`` (``_cacache``, ``_logs``).
 
@@ -1560,9 +1566,9 @@ def verified_cache(cache: Path, *, timeout: float | None = None) -> CacheState:
     # directory, whatever it is about to install.
     _modules_above(real, ran=False)
     listed = _entries(real, ran=False)
-    limit = _wait_limit(timeout)
+    deadline = time.monotonic() + _wait_limit(timeout)
     for entry in listed:
-        _await_npm(entry, real, limit)
+        _await_npm(entry, real, deadline)
     directories = _directory_rows(real)
     entries = {
         entry.name: _verified(entry, real, cache, fresh=False) for entry in listed
@@ -1615,9 +1621,9 @@ def check_unchanged(
             raise NpxIntegrityError(
                 _changed_message(f"lintro's npm cache entry {entry}"),
             )
-    limit = _wait_limit(timeout)
+    deadline = time.monotonic() + _wait_limit(timeout)
     for entry in _entries(real, ran=True):
         if entry.name not in before.entries:
-            _await_npm(entry, real, limit)
+            _await_npm(entry, real, deadline)
             _verified(entry, real, cache, fresh=True)
     _modules_above(real, ran=True)
