@@ -35,6 +35,7 @@ from lintro.utils.execution.fix_retry import (
 from lintro.utils.execution.parallel_executor import run_tools_parallel
 from lintro.utils.execution.result_shaping import (
     classify_runner_failure,
+    command_refusal,
     executed_command,
     mark_refused_command,
 )
@@ -386,7 +387,13 @@ def _execute_tools_sequential(
             result = ToolResult(
                 name=tool_name,
                 success=False,
-                output=f"Tool execution failed: {type(e).__name__}: {e}",
+                # A recorded refusal leads the output once, from
+                # ``mark_refused_command`` below (#3502).
+                output=(
+                    ""
+                    if command_refusal(attempted) is e
+                    else f"Tool execution failed: {type(e).__name__}: {e}"
+                ),
                 issues_count=0,
                 execution_failed=isinstance(e, NpxIntegrityError),
                 residual_unknown=ctx.action == Action.FIX,

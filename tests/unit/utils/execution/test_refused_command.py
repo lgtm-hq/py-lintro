@@ -413,6 +413,7 @@ def _npx_plugin(
     *,
     catch_error: bool,
     findings: tuple[BaseIssue, ...] = (),
+    script: str = "echo checked\n",
 ) -> tuple[_NpxPlugin, Path]:
     """Build a plugin running a fake ``npx`` against a real on-disk cache.
 
@@ -420,6 +421,7 @@ def _npx_plugin(
         tmp_path: Directory for the cache and the fake runner.
         catch_error: Whether the plugin turns the refusal into its own verdict.
         findings: Findings the plugin reports alongside a caught refusal.
+        script: What the fake ``npx`` does, after ``#!/bin/sh``.
 
     Returns:
         The plugin and the pin's installed ``bin.js``.
@@ -428,7 +430,7 @@ def _npx_plugin(
     entry = write_npx_entry(cache, [tool_package()])
     npx = tmp_path / "bin" / "npx"
     npx.parent.mkdir()
-    npx.write_text("#!/bin/sh\necho checked\n", encoding="utf-8")
+    npx.write_text(f"#!/bin/sh\n{script}", encoding="utf-8")
     npx.chmod(0o755)
     command = (
         str(npx),
@@ -493,6 +495,11 @@ def test_npx_integrity_refusal_fails_its_run_and_never_the_next(
     assert_that(first.findings_complete).is_false()
     assert_that(first.output).starts_with("lintro refused to run npx-plugin: ")
     assert_that(first.output).contains("bin.js changed", "did not run it")
+    # An escaped refusal is reported once; a caught one keeps the plugin's
+    # own text beside it, as #3491 does for every refusal.
+    assert_that(str(first.output).count("bin.js changed")).is_equal_to(
+        1 if not catch_error else 2,
+    )
     assert_that(second.execution_failed).is_false()
     assert_that(second.success).is_true()
     assert_that(plugin.command_refusal).is_none()
@@ -567,3 +574,52 @@ def test_escaped_npx_refusal_logs_no_traceback_above_debug(
 
     assert_that(result.execution_failed).is_true()
     assert_that(with_traceback).is_empty()
+
+
+@npx_posix_only
+@pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
+@pytest.mark.parametrize("catch_error", [True, False], ids=["caught", "escaped"])
+def test_refusal_after_the_run_says_the_results_cannot_be_trusted(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    parallel: bool,
+    catch_error: bool,
+) -> None:
+    """The tool ran, so its lead-in does not claim lintro refused to run it.
+
+    Args:
+        monkeypatch: Pytest patch fixture.
+        tmp_path: Temporary directory provided by pytest.
+        parallel: Whether to dispatch through parallel workers.
+        catch_error: Whether the plugin turns the refusal into its own verdict.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    bin_js = (
+        Path(os.path.realpath(tmp_path))
+        / "npx"
+        / "prettier@3.9.4"
+        / "_npx"
+        / "0123456789abcdef"
+        / "node_modules"
+        / "prettier"
+        / "bin.js"
+    )
+    plugin, _bin_js = _npx_plugin(
+        tmp_path,
+        catch_error=catch_error,
+        script=f"printf '// swapped\\n' >> '{bin_js}'\necho checked\n",
+    )
+
+    result = _run(
+        monkeypatch,
+        tools={"npx-plugin": plugin},
+        parallel=parallel,
+        action=Action.CHECK,
+    )["npx-plugin"]
+
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.output).starts_with(
+        "lintro cannot trust npx-plugin's results: ",
+    )
+    assert_that(result.output).contains("changed while the tool was running")
+    assert_that(result.output).does_not_contain("lintro refused to run")

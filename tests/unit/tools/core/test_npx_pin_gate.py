@@ -598,8 +598,8 @@ def test_bunx_keeps_its_pin_beside_a_node_modules_tree(
 
 @pytest.mark.parametrize(
     "lock_age",
-    [-3600.0, 3600.0],
-    ids=["dated-in-the-future", "abandoned"],
+    [-3600.0, 3600.0, 0.0],
+    ids=["dated-in-the-future", "abandoned", "held"],
 )
 def test_npm_lock_on_an_entry_never_makes_the_pin_unavailable(
     clean_dir: Path,
@@ -609,21 +609,27 @@ def test_npm_lock_on_an_entry_never_makes_the_pin_unavailable(
     """A lock the gate cannot take is the spawn check's to wait for or refuse.
 
     Refusing here would report the tool as unavailable and skip it; the
-    spawn-time check fails the run instead when the lock still blocks it.
+    spawn-time check fails the run instead when the lock still blocks it. The
+    gate does not wait either, so the only wait is the spawn-time one, bounded
+    by the tool's timeout (#3502).
 
     Args:
         clean_dir: Project without npm state above it.
-        monkeypatch: Shortens the gate's wait.
+        monkeypatch: Keeps the repair's own default wait short but noticeable.
         lock_age: Seconds since the lock was last touched (negative: future).
     """
-    monkeypatch.setattr(npx_cache, "_LOCK_WAIT_SECONDS", 0.2)
+    monkeypatch.setattr(npx_cache, "_LOCK_WAIT_SECONDS", 5.0)
     entry = write_npx_entry(npx_cache_dir(_SPEC), [tool_package(version=_PIN)])
     lock = entry / "concurrency.lock"
     lock.mkdir()
     touched = time.time() - lock_age
     os.utime(lock, (touched, touched))
+    started = time.monotonic()
 
-    assert_that(_cache_refusal(clean_dir)).is_none()
+    refusal = _cache_refusal(clean_dir)
+
+    assert_that(refusal).is_none()
+    assert_that(time.monotonic() - started).is_less_than(2.0)
     assert_that(lock.is_dir()).is_true()
 
 

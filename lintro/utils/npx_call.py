@@ -63,7 +63,11 @@ from pathlib import Path
 
 from loguru import logger
 
-from lintro.utils.npx_integrity import check_unchanged, verified_cache
+from lintro.utils.npx_integrity import (
+    NpxIntegrityError,
+    check_unchanged,
+    verified_cache,
+)
 
 #: npx/bunx flags that take the package spec as the next argument.
 PACKAGE_FLAGS: frozenset[str] = frozenset({"-p", "--package"})
@@ -322,6 +326,10 @@ def npx_shell_safe_command(
 
     Yields:
         Argv: The argv to spawn.
+
+    Raises:
+        NpxIntegrityError: The cache failed its check before the spawn, or
+            after the run, when it is marked after_run.
     """
     cache = npx_cache_option(cmd)
     if cache is None:
@@ -331,7 +339,11 @@ def npx_shell_safe_command(
     before = verified_cache(cache, timeout=timeout)
     with _quoted_argv(cmd, windows=windows, inline_limit=inline_limit) as argv:
         yield argv
-    check_unchanged(cache, before, timeout=timeout)
+    try:
+        check_unchanged(cache, before, timeout=timeout)
+    except NpxIntegrityError as exc:
+        exc.after_run = True
+        raise
 
 
 @contextlib.contextmanager

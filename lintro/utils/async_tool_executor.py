@@ -255,18 +255,25 @@ class AsyncToolExecutor:
                     logger.opt(exception=exc).debug(f"Tool {name} was refused: {exc}")
                 else:
                     logger.exception(f"Tool {name} failed with exception: {exc}")
+                from lintro.utils.execution.result_shaping import (
+                    command_refusal,
+                    mark_refused_command,
+                )
+
+                # A recorded refusal leads the output once, from
+                # ``mark_refused_command`` below (#3502).
                 failed_name, failed = _make_failed_result(
                     name=name,
-                    message=f"Parallel execution failed: {type(exc).__name__}: {exc}",
+                    message=(
+                        ""
+                        if command_refusal(tool) is exc
+                        else f"Parallel execution failed: {type(exc).__name__}: {exc}"
+                    ),
                     duration_seconds=time.monotonic() - started_at[name],
                     # The npx cache failed its integrity check (#3406).
                     execution_failed=isinstance(exc, NpxIntegrityError),
                 )
                 # A refused command is an execution failure, not a crash (#3486).
-                from lintro.utils.execution.result_shaping import (
-                    mark_refused_command,
-                )
-
                 return failed_name, mark_refused_command(
                     tool,
                     failed,

@@ -624,10 +624,10 @@ def test_node_modules_node_would_search_is_refused_with_its_path(
         verified_cache(cache)
 
     assert_that(str(refusal.value)).contains(
-        f": {planted}.",
+        f": {planted};",
         "Remove or rename that directory",
-        "Lintro did not run the tool",
-    ).does_not_contain("reinstalls")
+        "; lintro did not run the tool",
+    ).does_not_contain("reinstalls", "Lintro", "Npx")
 
 
 @posix_only
@@ -645,7 +645,7 @@ def test_node_modules_above_a_cold_cache_is_refused_before_npx_starts(
     spawned: list[list[str]] = []
 
     with (
-        pytest.raises(NpxIntegrityError, match="Lintro did not run the tool"),
+        pytest.raises(NpxIntegrityError, match="; lintro did not run the tool"),
         npx_shell_safe_command(_command(cache)) as argv,
     ):
         spawned.append(argv)
@@ -673,8 +673,8 @@ def test_node_modules_appearing_during_the_run_is_reported_as_run(
         (tmp_path / "node_modules").mkdir()
 
     assert_that(str(refusal.value)).contains(
-        "Npx ran the tool, but its findings cannot be trusted",
-    ).does_not_contain("did not run")
+        "; npx ran the tool, but its findings cannot be trusted",
+    ).does_not_contain("did not run", "Npx")
 
 
 @posix_only

@@ -240,7 +240,13 @@ class NpxIntegrityError(UnsafeCommandError):
     own copy (``BaseToolPlugin.copy_for_execution`` clears it), and every
     caller reports that run as an execution failure however the plugin
     handled the error (#3486, #3406).
+
+    Attributes:
+        after_run: Whether the refusal came after npx ran the tool, so the
+            tool ran but its results cannot be trusted.
     """
+
+    after_run: bool = False
 
 
 class Refusal(str):
@@ -1326,7 +1332,7 @@ def _modules_above(cache: Path, *, ran: bool) -> None:
     outcome = _outcome(ran=ran)
     raise NpxIntegrityError(
         f"Node could load packages for lintro's npx fallback from outside its "
-        f"npm cache {cache}: {names}. {outcome[0].upper()}{outcome[1:]}. Remove "
+        f"npm cache {cache}: {names}; {outcome}. Remove "
         f"or rename {which} and run lintro again.",
     )
 
@@ -1392,7 +1398,7 @@ def _content_message(entry: Path, reason: str, *, fresh: bool) -> str:
         subject = f"lintro's npm cache entry {entry}"
         outcome = "lintro did not run it, so the tool's findings are incomplete"
     if not is_repairable(reason):
-        return f"{subject} {reason}. {outcome[0].upper()}{outcome[1:]}."
+        return f"{subject} {reason}; {outcome}."
     return (
         f"{subject} {reason}; {outcome}. The next lintro run removes the entry "
         "and npx reinstalls the pin."

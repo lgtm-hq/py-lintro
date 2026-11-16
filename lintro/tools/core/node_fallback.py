@@ -217,12 +217,15 @@ def _cache_reason(
             pin=pin,
             binary=command[-1],
             pathsep=pathsep,
+            # No wait here: the spawn-time check waits for a held lock within
+            # the tool's timeout, so the two never add up past it (#3502).
+            lock_wait=0.0,
         )
     except NpxCacheLockError as exc:
         # Not a reason to skip the tool: the spawn-time check waits for the
         # lock within the tool's timeout and verifies the entry, or fails the
-        # run as an execution failure (#3406).
-        logger.warning(f"{exc} The npx run checks the entry itself first.")
+        # run as an execution failure (#3406). It logs its own wait.
+        logger.debug(f"{exc} The npx run checks the entry itself first.")
     except (NpxCacheError, OSError) as exc:
         return f"lintro's npm cache cannot be trusted ({exc})"
     return None

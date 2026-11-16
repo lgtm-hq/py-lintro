@@ -245,11 +245,14 @@ def mark_refused_command(
     refusal = command_refusal(tool)
     if refusal is None:
         return result
-    return _refused_result(
-        result,
-        f"lintro refused to run {result.name}: {refusal}",
-        fix=fix,
+    # An npx integrity refusal found after the run: the tool ran, but its
+    # results cannot be trusted (#3406, #3502).
+    lead = (
+        f"lintro cannot trust {result.name}'s results"
+        if getattr(refusal, "after_run", False)
+        else f"lintro refused to run {result.name}"
     )
+    return _refused_result(result, f"{lead}: {refusal}", fix=fix)
 
 
 def _refused_result(result: ToolResult, reason: str, *, fix: bool) -> ToolResult:
