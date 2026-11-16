@@ -138,7 +138,7 @@ through: it counts against MAX_DELETES and stops further deletions, and the
 verification listing then shows whether it did. The run fails only when that
 cannot be told. A 404 on DELETE means the version is already gone. A 403 or
 429 stops every further recheck and DELETE at once, as do 3 failed rechecks
-or DELETEEs in a row; either fails the run.
+or DELETE calls in a row; either fails the run.
 A run that stops at the budget or the cap exits 0 and prints
 "Partial sweep, resumes next run: N deleted, M remaining".
 EOF
@@ -160,13 +160,13 @@ unreached_packages=""
 # Per-package stops (a package whose listing left too little of the budget to
 # verify its deletions). They do not stop the next package from being listed.
 package_stops=""
-# "<pkg>:<id>" of DELETEEs whose answer was lost (timed out, 5xx, no HTTP
+# "<pkg>:<id>" of DELETE calls whose answer was lost (timed out, 5xx, no HTTP
 # answer), sorted by what the verification listing showed: gone, still
 # listed, or unknown because that listing could not run.
 uncertain_confirmed=""
 uncertain_present=""
 uncertain_unknown=""
-# Failed rechecks/DELETEs since the last successful DELETE (#3492).
+# Failed rechecks or DELETE calls since the last successful DELETE (#3492).
 consecutive_refusals=0
 readonly MAX_CONSECUTIVE_REFUSALS=3
 
@@ -585,11 +585,11 @@ note_refusal() {
 	[[ -n "$stop_reason" ]] && return 0
 	if [[ "$status" == "403" || "$status" == "429" ]]; then
 		stop_reason="rate limited or forbidden (HTTP ${status} on ${what});"
-		stop_reason+=" stopped all rechecks and DELETEEs"
+		stop_reason+=" stopped all rechecks and DELETE calls"
 	elif ((consecutive_refusals >= MAX_CONSECUTIVE_REFUSALS)); then
 		stop_reason="repeatedly refused: ${consecutive_refusals} failed rechecks"
-		stop_reason+=" or DELETEEs in a row (last: ${what}); stopped all"
-		stop_reason+=" rechecks and DELETEEs"
+		stop_reason+=" or DELETE calls in a row (last: ${what}); stopped all"
+		stop_reason+=" rechecks and DELETE calls"
 	fi
 	return 0
 }

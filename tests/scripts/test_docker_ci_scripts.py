@@ -2005,8 +2005,8 @@ def test_sweep_ci_ghcr_tags_stops_after_repeated_refusals(tmp_path: Path) -> Non
     assert_that(run.gh_log).does_not_contain("py-lintro/versions/304")
     assert_that(run.result.stdout).contains(
         "::error::Sweep finished with errors: 0 deleted, 3 remaining"
-        " (repeatedly refused: 3 failed rechecks or DELETEEs in a row"
-        " (last: DELETE of py-lintro:303); stopped all rechecks and DELETEEs)",
+        " (repeatedly refused: 3 failed rechecks or DELETE calls in a row"
+        " (last: DELETE of py-lintro:303); stopped all rechecks and DELETE calls)",
     )
 
 
@@ -2049,7 +2049,7 @@ def test_sweep_ci_ghcr_tags_stops_writing_when_rate_limited(
     assert_that(run.gh_log).does_not_contain("py-lintro/versions/302")
     assert_that(run.result.stdout).contains(
         f"(rate limited or forbidden (HTTP {status} on {what} of py-lintro:301);"
-        " stopped all rechecks and DELETEEs)",
+        " stopped all rechecks and DELETE calls)",
     )
 
 
