@@ -60,11 +60,17 @@ def rerun_tools(
     Args:
         by_tool: Dict mapping tool name to (result, issues) pairs.
 
+    Each check runs on a per-run copy of the registry tool, so a refused
+    command recorded during the re-run never sticks on the shared singleton
+    (#3498), and a refusal the plugin swallowed is marked as an incomplete
+    result that cannot confirm or reject a fix.
+
     Returns:
         List of fresh tool results from re-running checks.
     """
     try:
         from lintro.tools import tool_manager
+        from lintro.utils.execution.result_shaping import mark_refused_command
     except ImportError:
         return None
 
@@ -77,8 +83,9 @@ def rerun_tools(
         rerun_paths = absolute_paths_for_context(file_paths=file_paths)
 
         try:
-            tool = tool_manager.get_tool(tool_name)
-            rerun_results.append(tool.check(rerun_paths, {}))
+            tool = tool_manager.get_tool(tool_name).copy_for_execution()
+            result = tool.check(rerun_paths, {})
+            rerun_results.append(mark_refused_command(tool, result, fix=False))
         except (KeyError, ImportError):
             logger.debug(
                 f"AI post-fix rerun skipped for {tool_name}: tool not available",

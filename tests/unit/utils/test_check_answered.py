@@ -76,6 +76,24 @@ def test_check_answered_distinguishes_findings_from_missing_measurements(
     assert_that(check_answered(result)).is_equal_to(answered)
 
 
+def test_check_answered_rejects_a_failed_run_that_kept_partial_findings() -> None:
+    """A run marked execution_failed answers nothing, as a timeout does (#3498).
+
+    A refused command or a crashed invocation leaves only the findings of the
+    invocations that finished, so they can neither confirm nor reject a fix.
+    """
+    partial = ToolResult(
+        name="ruff",
+        success=False,
+        issues=[BaseIssue(file="src/main.py", line=1)],
+        issues_count=1,
+        execution_failed=True,
+        findings_complete=False,
+    )
+
+    assert_that(check_answered(partial)).is_false()
+
+
 @pytest.mark.parametrize(
     ("flag", "reason"),
     [

@@ -300,18 +300,26 @@ def _run_tool_check(
 
     Returns:
         List of issues found, or None if the tool is not available
-        or the check did not measure its scope.
+        or the check did not measure its scope, including an incomplete
+        check such as one that refused a command.
     """
     try:
         from lintro.tools import tool_manager
+        from lintro.utils.execution.result_shaping import mark_refused_command
 
-        tool = tool_manager.get_tool(tool_name)
+        # A per-run copy keeps a refusal recorded by this check off the
+        # shared registry singleton (#3498).
+        tool = tool_manager.get_tool(tool_name).copy_for_execution()
     except (KeyError, ImportError):
         logger.debug(f"Validation: tool {tool_name!r} not available")
         return None
 
     try:
-        tool_result = tool.check(file_paths, {})
+        tool_result = mark_refused_command(
+            tool,
+            tool.check(file_paths, {}),
+            fix=False,
+        )
     except (OSError, subprocess.SubprocessError, ValueError, RuntimeError):
         logger.debug(
             f"Validation: {tool_name} check failed",
