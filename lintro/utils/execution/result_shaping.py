@@ -13,16 +13,12 @@ import re
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from lintro.exceptions.errors import UnsafeCommandError
 from lintro.models.core.tool_outcome import (
     Checked,
-    FixAccounting,
-    FixPartial,
     FixUnmeasured,
     NoFiles,
     Skipped,
     TimedOut,
-    ToolOutcome,
     Unavailable,
 )
 from lintro.models.core.tool_result import ToolResult
