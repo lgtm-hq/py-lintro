@@ -63,8 +63,18 @@ from pathlib import Path
 
 from loguru import logger
 
+from lintro.utils.npx_integrity import (
+    NpxIntegrityError,
+    check_unchanged,
+    verified_cache,
+)
+
 #: npx/bunx flags that take the package spec as the next argument.
 PACKAGE_FLAGS: frozenset[str] = frozenset({"-p", "--package"})
+
+#: Prefix of the npm cache option on every npx fallback
+#: (:func:`lintro.tools.core.node_fallback.npx_runner_options`).
+NPX_CACHE_OPTION: str = "--cache="
 
 #: Longest ``--call`` script, in bytes, passed inline. Linux's per-string limit
 #: is 131,072 bytes; the margin leaves room for npm's own wrapping.
@@ -266,12 +276,30 @@ def _split_npx_fallback(
     return prefix, shlex.join(command[script_start:])
 
 
+def npx_cache_option(cmd: Sequence[str]) -> Path | None:
+    """Return the npm cache an npx fallback runs from.
+
+    Args:
+        cmd: Command about to be spawned.
+
+    Returns:
+        The last ``--cache=`` before ``--package`` (npm lets the last one win)
+        in lintro's npx fallback shape, or None for any other command.
+    """
+    index = _package_flag_index(cmd)
+    if index is None:
+        return None
+    caches = [arg for arg in cmd[1:index] if arg.startswith(NPX_CACHE_OPTION)]
+    return Path(caches[-1].removeprefix(NPX_CACHE_OPTION)) if caches else None
+
+
 @contextlib.contextmanager
 def npx_shell_safe_command(
     cmd: Sequence[str],
     *,
     windows: bool | None = None,
     inline_limit: int = NPX_INLINE_SCRIPT_LIMIT,
+    timeout: float | None = None,
 ) -> Iterator[Argv]:
     """Yield the argv to spawn so npm's shell sees every argument literally.
 
@@ -284,9 +312,52 @@ def npx_shell_safe_command(
     keep the context open until the process has finished. Every other command,
     including ``bunx`` and direct binaries, is yielded unchanged.
 
+    When the command carries a ``--cache``, its contents are verified against
+    their lockfile before the argv is yielded, and must be unchanged when the
+    context exits normally (:mod:`lintro.utils.npx_integrity`, #3406), on
+    every platform. Waiting for a concurrent npx's lock on the cache counts
+    against *timeout*.
+
     Args:
         cmd: Command about to be spawned.
         windows: Whether npx runs on Windows; defaults to ``os.name == "nt"``.
+        inline_limit: Longest script, in bytes, passed inline.
+        timeout: The tool's timeout in seconds, which bounds that wait.
+
+    Yields:
+        Argv: The argv to spawn.
+
+    Raises:
+        NpxIntegrityError: The cache failed its check before the spawn, or
+            after the run, when it is marked after_run.
+    """
+    cache = npx_cache_option(cmd)
+    if cache is None:
+        with _quoted_argv(cmd, windows=windows, inline_limit=inline_limit) as argv:
+            yield argv
+        return
+    before = verified_cache(cache, timeout=timeout)
+    with _quoted_argv(cmd, windows=windows, inline_limit=inline_limit) as argv:
+        yield argv
+    try:
+        check_unchanged(cache, before, timeout=timeout)
+    except NpxIntegrityError as exc:
+        exc.after_run = True
+        raise
+
+
+@contextlib.contextmanager
+def _quoted_argv(
+    cmd: Sequence[str],
+    *,
+    windows: bool | None,
+    inline_limit: int,
+) -> Iterator[Argv]:
+    """Yield the quoted argv for :func:`npx_shell_safe_command`.
+
+    Args:
+        cmd: Command about to be spawned.
+        windows: Whether npx runs on Windows; None means ``os.name == "nt"``.
         inline_limit: Longest script, in bytes, passed inline.
 
     Yields:

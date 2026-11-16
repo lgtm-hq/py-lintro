@@ -245,7 +245,28 @@ def mark_refused_command(
     refusal = command_refusal(tool)
     if refusal is None:
         return result
-    reason = f"lintro refused to run {result.name}: {refusal}"
+    # An npx integrity refusal found after the run: the tool ran, but its
+    # results cannot be trusted (#3406, #3502).
+    lead = (
+        f"lintro cannot trust {result.name}'s results"
+        if getattr(refusal, "after_run", False)
+        else f"lintro refused to run {result.name}"
+    )
+    return _refused_result(result, f"{lead}: {refusal}", fix=fix)
+
+
+def _refused_result(result: ToolResult, reason: str, *, fix: bool) -> ToolResult:
+    """Mark a result lintro refused, wholly or in part, as an execution failure.
+
+    Args:
+        result: The tool's result.
+        reason: Why lintro refused; it leads the output.
+        fix: Whether the run was a fix, whose accounting is then unmeasured.
+
+    Returns:
+        The result as an execution failure with incomplete findings, keeping
+        the findings that really ran.
+    """
     accounting: FixAccounting = (
         FixUnmeasured(reason=reason, initial=result.initial_issues_count)
         if fix

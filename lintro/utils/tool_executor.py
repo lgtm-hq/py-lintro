@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from lintro.enums.action import Action, normalize_action
+from lintro.exceptions.errors import UnsafeCommandError
 from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools import tool_manager, verify_pass
@@ -34,6 +35,7 @@ from lintro.utils.execution.fix_retry import (
 from lintro.utils.execution.parallel_executor import run_tools_parallel
 from lintro.utils.execution.result_shaping import (
     classify_runner_failure,
+    command_refusal,
     executed_command,
     mark_refused_command,
 )
@@ -64,6 +66,7 @@ from lintro.utils.execution.tool_configuration import (
 )
 from lintro.utils.execution_paths import get_execution_cwd
 from lintro.utils.gates import execute_gates
+from lintro.utils.npx_integrity import NpxIntegrityError
 from lintro.utils.output import OutputManager
 from lintro.utils.python_formatting import resolve_python_formatting
 from lintro.utils.unified_config import UnifiedConfigManager
@@ -368,17 +371,31 @@ def _execute_tools_sequential(
             # Includes invalid plugin result collections and legacy read-only
             # fixable properties, even if a plugin bypassed API negotiation.
             # Log full exception with traceback to debug.log via loguru
-            loguru_logger.exception(f"Error running {tool_name}")
+            if isinstance(e, UnsafeCommandError):
+                # An expected refusal: its one-line reason is the report, so
+                # the traceback goes to the debug log only.
+                loguru_logger.opt(exception=e).debug(f"Error running {tool_name}")
+            else:
+                loguru_logger.exception(f"Error running {tool_name}")
             # Show user-friendly error message on console
             logger.console_output(f"Error running {tool_name}: {e}")
 
             # Create a failed result for this tool. Duration is recorded so
-            # crashed tools still appear in the ``--profile`` table/JSON.
+            # crashed tools still appear in the ``--profile`` table/JSON. An
+            # npx cache that failed its integrity check ran nothing lintro can
+            # vouch for, so it is an execution failure (#3406).
             result = ToolResult(
                 name=tool_name,
                 success=False,
-                output=f"Tool execution failed: {type(e).__name__}: {e}",
+                # A recorded refusal leads the output once, from
+                # ``mark_refused_command`` below (#3502).
+                output=(
+                    ""
+                    if command_refusal(attempted) is e
+                    else f"Tool execution failed: {type(e).__name__}: {e}"
+                ),
                 issues_count=0,
+                execution_failed=isinstance(e, NpxIntegrityError),
                 residual_unknown=ctx.action == Action.FIX,
                 residual_unknown_reason=(
                     "tool crashed" if ctx.action == Action.FIX else None

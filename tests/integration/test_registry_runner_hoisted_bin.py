@@ -29,6 +29,7 @@ test uses ``require_command``.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -51,10 +52,12 @@ from lintro._tool_versions import get_tool_version
 from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.models.core.tool_snapshot import ToolSnapshot
+from lintro.plugins.subprocess_executor import run_subprocess
 from lintro.tools.core import snapshots
 from lintro.tools.core.npx_cache import npx_cache_dir
 from lintro.utils import file_cache
 from lintro.utils.execution.result_shaping import classify_runner_failure
+from lintro.utils.npx_integrity import NpxIntegrityError
 from tests.integration._tools import NO_MIN_VERSION, require_command
 
 _PIN = get_tool_version("prettier") or ""
@@ -69,8 +72,15 @@ requires_npx = pytest.mark.skipif(
 )
 
 
+#: File the pinned package's install script would write; lintro's npx
+#: fallback passes ``--ignore-scripts``, so it never appears (#3406).
+_INSTALL_SCRIPT_MARKER = "written-by-install-script"
+
+
 def _pinned_tarball() -> bytes:
     """Build the npm tarball the localhost registry serves for the pin.
+
+    The package has an install script, as some real dependencies do.
 
     Returns:
         Gzipped tar bytes with ``package/package.json`` and ``package/bin.js``.
@@ -78,7 +88,17 @@ def _pinned_tarball() -> bytes:
     files = {
         "package/package.json": (
             json.dumps(
-                {"name": "prettier", "version": _PIN, "bin": {"prettier": "bin.js"}},
+                {
+                    "name": "prettier",
+                    "version": _PIN,
+                    "bin": {"prettier": "bin.js"},
+                    "scripts": {
+                        "install": (
+                            "node -e \"require('fs').writeFileSync("
+                            f"'{_INSTALL_SCRIPT_MARKER}', '')\""
+                        ),
+                    },
+                },
             ).encode(),
             0o644,
         ),
@@ -105,6 +125,7 @@ def registry() -> Iterator[str]:
         str: The registry URL.
     """
     tarball = _pinned_tarball()
+    integrity = "sha512-" + base64.b64encode(hashlib.sha512(tarball).digest()).decode()
     ports: list[int] = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -120,10 +141,15 @@ def registry() -> Iterator[str]:
                                 "name": "prettier",
                                 "version": _PIN,
                                 "bin": {"prettier": "bin.js"},
+                                "hasInstallScript": True,
+                                # As the npm registry does: npm records the
+                                # integrity in the lockfile lintro checks the
+                                # installed files against (#3406).
                                 "dist": {
                                     "tarball": (
                                         f"http://127.0.0.1:{port}/prettier-{_PIN}.tgz"
                                     ),
+                                    "integrity": integrity,
                                 },
                             },
                         },
@@ -1361,6 +1387,288 @@ def test_tampered_lintro_cache_is_repaired_before_npx_runs(
     assert_that(snapshot.version).is_equal_to(_PIN)
     assert_that((code, launched)).is_equal_to((0, f"registry {_PIN}"))
     _assert_never_a_false_pass(snapshot, launched, code)
+
+
+def _replace_pinned_bin(cache: Path) -> None:
+    """Swap the cached pin's ``bin.js`` and leave its ``package.json`` alone.
+
+    This is the #3406 reproduction: the entry still names the pin.
+
+    Args:
+        cache: lintro's per-pin npm cache.
+    """
+    key = hashlib.sha512(f"prettier@{_PIN}".encode()).hexdigest()[:16]
+    bin_js = cache / "_npx" / key / "node_modules" / "prettier" / "bin.js"
+    bin_js.write_text(
+        '#!/usr/bin/env node\nconsole.log("substituted")\n',
+        encoding="utf-8",
+    )
+
+
+@requires_npx
+def test_replaced_executable_under_the_pinned_manifest_is_reinstalled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+) -> None:
+    """Raw npx runs the swapped file; after lintro's gate npx runs the pin.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+    """
+    _require_clean_ancestry(tmp_path)
+    project, env, command = _warm(tmp_path, monkeypatch, registry)
+    cache = npx_cache_dir(f"prettier@{_PIN}")
+
+    _replace_pinned_bin(cache)
+    raw = _run(command, project, env)
+    _replace_pinned_bin(cache)
+    snapshot = snapshots.probe_tool("prettier", search_root=project)
+    code, launched = _run(list(snapshot.command), project, env)
+
+    assert_that(raw).is_equal_to((0, "substituted"))
+    assert_that(snapshot.version).is_equal_to(_PIN)
+    assert_that((code, launched)).is_equal_to((0, f"registry {_PIN}"))
+    _assert_never_a_false_pass(snapshot, launched, code)
+
+
+@requires_npx
+def test_install_scripts_never_run_under_lintros_npx_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+) -> None:
+    """The pin installs as published: its install script does not run.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+    """
+    _require_clean_ancestry(tmp_path)
+    project, env, _command = _warm(tmp_path, monkeypatch, registry)
+    key = hashlib.sha512(f"prettier@{_PIN}".encode()).hexdigest()[:16]
+    package = npx_cache_dir(f"prettier@{_PIN}") / "_npx" / key / "node_modules"
+
+    snapshot = snapshots.probe_tool("prettier", search_root=project)
+    result = run_subprocess(
+        list(snapshot.command),
+        timeout=180,
+        cwd=str(project),
+        env=env,
+    )
+
+    assert_that(list(package.rglob(_INSTALL_SCRIPT_MARKER))).is_empty()
+    assert_that(result.stdout.strip()).is_equal_to(f"registry {_PIN}")
+
+
+@requires_npx
+@pytest.mark.parametrize("cache_state", ["cold", "warm"])
+def test_stray_home_node_modules_fails_the_run_and_never_skips_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+    cache_state: str,
+) -> None:
+    """An empty ``~/node_modules`` fails ``lintro chk`` instead of passing it.
+
+    Fable's round-2 reproduction: with the pin's cache warm, the tool was
+    reported unavailable and ``lintro chk`` exited 0. Node in the entry would
+    resolve a package it lacks from that directory, so the run is refused as
+    an execution failure, cold or warm, with the directory named.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+        cache_state: Whether the pin is installed before the checked run.
+    """
+    _require_clean_ancestry(tmp_path)
+    assert _NPX is not None and _NODE is not None
+    project = _clean_project(tmp_path)
+    (project / "a.css").write_text("a {\n  color: red;\n}\n", encoding="utf-8")
+    env = _isolate(monkeypatch, tmp_path, {"npx": _NPX, "node": _NODE}, registry, {})
+    command = [sys.executable, "-m", "lintro", "chk", "a.css", "--tools", "prettier"]
+    if cache_state == "warm":
+        subprocess.run(  # nosec B603 - fixed argv, shell=False
+            command,
+            cwd=project,
+            env=env,
+            capture_output=True,
+            timeout=300,
+            check=False,
+        )
+    stray = Path(env["HOME"]) / "node_modules"
+    stray.mkdir()
+
+    result = subprocess.run(  # nosec B603 - fixed argv, shell=False
+        [*command, "--output-format", "json"],
+        cwd=project,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    report = json.loads(result.stdout[result.stdout.index("{") :])
+    prettier = next(row for row in report["results"] if row["tool"] == "prettier")
+
+    assert_that(result.returncode).described_as(result.stderr).is_not_zero()
+    assert_that(prettier.get("execution_failed")).is_true()
+    assert_that(prettier.get("findings_complete", False)).is_false()
+    assert_that(prettier["output"]).contains(str(stray), "Remove or rename")
+
+
+def _lintro_chk_json(
+    project: Path,
+    env: dict[str, str],
+) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
+    """Run the real ``lintro chk`` on ``a.css`` with prettier, as JSON.
+
+    Args:
+        project: Directory to run in.
+        env: Environment from :func:`_isolate`.
+
+    Returns:
+        The finished process and prettier's row of the JSON report.
+    """
+    result = subprocess.run(  # nosec B603 - fixed argv, shell=False
+        [
+            sys.executable,
+            "-m",
+            "lintro",
+            "chk",
+            "a.css",
+            "--tools",
+            "prettier",
+            "--output-format",
+            "json",
+        ],
+        cwd=project,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    report = json.loads(result.stdout[result.stdout.index("{") :])
+    row = next(row for row in report["results"] if row["tool"] == "prettier")
+    return result, row
+
+
+def _css_project(directory: Path) -> Path:
+    """Create a clean project with one CSS file for prettier.
+
+    Args:
+        directory: Where the project goes.
+
+    Returns:
+        The project.
+    """
+    (directory / ".git").mkdir(parents=True)
+    _package(directory, "1.0.0", name="proj")
+    (directory / "a.css").write_text("a {\n  color: red;\n}\n", encoding="utf-8")
+    return directory
+
+
+@requires_npx
+def test_npm_lock_dated_in_the_future_fails_the_run_instead_of_skipping(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+) -> None:
+    """A lock npm would wait on for ever fails ``lintro chk``, at once.
+
+    Fable's round-3 reproduction: with the warm entry's ``concurrency.lock``
+    dated 2030, the gate gave up on it, the tool was reported unavailable and
+    ``lintro chk`` exited 0.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+    """
+    _require_clean_ancestry(tmp_path)
+    assert _NPX is not None and _NODE is not None
+    project = _css_project(tmp_path / "proj")
+    env = _isolate(monkeypatch, tmp_path, {"npx": _NPX, "node": _NODE}, registry, {})
+    _lintro_chk_json(project, env)  # warm the pin
+    cache = Path(env["HOME"]) / ".lintro" / "cache" / "npx" / f"prettier@{_PIN}"
+    key = hashlib.sha512(f"prettier@{_PIN}".encode()).hexdigest()[:16]
+    lock = cache / "_npx" / key / "concurrency.lock"
+    lock.mkdir()
+    future = time.time() + 3 * 365 * 24 * 3600
+    os.utime(lock, (future, future))
+    started = time.monotonic()
+
+    result, prettier = _lintro_chk_json(project, env)
+
+    assert_that(time.monotonic() - started).is_less_than(60)
+    assert_that(result.returncode).described_as(result.stderr).is_not_zero()
+    assert_that(prettier.get("execution_failed")).is_true()
+    assert_that(str(prettier["output"])).contains("in the future", str(lock))
+
+
+@requires_npx
+def test_home_node_modules_above_a_project_in_home_fails_the_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+) -> None:
+    """The usual layout: the project inside HOME, beside ``~/node_modules``.
+
+    Fable's round-3 reproduction: the project check found ``~/node_modules``
+    first and reported the tool unavailable ("npx may run an unpinned copy"),
+    exit 0. It is the same directory the npx cache check refuses, so the run
+    fails as an execution failure naming it, before npx starts.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+    """
+    _require_clean_ancestry(tmp_path)
+    assert _NPX is not None and _NODE is not None
+    env = _isolate(monkeypatch, tmp_path, {"npx": _NPX, "node": _NODE}, registry, {})
+    home = Path(env["HOME"])
+    project = _css_project(home / "work" / "proj")
+    stray = home / "node_modules"
+    stray.mkdir()
+
+    result, prettier = _lintro_chk_json(project, env)
+
+    assert_that(result.returncode).described_as(result.stderr).is_not_zero()
+    assert_that(prettier.get("execution_failed")).is_true()
+    assert_that(str(prettier["output"])).contains(
+        str(stray),
+        "Remove or rename",
+    ).does_not_contain("unpinned copy")
+
+
+@requires_npx
+def test_executable_replaced_after_the_gate_is_refused_at_spawn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+) -> None:
+    """A swap between the gate and the spawn cannot run under the pin.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+    """
+    _require_clean_ancestry(tmp_path)
+    project, env, _command = _warm(tmp_path, monkeypatch, registry)
+    snapshot = snapshots.probe_tool("prettier", search_root=project)
+    _replace_pinned_bin(npx_cache_dir(f"prettier@{_PIN}"))
+
+    with pytest.raises(NpxIntegrityError, match="bin.js changed"):
+        run_subprocess(list(snapshot.command), timeout=180, cwd=str(project), env=env)
+
+    assert_that(snapshot.version).is_equal_to(_PIN)
 
 
 @requires_npx

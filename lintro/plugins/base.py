@@ -416,16 +416,26 @@ class BaseToolPlugin(ABC):
 
         Returns:
             SubprocessResult with the return code and separated stdout/stderr.
+
+        Raises:
+            UnsafeCommandError: lintro refused the command, before the spawn or,
+                for an npx fallback whose cache fails its integrity check
+                (#3406), after it. It is kept on :attr:`command_refusal` first.
         """
         effective_timeout = self._get_effective_timeout(timeout)
         self._validate_subprocess_command(cmd)
-        return run_subprocess(
-            cmd,
-            effective_timeout,
-            cwd,
-            env,
-            stdin,
-        )
+        try:
+            return run_subprocess(
+                cmd,
+                effective_timeout,
+                cwd,
+                env,
+                stdin,
+            )
+        except UnsafeCommandError as exc:
+            # An npx fallback whose cache fails its integrity check (#3406).
+            self._record_command_refusal(exc)
+            raise
 
     def _run_subprocess(
         self,
@@ -479,10 +489,26 @@ class BaseToolPlugin(ABC):
 
         Returns:
             SubprocessResult with the return code and captured output.
+
+        Raises:
+            UnsafeCommandError: lintro refused the command, before the spawn or,
+                for an npx fallback whose cache fails its integrity check
+                (#3406), after it. It is kept on :attr:`command_refusal` first.
         """
         effective_timeout = self._get_effective_timeout(timeout)
         self._validate_subprocess_command(cmd)
-        return run_subprocess_streaming(cmd, effective_timeout, cwd, env, line_handler)
+        try:
+            return run_subprocess_streaming(
+                cmd,
+                effective_timeout,
+                cwd,
+                env,
+                line_handler,
+            )
+        except UnsafeCommandError as exc:
+            # An npx fallback whose cache fails its integrity check (#3406).
+            self._record_command_refusal(exc)
+            raise
 
     def _run_subprocess_streaming(
         self,
@@ -547,9 +573,18 @@ class BaseToolPlugin(ABC):
         try:
             validate_subprocess_command(cmd)
         except UnsafeCommandError as exc:
-            if self.command_refusal is None:
-                self.command_refusal = exc
+            self._record_command_refusal(exc)
             raise
+
+    def _record_command_refusal(self, refusal: UnsafeCommandError) -> None:
+        """Keep the first refusal of this run on :attr:`command_refusal`.
+
+        Args:
+            refusal: A command lintro refused to spawn, or an npx fallback
+                run whose cache failed its integrity check.
+        """
+        if self.command_refusal is None:
+            self.command_refusal = refusal
 
     def _validate_paths(self, paths: list[str]) -> None:
         """Validate that paths exist and are accessible.
