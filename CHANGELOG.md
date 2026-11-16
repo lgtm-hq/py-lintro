@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.180.37] - 2026-11-16
+
+### Fixed
+
+- **execution**: mark refused commands in the lint bridge and advisory runs (#3496)
+  (d1914d8)
+
 ## [0.180.36] - 2026-11-16
 
 ### Fixed
