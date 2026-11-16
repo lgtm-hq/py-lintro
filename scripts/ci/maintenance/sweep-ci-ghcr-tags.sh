@@ -50,8 +50,9 @@ set -euo pipefail
 # red. The run is now bounded end to end:
 #   - Every gh call runs under timeout(1) and is killed after
 #     GH_CALL_TIMEOUT_SECONDS (C).
-#   - Listings are paged by hand (PAGE_SIZE per request; 100 is the API
-#     maximum, the default is 30) so the clock is checked between pages, and
+#   - Listings are paged by hand (PAGE_SIZE per request, default 100: the
+#     API maximum; the API's own default is 30) so the clock is checked
+#     between pages, and
 #     only an empty page ends one. One listing yields both the candidates and
 #     the persistent-tag baseline.
 #   - With H = TIME_BUDGET_SECONDS and R = VERIFY_RESERVE_SECONDS, new work
@@ -132,9 +133,12 @@ Environment:
   DRY_RUN        When "true", log candidates without deleting (default: false)
 
 All numbers are read as base-10 integers; leading zeros are allowed.
-A DELETE that times out or gets no definitive (4xx) answer may have
-committed: it counts against MAX_DELETES, is verified, stops further
-deletions, and fails the run naming the version.
+A DELETE that times out, gets a 5xx or gets no HTTP answer may have gone
+through: it counts against MAX_DELETES and stops further deletions, and the
+verification listing then shows whether it did. The run fails only when that
+cannot be told. A 404 on DELETE means the version is already gone. A 403 or
+429 stops every further recheck and DELETE at once, as do 3 failed rechecks
+or DELETEEs in a row; either fails the run.
 A run that stops at the budget or the cap exits 0 and prints
 "Partial sweep, resumes next run: N deleted, M remaining".
 EOF
@@ -156,9 +160,15 @@ unreached_packages=""
 # Per-package stops (a package whose listing left too little of the budget to
 # verify its deletions). They do not stop the next package from being listed.
 package_stops=""
-# "<pkg>:<id>" of DELETEEs whose outcome is unknown (timed out, no definitive
-# HTTP answer): they may have committed remotely, so they count as deleted.
-uncertain_deletes=""
+# "<pkg>:<id>" of DELETEEs whose answer was lost (timed out, 5xx, no HTTP
+# answer), sorted by what the verification listing showed: gone, still
+# listed, or unknown because that listing could not run.
+uncertain_confirmed=""
+uncertain_present=""
+uncertain_unknown=""
+# Failed rechecks/DELETEs since the last successful DELETE (#3492).
+consecutive_refusals=0
+readonly MAX_CONSECUTIVE_REFUSALS=3
 
 # Actions keeps runs for 90 days from completion; GHCR updated_at reflects the
 # push, so +1 day covers the skew. Sweeping below this window deletes
@@ -384,15 +394,52 @@ fetch_persistent_tags() {
 	local rows_file=""
 	local rc=0
 	rows_file="$(mktemp)"
-	list_versions "$pkg" "$verify_deadline" "$rows_file" || rc=$?
+	list_for_verification "$pkg" "$rows_file" || rc=$?
 	if ((rc == 0)); then
 		persistent_tags_from "$rows_file"
-	elif ((rc == 3)); then
-		echo "the ${time_budget_seconds}s budget ran out before the listing" \
-			"finished" >&2
 	fi
 	rm -f "$rows_file"
 	return "$rc"
+}
+
+# List package $1 into file $2, bounded by the verification deadline.
+list_for_verification() {
+	local rc=0
+	list_versions "$1" "$verify_deadline" "$2" || rc=$?
+	if ((rc == 3)); then
+		echo "the ${time_budget_seconds}s budget ran out before the listing" \
+			"finished" >&2
+	fi
+	return "$rc"
+}
+
+# Decide each uncertain DELETE of package $1 (ids in $3) from the complete
+# verification listing in file $2: listed means it did not go through, absent
+# means it did. With no listing ($2 empty) the outcome stays unknown, which
+# fails the run.
+resolve_uncertain_deletes() {
+	local pkg="$1"
+	local rows_file="$2"
+	local vid=""
+	for vid in $3; do
+		if [[ -z "$rows_file" ]]; then
+			uncertain_unknown+="${pkg}:${vid} "
+			echo "::error::The DELETE outcome of ${pkg} version ${vid} is" \
+				"unknown: the verification listing could not run" >&2
+			sweep_errors=1
+		elif awk -F'\t' -v id="$vid" '$1 == id { found = 1 } END { exit !found }' \
+			"$rows_file"; then
+			uncertain_present+="${pkg}:${vid} "
+			swept_count=$((swept_count - 1))
+			remaining_count=$((remaining_count + 1))
+			echo "The DELETE of ${pkg} version ${vid} did not go through: it" \
+				"is still listed and stays for the next run"
+		else
+			uncertain_confirmed+="${pkg}:${vid} "
+			echo "The DELETE of ${pkg} version ${vid} went through: it is gone" \
+				"from the verification listing"
+		fi
+	done
 }
 
 tags_are_ci_only() {
@@ -455,19 +502,26 @@ verify_persistent_tags_survived() {
 	local pkg="$1"
 	local baseline="$2"
 	local deleted_ids="$3"
+	local uncertain_ids="$4"
 	local after=""
 	local missing=""
 	local err_file=""
+	local rows_file=""
 
 	err_file="$(mktemp)"
-	if ! after=$(fetch_persistent_tags "$pkg" 2>"${err_file}"); then
+	rows_file="$(mktemp)"
+	if ! list_for_verification "$pkg" "$rows_file" 2>"${err_file}"; then
 		echo "::error::Could not verify persistent tags for ${pkg} after" \
 			"deleting [${deleted_ids}]: $(cat "${err_file}") (#1652)" >&2
-		rm -f "${err_file}"
+		rm -f "${err_file}" "${rows_file}"
 		sweep_errors=1
+		resolve_uncertain_deletes "$pkg" "" "$uncertain_ids"
 		return
 	fi
 	rm -f "${err_file}"
+	resolve_uncertain_deletes "$pkg" "$rows_file" "$uncertain_ids"
+	after="$(persistent_tags_from "${rows_file}")"
+	rm -f "${rows_file}"
 
 	missing="$(tags_missing_from "$baseline" "$after")"
 	[[ -z "$missing" ]] && return
@@ -510,6 +564,34 @@ check_run_bound() {
 		return 0
 	fi
 	return 1
+}
+
+# Print the first HTTP status code in file $1, or nothing.
+http_status_in() {
+	{ grep -Eo 'HTTP[[:space:]]*[0-9]{3}' "$1" || true; } |
+		head -n 1 | grep -Eo '[0-9]{3}' || true
+}
+
+# Record a failed recheck or DELETE ($1 names it, $2 is its HTTP status or
+# empty) (#3492). A 403 or 429 (forbidden or rate limited) stops every
+# further write this run at once; any other failure stops them after
+# MAX_CONSECUTIVE_REFUSALS in a row, so a registry that keeps refusing is not
+# hammered for the whole work window. Either way the run fails.
+note_refusal() {
+	local what="$1"
+	local status="$2"
+	sweep_errors=1
+	consecutive_refusals=$((consecutive_refusals + 1))
+	[[ -n "$stop_reason" ]] && return 0
+	if [[ "$status" == "403" || "$status" == "429" ]]; then
+		stop_reason="rate limited or forbidden (HTTP ${status} on ${what});"
+		stop_reason+=" stopped all rechecks and DELETEEs"
+	elif ((consecutive_refusals >= MAX_CONSECUTIVE_REFUSALS)); then
+		stop_reason="repeatedly refused: ${consecutive_refusals} failed rechecks"
+		stop_reason+=" or DELETEEs in a row (last: ${what}); stopped all"
+		stop_reason+=" rechecks and DELETEEs"
+	fi
+	return 0
 }
 
 # Every reason this run stopped short, run-wide first, "; "-joined.
@@ -577,6 +659,7 @@ sweep_package() {
 	# deletes nothing, so it needs no baseline.
 	local baseline_tags=""
 	local deleted_ids=""
+	local uncertain_ids=""
 	if [[ "$dry_run" != "true" ]]; then
 		baseline_tags="$(persistent_tags_from "${rows_file}")"
 	fi
@@ -670,8 +753,12 @@ sweep_package() {
 				fi
 				echo "::error::Failed to re-check version ${vid}; skipping" \
 					"deletion: $(cat "${recheck_err_file}")" >&2
+				local recheck_status=""
+				if ! is_timeout_status "$recheck_rc"; then
+					recheck_status="$(http_status_in "${recheck_err_file}")"
+				fi
+				note_refusal "recheck of ${pkg}:${vid}" "$recheck_status"
 				rm -f "${recheck_err_file}"
-				sweep_errors=1
 				safe_to_delete=0
 				break
 			fi
@@ -711,37 +798,49 @@ sweep_package() {
 		gh_call api --method DELETE \
 			"orgs/${org}/packages/container/${pkg}/versions/${vid}" \
 			>/dev/null 2>"${delete_err_file}" || delete_rc=$?
+		local delete_status=""
+		# A call that timed out has no answer, whatever it printed first.
+		if ((delete_rc != 0)) && ! is_timeout_status "$delete_rc"; then
+			delete_status="$(http_status_in "${delete_err_file}")"
+		fi
 		if ((delete_rc == 0)); then
 			deleted_ids+="${vid} "
 			swept_count=$((swept_count + 1))
+			consecutive_refusals=0
 			echo "Deleted ${pkg} version ${vid} (tags: ${current_tags})"
-		elif ! is_timeout_status "$delete_rc" &&
-			grep -Eq 'HTTP[[:space:]]*4[0-9][0-9]' "${delete_err_file}"; then
-			# A 4xx is a definitive refusal: nothing was deleted.
+		elif [[ "$delete_status" == "404" ]]; then
+			# Gone already (a prior sweep or a manual cleanup), as with
+			# a 404 on recheck: benign for a reclaim job.
+			echo "Skipping version ${vid} (${pkg}): already deleted" \
+				"(404 on DELETE)"
+		elif [[ "$delete_status" == 4* ]]; then
+			# Any other 4xx is a definitive refusal: nothing was deleted.
 			echo "::error::Failed to delete ${pkg} version ${vid}:" \
 				"$(cat "${delete_err_file}")" >&2
-			sweep_errors=1
+			note_refusal "DELETE of ${pkg}:${vid}" "$delete_status"
 		else
 			# Timed out, 5xx, or no HTTP answer at all: the DELETE may have
-			# committed remotely before the response was lost (#3492). Count
-			# it against the cap, verify it like a deletion, start no more
-			# deletes this run, and fail the job naming the version.
-			echo "::error::DELETE of ${pkg} version ${vid} has an uncertain" \
-				"outcome and may have committed; treating it as deleted," \
-				"verifying it, and stopping deletions:" \
-				"$(cat "${delete_err_file}")" >&2
+			# gone through before the answer was lost (#3492). Count it
+			# against the cap, start no more deletes this run, and let the
+			# verification listing decide whether it went through.
+			echo "::warning::The DELETE of ${pkg} version ${vid} has an" \
+				"uncertain outcome and may have gone through; counting it" \
+				"against the cap, stopping deletions, and checking the" \
+				"verification listing for it: $(cat "${delete_err_file}")" >&2
 			deleted_ids+="${vid} "
-			uncertain_deletes+="${pkg}:${vid} "
+			uncertain_ids+="${vid} "
 			swept_count=$((swept_count + 1))
-			sweep_errors=1
-			stop_reason="a DELETE had an uncertain outcome"
+			if [[ -z "$stop_reason" ]]; then
+				stop_reason="the DELETE of ${pkg}:${vid} had an uncertain"
+				stop_reason+=" outcome"
+			fi
 		fi
 		rm -f "${delete_err_file}"
 	done <<<"$versions"
 
 	if [[ -n "$deleted_ids" ]]; then
 		verify_persistent_tags_survived "$pkg" "$baseline_tags" \
-			"${deleted_ids% }"
+			"${deleted_ids% }" "${uncertain_ids% }"
 	fi
 }
 
@@ -769,8 +868,14 @@ report_progress() {
 			line+="; not swept this run: ${unreached_packages% }"
 		fi
 	fi
-	if [[ -n "$uncertain_deletes" ]]; then
-		line+="; uncertain DELETE outcome: ${uncertain_deletes% }"
+	if [[ -n "$uncertain_confirmed" ]]; then
+		line+="; uncertain DELETE confirmed deleted: ${uncertain_confirmed% }"
+	fi
+	if [[ -n "$uncertain_present" ]]; then
+		line+="; uncertain DELETE still present: ${uncertain_present% }"
+	fi
+	if [[ -n "$uncertain_unknown" ]]; then
+		line+="; DELETE outcome unknown: ${uncertain_unknown% }"
 	fi
 	if [[ "$sweep_errors" -ne 0 ]]; then
 		echo "::error::${line}"

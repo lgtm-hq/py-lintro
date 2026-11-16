@@ -909,8 +909,9 @@ def test_sweep_ci_ghcr_tags_accepts_safe_tag_prefix(
 #: ``$GH_LIST_SLOW_COST`` from request ``$GH_LIST_SLOW_FROM`` on), deletes by
 #: ``$GH_DELETE_COST``.
 #: ``$GH_DELETE_FAIL`` fails every DELETE with that stderr; ``$GH_DELETE_HANG``
-#: logs the DELETE (as if it committed) and then hangs; ``$GH_RECHECK_HANG_<id>``
-#: prints its value to stderr and then hangs, so ``timeout(1)`` must stop it.
+#: logs the DELETE (as if it committed), prints ``$GH_DELETE_HANG_MSG`` to
+#: stderr if set, and then hangs; ``$GH_RECHECK_HANG_<id>`` prints its value
+#: to stderr and then hangs, so ``timeout(1)`` must stop it.
 _SWEEP_GH_STUB = r"""
 echo "$*" >> "$GH_LOG"
 clock_add() {
@@ -927,6 +928,9 @@ if [[ "$*" == *"--method DELETE"* ]]; then
     exit 1
   fi
   if [[ -n "${GH_DELETE_HANG:-}" ]]; then
+    if [[ -n "${GH_DELETE_HANG_MSG:-}" ]]; then
+      echo "$GH_DELETE_HANG_MSG" >&2
+    fi
     exec sleep 30
   fi
   exit 0
@@ -1846,50 +1850,129 @@ def test_free_disk_space_skips_off_github_hosted_runners(
     assert_that(log.exists()).is_false()
 
 
-@pytest.mark.parametrize("max_deletes", ["1", "0"])
-def test_sweep_ci_ghcr_tags_treats_a_timed_out_delete_as_possibly_committed(
+#: Three aged, sole-tagged CI versions for the DELETE-outcome tests.
+_THREE_CANDIDATES = _rows(*_PERSISTENT_ROWS, *_sole_ci_rows(301, 302, 303))
+
+
+@pytest.mark.parametrize(
+    ("verification_env", "expected_returncode", "expected_summary"),
+    [
+        # The verification listing no longer has 301: the DELETE went through.
+        (
+            {"GH_LIST_2": _rows(*_PERSISTENT_ROWS, *_sole_ci_rows(302, 303))},
+            0,
+            "::notice::Partial sweep, resumes next run: 1 deleted, 2 remaining"
+            " (the DELETE of py-lintro:301 had an uncertain outcome);"
+            " uncertain DELETE confirmed deleted: py-lintro:301",
+        ),
+        # 301 is still listed: the DELETE did not go through.
+        (
+            {},
+            0,
+            "::notice::Partial sweep, resumes next run: 0 deleted, 3 remaining"
+            " (the DELETE of py-lintro:301 had an uncertain outcome);"
+            " uncertain DELETE still present: py-lintro:301",
+        ),
+        # The verification listing fails: the outcome stays unknown.
+        (
+            {"GH_LIST_FAIL": "2"},
+            1,
+            "::error::Sweep finished with errors: 1 deleted, 2 remaining"
+            " (the DELETE of py-lintro:301 had an uncertain outcome);"
+            " DELETE outcome unknown: py-lintro:301",
+        ),
+    ],
+)
+def test_sweep_ci_ghcr_tags_resolves_a_timed_out_delete_from_the_verification(
     tmp_path: Path,
-    max_deletes: str,
+    verification_env: dict[str, str],
+    expected_returncode: int,
+    expected_summary: str,
 ) -> None:
-    """A DELETE that times out may have committed, so it is never ignored.
+    """A DELETE that times out may have gone through; verification decides.
 
     The fake records the DELETE and then hangs past the call timeout. The
-    version counts against the cap, no further DELETE is attempted (cap or
-    not), the package is still verified, and the run fails naming it.
+    version counts against the cap, no further DELETE is attempted, and the
+    verification listing reports it gone or still there. Only when that
+    listing cannot run does the outcome stay unknown and the run fail.
     """
     run = _run_sweep(
         tmp_path,
         {
             "GH_DELETE_HANG": "1",
             "GH_CALL_TIMEOUT_SECONDS": "1",
-            "MAX_DELETES": max_deletes,
-            "GH_VERSIONS": _rows(*_PERSISTENT_ROWS, *_sole_ci_rows(301, 302, 303)),
+            "MAX_DELETES": "1",
+            "GH_VERSIONS": _THREE_CANDIDATES,
+            **verification_env,
         },
     )
 
-    assert_that(run.result.returncode).is_equal_to(1)
+    assert_that(run.result.returncode).is_equal_to(expected_returncode)
     assert_that(run.gh_log.count("--method DELETE")).is_equal_to(1)
     assert_that(run.result.stderr).contains(
-        "DELETE of py-lintro version 301 has an uncertain outcome",
+        "The DELETE of py-lintro version 301 has an uncertain outcome",
     )
-    assert_that(run.result.stderr).contains("gh call timed out after 1s")
-    # The possibly-deleted version was verified: the listing plus a re-read.
+    assert_that(run.listings).is_equal_to(2)
+    assert_that(run.result.stdout).contains(expected_summary)
+
+
+def test_sweep_ci_ghcr_tags_stops_deleting_after_an_uncertain_delete_uncapped(
+    tmp_path: Path,
+) -> None:
+    """With no cap, one uncertain DELETE still stops every further DELETE."""
+    run = _run_sweep(
+        tmp_path,
+        {
+            "GH_DELETE_HANG": "1",
+            "GH_CALL_TIMEOUT_SECONDS": "1",
+            "MAX_DELETES": "0",
+            "GH_VERSIONS": _THREE_CANDIDATES,
+        },
+    )
+
+    assert_that(run.gh_log.count("--method DELETE")).is_equal_to(1)
+    assert_that(run.gh_log).does_not_contain("py-lintro/versions/302")
+    assert_that(run.result.stdout).contains("0 deleted, 3 remaining")
+
+
+@pytest.mark.parametrize(
+    "delete_env",
+    [
+        # A 5xx answer: the server may have finished the DELETE anyway.
+        {"GH_DELETE_FAIL": "gh: Bad Gateway (HTTP 502)"},
+        # A call that printed a 4xx and then timed out has no answer at all.
+        {
+            "GH_DELETE_HANG": "1",
+            "GH_DELETE_HANG_MSG": "gh: Unprocessable Entity (HTTP 422)",
+            "GH_CALL_TIMEOUT_SECONDS": "1",
+        },
+    ],
+)
+def test_sweep_ci_ghcr_tags_treats_an_answerless_delete_as_uncertain(
+    tmp_path: Path,
+    delete_env: dict[str, str],
+) -> None:
+    """A 5xx, or a timeout after any output, is uncertain, not a refusal."""
+    run = _run_sweep(tmp_path, {"GH_VERSIONS": _THREE_CANDIDATES, **delete_env})
+
+    assert_that(run.gh_log.count("--method DELETE")).is_equal_to(1)
+    assert_that(run.result.stderr).contains("has an uncertain outcome")
+    assert_that(run.result.stderr).does_not_contain("Failed to delete")
+    # It was looked up in the verification listing, which still has it.
     assert_that(run.listings).is_equal_to(2)
     assert_that(run.result.stdout).contains(
-        "::error::Sweep finished with errors: 1 deleted, 2 remaining"
-        " (a DELETE had an uncertain outcome);"
-        " uncertain DELETE outcome: py-lintro:301",
+        "uncertain DELETE still present: py-lintro:301",
     )
 
 
 def test_sweep_ci_ghcr_tags_continues_after_a_definitive_delete_refusal(
     tmp_path: Path,
 ) -> None:
-    """A 4xx DELETE answer is definitive: nothing was deleted, nothing to verify."""
+    """A 422 is definitive: nothing was deleted, nothing to verify, carry on."""
     run = _run_sweep(
         tmp_path,
         {
-            "GH_DELETE_FAIL": "gh: Forbidden (HTTP 403)",
+            "GH_DELETE_FAIL": "gh: Unprocessable Entity (HTTP 422)",
             "GH_VERSIONS": _rows(*_PERSISTENT_ROWS, *_sole_ci_rows(301, 302)),
         },
     )
@@ -1902,6 +1985,93 @@ def test_sweep_ci_ghcr_tags_continues_after_a_definitive_delete_refusal(
     assert_that(run.result.stdout).contains(
         "::error::Sweep finished with errors: 0 deleted",
     )
+
+
+def test_sweep_ci_ghcr_tags_stops_after_repeated_refusals(tmp_path: Path) -> None:
+    """Three refusals in a row stop every further recheck and DELETE."""
+    run = _run_sweep(
+        tmp_path,
+        {
+            "GH_DELETE_FAIL": "gh: Unprocessable Entity (HTTP 422)",
+            "GH_VERSIONS": _rows(
+                *_PERSISTENT_ROWS,
+                *_sole_ci_rows(301, 302, 303, 304, 305, 306),
+            ),
+        },
+    )
+
+    assert_that(run.result.returncode).is_equal_to(1)
+    assert_that(run.gh_log.count("--method DELETE")).is_equal_to(3)
+    assert_that(run.gh_log).does_not_contain("py-lintro/versions/304")
+    assert_that(run.result.stdout).contains(
+        "::error::Sweep finished with errors: 0 deleted, 3 remaining"
+        " (repeatedly refused: 3 failed rechecks or DELETEEs in a row"
+        " (last: DELETE of py-lintro:303); stopped all rechecks and DELETEEs)",
+    )
+
+
+@pytest.mark.parametrize(
+    ("refusal_env", "what", "status", "expected_deletes"),
+    [
+        ({"GH_DELETE_FAIL": "gh: Forbidden (HTTP 403)"}, "DELETE", "403", 1),
+        (
+            {"GH_DELETE_FAIL": "gh: Too Many Requests (HTTP 429)"},
+            "DELETE",
+            "429",
+            1,
+        ),
+        ({"GH_RECHECK_FAIL_301": "gh: Forbidden (HTTP 403)"}, "recheck", "403", 0),
+        (
+            {"GH_RECHECK_FAIL_301": "gh: Too Many Requests (HTTP 429)"},
+            "recheck",
+            "429",
+            0,
+        ),
+    ],
+)
+def test_sweep_ci_ghcr_tags_stops_writing_when_rate_limited(
+    tmp_path: Path,
+    refusal_env: dict[str, str],
+    what: str,
+    status: str,
+    expected_deletes: int,
+) -> None:
+    """A 403 or 429 on a recheck or DELETE stops the run's writes at once.
+
+    Carrying on into an active (secondary) rate limit for the rest of the work
+    window is how a backlog of thousands turns into thousands of refused
+    writes, which GitHub can escalate.
+    """
+    run = _run_sweep(tmp_path, {"GH_VERSIONS": _THREE_CANDIDATES, **refusal_env})
+
+    assert_that(run.result.returncode).is_equal_to(1)
+    assert_that(run.gh_log.count("--method DELETE")).is_equal_to(expected_deletes)
+    assert_that(run.gh_log).does_not_contain("py-lintro/versions/302")
+    assert_that(run.result.stdout).contains(
+        f"(rate limited or forbidden (HTTP {status} on {what} of py-lintro:301);"
+        " stopped all rechecks and DELETEEs)",
+    )
+
+
+def test_sweep_ci_ghcr_tags_treats_a_delete_404_as_already_gone(
+    tmp_path: Path,
+) -> None:
+    """A 404 on DELETE after clean rechecks is benign, like a 404 on recheck."""
+    run = _run_sweep(
+        tmp_path,
+        {
+            "GH_DELETE_FAIL": "gh: Not Found (HTTP 404)",
+            "GH_VERSIONS": _rows(*_PERSISTENT_ROWS, *_sole_ci_rows(301, 302)),
+        },
+    )
+
+    assert_that(run.result.returncode).is_equal_to(0)
+    assert_that(run.gh_log.count("--method DELETE")).is_equal_to(2)
+    assert_that(run.result.stdout).contains(
+        "Skipping version 301 (py-lintro): already deleted (404 on DELETE)",
+    )
+    assert_that(run.result.stdout).contains("Sweep complete: 0 deleted")
+    assert_that(run.result.stderr).does_not_contain("Failed to delete")
 
 
 def test_sweep_ci_ghcr_tags_never_reads_a_timed_out_recheck_as_a_404(
