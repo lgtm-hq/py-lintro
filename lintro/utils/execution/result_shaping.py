@@ -9,6 +9,7 @@ them out of the executor lets the execute phase read as orchestration only
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import replace
 from typing import TYPE_CHECKING
@@ -26,6 +27,7 @@ from lintro.models.core.tool_outcome import (
     Unavailable,
 )
 from lintro.models.core.tool_result import ToolResult
+from lintro.utils.npx_call import take_npx_refusals
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -104,6 +106,44 @@ def executed_command(tool: BaseToolPlugin, result: ToolResult) -> list[str] | No
         return list(tool._get_executable_command(tool.definition.name, cwd=result.cwd))
     except (OSError, ValueError, RuntimeError, AttributeError):
         return None
+
+
+def mark_npx_refusals(
+    tool: BaseToolPlugin,
+    result: ToolResult,
+    *,
+    fix: bool = False,
+) -> ToolResult:
+    """Report a run lintro's npx integrity check refused as an execution failure.
+
+    The check raises :class:`~lintro.utils.npx_integrity.NpxIntegrityError`
+    before, or after, an npx spawn whose cache cannot be trusted, and records
+    why. A tool that catches the error returns an ordinary failed result, so
+    the record is taken here: the result keeps any findings that really ran,
+    but is marked ``execution_failed`` with incomplete findings and the
+    refusal as its reason (#3406). Never a pass, and never a skip.
+
+    Args:
+        tool: Plugin that produced *result*.
+        result: Its result.
+        fix: Whether the run was a fix, whose accounting is then unmeasured.
+
+    Returns:
+        The result, marked when a refusal was recorded for the tool's cache.
+    """
+    if result.success:
+        return result
+    try:
+        command = tool._get_executable_command(
+            tool.definition.name,
+            cwd=result.cwd or os.getcwd(),
+        )
+    except (OSError, ValueError, RuntimeError, AttributeError, TypeError):
+        return result
+    refusals = take_npx_refusals(list(command))
+    if not refusals:
+        return result
+    return _refused_result(result, refusals[-1], fix=fix)
 
 
 def _runner_failure_reason(command: Sequence[str], output: str) -> str | None:
@@ -245,7 +285,25 @@ def mark_refused_command(
     refusal = command_refusal(tool)
     if refusal is None:
         return result
-    reason = f"lintro refused to run {result.name}: {refusal}"
+    return _refused_result(
+        result,
+        f"lintro refused to run {result.name}: {refusal}",
+        fix=fix,
+    )
+
+
+def _refused_result(result: ToolResult, reason: str, *, fix: bool) -> ToolResult:
+    """Mark a result lintro refused, wholly or in part, as an execution failure.
+
+    Args:
+        result: The tool's result.
+        reason: Why lintro refused; it leads the output.
+        fix: Whether the run was a fix, whose accounting is then unmeasured.
+
+    Returns:
+        The result as an execution failure with incomplete findings, keeping
+        the findings that really ran.
+    """
     accounting: FixAccounting = (
         FixUnmeasured(reason=reason, initial=result.initial_issues_count)
         if fix

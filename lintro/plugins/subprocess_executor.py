@@ -324,7 +324,9 @@ def run_subprocess(
     # script file the long form needs until the process has finished (#3439).
     spawn_scope = contextlib.ExitStack()
     try:
-        spawn_cmd = spawn_scope.enter_context(npx_shell_safe_command(cmd))
+        spawn_cmd = spawn_scope.enter_context(
+            npx_shell_safe_command(cmd, timeout=timeout),
+        )
         result = subprocess.run(  # nosec B603 - args list, shell=False
             spawn_cmd,
             capture_output=True,
@@ -447,7 +449,7 @@ def run_subprocess_streaming(
 
     # npx runs the tool through ``sh -c``; quote its arguments, and keep any
     # script file the long form needs until the process has finished (#3439).
-    with npx_shell_safe_command(cmd) as spawn_cmd:
+    with npx_shell_safe_command(cmd, timeout=timeout) as spawn_cmd:
         return _stream_subprocess(
             cmd=cmd,
             spawn_cmd=spawn_cmd,

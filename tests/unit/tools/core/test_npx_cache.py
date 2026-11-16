@@ -26,6 +26,7 @@ from lintro.tools.core.npx_cache import (
     repair_npx_cache,
 )
 from lintro.utils import file_cache
+from lintro.utils.npx_integrity import Refusal
 from tests.npx_entries import tool_package, write_npx_entry
 
 _PIN = "3.9.4"
@@ -239,8 +240,11 @@ def test_repair_removes_an_entry_whose_executable_was_replaced(
     ).contains("reinstalls prettier@3.9.4")
 
 
-def test_repair_refuses_a_node_modules_inside_lintros_cache(cache: Path) -> None:
-    """Node would load from ``<cache>/node_modules``; reinstalling cannot help.
+def test_repair_leaves_node_modules_above_to_the_spawn_check(cache: Path) -> None:
+    """The gate never turns that refusal into an unavailable (skipped) tool.
+
+    A ``node_modules`` Node would search is refused when the tool spawns, as
+    an execution failure; the gate keeps the pin available and the entry.
 
     Args:
         cache: Per-pin cache.
@@ -248,10 +252,33 @@ def test_repair_refuses_a_node_modules_inside_lintros_cache(cache: Path) -> None
     entry = _entry(cache)
     (cache / "node_modules" / "prettier").mkdir(parents=True)
 
-    with pytest.raises(NpxCacheError, match="would let Node load packages from"):
-        _repair(cache)
+    _repair(cache)
 
     assert_that(entry.is_dir()).is_true()
+
+
+def test_repair_keeps_an_entry_a_reinstall_would_not_fix(
+    cache: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    logged_warnings: list[str],
+) -> None:
+    """An unrecognised shim format survives the gate for the spawn to refuse.
+
+    Evicting it would only make npx write the same shims again, every run.
+
+    Args:
+        cache: Per-pin cache.
+        monkeypatch: Makes the entry's check report such a reason.
+        logged_warnings: Warnings logged during the repair.
+    """
+    entry = _entry(cache)
+    reason = Refusal("has .bin/prettier.cmd in a shim format lintro does not recognise")
+    monkeypatch.setattr(npx_cache, "verify_entry", lambda *_args, **_kwargs: reason)
+
+    _repair(cache)
+
+    assert_that(entry.is_dir()).is_true()
+    assert_that(" ".join(logged_warnings)).contains("does not recognise")
 
 
 def test_repair_deletes_every_entry_that_would_not_run_the_pin(cache: Path) -> None:

@@ -1518,16 +1518,22 @@ Rationale:
    - a `.bin` executable that no locked package declares, such as a planted `.bin/node`.
      On Linux and macOS each must be a link to the declared file. On Windows each shim
      (`<name>`, `<name>.cmd`, `<name>.ps1`) must be byte for byte what npm's `cmd-shim`
-     writes for it;
-   - a `node_modules` directory above the entry inside `~/.lintro/cache`, where Node
-     would look for a package the entry lacks. When npm skipped an optional package for
-     this platform, a `node_modules` anywhere up to the filesystem root, or
-     `~/.node_modules` or `~/.node_libraries`, is refused too. This makes the tool
-     **unavailable** rather than reinstalling, because a reinstall sits in the same
-     place.
+     writes for it. Lintro knows the shims npm 10 and 11 write and the ones npm 12
+     writes; a shim in any other format is refused as unrecognised (a newer npm may have
+     written it; upgrade Lintro or install the tool in the project), and the entry is
+     kept rather than reinstalled, since npm would write the same shim again.
 
    An entry that fails is removed like any other bad entry, so npx installs the pin
    afresh; an entry whose tarball is no longer cached is treated the same way.
+
+   **No `node_modules` Node could search.** Node looks for a package an entry lacks (an
+   optional dependency npm skipped, an optional peer, any undeclared `require`) in every
+   `node_modules` above it, up to the filesystem root, and then in `~/.node_modules` and
+   `~/.node_libraries`. Which requests a tool makes cannot be known in advance, so if
+   any of those directories exists, for example a stray `~/node_modules` or a
+   `/node_modules` in a container, the npx fallback is refused for every tool. The
+   message names each directory: remove or rename it and run Lintro again. Lintro's own
+   Docker images have none.
 
    The check is repeated right before each npx spawn and is bound to the run. Lintro
    records the inode, size, mtime and ctime of everything in the entry. An entry whose
@@ -1536,12 +1542,18 @@ Rationale:
    **execution failure** with incomplete findings, never a pass. A file replaced and
    then put back also counts as a change, and so does moving the entry or `_npx` aside
    and back, which Lintro sees on the per-pin cache directory and `_npx`. The same
-   applies to a refused check at spawn time; there npx never starts. An entry whose npm
-   lock is held, because another npx is installing it, is waited for (up to five
-   minutes, or until npm would call the lock stale) and checked once it is complete. On
-   a cold cache, npx installs the pin during the run (npm checks the download against
-   the registry's integrity) and Lintro verifies the new entry once the run ends. On a
-   warm cache the check costs about 0.1–0.25 s the first time in a process for
+   applies to every refusal at spawn time, where npx never starts: the tool is reported
+   as an execution failure with a non-zero exit, never as unavailable or skipped, even
+   when the tool's own error handling catches the refusal. An entry whose npm lock is
+   held, because another npx is installing it, is waited for once, for at most the
+   tool's timeout or five minutes, whichever is shorter, with a warning naming the lock;
+   a lock npm would call stale, or one touched in the future, is not waited for. If the
+   lock is still held when the wait ends, the run is an execution failure naming the
+   lock. On a cold cache, npx installs the pin during the run (npm checks the download
+   against the registry's integrity) and Lintro verifies the new entry once the run
+   ends. That first run has nothing earlier to compare with, so a byte-identical swap
+   made and undone while it runs is not detected; npx installs and runs in one process.
+   On a warm cache the check costs about 0.1–0.25 s the first time in a process for
    html-validate (13 packages, 944 files) and 10–30 ms per spawn after that.
 
    **Trust model.** Lintro's npx cache (`~/.lintro/cache/npx/<package>@<pinned>`) is

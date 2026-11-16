@@ -63,7 +63,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from lintro.utils.npx_integrity import check_unchanged, verified_cache
+from lintro.utils.npx_integrity import check_unchanged, take_refusals, verified_cache
 
 #: npx/bunx flags that take the package spec as the next argument.
 PACKAGE_FLAGS: frozenset[str] = frozenset({"-p", "--package"})
@@ -289,12 +289,27 @@ def npx_cache_option(cmd: Sequence[str]) -> Path | None:
     return Path(caches[-1].removeprefix(NPX_CACHE_OPTION)) if caches else None
 
 
+def take_npx_refusals(cmd: Sequence[str] | None) -> list[str]:
+    """Return and forget the integrity refusals raised for a command's cache.
+
+    Args:
+        cmd: A command lintro resolved for a tool, or None.
+
+    Returns:
+        The refusal messages recorded for its ``--cache`` in this process,
+        oldest first; empty for any other command.
+    """
+    cache = npx_cache_option(cmd) if cmd else None
+    return take_refusals(cache) if cache is not None else []
+
+
 @contextlib.contextmanager
 def npx_shell_safe_command(
     cmd: Sequence[str],
     *,
     windows: bool | None = None,
     inline_limit: int = NPX_INLINE_SCRIPT_LIMIT,
+    timeout: float | None = None,
 ) -> Iterator[Argv]:
     """Yield the argv to spawn so npm's shell sees every argument literally.
 
@@ -310,12 +325,14 @@ def npx_shell_safe_command(
     When the command carries a ``--cache``, its contents are verified against
     their lockfile before the argv is yielded, and must be unchanged when the
     context exits normally (:mod:`lintro.utils.npx_integrity`, #3406), on
-    every platform.
+    every platform. Waiting for a concurrent npx's lock on the cache counts
+    against *timeout*.
 
     Args:
         cmd: Command about to be spawned.
         windows: Whether npx runs on Windows; defaults to ``os.name == "nt"``.
         inline_limit: Longest script, in bytes, passed inline.
+        timeout: The tool's timeout in seconds, which bounds that wait.
 
     Yields:
         Argv: The argv to spawn.
@@ -325,10 +342,10 @@ def npx_shell_safe_command(
         with _quoted_argv(cmd, windows=windows, inline_limit=inline_limit) as argv:
             yield argv
         return
-    before = verified_cache(cache)
+    before = verified_cache(cache, timeout=timeout)
     with _quoted_argv(cmd, windows=windows, inline_limit=inline_limit) as argv:
         yield argv
-    check_unchanged(cache, before)
+    check_unchanged(cache, before, timeout=timeout)
 
 
 @contextlib.contextmanager

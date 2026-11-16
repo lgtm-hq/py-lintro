@@ -38,10 +38,12 @@ tool's ``PATH``, so an extra ``.bin/node`` would otherwise replace the ``node``
 that the tool's ``#!/usr/bin/env node`` starts.
 
 Node looks for a package it cannot find in the entry in every ``node_modules``
-above it. No ``node_modules`` may exist between the entry and lintro's cache
-root. When the lockfile lists an optional package npm skipped for this
-platform, none may exist anywhere up to the filesystem root, nor in
-``~/.node_modules`` or ``~/.node_libraries`` (:func:`ancestor_problem`).
+above it, up to the filesystem root, and then in ``~/.node_modules`` and
+``~/.node_libraries``. An optional dependency npm skipped, an optional peer or
+any undeclared ``require`` can reach them, and which of these an entry makes
+cannot be known in advance, so none of those directories may exist
+(:func:`ancestor_modules`). This is checked at spawn time only: removing and
+reinstalling the entry would not help.
 
 **Binding the check to the run.** An entry's fingerprint is the type, inode,
 size, mtime and ctime of everything in it. Users can set mtime but not ctime,
@@ -61,12 +63,15 @@ Before lintro spawns an npx fallback, it checks every entry in the command's
 ``--cache``. An entry whose fingerprint was already verified passes at once;
 any other entry is verified again. An entry whose npm lock is held is waited
 for, so a concurrent first install is checked once it is complete rather than
-mistaken for a broken one. After the process exits, every entry and both
-directories must be as they were before the spawn. An entry that appeared
-during the run, which is npx's first install of the pin, is verified then. Any
-failure raises :class:`NpxIntegrityError`, which lintro reports as an
-execution failure with incomplete findings. It is never treated as a pass and
-never produces findings.
+mistaken for a broken one; the wait is logged and bounded by the tool's
+timeout. After the process exits, every entry and both directories must be as
+they were before the spawn. An entry that appeared during the run, which is
+npx's first install of the pin, is verified then. Any failure raises
+:class:`NpxIntegrityError` with a message naming its cause and remedy, and is
+recorded for the executor (:func:`take_refusals`), so it is reported as an
+execution failure with incomplete findings even when the tool catches the
+error itself. It is never treated as a pass or a skip, and never produces
+findings.
 
 **Limits.** The lockfile and the tarballs live in the same user-writable
 cache as the install. This check catches a partial change, such as the one in
@@ -76,7 +81,9 @@ they agree. That user already controls lintro's cache, which lintro trusts as
 it trusts its own installation, and likewise could move the directories above
 the per-pin cache aside and back. ``NODE_PATH`` is not inspected. A cold run
 executes npm's fresh install, which npm checks against the registry's
-integrity hashes; lintro verifies it once the run has finished. On Windows,
+integrity hashes; lintro verifies it once the run has finished. That first
+run has no earlier state to compare with, so a byte-identical swap made and
+undone while it runs is not seen: npx installs and runs in one process. On Windows,
 ``st_ctime`` is the creation time, so there the fingerprint relies on size,
 mtime and inode.
 """
@@ -101,6 +108,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from loguru import logger
+
 #: Prefix lintro gives entries and locks it has set aside before deletion.
 STALE_PREFIX: str = ".lintro-stale-"
 
@@ -110,8 +119,18 @@ NPM_LOCK_NAME: str = "concurrency.lock"
 #: npm treats a lock whose mtime is older than this as abandoned.
 _STALE_LOCK_SECONDS: float = 60.0
 
-#: Longest wait for a live npm lock on an entry before checking it anyway.
+#: Longest wait for a live npm lock on an entry; the tool's timeout, when
+#: shorter, bounds it too.
 _INSTALL_WAIT_SECONDS: float = 300.0
+
+#: A lock touched further in the future than this is treated as stale: a
+#: clock skewed that far would otherwise keep it fresh for ever.
+_FUTURE_LOCK_SECONDS: float = 5.0
+
+#: ``cmd-shim`` releases whose shims lintro recognises: 7.0.0 and 8.0.0
+#: (npm 10 and 11) write the same text as each other, and 9.x (npm 12)
+#: rewrote the batch and ``sh`` shims.
+CMD_SHIM_GENERATORS: tuple[str, ...] = ("8", "9")
 
 #: Integrity algorithms lintro checks, strongest first.
 _ALGORITHMS: tuple[str, ...] = ("sha512", "sha384", "sha256", "sha1")
@@ -123,7 +142,10 @@ _GZIP_MAGIC: bytes = b"\x1f\x8b"
 _SHIM_SUFFIXES: tuple[str, ...] = (".cmd", ".ps1")
 
 #: Characters JavaScript's ``String.prototype.trim`` removes.
-_JS_WHITESPACE: str = " \t\n\v\f\r         " "        　﻿"
+_JS_WHITESPACE: str = (
+    " \t\n\v\f\r\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005"
+    "\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+)
 
 #: ``cmd-shim``'s shebang pattern (lib/index.js), unchanged.
 _SHEBANG = re.compile(
@@ -157,6 +179,32 @@ _SH_HEAD: str = (
     "\n"
 )
 
+#: ``cmd-shim`` 9's ``sh`` shim preamble.
+_SH_HEAD_9: str = (
+    "#!/bin/sh\n"
+    'basedir=$(dirname "$(echo "$0" | sed -e \'s,\\\\,/,g\')")\n'
+    'basedir_win="$basedir"\n'
+    "\n"
+    "case `uname -a` in\n"
+    "  *CYGWIN*|*MINGW*|*MSYS*)\n"
+    "    if command -v cygpath > /dev/null 2>&1; then\n"
+    '      basedir_win=`cygpath -w "$basedir"`\n'
+    "    fi\n"
+    "  ;;\n"
+    "  *WSL2*)\n"
+    "    if command -v wslpath > /dev/null 2>&1; then\n"
+    '      basedir_win="$(wslpath -w "$basedir" 2> /dev/null)"\n'
+    '      if [ $? -ne 0 ] || [ -z "$basedir_win" ]; then\n'
+    '        echo "Error: wslpath failed to convert path. WSL environment may be '
+    'misconfigured." >&2\n'
+    "        exit 1\n"
+    "      fi\n"
+    "    fi\n"
+    "  ;;\n"
+    "esac\n"
+    "\n"
+)
+
 #: ``cmd-shim``'s PowerShell shim preamble.
 _PWSH_HEAD: str = (
     "#!/usr/bin/env pwsh\n"
@@ -181,8 +229,78 @@ _VERIFIED: dict[tuple[str, str], Fingerprint] = {}
 _VERIFIED_LOCK = threading.Lock()
 
 
+#: Refusal messages raised for each resolved cache, until the executor that
+#: ran the tool takes them (:func:`take_refusals`).
+_REFUSALS: dict[str, list[str]] = {}
+
+
 class NpxIntegrityError(RuntimeError):
     """What npx would run from lintro's cache does not match its lockfile."""
+
+
+class Refusal(str):
+    """A reason an entry cannot be trusted that reinstalling it will not fix.
+
+    Plain ``str`` reasons are repairable: the gate removes the entry and npx
+    installs the pin afresh. A ``Refusal`` names something a fresh install
+    would reproduce, such as a shim format lintro does not know, so the gate
+    keeps the entry and the spawn refuses it with this reason.
+    """
+
+    __slots__ = ()
+
+    @property
+    def repairable(self) -> bool:
+        """Report that reinstalling the entry would not help.
+
+        Returns:
+            Always False.
+        """
+        return False
+
+
+def is_repairable(reason: str) -> bool:
+    """Report whether removing an entry and reinstalling it fixes *reason*.
+
+    Args:
+        reason: Why the entry cannot be trusted.
+
+    Returns:
+        False for a :class:`Refusal`, True for any other reason.
+    """
+    return not isinstance(reason, Refusal)
+
+
+def _recorded(cache: Path, message: str) -> str:
+    """Record a refusal for *cache* and return its message, to raise.
+
+    Args:
+        cache: The per-pin cache, resolved.
+        message: The complete, cause-specific message.
+
+    Returns:
+        *message*.
+    """
+    with _VERIFIED_LOCK:
+        _REFUSALS.setdefault(str(cache), []).append(message)
+    return message
+
+
+def take_refusals(cache: Path) -> list[str]:
+    """Return and forget the refusals raised for a cache in this process.
+
+    A tool may catch :class:`NpxIntegrityError` and return an ordinary failed
+    result; the executor takes these to report that result as an execution
+    failure instead (``lintro.utils.execution.result_shaping``).
+
+    Args:
+        cache: The ``--cache`` an npx command carries.
+
+    Returns:
+        The messages, oldest first.
+    """
+    with _VERIFIED_LOCK:
+        return _REFUSALS.pop(os.path.realpath(cache), [])
 
 
 @dataclass(frozen=True)
@@ -204,11 +322,9 @@ class _Lockfile:
 
     Attributes:
         installed: Lockfile entries by their path below the entry.
-        optional_missing: Whether an optional package was skipped.
     """
 
     installed: Mapping[str, Mapping[str, object]]
-    optional_missing: bool
 
 
 def forget_verified() -> None:
@@ -412,20 +528,22 @@ def _unquote(text: str) -> str:
     return re.sub(r'(^")|("$)', "", text)
 
 
-def _direct_shims(rel_target: str) -> dict[str, str]:
+def _direct_shims(rel_target: str, generator: str) -> dict[str, str]:
     """Port ``cmd-shim``'s shims for a target without a shebang.
 
     Args:
         rel_target: Target relative to the ``.bin`` directory, POSIX form.
+        generator: ``cmd-shim`` major version, from :data:`CMD_SHIM_GENERATORS`.
 
     Returns:
         Shim contents by suffix.
     """
     prog = '"%dp0%\\' + rel_target.replace("/", "\\") + '"'
     sh_prog = f'"$basedir/{rel_target}"'
+    sh_head = _SH_HEAD_9 if generator == "9" else _SH_HEAD
     return {
         ".cmd": f"{_CMD_HEAD}{prog}   %*\r\n",
-        "": f'{_SH_HEAD}exec {sh_prog}   "$@"\n',
+        "": f'{sh_head}exec {sh_prog}   "$@"\n',
         ".ps1": (
             f"{_PWSH_HEAD}# Support pipeline input\n"
             "if ($MyInvocation.ExpectingInput) {\n"
@@ -438,22 +556,64 @@ def _direct_shims(rel_target: str) -> dict[str, str]:
     }
 
 
-def npm_cmd_shims(rel_target: str, target_text: str) -> dict[str, str]:
+def _shebang_sh_9(
+    prog: str,
+    args: str,
+    variables: str,
+    rel_target: str,
+) -> str:
+    """Port ``cmd-shim`` 9's ``sh`` shim for a target with a shebang.
+
+    Args:
+        prog: The shebang's program.
+        args: Its arguments, trimmed.
+        variables: ``env -S`` variable declarations.
+        rel_target: Target relative to the ``.bin`` directory, POSIX form.
+
+    Returns:
+        The shim.
+    """
+    sh_prog = prog.replace("\\", "/")
+    sh_long_prog = f'"$basedir/{prog}"'
+    return (
+        f'{_SH_HEAD_9}PROG_EXE={sh_long_prog[:-1]}.exe"\n'
+        'if ! [ -x "$PROG_EXE" ]; then\n'
+        f"  PROG_EXE={sh_long_prog}\n"
+        '  if ! [ -x "$PROG_EXE" ]; then\n'
+        f"    PROG_EXE={sh_prog}\n"
+        '    if ! [ -x "$PROG_EXE" ]; then\n'
+        f"      PROG_EXE={sh_prog}.exe\n"
+        "    fi\n"
+        "  fi\n"
+        "fi\n"
+        "\n"
+        f'exec {variables}"$PROG_EXE" {args} "$basedir_win/{rel_target}" "$@"\n'
+    )
+
+
+def npm_cmd_shims(
+    rel_target: str,
+    target_text: str,
+    *,
+    generator: str = "8",
+) -> dict[str, str]:
     """Return the ``.bin`` shims npm's ``cmd-shim`` writes on Windows.
 
-    A port of ``cmd-shim``'s ``writeShim_`` (7.0.0 in npm 10, 8.0.0 in npm 11;
-    both generate the same text).
+    A port of ``cmd-shim``'s ``writeShim_``. Generator ``"8"`` is 7.0.0 (npm
+    10) and 8.0.0 (npm 11), which write the same text; ``"9"`` is 9.0.2 (npm
+    12), which rewrote the batch and ``sh`` shims and kept the PowerShell one.
 
     Args:
         rel_target: Target relative to the ``.bin`` directory, POSIX form.
         target_text: The target's contents, decoded as UTF-8.
+        generator: ``cmd-shim`` major version, from :data:`CMD_SHIM_GENERATORS`.
 
     Returns:
         Shim contents by suffix: ``.cmd``, ``.ps1`` and ``""`` (the sh shim).
     """
     shebang = _shebang(target_text)
     if shebang is None:
-        return _direct_shims(rel_target)
+        return _direct_shims(rel_target, generator)
     prog, args, variables = shebang
     args = _js_trim(args)
     sh_prog = prog.replace("\\", "/")
@@ -463,17 +623,23 @@ def npm_cmd_shims(rel_target: str, target_text: str) -> dict[str, str]:
     pwsh_long_prog = f'"$basedir/{prog}$exe"'
     target = '"%dp0%\\' + rel_target.replace("/", "\\") + '"'
     sh_target = f'"$basedir/{rel_target}"'
+    # 8 resets PATHEXT in the ELSE branch; 9 does it on the last line.
+    pathext_line, pathext_run = (
+        ("", "set PATHEXT=%PATHEXT:;.JS;=;% & ")
+        if generator == "9"
+        else ("  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n", "")
+    )
     cmd = (
         f"{_CMD_HEAD}{_batch_variables(variables)}\r\n"
         f"IF EXIST {long_prog} (\r\n"
         f'  SET "_prog={_unquote(long_prog)}"\r\n'
         ") ELSE (\r\n"
         f'  SET "_prog={_unquote(prog)}"\r\n'
-        "  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n"
+        f"{pathext_line}"
         ")\r\n"
         "\r\n"
         "endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "
-        f'"%_prog%" {args} {target} %*\r\n'
+        f'{pathext_run}"%_prog%" {args} {target} %*\r\n'
     )
     sh = (
         f"{_SH_HEAD}if [ -x {sh_long_prog} ]; then\n"
@@ -503,6 +669,8 @@ def npm_cmd_shims(rel_target: str, target_text: str) -> dict[str, str]:
         "}\n"
         "exit $ret\n"
     )
+    if generator == "9":
+        sh = _shebang_sh_9(prog, args, variables, rel_target)
     return {".cmd": cmd, "": sh, ".ps1": pwsh}
 
 
@@ -864,8 +1032,10 @@ def _shim_matches(child: Path, suffix: str, targets: set[Path]) -> bool:
     for target in targets:
         rel = Path(os.path.relpath(target, child.parent)).as_posix()
         text = target.read_bytes().decode("utf-8", errors="replace")
-        if npm_cmd_shims(rel, text)[suffix].encode("utf-8") == content:
-            return True
+        for generator in CMD_SHIM_GENERATORS:
+            shim = npm_cmd_shims(rel, text, generator=generator)[suffix]
+            if shim.encode("utf-8") == content:
+                return True
     return False
 
 
@@ -897,7 +1067,13 @@ def _bin_problem(
             return f"has .bin/{child.name}, which no locked package declares"
         if windows:
             if not _shim_matches(child, suffix, bins[name]):
-                return f"has .bin/{child.name}, which is not the shim npm writes"
+                return Refusal(
+                    f"has .bin/{child.name} in a shim format lintro does not "
+                    "recognise (it knows the shims npm 10 to 12 write). A newer "
+                    "npm may have written it: upgrade lintro, or install the tool "
+                    "in the project. If your npm is not newer, delete this entry "
+                    "once no npm or npx process is running",
+                )
             continue
         real = {os.path.realpath(target) for target in bins[name]}
         if not child.is_symlink() or os.path.realpath(child) not in real:
@@ -1050,7 +1226,6 @@ def _read_lockfile(entry: Path, npm_entry: str) -> _Lockfile | str:
     if not isinstance(packages, dict):
         return "has a package-lock.json without packages"
     installed: dict[str, Mapping[str, object]] = {}
-    optional_missing = False
     real_entry = os.path.realpath(entry)
     for locked, meta in packages.items():
         if locked == "":
@@ -1059,13 +1234,11 @@ def _read_lockfile(entry: Path, npm_entry: str) -> _Lockfile | str:
         if key is None or not isinstance(meta, dict) or meta.get("link"):
             return f"locks {locked!r}, which is not an installed registry package"
         reason = _installed_package(entry, key, meta)
-        if reason == "":
-            optional_missing = True
-        elif reason is not None:
-            return reason
-        else:
+        if reason is None:
             installed[key] = meta
-    return _Lockfile(installed=installed, optional_missing=optional_missing)
+        elif reason:
+            return reason
+    return _Lockfile(installed=installed)
 
 
 def _npm_entry(entry: Path, cache: Path, npm_cache: Path | None) -> str:
@@ -1118,49 +1291,48 @@ def entry_problem(
         return f"cannot be read ({exc})"
 
 
-def ancestor_problem(
-    entry: Path,
-    cache: Path,
-    *,
-    npm_cache: Path | None = None,
-) -> str | None:
-    """Refuse a ``node_modules`` above the entry that Node could load from.
+def ancestor_modules(entry: Path) -> list[Path]:
+    """List the ``node_modules`` above an entry that Node could load from.
 
-    Below lintro's cache root none may exist. When the lockfile lists an
-    optional package npm skipped, Node would search every ``node_modules`` up
-    to the filesystem root and the ``$HOME`` global folders for it, so none
-    may exist there either.
+    Node resolves a package the entry does not hold, whether an optional
+    dependency npm skipped, an optional peer or an undeclared require, from
+    every ``node_modules`` above the requiring file, up to the filesystem
+    root, and then from ``~/.node_modules`` and ``~/.node_libraries``. Which
+    requests an entry makes cannot be known in advance, so every such
+    directory counts.
 
     Args:
         entry: ``<cache>/_npx/<hash>``.
-        cache: The per-pin cache that holds it, already resolved.
-        npm_cache: The cache path as npm was given it, if not *cache*.
 
     Returns:
-        Why the entry's surroundings cannot be trusted, or None.
+        The directories found, nearest first.
     """
-    from lintro.utils import file_cache
-
-    lockfile = _read_lockfile(entry, _npm_entry(entry, cache, npm_cache))
-    anywhere = isinstance(lockfile, str) or lockfile.optional_missing
-    root = Path(os.path.realpath(file_cache.CACHE_DIR))
-    real_cache = Path(os.path.realpath(cache))
-    owned = root if real_cache == root or root in real_cache.parents else real_cache
+    home = Path.home()
     candidates = [
         directory / "node_modules"
         for directory in Path(os.path.realpath(entry)).parents
-        if anywhere or directory == owned or owned in directory.parents
     ]
-    if anywhere:
-        home = Path.home()
-        candidates += [home / ".node_modules", home / ".node_libraries"]
-    for candidate in candidates:
-        if os.path.lexists(candidate):
-            return (
-                f"would let Node load packages from {candidate}, outside the "
-                "entry; remove it"
-            )
-    return None
+    candidates += [home / ".node_modules", home / ".node_libraries"]
+    return [candidate for candidate in candidates if os.path.lexists(candidate)]
+
+
+def _ancestor_message(entry: Path, found: list[Path]) -> str:
+    """Explain a refusal over ``node_modules`` directories above an entry.
+
+    Args:
+        entry: The ``_npx`` entry.
+        found: The directories, from :func:`ancestor_modules`.
+
+    Returns:
+        The message, naming every directory and how to clear it.
+    """
+    names = ", ".join(str(path) for path in found)
+    which = "that directory" if len(found) == 1 else "those directories"
+    return (
+        f"Node could load packages for lintro's npx fallback from outside its "
+        f"npm cache entry {entry}: {names}. lintro did not run the tool, so its "
+        f"findings are incomplete. Remove or rename {which} and run lintro again."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1206,51 +1378,122 @@ def verify_entry(
     return after
 
 
-def _refusal(entry: Path, reason: str) -> str:
-    """Explain why lintro will not run or trust an entry.
+def _content_message(entry: Path, reason: str, *, fresh: bool) -> str:
+    """Explain why an entry's contents are refused, with the remedy that works.
 
     Args:
         entry: The ``_npx`` entry.
-        reason: What lintro found.
+        reason: What the check found.
+        fresh: Whether npx installed the entry during this run.
 
     Returns:
-        The message, naming the entry and how it is repaired.
+        The message.
     """
+    if fresh:
+        subject = f"npx's fresh install in {entry}"
+        outcome = "the tool's findings cannot be trusted"
+    else:
+        subject = f"lintro's npm cache entry {entry}"
+        outcome = "lintro did not run it, so the tool's findings are incomplete"
+    if not is_repairable(reason):
+        return f"{subject} {reason}. {outcome[0].upper()}{outcome[1:]}."
     return (
-        f"lintro's npm cache entry {entry} {reason}, so its findings cannot be "
-        "trusted; the next lintro run removes the entry and npx reinstalls the pin"
+        f"{subject} {reason}; {outcome}. The next lintro run removes the entry "
+        "and npx reinstalls the pin."
     )
 
 
-def _await_npm(entry: Path) -> None:
-    """Wait while npm holds an entry's lock, so a running install can finish.
+def _changed_message(subject: str) -> str:
+    """Explain a cache that changed while the tool ran.
 
-    A lock untouched for npm's stale threshold, or held past the wait, is
-    not waited for further; the entry is then checked as it is, and an
-    unfinished install fails that check.
+    Args:
+        subject: What changed.
+
+    Returns:
+        The message.
+    """
+    return (
+        f"{subject} changed while the tool was running, so its findings cannot "
+        "be trusted. Run lintro again; if this repeats, another process is "
+        "changing lintro's npm cache."
+    )
+
+
+def _wait_limit(timeout: float | None) -> float:
+    """Return the longest wait for an npm lock.
+
+    Args:
+        timeout: The tool's timeout in seconds, if known.
+
+    Returns:
+        The smaller of the tool's timeout and :data:`_INSTALL_WAIT_SECONDS`.
+    """
+    if timeout is None or timeout <= 0:
+        return _INSTALL_WAIT_SECONDS
+    return min(timeout, _INSTALL_WAIT_SECONDS)
+
+
+def _await_npm(entry: Path, cache: Path, limit: float) -> None:
+    """Wait once, within *limit*, while npm holds an entry's lock.
+
+    A concurrent npx installing or checking the pin holds the lock; its
+    install is checked once the lock is released. A lock npm itself would
+    call stale (untouched for 60 seconds, or touched in the future past a
+    small allowance for clock skew) is not waited for: npx reclaims it, and
+    the entry is checked as it is.
 
     Args:
         entry: The ``_npx`` entry.
+        cache: The per-pin cache, resolved.
+        limit: Longest wait, in seconds.
+
+    Raises:
+        NpxIntegrityError: The lock was still held when *limit* ran out.
     """
     lock = entry / NPM_LOCK_NAME
-    deadline = time.monotonic() + _INSTALL_WAIT_SECONDS
-    while time.monotonic() < deadline:
+    started = time.monotonic()
+    announced = False
+    while True:
         try:
-            touched = os.lstat(lock).st_mtime
+            age = time.time() - os.lstat(lock).st_mtime
         except FileNotFoundError:
             return
-        if time.time() - touched > _STALE_LOCK_SECONDS:
+        if age > _STALE_LOCK_SECONDS or age < -_FUTURE_LOCK_SECONDS:
             return
+        waited = time.monotonic() - started
+        if waited >= limit:
+            raise NpxIntegrityError(
+                _recorded(
+                    cache,
+                    f"npm's lock {lock} on lintro's npm cache entry {entry} stayed "
+                    f"held for {waited:.0f}s, so lintro did not run the tool and its "
+                    "findings are incomplete. Run lintro again once the other npm or "
+                    f"npx process finishes, or delete {lock} once none is running.",
+                ),
+            )
+        if not announced:
+            announced = True
+            logger.warning(
+                f"Waiting up to {limit:.0f}s for npm's lock {lock}: another npm "
+                "or npx process is installing or checking this pinned package.",
+            )
         time.sleep(0.1)
 
 
-def _checked(entry: Path, cache: Path, npm_cache: Path) -> Fingerprint:
-    """Wait for npm, then verify an entry and its surroundings, or refuse.
+def _verified(
+    entry: Path,
+    cache: Path,
+    npm_cache: Path,
+    *,
+    fresh: bool,
+) -> Fingerprint:
+    """Verify an entry and its surroundings, or refuse.
 
     Args:
-        entry: The ``_npx`` entry.
+        entry: The ``_npx`` entry, its npm lock already waited for.
         cache: The per-pin cache, already resolved.
         npm_cache: The cache path as npm is given it.
+        fresh: Whether npx installed the entry during this run.
 
     Returns:
         The entry's verified fingerprint.
@@ -1258,67 +1501,107 @@ def _checked(entry: Path, cache: Path, npm_cache: Path) -> Fingerprint:
     Raises:
         NpxIntegrityError: The entry or its surroundings cannot be trusted.
     """
-    _await_npm(entry)
     result = verify_entry(entry, cache, npm_cache=npm_cache)
     if isinstance(result, str):
-        raise NpxIntegrityError(_refusal(entry, result))
-    reason = ancestor_problem(entry, cache, npm_cache=npm_cache)
-    if reason is not None:
-        raise NpxIntegrityError(_refusal(entry, reason))
+        raise NpxIntegrityError(
+            _recorded(cache, _content_message(entry, result, fresh=fresh)),
+        )
+    found = ancestor_modules(entry)
+    if found:
+        raise NpxIntegrityError(_recorded(cache, _ancestor_message(entry, found)))
     return result
 
 
-def verified_cache(cache: Path) -> CacheState:
+def _entries(cache: Path) -> list[Path]:
+    """List a cache's entries, recording a refusal if ``_npx`` is unusable.
+
+    Args:
+        cache: The per-pin cache, resolved.
+
+    Returns:
+        The entries.
+
+    Raises:
+        NpxIntegrityError: ``_npx`` is not a real directory.
+    """
+    try:
+        return cache_entries(cache)
+    except NpxIntegrityError as exc:
+        raise NpxIntegrityError(
+            _recorded(cache, f"{exc}; lintro did not run the tool"),
+        ) from exc
+
+
+def verified_cache(cache: Path, *, timeout: float | None = None) -> CacheState:
     """Verify every entry npx could run from a cache, before a spawn.
+
+    Each entry's npm lock is waited for once, within the tool's timeout, and
+    only then are the cache directories recorded: a concurrent first install
+    also writes beside ``_npx`` (``_cacache``, ``_logs``).
 
     Args:
         cache: The ``--cache`` the npx command carries.
+        timeout: The tool's timeout in seconds, if known.
 
     Returns:
         What the cache held: each entry's verified fingerprint and the rows
         of the cache directory and ``_npx``.
 
     Raises:
-        NpxIntegrityError: An entry does not match its lockfile, or the
-            cache was moved or replaced during the check.
+        NpxIntegrityError: An entry, or its surroundings, cannot be trusted,
+            or the cache changed during the check. The message is also
+            recorded for :func:`take_refusals`.
     """
     real = Path(os.path.realpath(cache))
-    # A concurrent first install also writes beside ``_npx`` (``_cacache``,
-    # ``_logs``): let it finish before recording the directories.
-    for entry in cache_entries(real):
-        _await_npm(entry)
+    listed = _entries(real)
+    limit = _wait_limit(timeout)
+    for entry in listed:
+        _await_npm(entry, real, limit)
     directories = _directory_rows(real)
     entries = {
-        entry.name: _checked(entry, real, cache) for entry in cache_entries(real)
+        entry.name: _verified(entry, real, cache, fresh=False) for entry in listed
     }
     if entries and _directory_rows(real) != directories:
         raise NpxIntegrityError(
-            f"lintro's npm cache {real} changed while lintro verified it",
+            _recorded(real, _changed_message(f"lintro's npm cache {real}")),
         )
     return CacheState(entries=entries, directories=directories)
 
 
-def check_unchanged(cache: Path, before: CacheState) -> None:
+def check_unchanged(
+    cache: Path,
+    before: CacheState,
+    *,
+    timeout: float | None = None,
+) -> None:
     """Require a cache to hold what it held before the spawn, after the run.
 
     Entries that existed before must be byte-for-byte the files verified,
     shown by an unchanged fingerprint, and neither the cache directory nor
     ``_npx`` may have been moved or had entries moved in or out. Entries that
     appeared during the run, npx's install of a cold pin, are verified now.
+    That first run has no earlier state to compare with, so a byte-identical
+    swap made and undone while it runs is not seen; npx installs and runs in
+    one process, leaving lintro no point between the two.
 
     Args:
         cache: The ``--cache`` the npx command carried.
         before: What :func:`verified_cache` found.
+        timeout: The tool's timeout in seconds, if known.
 
     Raises:
-        NpxIntegrityError: An entry or the cache changed during the run, or a
-            new entry does not match its lockfile.
+        NpxIntegrityError: An entry or the cache changed during the run, a new
+            entry does not match its lockfile, or a ``node_modules`` appeared
+            above an entry. The message is also recorded for
+            :func:`take_refusals`.
     """
     real = Path(os.path.realpath(cache))
     if before.entries and _directory_rows(real) != before.directories:
         raise NpxIntegrityError(
-            f"lintro's npm cache {real} had entries moved or replaced while "
-            "the tool was running, so its findings cannot be trusted",
+            _recorded(
+                real,
+                _changed_message(f"lintro's npm cache {real} (an entry was moved)"),
+            ),
         )
     for name, fingerprint in before.entries.items():
         entry = real / "_npx" / name
@@ -1328,12 +1611,14 @@ def check_unchanged(cache: Path, before: CacheState) -> None:
             unchanged = False
         if not unchanged:
             raise NpxIntegrityError(
-                _refusal(entry, "changed while the tool was running"),
+                _recorded(real, _changed_message(f"lintro's npm cache entry {entry}")),
             )
-    for entry in cache_entries(real):
+    limit = _wait_limit(timeout)
+    for entry in _entries(real):
         if entry.name not in before.entries:
-            _checked(entry, real, cache)
+            _await_npm(entry, real, limit)
+            _verified(entry, real, cache, fresh=True)
             continue
-        reason = ancestor_problem(entry, real, npm_cache=cache)
-        if reason is not None:
-            raise NpxIntegrityError(_refusal(entry, reason))
+        found = ancestor_modules(entry)
+        if found:
+            raise NpxIntegrityError(_recorded(real, _ancestor_message(entry, found)))

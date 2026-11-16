@@ -15,16 +15,22 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.models.core.subprocess_result import SubprocessResult
+from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
 from lintro.plugins.subprocess_executor import (
     run_subprocess,
     run_subprocess_streaming,
 )
 from lintro.tools.core.version_parsing import _run_probe_with_retry
+from lintro.utils import npx_integrity
+from lintro.utils.execution.result_shaping import mark_npx_refusals
 from lintro.utils.npx_call import npx_shell_safe_command
 from lintro.utils.npx_integrity import (
     NpxIntegrityError,
@@ -69,6 +75,17 @@ _DEPENDENCIES = (
 _GOLDEN = json.loads(
     (Path(__file__).parent / "npm_bin_links_golden.json").read_text(encoding="utf-8"),
 )
+
+
+@pytest.fixture(autouse=True)
+def _private_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the real ``~/.node_modules`` out of the ancestor check.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped ``HOME`` override.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
 
 
 @pytest.fixture
@@ -449,19 +466,21 @@ def test_fix_bin_port_matches_npm(case: str) -> None:
     assert_that(fixed).is_equal_to(golden["installed"].encode("utf-8"))
 
 
+@pytest.mark.parametrize("generator", ["8", "9"], ids=["npm-10-11", "npm-12"])
 @pytest.mark.parametrize(
     "case",
     ["env-node", "env-split-vars", "absolute-sh", "no-shebang"],
 )
-def test_cmd_shim_port_matches_npm(case: str) -> None:
+def test_cmd_shim_port_matches_npm(case: str, generator: str) -> None:
     """The Windows shims lintro expects are byte for byte npm's own.
 
     Args:
         case: Golden captured from npm's own ``cmd-shim``.
+        generator: ``cmd-shim`` major version the golden came from.
     """
-    golden = _GOLDEN["cmd_shim"][case]
+    golden = _GOLDEN["cmd_shim"][generator][case]
 
-    shims = npm_cmd_shims("../tool/bin/cli.js", golden["target"])
+    shims = npm_cmd_shims("../tool/bin/cli.js", golden["target"], generator=generator)
 
     assert_that(shims).is_equal_to(
         {suffix: golden[suffix] for suffix in (".cmd", ".ps1", "")},
@@ -504,11 +523,12 @@ def test_crlf_shebang_is_expected_only_on_declared_executables(
         assert_that(result).is_instance_of(str).contains(expected)
 
 
-def _windows_shims(entry: Path) -> Path:
+def _windows_shims(entry: Path, generator: str = "8") -> Path:
     """Replace the tool's ``.bin`` link with npm's Windows shims.
 
     Args:
         entry: The entry.
+        generator: ``cmd-shim`` major version that writes them.
 
     Returns:
         The ``.bin`` directory.
@@ -516,20 +536,26 @@ def _windows_shims(entry: Path) -> Path:
     bin_dir = entry / "node_modules" / ".bin"
     (bin_dir / "prettier").unlink()
     text = (_package(entry) / "bin.js").read_text(encoding="utf-8")
-    for suffix, shim in npm_cmd_shims("../prettier/bin.js", text).items():
+    shims = npm_cmd_shims("../prettier/bin.js", text, generator=generator)
+    for suffix, shim in shims.items():
         (bin_dir / f"prettier{suffix}").write_bytes(shim.encode("utf-8"))
     return bin_dir
 
+
+#: Shims in a format no known generator writes are refused as unrecognised,
+#: which a reinstall would not fix, so the gate keeps them for the spawn to
+#: refuse.
+_UNRECOGNISED = "in a shim format lintro does not recognise"
 
 _SHIM_TAMPERING: dict[str, tuple[Callable[[Path], object], str | None]] = {
     "as-npm-writes-them": (lambda _bin_dir: None, None),
     "cmd-replaced": (
         lambda bin_dir: (bin_dir / "prettier.cmd").write_text("@echo []\r\n"),
-        "has .bin/prettier.cmd, which is not the shim npm writes",
+        f"has .bin/prettier.cmd {_UNRECOGNISED}",
     ),
     "sh-shim-replaced": (
         lambda bin_dir: (bin_dir / "prettier").write_text("#!/bin/sh\necho []\n"),
-        "has .bin/prettier, which is not the shim npm writes",
+        f"has .bin/prettier {_UNRECOGNISED}",
     ),
     "undeclared-node-cmd": (
         lambda bin_dir: (bin_dir / "node.cmd").write_text("@echo []\r\n"),
@@ -538,17 +564,23 @@ _SHIM_TAMPERING: dict[str, tuple[Callable[[Path], object], str | None]] = {
 }
 
 
+@pytest.mark.parametrize("generator", ["8", "9"], ids=["npm-10-11", "npm-12"])
 @pytest.mark.parametrize("case", list(_SHIM_TAMPERING), ids=list(_SHIM_TAMPERING))
-def test_windows_shims_must_be_the_ones_npm_writes(cache: Path, case: str) -> None:
+def test_windows_shims_must_be_the_ones_npm_writes(
+    cache: Path,
+    case: str,
+    generator: str,
+) -> None:
     """On Windows, ``.bin`` holds shims, which are checked byte for byte.
 
     Args:
         cache: Per-pin npm cache.
         case: What happens to the shims.
+        generator: ``cmd-shim`` major version that wrote them.
     """
     entry = write_npx_entry(cache, [tool_package()])
     tamper, expected = _SHIM_TAMPERING[case]
-    tamper(_windows_shims(entry))
+    tamper(_windows_shims(entry, generator))
 
     reason = entry_problem(entry, cache, windows=True)
 
@@ -556,52 +588,50 @@ def test_windows_shims_must_be_the_ones_npm_writes(cache: Path, case: str) -> No
         assert_that(reason).is_none()
     else:
         assert_that(reason).contains(expected)
+        assert_that(npx_integrity.is_repairable(reason or "")).is_equal_to(
+            _UNRECOGNISED not in expected,
+        )
+
+
+#: Where a ``node_modules`` Node would search is planted, relative to the
+#: test's directory: inside the per-pin cache, above lintro's cache, and the
+#: ``$HOME`` global folder.
+_ANCESTORS: dict[str, Callable[[Path, Path], Path]] = {
+    "in-the-cache": lambda cache, _tmp: cache / "node_modules",
+    "above-the-cache": lambda cache, _tmp: cache.parent.parent / "node_modules",
+    "home-global-folder": lambda _cache, tmp: tmp / "home" / ".node_modules",
+}
 
 
 @posix_only
-@pytest.mark.parametrize(
-    ("location", "optional_missing", "expected"),
-    [
-        ("cache", False, "would let Node load packages from"),
-        ("above-cache", False, None),
-        ("above-cache", True, "would let Node load packages from"),
-    ],
-    ids=["in-lintros-cache", "above-cache-all-installed", "above-cache-optional-gap"],
-)
-def test_node_modules_above_the_entry_is_refused_where_node_would_use_it(
+@pytest.mark.parametrize("location", list(_ANCESTORS), ids=list(_ANCESTORS))
+def test_node_modules_node_would_search_is_refused_with_its_path(
     cache: Path,
+    tmp_path: Path,
     location: str,
-    optional_missing: bool,
-    expected: str | None,
 ) -> None:
-    """Node climbs to every ``node_modules`` above for a package it lacks.
+    """Every entry is refused, whether or not npm skipped an optional package.
+
+    markdownlint-cli2 skips none, yet Node in its entry resolves an
+    undeclared ``require("ghost")`` from ``~/node_modules/ghost``.
 
     Args:
         cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
         location: Where the ``node_modules`` is planted.
-        optional_missing: Whether npm skipped an optional package.
-        expected: Reason expected, or None for a pass.
     """
-    absent = LockedPackage(
-        key="node_modules/fsevents",
-        files={"package.json": "{}"},
-        extra={"optional": True},
-        installed=False,
-    )
-    write_npx_entry(cache, [tool_package(), *([absent] if optional_missing else [])])
-    planted_in = cache if location == "cache" else cache.parent.parent
-    (planted_in / "node_modules" / "fsevents").mkdir(parents=True)
-    error: NpxIntegrityError | None = None
+    write_npx_entry(cache, [tool_package()])
+    planted = _ANCESTORS[location](cache, tmp_path)
+    (planted / "ghost").mkdir(parents=True)
 
-    try:
+    with pytest.raises(NpxIntegrityError) as refusal:
         verified_cache(cache)
-    except NpxIntegrityError as exc:
-        error = exc
 
-    if expected is None:
-        assert_that(error).is_none()
-    else:
-        assert_that(str(error)).contains(expected).contains(str(planted_in))
+    assert_that(str(refusal.value)).contains(
+        f": {planted}.",
+        "Remove or rename that directory",
+        "lintro did not run the tool",
+    ).does_not_contain("reinstalls")
 
 
 @posix_only
@@ -631,6 +661,104 @@ def test_an_install_in_progress_is_awaited_not_refused(cache: Path) -> None:
         installer.join()
 
     assert_that(list(state.entries)).is_equal_to([entry.name])
+
+
+@posix_only
+def test_a_held_lock_is_waited_for_once_within_the_tool_timeout(
+    cache: Path,
+) -> None:
+    """A lock still held when the tool's timeout runs out fails the run, once.
+
+    Args:
+        cache: Per-pin npm cache.
+    """
+    entry = _install(cache)
+    (entry / "concurrency.lock").mkdir()
+    warnings: list[str] = []
+    sink = logger.add(
+        warnings.append,
+        level="WARNING",
+        format="{message}",
+    )
+    started = time.monotonic()
+    try:
+        with pytest.raises(NpxIntegrityError) as refusal:
+            verified_cache(cache, timeout=0.5)
+    finally:
+        logger.remove(sink)
+    waited = time.monotonic() - started
+
+    assert_that(waited).is_less_than(1.5)
+    assert_that(str(refusal.value)).contains(
+        "stayed held",
+        "lintro did not run the tool",
+        f"delete {entry / 'concurrency.lock'} once none is running",
+    )
+    assert_that(warnings).is_length(1)
+    assert_that(warnings[0]).contains("Waiting up to 0s", "another npm or npx")
+
+
+@posix_only
+def test_a_lock_touched_in_the_future_is_treated_as_stale(cache: Path) -> None:
+    """A skewed clock cannot keep a lock fresh for ever.
+
+    Args:
+        cache: Per-pin npm cache.
+    """
+    entry = _install(cache)
+    lock = entry / "concurrency.lock"
+    lock.mkdir()
+    future = time.time() + 3600
+    os.utime(lock, (future, future))
+    started = time.monotonic()
+
+    state = verified_cache(cache, timeout=30)
+
+    assert_that(time.monotonic() - started).is_less_than(5)
+    assert_that(list(state.entries)).is_equal_to([entry.name])
+
+
+@posix_only
+@pytest.mark.parametrize("fix", [False, True], ids=["check", "fix"])
+def test_a_refusal_the_tool_caught_still_fails_the_run(cache: Path, fix: bool) -> None:
+    """A tool's own handler cannot turn a refusal into a plain failure.
+
+    prettier, oxlint and oxfmt run through the batch runner, which catches
+    the error and returns an ordinary failed result. The executor marks it
+    from the recorded refusal, keeping the findings that really ran; in a
+    fix run what remains is unmeasured.
+
+    Args:
+        cache: Per-pin npm cache.
+        fix: Whether the refused run was a fix.
+    """
+    entry = _install(cache)
+    _replace_file(_package(entry) / "bin.js", "console.log('[]');\n")
+    with pytest.raises(NpxIntegrityError):
+        verified_cache(cache)
+    tool = SimpleNamespace(
+        definition=SimpleNamespace(name="prettier"),
+        _get_executable_command=lambda _name, cwd: _command(cache),
+    )
+    issue = BaseIssue(file="a.js", line=1, message="real finding")
+    caught = ToolResult(
+        name="prettier",
+        success=False,
+        output="Prettier execution failed",
+        issues_count=1,
+        issues=[issue],
+        cwd=str(cache),
+    )
+
+    marked = mark_npx_refusals(tool, caught, fix=fix)  # type: ignore[arg-type]
+    again = mark_npx_refusals(tool, caught, fix=fix)  # type: ignore[arg-type]
+
+    assert_that(marked.execution_failed).is_true()
+    assert_that(marked.findings_complete).is_false()
+    assert_that(marked.issues).is_equal_to([issue])
+    assert_that(marked.output).contains("bin.js changed", "did not run it")
+    assert_that(again.execution_failed).is_false()
+    assert_that(marked.residual_unknown).is_equal_to(fix)
 
 
 @posix_only
@@ -780,12 +908,12 @@ _DURING_RUN: dict[str, tuple[bool, Callable[[Path], None], str | None]] = {
     "entry-swapped-aside-and-back": (
         True,
         lambda cache: _swap_aside_and_back(cache / "_npx" / "0123456789abcdef"),
-        "had entries moved or replaced while the tool was running",
+        "(an entry was moved) changed while the tool was running",
     ),
     "npx-dir-swapped-aside-and-back": (
         True,
         lambda cache: _swap_aside_and_back(cache / "_npx"),
-        "had entries moved or replaced while the tool was running",
+        "(an entry was moved) changed while the tool was running",
     ),
     "npm-lock-taken-and-released": (True, _npm_lock_churn, None),
     "cold-install-verified-after": (False, _cold_install, None),

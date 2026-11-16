@@ -1465,6 +1465,63 @@ def test_install_scripts_never_run_under_lintros_npx_command(
 
 
 @requires_npx
+@pytest.mark.parametrize("cache_state", ["cold", "warm"])
+def test_stray_home_node_modules_fails_the_run_and_never_skips_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+    cache_state: str,
+) -> None:
+    """An empty ``~/node_modules`` fails ``lintro chk`` instead of passing it.
+
+    Fable's round-2 reproduction: with the pin's cache warm, the tool was
+    reported unavailable and ``lintro chk`` exited 0. Node in the entry would
+    resolve a package it lacks from that directory, so the run is refused as
+    an execution failure, cold or warm, with the directory named.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+        cache_state: Whether the pin is installed before the checked run.
+    """
+    _require_clean_ancestry(tmp_path)
+    assert _NPX is not None and _NODE is not None
+    project = _clean_project(tmp_path)
+    (project / "a.css").write_text("a {\n  color: red;\n}\n", encoding="utf-8")
+    env = _isolate(monkeypatch, tmp_path, {"npx": _NPX, "node": _NODE}, registry, {})
+    command = [sys.executable, "-m", "lintro", "chk", "a.css", "--tools", "prettier"]
+    if cache_state == "warm":
+        subprocess.run(  # nosec B603 - fixed argv, shell=False
+            command,
+            cwd=project,
+            env=env,
+            capture_output=True,
+            timeout=300,
+            check=False,
+        )
+    stray = Path(env["HOME"]) / "node_modules"
+    stray.mkdir()
+
+    result = subprocess.run(  # nosec B603 - fixed argv, shell=False
+        [*command, "--output-format", "json"],
+        cwd=project,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    report = json.loads(result.stdout[result.stdout.index("{") :])
+    prettier = next(row for row in report["results"] if row["tool"] == "prettier")
+
+    assert_that(result.returncode).described_as(result.stderr).is_not_zero()
+    assert_that(prettier.get("execution_failed")).is_true()
+    assert_that(prettier.get("findings_complete", False)).is_false()
+    assert_that(prettier["output"]).contains(str(stray), "Remove or rename")
+
+
+@requires_npx
 def test_executable_replaced_after_the_gate_is_refused_at_spawn(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

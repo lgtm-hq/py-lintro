@@ -35,6 +35,7 @@ from lintro.utils.execution.parallel_executor import run_tools_parallel
 from lintro.utils.execution.result_shaping import (
     classify_runner_failure,
     executed_command,
+    mark_npx_refusals,
     mark_refused_command,
 )
 from lintro.utils.execution.result_shaping import (
@@ -348,6 +349,7 @@ def _execute_tools_sequential(
             # Reject them before any consumer
             # (including the live callback) can lose the rest of the run.
             ToolResult.validate_outcome(result)
+            result = mark_npx_refusals(tool, result, fix=ctx.action == Action.FIX)
             result = classify_runner_failure(
                 result,
                 command=executed_command(tool, result),

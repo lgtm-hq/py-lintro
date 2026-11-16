@@ -132,9 +132,11 @@ class AsyncToolExecutor:
         from lintro.utils.execution.result_shaping import (
             classify_runner_failure,
             executed_command,
+            mark_npx_refusals,
             mark_refused_command,
         )
 
+        result = mark_npx_refusals(tool, result, fix=action == Action.FIX)
         result = classify_runner_failure(
             result,
             command=executed_command(tool, result),

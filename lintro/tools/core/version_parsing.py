@@ -207,7 +207,7 @@ def _run_probe(
     Returns:
         subprocess.CompletedProcess[str]: The finished probe.
     """
-    with npx_shell_safe_command(cmd) as spawn_cmd:
+    with npx_shell_safe_command(cmd, timeout=timeout) as spawn_cmd:
         return subprocess.run(  # nosec B603 - args list, shell=False
             spawn_cmd,
             capture_output=True,
