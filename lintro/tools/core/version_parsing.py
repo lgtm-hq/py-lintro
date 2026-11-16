@@ -33,7 +33,7 @@ from lintro.tools.core.version_checking import (
     get_minimum_versions as _get_minimum_versions_impl,
 )
 from lintro.utils.env import get_subprocess_env
-from lintro.utils.npx_call import npx_child_env
+from lintro.utils.npx_call import npx_child_env, npx_shell_safe_command
 
 # Sentinel value for unknown/unspecified version requirements
 VERSION_UNKNOWN: str = "unknown"
@@ -184,6 +184,40 @@ class VersionProbeTimeoutError(subprocess.TimeoutExpired):
         )
 
 
+def _run_probe(
+    cmd: list[str],
+    *,
+    timeout: float,
+    env: Mapping[str, str] | None,
+    cwd: str | Path | None,
+) -> subprocess.CompletedProcess[str]:
+    """Run one version probe attempt.
+
+    An npx fallback goes through :func:`npx_shell_safe_command`, as every
+    other npx spawn does, so its cache is verified before it runs and must
+    be unchanged after (#3406); any other command is run as given. An
+    ``NpxIntegrityError`` from that check propagates.
+
+    Args:
+        cmd: Probe command as an argv list; run with ``shell=False``.
+        timeout: Budget, in seconds.
+        env: Environment for the subprocess.
+        cwd: Working directory for the subprocess.
+
+    Returns:
+        subprocess.CompletedProcess[str]: The finished probe.
+    """
+    with npx_shell_safe_command(cmd) as spawn_cmd:
+        return subprocess.run(  # nosec B603 - args list, shell=False
+            spawn_cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+            cwd=cwd,
+        )
+
+
 def _run_probe_with_retry(
     argv: Sequence[str],
     timeout: float,
@@ -213,14 +247,7 @@ def _run_probe_with_retry(
     cmd = list(argv)
     started = time.monotonic()
     try:
-        return subprocess.run(  # nosec B603 - args list, shell=False
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=env,
-            cwd=cwd,
-        )
+        return _run_probe(cmd, timeout=timeout, env=env, cwd=cwd)
     except subprocess.TimeoutExpired:
         elapsed = time.monotonic() - started
 
@@ -230,14 +257,7 @@ def _run_probe_with_retry(
         f"(budget {timeout:g}s); retrying once with {retry_timeout:g}s",
     )
     try:
-        return subprocess.run(  # nosec B603 - args list, shell=False
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=retry_timeout,
-            env=env,
-            cwd=cwd,
-        )
+        return _run_probe(cmd, timeout=retry_timeout, env=env, cwd=cwd)
     except subprocess.TimeoutExpired as exc:
         raise VersionProbeTimeoutError(
             cmd,

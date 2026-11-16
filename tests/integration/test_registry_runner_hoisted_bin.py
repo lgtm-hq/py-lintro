@@ -72,8 +72,15 @@ requires_npx = pytest.mark.skipif(
 )
 
 
+#: File the pinned package's install script would write; lintro's npx
+#: fallback passes ``--ignore-scripts``, so it never appears (#3406).
+_INSTALL_SCRIPT_MARKER = "written-by-install-script"
+
+
 def _pinned_tarball() -> bytes:
     """Build the npm tarball the localhost registry serves for the pin.
+
+    The package has an install script, as some real dependencies do.
 
     Returns:
         Gzipped tar bytes with ``package/package.json`` and ``package/bin.js``.
@@ -81,7 +88,17 @@ def _pinned_tarball() -> bytes:
     files = {
         "package/package.json": (
             json.dumps(
-                {"name": "prettier", "version": _PIN, "bin": {"prettier": "bin.js"}},
+                {
+                    "name": "prettier",
+                    "version": _PIN,
+                    "bin": {"prettier": "bin.js"},
+                    "scripts": {
+                        "install": (
+                            "node -e \"require('fs').writeFileSync("
+                            f"'{_INSTALL_SCRIPT_MARKER}', '')\""
+                        ),
+                    },
+                },
             ).encode(),
             0o644,
         ),
@@ -124,6 +141,7 @@ def registry() -> Iterator[str]:
                                 "name": "prettier",
                                 "version": _PIN,
                                 "bin": {"prettier": "bin.js"},
+                                "hasInstallScript": True,
                                 # As the npm registry does: npm records the
                                 # integrity in the lockfile lintro checks the
                                 # installed files against (#3406).
@@ -1414,6 +1432,36 @@ def test_replaced_executable_under_the_pinned_manifest_is_reinstalled(
     assert_that(snapshot.version).is_equal_to(_PIN)
     assert_that((code, launched)).is_equal_to((0, f"registry {_PIN}"))
     _assert_never_a_false_pass(snapshot, launched, code)
+
+
+@requires_npx
+def test_install_scripts_never_run_under_lintros_npx_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+) -> None:
+    """The pin installs as published: its install script does not run.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+    """
+    _require_clean_ancestry(tmp_path)
+    project, env, _command = _warm(tmp_path, monkeypatch, registry)
+    key = hashlib.sha512(f"prettier@{_PIN}".encode()).hexdigest()[:16]
+    package = npx_cache_dir(f"prettier@{_PIN}") / "_npx" / key / "node_modules"
+
+    snapshot = snapshots.probe_tool("prettier", search_root=project)
+    result = run_subprocess(
+        list(snapshot.command),
+        timeout=180,
+        cwd=str(project),
+        env=env,
+    )
+
+    assert_that(list(package.rglob(_INSTALL_SCRIPT_MARKER))).is_empty()
+    assert_that(result.stdout.strip()).is_equal_to(f"registry {_PIN}")
 
 
 @requires_npx

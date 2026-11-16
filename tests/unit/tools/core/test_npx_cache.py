@@ -239,6 +239,21 @@ def test_repair_removes_an_entry_whose_executable_was_replaced(
     ).contains("reinstalls prettier@3.9.4")
 
 
+def test_repair_refuses_a_node_modules_inside_lintros_cache(cache: Path) -> None:
+    """Node would load from ``<cache>/node_modules``; reinstalling cannot help.
+
+    Args:
+        cache: Per-pin cache.
+    """
+    entry = _entry(cache)
+    (cache / "node_modules" / "prettier").mkdir(parents=True)
+
+    with pytest.raises(NpxCacheError, match="would let Node load packages from"):
+        _repair(cache)
+
+    assert_that(entry.is_dir()).is_true()
+
+
 def test_repair_deletes_every_entry_that_would_not_run_the_pin(cache: Path) -> None:
     """Bad entries go, good ones stay, and nothing is left half-moved.
 

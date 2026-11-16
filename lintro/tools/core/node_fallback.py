@@ -54,7 +54,10 @@ REGISTRY_RUNNERS: frozenset[str] = frozenset({"bunx", "npx"})
 #: whatever an existing cache holds; an empty ``--node-options=`` stops a
 #: ``node-options`` setting (``--require=<preload>``) being exported to the
 #: tool as ``NODE_OPTIONS`` (#3460; npm 10.9.9 and 11.20.0 export it only when
-#: the effective value is non-empty, and the command-line layer wins). The
+#: the effective value is non-empty, and the command-line layer wins);
+#: ``--ignore-scripts`` stops dependencies' install scripts running, so an
+#: install holds exactly the published files lintro checks against the
+#: lockfile (#3406; npx still runs the tool, checked with npm 11.20.0). The
 #: inherited ``NODE_OPTIONS`` itself is filtered at spawn time by
 #: :func:`lintro.utils.npx_call.npx_child_env`. The cache itself is lintro's
 #: own per-pin directory, passed as ``--cache=<dir>`` by :func:`npx_runner_options` and
@@ -70,6 +73,7 @@ NPX_ISOLATION_FLAGS: tuple[str, ...] = (
     "--offline=false",
     "--prefer-offline=false",
     "--node-options=",
+    "--ignore-scripts",
 )
 
 # Boolean runner flags that may precede the package spec or ``--package``.

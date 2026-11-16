@@ -7,9 +7,12 @@ installed beside a lockfile that records it.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
+import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -21,10 +24,15 @@ from lintro.plugins.subprocess_executor import (
     run_subprocess,
     run_subprocess_streaming,
 )
+from lintro.tools.core.version_parsing import _run_probe_with_retry
 from lintro.utils.npx_call import npx_shell_safe_command
 from lintro.utils.npx_integrity import (
     NpxIntegrityError,
     entry_fingerprint,
+    entry_problem,
+    npm_cmd_shims,
+    npm_fixed_bin,
+    verified_cache,
     verify_entry,
 )
 from tests.npx_entries import (
@@ -51,6 +59,15 @@ _DEPENDENCIES = (
         key="node_modules/dep/node_modules/inner",
         files={"package.json": '{"name":"inner"}', "index.js": "module.exports=3;\n"},
     ),
+    LockedPackage(
+        key="node_modules/@scope/scoped",
+        files={"package.json": '{"name":"@scope/scoped"}', "index.js": "1;\n"},
+    ),
+)
+
+#: npm's own cmd-shim and bin-links output, captured from npm 11.20.0.
+_GOLDEN = json.loads(
+    (Path(__file__).parent / "npm_bin_links_golden.json").read_text(encoding="utf-8"),
 )
 
 
@@ -134,6 +151,31 @@ def _relink_bin(entry: Path, cache: Path) -> None:
     link.symlink_to("../dep/index.js")
 
 
+def _link_back_from_outside(path: Path, cache: Path) -> None:
+    """Move *path* outside the entry and leave a symlink to it in its place.
+
+    Args:
+        path: Directory inside the entry.
+        cache: Per-pin npm cache; the copy goes beside it.
+    """
+    outside = cache.parent / f"outside-{path.name}"
+    path.rename(outside)
+    path.symlink_to(outside, target_is_directory=True)
+
+
+def _plant_linked_modules(entry: Path, cache: Path) -> None:
+    """Give the tool a ``node_modules`` link to a planted package (Fable's B).
+
+    Args:
+        entry: The entry.
+        cache: Per-pin npm cache.
+    """
+    planted = cache.parent / "planted" / "glob"
+    planted.mkdir(parents=True)
+    (planted / "index.js").write_text("console.log('PLANTED');\n", encoding="utf-8")
+    (_package(entry) / "node_modules").symlink_to(planted.parent)
+
+
 def _replace_cached_tarball(entry: Path, cache: Path) -> None:
     tarballs = list((cache / "_cacache").rglob("*"))
     for tarball in (path for path in tarballs if path.is_file()):
@@ -196,6 +238,28 @@ _TAMPERING: dict[str, tuple[Callable[[Path, Path], object], str]] = {
     "lockfile-gone": (
         lambda entry, _cache: (entry / "package-lock.json").unlink(),
         "has no readable package-lock.json",
+    ),
+    "node-modules-linked-from-outside": (
+        lambda entry, cache: _link_back_from_outside(entry / "node_modules", cache),
+        "through a symlink",
+    ),
+    "nested-node-modules-linked-from-outside": (
+        lambda entry, cache: _link_back_from_outside(
+            entry / "node_modules" / "dep" / "node_modules",
+            cache,
+        ),
+        "reaches node_modules/dep/node_modules/inner through a symlink",
+    ),
+    "scope-linked-from-outside": (
+        lambda entry, cache: _link_back_from_outside(
+            entry / "node_modules" / "@scope",
+            cache,
+        ),
+        "reaches node_modules/@scope/scoped through a symlink",
+    ),
+    "unlocked-node-modules-link": (
+        _plant_linked_modules,
+        "has node_modules, which is not in the published package",
     ),
 }
 
@@ -303,21 +367,270 @@ def test_packed_gitignore_is_expected_where_npm_installs_it(
 
 
 @posix_only
-def test_install_script_output_is_allowed_only_where_declared(cache: Path) -> None:
-    """A package npm ran an install script for may hold files it generated.
+def test_install_script_output_is_refused(cache: Path) -> None:
+    """A file an install script could have written is not trusted to run.
+
+    lintro's npx fallback runs with ``--ignore-scripts``, so no install holds
+    one; a ``generated.js`` the published entry could require is refused.
 
     Args:
         cache: Per-pin npm cache.
     """
     built = LockedPackage(
         key="node_modules/native",
-        files={"package.json": '{"name":"native"}'},
+        files={"package.json": '{"name":"native"}', "index.js": "require('./g');\n"},
         extra={"hasInstallScript": True},
     )
     entry = write_npx_entry(cache, [tool_package(), built])
-    (entry / "node_modules" / "native" / "build.node").write_bytes(b"\0")
+    (entry / "node_modules" / "native" / "generated.js").write_text(
+        "console.log('[]');\n",
+        encoding="utf-8",
+    )
 
-    assert_that(verify_entry(entry, cache)).is_instance_of(tuple)
+    assert_that(verify_entry(entry, cache)).is_instance_of(str).contains(
+        "node_modules/native has generated.js, which is not in the published package",
+    )
+
+
+@posix_only
+@pytest.mark.parametrize(
+    ("planted", "expected"),
+    [(False, None), (True, "which node_modules/host does not publish")],
+    ids=["as-published", "file-planted"],
+)
+def test_bundled_package_holds_only_what_its_bundler_publishes(
+    cache: Path,
+    planted: bool,
+    expected: str | None,
+) -> None:
+    """A bundled package has no tarball of its own; its bundler's is used.
+
+    Args:
+        cache: Per-pin npm cache.
+        planted: Whether a file is added to the bundled package.
+        expected: Reason expected, or None for a pass.
+    """
+    inner = "module.exports = 'bundled';\n"
+    host = LockedPackage(
+        key="node_modules/host",
+        files={
+            "package.json": '{"name":"host"}',
+            "node_modules/bundled/index.js": inner,
+        },
+    )
+    bundled = LockedPackage(
+        key="node_modules/host/node_modules/bundled",
+        files={"index.js": inner},
+        extra={"inBundle": True},
+    )
+    entry = write_npx_entry(cache, [tool_package(), host, bundled])
+    if planted:
+        (entry / bundled.key / "index.mjs").write_text("1;\n", encoding="utf-8")
+
+    result = verify_entry(entry, cache)
+
+    if expected is None:
+        assert_that(result).is_instance_of(tuple)
+    else:
+        assert_that(result).is_instance_of(str).contains(expected)
+
+
+@pytest.mark.parametrize("case", ["crlf", "lf", "noshebang"])
+def test_fix_bin_port_matches_npm(case: str) -> None:
+    """Only a CRLF on the ``#!`` line is rewritten, as bin-links does.
+
+    Args:
+        case: Golden captured from npm's own ``fix-bin``.
+    """
+    golden = _GOLDEN["fix_bin"][case]
+
+    fixed = npm_fixed_bin(golden["published"].encode("utf-8"))
+
+    assert_that(fixed).is_equal_to(golden["installed"].encode("utf-8"))
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["env-node", "env-split-vars", "absolute-sh", "no-shebang"],
+)
+def test_cmd_shim_port_matches_npm(case: str) -> None:
+    """The Windows shims lintro expects are byte for byte npm's own.
+
+    Args:
+        case: Golden captured from npm's own ``cmd-shim``.
+    """
+    golden = _GOLDEN["cmd_shim"][case]
+
+    shims = npm_cmd_shims("../tool/bin/cli.js", golden["target"])
+
+    assert_that(shims).is_equal_to(
+        {suffix: golden[suffix] for suffix in (".cmd", ".ps1", "")},
+    )
+
+
+@posix_only
+@pytest.mark.parametrize(
+    ("published_as", "expected"),
+    [("bin.js", None), ("lib/index.js", "lib/index.js changed")],
+    ids=["declared-bin", "other-file"],
+)
+def test_crlf_shebang_is_expected_only_on_declared_executables(
+    cache: Path,
+    published_as: str,
+    expected: str | None,
+) -> None:
+    """Npm strips the ``#!`` line's CRLF on install, for executables only.
+
+    Args:
+        cache: Per-pin npm cache.
+        published_as: Which file is published with a CRLF shebang.
+        expected: Reason expected, or None for a pass.
+    """
+    package = tool_package()
+    crlf = "#!/usr/bin/env node\r\nconsole.log(1)\r\n"
+    tool = LockedPackage(
+        key=package.key,
+        files={**package.files, published_as: crlf},
+        bins=package.bins,
+    )
+    entry = write_npx_entry(cache, [tool])
+    (_package(entry) / published_as).write_bytes(npm_fixed_bin(crlf.encode()))
+
+    result = verify_entry(entry, cache)
+
+    if expected is None:
+        assert_that(result).is_instance_of(tuple)
+    else:
+        assert_that(result).is_instance_of(str).contains(expected)
+
+
+def _windows_shims(entry: Path) -> Path:
+    """Replace the tool's ``.bin`` link with npm's Windows shims.
+
+    Args:
+        entry: The entry.
+
+    Returns:
+        The ``.bin`` directory.
+    """
+    bin_dir = entry / "node_modules" / ".bin"
+    (bin_dir / "prettier").unlink()
+    text = (_package(entry) / "bin.js").read_text(encoding="utf-8")
+    for suffix, shim in npm_cmd_shims("../prettier/bin.js", text).items():
+        (bin_dir / f"prettier{suffix}").write_bytes(shim.encode("utf-8"))
+    return bin_dir
+
+
+_SHIM_TAMPERING: dict[str, tuple[Callable[[Path], object], str | None]] = {
+    "as-npm-writes-them": (lambda _bin_dir: None, None),
+    "cmd-replaced": (
+        lambda bin_dir: (bin_dir / "prettier.cmd").write_text("@echo []\r\n"),
+        "has .bin/prettier.cmd, which is not the shim npm writes",
+    ),
+    "sh-shim-replaced": (
+        lambda bin_dir: (bin_dir / "prettier").write_text("#!/bin/sh\necho []\n"),
+        "has .bin/prettier, which is not the shim npm writes",
+    ),
+    "undeclared-node-cmd": (
+        lambda bin_dir: (bin_dir / "node.cmd").write_text("@echo []\r\n"),
+        "has .bin/node.cmd, which no locked package declares",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", list(_SHIM_TAMPERING), ids=list(_SHIM_TAMPERING))
+def test_windows_shims_must_be_the_ones_npm_writes(cache: Path, case: str) -> None:
+    """On Windows, ``.bin`` holds shims, which are checked byte for byte.
+
+    Args:
+        cache: Per-pin npm cache.
+        case: What happens to the shims.
+    """
+    entry = write_npx_entry(cache, [tool_package()])
+    tamper, expected = _SHIM_TAMPERING[case]
+    tamper(_windows_shims(entry))
+
+    reason = entry_problem(entry, cache, windows=True)
+
+    if expected is None:
+        assert_that(reason).is_none()
+    else:
+        assert_that(reason).contains(expected)
+
+
+@posix_only
+@pytest.mark.parametrize(
+    ("location", "optional_missing", "expected"),
+    [
+        ("cache", False, "would let Node load packages from"),
+        ("above-cache", False, None),
+        ("above-cache", True, "would let Node load packages from"),
+    ],
+    ids=["in-lintros-cache", "above-cache-all-installed", "above-cache-optional-gap"],
+)
+def test_node_modules_above_the_entry_is_refused_where_node_would_use_it(
+    cache: Path,
+    location: str,
+    optional_missing: bool,
+    expected: str | None,
+) -> None:
+    """Node climbs to every ``node_modules`` above for a package it lacks.
+
+    Args:
+        cache: Per-pin npm cache.
+        location: Where the ``node_modules`` is planted.
+        optional_missing: Whether npm skipped an optional package.
+        expected: Reason expected, or None for a pass.
+    """
+    absent = LockedPackage(
+        key="node_modules/fsevents",
+        files={"package.json": "{}"},
+        extra={"optional": True},
+        installed=False,
+    )
+    write_npx_entry(cache, [tool_package(), *([absent] if optional_missing else [])])
+    planted_in = cache if location == "cache" else cache.parent.parent
+    (planted_in / "node_modules" / "fsevents").mkdir(parents=True)
+    error: NpxIntegrityError | None = None
+
+    try:
+        verified_cache(cache)
+    except NpxIntegrityError as exc:
+        error = exc
+
+    if expected is None:
+        assert_that(error).is_none()
+    else:
+        assert_that(str(error)).contains(expected).contains(str(planted_in))
+
+
+@posix_only
+def test_an_install_in_progress_is_awaited_not_refused(cache: Path) -> None:
+    """A concurrent npx still installing holds npm's lock; lintro waits for it.
+
+    Args:
+        cache: Per-pin npm cache.
+    """
+    entry = _install(cache)
+    lockfile = entry / "package-lock.json"
+    pending = entry / "node_modules" / ".pending-lock.json"
+    lockfile.rename(pending)
+    (entry / "concurrency.lock").mkdir()
+
+    def npm_finishes() -> None:
+        time.sleep(0.3)
+        (cache / "_logs").mkdir()  # npm writes beside _npx too.
+        pending.rename(lockfile)
+        (entry / "concurrency.lock").rmdir()
+
+    installer = threading.Thread(target=npm_finishes)
+    installer.start()
+    try:
+        state = verified_cache(cache)
+    finally:
+        installer.join()
+
+    assert_that(list(state.entries)).is_equal_to([entry.name])
 
 
 @posix_only
@@ -430,22 +743,53 @@ def _npm_lock_churn(cache: Path) -> None:
 
 
 def _cold_install(cache: Path) -> None:
-    _install(cache, name="fedcba9876543210")
+    _install(cache)
 
 
 def _cold_install_tampered(cache: Path) -> None:
-    entry = _install(cache, name="fedcba9876543210")
+    entry = _install(cache)
     (_package(entry) / "bin.js").write_text("console.log('[]');\n", encoding="utf-8")
 
 
-_DURING_RUN: dict[str, tuple[Callable[[Path], None], str | None]] = {
+def _swap_aside_and_back(directory: Path) -> None:
+    """Run from a tampered copy in *directory*'s place, then put it back.
+
+    Fable's rename-aside reproduction: the original keeps its inode and
+    contents, so only the moves themselves are left to see.
+
+    Args:
+        directory: The entry or ``_npx``.
+    """
+    aside = directory.with_name(f"{directory.name}-aside")
+    directory.rename(aside)
+    shutil.copytree(aside, directory, symlinks=True)
+    for bin_js in directory.rglob("prettier/bin.js"):
+        bin_js.write_text("console.log('SWAPPED');\n", encoding="utf-8")
+    shutil.rmtree(directory)
+    aside.rename(directory)
+
+
+#: What happens during the run: whether the pin was installed before the
+#: spawn, the change, and the refusal expected (None for none).
+_DURING_RUN: dict[str, tuple[bool, Callable[[Path], None], str | None]] = {
     "replaced-and-put-back": (
+        True,
         _swap_in_identical_bin,
         "changed while the tool was running",
     ),
-    "npm-lock-taken-and-released": (_npm_lock_churn, None),
-    "cold-install-verified-after": (_cold_install, None),
-    "cold-install-tampered": (_cold_install_tampered, "bin.js changed"),
+    "entry-swapped-aside-and-back": (
+        True,
+        lambda cache: _swap_aside_and_back(cache / "_npx" / "0123456789abcdef"),
+        "had entries moved or replaced while the tool was running",
+    ),
+    "npx-dir-swapped-aside-and-back": (
+        True,
+        lambda cache: _swap_aside_and_back(cache / "_npx"),
+        "had entries moved or replaced while the tool was running",
+    ),
+    "npm-lock-taken-and-released": (True, _npm_lock_churn, None),
+    "cold-install-verified-after": (False, _cold_install, None),
+    "cold-install-tampered": (False, _cold_install_tampered, "bin.js changed"),
 }
 
 
@@ -461,8 +805,9 @@ def test_cache_must_hold_what_was_verified_when_the_run_ends(
         cache: Per-pin npm cache.
         case: What happens to the cache while the tool runs.
     """
-    _install(cache)
-    during, expected = _DURING_RUN[case]
+    installed, during, expected = _DURING_RUN[case]
+    if installed:
+        _install(cache)
     error: NpxIntegrityError | None = None
 
     try:
@@ -474,7 +819,7 @@ def test_cache_must_hold_what_was_verified_when_the_run_ends(
     if expected is None:
         assert_that(error).is_none()
     else:
-        assert_that(str(error)).contains(expected).contains("next lintro run")
+        assert_that(str(error)).contains(expected).contains("cannot be trusted")
 
 
 def _fake_npx(directory: Path, body: str) -> Path:
@@ -534,3 +879,25 @@ def test_executors_fail_a_run_that_replaced_the_tool(
 
     with pytest.raises(NpxIntegrityError, match="changed while the tool was running"):
         executor([str(npx), *_command(cache)[1:]], timeout=30)
+
+
+@posix_only
+def test_version_probe_never_starts_npx_on_a_tampered_cache(
+    cache: Path,
+    tmp_path: Path,
+) -> None:
+    """A version probe of an npx fallback goes through the same check.
+
+    Args:
+        cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    entry = _install(cache)
+    (_package(entry) / "bin.js").write_text("console.log('9.9.9');\n", encoding="utf-8")
+    ran = tmp_path / "ran"
+    npx = _fake_npx(tmp_path / "bin", f"touch '{ran}'\necho 3.9.4\n")
+
+    with pytest.raises(NpxIntegrityError, match="bin.js changed"):
+        _run_probe_with_retry([str(npx), *_command(cache)[1:], "--version"], 30)
+
+    assert_that(ran.exists()).is_false()

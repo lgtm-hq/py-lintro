@@ -70,7 +70,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from lintro.utils.npx_integrity import STALE_PREFIX, verify_entry
+from lintro.utils.npx_integrity import STALE_PREFIX, ancestor_problem, verify_entry
 
 #: npm treats a lock whose mtime is older than this as abandoned.
 _STALE_LOCK_SECONDS: float = 60.0
@@ -685,3 +685,27 @@ def repair_npx_cache(
                 binary=binary,
                 npm_cache=cache,
             )
+    _refuse_modules_above(npx_root, cache=cache)
+
+
+def _refuse_modules_above(npx_root: Path, *, cache: Path) -> None:
+    """Refuse a ``node_modules`` above the kept entries that Node could use.
+
+    Removing an entry would not help: the next install sits below the same
+    directories (:func:`lintro.utils.npx_integrity.ancestor_problem`).
+
+    Args:
+        npx_root: ``<resolved cache>/_npx``.
+        cache: The cache path as npx is given it.
+
+    Raises:
+        NpxCacheError: Node could load a package from outside an entry.
+    """
+    if not npx_root.is_dir():
+        return
+    for entry in sorted(npx_root.iterdir()):
+        if entry.name.startswith(_STALE_PREFIX) or not entry.is_dir():
+            continue
+        reason = ancestor_problem(entry, npx_root.parent, npm_cache=cache)
+        if reason is not None:
+            raise NpxCacheError(f"lintro's npm cache entry {entry} {reason}")

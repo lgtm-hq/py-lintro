@@ -1397,12 +1397,16 @@ Rationale:
 
    **Flags on the generated command.** Every npx fallback runs as `npx --yes`, then
    `--workspaces=false`, `--include-workspace-root=false`, `--bin-links=true`,
-   `--global=false`, `--offline=false`, `--prefer-offline=false`, `--node-options=` and
-   `--cache=~/.lintro/cache/npx/<package>@<pinned>`, then
+   `--global=false`, `--offline=false`, `--prefer-offline=false`, `--node-options=`,
+   `--ignore-scripts` and `--cache=~/.lintro/cache/npx/<package>@<pinned>`, then
    `--package <package>@<pinned> <binary>`. Each flag overrides the same setting from
    the environment (`npm_config_*`) and from the project, user and global npmrc files,
-   so `workspaces`, `bin-links`, `global`, `offline`, `prefer-offline`, `node-options`
-   and `cache` cannot change what runs.
+   so `workspaces`, `bin-links`, `global`, `offline`, `prefer-offline`, `node-options`,
+   `ignore-scripts` and `cache` cannot change what runs. `--ignore-scripts` keeps
+   dependencies' install scripts from running, so an install holds exactly the files the
+   registry published; npx still runs the tool itself. Of the npm tools Lintro pins,
+   only spectral (`@scarf/scarf`, an analytics ping) and, on macOS, astro and spectral
+   (`fsevents`, which ships a prebuilt binary) have dependencies with install scripts.
 
    **Node preloads cannot replace the tool.** npm hands its `node-options` setting to
    the tool as `NODE_OPTIONS`, and Node honours an inherited `NODE_OPTIONS` in both npm
@@ -1501,13 +1505,26 @@ Rationale:
    into each `_npx` entry, recording the `integrity` hash of every package's tarball,
    and keeps those tarballs in the same cache (`_cacache`). An entry is kept only when,
    for every package in its lockfile, the cached tarball matches that hash and every
-   file in the tarball is installed with the same bytes. Each installed file must also
-   be a regular file with no other hard link. The checks also refuse:
+   file npm extracts from it is installed with the same bytes. Two install-time rewrites
+   npm makes are allowed exactly as npm makes them: a packed `.gitignore` becomes
+   `.npmignore`, and a declared executable's `#!` line loses a trailing CR. Each
+   installed file must also be a regular file with no other hard link. The checks also
+   refuse:
 
-   - a file or symlink that is not in the published package, unless the lockfile marks
-     the package `hasInstallScript`;
-   - a package directory that is not in the lockfile;
+   - a file, directory link or `node_modules` that is not in the published package
+     (bundled packages are checked against the tarball that bundles them);
+   - a package directory that is not in the lockfile, or one reached through a symlink:
+     `node_modules` itself, a scope directory or a parent package, at any depth;
    - a `.bin` executable that no locked package declares, such as a planted `.bin/node`.
+     On Linux and macOS each must be a link to the declared file. On Windows each shim
+     (`<name>`, `<name>.cmd`, `<name>.ps1`) must be byte for byte what npm's `cmd-shim`
+     writes for it;
+   - a `node_modules` directory above the entry inside `~/.lintro/cache`, where Node
+     would look for a package the entry lacks. When npm skipped an optional package for
+     this platform, a `node_modules` anywhere up to the filesystem root, or
+     `~/.node_modules` or `~/.node_libraries`, is refused too. This makes the tool
+     **unavailable** rather than reinstalling, because a reinstall sits in the same
+     place.
 
    An entry that fails is removed like any other bad entry, so npx installs the pin
    afresh; an entry whose tarball is no longer cached is treated the same way.
@@ -1517,12 +1534,15 @@ Rationale:
    record still matches one already verified in this process is not hashed again. If
    anything in the entry changed by the time the tool exits, the result is an
    **execution failure** with incomplete findings, never a pass. A file replaced and
-   then put back also counts as a change. The same applies to a refused check at spawn
-   time; there npx never starts. On a cold cache, npx installs the pin during the run
-   (npm checks the download against the registry's integrity) and Lintro verifies the
-   new entry once the run ends. On a warm cache the check costs about 0.1–0.25 s the
-   first time in a process for html-validate (13 packages, 944 files) and 10–30 ms per
-   spawn after that.
+   then put back also counts as a change, and so does moving the entry or `_npx` aside
+   and back, which Lintro sees on the per-pin cache directory and `_npx`. The same
+   applies to a refused check at spawn time; there npx never starts. An entry whose npm
+   lock is held, because another npx is installing it, is waited for (up to five
+   minutes, or until npm would call the lock stale) and checked once it is complete. On
+   a cold cache, npx installs the pin during the run (npm checks the download against
+   the registry's integrity) and Lintro verifies the new entry once the run ends. On a
+   warm cache the check costs about 0.1–0.25 s the first time in a process for
+   html-validate (13 packages, 944 files) and 10–30 ms per spawn after that.
 
    **Trust model.** Lintro's npx cache (`~/.lintro/cache/npx/<package>@<pinned>`) is
    trusted the same way as Lintro's own installation. The lockfile and the cached
@@ -1530,8 +1550,10 @@ Rationale:
    replaced executable under an unchanged `package.json`. It cannot catch a local user
    who rewrites the lockfile, the tarball and the installed files so that they agree.
    Such a user can already change what runs, just as they could by editing Lintro itself
-   or the project's `node_modules`. On Windows the change record relies on size, mtime
-   and inode, because `st_ctime` there is the creation time.
+   or the project's `node_modules`, and could likewise move a directory above the
+   per-pin cache aside and back. `NODE_PATH` is not inspected. On Windows the change
+   record relies on size, mtime and inode, because `st_ctime` there is the creation
+   time.
 
    **Refusal when npx could still reuse something.** The pin is trusted only when all of
    these hold, and the tool is **unavailable** otherwise:
