@@ -266,6 +266,43 @@ def test_only_an_optional_package_may_be_absent(
 
 
 @posix_only
+@pytest.mark.parametrize(
+    ("packed", "installed"),
+    [
+        ({".gitignore": "dist\n"}, {".npmignore": "dist\n"}),
+        ({".npmignore": "a\n", ".gitignore": "b\n"}, {".npmignore": "a\n"}),
+    ],
+    ids=["gitignore-renamed", "npmignore-wins"],
+)
+def test_packed_gitignore_is_expected_where_npm_installs_it(
+    cache: Path,
+    packed: dict[str, str],
+    installed: dict[str, str],
+) -> None:
+    """Pacote installs ``.gitignore`` as ``.npmignore`` unless one came first.
+
+    Seen with ``node-sarif-builder`` under spectral's pin in CI.
+
+    Args:
+        cache: Per-pin npm cache.
+        packed: Ignore files in the tarball, in tarball order.
+        installed: What npm leaves in the package directory.
+    """
+    package = LockedPackage(
+        key="node_modules/ignored",
+        files={"package.json": '{"name":"ignored"}', **packed},
+    )
+    entry = write_npx_entry(cache, [tool_package(), package])
+    directory = entry / "node_modules" / "ignored"
+    for name in packed:
+        (directory / name).unlink()
+    for name, text in installed.items():
+        (directory / name).write_text(text, encoding="utf-8")
+
+    assert_that(verify_entry(entry, cache)).is_instance_of(tuple)
+
+
+@posix_only
 def test_install_script_output_is_allowed_only_where_declared(cache: Path) -> None:
     """A package npm ran an install script for may hold files it generated.
 

@@ -24,6 +24,8 @@ the tools image ships bun but no npm.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import io
 import json
 import shutil
@@ -111,6 +113,7 @@ def registry() -> Iterator[str]:
         str: The registry URL.
     """
     tarball = _echo_tarball()
+    integrity = "sha512-" + base64.b64encode(hashlib.sha512(tarball).digest()).decode()
     ports: list[int] = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -121,7 +124,9 @@ def registry() -> Iterator[str]:
                     "name": "prettier",
                     "version": _PIN,
                     "bin": {"prettier": "bin.js"},
-                    "dist": {"tarball": tarball_url},
+                    # As the npm registry does: lintro checks the installed
+                    # files against the integrity npm records (#3406).
+                    "dist": {"tarball": tarball_url, "integrity": integrity},
                 }
                 body = json.dumps(
                     {

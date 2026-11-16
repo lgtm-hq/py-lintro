@@ -261,6 +261,7 @@ def _published_files(data: bytes) -> dict[str, bytes] | str:
         cannot be read.
     """
     files: dict[str, bytes] = {}
+    ignores: set[str] = set()
     try:
         # Inflating once up front is several times faster than letting
         # tarfile seek through the gzip stream member by member.
@@ -273,9 +274,18 @@ def _published_files(data: bytes) -> dict[str, bytes] | str:
                 parts = name.parts[1:]
                 if name.is_absolute() or not parts or ".." in parts:
                     continue
+                rel = "/".join(parts)
+                # pacote installs a packed ``.gitignore`` as ``.npmignore``,
+                # and drops it when a ``.npmignore`` beside it came first.
+                if parts[-1] == ".npmignore":
+                    ignores.add(rel)
+                elif parts[-1] == ".gitignore":
+                    rel = rel.removesuffix(".gitignore") + ".npmignore"
+                    if rel in ignores:
+                        continue
                 extracted = archive.extractfile(member)
                 if extracted is not None:
-                    files["/".join(parts)] = extracted.read()
+                    files[rel] = extracted.read()
     except (tarfile.TarError, OSError, EOFError, zlib.error):
         return "has a cached tarball that cannot be read"
     return files
