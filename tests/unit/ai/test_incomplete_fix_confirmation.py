@@ -49,6 +49,7 @@ class _PartialPlugin(BaseToolPlugin):
 
     mode: str = "refused"
     finding_file: str = ""
+    failure_output: str = "partial-tool crashed on b.py"
 
     @property
     def definition(self) -> ToolDefinition:
@@ -83,7 +84,7 @@ class _PartialPlugin(BaseToolPlugin):
         return ToolResult(
             name=_TOOL,
             success=False,
-            output="partial-tool crashed on b.py",
+            output=self.failure_output,
             issues=[finding],
             issues_count=1,
             execution_failed=True,
@@ -284,3 +285,28 @@ def test_validation_leaves_the_registry_singleton_refusal_state_untouched(
     if result is None:
         pytest.fail("Expected a validation result")
     assert_that(result.unverified).is_equal_to(1)
+
+
+def test_unmeasured_reason_is_quoted_without_terminal_control_codes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A coloured failure line is quoted as plain text.
+
+    Args:
+        monkeypatch: Pytest patch fixture.
+        tmp_path: Pytest temporary directory.
+    """
+    source = _source(tmp_path)
+    plugin = _install(monkeypatch, mode="execution_failed", source=source)
+    plugin.failure_output = (
+        "\x1b[31mpartial-tool\x1b[0m crashed\x07 on b.py\x1b[2K\nTraceback ..."
+    )
+
+    result = validate_applied_fixes([_fixed_suggestion(source)])
+
+    if result is None:
+        pytest.fail("Expected a validation result")
+    assert_that(result.details).is_equal_to(
+        ["[E2] main.py:5 — tool check unmeasured (partial-tool crashed on b.py)"],
+    )

@@ -492,7 +492,10 @@ def test_fold_keeps_a_failed_mutation_failed_even_with_no_residual() -> None:
 
 
 def test_fold_keeps_pre_fix_issues_when_the_check_timed_out() -> None:
-    """A CHECK that timed out verified nothing: pre-fix findings are carried."""
+    """A CHECK that timed out verified nothing: pre-fix findings are carried.
+
+    No count is reported for it either; the residual is unknown (#3498).
+    """
     mutation = ToolResult(
         name="ruff",
         success=True,
@@ -525,7 +528,11 @@ def test_fold_keeps_pre_fix_issues_when_the_check_timed_out() -> None:
 
     folded = results[0]
     assert_that(folded.success).is_false()
-    assert_that(folded.remaining_issues_count).is_equal_to(2)
+    assert_that(folded.residual_unknown).is_true()
+    assert_that(folded.residual_unknown_reason).is_equal_to(TIMED_OUT_REASON)
+    assert_that(folded.remaining_issues_count).is_none()
+    assert_that(folded.fixed_issues_count).is_none()
+    assert_that(folded.issues).is_length(2)
 
 
 def test_fold_catches_a_residual_a_later_tool_reintroduced() -> None:
@@ -1627,8 +1634,8 @@ def test_fold_never_reads_a_timed_out_check_as_a_verdict() -> None:
 
     ``run_verify_pass`` already converts a timed-out CHECK to ``result=None``,
     so this pins the guard in ``_fold_one``: a partial result that still
-    carries parsed findings must leave every pre-fix finding standing rather
-    than count the difference as fixed.
+    carries parsed findings must leave every pre-fix finding standing, keep
+    the new finding it reported, and report no count at all (#3498).
     """
     mutation = ToolResult(
         name="golangci-lint",
@@ -1647,7 +1654,7 @@ def test_fold_never_reads_a_timed_out_check_as_a_verdict() -> None:
         success=False,
         output="golangci-lint timed out",
         issues_count=1,
-        issues=[_issue("/repo/a.go")],
+        issues=[BaseIssue(file="/repo/a.go", line=9, column=1, message="new")],
         timed_out=True,
         capability=Cap.CHECK,
         inspected_files=False,
@@ -1661,9 +1668,16 @@ def test_fold_never_reads_a_timed_out_check_as_a_verdict() -> None:
     )
 
     folded = results[0]
-    # Both pre-fix findings survive: neither file was re-checked to completion.
-    assert_that(folded.remaining_issues_count).is_equal_to(2)
-    assert_that(folded.fixed_issues_count).is_equal_to(0)
+    # Both pre-fix findings survive beside the new one: neither file was
+    # re-checked to completion, so nothing is counted as fixed or remaining.
+    assert_that(folded.residual_unknown).is_true()
+    assert_that(folded.remaining_issues_count).is_none()
+    assert_that(folded.fixed_issues_count).is_none()
+    assert_that([(i.file, i.line) for i in folded.issues]).contains_only(
+        ("/repo/a.go", 1),
+        ("/repo/b.go", 1),
+        ("/repo/a.go", 9),
+    )
     assert_that(folded.success).is_false()
 
 

@@ -19,13 +19,14 @@ import lintro.tools as lintro_tools
 from lintro.enums.capability import Cap
 from lintro.enums.verify_status import VerifyStatus
 from lintro.models.core.claim import Claim
-from lintro.models.core.tool_outcome import Checked, ToolOutcome
+from lintro.models.core.tool_outcome import Checked, FixUnmeasured, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.tools.core.incomplete_run import incomplete_run_result
 from lintro.tools.core.verify_pass import (
+    TIMED_OUT_REASON,
     VerifyOutcome,
     VerifyScope,
     fold_verify_results,
@@ -206,3 +207,82 @@ def test_refused_verify_check_is_unknown_and_never_verified(
     assert_that(folded.fixed_issues_count).is_none()
     assert_that(folded.execution_failed).is_true()
     assert_that([issue.message for issue in folded.issues]).contains("new")
+
+
+def test_failed_verify_reason_is_quoted_without_terminal_control_codes() -> None:
+    """ANSI colour and control characters never reach the residual reason."""
+    verify = incomplete_run_result(
+        name=_TOOL,
+        reason="\x1b[31mruff crashed\x1b[0m on b.py\x07\x1b[2K\nTraceback ...",
+    )
+
+    folded = _fold(VerifyOutcome(tool=_TOOL, result=verify))
+
+    assert_that(folded.residual_unknown_reason).is_equal_to(
+        "the verify check did not complete (ruff crashed on b.py)",
+    )
+
+
+def _crashed_fix() -> ToolResult:
+    """Build a fix that crashed after detecting A and B, so it was unmeasured.
+
+    Returns:
+        The mutation-phase result.
+    """
+    return ToolResult.from_outcome(
+        ToolOutcome(
+            execution=Checked(success=False),
+            accounting=FixUnmeasured(reason="ruff fix crashed", initial=2),
+            issues_count=2,
+        ),
+        name=_TOOL,
+        issues=[_finding(_A, 1, "A"), _finding(_B, 1, "B")],
+        capability=Cap.FIX,
+    )
+
+
+@pytest.mark.parametrize(
+    ("outcome", "verify_reason"),
+    [
+        pytest.param(
+            VerifyOutcome(
+                tool=_TOOL,
+                result=incomplete_run_result(name=_TOOL, reason="ruff crashed"),
+            ),
+            "the verify check did not complete (ruff crashed)",
+            id="failed-check",
+        ),
+        pytest.param(
+            VerifyOutcome(
+                tool=_TOOL,
+                result=None,
+                status=VerifyStatus.UNKNOWN,
+                unknown_reason=TIMED_OUT_REASON,
+            ),
+            TIMED_OUT_REASON,
+            id="timed-out-check",
+        ),
+    ],
+)
+def test_unmeasured_fix_and_failed_verify_name_both_reasons(
+    outcome: VerifyOutcome,
+    verify_reason: str,
+) -> None:
+    """A crashed fix whose verify check also failed reports both causes.
+
+    Args:
+        outcome: The verify pass's outcome for the tool.
+        verify_reason: Why the verify pass could not measure the residual.
+    """
+    results = [_crashed_fix()]
+
+    fold_verify_results(
+        mutation_results=results,
+        verify_results=[outcome],
+        scope=VerifyScope(files=(_A, _B), narrowed=True),
+    )
+
+    assert_that(results[0].residual_unknown).is_true()
+    assert_that(results[0].residual_unknown_reason).is_equal_to(
+        f"ruff fix crashed; {verify_reason}",
+    )

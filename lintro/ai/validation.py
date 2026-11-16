@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from lintro.models.core.result_completeness import is_incomplete_result
+from lintro.parsers.base_parser import quote_first_line
 from lintro.utils.check_answered import check_answered
 from lintro.utils.refused_command import mark_refused_command
 
@@ -185,13 +186,10 @@ def _incomplete_reason(result: ToolResult) -> str | None:
         return None
     if result.timed_out:
         return "the check timed out"
-    lines = (result.output or "").strip().splitlines()
-    detail = lines[0].strip() if lines else ""
-    if not detail:
-        return "the check did not complete"
-    if len(detail) > _REASON_LIMIT:
-        detail = detail[: _REASON_LIMIT - 1].rstrip() + "…"
-    return detail
+    return (
+        quote_first_line(result.output, limit=_REASON_LIMIT)
+        or "the check did not complete"
+    )
 
 
 def _validate_suggestions(
