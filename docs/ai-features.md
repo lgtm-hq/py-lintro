@@ -549,9 +549,14 @@ never reads its silence as a clean result. An unavailable tool gets
 `Tool: <name> | unavailable: <reason>`. Findings an unfinished tool did report are kept;
 it is counted apart from the tools that ran, and a skipped or unavailable tool is
 counted as neither. A saved `--lint-report` carries every one of these states, so it
-gives the same answer as the live run. Tool text in the digest has `&`, `<` and `>`
-escaped, and the whole section sits inside the prompt's random boundary fence as
-untrusted data.
+gives the same answer as the live run. Because the report is untrusted, nothing in it
+can make a tool look finished on bad evidence: an entry with a missing or non-boolean
+`success`, an unknown `status`, a `null` or mistyped flag, a `null` `issues` or an
+`issues_count` that does not match its issues makes the report unusable (the header note
+names the entry), and an entry whose `status` and flags disagree (a skip beside a
+failure status, a clean status beside a failed verdict) is reported as incomplete with
+the contradiction as its reason. Tool text in the digest has `&`, `<` and `>` escaped,
+and the whole section sits inside the prompt's random boundary fence as untrusted data.
 
 ### Review coverage completeness
 

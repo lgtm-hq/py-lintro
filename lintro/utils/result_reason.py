@@ -72,9 +72,10 @@ def _with_detail(reason: str, detail: str) -> str:
         detail: The cleaned detail, possibly empty.
 
     Returns:
-        ``"reason (detail)"``, or the reason alone.
+        ``"reason (detail)"``, or the reason alone when the detail is empty
+        or only repeats it.
     """
-    return f"{reason} ({detail})" if detail else reason
+    return f"{reason} ({detail})" if detail and detail != reason else reason
 
 
 def unavailable_reason(result: ToolResult) -> str | None:

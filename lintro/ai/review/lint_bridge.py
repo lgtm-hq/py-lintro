@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, Any, Final
 
 from loguru import logger
 
-from lintro.ai.review.lint_completeness import report_tool_result
 from lintro.ai.review.lint_digest import format_lint_results_for_prompt
+from lintro.ai.review.lint_report_entry import report_tool_result
 from lintro.enums.action import Action
 from lintro.models.core.result_completeness import is_incomplete_result
 from lintro.models.core.tool_result import ToolResult
@@ -300,9 +300,9 @@ def load_lint_report(path: Path) -> list[ToolResult]:
         if not isinstance(name, str) or not name:
             msg = f"{where} has an empty or non-string 'tool'"
             raise LintReportError(msg)
+        # Absent means no findings; a null or any other non-list is
+        # malformed, never a clean verdict (#3497).
         raw_issues = entry.get("issues", [])
-        if raw_issues is None:
-            raw_issues = []
         if not isinstance(raw_issues, list):
             msg = f"{where} 'issues' is not a list"
             raise LintReportError(msg)

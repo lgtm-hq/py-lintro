@@ -246,6 +246,10 @@ def run_advisory_tools(
     return results
 
 
+#: The line the issue table prints for a tool without findings.
+_NO_ISSUES_LINE: str = "No issues found."
+
+
 def advisory_findings_count(results: list[ToolResult]) -> int:
     """Return the total number of advisory findings across results.
 
@@ -349,6 +353,14 @@ def render_advisory_results(
         note = _tool_note(result)
         if note:
             header = f"{header}\n  {note}"
+            if not result.issues:
+                # "No issues found." under a tool that did not finish, or
+                # did not run, would read as a clean verdict.
+                body = "\n".join(
+                    line
+                    for line in body.splitlines()
+                    if line.strip() != _NO_ISSUES_LINE
+                )
         blocks.append(f"{header}\n{body}".rstrip())
     return "\n\n".join(blocks)
 
@@ -367,7 +379,9 @@ def advisory_results_to_payload(results: list[ToolResult]) -> list[dict[str, obj
         ``execution_failed`` is the producer's own flag, and
         ``findings_complete`` is the producer's certification that every
         invocation finished, which legacy plugins never set, so ``false``
-        alone does not mean incomplete.
+        alone does not mean incomplete. ``unavailable`` and
+        ``unavailable_reason`` mark a tool that could not be run at all,
+        which is a skip, not a failure.
     """
     payload: list[dict[str, object]] = []
     for result in results:
@@ -383,6 +397,8 @@ def advisory_results_to_payload(results: list[ToolResult]) -> list[dict[str, obj
                 "incomplete": advisory_tool_errored(result),
                 "execution_failed": result.execution_failed,
                 "findings_complete": result.findings_complete,
+                "unavailable": result.unavailable,
+                "unavailable_reason": result.unavailable_reason,
             },
         )
     return payload

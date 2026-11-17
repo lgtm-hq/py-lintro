@@ -205,7 +205,24 @@ def test_unavailable_advisory_tool_is_a_skip_with_its_reason() -> None:
     assert_that(terminal.output).contains(
         "Advisory: idiom-review\n  unavailable: idiom-review binary missing",
     )
-    assert_that(entry["advisory"][0]).contains_entry({"incomplete": False})
+    assert_that(entry["advisory"][0]).contains_entry(
+        {"incomplete": False},
+        {"unavailable": True},
+        {"unavailable_reason": "idiom-review binary missing"},
+    )
+
+
+def test_failure_without_output_is_not_followed_by_no_issues_found() -> None:
+    """A tool that failed silently never reads "No issues found." (#3497)."""
+    failed = ToolResult(name="idiom-review", success=False)
+
+    outcome = _advisory_only([failed], output="terminal")
+
+    assert_that(outcome.exit_code).is_equal_to(REVIEW_ERROR_EXIT_CODE)
+    assert_that(outcome.output).contains(
+        "Advisory: idiom-review\n  did not run / incomplete: failed with no findings",
+    )
+    assert_that(outcome.output).does_not_contain("No issues found.")
 
 
 def test_clean_legacy_advisory_tool_is_not_incomplete_in_json() -> None:

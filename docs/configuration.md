@@ -1140,7 +1140,7 @@ The machine-readable keys for this figure, and for the third state below:
 | ---------------------- | -------------------------------- | ------------------------------------------------------------ |
 | JSON, per tool         | `net_resolved`                   | Before minus after; `null` when the residual is unknown      |
 | JSON, per tool         | `remaining`                      | Measured residual; `null` when the residual is unknown       |
-| JSON, per tool         | `residual_unknown`               | `true` when no after-count was taken                         |
+| JSON, per tool         | `residual_unknown`               | `true` when the residual was not measured (fix or check run) |
 | JSON, per tool         | `residual_unknown_reason`        | Why — the check crashed, timed out or was skipped            |
 | JSON, run summary      | `summary.total_net_resolved`     | Sum over the tools that were measured                        |
 | JSON, run summary      | `summary.total_remaining`        | Sum over the tools that were measured                        |

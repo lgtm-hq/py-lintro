@@ -45,6 +45,7 @@ def test_report_digest_is_restricted_to_the_changed_files(tmp_path: Path) -> Non
                 "results": [
                     {
                         "tool": "ruff",
+                        "success": False,
                         "issues": [
                             {
                                 "file": "src/main.py",
@@ -60,7 +61,7 @@ def test_report_digest_is_restricted_to_the_changed_files(tmp_path: Path) -> Non
                             },
                         ],
                     },
-                    {"tool": "black", "issues": []},
+                    {"tool": "black", "success": True, "issues": []},
                 ],
             },
         ),
