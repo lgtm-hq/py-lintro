@@ -1587,14 +1587,19 @@ Rationale:
    never as an unavailable tool or a run without the lock. That covers a directory or a
    symbolic link at the lock path (the lock is never opened through a link), a directory
    Lintro cannot write, and a filesystem whose `flock` is unsupported, as some network
-   and FUSE home directories are. Move `~/.lintro/cache` to a local filesystem if that
-   happens. The lock follows the file it was taken on, so after taking it Lintro checks
-   that the file is still the one at the path, and otherwise locks the new file instead.
-   A first install checks once more right before npx starts and fails the run if the
-   lock was deleted or replaced. Lintro never deletes the lock file itself. The limit: a
-   process of the same user that deletes the lock while npx is installing lets another
-   run take a fresh lock and meet the half-written entry; do not delete it while Lintro
-   runs.
+   and FUSE home directories are. Lintro's cache location has no setting, so in that
+   case make `~/.lintro/cache` a symbolic link to a directory on a local filesystem:
+   move the directory there and link `~/.lintro/cache` to it. Lintro resolves the link
+   before it checks the per-pin caches, so everything above works through it. (A link at
+   a per-pin cache, `~/.lintro/cache/npx/<package>@<pinned>`, is still refused.) The
+   lock follows the file it was taken on, so after taking it Lintro checks that the file
+   is still the one at the path, and otherwise pauses briefly and locks the new file
+   instead. If the file never stays in place until the wait runs out, the run fails
+   saying the lock kept being replaced. A first install checks once more right before
+   npx starts and fails the run if the lock was deleted or replaced. Lintro never
+   deletes the lock file itself. The limit: a process of the same user that deletes the
+   lock while npx is installing lets another run take a fresh lock and meet the
+   half-written entry; do not delete it while Lintro runs.
 
    A warm run cannot install a second entry unlocked without being caught. Each per-pin
    cache only ever sees one package spec, so npx always uses the same entry. If that

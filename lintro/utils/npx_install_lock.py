@@ -94,6 +94,19 @@ _WINDOWS_BUSY: frozenset[int] = frozenset(
 )
 
 
+#: ``flock`` errors meaning the filesystem has no usable file locks.
+_NO_FILE_LOCKS: frozenset[int] = frozenset(
+    code
+    for code in (
+        getattr(errno, "ENOTSUP", None),
+        getattr(errno, "EOPNOTSUPP", None),
+        getattr(errno, "ENOLCK", None),
+        getattr(errno, "ENOSYS", None),
+    )
+    if code is not None
+)
+
+
 class NpxInstallLockTimeoutError(NpxIntegrityError):
     """Another lintro run's first install of the pin outlasted the wait."""
 
@@ -129,6 +142,31 @@ def _unusable(path: Path, reason: str) -> str:
         "not run the tool, so its findings are incomplete. Make sure "
         f"{path} is a regular file (or absent) in a directory lintro can "
         "write, then run lintro again."
+    )
+
+
+def _no_file_locks(path: Path, exc: OSError) -> str:
+    """Explain a filesystem that refuses file locks, with the remedy that works.
+
+    lintro's cache root is fixed (``~/.lintro/cache``), so the remedy is a
+    symbolic link from it to a local directory; lintro resolves that root
+    before checking the per-pin caches against it.
+
+    Args:
+        path: The lock file.
+        exc: The error ``flock`` raised.
+
+    Returns:
+        The message.
+    """
+    root = path.parent.parent
+    return (
+        f"the filesystem holding lintro's npx install lock {path} does not "
+        f"support file locks ({_os_reason(exc)}), so lintro cannot stop two "
+        "runs from installing the same pin at once. lintro did not run the "
+        f"tool, so its findings are incomplete. Point lintro's cache {root} "
+        "at a directory on a local filesystem with a symbolic link (move the "
+        f"directory there and link {root} to it), then run lintro again."
     )
 
 
@@ -221,6 +259,8 @@ def _try_lock(fd: int, path: Path, *, shared: bool) -> bool:
         )
         if busy:
             return False
+        if exc.errno in _NO_FILE_LOCKS:
+            raise NpxInstallLockError(_no_file_locks(path, exc)) from exc
         raise NpxInstallLockError(
             _unusable(path, f"it cannot be locked: {_os_reason(exc)}"),
         ) from exc
@@ -315,6 +355,27 @@ def _timeout_message(cache: Path, path: Path, waited: float) -> str:
     )
 
 
+def _replaced_message(path: Path, waited: float) -> str:
+    """Explain a lock file that never stayed in place long enough to hold.
+
+    Args:
+        path: The lock file.
+        waited: Seconds spent trying.
+
+    Returns:
+        The message.
+    """
+    return (
+        f"lintro's npx install lock {path} kept being replaced: for "
+        f"{waited:.1f}s the file lintro locked was no longer the file at that "
+        "path (something keeps deleting or replacing it, or the filesystem "
+        "reports different identities for the same file). lintro did not run "
+        "the tool, so its findings are incomplete. Stop whatever is changing "
+        "that file, or put lintro's cache on a local filesystem, then run "
+        "lintro again."
+    )
+
+
 def _acquire(cache: Path, path: Path, *, shared: bool, deadline: float) -> int:
     """Lock the file now at *path*, waiting until *deadline* at the latest.
 
@@ -332,6 +393,8 @@ def _acquire(cache: Path, path: Path, *, shared: bool, deadline: float) -> int:
 
     Raises:
         NpxInstallLockTimeoutError: Another run held the lock until *deadline*.
+        NpxInstallLockError: The file locked was still not the one at the path
+            at *deadline*.
     """
     started = time.monotonic()
     announced = False
@@ -361,9 +424,8 @@ def _acquire(cache: Path, path: Path, *, shared: bool, deadline: float) -> int:
         _release(fd)
         now = time.monotonic()
         if now >= deadline:
-            raise NpxInstallLockTimeoutError(
-                _timeout_message(cache, path, now - started),
-            )
+            raise NpxInstallLockError(_replaced_message(path, now - started))
+        time.sleep(min(_POLL_SECONDS, deadline - now))
 
 
 @contextlib.contextmanager

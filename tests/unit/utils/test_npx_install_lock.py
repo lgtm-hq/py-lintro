@@ -25,7 +25,7 @@ from lintro.tools.core.npx_cache import (
     npx_cache_dir,
     repair_npx_cache,
 )
-from lintro.utils import file_cache, npx_call
+from lintro.utils import file_cache, npx_call, npx_install_lock
 from lintro.utils.npx_call import npx_shell_safe_command
 from lintro.utils.npx_install_lock import (
     NpxInstallLockError,
@@ -364,12 +364,20 @@ def test_filesystem_without_file_locks_fails_the_run(
     monkeypatch.setattr(fcntl, "flock", unsupported)
 
     with (
-        pytest.raises(NpxInstallLockError, match="cannot be locked") as caught,
+        pytest.raises(
+            NpxInstallLockError,
+            match="does not support file locks",
+        ) as caught,
         npx_shell_safe_command(_command(cache), timeout=5),
     ):
         pytest.fail("npx would have spawned unlocked")
 
-    assert_that(str(caught.value)).contains(str(install_lock_path(cache)))
+    assert_that(str(caught.value)).contains(
+        str(install_lock_path(cache)),
+        f"Point lintro's cache {file_cache.CACHE_DIR}",
+        "symbolic link",
+    )
+    assert_that(str(caught.value)).does_not_contain("regular file")
 
 
 def test_cache_gate_hands_an_unusable_lock_to_the_spawn_check(cache: Path) -> None:
@@ -500,3 +508,42 @@ def test_waiter_on_a_deleted_lock_waits_for_the_new_holder(
 
     assert_that(shared_while_third_held).is_false()
     assert_that(held_after_third).is_true()
+
+
+def test_lock_file_that_never_stays_in_place_is_retried_at_a_bounded_rate(
+    cache: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lock that never matches its path pauses between tries and says why.
+
+    Fable's round-2 reproduction: with the identity check always failing,
+    the retry loop opened and locked the file tens of thousands of times a
+    second for the whole timeout, then blamed another lintro run.
+
+    Args:
+        cache: Per-pin npm cache.
+        monkeypatch: Scoped stand-in for a lock that keeps being replaced.
+    """
+    opened: list[Path] = []
+    real_open = npx_install_lock._open
+    real_is_at_path = npx_install_lock._is_at_path
+
+    def counting_open(path: Path) -> int:
+        opened.append(path)
+        return real_open(path)
+
+    monkeypatch.setattr(npx_install_lock, "_open", counting_open)
+    monkeypatch.setattr(npx_install_lock, "_is_at_path", lambda fd, path: False)
+    started = time.monotonic()
+
+    with (
+        pytest.raises(NpxInstallLockError, match="kept being replaced") as caught,
+        install_lock(cache, shared=False, deadline=started + 0.5),
+    ):
+        pytest.fail("a lock that is not the file at its path was held")
+
+    assert_that(len(opened)).is_between(2, 20)
+    assert_that(isinstance(caught.value, NpxInstallLockTimeoutError)).is_false()
+    assert_that(str(caught.value)).does_not_contain("still installing")
+    monkeypatch.setattr(npx_install_lock, "_is_at_path", real_is_at_path)
+    assert_that(_exclusive_free(cache)).is_true()

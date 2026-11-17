@@ -2145,4 +2145,55 @@ def test_filesystem_without_flock_fails_the_run_naming_the_lock(
         ),
     )
 
-    _assert_lock_refusal(code, row, str(install_lock_path(cache)), "cannot be locked")
+    _assert_lock_refusal(
+        code,
+        row,
+        str(install_lock_path(cache)),
+        "does not support file locks",
+        "symbolic link",
+    )
+
+
+@requires_npx
+def test_lintro_cache_linked_to_another_directory_runs_cold_and_warm(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+) -> None:
+    """``~/.lintro/cache`` as a link to a local directory is a working setup.
+
+    It is the remedy the no-file-locks refusal gives, since the cache root
+    has no setting: the root is resolved before the per-pin caches are
+    checked against it, so the install lock, the gate and the integrity
+    check all work through the link.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+    """
+    _require_clean_ancestry(tmp_path)
+    assert _NPX is not None and _NODE is not None
+    project = _css_project(tmp_path / "proj")
+    env = _isolate(monkeypatch, tmp_path, {"npx": _NPX, "node": _NODE}, registry, {})
+    local = tmp_path / "local-disk" / "lintro-cache"
+    local.mkdir(parents=True)
+    root = Path(env["HOME"]) / ".lintro" / "cache"
+    root.parent.mkdir(parents=True)
+    root.symlink_to(local)
+
+    runs = [
+        _prettier_row(_start_chk(project, env, tmp_path / f"{state}.log"))
+        for state in ("cold", "warm")
+    ]
+
+    for code, row in runs:
+        assert_that(row.get("execution_failed")).described_as(
+            str(row.get("output")),
+        ).is_false()
+        assert_that(code).described_as(str(row.get("output"))).is_zero()
+    real_cache = local / "npx" / f"prettier@{_PIN}"
+    assert_that(
+        sorted(path.name for path in (real_cache / "_npx").iterdir()),
+    ).is_length(1)
+    assert_that(install_lock_path(real_cache).is_file()).is_true()
