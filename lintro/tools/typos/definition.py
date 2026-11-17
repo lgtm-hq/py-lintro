@@ -8,6 +8,7 @@ understanding programming conventions (identifiers, escape sequences, etc.).
 from __future__ import annotations
 
 import subprocess  # nosec B404 - used safely with shell disabled
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -518,7 +519,14 @@ class TyposPlugin(BaseToolPlugin):
                 issues_count=remaining_count,
             ),
             name=self.definition.name,
-            output=_fix_summary(fixed=fixed_count, remaining=remaining_count),
+            output=_fix_summary(
+                fixed=fixed_count,
+                remaining=remaining_count,
+                applied=_applied_corrections(
+                    initial=initial_issues,
+                    remaining=remaining_issues,
+                ),
+            ),
             # Only the surviving typos are reported as issues: unfixed typos
             # appear in both the initial and post-fix reports, so combining
             # the lists would double-count them.
@@ -576,20 +584,61 @@ class TyposPlugin(BaseToolPlugin):
         )
 
 
-def _fix_summary(fixed: int, remaining: int) -> str:
+def _applied_corrections(
+    initial: list[TyposIssue],
+    remaining: list[TyposIssue],
+) -> list[str]:
+    """List the corrections ``--write-changes`` applied, one line each.
+
+    typos rewrites a word only when it has exactly one correction, and a
+    rewrite never adds or removes lines, so a finding from the pre-scan that
+    the re-check no longer reports at the same file, line and word was
+    corrected on disk. Byte offsets are not compared: an earlier fix on the
+    same line shifts them.
+
+    Args:
+        initial: Findings from the pre-fix scan.
+        remaining: Findings from the post-fix re-check.
+
+    Returns:
+        ``file:line: old -> new`` lines in pre-scan order.
+    """
+    survivors = Counter((i.file, i.line, i.typo) for i in remaining)
+    lines: list[str] = []
+    for issue in initial:
+        key = (issue.file, issue.line, issue.typo)
+        if survivors[key]:
+            survivors[key] -= 1
+            continue
+        new = " | ".join(issue.corrections) or "?"
+        lines.append(f"{issue.file}:{issue.line}: {issue.typo} -> {new}")
+    return lines
+
+
+def _fix_summary(
+    fixed: int,
+    remaining: int,
+    applied: list[str] | None = None,
+) -> str:
     """Compose the human-readable summary of a fix run.
 
     Args:
         fixed: Number of typos typos corrected.
         remaining: Number of typos that survived the fix pass.
+        applied: One ``file:line: old -> new`` line per correction written,
+            listed under the summary so a spelling rewrite is never silent.
 
     Returns:
-        A one-line summary of the fix outcome.
+        The summary line, followed by the applied corrections if any.
     """
     if fixed and remaining:
-        return f"Fixed {fixed} typo(s); {remaining} could not be auto-corrected."
-    if fixed:
-        return f"Fixed {fixed} typo(s)."
-    if remaining:
-        return f"Found {remaining} typo(s) that could not be fixed."
-    return "No typos found."
+        summary = f"Fixed {fixed} typo(s); {remaining} could not be auto-corrected."
+    elif fixed:
+        summary = f"Fixed {fixed} typo(s)."
+    elif remaining:
+        summary = f"Found {remaining} typo(s) that could not be fixed."
+    else:
+        summary = "No typos found."
+    if not applied:
+        return summary
+    return "\n".join([summary, *(f"  {line}" for line in applied)])

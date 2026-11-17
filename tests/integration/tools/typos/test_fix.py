@@ -68,3 +68,32 @@ def test_fix_clean_file_is_noop(
     assert_that(result.fixed_issues_count).is_equal_to(0)
     assert_that(result.remaining_issues_count).is_equal_to(0)
     assert_that(Path(typos_clean_file).read_text(encoding="utf-8")).is_equal_to(before)
+
+
+def test_fix_leaves_http_verb_plurals_alone_under_repo_config(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    typos_project_config_dir: Path,
+) -> None:
+    """Verify the repo's ``.typos.toml`` keeps ``DELETEs`` from becoming ``DELETEEs``.
+
+    typos splits ``DELETEs`` into ``DELET`` + ``Es`` and its fix inserts an
+    ``E`` (#3509). The project config is copied next to the sample so typos
+    discovers it the way it does inside the repository.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        typos_project_config_dir: Temp directory holding the repo's config.
+    """
+    sample = typos_project_config_dir / "verbs.txt"
+    text = (
+        "three failed rechecks or DELETEs in a row\n"
+        "GETs, PUTs, POSTs, PATCHes, HEADs, CONNECTs and TRACEs\n"
+    )
+    sample.write_text(text, encoding="utf-8")
+    plugin = get_plugin("typos")
+
+    result = plugin.fix([str(sample)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.initial_issues_count).is_equal_to(0)
+    assert_that(sample.read_text(encoding="utf-8")).is_equal_to(text)

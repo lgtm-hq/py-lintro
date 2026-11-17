@@ -17,6 +17,11 @@ extend-ignore-re = [
   # An acronym followed by the English "-ed" suffix (``PATCHed``, ``ANDed``):
   # typos reads the tail of the acronym plus "ed" as its own word.
   "\\b[A-Z]{2,}ed\\b",
+  # Upper-case HTTP-verb plurals (``DELETEs``, ``CONNECTs``): typos splits
+  # them into ``DELET`` + ``Es`` and its fix writes ``DELETEEs`` (#3509).
+  # Only the verbs typos actually flags are listed; ``GETs``, ``PUTs``,
+  # ``POSTs``, ``PATCHes``, ``HEADs`` and ``TRACEs`` already pass.
+  "\\b(?:CONNECT|DELETE)s\\b",
   # Example ``rustc``/``clippy --version`` strings quote a real commit hash.
   "ded5c06cf2?",
   # S1 release-validation fixture records the npm integrity prefixes verbatim.
@@ -71,6 +76,7 @@ extend-exclude = [
   "tests/unit/parsers/typos_parser/test_invalid_input.py",
   "tests/unit/parsers/typos_parser/test_issue_model.py",
   "tests/unit/tools/typos/test_execution.py",
+  "tests/unit/tools/typos/test_fix_report.py",
   "tests/integration/tools/typos/test_check.py",
   "tests/integration/tools/typos/test_fix.py",
   "test_samples/tools/spelling/typos/typos_violations.txt",
