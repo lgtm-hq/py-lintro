@@ -391,14 +391,17 @@ class CliTransport(ABC):
                     **spawn_kwargs,
                 )
             except OSError as exc:
-                # A missing cwd fails the spawn as FileNotFoundError on POSIX,
-                # which reads like a missing binary, and as NotADirectoryError
-                # (WinError 267) on Windows. Neither it nor a missing binary is
-                # retried: every call in the run would fail the same way (#3494).
+                # An unusable cwd (missing, a file, or behind an unsearchable
+                # parent) fails the spawn as FileNotFoundError on POSIX, which
+                # reads like a missing binary, or as NotADirectoryError
+                # (WinError 267) on Windows. The OS error is kept, since it may
+                # name another cause. Not retried: every call in the run would
+                # fail the same way (#3494).
                 if cwd is not None and not os.path.isdir(cwd):
                     raise AINotAvailableError(
                         f"{self._binary_name} CLI cannot start: its working "
-                        f"directory {cwd!r} does not exist.",
+                        f"directory {cwd!r} is not an accessible directory "
+                        f"({exc}).",
                     ) from exc
                 if isinstance(exc, FileNotFoundError):
                     raise AINotAvailableError(

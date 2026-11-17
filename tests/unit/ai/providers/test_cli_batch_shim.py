@@ -354,26 +354,33 @@ class _EchoTransport(CliTransport):
 
 
 @pytest.mark.parametrize(
-    "windows_error",
+    ("cwd_kind", "windows_error", "os_text"),
     [
-        pytest.param(None, id="posix-real-spawn"),
+        pytest.param("missing", None, "[Errno", id="posix-missing-real-spawn"),
+        pytest.param("file", None, "[Errno", id="posix-file-real-spawn"),
         pytest.param(
+            "missing",
             NotADirectoryError(267, "The directory name is invalid"),
+            "The directory name is invalid",
             id="windows-winerror-267",
         ),
     ],
 )
-async def test_missing_working_directory_is_not_reported_as_a_missing_binary(
+async def test_unusable_working_directory_is_not_reported_as_a_missing_binary(
     tmp_path: Path,
+    cwd_kind: str,
     windows_error: OSError | None,
+    os_text: str,
 ) -> None:
-    """A vanished repository root is named, and not as a retried provider error."""
+    """An unusable repository root is named with the OS error, never retried."""
     transport = _EchoTransport(
         binary_path=sys.executable,
         binary_name="Agent",
         install_hint="install it",
     )
-    missing = str(tmp_path / "gone")
+    cwd = tmp_path / "repo"
+    if cwd_kind == "file":
+        cwd.write_text("not a directory")
     spawn = (
         patch(
             "lintro.ai.providers.cli_transport.asyncio.create_subprocess_exec",
@@ -384,7 +391,9 @@ async def test_missing_working_directory_is_not_reported_as_a_missing_binary(
     )
 
     with spawn, pytest.raises(AINotAvailableError) as excinfo:
-        await transport.run([sys.executable, "-c", "pass"], timeout=30, cwd=missing)
+        await transport.run([sys.executable, "-c", "pass"], timeout=30, cwd=str(cwd))
 
-    assert_that(str(excinfo.value)).contains("working directory", missing)
-    assert_that(str(excinfo.value)).does_not_contain("not found on PATH")
+    message = str(excinfo.value)
+    assert_that(message).contains(str(cwd), "is not an accessible directory", os_text)
+    assert_that(message).does_not_contain("does not exist")
+    assert_that(message).does_not_contain("not found on PATH")

@@ -570,6 +570,91 @@ async def test_failure_after_apply_still_writes_the_audit_log(
     )
 
 
+def _block_audit_dir(workspace: Path) -> None:
+    """Make the audit directory impossible to create, as a stray file would."""
+    (workspace / Path(AUDIT_DIR).parts[0]).write_text("not a directory")
+
+
+async def test_audit_failure_does_not_mask_the_verification_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The original error reaches the caller and telemetry is still attached.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Workspace root whose audit directory cannot be created.
+    """
+    issue = MockIssue(file="a.py", line=1, code="B101", message="err")
+    result = _make_result("ruff", [issue])
+    suggestion = _make_suggestion(code="B101", tool_name="ruff")
+    _install_pipeline_recorder(
+        monkeypatch=monkeypatch,
+        generated=[[suggestion]],
+        applied=[suggestion],
+    )
+
+    def _verify_crashes(**_kwargs: Any) -> ValidationResult | None:
+        raise RuntimeError("ORIGINAL verification crash")
+
+    monkeypatch.setattr(f"{_PIPELINE}.verify_fixes", _verify_crashes)
+    _block_audit_dir(tmp_path)
+
+    with pytest.raises(RuntimeError, match="ORIGINAL verification crash"):
+        await run_fix_pipeline(
+            fix_issues=_make_fix_issues(result, [issue]),
+            all_results=[result],
+            provider=MockAIProvider(),
+            ai_config=_default_ai_config(auto_apply=True),
+            logger=RecordingConsoleLogger(),
+            output_format="terminal",
+            workspace_root=tmp_path,
+        )
+
+    assert_that(result.metadata).contains_key("ai_metrics")
+    assert_that(result.metadata["ai_metrics"]["successful_fixes"]).is_equal_to(1)
+
+
+async def test_audit_failure_alone_still_fails_the_run_after_recording_telemetry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """As on main, an unwritable audit log fails an otherwise clean run.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Workspace root whose audit directory cannot be created.
+    """
+    issue = MockIssue(file="a.py", line=1, code="B101", message="err")
+    result = _make_result("ruff", [issue])
+    suggestion = _make_suggestion(code="B101", tool_name="ruff")
+    _install_pipeline_recorder(
+        monkeypatch=monkeypatch,
+        generated=[[suggestion]],
+        applied=[suggestion],
+        validation=ValidationResult(
+            verified=1,
+            unverified=0,
+            verified_by_tool={"ruff": 1},
+            unverified_by_tool={"ruff": 0},
+        ),
+    )
+    _block_audit_dir(tmp_path)
+
+    with pytest.raises(OSError):
+        await run_fix_pipeline(
+            fix_issues=_make_fix_issues(result, [issue]),
+            all_results=[result],
+            provider=MockAIProvider(),
+            ai_config=_default_ai_config(auto_apply=True),
+            logger=RecordingConsoleLogger(),
+            output_format="terminal",
+            workspace_root=tmp_path,
+        )
+
+    assert_that(result.metadata).contains_key("ai_metrics")
+
+
 async def test_verify_fixes_flow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
