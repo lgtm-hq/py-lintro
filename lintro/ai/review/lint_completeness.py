@@ -25,7 +25,8 @@ class LintRunCounts:
     """How many lint tools answered, how many did not, and what they found.
 
     Attributes:
-        ran: Tools that produced a complete verdict.
+        ran: Tools that produced a complete verdict. A skipped tool is
+            counted in neither field: it made no claim either way.
         incomplete: Tools that did not run or did not complete.
         issues: Findings reported by all tools, incomplete ones included.
     """
@@ -67,11 +68,13 @@ def count_lint_results(results: list[ToolResult]) -> LintRunCounts:
         results: Tool results from a lint run or a saved report.
 
     Returns:
-        The counts, so a refused tool is never counted as one that ran.
+        The counts, so neither a refused nor a skipped tool is counted as
+        one that ran.
     """
     incomplete = sum(1 for result in results if incomplete_lint_reason(result))
+    skipped = sum(1 for result in results if result.skipped)
     return LintRunCounts(
-        ran=len(results) - incomplete,
+        ran=len(results) - incomplete - skipped,
         incomplete=incomplete,
         issues=sum(result.issues_count or 0 for result in results),
     )

@@ -178,6 +178,19 @@ def test_incomplete_result_gets_one_cleaned_line(result: ToolResult, note: str) 
     assert_that(digest).does_not_contain("\x1b")
 
 
+def test_a_skipped_tool_is_counted_neither_as_ran_nor_as_incomplete() -> None:
+    """A skip made no claim, so it is not a tool that ran to a verdict."""
+    results = [
+        ToolResult(name="ruff", success=True),
+        ToolResult(name="tsc", success=True, skipped=True, skip_reason="deferred"),
+    ]
+
+    counts = count_lint_results(results)
+
+    assert_that((counts.ran, counts.incomplete)).is_equal_to((1, 0))
+    assert_that(format_lint_results_for_prompt(results=results)).is_empty()
+
+
 def test_a_clean_legacy_result_is_not_called_incomplete() -> None:
     """``findings_complete`` alone is not used: legacy plugins never set it."""
     clean = ToolResult(name="ruff", success=True, findings_complete=False)
