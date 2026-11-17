@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.181.3] - 2026-11-17
+
+### Fixed
+
+- **ai**: keep cmd.exe metacharacters off agent CLI batch shims (#3499) (c76845a)
+
 ## [0.181.2] - 2026-11-17
 
 ### Fixed

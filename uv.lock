@@ -1551,7 +1551,7 @@ wheels = [
 
 [[package]]
 name = "lintro"
-version = "0.181.2"
+version = "0.181.3"
 source = { editable = "." }
 default-groups = ["ai-runtime", "dev"]
 dependencies = [
