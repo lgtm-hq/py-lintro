@@ -130,7 +130,7 @@ BATCH_UNSAFE_CHARS: frozenset[str] = frozenset(
 BATCH_SUFFIXES: frozenset[str] = frozenset({".cmd", ".bat"})
 
 
-def _is_batch_command(command: str) -> bool:
+def is_batch_command(command: str) -> bool:
     """Return whether Windows would launch *command* through ``cmd.exe``.
 
     Args:
@@ -243,7 +243,7 @@ def validate_subprocess_command(cmd: list[str]) -> None:
     command = cmd[0]
     if any(ch in command for ch in COMMAND_CONTROL_CHARS):
         raise UnsafeCommandError("Unsafe character detected in command name")
-    is_batch = _is_batch_command(command)
+    is_batch = is_batch_command(command)
     if is_batch and any(ch in command for ch in BATCH_UNSAFE_CHARS):
         raise UnsafeCommandError("Unsafe character detected in command name")
 

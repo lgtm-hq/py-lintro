@@ -47,6 +47,10 @@ ANTHROPIC_CLI_CONTRACT = CliContract(
     # A liveness probe that cannot read the help surface must not report the
     # binary usable: every completion refuses until --tools is confirmed.
     fail_closed_flags=("--tools",),
+    # Review, fix and summary calls pass the schema inline, and JSON always
+    # contains '"', which cmd.exe misreads on a .cmd shim; the flag has no
+    # file or stdin form, so those calls are refused there (#3494).
+    batch_unsafe_flags=("--json-schema",),
     optional_flags=(
         OptionalCliFlag(
             flag="--json-schema-name",

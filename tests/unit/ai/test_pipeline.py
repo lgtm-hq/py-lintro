@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,10 +11,13 @@ from typing import Any
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.audit import AUDIT_DIR, AUDIT_JSONL_FILE
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
+from lintro.ai.exceptions import AIBatchShimRefusedError
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.pipeline import run_fix_pipeline
+from lintro.ai.summary import generate_post_fix_summary
 from lintro.ai.validation import ValidationResult
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
@@ -466,6 +470,189 @@ async def test_post_fix_summary_generation(
     assert_that(summary_kwargs["rejected"]).is_equal_to(0)
     remaining = [r.name for r in summary_kwargs["remaining_results"]]
     assert_that(remaining).is_equal_to(["ruff"])
+
+
+class _UnavailableAtSummaryProvider(MockAIProvider):
+    """A provider that turns unavailable after the fixes were generated."""
+
+    async def complete(self, prompt: str, **kwargs: Any) -> Any:
+        raise AIBatchShimRefusedError("claude.cmd refused: --json-schema")
+
+
+async def test_unavailable_provider_at_summary_keeps_applied_fixes_recorded(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A refusal at post-fix summary time neither raises nor loses the audit log.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Workspace root receiving the audit log.
+    """
+    issue = MockIssue(file="a.py", line=1, code="B101", message="err")
+    result = _make_result("ruff", [issue])
+    fix_issues = _make_fix_issues(result, [issue])
+    suggestion = _make_suggestion(code="B101", tool_name="ruff")
+    _install_pipeline_recorder(
+        monkeypatch=monkeypatch,
+        generated=[[suggestion]],
+        applied=[suggestion],
+        validation=ValidationResult(
+            verified=1,
+            unverified=0,
+            verified_by_tool={"ruff": 1},
+            unverified_by_tool={"ruff": 0},
+        ),
+    )
+    # The summary stage runs for real, so the provider's refusal reaches it.
+    monkeypatch.setattr(
+        f"{_PIPELINE}.generate_post_fix_summary",
+        generate_post_fix_summary,
+    )
+
+    applied_count, failed_count, applied = await run_fix_pipeline(
+        fix_issues=fix_issues,
+        all_results=[result for result, _ in fix_issues],
+        provider=_UnavailableAtSummaryProvider(),
+        ai_config=_default_ai_config(auto_apply=True),
+        logger=RecordingConsoleLogger(),
+        output_format="terminal",
+        workspace_root=tmp_path,
+    )
+
+    assert_that(applied_count).is_equal_to(1)
+    assert_that(failed_count).is_equal_to(0)
+    assert_that(applied).is_equal_to([suggestion])
+    audit = (tmp_path / AUDIT_DIR / AUDIT_JSONL_FILE).read_text().splitlines()
+    assert_that(audit).is_length(1)
+    assert_that(json.loads(audit[0])["applied_count"]).is_equal_to(1)
+
+
+async def test_failure_after_apply_still_writes_the_audit_log(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Fixes on disk are recorded even when verification then raises.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Workspace root receiving the audit log.
+    """
+    issue = MockIssue(file="a.py", line=1, code="B101", message="err")
+    result = _make_result("ruff", [issue])
+    fix_issues = _make_fix_issues(result, [issue])
+    suggestion = _make_suggestion(code="B101", tool_name="ruff")
+    _install_pipeline_recorder(
+        monkeypatch=monkeypatch,
+        generated=[[suggestion]],
+        applied=[suggestion],
+    )
+
+    def _verify_crashes(**_kwargs: Any) -> ValidationResult | None:
+        raise RuntimeError("rerun crashed")
+
+    monkeypatch.setattr(f"{_PIPELINE}.verify_fixes", _verify_crashes)
+
+    with pytest.raises(RuntimeError, match="rerun crashed"):
+        await run_fix_pipeline(
+            fix_issues=fix_issues,
+            all_results=[result for result, _ in fix_issues],
+            provider=MockAIProvider(),
+            ai_config=_default_ai_config(auto_apply=True),
+            logger=RecordingConsoleLogger(),
+            output_format="terminal",
+            workspace_root=tmp_path,
+        )
+
+    audit = (tmp_path / AUDIT_DIR / AUDIT_JSONL_FILE).read_text().splitlines()
+    assert_that([json.loads(line)["applied_count"] for line in audit]).is_equal_to(
+        [1],
+    )
+
+
+def _block_audit_dir(workspace: Path) -> None:
+    """Make the audit directory impossible to create, as a stray file would."""
+    (workspace / Path(AUDIT_DIR).parts[0]).write_text("not a directory")
+
+
+async def test_audit_failure_does_not_mask_the_verification_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The original error reaches the caller and telemetry is still attached.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Workspace root whose audit directory cannot be created.
+    """
+    issue = MockIssue(file="a.py", line=1, code="B101", message="err")
+    result = _make_result("ruff", [issue])
+    suggestion = _make_suggestion(code="B101", tool_name="ruff")
+    _install_pipeline_recorder(
+        monkeypatch=monkeypatch,
+        generated=[[suggestion]],
+        applied=[suggestion],
+    )
+
+    def _verify_crashes(**_kwargs: Any) -> ValidationResult | None:
+        raise RuntimeError("ORIGINAL verification crash")
+
+    monkeypatch.setattr(f"{_PIPELINE}.verify_fixes", _verify_crashes)
+    _block_audit_dir(tmp_path)
+
+    with pytest.raises(RuntimeError, match="ORIGINAL verification crash"):
+        await run_fix_pipeline(
+            fix_issues=_make_fix_issues(result, [issue]),
+            all_results=[result],
+            provider=MockAIProvider(),
+            ai_config=_default_ai_config(auto_apply=True),
+            logger=RecordingConsoleLogger(),
+            output_format="terminal",
+            workspace_root=tmp_path,
+        )
+
+    assert_that(result.metadata).contains_key("ai_metrics")
+    assert_that(result.metadata["ai_metrics"]["successful_fixes"]).is_equal_to(1)
+
+
+async def test_audit_failure_alone_still_fails_the_run_after_recording_telemetry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """As on main, an unwritable audit log fails an otherwise clean run.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Workspace root whose audit directory cannot be created.
+    """
+    issue = MockIssue(file="a.py", line=1, code="B101", message="err")
+    result = _make_result("ruff", [issue])
+    suggestion = _make_suggestion(code="B101", tool_name="ruff")
+    _install_pipeline_recorder(
+        monkeypatch=monkeypatch,
+        generated=[[suggestion]],
+        applied=[suggestion],
+        validation=ValidationResult(
+            verified=1,
+            unverified=0,
+            verified_by_tool={"ruff": 1},
+            unverified_by_tool={"ruff": 0},
+        ),
+    )
+    _block_audit_dir(tmp_path)
+
+    with pytest.raises(OSError):
+        await run_fix_pipeline(
+            fix_issues=_make_fix_issues(result, [issue]),
+            all_results=[result],
+            provider=MockAIProvider(),
+            ai_config=_default_ai_config(auto_apply=True),
+            logger=RecordingConsoleLogger(),
+            output_format="terminal",
+            workspace_root=tmp_path,
+        )
+
+    assert_that(result.metadata).contains_key("ai_metrics")
 
 
 async def test_verify_fixes_flow(

@@ -55,11 +55,29 @@ class AICostBudgetExceededError(AIError):
 
 
 class AINotAvailableError(AIError):
-    """AI dependencies are not installed.
+    """The selected AI provider cannot serve a call in this environment.
 
-    Raised when AI features are requested but the required packages
-    are not available. The error message includes
-    installation instructions.
+    Raised when AI features are requested but the provider cannot run: its
+    SDK package is not installed, its CLI is missing from ``PATH`` or below
+    the declared version floor, or lintro refuses to launch it, as for an
+    agent CLI on a ``.cmd``/``.bat`` shim whose arguments ``cmd.exe`` would
+    interpret (#3494). The message says what to install or change. Every
+    call to the same provider would fail the same way, so it is never
+    retried. Fix generation and the lint summary let it propagate to the
+    orchestrator rather than swallowing it per issue. Stages that run after
+    fixes are on disk (refinement and the post-fix summary) stay
+    best-effort: they log it and keep the applied fixes.
+    """
+
+
+class AIBatchShimRefusedError(AINotAvailableError):
+    """lintro refuses to launch an agent CLI through a ``.cmd``/``.bat`` shim.
+
+    Windows runs a batch argv0 through ``cmd.exe``, so a shim path or an
+    argument holding a character ``cmd.exe`` interprets is refused before
+    anything is spawned (#3494). Kept distinct so capability probes, which
+    treat an unrunnable binary as "no output", can report this reason
+    instead of a misleading "--help could not be read".
     """
 
 

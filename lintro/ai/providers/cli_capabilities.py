@@ -33,6 +33,7 @@ from loguru import logger
 
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import (
+    AIBatchShimRefusedError,
     AINotAvailableError,
     AIProviderError,
 )
@@ -40,6 +41,11 @@ from lintro.ai.liveness import (
     LivenessResult,
     incompatible_cli_result,
     live_result,
+)
+from lintro.ai.providers.batch_shim import (
+    batch_shim_remedy,
+    refuse_unsafe_batch_path,
+    refused_batch_flags_reason,
 )
 from lintro.ai.providers.cli_contracts import (
     CliContract,
@@ -297,9 +303,35 @@ class CliCapabilityGuard:
         Args:
             provider_name: Provider identifier used in the result.
 
+        A ``.cmd``/``.bat`` shim lintro refuses to launch is reported
+        incompatible with the reason and its remedy, before any probe runs
+        (#3494): its path holds a character ``cmd.exe`` interprets, or the
+        contract declares a flag lintro sends with such a value.
+
         Returns:
             The liveness result for this CLI transport.
         """
+        try:
+            refuse_unsafe_batch_path(self._binary_path, binary_name=self._binary_name)
+        except AIBatchShimRefusedError as exc:
+            # The default hint is the upgrade hint, which reinstalls the shim.
+            return incompatible_cli_result(
+                provider=provider_name,
+                message=str(exc),
+                hint=batch_shim_remedy(self._binary_name),
+            )
+        refused = refused_batch_flags_reason(
+            self._binary_path,
+            binary_name=self._binary_name,
+            flags=self._contract.batch_unsafe_flags if self._contract else (),
+        )
+        if refused is not None:
+            return incompatible_cli_result(
+                provider=provider_name,
+                message=refused,
+                hint=batch_shim_remedy(self._binary_name),
+            )
+
         try:
             await self.check_version_floor()
         except AINotAvailableError as exc:
@@ -556,9 +588,17 @@ class CliCapabilityGuard:
         Returns:
             Combined stdout/stderr on a clean exit, or ``None`` when the probe
             failed or exited non-zero.
+
+        Raises:
+            AIBatchShimRefusedError: When the binary is a batch shim lintro
+                refuses to launch. Read as "no output", it would surface as
+                "--help could not be read" with an upgrade hint that
+                reinstalls the same shim (#3494).
         """
         try:
             result = await self._run(cmd, timeout=PROBE_TIMEOUT)
+        except AIBatchShimRefusedError:
+            raise
         except (AIProviderError, AINotAvailableError, OSError) as exc:
             # OSError covers PermissionError and other spawn failures that
             # run() does not remap.

@@ -24,7 +24,7 @@ from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.enums.ai_call_kind import AICallKind
 from lintro.ai.enums.sanitize_mode import SanitizeMode
-from lintro.ai.exceptions import AITurnLimitError
+from lintro.ai.exceptions import AINotAvailableError, AITurnLimitError
 from lintro.ai.fallback import ensure_chain_not_retired
 from lintro.ai.fix_context import (
     CONTEXT_LINES,
@@ -197,7 +197,10 @@ async def _call_and_cache_fix(
 
             return suggestion
 
-    except (KeyboardInterrupt, SystemExit):
+    # A provider that cannot serve any call (a refused batch shim, a missing
+    # binary) is a run-level failure, not a per-issue one: swallowing it here
+    # reported "nothing to fix" and bypassed ``fail_on_ai_error`` (#3494).
+    except (KeyboardInterrupt, SystemExit, AINotAvailableError):
         raise
     except AIFixParseError as exc:
         logger.debug(
@@ -369,6 +372,8 @@ async def _generate_batch_fixes(
     Raises:
         KeyboardInterrupt: Re-raised immediately.
         SystemExit: Re-raised immediately.
+        AINotAvailableError: Re-raised so the caller reports a provider that
+            cannot serve any call, instead of retrying issue by issue.
     """
     issues_list_parts: list[str] = []
     raw_messages: list[str] = []
@@ -453,7 +458,8 @@ async def _generate_batch_fixes(
         )
         return suggestions
 
-    except (KeyboardInterrupt, SystemExit):
+    # Unusable provider: single-issue mode would be refused the same way (#3494).
+    except (KeyboardInterrupt, SystemExit, AINotAvailableError):
         raise
     except AIFixParseError as exc:
         logger.debug(
@@ -547,6 +553,8 @@ async def generate_fixes(
     Raises:
         KeyboardInterrupt: Re-raised on user interrupt.
         SystemExit: Re-raised on system exit.
+        AINotAvailableError: When the provider cannot serve any call, such as
+            a refused batch shim (#3494), instead of zero suggestions.
     """
     if not issues:
         return []
@@ -712,7 +720,7 @@ async def generate_fixes(
             for completed in asyncio.as_completed(tasks):
                 try:
                     result = await completed
-                except (KeyboardInterrupt, SystemExit):
+                except (KeyboardInterrupt, SystemExit, AINotAvailableError):
                     raise
                 except Exception as exc:
                     logger.debug(

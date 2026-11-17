@@ -34,6 +34,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
 )
 from lintro.ai.liveness import LivenessResult
+from lintro.ai.providers.batch_shim import refuse_unsafe_batch_argv
 from lintro.ai.providers.cli_capabilities import (
     PROBE_TIMEOUT,
     UNKNOWN_OPTION_PATTERNS,
@@ -350,9 +351,15 @@ class CliTransport(ABC):
 
         Raises:
             AIProviderError: On timeout.
-            AINotAvailableError: When the binary disappears from ``PATH``.
+            AINotAvailableError: When the binary disappears from ``PATH``, when
+                *cwd* does not exist, or
+                when it is a ``.cmd``/``.bat`` shim and an argument holds a
+                character ``cmd.exe`` would interpret (#3494).
             asyncio.CancelledError: Re-raised after the child is stopped.
         """
+        # Windows runs a batch argv0 through cmd.exe even without a shell, so
+        # this is refused before anything is spawned (#3494).
+        refuse_unsafe_batch_argv(cmd, binary_name=self._binary_name)
         env = os.environ.copy()
         if extra_env:
             env.update(extra_env)
@@ -383,21 +390,31 @@ class CliTransport(ABC):
                     cwd=cwd,
                     **spawn_kwargs,
                 )
-            except FileNotFoundError as exc:
-                raise AINotAvailableError(
-                    f"{self._binary_name} CLI not found on PATH. {self._install_hint}",
-                ) from exc
             except OSError as exc:
+                # An unusable cwd (missing, a file, or behind an unsearchable
+                # parent) fails the spawn as FileNotFoundError on POSIX, which
+                # reads like a missing binary, or as NotADirectoryError
+                # (WinError 267) on Windows. The OS error is kept, since it may
+                # name another cause. Not retried: every call in the run would
+                # fail the same way (#3494).
+                if cwd is not None and not os.path.isdir(cwd):
+                    raise AINotAvailableError(
+                        f"{self._binary_name} CLI cannot start: its working "
+                        f"directory {cwd!r} is not an accessible directory "
+                        f"({exc}).",
+                    ) from exc
+                if isinstance(exc, FileNotFoundError):
+                    raise AINotAvailableError(
+                        f"{self._binary_name} CLI not found on PATH. "
+                        f"{self._install_hint}",
+                    ) from exc
                 # Defense in depth for #1967: even after stdin prompt delivery,
                 # a leftover oversized argv element (or a huge env) can still
                 # raise E2BIG / "Argument list too long". Map it to a provider
                 # error instead of leaking a raw OSError to callers.
                 if (
                     exc.errno == errno.E2BIG
-                    or "argument list too long"
-                    in str(
-                        exc,
-                    ).lower()
+                    or "argument list too long" in str(exc).lower()
                 ):
                     raise AIProviderError(
                         f"{self._binary_name} CLI could not spawn because the "

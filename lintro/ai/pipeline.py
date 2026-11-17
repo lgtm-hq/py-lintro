@@ -15,6 +15,7 @@ from lintro.ai.budget import CostBudget
 from lintro.ai.checkpoints import checkpoint_ref_exists
 from lintro.ai.display import render_fixes, render_summary, render_validation
 from lintro.ai.enums import ConfidenceLevel
+from lintro.ai.exceptions import AINotAvailableError
 from lintro.ai.fix import generate_fixes_from_params
 from lintro.ai.fix_params import FixGenParams
 from lintro.ai.interactive import review_fixes_interactive
@@ -425,6 +426,11 @@ async def run_fix_pipeline(
 
     Returns:
         Tuple of (fixes_applied, fixes_failed).
+
+    Raises:
+        BaseException: Whatever verification, refinement or the post-fix
+            summary raised once fixes were applied, re-raised unchanged after
+            the run was recorded.
     """
     budget = budget if budget is not None else CostBudget()
     telemetry = AITelemetry()
@@ -496,86 +502,207 @@ async def run_fix_pipeline(
     telemetry.successful_fixes = applied
     telemetry.failed_fixes = total_generated - applied
 
-    # Step 4: Verify and refine applied fixes
-    validation = None
-    if applied_suggestions:
-        validation = await _verify_and_refine(
-            applied_suggestions,
+    # Fixes are on disk from here: whatever verification or the summary
+    # raises, the audit log and telemetry still record them, and a failure
+    # to record never replaces that error (#3494).
+    try:
+        # Step 4: Verify and refine applied fixes
+        validation = None
+        if applied_suggestions:
+            validation = await _verify_and_refine(
+                applied_suggestions,
+                by_tool,
+                provider,
+                ai_config,
+                logger,
+                is_json,
+                workspace_root,
+                telemetry,
+                budget,
+            )
+
+        # Publish after verification/refinement returns normally. An earlier exception
+        # leaves the owning list's original result envelopes in place.
+        _publish_verified_results(
+            all_results,
             by_tool,
-            provider,
-            ai_config,
-            logger,
-            is_json,
-            workspace_root,
-            telemetry,
-            budget,
+            original_by_tool,
+            applied_suggestions,
+            validation,
         )
 
-    # Publish after verification/refinement returns normally. An earlier exception
-    # leaves the owning list's original result envelopes in place.
-    _publish_verified_results(
-        all_results,
-        by_tool,
-        original_by_tool,
-        applied_suggestions,
-        validation,
-    )
-
-    # Generate post-fix summary — only when validation confirms outcomes
-    if (applied > 0 or rejected > 0) and not is_json and validation is not None:
-        applied_for_summary = applied
-        if validation.verified or validation.unverified:
-            applied_for_summary = validation.verified
-
-        # Applied fixes use the de-duplicated replacements in by_tool.
-        # Without applied suggestions, verification/refinement did not run,
-        # so fix_issues still holds current results with no rerun replacements.
-        if applied_suggestions:
-            unique_results: list[ToolResult] | None = [
-                result for result, _ in by_tool.values()
-            ]
-        else:
-            unique_results = _unique_results_from_fix_issues(fix_issues)
-
-        if unique_results:
-            post_summary = await generate_post_fix_summary(
-                applied=applied_for_summary,
-                rejected=rejected,
-                remaining_results=unique_results,
-                provider=provider,
-                ai_config=ai_config,
-                max_tokens=ai_config.max_tokens,
-                workspace_root=workspace_root,
-                timeout=ai_config.api_timeout,
-                max_retries=ai_config.max_retries,
-                base_delay=ai_config.retry_base_delay,
-                max_delay=ai_config.retry_max_delay,
-                backoff_factor=ai_config.retry_backoff_factor,
-                fallback_models=ai_config.fallback_models,
-            )
-            if post_summary:
-                output = render_summary(
-                    post_summary,
-                    show_cost=ai_config.show_cost_estimate,
-                )
-                if output:
-                    logger.console_output(output)
-
-    # Audit-log writing takes a blocking inter-process file lock (with a
-    # sleep-based retry on Windows), so it runs off the event loop.
-    await asyncio.to_thread(
-        write_audit_log,
-        workspace_root,
-        applied_suggestions,
-        rejected,
-        telemetry.total_cost_usd,
-    )
-    attach_telemetry_metadata(
-        [r for r, _ in by_tool.values()],
-        telemetry,
+        await _post_fix_summary(
+            applied=applied,
+            rejected=rejected,
+            validation=validation,
+            applied_suggestions=applied_suggestions,
+            by_tool=by_tool,
+            fix_issues=fix_issues,
+            provider=provider,
+            ai_config=ai_config,
+            logger=logger,
+            is_json=is_json,
+            workspace_root=workspace_root,
+        )
+    except BaseException:
+        await _record_fix_run(
+            workspace_root=workspace_root,
+            applied_suggestions=applied_suggestions,
+            rejected=rejected,
+            telemetry=telemetry,
+            by_tool=by_tool,
+            raise_failures=False,
+        )
+        raise
+    await _record_fix_run(
+        workspace_root=workspace_root,
+        applied_suggestions=applied_suggestions,
+        rejected=rejected,
+        telemetry=telemetry,
+        by_tool=by_tool,
+        raise_failures=True,
     )
 
     return (applied, len(all_suggestions) - applied, applied_suggestions)
+
+
+async def _record_fix_run(
+    *,
+    workspace_root: Path,
+    applied_suggestions: list[AIFixSuggestion],
+    rejected: int,
+    telemetry: AITelemetry,
+    by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]],
+    raise_failures: bool,
+) -> None:
+    """Write the audit log and attach telemetry, each independently.
+
+    Each step runs even when the other fails, and each failure is logged as
+    a warning naming what could not be recorded. With ``raise_failures`` the
+    first failure is re-raised after both steps ran, which keeps main's
+    outcome for a run that otherwise succeeded: an audit log that cannot be
+    written fails the run, though telemetry is still attached. Without it (an
+    exception is already in flight), nothing is raised, so the original error
+    reaches the caller (#3494).
+
+    Args:
+        workspace_root: Workspace root receiving the audit log.
+        applied_suggestions: Successfully applied AI suggestions.
+        rejected: Number of fixes rejected.
+        telemetry: Telemetry for this run.
+        by_tool: Current per-tool results receiving the telemetry metadata.
+        raise_failures: Whether to re-raise the first failure.
+
+    Raises:
+        Exception: The audit failure, else the telemetry failure, only when
+            ``raise_failures``.
+    """
+    audit_failed = False
+    try:
+        # Audit-log writing takes a blocking inter-process file lock (with a
+        # sleep-based retry on Windows), so it runs off the event loop.
+        await asyncio.to_thread(
+            write_audit_log,
+            workspace_root,
+            applied_suggestions,
+            rejected,
+            telemetry.total_cost_usd,
+        )
+    except Exception as exc:
+        audit_failed = True
+        loguru_logger.warning(f"AI audit log could not be written: {exc}")
+        if raise_failures:
+            raise
+    finally:
+        try:
+            attach_telemetry_metadata([r for r, _ in by_tool.values()], telemetry)
+        except Exception as exc:
+            loguru_logger.warning(f"AI telemetry could not be attached: {exc}")
+            # Never replace the audit failure already propagating.
+            if raise_failures and not audit_failed:
+                raise
+
+
+async def _post_fix_summary(
+    *,
+    applied: int,
+    rejected: int,
+    validation: ValidationResult | None,
+    applied_suggestions: list[AIFixSuggestion],
+    by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]],
+    fix_issues: list[tuple[ToolResult, BaseIssue]],
+    provider: BaseAIProvider,
+    ai_config: AIConfig,
+    logger: ThreadSafeConsoleLogger,
+    is_json: bool,
+    workspace_root: Path,
+) -> None:
+    """Render the post-fix summary, best-effort.
+
+    The fixes are already applied and verified when this runs, so a provider
+    that has become unavailable is reported as a warning rather than raised:
+    raising here would turn a successful fix run into an AI error with
+    nothing recorded (#3494).
+
+    Args:
+        applied: Number of fixes applied.
+        rejected: Number of fixes rejected.
+        validation: Verification counts, when a check could run.
+        applied_suggestions: Successfully applied AI suggestions.
+        by_tool: Current per-tool results after verification.
+        fix_issues: The (tool_result, issue) pairs the run started from.
+        provider: AI provider instance.
+        ai_config: AI configuration.
+        logger: Console logger for output.
+        is_json: Whether stdout is reserved for a machine-readable document.
+        workspace_root: Workspace root path.
+    """
+    # Only when validation confirms outcomes.
+    if is_json or validation is None or (applied == 0 and rejected == 0):
+        return
+    applied_for_summary = applied
+    if validation.verified or validation.unverified:
+        applied_for_summary = validation.verified
+
+    # Applied fixes use the de-duplicated replacements in by_tool.
+    # Without applied suggestions, verification/refinement did not run,
+    # so fix_issues still holds current results with no rerun replacements.
+    if applied_suggestions:
+        unique_results: list[ToolResult] | None = [
+            result for result, _ in by_tool.values()
+        ]
+    else:
+        unique_results = _unique_results_from_fix_issues(fix_issues)
+    if not unique_results:
+        return
+
+    try:
+        post_summary = await generate_post_fix_summary(
+            applied=applied_for_summary,
+            rejected=rejected,
+            remaining_results=unique_results,
+            provider=provider,
+            ai_config=ai_config,
+            max_tokens=ai_config.max_tokens,
+            workspace_root=workspace_root,
+            timeout=ai_config.api_timeout,
+            max_retries=ai_config.max_retries,
+            base_delay=ai_config.retry_base_delay,
+            max_delay=ai_config.retry_max_delay,
+            backoff_factor=ai_config.retry_backoff_factor,
+            fallback_models=ai_config.fallback_models,
+        )
+    except AINotAvailableError as exc:
+        # WARNING reaches the console sink, so the reason is visible.
+        loguru_logger.warning(f"AI post-fix summary skipped: {exc}")
+        return
+    if post_summary:
+        output = render_summary(
+            post_summary,
+            show_cost=ai_config.show_cost_estimate,
+        )
+        if output:
+            logger.console_output(output)
 
 
 def _publish_verified_results(
