@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.181.6] - 2026-11-17
+
+### Fixed
+
+- **execution**: stop incomplete tools reading as clean in review prompt and advisory
+  (#3511) (df1f525)
+
 ## [0.181.5] - 2026-11-17
 
 ### Fixed
