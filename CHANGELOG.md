@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.181.2] - 2026-11-17
+
+### Fixed
+
+- **ci**: bound the GHCR tag sweep per run so it stops cleanly (#3504) (ebb7b38)
+
 ## [0.181.1] - 2026-11-16
 
 ### Fixed
