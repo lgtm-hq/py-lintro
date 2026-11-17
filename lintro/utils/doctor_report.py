@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any, Final
 from lintro.enums.tool_status import ToolStatus
 from lintro.tools.core.install_strategies import get_strategy
 from lintro.tools.core.tool_installer import (
+    has_path_separator,
     is_resolved_command_discoverable,
     resolve_version_command,
 )
@@ -304,7 +305,8 @@ def check_tool(
         # verification because they cannot prove the *tool* is absent. Doctor
         # still needs the host binary on PATH; otherwise subprocess raises
         # FileNotFoundError and we mislabel the miss as os_error (#2026).
-        if tool_path is None and "/" not in main_cmd:
+        # A path argv0 that is missing was already rejected above (#2042).
+        if tool_path is None and not has_path_separator(main_cmd):
             return ToolCheckResult(
                 tool=tool,
                 status=ToolStatus.MISSING,

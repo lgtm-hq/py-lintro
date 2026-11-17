@@ -618,6 +618,31 @@ def test_check_tool_missing_wrapper_host_is_not_in_path() -> None:
     assert_that(result.error).is_equal_to("not_in_path")
 
 
+@pytest.mark.parametrize("relative", [True, False], ids=["relative", "absolute"])
+def test_check_tool_missing_path_argv0_is_not_in_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    relative: bool,
+) -> None:
+    """A path argv0 whose file is missing is not discoverable, not os_error.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Pytest monkeypatch fixture.
+        relative: Whether the manifest names the probe by a relative path.
+    """
+    monkeypatch.chdir(tmp_path)
+    probe = Path("scripts") / "probe.sh"
+    argv0 = str(probe if relative else tmp_path / probe)
+    tool = _make_tool(version_command=(argv0, "--version"))
+
+    result = check_tool(tool=tool, context=_make_context())
+
+    assert_that(result.status).is_equal_to(ToolStatus.MISSING)
+    assert_that(result.error).is_equal_to("not_in_path")
+    assert_that(result.details).is_equal_to(argv0)
+
+
 def test_check_tool_missing_command_failed() -> None:
     """Tool found but version command exits non-zero."""
     tool = _make_tool()

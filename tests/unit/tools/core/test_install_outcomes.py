@@ -523,6 +523,7 @@ def test_not_discoverable_message_names_the_destination_directory(
 )
 def test_npm_wrapper_probes_are_not_rewritten_by_node_resolution(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     argv0: str,
     rest: tuple[str, ...],
 ) -> None:
@@ -530,10 +531,15 @@ def test_npm_wrapper_probes_are_not_rewritten_by_node_resolution(
 
     Args:
         tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Pytest monkeypatch fixture.
         argv0: First element of the manifest version command.
         rest: Remaining argv.
     """
     _write_node_project(tmp_path)
+    # A path probe counts as discoverable only when its file exists (#2042).
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "probe.sh").write_text("")
     installer = _node_installer(tmp_path)
     command = (argv0, *rest)
     tool = ManifestTool(
@@ -582,11 +588,14 @@ def test_global_npm_destination_uses_which_parent_not_symlink_target(
     with (
         patch.object(installer, "_install_cwd", return_value=None),
         patch(
-            "lintro.tools.core.tool_installer.shutil.which",
+            "lintro.tools.core.install_destination.shutil.which",
             return_value=str(link),
         ),
     ):
-        dest = installer._install_destination_dir(tool)
+        dest = installer._install_destination(
+            tool,
+            "npm install -g prettier@3.9.4",
+        ).directory
 
     assert_that(dest).is_equal_to(bindir)
     assert_that(str(dest)).does_not_contain("node_modules")
