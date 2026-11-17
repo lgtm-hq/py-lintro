@@ -835,8 +835,8 @@ reported as `⚠️ UNAVAIL` / `⏭️ SKIP` and the run still exits 0. A local 
 pass while CI, which has the tool, fails. Strict mode turns those rows into failures:
 
 ```bash
-lintro chk --strict-missing-tools
-lintro fmt --strict-missing-tools
+lintro check --strict-missing-tools
+lintro format --strict-missing-tools
 ```
 
 ```yaml
