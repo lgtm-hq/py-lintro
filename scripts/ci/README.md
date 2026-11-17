@@ -53,7 +53,17 @@ BuildKit registry cache is stored on production packages as `:cache` (not separa
 reaps ephemeral `pr-*` / `mq-*` / `dispatch-*` cache exports from `py-lintro` and
 `py-lintro-base` while preserving referenced digests and the permanent `:cache` tag.
 Ephemeral run-scoped `ci-*` tags from docker-ci are retained for partial reruns and
-reclaimed by `sweep-ci-ghcr-tags.sh` (age-based, default 91 days; #1138).
+reclaimed by `sweep-ci-ghcr-tags.sh` (age-based, default 91 days; #1138). Each run is
+bounded (#3492): every `gh` call is killed after `GH_CALL_TIMEOUT_SECONDS`, listings are
+paged by hand with the clock checked between pages, new work stops at
+`TIME_BUDGET_SECONDS` minus `VERIFY_RESERVE_SECONDS`, and at most `MAX_DELETES` versions
+go per run. A package whose listing took L seconds only starts deletes before
+`TIME_BUDGET_SECONDS` minus the larger of the reserve and 2L, so the first package
+deletes nothing once its listing takes 400 s or more at the default 1200 s budget (later
+packages reach that point sooner); real listings take about 2 minutes. A run that stops
+early still verifies its deletions and exits 0 with a "partial, resumes next run"
+notice. `PACKAGE_ROTATION` (the run number) changes which package goes first, and a
+partial run that deleted nothing or skipped a package raises a warning.
 
 ## Code Quality Gate
 

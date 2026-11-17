@@ -103,7 +103,13 @@ jobs:
     permissions:
       contents: read # checkout sweep-ci-ghcr-tags.sh
       packages: write # delete aged-out CI tags from GHCR
-    timeout-minutes: 10
+    # The script returns within TIME_BUDGET_SECONDS + GH_CALL_TIMEOUT_SECONDS
+    # (20 min + 1 min): every gh call is killed at the call timeout, listing
+    # pages and deletes stop at budget - reserve, and verification stops at
+    # the budget. 30 minutes covers that plus runner setup, so a backlog
+    # ends `success` with a "partial, resumes next run" note instead of
+    # being cancelled (#3492).
+    timeout-minutes: 30
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
@@ -131,6 +137,15 @@ jobs:
           # yamllint disable-line rule:line-length
           MIN_AGE_DAYS: ${{ github.event_name != 'workflow_dispatch' && 91 || inputs.sweep_min_age_days }}
           DRY_RUN: ${{ inputs.dry_run == true }}
+          # Per-run bound (#3492): a backlog drains over several weekly
+          # runs instead of pushing one run past its timeout. The run number
+          # rotates which package goes first, so a slow one cannot starve
+          # the other week after week.
+          TIME_BUDGET_SECONDS: 1200
+          VERIFY_RESERVE_SECONDS: 300
+          GH_CALL_TIMEOUT_SECONDS: 60
+          MAX_DELETES: 500
+          PACKAGE_ROTATION: ${{ github.run_number }}
         run: scripts/ci/maintenance/sweep-ci-ghcr-tags.sh
 
   # Age-based sweep of per-commit tags (sha-<commit>) published alongside
@@ -149,7 +164,13 @@ jobs:
     permissions:
       contents: read # checkout sweep-ci-ghcr-tags.sh
       packages: write # delete aged-out CI tags from GHCR
-    timeout-minutes: 10
+    # The script returns within TIME_BUDGET_SECONDS + GH_CALL_TIMEOUT_SECONDS
+    # (20 min + 1 min): every gh call is killed at the call timeout, listing
+    # pages and deletes stop at budget - reserve, and verification stops at
+    # the budget. 30 minutes covers that plus runner setup, so a backlog
+    # ends `success` with a "partial, resumes next run" note instead of
+    # being cancelled (#3492).
+    timeout-minutes: 30
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
@@ -175,6 +196,15 @@ jobs:
           # yamllint disable-line rule:line-length
           MIN_AGE_DAYS: ${{ github.event_name != 'workflow_dispatch' && 91 || inputs.sweep_min_age_days }}
           DRY_RUN: ${{ inputs.dry_run == true }}
+          # Per-run bound (#3492): a backlog drains over several weekly
+          # runs instead of pushing one run past its timeout. The run number
+          # rotates which package goes first, so a slow one cannot starve
+          # the other week after week.
+          TIME_BUDGET_SECONDS: 1200
+          VERIFY_RESERVE_SECONDS: 300
+          GH_CALL_TIMEOUT_SECONDS: 60
+          MAX_DELETES: 500
+          PACKAGE_ROTATION: ${{ github.run_number }}
         run: scripts/ci/maintenance/sweep-ci-ghcr-tags.sh
 
   sweep-tools-candidates:
