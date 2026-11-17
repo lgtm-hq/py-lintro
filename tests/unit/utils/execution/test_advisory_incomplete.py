@@ -2,6 +2,7 @@
 
 The advisory text output renders only the issue table, so a refusal beside
 one real finding would be unmentioned, and ``--advisory-only`` would exit 0.
+It now names the reason, keeps the findings, and exits 2 after rendering.
 """
 
 from __future__ import annotations
@@ -12,13 +13,15 @@ from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 
 import lintro.utils.execution.advisory as advisory_module
 from lintro.ai.review.error_contract import REVIEW_ERROR_EXIT_CODE
 from lintro.cli import cli
 from lintro.config.lintro_config import LintroConfig
+from lintro.models.core.tool_outcome import ToolOutcome, Unavailable
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
 from lintro.tools import tool_manager
 from tests.refused_plugin import FINDING_MESSAGE, RefusingPlugin, copy_configured
 
@@ -107,16 +110,16 @@ def test_completed_advisory_tool_reports_complete_fields_and_no_note(
     )
 
 
-def test_advisory_only_with_a_refusal_and_a_finding_does_not_exit_zero(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``--advisory-only`` fails closed on a refusal even beside a real finding.
+def _advisory_only(results: list[ToolResult], *, output: str) -> Result:
+    """Run ``lintro review --advisory-only`` over fixed advisory results.
 
     Args:
-        monkeypatch: Pytest patch fixture.
-    """
-    results = _run(monkeypatch, RefusingPlugin(with_finding=True))
+        results: What the advisory tools return.
+        output: ``terminal`` or ``json``.
 
+    Returns:
+        The CLI result.
+    """
     with (
         patch("lintro.cli_utils.commands.review.require_ai"),
         patch(
@@ -124,13 +127,95 @@ def test_advisory_only_with_a_refusal_and_a_finding_does_not_exit_zero(
             return_value=results,
         ),
     ):
-        outcome = CliRunner().invoke(
+        return CliRunner().invoke(
             cli,
-            ["review", "--advisory-only", "--output", "json"],
+            ["review", "--advisory-only", "--output", output],
         )
 
+
+@pytest.mark.parametrize("output", ["terminal", "json"])
+def test_advisory_only_shows_an_unfinished_tools_findings_then_exits_two(
+    monkeypatch: pytest.MonkeyPatch,
+    output: str,
+) -> None:
+    """Real findings of a refused tool are rendered before the run exits 2.
+
+    Args:
+        monkeypatch: Pytest patch fixture.
+        output: ``--output`` value.
+    """
+    results = _run(monkeypatch, RefusingPlugin(with_finding=True))
+
+    outcome = _advisory_only(results, output=output)
+
     assert_that(outcome.exit_code).is_equal_to(REVIEW_ERROR_EXIT_CODE)
-    payload = json.loads(outcome.output[outcome.output.index("{") :])
-    assert_that(payload["error"]["message"]).starts_with(
-        "lintro refused to run tsc: ",
+    assert_that(outcome.output).contains(FINDING_MESSAGE)
+    assert_that(outcome.output).does_not_contain("unexpected error")
+    if output == "json":
+        entry = json.loads(outcome.output)["advisory"][0]
+        assert_that(entry).contains_entry(
+            {"incomplete": True},
+            {"execution_failed": True},
+            {"issues_count": 1},
+        )
+        assert_that(entry["output"]).starts_with("lintro refused to run tsc: ")
+    else:
+        assert_that(outcome.output).contains(
+            "did not run / incomplete: lintro refused to run tsc: ",
+        )
+
+
+def test_advisory_only_names_a_partial_parse_without_quoting_a_finding() -> None:
+    """A partial parse fails closed with its own reason, findings shown."""
+    partial = ToolResult(
+        name="idiom-review",
+        success=False,
+        issues_count=1,
+        issues=[
+            BaseIssue(file="src/a.py", line=3, column=1, message="line too long"),
+        ],
+        parse_failures_count=2,
+        output="src/a.py:3:1 E501 line too long\n{garbled",
+    )
+
+    outcome = _advisory_only([partial], output="terminal")
+
+    assert_that(outcome.exit_code).is_equal_to(REVIEW_ERROR_EXIT_CODE)
+    assert_that(outcome.output).contains(
+        "did not run / incomplete: 2 part(s) of idiom-review's output could "
+        "not be parsed; its findings are partial",
+    )
+    assert_that(outcome.output).does_not_contain("incomplete: src/a.py")
+    assert_that(outcome.output).does_not_contain("unexpected error")
+    assert_that(outcome.output).contains("line too long")
+
+
+def test_unavailable_advisory_tool_is_a_skip_with_its_reason() -> None:
+    """An unavailable tool is named with its reason and does not fail the run."""
+    unavailable = ToolResult.from_outcome(
+        ToolOutcome(execution=Unavailable(reason="idiom-review binary missing")),
+        name="idiom-review",
+        output="idiom-review unavailable",
+    )
+
+    terminal = _advisory_only([unavailable], output="terminal")
+    entry = json.loads(_advisory_only([unavailable], output="json").output)
+
+    assert_that(terminal.exit_code).is_equal_to(0)
+    assert_that(terminal.output).contains(
+        "Advisory: idiom-review\n  unavailable: idiom-review binary missing",
+    )
+    assert_that(entry["advisory"][0]).contains_entry({"incomplete": False})
+
+
+def test_clean_legacy_advisory_tool_is_not_incomplete_in_json() -> None:
+    """``findings_complete`` is false for a legacy tool; ``incomplete`` is not."""
+    clean = ToolResult(name="idiom-review", success=True, findings_complete=False)
+
+    outcome = _advisory_only([clean], output="json")
+
+    assert_that(outcome.exit_code).is_equal_to(0)
+    assert_that(json.loads(outcome.output)["advisory"][0]).contains_entry(
+        {"incomplete": False},
+        {"findings_complete": False},
     )

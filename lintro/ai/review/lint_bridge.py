@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 from loguru import logger
 
-from lintro.ai.prompts.review import format_lint_results_section
-from lintro.ai.review.lint_completeness import incomplete_lint_reason
+from lintro.ai.review.lint_completeness import report_tool_result
+from lintro.ai.review.lint_digest import format_lint_results_for_prompt
 from lintro.enums.action import Action
+from lintro.models.core.result_completeness import is_incomplete_result
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.tools import tool_manager
@@ -187,57 +188,6 @@ def run_lint_on_changed_files(
     return results
 
 
-def format_lint_results_for_prompt(
-    *,
-    results: list[ToolResult],
-    max_entries: int = 200,
-) -> str:
-    """Format lint tool results as a compact prompt digest.
-
-    A tool that did not run or did not complete gets one line naming why,
-    ahead of the findings, so its silence never reads as a clean result
-    (#3497). Findings it did report are kept like any other.
-
-    Args:
-        results: Tool results from ``run_lint_on_changed_files``.
-        max_entries: Maximum number of issue entries to include.
-
-    Returns:
-        Lint digest wrapped in ``<lint_results>`` tags, or empty string.
-    """
-    notes = [
-        f"Tool: {result.name} | did not run / incomplete: {reason}"
-        for result in results
-        if (reason := incomplete_lint_reason(result))
-    ]
-    lines: list[str] = []
-    for result in results:
-        if not result.issues:
-            continue
-        for issue in result.issues:
-            if len(lines) >= max_entries:
-                break
-            code = getattr(issue, "code", "") or "unknown"
-            message = getattr(issue, "message", "") or ""
-            file_path = getattr(issue, "file", "") or ""
-            line_no = getattr(issue, "line", None)
-            line_suffix = f" | line: {line_no}" if line_no else ""
-            lines.append(
-                f"Tool: {result.name} | file: {file_path}{line_suffix}\n"
-                f"Code: {code} | Message: {message}",
-            )
-        if len(lines) >= max_entries:
-            break
-
-    if not lines and not notes:
-        return ""
-
-    digest = "\n\n".join([*notes, *lines])
-    if len(lines) >= max_entries:
-        digest += "\n\n(truncated lint digest)"
-    return format_lint_results_section(digest=digest)
-
-
 def _report_field(entry: Any, key: str, *, where: str) -> Any:
     """Return ``entry[key]`` from a report mapping, or raise.
 
@@ -360,26 +310,13 @@ def load_lint_report(path: Path) -> list[ToolResult]:
             _parse_report_issue(raw, where=f"{where}.issues[{position}]")
             for position, raw in enumerate(raw_issues)
         ]
-        # A tool that did not run or did not complete stays marked, so the
-        # digest says so instead of reading its silence as clean (#3497).
-        execution_failed = entry.get("execution_failed") is True
-        timed_out = entry.get("timed_out") is True
-        output = entry.get("output")
-        results.append(
-            ToolResult(
-                name=name,
-                success=(
-                    bool(entry.get("success", True))
-                    and not execution_failed
-                    and not timed_out
-                ),
-                issues_count=len(issues),
-                issues=issues,
-                output=output if isinstance(output, str) else None,
-                execution_failed=execution_failed,
-                timed_out=timed_out,
-            ),
-        )
+        # Every completeness marker is carried, so the digest judges the
+        # reloaded result exactly as it judged the live one (#3497).
+        try:
+            results.append(report_tool_result(entry, name=name, issues=issues))
+        except ValueError as exc:
+            msg = f"{where} {exc}"
+            raise LintReportError(msg) from exc
     return results
 
 
@@ -463,20 +400,21 @@ def restrict_lint_results_to_files(
                 continue
             if relative in changed:
                 kept.append(issue)
-        # A tool that failed only on files outside the review is clean on the
-        # changed files; one that failed without findings, or did not
-        # complete, keeps its failure so the digest names it (#3497).
-        incomplete = result.execution_failed or result.timed_out
+        # Every other field, completeness and skip evidence included, is
+        # kept (#3497). A tool that failed only on files outside the review
+        # is clean on the changed files; one that did not complete keeps its
+        # failure so the digest names it.
         restricted.append(
-            ToolResult(
-                name=result.name,
+            replace(
+                result,
                 success=result.success
-                or (bool(result.issues) and not kept and not incomplete),
+                or (
+                    bool(result.issues)
+                    and not kept
+                    and not is_incomplete_result(result)
+                ),
                 issues_count=len(kept),
                 issues=kept,
-                output=result.output,
-                execution_failed=result.execution_failed,
-                timed_out=result.timed_out,
             ),
         )
     if outside_root:
