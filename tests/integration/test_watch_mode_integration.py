@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import itertools
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,10 @@ from lintro.watch.watcher import watch_paths
 # Upper bound for each wait. Waits return as soon as their condition holds,
 # so this only matters when the watcher is broken or the machine is starved.
 _DEADLINE_S = 10.0
+
+# Makes each fence marker name unique, so a fence can never be satisfied by
+# an earlier fence's events.
+_FENCE_IDS = itertools.count()
 
 
 class _SignalingObserver:
@@ -120,49 +126,70 @@ class _WatchRecorder:
         with self._changed:
             return len(self.batches), len(self.events)
 
-    def wait_for_batch_with(
+    def expect_batch_with(
         self,
         path: Path,
         *,
         since: tuple[int, int] = (0, 0),
-    ) -> bool:
-        """Wait until a batch recorded after ``since`` contains ``path``.
+    ) -> None:
+        """Assert that a batch recorded after ``since`` contains ``path``.
 
         Args:
             path: Path expected in a batch.
             since: Mark taken before the write that should produce it.
-
-        Returns:
-            True when such a batch arrived before the deadline.
         """
-        with self._changed:
-            return self._changed.wait_for(
-                lambda: any(str(path) in batch for batch in self.batches[since[0] :]),
-                timeout=_DEADLINE_S,
-            )
+        self._expect(
+            lambda: any(str(path) in batch for batch in self.batches[since[0] :]),
+            awaited=f"a batch containing {path}",
+            since=since,
+        )
 
-    def wait_for_event(
+    def expect_event(
         self,
         path: Path,
         kind: str,
         *,
         since: tuple[int, int] = (0, 0),
-    ) -> bool:
-        """Wait until an event of ``kind`` for ``path`` is recorded after ``since``.
+    ) -> None:
+        """Assert that an event of ``kind`` for ``path`` is recorded after ``since``.
 
         Args:
             path: Path expected in the event.
             kind: Event kind expected.
             since: Mark taken before the write that should produce it.
+        """
+        self._expect(
+            lambda: (str(path), kind) in self.events[since[1] :],
+            awaited=f"a {kind!r} event for {path}",
+            since=since,
+        )
 
-        Returns:
-            True when such an event arrived before the deadline.
+    def _expect(
+        self,
+        condition: Callable[[], bool],
+        *,
+        awaited: str,
+        since: tuple[int, int],
+    ) -> None:
+        """Wait for ``condition`` and fail with the recorded state on timeout.
+
+        The message names what was awaited, the bound, the mark and every batch
+        and event recorded so far, so a timeout in CI can be diagnosed from the
+        log alone.
+
+        Args:
+            condition: Predicate evaluated with the recorder lock held.
+            awaited: Human-readable description of what the wait expects.
+            since: Mark the condition is evaluated from.
         """
         with self._changed:
-            return self._changed.wait_for(
-                lambda: (str(path), kind) in self.events[since[1] :],
-                timeout=_DEADLINE_S,
+            met = self._changed.wait_for(condition, timeout=_DEADLINE_S)
+            diagnostic = (
+                f"timed out after {_DEADLINE_S}s waiting for {awaited} "
+                f"recorded after mark {since}; "
+                f"batches={self.batches!r}; events={self.events!r}"
             )
+        assert_that(met, description=diagnostic).is_true()
 
     def kinds_for(self, path: Path) -> list[str]:
         """Return every recorded event kind for ``path``.
@@ -224,26 +251,52 @@ def _start_watch(
     return worker, errors
 
 
+def _fence(root: Path, *, recorder: _WatchRecorder) -> tuple[int, int]:
+    """Write a uniquely named marker and wait until it is reported.
+
+    Native backends deliver events in write order and the debouncer only
+    merges batches, so once the marker's batch is seen every event caused by
+    an earlier write has already been recorded. The returned mark therefore
+    excludes all of them: a wait using it can only be satisfied by writes made
+    after this call.
+
+    Waiting for the marker itself, not for the first batch, also skips
+    anything FSEvents replays from just before the stream started.
+
+    Args:
+        root: Watched directory.
+        recorder: Sink for debounced batches and accepted events.
+
+    Returns:
+        Recorder mark taken after the marker's batch arrived.
+    """
+    marker = root / f".watch-fence-{next(_FENCE_IDS)}"
+    marker.write_text("fence\n", encoding="utf-8")
+    recorder.expect_batch_with(marker)
+    return recorder.mark()
+
+
 def _handshake_watcher(
     root: Path,
     *,
     ready: threading.Event,
     recorder: _WatchRecorder,
-) -> None:
-    """Prove native watches are installed with an observed sentinel write.
-
-    Waits for the sentinel itself rather than for the first batch: FSEvents
-    may first replay files written just before the stream started.
+) -> tuple[int, int]:
+    """Prove native watches are installed with an observed marker write.
 
     Args:
         root: Watched directory.
         ready: Native observer startup event.
         recorder: Sink for debounced batches and accepted events.
+
+    Returns:
+        Recorder mark that excludes everything delivered before the handshake.
     """
-    assert_that(ready.wait(timeout=_DEADLINE_S)).is_true()
-    sentinel = root / ".watch-ready"
-    sentinel.write_text("ready\n", encoding="utf-8")
-    assert_that(recorder.wait_for_batch_with(sentinel)).is_true()
+    assert_that(
+        ready.wait(timeout=_DEADLINE_S),
+        description=f"native observer did not start within {_DEADLINE_S}s",
+    ).is_true()
+    return _fence(root, recorder=recorder)
 
 
 def _stop_watch(stop: threading.Event, worker: threading.Thread) -> None:
@@ -264,32 +317,28 @@ def test_real_observer_reports_create_modify_and_stops_cleanly(
     ready = threading.Event()
     stop = threading.Event()
     recorder = _WatchRecorder()
-    target = tmp_path / "watched.py"
+    created = tmp_path / "created.py"
+    # The modify step uses a file that exists before observation starts, so
+    # no creation events for it can still be in flight when it is modified.
+    existing = tmp_path / "existing.py"
+    existing.write_text("value = 1\n", encoding="utf-8")
 
     worker, errors = _start_watch(tmp_path, recorder=recorder, ready=ready, stop=stop)
     try:
-        _handshake_watcher(tmp_path, ready=ready, recorder=recorder)
+        before_create = _handshake_watcher(tmp_path, ready=ready, recorder=recorder)
+        created.write_text("value = 1\n", encoding="utf-8")
+        recorder.expect_batch_with(created, since=before_create)
 
-        before_create = recorder.mark()
-        target.write_text("value = 1\n", encoding="utf-8")
-        assert_that(
-            recorder.wait_for_batch_with(target, since=before_create),
-        ).is_true()
-
-        before_modify = recorder.mark()
-        target.write_text("value = 2\n", encoding="utf-8")
-        assert_that(
-            recorder.wait_for_event(target, "modified", since=before_modify),
-        ).is_true()
-        assert_that(
-            recorder.wait_for_batch_with(target, since=before_modify),
-        ).is_true()
+        before_modify = _fence(tmp_path, recorder=recorder)
+        existing.write_text("value = 2\n", encoding="utf-8")
+        recorder.expect_event(existing, "modified", since=before_modify)
+        recorder.expect_batch_with(existing, since=before_modify)
     finally:
         _stop_watch(stop, worker)
 
     assert_that(worker.is_alive()).is_false()
     assert_that(errors).is_empty()
-    kinds = recorder.kinds_for(target)
+    kinds = recorder.kinds_for(created)
     assert_that(set(kinds)).is_subset_of({"created", "modified"})
     if sys.platform != "darwin":
         # inotify and ReadDirectoryChangesW report the creation as its own
@@ -317,9 +366,7 @@ def test_real_observer_expands_directory_move_events(tmp_path: Path) -> None:
         _handshake_watcher(tmp_path, ready=ready, recorder=recorder)
         before_move = recorder.mark()
         source.rename(destination)
-        assert_that(
-            recorder.wait_for_batch_with(expected, since=before_move),
-        ).is_true()
+        recorder.expect_batch_with(expected, since=before_move)
     finally:
         _stop_watch(stop, worker)
 
@@ -344,7 +391,7 @@ def test_real_observer_ignores_lintro_run_output(tmp_path: Path) -> None:
         # only merges, never reorders, so once the later write is reported
         # an unfiltered report event would already be in some batch.
         target.write_text("value = 1\n", encoding="utf-8")
-        assert_that(recorder.wait_for_batch_with(target)).is_true()
+        recorder.expect_batch_with(target)
     finally:
         _stop_watch(stop, worker)
 
