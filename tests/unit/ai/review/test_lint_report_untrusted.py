@@ -48,8 +48,24 @@ def _digest(
     Returns:
         The digest, the counts and the header note.
     """
+    return _digest_text(tmp_path, json.dumps({"results": [entry]}))
+
+
+def _digest_text(
+    tmp_path: Path,
+    text: str,
+) -> tuple[str | None, LintRunCounts, str]:
+    """Write *text* as the report and digest it as ``--lint-report`` does.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        text: The report file's raw contents.
+
+    Returns:
+        The digest, the counts and the header note.
+    """
     report = tmp_path / "results.json"
-    report.write_text(json.dumps({"results": [entry]}), encoding="utf-8")
+    report.write_text(text, encoding="utf-8")
     context = ReviewContext(
         base_ref="main",
         head_ref="abc123",
@@ -109,6 +125,16 @@ def _digest(
             {"tool": "tsc", "success": True, "issues_count": 3, "issues": []},
             "has 'issues_count' 3 but lists 0 issue(s)",
             id="issues-count-mismatch",
+        ),
+        pytest.param(
+            {"tool": "tsc", "success": True, "issues_count": None},
+            "has a non-int 'issues_count'",
+            id="null-issues-count",
+        ),
+        pytest.param(
+            {"tool": "ruff", "success": True, "remaining": -1},
+            "has a negative 'remaining'",
+            id="negative-remaining",
         ),
     ],
 )
@@ -230,3 +256,37 @@ def test_null_residual_reason_is_not_repeated(tmp_path: Path) -> None:
         "Tool: mypy | did not run / incomplete: remaining issues unknown\n",
     )
     assert_that(digest).does_not_contain("(remaining issues unknown)")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param(
+            '{"results": [{"tool": "tsc", "success": true}], "extra": '
+            + "9" * 5000
+            + "}",
+            id="integer-past-the-digit-limit",
+        ),
+        pytest.param(
+            '{"results": [], "extra": ' + "[" * 100_000 + "]" * 100_000 + "}",
+            id="nesting-too-deep",
+        ),
+    ],
+)
+def test_undecodable_report_is_a_header_note_not_an_error(
+    tmp_path: Path,
+    text: str,
+) -> None:
+    """A report the decoder cannot read is rejected, never raised.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        text: Raw report contents the JSON decoder cannot handle.
+    """
+    digest, counts, note = _digest_text(tmp_path, text)
+
+    assert_that(digest).is_none()
+    assert_that((counts.ran, counts.incomplete)).is_equal_to((0, 0))
+    assert_that(note).starts_with(
+        f"{LINT_FACTS_UNAVAILABLE}: lint report is not valid JSON",
+    )

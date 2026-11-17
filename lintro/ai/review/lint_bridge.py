@@ -282,9 +282,13 @@ def load_lint_report(path: Path) -> list[ToolResult]:
             f"(limit {MAX_LINT_REPORT_BYTES})"
         )
         raise LintReportError(msg)
+    # Any failure to read or decode the report is a rejected report, never
+    # an error that escapes the review: ``ValueError`` covers malformed JSON,
+    # bad UTF-8 and integers past the interpreter's digit limit, and
+    # ``RecursionError`` covers nesting too deep to decode (#3497).
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         msg = f"lint report is not valid JSON: {path} ({exc})"
         raise LintReportError(msg) from exc
 
@@ -413,7 +417,9 @@ def restrict_lint_results_to_files(
                     and not kept
                     and not is_incomplete_result(result)
                 ),
-                issues_count=len(kept),
+                # A fix report that counts remaining issues without listing
+                # them keeps its count, so it never reads as a silent failure.
+                issues_count=len(kept) if result.issues else result.issues_count,
                 issues=kept,
             ),
         )

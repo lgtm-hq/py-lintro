@@ -15,6 +15,15 @@ claim. An entry whose claims disagree (a skip beside a failure status, a
 clean status beside a failed verdict, a failure status with no findings)
 is reported as an execution failure naming the contradiction, so its warning
 reaches the prompt instead of a clean verdict.
+
+**A fix report's verdict is its ``remaining`` count.** Every fix row carries
+``remaining`` (with ``fixed`` and ``net_resolved``), and its ``issues`` are
+the findings detected before the fix merged with the ones left after it, with
+nothing marking which is which. So the prompt receives those findings only
+when ``remaining`` equals their number (none were fixed, and every listed
+finding remains). With nothing remaining it receives none; with some
+remaining it receives none plus a note giving the count. An unknown residual
+stays incomplete and drops the pre-fix findings, which may have been fixed.
 """
 
 from __future__ import annotations
@@ -26,7 +35,11 @@ from lintro.models.core.tool_outcome import ToolOutcome, Unavailable
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 
-__all__ = ["report_tool_result"]
+__all__ = ["REPORT_NOTE_METADATA_KEY", "report_tool_result"]
+
+#: ``ToolResult.metadata`` key for a note the digest prints for a tool whose
+#: report entry is complete but whose findings cannot be listed.
+REPORT_NOTE_METADATA_KEY: Final[str] = "lint_report_note"
 
 #: Boolean markers the report writer emits; absent means false.
 _FLAGS: Final[tuple[str, ...]] = (
@@ -140,11 +153,35 @@ def _validated(
         msg = f"has an unknown 'status' {status!r}"
         raise ValueError(msg)
     flags = {key: bool(_typed(entry, key, bool)) for key in _FLAGS}
-    count = _count(entry, "issues_count")
+    count: int | None = _typed(entry, "issues_count", int)
+    if count is not None and count < 0:
+        msg = "has a negative 'issues_count'"
+        raise ValueError(msg)
     if count is not None and count != len(issues):
         msg = f"has 'issues_count' {count} but lists {len(issues)} issue(s)"
         raise ValueError(msg)
     return success, status, flags
+
+
+def _fix_remaining(entry: Mapping[str, Any]) -> tuple[bool, int | None]:
+    """Read a fix row's ``remaining`` count, validating its accounting.
+
+    A mistyped ``fixed`` / ``net_resolved``, or a mistyped or negative
+    ``remaining``, raises ``ValueError`` from the field readers.
+
+    Args:
+        entry: One per-tool report object.
+
+    Returns:
+        Whether the entry is a fix row, and its remaining count (None when the
+        row says the residual is unknown).
+    """
+    if "remaining" not in entry:
+        return False, None
+    for key in ("fixed", "net_resolved"):
+        if entry.get(key) is not None:
+            _typed(entry, key, int)
+    return True, _count(entry, "remaining")
 
 
 def _contradiction(
@@ -223,6 +260,13 @@ def report_tool_result(
         piece of evidence agrees, and otherwise incomplete.
     """
     success, status, flags = _validated(entry, issues)
+    fix_row, remaining = _fix_remaining(entry)
+    if fix_row:
+        # The listed findings are fix history; only the count is a verdict.
+        listed = issues if remaining == len(issues) else ()
+        found = bool(remaining)
+    else:
+        listed, found = issues, bool(issues)
     parse_failures = _count(entry, "parse_failures_count")
     output = _text(entry, "output")
     timed_out = flags["timed_out"] or status == "timed_out"
@@ -238,8 +282,15 @@ def report_tool_result(
         status=status,
         flags=flags,
         incomplete=incomplete,
-        has_issues=bool(issues),
+        has_issues=found,
     )
+    if (
+        problem is None
+        and fix_row
+        and remaining is None
+        and not (incomplete or flags["unavailable"])
+    ):
+        problem = "is a fix report with an unknown residual but no reason"
     if problem is None and flags["unavailable"]:
         return ToolResult.from_outcome(
             ToolOutcome(
@@ -260,11 +311,22 @@ def report_tool_result(
             output=output,
         )
     lead = _lead(name, problem=problem, status=status)
+    unlisted = bool(fix_row and remaining and not listed)
     return ToolResult(
         name=name,
         success=success and not incomplete and problem is None,
-        issues_count=len(issues),
-        issues=list(issues),
+        issues_count=remaining if unlisted and remaining else len(listed),
+        issues=list(listed),
+        metadata=(
+            {
+                REPORT_NOTE_METADATA_KEY: (
+                    f"fix report: {remaining} issue(s) remain after the fix; "
+                    "the report does not say which"
+                ),
+            }
+            if unlisted and lead is None and not incomplete
+            else {}
+        ),
         output=f"{lead}\n{output}" if lead and output else lead or output,
         execution_failed=flags["execution_failed"] or lead is not None,
         timed_out=timed_out,

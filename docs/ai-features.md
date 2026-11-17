@@ -555,8 +555,13 @@ can make a tool look finished on bad evidence: an entry with a missing or non-bo
 `issues_count` that does not match its issues makes the report unusable (the header note
 names the entry), and an entry whose `status` and flags disagree (a skip beside a
 failure status, a clean status beside a failed verdict) is reported as incomplete with
-the contradiction as its reason. Tool text in the digest has `&`, `<` and `>` escaped,
-and the whole section sits inside the prompt's random boundary fence as untrusted data.
+the contradiction as its reason. A report written by a fix run (`lintro fmt`) lists each
+tool's findings from before and after the fix together, so its verdict is the
+`remaining` count: with nothing remaining the tool is clean, when every listed finding
+remains they are all shown, and otherwise none is shown and the digest notes how many
+remain, since the report does not say which. Tool text in the digest has `&`, `<` and
+`>` escaped, and the whole section sits inside the prompt's random boundary fence as
+untrusted data.
 
 ### Review coverage completeness
 

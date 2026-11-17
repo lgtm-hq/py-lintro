@@ -10,6 +10,7 @@ from __future__ import annotations
 from html import escape
 
 from lintro.ai.prompts.review import format_lint_results_section
+from lintro.ai.review.lint_report_entry import REPORT_NOTE_METADATA_KEY
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.result_reason import incomplete_reason, unavailable_reason
 
@@ -92,7 +93,8 @@ def _tool_note(result: ToolResult) -> str | None:
     reason = incomplete_reason(result)
     if reason:
         return f"did not run / incomplete: {reason}"
-    return unavailable_reason(result)
+    note = result.metadata.get(REPORT_NOTE_METADATA_KEY)
+    return unavailable_reason(result) or (note if isinstance(note, str) else None)
 
 
 def _text(value: object) -> str:
