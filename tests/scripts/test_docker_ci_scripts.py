@@ -908,7 +908,8 @@ def test_sweep_ci_ghcr_tags_accepts_safe_tag_prefix(
 #: ``$GH_LIST_COST`` (per package via ``$GH_LIST_COSTS="pkg=s ..."``, or
 #: ``$GH_LIST_SLOW_COST`` from request ``$GH_LIST_SLOW_FROM`` on), deletes by
 #: ``$GH_DELETE_COST``.
-#: ``$GH_DELETE_FAIL`` fails every DELETE with that stderr; ``$GH_DELETE_HANG``
+#: ``$GH_DELETE_FAIL`` fails every DELETE with that stderr, and
+#: ``$GH_DELETE_FAIL_<id>`` only the DELETE of that version; ``$GH_DELETE_HANG``
 #: logs the DELETE (as if it committed), prints ``$GH_DELETE_HANG_MSG`` to
 #: stderr if set, and then hangs; ``$GH_RECHECK_HANG_<id>`` prints its value
 #: to stderr and then hangs, so ``timeout(1)`` must stop it.
@@ -926,6 +927,13 @@ if [[ "$*" == *"--method DELETE"* ]]; then
   if [[ -n "${GH_DELETE_FAIL:-}" ]]; then
     echo "$GH_DELETE_FAIL" >&2
     exit 1
+  fi
+  if [[ "$*" =~ /versions/([0-9]+) ]]; then
+    delete_fail_var="GH_DELETE_FAIL_${BASH_REMATCH[1]}"
+    if [[ -n "${!delete_fail_var:-}" ]]; then
+      echo "${!delete_fail_var}" >&2
+      exit 1
+    fi
   fi
   if [[ -n "${GH_DELETE_HANG:-}" ]]; then
     if [[ -n "${GH_DELETE_HANG_MSG:-}" ]]; then
@@ -2004,9 +2012,41 @@ def test_sweep_ci_ghcr_tags_stops_after_repeated_refusals(tmp_path: Path) -> Non
     assert_that(run.gh_log.count("--method DELETE")).is_equal_to(3)
     assert_that(run.gh_log).does_not_contain("py-lintro/versions/304")
     assert_that(run.result.stdout).contains(
-        "::error::Sweep finished with errors: 0 deleted, 3 remaining"
-        " (repeatedly refused: 3 failed rechecks or DELETE calls in a row"
-        " (last: DELETE of py-lintro:303); stopped all rechecks and DELETE calls)",
+        "::error::Sweep finished with errors: 0 deleted, 6 remaining"
+        " (repeatedly refused: 3 failed rechecks or DELETE calls since the last"
+        " successful DELETE (last: DELETE of py-lintro:303); stopped all"
+        " rechecks and DELETE calls)",
+    )
+
+
+def test_sweep_ci_ghcr_tags_a_successful_delete_resets_the_refusal_count(
+    tmp_path: Path,
+) -> None:
+    """Fail, fail, success, fail, fail never reaches three refusals in a row.
+
+    Only a successful DELETE resets the count (#3510), so the run carries on
+    to the last candidate, fails for the four refusals, and counts the four
+    refused versions as remaining.
+    """
+    refused = "gh: Unprocessable Entity (HTTP 422)"
+    run = _run_sweep(
+        tmp_path,
+        {
+            **{f"GH_DELETE_FAIL_{vid}": refused for vid in (301, 302, 304, 305)},
+            "GH_VERSIONS": _rows(
+                *_PERSISTENT_ROWS,
+                *_sole_ci_rows(301, 302, 303, 304, 305, 306),
+            ),
+        },
+    )
+
+    assert_that(run.result.returncode).is_equal_to(1)
+    assert_that(run.gh_log.count("--method DELETE")).is_equal_to(6)
+    assert_that(run.result.stdout).contains("Deleted py-lintro version 303")
+    assert_that(run.result.stdout).contains("Deleted py-lintro version 306")
+    assert_that(run.result.stdout).does_not_contain("repeatedly refused")
+    assert_that(run.result.stdout).contains(
+        "::error::Sweep finished with errors: 2 deleted, 4 remaining\n",
     )
 
 
@@ -2072,6 +2112,37 @@ def test_sweep_ci_ghcr_tags_treats_a_delete_404_as_already_gone(
     )
     assert_that(run.result.stdout).contains("Sweep complete: 0 deleted")
     assert_that(run.result.stderr).does_not_contain("Failed to delete")
+    # Both rechecks had just found it, so the 404 is flagged, per version and
+    # for the run: a token that can read but not delete looks just like this.
+    assert_that(run.result.stdout).contains(
+        "::warning::The DELETE of py-lintro version 302 answered 404"
+        " right after two rechecks found it (#3510)",
+    )
+    assert_that(run.result.stdout).contains(
+        "::warning::The ci-* sweep deleted nothing and 2 DELETE call(s)"
+        " answered 404 right after clean rechecks.",
+    )
+
+
+def test_sweep_ci_ghcr_tags_flags_a_delete_404_without_the_run_warning(
+    tmp_path: Path,
+) -> None:
+    """One 404 next to a real deletion warns for the version, not the run."""
+    run = _run_sweep(
+        tmp_path,
+        {
+            "GH_DELETE_FAIL_301": "gh: Not Found (HTTP 404)",
+            "GH_VERSIONS": _rows(*_PERSISTENT_ROWS, *_sole_ci_rows(301, 302)),
+        },
+    )
+
+    assert_that(run.result.returncode).is_equal_to(0)
+    assert_that(run.result.stdout).contains("Deleted py-lintro version 302")
+    assert_that(run.result.stdout).contains(
+        "::warning::The DELETE of py-lintro version 301 answered 404",
+    )
+    assert_that(run.result.stdout).does_not_contain("sweep deleted nothing")
+    assert_that(run.result.stdout).contains("Sweep complete: 1 deleted\n")
 
 
 def test_sweep_ci_ghcr_tags_never_reads_a_timed_out_recheck_as_a_404(
@@ -2098,6 +2169,35 @@ def test_sweep_ci_ghcr_tags_never_reads_a_timed_out_recheck_as_a_404(
     assert_that(run.result.stdout).contains("Sweep finished with errors: 0 deleted")
 
 
+def test_sweep_ci_ghcr_tags_never_reads_a_timed_out_recheck_as_a_403(
+    tmp_path: Path,
+) -> None:
+    """A recheck that printed ``HTTP 403`` and then timed out stops nothing.
+
+    A timed-out call has no answer, so it is an ordinary failed recheck, not
+    the forbidden-or-rate-limited stop: the run fails but still deletes the
+    other candidates.
+    """
+    run = _run_sweep(
+        tmp_path,
+        {
+            "GH_RECHECK_HANG_301": "gh: Forbidden (HTTP 403)",
+            "GH_CALL_TIMEOUT_SECONDS": "1",
+            "GH_VERSIONS": _THREE_CANDIDATES,
+        },
+    )
+
+    assert_that(run.result.returncode).is_equal_to(1)
+    assert_that(run.result.stderr).contains("Failed to re-check version 301")
+    assert_that(run.result.stderr).contains("gh call timed out after 1s")
+    assert_that(run.result.stdout).does_not_contain("rate limited or forbidden")
+    assert_that(run.result.stdout).contains("Deleted py-lintro version 302")
+    assert_that(run.result.stdout).contains("Deleted py-lintro version 303")
+    assert_that(run.result.stdout).contains(
+        "::error::Sweep finished with errors: 2 deleted, 1 remaining\n",
+    )
+
+
 def test_sweep_ci_ghcr_tags_reports_errors_ahead_of_a_partial_stop(
     tmp_path: Path,
 ) -> None:
@@ -2115,7 +2215,8 @@ def test_sweep_ci_ghcr_tags_reports_errors_ahead_of_a_partial_stop(
     )
 
     expected = (
-        "Sweep finished with errors: 1 deleted, 1 remaining"
+        # 301's failed recheck and 303 past the cap are both still there.
+        "Sweep finished with errors: 1 deleted, 2 remaining"
         " (cap of 1 deletions reached)"
     )
     assert_that(run.result.returncode).is_equal_to(1)
