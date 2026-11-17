@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.181.5] - 2026-11-17
+
+### Fixed
+
+- **ci**: pin the GHCR sweep's refusal counter and flag all-404 runs (#3514) (c5605ca)
+
 ## [0.181.4] - 2026-11-17
 
 ### Fixed
