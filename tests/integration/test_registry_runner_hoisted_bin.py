@@ -33,6 +33,7 @@ import base64
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -57,7 +58,8 @@ from lintro.tools.core import snapshots
 from lintro.tools.core.npx_cache import npx_cache_dir
 from lintro.utils import file_cache
 from lintro.utils.execution.result_shaping import classify_runner_failure
-from lintro.utils.npx_integrity import NpxIntegrityError
+from lintro.utils.npx_install_lock import install_lock, install_lock_path
+from lintro.utils.npx_integrity import NpxIntegrityError, verify_entry
 from tests.integration._tools import NO_MIN_VERSION, require_command
 
 _PIN = get_tool_version("prettier") or ""
@@ -1766,3 +1768,432 @@ def test_bunx_runs_the_pin_beside_a_hoisted_copy_and_the_gate_reports_it(
     assert_that(snapshot.version).is_equal_to(_PIN)
     assert_that(code).is_zero()
     assert_that(launched).is_equal_to(f"registry {_PIN}")
+
+
+# ---------------------------------------------------------------------------
+# Concurrent first installs (#3421)
+# ---------------------------------------------------------------------------
+
+#: Preloaded into npx: after npx creates ``_npx/<hash>``, and before it takes
+#: npm's lock there, wait for a release file. npm leaves that gap open for
+#: microseconds; this holds it open so another run reliably meets it.
+_PAUSE_AFTER_ENTRY_MKDIR = """
+const fs = require('node:fs');
+const fsp = require('node:fs/promises');
+const [paused, release] = %s;
+const mkdir = fsp.mkdir;
+fsp.mkdir = async function (path, options) {
+  const result = await mkdir.call(this, path, options);
+  if (/[\\\\/]_npx[\\\\/][0-9a-f]{16}$/.test(String(path)) && !fs.existsSync(release)) {
+    fs.writeFileSync(paused, '');
+    const until = Date.now() + 120000;
+    while (!fs.existsSync(release) && Date.now() < until) {
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  }
+  return result;
+};
+"""
+
+
+def _pausing_npx(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Write an ``npx`` that runs real npm with :data:`_PAUSE_AFTER_ENTRY_MKDIR`.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+
+    Returns:
+        The ``npx`` wrapper, the file it writes once paused, and the file
+        that releases it.
+    """
+    assert _NPX is not None and _NODE is not None
+    directory = tmp_path / "pausing-npx"
+    directory.mkdir()
+    paused, release = directory / "paused", directory / "release"
+    preload = directory / "pause.cjs"
+    preload.write_text(
+        _PAUSE_AFTER_ENTRY_MKDIR % json.dumps([str(paused), str(release)]),
+        encoding="utf-8",
+    )
+    npx = directory / "npx"
+    npx.write_text(
+        f'#!/bin/sh\nexec "{_NODE}" --require "{preload}" '
+        f'"{os.path.realpath(_NPX)}" "$@"\n',
+        encoding="utf-8",
+    )
+    npx.chmod(0o755)
+    return npx, paused, release
+
+
+def _wait_for(condition: Callable[[], bool], seconds: float) -> bool:
+    """Poll *condition* until it holds or *seconds* pass.
+
+    Args:
+        condition: What to wait for.
+        seconds: Longest wait.
+
+    Returns:
+        Whether *condition* held in time.
+    """
+    until = time.monotonic() + seconds
+    while not condition():
+        if time.monotonic() >= until:
+            return False
+        time.sleep(0.05)
+    return True
+
+
+def _start_chk(
+    project: Path,
+    env: dict[str, str],
+    log: Path,
+    timeout: int = 120,
+    *,
+    action: str = "chk",
+    launcher: tuple[str, ...] = ("-m", "lintro"),
+) -> subprocess.Popen[str]:
+    """Start the real ``lintro chk`` (or *action*) on ``a.css`` with prettier.
+
+    Args:
+        project: Directory to run in.
+        env: Environment from :func:`_isolate`.
+        log: File that receives the run's stderr.
+        timeout: prettier's timeout in seconds.
+        action: lintro command, ``chk`` or ``fmt``.
+        launcher: Interpreter arguments that start lintro.
+
+    Returns:
+        The running process, reporting as JSON; stderr goes to *log*.
+    """
+    with log.open("w", encoding="utf-8") as stderr:
+        return subprocess.Popen(  # nosec B603 - fixed argv, shell=False
+            [
+                sys.executable,
+                *launcher,
+                action,
+                "a.css",
+                "--tools",
+                "prettier",
+                "--tool-options",
+                f"prettier:timeout={timeout}",
+                "--output-format",
+                "json",
+            ],
+            cwd=project,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=stderr,
+            text=True,
+        )
+
+
+def _prettier_row(run: subprocess.Popen[str]) -> tuple[int, dict[str, object]]:
+    """Wait for a ``lintro chk`` run and return its exit code and prettier row.
+
+    Args:
+        run: Process from :func:`_start_chk`.
+
+    Returns:
+        The exit code and prettier's row of the JSON report.
+    """
+    stdout, _ = run.communicate(timeout=300)
+    report = json.loads(stdout[stdout.index("{") :])
+    return run.returncode, next(
+        row for row in report["results"] if row["tool"] == "prettier"
+    )
+
+
+@requires_npx
+def test_two_cold_runs_install_the_pin_once_and_both_pass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+) -> None:
+    """A second run meeting the first run's half-written entry waits for it.
+
+    Run A's npx pauses after creating its ``_npx`` entry, before it locks it.
+    Run B starts then. Before #3421, B's cache gate moved A's half-written
+    entry aside and A's npx failed with ``ENOENT`` on ``concurrency.lock``.
+    Now A installs under lintro's exclusive per-pin lock, B waits for it and
+    runs the entry A installed, and both pass with one valid entry.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+    """
+    _require_clean_ancestry(tmp_path)
+    assert _NODE is not None
+    npx, paused, release = _pausing_npx(tmp_path)
+    project = _css_project(tmp_path / "proj")
+    env = _isolate(
+        monkeypatch,
+        tmp_path,
+        {"npx": str(npx), "node": _NODE},
+        registry,
+        {},
+    )
+    cache = Path(env["HOME"]) / ".lintro" / "cache" / "npx" / f"prettier@{_PIN}"
+    npx_dir = cache / "_npx"
+
+    first = _start_chk(project, env, tmp_path / "first.log")
+    try:
+        assert_that(_wait_for(paused.exists, 120)).described_as(
+            "run A's npx reached its entry",
+        ).is_true()
+        entry = next(npx_dir.iterdir())
+        second = _start_chk(project, env, tmp_path / "second.log")
+        # B either removes the half-written entry (the bug) or waits for A's
+        # lock, which it logs; give it time to do one of the two.
+        _wait_for(
+            lambda: not entry.exists()
+            or "another lintro run"
+            in (tmp_path / "second.log").read_text(encoding="utf-8"),
+            60,
+        )
+    finally:
+        release.touch()
+    first_code, first_row = _prettier_row(first)
+    second_code, second_row = _prettier_row(second)
+
+    for code, row in ((first_code, first_row), (second_code, second_row)):
+        assert_that(row.get("execution_failed")).described_as(
+            str(row.get("output")),
+        ).is_false()
+        assert_that(code).described_as(str(row.get("output"))).is_zero()
+    entries = sorted(npx_dir.iterdir())
+    assert_that([path.name for path in entries]).is_equal_to([entry.name])
+    verdict = verify_entry(entries[0], cache.resolve(), npm_cache=cache)
+    assert_that(isinstance(verdict, str)).described_as(str(verdict)).is_false()
+
+
+@requires_npx
+def test_first_install_outlasting_the_timeout_fails_the_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+) -> None:
+    """A wait for another run's first install that runs out is not a skip.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+    """
+    _require_clean_ancestry(tmp_path)
+    assert _NPX is not None and _NODE is not None
+    project = _css_project(tmp_path / "proj")
+    env = _isolate(monkeypatch, tmp_path, {"npx": _NPX, "node": _NODE}, registry, {})
+    cache = Path(env["HOME"]) / ".lintro" / "cache" / "npx" / f"prettier@{_PIN}"
+
+    with install_lock(cache, shared=False, deadline=math.inf):
+        code, prettier = _prettier_row(
+            _start_chk(project, env, tmp_path / "run.log", timeout=3),
+        )
+
+    assert_that(code).described_as(str(prettier.get("output"))).is_not_zero()
+    assert_that(prettier.get("execution_failed")).is_true()
+    assert_that(prettier.get("findings_complete", False)).is_false()
+    assert_that(str(prettier["output"])).contains("still installing")
+    assert_that(cache.exists()).described_as("npx never started").is_false()
+
+
+#: Runs lintro with ``flock`` failing with ``ENOTSUP`` on the install lock of
+#: the spec in argv[1] only, as on a network or FUSE home without file locks.
+_NO_FLOCK_LAUNCHER = """
+import errno, fcntl, os, runpy, sys
+from lintro.tools.core.npx_cache import npx_cache_dir
+from lintro.utils.npx_install_lock import install_lock_path
+lock = install_lock_path(npx_cache_dir(sys.argv.pop(1)))
+real_flock = fcntl.flock
+def flock(fd, operation):
+    try:
+        ours = os.path.samestat(os.fstat(fd), os.stat(lock))
+    except OSError:
+        ours = False
+    if ours:
+        raise OSError(errno.ENOTSUP, os.strerror(errno.ENOTSUP))
+    return real_flock(fd, operation)
+fcntl.flock = flock
+runpy.run_module("lintro", run_name="__main__", alter_sys=True)
+"""
+
+
+def _lock_dir_hazard(lock: Path) -> None:
+    lock.unlink(missing_ok=True)
+    lock.mkdir()
+
+
+def _lock_symlink_hazard(lock: Path) -> None:
+    lock.unlink(missing_ok=True)
+    lock.symlink_to(lock.with_name("elsewhere"))
+
+
+def _lock_unwritable_hazard(lock: Path) -> None:
+    lock.unlink(missing_ok=True)
+    lock.parent.chmod(0o555)
+
+
+#: How the warm run's lock is made unusable, the command, and the reason.
+_LOCK_HAZARDS = [
+    pytest.param(_lock_dir_hazard, "chk", "it is a directory", id="directory-chk"),
+    pytest.param(_lock_dir_hazard, "fmt", "it is a directory", id="directory-fmt"),
+    pytest.param(_lock_symlink_hazard, "chk", "symbolic link", id="symlink-chk"),
+    pytest.param(
+        _lock_unwritable_hazard,
+        "chk",
+        "Permission denied",
+        id="unwritable-directory-chk",
+        marks=pytest.mark.skipif(
+            sys.platform == "win32" or os.geteuid() == 0,
+            reason="POSIX permissions that bind the running user",
+        ),
+    ),
+]
+
+
+def _assert_lock_refusal(code: int, row: dict[str, object], *needles: str) -> None:
+    """Require an execution failure with incomplete findings naming the lock.
+
+    Args:
+        code: lintro's exit code.
+        row: prettier's row of the JSON report.
+        *needles: Text the reason must contain.
+    """
+    output = str(row.get("output"))
+    assert_that(code).described_as(output).is_not_zero()
+    assert_that(row.get("execution_failed")).described_as(output).is_true()
+    assert_that(row.get("findings_complete", False)).is_false()
+    assert_that(output).contains(*needles)
+
+
+@requires_npx
+@pytest.mark.parametrize(("hazard", "action", "reason"), _LOCK_HAZARDS)
+def test_unusable_install_lock_fails_a_warm_run_instead_of_skipping(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+    hazard: Callable[[Path], None],
+    action: str,
+    reason: str,
+) -> None:
+    """A lock lintro cannot use is an execution failure, never unavailable.
+
+    Sol's round-1 reproduction: with a directory at the lock path on a warm
+    cache, ``lintro chk`` reported prettier unavailable and exited 0.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+        hazard: Makes the lock unusable.
+        action: lintro command.
+        reason: What the refusal must say about the lock.
+    """
+    _require_clean_ancestry(tmp_path)
+    assert _NPX is not None and _NODE is not None
+    project = _css_project(tmp_path / "proj")
+    env = _isolate(monkeypatch, tmp_path, {"npx": _NPX, "node": _NODE}, registry, {})
+    cache = Path(env["HOME"]) / ".lintro" / "cache" / "npx" / f"prettier@{_PIN}"
+    _prettier_row(_start_chk(project, env, tmp_path / "warm.log"))  # warm the pin
+    lock = install_lock_path(cache)
+    hazard(lock)
+    try:
+        code, row = _prettier_row(
+            _start_chk(project, env, tmp_path / "run.log", action=action),
+        )
+    finally:
+        lock.parent.chmod(0o755)
+
+    _assert_lock_refusal(code, row, str(lock), reason)
+
+
+@requires_npx
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX flock")
+@pytest.mark.parametrize("cache_state", ["warm", "cold"])
+def test_filesystem_without_flock_fails_the_run_naming_the_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+    cache_state: str,
+) -> None:
+    """``flock`` failing with ``ENOTSUP`` never runs npx unlocked or skips.
+
+    Fable's round-1 reproduction: warm, prettier was reported unavailable
+    with exit 0; cold, the run exited 1 without naming the lock.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+        cache_state: Whether the pin is installed before the checked run.
+    """
+    _require_clean_ancestry(tmp_path)
+    assert _NPX is not None and _NODE is not None
+    project = _css_project(tmp_path / "proj")
+    env = _isolate(monkeypatch, tmp_path, {"npx": _NPX, "node": _NODE}, registry, {})
+    cache = Path(env["HOME"]) / ".lintro" / "cache" / "npx" / f"prettier@{_PIN}"
+    if cache_state == "warm":
+        _prettier_row(_start_chk(project, env, tmp_path / "warm.log"))
+
+    code, row = _prettier_row(
+        _start_chk(
+            project,
+            env,
+            tmp_path / "run.log",
+            launcher=("-c", _NO_FLOCK_LAUNCHER, f"prettier@{_PIN}"),
+        ),
+    )
+
+    _assert_lock_refusal(
+        code,
+        row,
+        str(install_lock_path(cache)),
+        "does not support file locks",
+        "symbolic link",
+    )
+
+
+@requires_npx
+def test_lintro_cache_linked_to_another_directory_runs_cold_and_warm(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry: str,
+) -> None:
+    """``~/.lintro/cache`` as a link to a local directory is a working setup.
+
+    It is the remedy the no-file-locks refusal gives, since the cache root
+    has no setting: the root is resolved before the per-pin caches are
+    checked against it, so the install lock, the gate and the integrity
+    check all work through the link.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped environment override.
+        registry: Localhost registry URL.
+    """
+    _require_clean_ancestry(tmp_path)
+    assert _NPX is not None and _NODE is not None
+    project = _css_project(tmp_path / "proj")
+    env = _isolate(monkeypatch, tmp_path, {"npx": _NPX, "node": _NODE}, registry, {})
+    local = tmp_path / "local-disk" / "lintro-cache"
+    local.mkdir(parents=True)
+    root = Path(env["HOME"]) / ".lintro" / "cache"
+    root.parent.mkdir(parents=True)
+    root.symlink_to(local)
+
+    runs = [
+        _prettier_row(_start_chk(project, env, tmp_path / f"{state}.log"))
+        for state in ("cold", "warm")
+    ]
+
+    for code, row in runs:
+        assert_that(row.get("execution_failed")).described_as(
+            str(row.get("output")),
+        ).is_false()
+        assert_that(code).described_as(str(row.get("output"))).is_zero()
+    real_cache = local / "npx" / f"prettier@{_PIN}"
+    assert_that(
+        sorted(path.name for path in (real_cache / "_npx").iterdir()),
+    ).is_length(1)
+    assert_that(install_lock_path(real_cache).is_file()).is_true()

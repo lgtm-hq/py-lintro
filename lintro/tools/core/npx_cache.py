@@ -72,6 +72,10 @@ from pathlib import Path
 
 from loguru import logger
 
+from lintro.utils.npx_install_lock import (
+    NpxInstallLockError,
+    shared_install_lock_now,
+)
 from lintro.utils.npx_integrity import (
     FUTURE_LOCK_SECONDS,
     STALE_PREFIX,
@@ -698,10 +702,64 @@ def repair_npx_cache(
 
     An unsafe cache, or an entry that cannot be locked or repaired, raises
     :class:`NpxCacheError` from the helpers called here.
+
+    The repair runs under lintro's shared per-pin install lock, taken without
+    waiting (:mod:`lintro.utils.npx_install_lock`, #3421): while another lintro
+    run installs the pin, npx's entry may be half-written and unlocked, so the
+    cache is left alone and the spawn-time check, which waits, takes over.
+
+    Raises:
+        NpxCacheLockError: Another lintro run holds the install lock, or the
+            lock cannot be used; the spawn-time check then fails the run.
     """
     real = check_cache_location(cache, pathsep=pathsep)
     if not real.is_dir():
         return
+    with contextlib.ExitStack() as stack:
+        try:
+            held = stack.enter_context(shared_install_lock_now(cache))
+        except NpxInstallLockError as exc:
+            # Not a reason to call the tool unavailable: the spawn-time check
+            # meets the same lock and fails the run as an execution failure.
+            raise NpxCacheLockError(
+                f"{exc} The spawn-time check reports it.",
+            ) from exc
+        if not held:
+            # Another lintro run is installing the pin and npx's entry may be
+            # half-written; the spawn-time check waits for it instead (#3421).
+            raise NpxCacheLockError(
+                f"another lintro run is installing the pin into {real}; "
+                "the cache gate leaves it alone.",
+            )
+        _repair_entries(
+            real,
+            cache,
+            package=package,
+            pin=pin,
+            binary=binary,
+            lock_wait=lock_wait,
+        )
+
+
+def _repair_entries(
+    real: Path,
+    cache: Path,
+    *,
+    package: str,
+    pin: str,
+    binary: str,
+    lock_wait: float,
+) -> None:
+    """Repair every entry of a per-pin cache, under the shared install lock.
+
+    Args:
+        real: The per-pin cache, resolved and checked.
+        cache: The per-pin cache as npx is given it.
+        package: npm package name.
+        pin: Exact pinned version.
+        binary: Executable name.
+        lock_wait: Longest wait for another process's lock on an entry.
+    """
     # A whole ``_npx`` set aside by an earlier release lands beside it.
     _delete_leftovers(real)
     npx_root = real / "_npx"

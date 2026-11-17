@@ -1562,6 +1562,50 @@ Rationale:
    the check costs about 0.1–0.25 s the first time in a process for html-validate (13
    packages, 944 files) and 10–30 ms per spawn after that.
 
+   **One first install per pin at a time.** npx leaves a new `_npx` entry unlocked for a
+   moment after creating it, and again while it finishes writing it, so another Lintro
+   run that reached the entry then could remove it from under npx or refuse it as
+   broken. Lintro therefore keeps an OS file lock per pin,
+   `~/.lintro/cache/npx/.<package>@<pinned>.lintro-install.lock`. A run whose cache
+   holds no entry yet takes it exclusively and keeps it until npx has exited and its
+   install has been checked; other runs of that pin wait for it, then run the entry it
+   installed. A warm cache is checked under a shared lock and npx runs without it, so
+   warm runs never wait for one another. The cache repair before the run never waits for
+   this lock: while a first install holds it, the repair leaves the cache alone. The
+   wait counts against the same budget as the wait for npm's lock (the tool's timeout,
+   at most five minutes); if it runs out, the run is an execution failure saying another
+   Lintro run is still installing the pin. The operating system releases the lock when
+   its holder exits, so a killed run never leaves one behind. On Windows the lock has no
+   shared mode, so there warm checks of the same pin take turns.
+
+   npx installs a cold pin and runs the tool in the same process, so the first run holds
+   the exclusive lock for its whole tool run, not only for the install. A run that waits
+   for it therefore fails once its own timeout runs out, even if the install itself
+   finished earlier; this only happens while a pin is cold.
+
+   A lock Lintro cannot use fails the run as an execution failure naming the lock path,
+   never as an unavailable tool or a run without the lock. That covers a directory or a
+   symbolic link at the lock path (the lock is never opened through a link), a directory
+   Lintro cannot write, and a filesystem whose `flock` is unsupported, as some network
+   and FUSE home directories are. Lintro's cache location has no setting, so in that
+   case make `~/.lintro/cache` a symbolic link to a directory on a local filesystem:
+   move the directory there and link `~/.lintro/cache` to it. Lintro resolves the link
+   before it checks the per-pin caches, so everything above works through it. (A link at
+   a per-pin cache, `~/.lintro/cache/npx/<package>@<pinned>`, is still refused.) The
+   lock follows the file it was taken on, so after taking it Lintro checks that the file
+   is still the one at the path, and otherwise pauses briefly and locks the new file
+   instead. If the file never stays in place until the wait runs out, the run fails
+   saying the lock kept being replaced. A first install checks once more right before
+   npx starts and fails the run if the lock was deleted or replaced. Lintro never
+   deletes the lock file itself. The limit: a process of the same user that deletes the
+   lock while npx is installing lets another run take a fresh lock and meet the
+   half-written entry; do not delete it while Lintro runs.
+
+   A warm run cannot install a second entry unlocked without being caught. Each per-pin
+   cache only ever sees one package spec, so npx always uses the same entry. If that
+   entry is removed between a warm run's check and npx starting, npx reinstalls it, and
+   the check after the run reports the cache as changed, an execution failure.
+
    **Trust model.** Lintro's npx cache (`~/.lintro/cache/npx/<package>@<pinned>`) is
    trusted the same way as Lintro's own installation. The lockfile and the cached
    tarballs live in that same directory. The check catches a partial change, such as a
