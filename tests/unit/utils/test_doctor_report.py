@@ -643,6 +643,23 @@ def test_check_tool_missing_path_argv0_is_not_in_path(
     assert_that(result.details).is_equal_to(argv0)
 
 
+def test_check_tool_does_not_hide_a_broken_version_resolver() -> None:
+    """An import failure in Node resolution surfaces instead of a silent fallback.
+
+    The installer has no such fallback; doctor must agree with it (#2042).
+    """
+    tool = _make_tool(install_type="npm", version_command=("prettier", "--version"))
+
+    with (
+        patch(
+            "lintro.utils.doctor_report.resolve_version_command",
+            side_effect=ImportError("execution_preparation missing"),
+        ),
+        pytest.raises(ImportError, match="execution_preparation missing"),
+    ):
+        check_tool(tool=tool, context=_make_context())
+
+
 def test_check_tool_missing_command_failed() -> None:
     """Tool found but version command exits non-zero."""
     tool = _make_tool()

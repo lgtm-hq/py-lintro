@@ -279,10 +279,7 @@ def check_tool(
             upgrade_hint=upgrade_hint,
         )
 
-    try:
-        command = resolve_version_command(tool, context=context)
-    except ImportError:
-        command = list(tool.version_command)
+    command = resolve_version_command(tool, context=context)
 
     if not is_resolved_command_discoverable(command):
         main_cmd = command[0] if command else ""

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import subprocess  # nosec B404 - only TimeoutExpired is referenced; no process is spawned
 import sys
-import sysconfig
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -92,7 +91,8 @@ def test_command_success_without_discovery_is_flagged() -> None:
     assert_that(result.outcome).is_equal_to(InstallOutcome.NOT_DISCOVERABLE)
     assert_that(result.success).is_false()
     assert_that(result.message).contains("not discoverable")
-    assert_that(result.message).contains(str(Path(sysconfig.get_path("scripts"))))
+    # A bare `pip` may belong to any Python, so lintro names no directory.
+    assert_that(result.message).contains("could not determine where pip installed it")
     assert_that(result.message).contains("PATH")
     assert_that(result.message).does_not_contain("needs manual action")
     # A rerun installs the same package to the same place — it cannot fix PATH.
@@ -558,44 +558,3 @@ def test_npm_wrapper_probes_are_not_rewritten_by_node_resolution(
     assert_that(resolved).is_equal_to(list(command))
     mock_resolve.assert_not_called()
     assert_that(is_resolved_command_discoverable(resolved)).is_true()
-
-
-def test_global_npm_destination_uses_which_parent_not_symlink_target(
-    tmp_path: Path,
-) -> None:
-    """Global npm PATH names the executable's parent, not the symlink target.
-
-    Args:
-        tmp_path: Temporary directory provided by pytest.
-    """
-    bindir = tmp_path / "node" / "v22.22.2" / "bin"
-    bindir.mkdir(parents=True)
-    real_npm = tmp_path / "lib" / "node_modules" / "npm" / "bin" / "npm-cli.js"
-    real_npm.parent.mkdir(parents=True)
-    real_npm.write_text("")
-    link = bindir / "npm"
-    link.symlink_to(real_npm)
-
-    installer = _installer()
-    tool = ManifestTool(
-        name="prettier",
-        version="3.9.4",
-        min_version="3.9.4",
-        install_type="npm",
-        install_package="prettier",
-        version_command=("prettier", "--version"),
-    )
-    with (
-        patch.object(installer, "_install_cwd", return_value=None),
-        patch(
-            "lintro.tools.core.install_destination.shutil.which",
-            return_value=str(link),
-        ),
-    ):
-        dest = installer._install_destination(
-            tool,
-            "npm install -g prettier@3.9.4",
-        ).directory
-
-    assert_that(dest).is_equal_to(bindir)
-    assert_that(str(dest)).does_not_contain("node_modules")

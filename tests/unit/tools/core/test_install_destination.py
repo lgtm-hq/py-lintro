@@ -1,13 +1,13 @@
 """NOT_DISCOVERABLE names the directory the executed install command used (#2042).
 
-No package manager runs here: install commands are canned, ``brew --prefix``
-and ``which`` are faked, and the assertions read the user-facing message.
+No package manager runs here: install commands are canned, every manager
+query is answered by a fake, HOME and the working directory are temporary,
+and the assertions read the user-facing message.
 """
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 - only TimeoutExpired is referenced; no process is spawned
-import sysconfig
+import subprocess  # nosec B404 - the real run is kept only to paste a suggested PATH line into sh
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,7 +19,7 @@ from assertpy import assert_that
 
 from lintro.enums.install_outcome import InstallOutcome
 from lintro.tools.core.install_context import RuntimeContext
-from lintro.tools.core.install_destination import brew_bin_dir
+from lintro.tools.core.install_destination import probe_dir
 from lintro.tools.core.install_plan import InstallResult
 from lintro.tools.core.tool_installer import (
     ToolInstaller,
@@ -27,17 +27,30 @@ from lintro.tools.core.tool_installer import (
 )
 from lintro.tools.core.tool_registry import ManifestRegistry, ManifestTool
 
-_BREW = "/fake/brew/bin/brew"
-_BREW_PREFIX = "/fake/homebrew"
+_REAL_RUN = subprocess.run
+_PY_SCRIPTS_QUERY = (
+    "python3",
+    "-c",
+    "import sysconfig; print(sysconfig.get_path('scripts'))",
+)
 _ENV_OVERRIDES = (
     "CARGO_HOME",
-    "BUN_INSTALL",
-    "PNPM_HOME",
-    "UV_TOOL_BIN_DIR",
-    "XDG_BIN_HOME",
-    "XDG_DATA_HOME",
-    "PIPX_BIN_DIR",
+    "CARGO_INSTALL_ROOT",
+    "VIRTUAL_ENV",
+    "CONDA_PREFIX",
 )
+
+#: Answers a fake manager gives to each read-only query.
+_DEFAULT_ANSWERS: dict[tuple[str, ...], str | int | BaseException] = {
+    ("brew", "--prefix"): "/fake/homebrew",
+    ("npm", "config", "get", "prefix"): "/fake/npm-prefix",
+    ("pnpm", "bin", "-g"): "/fake/pnpm-home/bin",
+    ("bun", "pm", "bin", "-g"): "/fake/bun/bin",
+    ("yarn", "global", "bin"): "/fake/yarn/bin",
+    ("uv", "tool", "dir", "--bin"): "/fake/uv-tools/bin",
+    ("pipx", "environment", "--value", "PIPX_BIN_DIR"): "/fake/pipx/bin",
+    _PY_SCRIPTS_QUERY: "/fake/py/bin",
+}
 
 
 @dataclass
@@ -46,34 +59,25 @@ class _FakeMachine:
 
     Attributes:
         home: Directory returned by ``Path.home()``.
-        npm_dir: Directory holding the ``npm`` executable on PATH.
-        brew_prefix_result: What ``brew --prefix`` does: a stdout string,
-            a non-zero exit (int), or an exception to raise.
-        brew_prefix_calls: Number of ``brew --prefix`` invocations seen.
+        workdir: Process working directory.
+        answers: What each manager query does: stdout text, a non-zero exit
+            code (int), or an exception to raise.
+        queries: Every manager query seen, in order.
     """
 
     home: Path
-    npm_dir: Path
-    brew_prefix_result: str | int | Exception = _BREW_PREFIX
-    brew_prefix_calls: int = field(default=0)
-
-    def which(self, name: str) -> str | None:
-        """Resolve only the package managers; the installed tool is absent.
-
-        Args:
-            name: Executable name.
-
-        Returns:
-            Fake path for ``brew``/``npm``, otherwise None.
-        """
-        return {"brew": _BREW, "npm": str(self.npm_dir / "npm")}.get(name)
+    workdir: Path
+    answers: dict[tuple[str, ...], str | int | BaseException] = field(
+        default_factory=lambda: dict(_DEFAULT_ANSWERS),
+    )
+    queries: list[tuple[str, ...]] = field(default_factory=list)
 
     def run(
         self,
         argv: Sequence[str],
         **_kwargs: Any,
     ) -> subprocess.CompletedProcess[str]:
-        """Answer ``brew --prefix``; every install command exits zero.
+        """Answer manager queries; every install command exits zero.
 
         Args:
             argv: Command argv.
@@ -83,22 +87,38 @@ class _FakeMachine:
             Completed process.
 
         Raises:
-            result: The configured ``brew --prefix`` failure.
+            answer: The configured query failure.
         """
-        if list(argv) == [_BREW, "--prefix"]:
-            self.brew_prefix_calls += 1
-            result = self.brew_prefix_result
-            if isinstance(result, Exception):
-                raise result
-            if isinstance(result, int):
-                return subprocess.CompletedProcess(argv, result, "", "boom")
-            return subprocess.CompletedProcess(argv, 0, f"{result}\n", "")
-        return subprocess.CompletedProcess(argv, 0, "", "")
+        key = tuple(argv)
+        if key not in self.answers:
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        self.queries.append(key)
+        answer = self.answers[key]
+        if isinstance(answer, BaseException):
+            raise answer
+        if isinstance(answer, int):
+            return subprocess.CompletedProcess(argv, answer, "", "boom")
+        return subprocess.CompletedProcess(argv, 0, f"{answer}\n", "")
+
+
+def _which(name: str) -> str | None:
+    """Resolve the package managers by name; the installed tool is absent.
+
+    Args:
+        name: Executable name.
+
+    Returns:
+        *name* for a manager the fake answers for, otherwise None.
+    """
+    return name if any(name == key[0] for key in _DEFAULT_ANSWERS) else None
 
 
 @pytest.fixture
-def machine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[_FakeMachine]:
-    """Isolate HOME, manager env vars, PATH lookups and subprocesses.
+def machine(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[_FakeMachine]:
+    """Isolate HOME, cwd, manager env vars, PATH lookups and subprocesses.
 
     Args:
         tmp_path: Temporary directory provided by pytest.
@@ -108,17 +128,21 @@ def machine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[_FakeMa
         _FakeMachine: The fake machine the installer runs against.
     """
     home = tmp_path / "home"
-    fake = _FakeMachine(home=home, npm_dir=tmp_path / "node" / "bin")
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
+    fake = _FakeMachine(home=home, workdir=workdir)
     for var in _ENV_OVERRIDES:
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
-    brew_bin_dir.cache_clear()
+    monkeypatch.setattr("lintro.tools.core.install_destination._IS_WINDOWS", False)
+    probe_dir.cache_clear()
     with (
-        patch("lintro.tools.core.tool_installer.shutil.which", side_effect=fake.which),
+        patch("lintro.tools.core.tool_installer.shutil.which", side_effect=_which),
         patch("lintro.tools.core.tool_installer.subprocess.run", side_effect=fake.run),
     ):
         yield fake
-    brew_bin_dir.cache_clear()
+    probe_dir.cache_clear()
 
 
 def _tool(name: str, install_type: str) -> ManifestTool:
@@ -142,191 +166,416 @@ def _tool(name: str, install_type: str) -> ManifestTool:
 
 
 def _install(
-    tool: ManifestTool,
     command: str,
     *,
+    install_type: str = "binary",
     cwd: Path | None = None,
+    name: str = "tool",
 ) -> InstallResult:
-    """Run *command* for *tool* through the installer with a fixed cwd.
+    """Run *command* through the installer with a fixed install cwd.
 
     Args:
-        tool: Tool being installed.
         command: Canned install command.
+        install_type: Manifest install type of the tool.
         cwd: Directory the installer would run the command in.
+        name: Tool name.
 
     Returns:
         Classified install result.
     """
     installer = ToolInstaller(ManifestRegistry.load(), RuntimeContext.detect())
     with patch.object(installer, "_install_cwd", return_value=cwd):
-        return installer._run_install(tool, command)
+        return installer._run_install(_tool(name, install_type), command)
+
+
+def _assert_names(result: InstallResult, directory: Path | str) -> None:
+    """Assert the message names *directory* and a PATH line for it.
+
+    Args:
+        result: Install result to inspect.
+        directory: Directory the message must name.
+    """
+    assert_that(result.outcome).is_equal_to(InstallOutcome.NOT_DISCOVERABLE)
+    assert_that(result.message).contains(f"expected under {directory},")
+    assert_that(result.message).ends_with(f'export PATH={directory}:"$PATH"')
+
+
+def _assert_unknown(result: InstallResult, where: str) -> None:
+    """Assert the message admits the directory is unknown.
+
+    Args:
+        result: Install result to inspect.
+        where: Expected ``where ...`` clause.
+    """
+    assert_that(result.outcome).is_equal_to(InstallOutcome.NOT_DISCOVERABLE)
+    assert_that(result.message).contains(f"lintro could not determine {where};")
+    assert_that(result.message).does_not_contain("expected under")
+    assert_that(result.message).does_not_contain("export PATH")
 
 
 @pytest.mark.parametrize(
-    ("install_type", "command", "local", "expected"),
+    ("install_type", "command", "env", "expected"),
     [
-        ("binary", "brew install hadolint", False, "brew"),
-        ("pip", "brew install semgrep", False, "brew"),
-        ("npm", "brew install prettier", True, "brew"),
-        ("pip", "uv pip install 'tool>=1.0.0'", False, "scripts"),
-        ("pip", "pip install 'tool>=1.0.0'", False, "scripts"),
-        ("cargo", "cargo install tool", False, "cargo"),
-        ("rustup", "rustup component add clippy", False, "cargo"),
-        ("rustup", "rustup toolchain install stable", False, "cargo"),
-        ("npm", "npm install -D tool@1.0.0", True, "local"),
-        ("npm", "bun install", True, "local"),
-        ("npm", "npm install -g tool@1.0.0", False, "npm"),
-        ("npm", "bun add -g tool@1.0.0", False, "bun"),
+        ("binary", "brew install hadolint", {}, "/fake/homebrew/bin"),
+        ("pip", "brew install semgrep", {}, "/fake/homebrew/bin"),
+        (
+            "pip",
+            "uv pip install 'tool>=1'",
+            {"VIRTUAL_ENV": "/venvs/a"},
+            "/venvs/a/bin",
+        ),
+        (
+            "pip",
+            "uv pip install tool",
+            {"CONDA_PREFIX": "/conda/env"},
+            "/conda/env/bin",
+        ),
+        ("pip", "python3 -m pip install tool", {}, "/fake/py/bin"),
+        ("cargo", "cargo install tool", {}, "{home}/.cargo/bin"),
+        ("cargo", "cargo install tool --root /roots/r", {}, "/roots/r/bin"),
+        ("cargo", "cargo install --root=rel tool", {}, "{work}/rel/bin"),
+        ("cargo", "cargo install tool", {"CARGO_INSTALL_ROOT": "/ir"}, "/ir/bin"),
+        ("cargo", "cargo install tool", {"CARGO_HOME": "/ch"}, "/ch/bin"),
+        (
+            "cargo",
+            "cargo install tool --root /r",
+            {"CARGO_INSTALL_ROOT": "/ir"},
+            "/r/bin",
+        ),
+        ("rustup", "rustup component add clippy", {}, "{home}/.cargo/bin"),
+        (
+            "rustup",
+            "rustup component add clippy",
+            {"CARGO_INSTALL_ROOT": "/ir", "CARGO_HOME": "/ch"},
+            "/ch/bin",
+        ),
+        ("npm", "npm install -g tool@1.0.0", {}, "/fake/npm-prefix/bin"),
+        (
+            "npm",
+            "pnpm add -g tool@1.0.0",
+            {"PNPM_HOME": "/fake/pnpm-home"},
+            "/fake/pnpm-home/bin",
+        ),
+        ("npm", "bun add -g tool@1.0.0", {}, "/fake/bun/bin"),
+        ("npm", "yarn global add tool@1.0.0", {}, "/fake/yarn/bin"),
+        ("pip", "uv tool install tool", {}, "/fake/uv-tools/bin"),
+        ("pip", "pipx install tool", {}, "/fake/pipx/bin"),
         (
             "binary",
             "bash /x/scripts/utils/install-tools.sh --tools tool",
-            False,
-            "home",
+            {},
+            "{home}/.local/bin",
         ),
-        ("pip", "uv tool install tool", False, "home"),
     ],
     ids=[
         "binary-brew",
         "pip-brew",
-        "npm-brew-in-project",
-        "pip-uv-sysconfig",
-        "pip-sysconfig",
-        "cargo",
-        "rustup-component",
-        "rustup-toolchain",
-        "npm-project-local",
-        "npm-project-restore",
+        "uv-pip-virtual-env",
+        "uv-pip-conda",
+        "python-m-pip",
+        "cargo-default",
+        "cargo-root",
+        "cargo-relative-root",
+        "cargo-install-root-env",
+        "cargo-home",
+        "cargo-root-beats-env",
+        "rustup-default",
+        "rustup-ignores-install-root",
         "npm-global",
+        "pnpm-global",
         "bun-global",
-        "install-tools-script",
+        "yarn-global",
         "uv-tool",
+        "pipx",
+        "install-tools-script",
     ],
 )
 def test_message_names_the_directory_the_command_installed_into(
     machine: _FakeMachine,
-    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     install_type: str,
     command: str,
-    local: bool,
+    env: dict[str, str],
     expected: str,
 ) -> None:
     """The PATH remedy names the executed command's destination.
 
     Args:
         machine: Fake PATH lookups and subprocesses.
-        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Pytest monkeypatch fixture.
         install_type: Manifest install type of the tool.
         command: Install command that ran.
-        local: Whether the command ran from a Node project root.
-        expected: Which destination the message must name.
+        env: Manager environment variables to set.
+        expected: Directory the message must name.
     """
-    project = tmp_path / "project"
-    expected_dir = {
-        "brew": Path(_BREW_PREFIX) / "bin",
-        "scripts": Path(sysconfig.get_path("scripts")),
-        "cargo": machine.home / ".cargo" / "bin",
-        "local": project / "node_modules" / ".bin",
-        "npm": machine.npm_dir,
-        "bun": machine.home / ".bun" / "bin",
-        "home": machine.home / ".local" / "bin",
-    }[expected]
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    directory = expected.format(home=machine.home, work=machine.workdir)
 
-    result = _install(
-        _tool("tool", install_type),
-        command,
-        cwd=project if local else None,
-    )
+    result = _install(command, install_type=install_type)
 
-    assert_that(result.outcome).is_equal_to(InstallOutcome.NOT_DISCOVERABLE)
-    assert_that(result.message).contains(f"expected under {expected_dir},")
-    assert_that(result.message).ends_with(f'export PATH="{expected_dir}:$PATH"')
-    if expected != "home":
-        assert_that(result.message).does_not_contain(str(machine.home / ".local"))
+    _assert_names(result, directory)
 
 
 @pytest.mark.parametrize(
-    ("command", "brew_prefix_result", "manager"),
+    "command",
+    ["npm install -D tool@1.0.0", "bun install", "brew install prettier"],
+    ids=["npm-project-local", "npm-project-restore", "brew-inside-project"],
+)
+def test_project_install_destination_follows_the_command(
+    machine: _FakeMachine,
+    command: str,
+) -> None:
+    """A project-local add names node_modules/.bin; brew still names brew.
+
+    Args:
+        machine: Fake PATH lookups and subprocesses.
+        command: Install command run from the project root.
+    """
+    project = machine.workdir / "project"
+    expected = (
+        "/fake/homebrew/bin"
+        if command.startswith("brew")
+        else f"{project}/node_modules/.bin"
+    )
+
+    result = _install(command, install_type="npm", cwd=project)
+
+    _assert_names(result, expected)
+
+
+def test_windows_npm_global_bin_is_the_prefix_itself(
+    machine: _FakeMachine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On Windows npm links global executables into the prefix, not prefix/bin.
+
+    Args:
+        machine: Fake PATH lookups and subprocesses.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr("lintro.tools.core.install_destination._IS_WINDOWS", True)
+    machine.answers["npm", "config", "get", "prefix"] = "/fake/appdata/npm"
+
+    result = _install("npm install -g tool@1.0.0", install_type="npm")
+
+    _assert_names(result, "/fake/appdata/npm")
+
+
+def test_uv_pip_names_the_nearest_project_venv(machine: _FakeMachine) -> None:
+    """Without VIRTUAL_ENV, uv targets the nearest .venv above the cwd.
+
+    Args:
+        machine: Fake PATH lookups and subprocesses.
+    """
+    venv = machine.workdir / ".venv"
+    venv.mkdir()
+    (venv / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    nested = machine.workdir / "pkg" / "sub"
+    nested.mkdir(parents=True)
+
+    result = _install("uv pip install tool", install_type="pip", cwd=nested)
+
+    _assert_names(result, f"{venv}/bin")
+
+
+def test_cargo_config_install_root_is_honoured(machine: _FakeMachine) -> None:
+    """``install.root`` in .cargo/config.toml beats CARGO_HOME, relative to it.
+
+    Args:
+        machine: Fake PATH lookups and subprocesses.
+    """
+    config_dir = machine.workdir / ".cargo"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text('[install]\nroot = "tools"\n')
+
+    result = _install("cargo install tool", install_type="cargo")
+
+    _assert_names(result, f"{machine.workdir}/tools/bin")
+
+
+@pytest.mark.parametrize(
+    ("command", "answer", "env", "where"),
     [
-        ("brew install hadolint", 1, "Homebrew"),
-        ("brew install hadolint", "", "Homebrew"),
-        ("brew install hadolint", subprocess.TimeoutExpired("brew", 5), "Homebrew"),
-        ("brew install hadolint", OSError("no brew"), "Homebrew"),
-        ("go install example.com/tool@latest", _BREW_PREFIX, "go"),
-        ("yarn global add tool@1.0.0", _BREW_PREFIX, "yarn"),
-        ("npm install -D tool@1.0.0", _BREW_PREFIX, "npm"),
+        ("brew install t", 1, {}, "where Homebrew installed it"),
+        ("brew install t", "", {}, "where Homebrew installed it"),
+        (
+            "brew install t",
+            subprocess.TimeoutExpired("brew", 5),
+            {},
+            "where Homebrew installed it",
+        ),
+        ("brew install t", OSError("no brew"), {}, "where Homebrew installed it"),
+        (
+            "brew install t",
+            "garbage\n/opt/homebrew\x1b[31m",
+            {},
+            "where Homebrew installed it",
+        ),
+        ("brew install t", "opt/homebrew", {}, "where Homebrew installed it"),
+        ("npm install -g t", "/a\n/b", {}, "where npm installed it"),
+        ("pnpm add -g t", 1, {}, "where pnpm installed it"),
+        ("bun add -g t", "relative/bin", {}, "where bun installed it"),
+        ("pip install t", None, {}, "where pip installed it"),
+        ("python3 -m pip install t", 1, {}, "where pip installed it"),
+        ("python3 -m pip install --user t", None, {}, "where pip installed it"),
+        ("uv pip install t", None, {}, "where uv installed it"),
+        (
+            "uv pip install --system t",
+            None,
+            {"VIRTUAL_ENV": "/v"},
+            "where uv installed it",
+        ),
+        (
+            "uv pip install t",
+            None,
+            {"VIRTUAL_ENV": "venv"},
+            "where uv installed it",
+        ),
+        (
+            "rustup component add clippy",
+            None,
+            {"CARGO_HOME": "/x\x1b[31m"},
+            "where rustup installed it",
+        ),
+        (
+            "cargo install t",
+            None,
+            {"CARGO_INSTALL_ROOT": "relative"},
+            "where cargo installed it",
+        ),
+        ("sudo npm install -g t", None, {}, "where it was installed"),
+        ("go install example.com/t@latest", None, {}, "where go installed it"),
+        ("npm install -D t@1.0.0", None, {}, "where npm installed it"),
     ],
     ids=[
-        "brew-prefix-nonzero",
-        "brew-prefix-empty",
-        "brew-prefix-timeout",
-        "brew-prefix-oserror",
+        "brew-nonzero",
+        "brew-empty",
+        "brew-timeout",
+        "brew-oserror",
+        "brew-multiline-escape",
+        "brew-relative",
+        "npm-multiline",
+        "pnpm-fails",
+        "bun-relative",
+        "bare-pip",
+        "python-m-pip-fails",
+        "python-m-pip-user",
+        "uv-pip-no-env",
+        "uv-pip-system",
+        "uv-pip-relative-venv",
+        "cargo-home-escape",
+        "cargo-install-root-relative",
+        "sudo-wrapper",
         "unknown-manager",
-        "yarn-global",
         "node-local-without-project",
     ],
 )
 def test_unknown_destination_is_stated_not_guessed(
     machine: _FakeMachine,
+    monkeypatch: pytest.MonkeyPatch,
     command: str,
-    brew_prefix_result: str | int | Exception,
-    manager: str,
+    answer: str | int | BaseException | None,
+    env: dict[str, str],
+    where: str,
 ) -> None:
     """When the directory cannot be determined, the message says so.
 
     Args:
         machine: Fake PATH lookups and subprocesses.
+        monkeypatch: Pytest monkeypatch fixture.
         command: Install command that ran.
-        brew_prefix_result: Behaviour of ``brew --prefix``.
-        manager: Manager name the message must mention.
+        answer: How the manager answers its query, or None for the default.
+        env: Manager environment variables to set.
+        where: Expected ``where ...`` clause.
     """
-    machine.brew_prefix_result = brew_prefix_result
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    if answer is not None:
+        query = next(key for key in machine.answers if command.startswith(key[0]))
+        machine.answers[query] = answer
 
-    result = _install(_tool("tool", "binary"), command)
+    result = _install(command)
 
-    assert_that(result.outcome).is_equal_to(InstallOutcome.NOT_DISCOVERABLE)
-    assert_that(result.message).contains(
-        f"lintro could not determine where {manager} installed it",
+    _assert_unknown(result, where)
+    assert_that(result.message).does_not_contain("\x1b")
+
+
+def test_unparseable_cargo_config_is_unknown(machine: _FakeMachine) -> None:
+    """A cargo config lintro cannot read never yields a guessed root.
+
+    Args:
+        machine: Fake PATH lookups and subprocesses.
+    """
+    config_dir = machine.workdir / ".cargo"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text("[install\nroot = \n")
+
+    result = _install("cargo install tool", install_type="cargo")
+
+    _assert_unknown(result, "where cargo installed it")
+
+
+def test_directory_with_control_characters_gets_no_path_line(
+    machine: _FakeMachine,
+) -> None:
+    """A destination holding a control character is never echoed or quoted.
+
+    Args:
+        machine: Fake PATH lookups and subprocesses.
+    """
+    project = machine.workdir / "proj\x1b]0;owned\x07"
+
+    result = _install("npm install -D tool@1.0.0", install_type="npm", cwd=project)
+
+    _assert_unknown(result, "where npm installed it")
+    assert_that(result.message).does_not_contain("\x1b")
+
+
+def test_suggested_path_line_expands_only_path(
+    machine: _FakeMachine,
+    tmp_path: Path,
+) -> None:
+    """Pasting the suggested line runs no command substitution.
+
+    Args:
+        machine: Fake PATH lookups and subprocesses.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    hostile = "/tmp/$(printf REVIEW_EXECUTED) `id` 'q'"
+    machine.answers["uv", "tool", "dir", "--bin"] = hostile
+    result = _install("uv tool install tool", install_type="pip")
+    line = result.message.rsplit("for example: ", 1)[1]
+
+    pasted = _REAL_RUN(  # nosec B603 B607 - runs the suggested line in a scratch shell
+        ["sh", "-c", f'{line}; printf %s "$PATH"'],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin:/bin"},
     )
-    assert_that(result.message).does_not_contain("expected under")
-    assert_that(result.message).does_not_contain("export PATH")
-    assert_that(result.message).does_not_contain(".local")
+
+    assert_that(pasted.stdout).is_equal_to(f"{hostile}:/usr/bin:/bin")
 
 
-def test_brew_prefix_is_queried_once_per_run(machine: _FakeMachine) -> None:
-    """Several brew installs in one run share a single ``brew --prefix``.
+def test_each_manager_is_queried_once_per_run(machine: _FakeMachine) -> None:
+    """Repeated installs reuse one answer per manager query.
 
     Args:
         machine: Fake PATH lookups and subprocesses.
     """
     messages = [
-        _install(_tool(name, "binary"), f"brew install {name}").message
-        for name in ("hadolint", "shellcheck", "actionlint")
+        _install(command, name=name).message
+        for name in ("hadolint", "shellcheck")
+        for command in (f"brew install {name}", f"npm install -g {name}")
     ]
 
-    assert_that(machine.brew_prefix_calls).is_equal_to(1)
-    for message in messages:
-        assert_that(message).contains(str(Path(_BREW_PREFIX) / "bin"))
-
-
-def test_cargo_home_overrides_the_default_cargo_bin(
-    machine: _FakeMachine,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``CARGO_HOME`` is where cargo and rustup put executables.
-
-    Args:
-        machine: Fake PATH lookups and subprocesses.
-        tmp_path: Temporary directory provided by pytest.
-        monkeypatch: Pytest monkeypatch fixture.
-    """
-    cargo_home = tmp_path / "custom-cargo"
-    monkeypatch.setenv("CARGO_HOME", str(cargo_home))
-
-    result = _install(_tool("clippy", "rustup"), "rustup component add clippy")
-
-    assert_that(result.message).contains(f"expected under {cargo_home / 'bin'},")
-    assert_that(result.message).does_not_contain(str(machine.home))
+    assert_that(machine.queries).is_equal_to(
+        [("brew", "--prefix"), ("npm", "config", "get", "prefix")],
+    )
+    assert_that(messages[2]).contains("/fake/homebrew/bin")
+    assert_that(messages[3]).contains("/fake/npm-prefix/bin")
 
 
 @pytest.mark.parametrize("exists", [True, False], ids=["present", "missing"])

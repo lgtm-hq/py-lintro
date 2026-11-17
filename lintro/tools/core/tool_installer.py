@@ -33,6 +33,7 @@ from lintro.enums.install_outcome import InstallOutcome
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_destination import (
     InstallDestination,
+    has_control_characters,
     install_destination,
 )
 from lintro.tools.core.install_hints import (
@@ -673,19 +674,26 @@ class ToolInstaller:
         """
         destination = self._install_destination(tool, command)
         bin_dir = destination.directory
-        if bin_dir is None:
+        # install_destination already refuses such paths; this guard keeps a
+        # control character from ever reaching a line meant to be pasted.
+        if bin_dir is None or has_control_characters(str(bin_dir)):
+            where = (
+                f"where {destination.manager} installed it"
+                if destination.manager
+                else "where it was installed"
+            )
             return (
                 f"Install command succeeded but {tool.name} is still not "
-                f"discoverable, and lintro could not determine where "
-                f"{destination.manager} installed it; find the directory "
-                f"that holds {tool.name} and add it to PATH"
+                f"discoverable, and lintro could not determine {where}; "
+                f"find the directory that holds {tool.name} and add it to PATH"
             )
+        # Single-quote the directory so pasting the line expands only $PATH.
         return (
             f"Install command succeeded but {tool.name} is still not "
             f"discoverable. It was expected under {bin_dir}, where "
             f"{destination.manager} installs it, and was not found; inspect "
             f"that directory, or add it to PATH, for example: "
-            f'export PATH="{bin_dir}:$PATH"'
+            f'export PATH={shlex.quote(str(bin_dir))}:"$PATH"'
         )
 
     def _install_destination(
