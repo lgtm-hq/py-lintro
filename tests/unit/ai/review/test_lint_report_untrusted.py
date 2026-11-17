@@ -258,35 +258,53 @@ def test_null_residual_reason_is_not_repeated(tmp_path: Path) -> None:
     assert_that(digest).does_not_contain("(remaining issues unknown)")
 
 
-@pytest.mark.parametrize(
-    "text",
-    [
-        pytest.param(
-            '{"results": [{"tool": "tsc", "success": true}], "extra": '
-            + "9" * 5000
-            + "}",
-            id="integer-past-the-digit-limit",
-        ),
-        pytest.param(
-            '{"results": [], "extra": ' + "[" * 100_000 + "]" * 100_000 + "}",
-            id="nesting-too-deep",
-        ),
-    ],
-)
-def test_undecodable_report_is_a_header_note_not_an_error(
-    tmp_path: Path,
-    text: str,
+def _assert_rejected_as_invalid_json(
+    result: tuple[str | None, LintRunCounts, str],
 ) -> None:
-    """A report the decoder cannot read is rejected, never raised.
+    """Assert a digest call rejected the report with the invalid-JSON note.
 
     Args:
-        tmp_path: Pytest temporary directory.
-        text: Raw report contents the JSON decoder cannot handle.
+        result: What ``build_lint_digest_from_report`` returned.
     """
-    digest, counts, note = _digest_text(tmp_path, text)
-
+    digest, counts, note = result
     assert_that(digest).is_none()
     assert_that((counts.ran, counts.incomplete)).is_equal_to((0, 0))
     assert_that(note).starts_with(
         f"{LINT_FACTS_UNAVAILABLE}: lint report is not valid JSON",
     )
+
+
+def test_integer_past_the_digit_limit_is_a_header_note(tmp_path: Path) -> None:
+    """A valid report with a 5,000-digit integer is rejected, never raised.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    text = (
+        '{"results": [{"tool": "tsc", "success": true}], "extra": ' + "9" * 5000 + "}"
+    )
+
+    _assert_rejected_as_invalid_json(_digest_text(tmp_path, text))
+
+
+def test_nesting_too_deep_to_decode_is_a_header_note(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``RecursionError`` from the decoder is a rejected report.
+
+    How deep a document must be to exhaust the decoder depends on the
+    interpreter and its C stack (Python 3.14 decodes 100,000 levels on some
+    hosts and not on others), so the decoder is made to raise directly.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest patch fixture.
+    """
+
+    def _too_deep(*_args: object, **_kwargs: object) -> object:
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(json, "loads", _too_deep)
+
+    _assert_rejected_as_invalid_json(_digest_text(tmp_path, '{"results": []}'))
