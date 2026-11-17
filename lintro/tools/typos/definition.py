@@ -35,6 +35,7 @@ from lintro.plugins.base import BaseToolPlugin, PreparedExecution
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.argv_batching import argv_cost, chunk_paths
+from lintro.utils.execution.fix_retry import APPLIED_CHANGES_KEY
 
 # Constants for typos configuration
 TYPOS_DEFAULT_TIMEOUT: int = 30
@@ -467,10 +468,14 @@ class TyposPlugin(BaseToolPlugin):
         # record or non-zero exit without a parseable report is a real write
         # failure. ``stop_on_failure`` keeps a failing batch from rewriting
         # the batches that follow it.
+        # ``--no-check-filenames`` keeps the write pass from renaming files:
+        # a rename is a structural change a formatter must not make, and the
+        # re-check would then look for the old path. File-name typos are
+        # still detected by the scans and reported as remaining.
         written = self._run_batched(
             files=files,
             ctx=ctx,
-            extra_args=["--write-changes"],
+            extra_args=["--write-changes", "--no-check-filenames"],
             stop_on_failure=True,
         )
         if written.failed:
@@ -508,6 +513,10 @@ class TyposPlugin(BaseToolPlugin):
         if initial_count != fixed_count + remaining_count:
             initial_count = fixed_count + remaining_count
 
+        applied = _applied_corrections(
+            initial=initial_issues,
+            remaining=remaining_issues,
+        )
         return ToolResult.from_outcome(
             ToolOutcome(
                 execution=Checked(success=remaining_count == 0, inspected_files=True),
@@ -522,11 +531,11 @@ class TyposPlugin(BaseToolPlugin):
             output=_fix_summary(
                 fixed=fixed_count,
                 remaining=remaining_count,
-                applied=_applied_corrections(
-                    initial=initial_issues,
-                    remaining=remaining_issues,
-                ),
+                applied=applied,
             ),
+            # The fix-retry merge carries these across convergence passes,
+            # so a later pass that wrote nothing cannot hide them.
+            metadata={APPLIED_CHANGES_KEY: applied},
             # Only the surviving typos are reported as issues: unfixed typos
             # appear in both the initial and post-fix reports, so combining
             # the lists would double-count them.
@@ -584,34 +593,75 @@ class TyposPlugin(BaseToolPlugin):
         )
 
 
+_LINE_BREAKS: frozenset[str] = frozenset("\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
+
+
+def _display_safe(text: str) -> str:
+    r"""Escape control and other non-printable characters for one display line.
+
+    File names, words and replacements come from the scanned tree, so a
+    newline or terminal escape in any of them could forge extra listing
+    entries or recolour the console. Each such character is replaced with
+    its Python escape (``\\n``, ``\\x1b``, ``\\u2028``), so every entry stays
+    on one line.
+
+    Args:
+        text: Untrusted text.
+
+    Returns:
+        The text with every non-printable character escaped.
+    """
+    return "".join(char if char.isprintable() else repr(char)[1:-1] for char in text)
+
+
 def _applied_corrections(
     initial: list[TyposIssue],
     remaining: list[TyposIssue],
 ) -> list[str]:
     """List the corrections ``--write-changes`` applied, one line each.
 
-    typos rewrites a word only when it has exactly one correction, and a
-    rewrite never adds or removes lines, so a finding from the pre-scan that
-    the re-check no longer reports at the same file, line and word was
-    corrected on disk. Byte offsets are not compared: an earlier fix on the
-    same line shifts them.
+    typos auto-applies a word only when it has exactly one correction, so
+    words offering several are never listed. For each file and word, the
+    number of corrections applied is the number of pre-scan reports minus
+    the number the re-check still makes.
+
+    Line numbers are given only when they can be trusted: a configured
+    replacement that contains a line break shifts every line after it, so in
+    such a file entries are listed without a line number. Otherwise the line
+    of each corrected occurrence is the pre-scan line the re-check no longer
+    reports. Byte offsets are never compared: an earlier fix on the same line
+    shifts them.
 
     Args:
         initial: Findings from the pre-fix scan.
         remaining: Findings from the post-fix re-check.
 
     Returns:
-        ``file:line: old -> new`` lines in pre-scan order.
+        ``file:line: old -> new`` (or ``file: old -> new``) lines in pre-scan
+        order, every field escaped by :func:`_display_safe`.
     """
-    survivors = Counter((i.file, i.line, i.typo) for i in remaining)
+    applied = [i for i in initial if len(i.corrections) == 1]
+    before = Counter((i.file, i.typo) for i in applied)
+    after = Counter((i.file, i.typo) for i in remaining)
+    budget = {key: max(0, n - after[key]) for key, n in before.items()}
+    shifted = {i.file for i in applied if _LINE_BREAKS & set(i.corrections[0])}
+    surviving_lines = Counter((i.file, i.line, i.typo) for i in remaining)
     lines: list[str] = []
-    for issue in initial:
-        key = (issue.file, issue.line, issue.typo)
-        if survivors[key]:
-            survivors[key] -= 1
+    for issue in applied:
+        key = (issue.file, issue.typo)
+        if not budget[key]:
             continue
-        new = " | ".join(issue.corrections) or "?"
-        lines.append(f"{issue.file}:{issue.line}: {issue.typo} -> {new}")
+        where = _display_safe(issue.file)
+        if issue.file not in shifted:
+            line_key = (issue.file, issue.line, issue.typo)
+            if surviving_lines[line_key]:
+                surviving_lines[line_key] -= 1
+                continue
+            where = f"{where}:{issue.line}"
+        budget[key] -= 1
+        old = _display_safe(issue.typo)
+        new = _display_safe(issue.corrections[0])
+        lines.append(f"{where}: {old} -> {new}")
     return lines
 
 
