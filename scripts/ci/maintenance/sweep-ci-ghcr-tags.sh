@@ -136,9 +136,13 @@ All numbers are read as base-10 integers; leading zeros are allowed.
 A DELETE that times out, gets a 5xx or gets no HTTP answer may have gone
 through: it counts against MAX_DELETES and stops further deletions, and the
 verification listing then shows whether it did. The run fails only when that
-cannot be told. A 404 on DELETE means the version is already gone. A 403 or
-429 stops every further recheck and DELETE at once, as do 3 failed rechecks
-or DELETE calls in a row; either fails the run.
+cannot be told. A 404 on DELETE means the version is already gone, but it
+came right after two clean rechecks, so it is also a ::warning::; a run that
+deletes nothing and gets such a 404 warns that the token may be able to read
+but not delete. A 403 or 429 stops every further recheck and DELETE at once,
+as do 3 failed rechecks or DELETE calls with no successful DELETE between
+them; either fails the run. Versions whose recheck or DELETE failed count as
+remaining.
 A run that stops at the budget or the cap exits 0 and prints
 "Partial sweep, resumes next run: N deleted, M remaining".
 EOF
@@ -167,7 +171,10 @@ uncertain_confirmed=""
 uncertain_present=""
 uncertain_unknown=""
 # Failed rechecks or DELETE calls since the last successful DELETE (#3492).
+# Only a successful DELETE resets it: a clean skip or a 404 in between does not.
 consecutive_refusals=0
+# DELETE calls answered 404 right after two clean rechecks (#3510).
+delete_404_count=0
 readonly MAX_CONSECUTIVE_REFUSALS=3
 
 # Actions keeps runs for 90 days from completion; GHCR updated_at reflects the
@@ -575,12 +582,16 @@ http_status_in() {
 # Record a failed recheck or DELETE ($1 names it, $2 is its HTTP status or
 # empty) (#3492). A 403 or 429 (forbidden or rate limited) stops every
 # further write this run at once; any other failure stops them after
-# MAX_CONSECUTIVE_REFUSALS in a row, so a registry that keeps refusing is not
-# hammered for the whole work window. Either way the run fails.
+# MAX_CONSECUTIVE_REFUSALS failures with no successful DELETE between them
+# (a skipped version or a 404 does not reset the count), so a registry that
+# keeps refusing is not hammered for the whole work window. Either way the
+# run fails. The version is still there, so it counts as remaining, like an
+# uncertain DELETE the verification finds still listed (#3510).
 note_refusal() {
 	local what="$1"
 	local status="$2"
 	sweep_errors=1
+	remaining_count=$((remaining_count + 1))
 	consecutive_refusals=$((consecutive_refusals + 1))
 	[[ -n "$stop_reason" ]] && return 0
 	if [[ "$status" == "403" || "$status" == "429" ]]; then
@@ -588,8 +599,8 @@ note_refusal() {
 		stop_reason+=" stopped all rechecks and DELETE calls"
 	elif ((consecutive_refusals >= MAX_CONSECUTIVE_REFUSALS)); then
 		stop_reason="repeatedly refused: ${consecutive_refusals} failed rechecks"
-		stop_reason+=" or DELETE calls in a row (last: ${what}); stopped all"
-		stop_reason+=" rechecks and DELETE calls"
+		stop_reason+=" or DELETE calls since the last successful DELETE"
+		stop_reason+=" (last: ${what}); stopped all rechecks and DELETE calls"
 	fi
 	return 0
 }
@@ -810,9 +821,16 @@ sweep_package() {
 			echo "Deleted ${pkg} version ${vid} (tags: ${current_tags})"
 		elif [[ "$delete_status" == "404" ]]; then
 			# Gone already (a prior sweep or a manual cleanup), as with
-			# a 404 on recheck: benign for a reclaim job.
+			# a 404 on recheck: benign for a reclaim job. But both rechecks
+			# found it a moment ago, and GitHub may answer 404 to a token
+			# that can read the package but not delete from it, so say so
+			# rather than let a mis-scoped token under-delete silently
+			# (#3510).
+			delete_404_count=$((delete_404_count + 1))
 			echo "Skipping version ${vid} (${pkg}): already deleted" \
 				"(404 on DELETE)"
+			echo "::warning::The DELETE of ${pkg} version ${vid} answered 404" \
+				"right after two rechecks found it (#3510)"
 		elif [[ "$delete_status" == 4* ]]; then
 			# Any other 4xx is a definitive refusal: nothing was deleted.
 			echo "::error::Failed to delete ${pkg} version ${vid}:" \
@@ -867,6 +885,8 @@ report_progress() {
 		if [[ -n "$unreached_packages" ]]; then
 			line+="; not swept this run: ${unreached_packages% }"
 		fi
+	elif ((remaining_count > 0)); then
+		line+=", ${remaining_count} remaining"
 	fi
 	if [[ -n "$uncertain_confirmed" ]]; then
 		line+="; uncertain DELETE confirmed deleted: ${uncertain_confirmed% }"
@@ -895,6 +915,15 @@ report_progress() {
 				"(${reasons}). The next run starts from another package" \
 				"(#3492)."
 		fi
+	fi
+	# Every DELETE that was tried answered 404 after clean rechecks: either
+	# something else cleaned up first, or the token can read but not delete
+	# (#3510). The run stays green; the warning keeps it from looking healthy.
+	if ((swept_count == 0 && delete_404_count > 0)); then
+		echo "::warning::The ${tag_prefix}* sweep deleted nothing and" \
+			"${delete_404_count} DELETE call(s) answered 404 right after clean" \
+			"rechecks. If this repeats, check that the token can delete" \
+			"package versions, not only read them (#3510)."
 	fi
 	if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
 		printf '%s\n' "${tag_prefix}* sweep: ${line}" >>"$GITHUB_STEP_SUMMARY" ||
