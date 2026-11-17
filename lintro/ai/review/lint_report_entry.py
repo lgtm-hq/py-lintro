@@ -16,14 +16,24 @@ clean status beside a failed verdict, a failure status with no findings)
 is reported as an execution failure naming the contradiction, so its warning
 reaches the prompt instead of a clean verdict.
 
-**A fix report's verdict is its ``remaining`` count.** Every fix row carries
-``remaining`` (with ``fixed`` and ``net_resolved``), and its ``issues`` are
-the findings detected before the fix merged with the ones left after it, with
-nothing marking which is which. So the prompt receives those findings only
-when ``remaining`` equals their number (none were fixed, and every listed
-finding remains). With nothing remaining it receives none; with some
-remaining it receives none plus a note giving the count. An unknown residual
-stays incomplete and drops the pre-fix findings, which may have been fixed.
+**A fix report's verdict is its ``remaining`` count**, read by one closed
+rule. The writer emits ``remaining``, ``fixed`` and ``net_resolved`` together
+on every fix row and never on a check row, either all ``null`` (unmeasured)
+or all integers (unmeasured counts default to 0), with ``fixed`` an alias of
+``net_resolved``. Its ``issues`` are the findings detected before the fix
+merged with the ones left after it, with nothing marking which is which.
+
+1. A document whose ``action`` is not ``fix`` may not carry fix accounting;
+   the three keys come all together or not at all; integers must satisfy
+   ``fixed == net_resolved``, ``0 <= remaining <= len(issues)`` and
+   ``0 <= fixed + remaining <= len(issues)`` (the pre-fix count cannot
+   exceed the merged list). Anything else rejects the report.
+2. Incomplete evidence wins first, exactly as for a check row: ``remaining``
+   never overrides a flag, a status or an unexplained failure.
+3. Then: nothing remaining is clean and shows no findings; every listed
+   finding remaining shows them all; some remaining shows none, with a note
+   giving the count; ``null`` counts need a residual reason; integer counts
+   that account for none of the listed findings are "no measured counts".
 """
 
 from __future__ import annotations
@@ -35,7 +45,19 @@ from lintro.models.core.tool_outcome import ToolOutcome, Unavailable
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 
-__all__ = ["REPORT_NOTE_METADATA_KEY", "report_tool_result"]
+__all__ = [
+    "REPORT_FIX_FILES_METADATA_KEY",
+    "REPORT_NOTE_METADATA_KEY",
+    "report_tool_result",
+]
+
+#: ``ToolResult.metadata`` key for the files a fix row's unlisted remaining
+#: findings may be on: the files of every finding it listed. Restriction to
+#: the changed files drops the note when none of them is under review.
+REPORT_FIX_FILES_METADATA_KEY: Final[str] = "lint_report_fix_files"
+
+#: The fix accounting keys the writer emits together on every fix row.
+_FIX_KEYS: Final[tuple[str, ...]] = ("remaining", "fixed", "net_resolved")
 
 #: ``ToolResult.metadata`` key for a note the digest prints for a tool whose
 #: report entry is complete but whose findings cannot be listed.
@@ -163,25 +185,56 @@ def _validated(
     return success, status, flags
 
 
-def _fix_remaining(entry: Mapping[str, Any]) -> tuple[bool, int | None]:
-    """Read a fix row's ``remaining`` count, validating its accounting.
-
-    A mistyped ``fixed`` / ``net_resolved``, or a mistyped or negative
-    ``remaining``, raises ``ValueError`` from the field readers.
+def _fix_accounting(
+    entry: Mapping[str, Any],
+    *,
+    fix_document: bool | None,
+    listed: int,
+) -> tuple[bool, int | None, int | None]:
+    """Read and validate a fix row's accounting by the module's closed rule.
 
     Args:
         entry: One per-tool report object.
+        fix_document: Whether the document's ``action`` is ``fix``; None
+            when the document does not say (the stdout writer omits it).
+        listed: How many issues the entry lists.
 
     Returns:
-        Whether the entry is a fix row, and its remaining count (None when the
-        row says the residual is unknown).
+        Whether the entry is a fix row, its ``remaining`` and its ``fixed``
+        count (both None when the row says they were not measured).
+
+    Raises:
+        ValueError: When the accounting breaks the rule; the caller rejects
+            the report.
     """
-    if "remaining" not in entry:
-        return False, None
-    for key in ("fixed", "net_resolved"):
-        if entry.get(key) is not None:
-            _typed(entry, key, int)
-    return True, _count(entry, "remaining")
+    present = [key for key in _FIX_KEYS if key in entry]
+    if not present:
+        if fix_document:
+            msg = "has no fix accounting in a fix report"
+            raise ValueError(msg)
+        return False, None, None
+    if fix_document is False:
+        msg = f"carries fix accounting ({', '.join(present)}) in a check report"
+        raise ValueError(msg)
+    if len(present) != len(_FIX_KEYS):
+        msg = "carries partial fix accounting (needs remaining, fixed, net_resolved)"
+        raise ValueError(msg)
+    if all(entry[key] is None for key in _FIX_KEYS):
+        return True, None, None
+    remaining, fixed, net = (_typed(entry, key, int) for key in _FIX_KEYS)
+    if remaining is None or fixed is None or net is None:
+        msg = "mixes null and measured fix accounting"
+        raise ValueError(msg)
+    if fixed != net:
+        msg = f"has 'fixed' {fixed} but 'net_resolved' {net}"
+        raise ValueError(msg)
+    if not 0 <= remaining <= listed or not 0 <= fixed + remaining <= listed:
+        msg = (
+            f"has fix counts (remaining {remaining}, fixed {fixed}) that do "
+            f"not fit its {listed} listed issue(s)"
+        )
+        raise ValueError(msg)
+    return True, remaining, fixed
 
 
 def _contradiction(
@@ -247,6 +300,7 @@ def report_tool_result(
     *,
     name: str,
     issues: Sequence[BaseIssue],
+    fix_document: bool | None = None,
 ) -> ToolResult:
     """Rebuild one tool's result from a saved report entry.
 
@@ -254,13 +308,19 @@ def report_tool_result(
         entry: One per-tool report object.
         name: The tool's name.
         issues: Its parsed findings.
+        fix_document: Whether the document's ``action`` is ``fix``; None
+            when the document does not say.
 
     Returns:
         The rebuilt result: complete, skipped or unavailable only when every
         piece of evidence agrees, and otherwise incomplete.
     """
     success, status, flags = _validated(entry, issues)
-    fix_row, remaining = _fix_remaining(entry)
+    fix_row, remaining, fixed = _fix_accounting(
+        entry,
+        fix_document=fix_document,
+        listed=len(issues),
+    )
     if fix_row:
         # The listed findings are fix history; only the count is a verdict.
         listed = issues if remaining == len(issues) else ()
@@ -291,6 +351,20 @@ def report_tool_result(
         and not (incomplete or flags["unavailable"])
     ):
         problem = "is a fix report with an unknown residual but no reason"
+    if (
+        problem is None
+        and fix_row
+        and issues
+        and remaining == 0
+        and fixed == 0
+        and not incomplete
+    ):
+        # The writer defaults unmeasured counts to 0, so counts that account
+        # for none of the listed findings measured nothing.
+        problem = (
+            f"is a fix report with no measured counts for its {len(issues)} "
+            "listed issue(s)"
+        )
     if problem is None and flags["unavailable"]:
         return ToolResult.from_outcome(
             ToolOutcome(
@@ -322,6 +396,9 @@ def report_tool_result(
                 REPORT_NOTE_METADATA_KEY: (
                     f"fix report: {remaining} issue(s) remain after the fix; "
                     "the report does not say which"
+                ),
+                REPORT_FIX_FILES_METADATA_KEY: sorted(
+                    {str(getattr(issue, "file", "") or "") for issue in issues},
                 ),
             }
             if unlisted and lead is None and not incomplete

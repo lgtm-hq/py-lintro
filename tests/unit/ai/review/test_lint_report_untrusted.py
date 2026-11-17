@@ -133,8 +133,8 @@ def _digest_text(
         ),
         pytest.param(
             {"tool": "ruff", "success": True, "remaining": -1},
-            "has a negative 'remaining'",
-            id="negative-remaining",
+            "carries partial fix accounting",
+            id="negative-remaining-alone",
         ),
     ],
 )

@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING, Any, Final
 from loguru import logger
 
 from lintro.ai.review.lint_digest import format_lint_results_for_prompt
-from lintro.ai.review.lint_report_entry import report_tool_result
+from lintro.ai.review.lint_report_entry import (
+    REPORT_FIX_FILES_METADATA_KEY,
+    REPORT_NOTE_METADATA_KEY,
+    report_tool_result,
+)
 from lintro.enums.action import Action
 from lintro.models.core.result_completeness import is_incomplete_result
 from lintro.models.core.tool_result import ToolResult
@@ -296,6 +300,7 @@ def load_lint_report(path: Path) -> list[ToolResult]:
     if not isinstance(raw_results, list):
         msg = "lint report 'results' is not a list"
         raise LintReportError(msg)
+    fix_document = _report_action(document)
 
     results: list[ToolResult] = []
     for index, entry in enumerate(raw_results):
@@ -317,11 +322,44 @@ def load_lint_report(path: Path) -> list[ToolResult]:
         # Every completeness marker is carried, so the digest judges the
         # reloaded result exactly as it judged the live one (#3497).
         try:
-            results.append(report_tool_result(entry, name=name, issues=issues))
+            results.append(
+                report_tool_result(
+                    entry,
+                    name=name,
+                    issues=issues,
+                    fix_document=fix_document,
+                ),
+            )
         except ValueError as exc:
             msg = f"{where} {exc}"
             raise LintReportError(msg) from exc
     return results
+
+
+def _report_action(document: Any) -> bool | None:
+    """Return whether a report records a fix run, from its ``action``.
+
+    The report file lintro writes records ``action`` (``check``, ``fix`` or
+    ``test``); the stdout JSON document does not.
+
+    Args:
+        document: The decoded report.
+
+    Returns:
+        True for a fix run, False for any other recorded action, None when
+        the report records none.
+
+    Raises:
+        LintReportError: When ``action`` is present but not one of the
+            values lintro writes.
+    """
+    if "action" not in document:
+        return None
+    action: object = document["action"]
+    if action not in ("check", "fix", "test"):
+        msg = f"lint report has an unknown 'action' {action!r}"
+        raise LintReportError(msg)
+    return action == "fix"
 
 
 def _normalize_report_path(raw: str) -> str:
@@ -390,9 +428,36 @@ def restrict_lint_results_to_files(
         result, with ``issues_count`` recomputed.
     """
     changed = frozenset(_normalize_report_path(path) for path in changed_files)
+
+    def _under_review(path: object) -> bool:
+        relative = _relative_report_path(
+            _normalize_report_path(str(path or "")),
+            report_root=report_root,
+        )
+        return relative is not None and relative in changed
+
     restricted: list[ToolResult] = []
     outside_root = 0
     for result in results:
+        fix_files = result.metadata.get(REPORT_FIX_FILES_METADATA_KEY)
+        if isinstance(fix_files, list) and not any(map(_under_review, fix_files)):
+            # A fix row lists every finding from before and after the fix, so
+            # if none is on a changed file, none remains there either.
+            restricted.append(
+                replace(
+                    result,
+                    success=True,
+                    issues_count=0,
+                    issues=[],
+                    metadata={
+                        key: value
+                        for key, value in result.metadata.items()
+                        if key
+                        not in (REPORT_NOTE_METADATA_KEY, REPORT_FIX_FILES_METADATA_KEY)
+                    },
+                ),
+            )
+            continue
         kept = []
         for issue in result.issues:
             relative = _relative_report_path(

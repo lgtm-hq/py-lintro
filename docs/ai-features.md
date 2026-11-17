@@ -559,9 +559,12 @@ the contradiction as its reason. A report written by a fix run (`lintro fmt`) li
 tool's findings from before and after the fix together, so its verdict is the
 `remaining` count: with nothing remaining the tool is clean, when every listed finding
 remains they are all shown, and otherwise none is shown and the digest notes how many
-remain, since the report does not say which. Tool text in the digest has `&`, `<` and
-`>` escaped, and the whole section sits inside the prompt's random boundary fence as
-untrusted data.
+remain, since the report does not say which (no note when none of the listed findings is
+on a changed file). `remaining` is read only on a fix row: it must come with `fixed` and
+`net_resolved`, fit the listed findings, and never appear in a report whose `action` is
+not `fix`, or the report is rejected; and it never overrides a failure, timeout or other
+incomplete evidence. Tool text in the digest has `&`, `<` and `>` escaped, and the whole
+section sits inside the prompt's random boundary fence as untrusted data.
 
 ### Review coverage completeness
 
