@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.181.4] - 2026-11-17
+
+### Fixed
+
+- **tools**: serialise first-time npx installs per pin (#3507) (54e73b2)
+
 ## [0.181.3] - 2026-11-17
 
 ### Fixed
