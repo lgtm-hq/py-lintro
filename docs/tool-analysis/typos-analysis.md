@@ -35,6 +35,15 @@ parser-selection decision.
   `typos --format json --force-exclude --write-changes <files>` (the same always-on
   wrapper flags as check, so `[files] extend-exclude` still applies), then re-checks to
   report the `initial = fixed + remaining` breakdown expected by Lintro's fix pipeline.
+  The write pass also passes `--no-check-filenames`, so files are never renamed; a
+  misspelled file name is reported as a remaining issue.
+- **Correction listing**: the fix output lists every correction written as
+  `file:line: old -> new`. typos cannot report what `--write-changes` applied (it prints
+  nothing in write mode and refuses `--diff` with it), so the list is the
+  single-candidate findings from the scan taken just before the write, kept only for
+  files whose bytes changed. Line numbers refer to the file before the fix. The listing
+  is exact when nothing else changes the files or the typos configuration during the
+  run. Convergence retries carry earlier passes' entries into the merged output.
 - **Explicit-path safeguards**: Lintro always passes a resolved file list, and typos
   (like ripgrep) skips its ignore rules for paths given as arguments. `--force-exclude`
   restores the project's `[files] extend-exclude`, and the plugin additionally skips

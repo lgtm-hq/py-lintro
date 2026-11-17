@@ -19,11 +19,13 @@ extend-ignore-re = [
   # ``UPDATEd``), also inside snake_case names (``test_handles_DELETEs``).
   # typos reads the tail of the upper-case run plus the suffix as its own
   # word and "fixes" ``DELETEs`` to ``DELETEEs`` (#3509). ``_`` counts as a
-  # boundary because ``\\b`` does not fire next to it. ``DELET``, ``DELETEsx``
+  # boundary because ``\\b`` does not fire next to it, and a run of such
+  # components (``GETs_PUTs_DELETEs``) is matched in one go so adjacent
+  # components cannot consume their shared ``_``. ``DELET``, ``DELETEsx``
   # and ``delets`` are still reported, and so are all-caps misspellings
   # (``RECIEVED``); only the upper-case-stem-plus-lower-case-suffix form of a
   # misspelling (``ADRESSs``) is hidden.
-  "(?:\\b|_)[A-Z]{2,}e?[sd](?:\\b|_)",
+  "(?:\\b|_)[A-Z]{2,}e?[sd](?:_[A-Z]{2,}e?[sd])*(?:\\b|_)",
   # Example ``rustc``/``clippy --version`` strings quote a real commit hash.
   "ded5c06cf2?",
   # S1 release-validation fixture records the npm integrity prefixes verbatim.

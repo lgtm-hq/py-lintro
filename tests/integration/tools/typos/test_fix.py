@@ -90,6 +90,7 @@ def test_fix_leaves_http_verb_plurals_alone_under_repo_config(
         "GETs, PUTs, POSTs, PATCHes, HEADs, CONNECTs and TRACEs\n"
         "UPDATEs, SELECTs, INSERTs, ROTATEs, DELETEd and PATCHed\n"
         "x_DELETEs, my_UPDATEd_rows and test_handles_DELETEs\n"
+        "DELETEs_DELETEs, GETs_PUTs_DELETEs and x_UPDATEd_DELETEs_y\n"
     )
     sample.write_text(text, encoding="utf-8")
     plugin = get_plugin("typos")

@@ -103,7 +103,8 @@ _AFTER_WRITE_NOTE: str = (
 
 # Heads the per-correction listing in a fix run's output.
 _APPLIED_HEADER: str = (
-    "Corrections written (line numbers refer to the file before the fix):"
+    "Corrections written, from the scan taken just before the fix "
+    "(line numbers refer to the file before the fix):"
 )
 
 

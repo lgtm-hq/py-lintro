@@ -13,7 +13,10 @@ from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.typos.definition import TyposPlugin
 from lintro.utils.execution.fix_retry import run_fix_with_retry
 
-_HEADER = "Corrections written (line numbers refer to the file before the fix):"
+_HEADER = (
+    "Corrections written, from the scan taken just before the fix "
+    "(line numbers refer to the file before the fix):"
+)
 _CLEAN = SubprocessResult(returncode=0, stdout="", stderr="", output="")
 
 
