@@ -464,32 +464,34 @@ def _finish_converged_review(
     raise SystemExit(1 if open_p1 else 0)
 
 
-def _advisory_failure_error(results: list[ToolResult]) -> AIError:
-    """Build the exception for an advisory tool that failed to run.
+def _advisory_provider_error(
+    results: list[ToolResult],
+) -> AIProviderRequiredError | None:
+    """Return the configuration error of an advisory tool with no provider.
+
+    A missing provider means no advisory tool could run at all, so it keeps
+    the review-error contract. Any other failure is a tool result: its
+    output, findings included, is rendered before the run exits 2 (#3497).
 
     Args:
-        results: Advisory tool results that include at least one error.
+        results: Advisory tool results.
 
     Returns:
-        ``AIProviderRequiredError`` when the failure is a missing provider,
-        otherwise a generic ``AIError`` with the tool's output.
+        ``AIProviderRequiredError`` for a tool marked as missing its
+        provider, keyed off the typed metadata marker, or None.
     """
-    from lintro.enums.tool_run_status import ToolRunStatus, tool_run_status
-
     failed = next(
-        result
-        for result in results
-        if tool_run_status(
-            result=result,
-            issue_count=result.issues_count or 0,
-        )
-        in {ToolRunStatus.ERRORED, ToolRunStatus.TIMED_OUT}
+        (
+            result
+            for result in results
+            if result.metadata.get(ADVISORY_ERROR_METADATA_KEY)
+            == ADVISORY_ERROR_PROVIDER_REQUIRED
+        ),
+        None,
     )
-    message = failed.output or f"{failed.name} failed"
-    metadata = failed.metadata
-    if metadata.get(ADVISORY_ERROR_METADATA_KEY) == (ADVISORY_ERROR_PROVIDER_REQUIRED):
-        return AIProviderRequiredError(message)
-    return AIError(message)
+    if failed is None:
+        return None
+    return AIProviderRequiredError(failed.output or f"{failed.name} failed")
 
 
 @click.command("review")
@@ -1088,6 +1090,13 @@ def _prepare(
                 prepared.lint_tool_count,
                 prepared.lint_issue_count,
             )
+            if prepared.lint_incomplete_count:
+                # Never counted as tools that ran: their silence is no
+                # verdict, and the prompt names each one (#3497).
+                logger.warning(
+                    "Lint: {} tool(s) did not run or did not complete",
+                    prepared.lint_incomplete_count,
+                )
         if prepared.lint_note and options.output_format == "terminal":
             logger.warning(prepared.lint_note)
     return prepared
@@ -2003,9 +2012,10 @@ def _run_advisory_only(
         paths=paths,
         ai_config=ai_config,
     )
-    if advisory_tools_errored(results):
+    provider_error = _advisory_provider_error(results)
+    if provider_error is not None:
         _fail_review_command(
-            _advisory_failure_error(results),
+            provider_error,
             output_format=output_format,
             provider_label=provider_label,
             post=False,
@@ -2023,6 +2033,18 @@ def _run_advisory_only(
         click.echo(
             render_advisory_results(results=results) or "No advisory tools ran.",
         )
+    if advisory_tools_errored(results):
+        # Fail closed, but only after the tools' own output, findings and
+        # "did not run / incomplete" notes included, has been shown (#3497).
+        from lintro.ai.review.error_contract import REVIEW_ERROR_EXIT_CODE
+
+        if output_format != "json":
+            click.echo(
+                "Advisory tools did not all complete; exiting "
+                f"{REVIEW_ERROR_EXIT_CODE}.",
+                err=True,
+            )
+        raise SystemExit(REVIEW_ERROR_EXIT_CODE)
     findings = advisory_findings_count(results)
     raise SystemExit(1 if (fail_on_findings and findings) else 0)
 

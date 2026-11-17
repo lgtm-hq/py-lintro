@@ -170,7 +170,8 @@ def serialize_tool_result(
     Returns:
         The per-tool JSON object: always ``tool``, ``success``,
         ``issues_count``, ``skipped``, ``skip_reason``, ``timed_out`` and
-        ``output``; plus ``parse_failures_count`` when set,
+        ``output``; plus ``parse_failures_count`` when set, ``execution_failed``
+        and ``residual_unknown`` (with its reason) when set,
         ``fixed``/``remaining`` in FIX mode, normalized ``metadata`` when
         present, and ``issues`` when any exist. ``status`` names the execution
         verdict; unavailable results also carry ``unavailable: true`` and
@@ -202,6 +203,12 @@ def serialize_tool_result(
         data["baselined_count"] = result.baselined_count
     if result.execution_failed:
         data["execution_failed"] = True
+    if result.residual_unknown and action != Action.FIX:
+        # A FIX row writes these from its accounting below. Any other row
+        # still carries them, so a saved report keeps the result incomplete
+        # when it is read back (#3497).
+        data["residual_unknown"] = True
+        data["residual_unknown_reason"] = result.residual_unknown_reason
     if action == Action.FIX:
         # These keys belong to every FIX row, including check-only tools and
         # legacy results with no fix measurements.

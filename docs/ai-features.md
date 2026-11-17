@@ -215,7 +215,30 @@ they never contribute to the `chk` issue counts. One exception: a round short-ci
 by the [convergence stop rule](#review-convergence-deterministic-re-review-stop) returns
 before the advisory tools run at all, so `--fail-on-findings` is inert on that
 invocation. With `--output json`, they appear under an additive `advisory` key so
-existing consumers of the review JSON keep working.
+existing consumers of the review JSON keep working. Each entry carries three
+completeness fields:
+
+| Field               | Meaning                                                                                                                                                                     |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `incomplete`        | The verdict: the tool failed, timed out, was refused, printed output that could not be fully parsed, or left its result unmeasured. This is what fails `--advisory-only`.   |
+| `execution_failed`  | The tool's own flag that a run failed to execute (a refused command, an npx integrity refusal, a crash).                                                                    |
+| `findings_complete` | The tool's own certification that every invocation finished. Older plugins never set it, so `false` on its own does not mean incomplete; read `incomplete` for the verdict. |
+
+An advisory tool that did not complete is an error rather than a result, even when it
+reported findings from the invocations that did run. The output still shows its
+findings, with a `did not run / incomplete: <reason>` line under the tool's header
+naming the cause: the refusal text, `timed out`,
+`N part(s) of <tool>'s output could not be parsed`, `remaining issues unknown (<why>)`,
+or `failed with no findings`. `--advisory-only` then exits 2. An unavailable tool is a
+skip, not a failure: it is listed as `unavailable: <reason>` and does not change the
+exit code.
+
+**Behaviour change (#3497).** `--advisory-only` used to exit 0 when an unfinished tool
+also reported findings, and a tool whose output could not be fully parsed passed. Both
+now exit 2. A tool failure other than a missing AI provider no longer replaces the
+output with an error report: the normal advisory output (or the `advisory` JSON
+document) is printed first, then the run exits 2. A missing provider still exits 2 with
+the review-error report.
 
 `idiom-review` offers two modes:
 
@@ -517,6 +540,31 @@ alongside the diff, and never acted on by lintro itself. A report that is missin
 oversized, or malformed is not fatal: the review runs from the diff alone and the posted
 header says `linter facts unavailable for this head`. The two flags are mutually
 exclusive.
+
+A tool that did not run or did not complete (lintro refused its command, its npx cache
+failed the integrity check, it crashed or timed out, its output could not be fully
+parsed, or its result is unmeasured) gets one line in the digest,
+`Tool: <name> | did not run / incomplete: <reason>`, ahead of the findings, so the model
+never reads its silence as a clean result. An unavailable tool gets
+`Tool: <name> | unavailable: <reason>`. Findings an unfinished tool did report are kept;
+it is counted apart from the tools that ran, and a skipped or unavailable tool is
+counted as neither. A saved `--lint-report` carries every one of these states, so it
+gives the same answer as the live run. Because the report is untrusted, nothing in it
+can make a tool look finished on bad evidence: an entry with a missing or non-boolean
+`success`, an unknown `status`, a `null` or mistyped flag, a `null` `issues` or an
+`issues_count` that does not match its issues makes the report unusable (the header note
+names the entry), and an entry whose `status` and flags disagree (a skip beside a
+failure status, a clean status beside a failed verdict) is reported as incomplete with
+the contradiction as its reason. A report written by a fix run (`lintro fmt`) lists each
+tool's findings from before and after the fix together, so its verdict is the
+`remaining` count: with nothing remaining the tool is clean, when every listed finding
+remains they are all shown, and otherwise none is shown and the digest notes how many
+remain, since the report does not say which (no note when none of the listed findings is
+on a changed file). `remaining` is read only on a fix row: it must come with `fixed` and
+`net_resolved`, fit the listed findings, and never appear in a report whose `action` is
+not `fix`, or the report is rejected; and it never overrides a failure, timeout or other
+incomplete evidence. Tool text in the digest has `&`, `<` and `>` escaped, and the whole
+section sits inside the prompt's random boundary fence as untrusted data.
 
 ### Review coverage completeness
 

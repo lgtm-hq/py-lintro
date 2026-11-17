@@ -41,6 +41,7 @@ from lintro.ai.review import (
 from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.exceptions import known_review_head
+from lintro.ai.review.lint_completeness import LintRunCounts
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.pr_head_guard import RemoveOnError
 from lintro.ai.review.preparation_resolvers import (
@@ -178,11 +179,14 @@ class PreparedReview:
         verify_moved_findings: ``review.verify_moved_findings`` (#3466).
         lint_digest: ``--with-lint`` / ``--lint-report`` digest for the
             prompt, or None.
-        lint_tool_count: Number of lint tools that ran for the digest.
+        lint_tool_count: Number of lint tools that ran to a complete
+            verdict for the digest.
         lint_issue_count: Total issues those tools reported.
         lint_note: Why a requested ``--lint-report`` could not be used, or
             why none was passed (#2571), for the review header. Empty
             otherwise.
+        lint_incomplete_count: Number of lint tools that did not run or did
+            not complete (#3497); the digest names each.
         context_collection_seconds: Wall-clock seconds spent collecting the
             diff context. Excluded from equality: it measures the run, not the
             preparation.
@@ -207,6 +211,7 @@ class PreparedReview:
     lint_tool_count: int = 0
     lint_issue_count: int = 0
     lint_note: str = ""
+    lint_incomplete_count: int = 0
     context_collection_seconds: float = field(default=0.0, compare=False)
 
     def with_max_cost_usd(self, *, max_cost_usd: float | None) -> PreparedReview:
@@ -343,18 +348,15 @@ def _prepare_from_context(
     checklist_text, _prompt_mapping = format_checklist_for_prompt(items=selected_items)
 
     lint_digest: str | None = None
-    lint_tool_count = 0
-    lint_issue_count = 0
+    lint_counts = LintRunCounts(ran=0, incomplete=0, issues=0)
     lint_note = ""
     if request.lint_report is not None:
-        lint_digest, lint_tool_count, lint_issue_count, lint_note = (
-            build_lint_digest_from_report(
-                context=context,
-                report_path=request.lint_report,
-            )
+        lint_digest, lint_counts, lint_note = build_lint_digest_from_report(
+            context=context,
+            report_path=request.lint_report,
         )
     elif request.with_lint:
-        lint_digest, lint_tool_count, lint_issue_count = build_lint_digest(
+        lint_digest, lint_counts = build_lint_digest(
             context=context,
             lintro_config=request.lintro_config,
         )
@@ -390,9 +392,10 @@ def _prepare_from_context(
         verify_moved_findings=review_config.verify_moved_findings,
         workspace_root=request.workspace_root,
         lint_digest=lint_digest,
-        lint_tool_count=lint_tool_count,
-        lint_issue_count=lint_issue_count,
+        lint_tool_count=lint_counts.ran,
+        lint_issue_count=lint_counts.issues,
         lint_note=lint_note,
+        lint_incomplete_count=lint_counts.incomplete,
         context_collection_seconds=context_collection_seconds,
     )
 

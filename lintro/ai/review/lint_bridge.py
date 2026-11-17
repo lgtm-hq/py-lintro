@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 from loguru import logger
 
-from lintro.ai.prompts.review import format_lint_results_section
+from lintro.ai.review.lint_digest import format_lint_results_for_prompt
+from lintro.ai.review.lint_report_entry import (
+    REPORT_FIX_FILES_METADATA_KEY,
+    REPORT_NOTE_METADATA_KEY,
+    report_tool_result,
+)
 from lintro.enums.action import Action
+from lintro.models.core.result_completeness import is_incomplete_result
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.tools import tool_manager
+from lintro.tools.core.incomplete_run import incomplete_run_result
 from lintro.utils.execution.tool_configuration import (
     configure_tool_for_execution,
     get_tools_to_run,
@@ -163,65 +170,26 @@ def run_lint_on_changed_files(
             )
             attempted = tool
             result = tool.check(paths=changed_files, options={})
-        except Exception:
-            # A refused command is reported as an execution failure, not
-            # dropped like an ordinary crash (#3486).
+        except Exception as exc:
+            # A refused command is reported as an execution failure (#3486),
+            # and so is a crash: dropping it would let the prompt read the
+            # tool's silence as a clean result (#3497).
             refused = refused_command_failure(attempted, name=tool_name, fix=False)
             if refused is None:
                 logger.warning(
-                    "Lint bridge skipped {} after check failure",
+                    "Lint bridge: {} check failed",
                     tool_name,
                     exc_info=True,
                 )
-                continue
-            # Already marked by ``refused_command_failure``.
+                refused = incomplete_run_result(
+                    name=tool_name,
+                    reason=f"check crashed: {type(exc).__name__}: {exc}",
+                )
             results.append(refused)
             continue
         results.append(mark_refused_command(attempted, result, fix=False))
 
     return results
-
-
-def format_lint_results_for_prompt(
-    *,
-    results: list[ToolResult],
-    max_entries: int = 200,
-) -> str:
-    """Format lint tool results as a compact prompt digest.
-
-    Args:
-        results: Tool results from ``run_lint_on_changed_files``.
-        max_entries: Maximum number of issue entries to include.
-
-    Returns:
-        Lint digest wrapped in ``<lint_results>`` tags, or empty string.
-    """
-    lines: list[str] = []
-    for result in results:
-        if not result.issues:
-            continue
-        for issue in result.issues:
-            if len(lines) >= max_entries:
-                break
-            code = getattr(issue, "code", "") or "unknown"
-            message = getattr(issue, "message", "") or ""
-            file_path = getattr(issue, "file", "") or ""
-            line_no = getattr(issue, "line", None)
-            line_suffix = f" | line: {line_no}" if line_no else ""
-            lines.append(
-                f"Tool: {result.name} | file: {file_path}{line_suffix}\n"
-                f"Code: {code} | Message: {message}",
-            )
-        if len(lines) >= max_entries:
-            break
-
-    if not lines:
-        return ""
-
-    digest = "\n\n".join(lines)
-    if len(lines) >= max_entries:
-        digest += "\n\n(truncated lint digest)"
-    return format_lint_results_section(digest=digest)
 
 
 def _report_field(entry: Any, key: str, *, where: str) -> Any:
@@ -318,9 +286,13 @@ def load_lint_report(path: Path) -> list[ToolResult]:
             f"(limit {MAX_LINT_REPORT_BYTES})"
         )
         raise LintReportError(msg)
+    # Any failure to read or decode the report is a rejected report, never
+    # an error that escapes the review: ``ValueError`` covers malformed JSON,
+    # bad UTF-8 and integers past the interpreter's digit limit, and
+    # ``RecursionError`` covers nesting too deep to decode (#3497).
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         msg = f"lint report is not valid JSON: {path} ({exc})"
         raise LintReportError(msg) from exc
 
@@ -328,6 +300,7 @@ def load_lint_report(path: Path) -> list[ToolResult]:
     if not isinstance(raw_results, list):
         msg = "lint report 'results' is not a list"
         raise LintReportError(msg)
+    fix_document = _report_action(document)
 
     results: list[ToolResult] = []
     for index, entry in enumerate(raw_results):
@@ -336,9 +309,9 @@ def load_lint_report(path: Path) -> list[ToolResult]:
         if not isinstance(name, str) or not name:
             msg = f"{where} has an empty or non-string 'tool'"
             raise LintReportError(msg)
+        # Absent means no findings; a null or any other non-list is
+        # malformed, never a clean verdict (#3497).
         raw_issues = entry.get("issues", [])
-        if raw_issues is None:
-            raw_issues = []
         if not isinstance(raw_issues, list):
             msg = f"{where} 'issues' is not a list"
             raise LintReportError(msg)
@@ -346,15 +319,47 @@ def load_lint_report(path: Path) -> list[ToolResult]:
             _parse_report_issue(raw, where=f"{where}.issues[{position}]")
             for position, raw in enumerate(raw_issues)
         ]
-        results.append(
-            ToolResult(
-                name=name,
-                success=bool(entry.get("success", True)),
-                issues_count=len(issues),
-                issues=issues,
-            ),
-        )
+        # Every completeness marker is carried, so the digest judges the
+        # reloaded result exactly as it judged the live one (#3497).
+        try:
+            results.append(
+                report_tool_result(
+                    entry,
+                    name=name,
+                    issues=issues,
+                    fix_document=fix_document,
+                ),
+            )
+        except ValueError as exc:
+            msg = f"{where} {exc}"
+            raise LintReportError(msg) from exc
     return results
+
+
+def _report_action(document: Any) -> bool | None:
+    """Return whether a report records a fix run, from its ``action``.
+
+    The report file lintro writes records ``action`` (``check``, ``fix`` or
+    ``test``); the stdout JSON document does not.
+
+    Args:
+        document: The decoded report.
+
+    Returns:
+        True for a fix run, False for any other recorded action, None when
+        the report records none.
+
+    Raises:
+        LintReportError: When ``action`` is present but not one of the
+            values lintro writes.
+    """
+    if "action" not in document:
+        return None
+    action: object = document["action"]
+    if action not in ("check", "fix", "test"):
+        msg = f"lint report has an unknown 'action' {action!r}"
+        raise LintReportError(msg)
+    return action == "fix"
 
 
 def _normalize_report_path(raw: str) -> str:
@@ -423,9 +428,36 @@ def restrict_lint_results_to_files(
         result, with ``issues_count`` recomputed.
     """
     changed = frozenset(_normalize_report_path(path) for path in changed_files)
+
+    def _under_review(path: object) -> bool:
+        relative = _relative_report_path(
+            _normalize_report_path(str(path or "")),
+            report_root=report_root,
+        )
+        return relative is not None and relative in changed
+
     restricted: list[ToolResult] = []
     outside_root = 0
     for result in results:
+        fix_files = result.metadata.get(REPORT_FIX_FILES_METADATA_KEY)
+        if isinstance(fix_files, list) and not any(map(_under_review, fix_files)):
+            # A fix row lists every finding from before and after the fix, so
+            # if none is on a changed file, none remains there either.
+            restricted.append(
+                replace(
+                    result,
+                    success=True,
+                    issues_count=0,
+                    issues=[],
+                    metadata={
+                        key: value
+                        for key, value in result.metadata.items()
+                        if key
+                        not in (REPORT_NOTE_METADATA_KEY, REPORT_FIX_FILES_METADATA_KEY)
+                    },
+                ),
+            )
+            continue
         kept = []
         for issue in result.issues:
             relative = _relative_report_path(
@@ -437,11 +469,22 @@ def restrict_lint_results_to_files(
                 continue
             if relative in changed:
                 kept.append(issue)
+        # Every other field, completeness and skip evidence included, is
+        # kept (#3497). A tool that failed only on files outside the review
+        # is clean on the changed files; one that did not complete keeps its
+        # failure so the digest names it.
         restricted.append(
-            ToolResult(
-                name=result.name,
-                success=result.success,
-                issues_count=len(kept),
+            replace(
+                result,
+                success=result.success
+                or (
+                    bool(result.issues)
+                    and not kept
+                    and not is_incomplete_result(result)
+                ),
+                # A fix report that counts remaining issues without listing
+                # them keeps its count, so it never reads as a silent failure.
+                issues_count=len(kept) if result.issues else result.issues_count,
                 issues=kept,
             ),
         )

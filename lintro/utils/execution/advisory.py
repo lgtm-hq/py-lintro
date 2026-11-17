@@ -11,10 +11,10 @@ It is deliberately a thin, sequential runner rather than a second copy of the
 full :mod:`lintro.utils.tool_executor` pipeline: advisory tools never fix,
 never participate in post-checks, and never feed its issue counts. Findings
 do not change the exit code unless the user opts in with
-``--fail-on-findings``. An advisory tool that failed to run
-(:attr:`~lintro.enums.tool_run_status.ToolRunStatus.ERRORED` or
-:attr:`~lintro.enums.tool_run_status.ToolRunStatus.TIMED_OUT`) is not a
-finding: ``--advisory-only`` fails closed, while a full review still
+``--fail-on-findings``. An advisory tool that failed to run or did not
+complete (it errored, timed out, was refused, or left a partial or
+unmeasured result) is not a finding: ``--advisory-only`` still renders every
+tool's output, findings included, and then exits 2, while a full review
 renders the completed review and records the advisory failure.
 """
 
@@ -28,7 +28,6 @@ from loguru import logger
 from lintro.config.config_loader import get_config
 from lintro.enums.action import Action
 from lintro.enums.advisory_tools_value import AdvisoryToolsValue
-from lintro.enums.tool_run_status import ToolRunStatus, tool_run_status
 from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools import tool_manager
@@ -37,6 +36,7 @@ from lintro.utils.execution.tool_configuration import (
     configure_tool_for_execution,
 )
 from lintro.utils.refused_command import mark_refused_command
+from lintro.utils.result_reason import incomplete_reason, unavailable_reason
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
@@ -50,6 +50,7 @@ __all__ = [
     "AdvisorySelection",
     "advisory_findings_count",
     "advisory_results_to_payload",
+    "advisory_tool_errored",
     "advisory_tools_errored",
     "get_advisory_tool_names",
     "render_advisory_results",
@@ -245,6 +246,10 @@ def run_advisory_tools(
     return results
 
 
+#: The line the issue table prints for a tool without findings.
+_NO_ISSUES_LINE: str = "No issues found."
+
+
 def advisory_findings_count(results: list[ToolResult]) -> int:
     """Return the total number of advisory findings across results.
 
@@ -261,24 +266,51 @@ def advisory_tools_errored(results: list[ToolResult]) -> bool:
     """Return whether any advisory tool failed to run.
 
     Findings also set ``success=False``; those still have issues and are
-    not errors. A skip is not an error. Use
-    :func:`~lintro.enums.tool_run_status.tool_run_status` so this stays
-    aligned with the other result surfaces.
+    not errors. A skip or an unavailable tool is not an error. A tool that
+    did not complete, such as one whose command lintro refused, counts as
+    errored even when it reported findings from the invocations that did
+    run (#3497).
 
     Args:
         results: Advisory tool results.
 
     Returns:
-        True when at least one tool errored or timed out.
+        True when at least one tool errored, timed out or did not complete.
     """
-    return any(
-        tool_run_status(
-            result=result,
-            issue_count=result.issues_count,
-        )
-        in {ToolRunStatus.ERRORED, ToolRunStatus.TIMED_OUT}
-        for result in results
-    )
+    return any(advisory_tool_errored(result) for result in results)
+
+
+def advisory_tool_errored(result: ToolResult) -> bool:
+    """Return whether one advisory tool failed to run or did not complete.
+
+    It uses the same verdict as the AI review lint digest
+    (:func:`~lintro.utils.result_reason.incomplete_reason`): a failure, a
+    timeout, a refused command, a partial parse or an unknown residual. A
+    skipped or unavailable tool is not an error.
+
+    Args:
+        result: One advisory tool's result.
+
+    Returns:
+        True when the tool errored, timed out, or did not complete.
+    """
+    return incomplete_reason(result) is not None
+
+
+def _tool_note(result: ToolResult) -> str | None:
+    """Name why an advisory tool did not complete, or why it is unavailable.
+
+    Args:
+        result: One advisory tool's result.
+
+    Returns:
+        ``"did not run / incomplete: <reason>"``, ``"unavailable: <reason>"``,
+        or None.
+    """
+    reason = incomplete_reason(result)
+    if reason:
+        return f"did not run / incomplete: {reason}"
+    return unavailable_reason(result)
 
 
 def render_advisory_results(
@@ -316,6 +348,19 @@ def render_advisory_results(
             success=result.success,
             issues_count=result.issues_count,
         )
+        # The issue table drops the output, so a refusal beside real
+        # findings would otherwise go unmentioned (#3497).
+        note = _tool_note(result)
+        if note:
+            header = f"{header}\n  {note}"
+            if not result.issues:
+                # "No issues found." under a tool that did not finish, or
+                # did not run, would read as a clean verdict.
+                body = "\n".join(
+                    line
+                    for line in body.splitlines()
+                    if line.strip() != _NO_ISSUES_LINE
+                )
         blocks.append(f"{header}\n{body}".rstrip())
     return "\n\n".join(blocks)
 
@@ -327,7 +372,16 @@ def advisory_results_to_payload(results: list[ToolResult]) -> list[dict[str, obj
         results: Advisory tool results.
 
     Returns:
-        One dictionary per tool with its findings as display rows.
+        One dictionary per tool with its findings as display rows, plus
+        three completeness fields: ``incomplete`` is the verdict (the tool
+        failed, timed out, was refused, or left a partial or unmeasured
+        result; the same verdict that fails ``--advisory-only``),
+        ``execution_failed`` is the producer's own flag, and
+        ``findings_complete`` is the producer's certification that every
+        invocation finished, which legacy plugins never set, so ``false``
+        alone does not mean incomplete. ``unavailable`` and
+        ``unavailable_reason`` mark a tool that could not be run at all,
+        which is a skip, not a failure.
     """
     payload: list[dict[str, object]] = []
     for result in results:
@@ -340,6 +394,11 @@ def advisory_results_to_payload(results: list[ToolResult]) -> list[dict[str, obj
                 "skip_reason": result.skip_reason,
                 "issues_count": result.issues_count,
                 "issues": [issue.to_display_row() for issue in result.issues],
+                "incomplete": advisory_tool_errored(result),
+                "execution_failed": result.execution_failed,
+                "findings_complete": result.findings_complete,
+                "unavailable": result.unavailable,
+                "unavailable_reason": result.unavailable_reason,
             },
         )
     return payload

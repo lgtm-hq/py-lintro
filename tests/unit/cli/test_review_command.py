@@ -1647,9 +1647,14 @@ def test_advisory_only_provider_flag_reaches_advisory_tools() -> None:
 
 
 def test_advisory_failure_error_uses_metadata_not_prose() -> None:
-    """Classification keys off the typed marker, not error-message copy."""
-    from lintro.ai.exceptions import AIError, AIProviderRequiredError
-    from lintro.cli_utils.commands.review import _advisory_failure_error
+    """Classification keys off the typed marker, not error-message copy.
+
+    Only the marked result is a provider error that keeps the review-error
+    contract; a prose-only failure is an ordinary tool failure, rendered
+    with the rest of the advisory output before the run exits 2 (#3497).
+    """
+    from lintro.ai.exceptions import AIProviderRequiredError
+    from lintro.cli_utils.commands.review import _advisory_provider_error
 
     marked = ToolResult(
         name="idiom-review",
@@ -1657,7 +1662,7 @@ def test_advisory_failure_error_uses_metadata_not_prose() -> None:
         output="tool failed for an unrelated reason",
         metadata={"advisory_error": "provider_required"},
     )
-    assert_that(_advisory_failure_error([marked])).is_instance_of(
+    assert_that(_advisory_provider_error([marked])).is_instance_of(
         AIProviderRequiredError,
     )
 
@@ -1666,9 +1671,7 @@ def test_advisory_failure_error_uses_metadata_not_prose() -> None:
         success=False,
         output=("ai.provider is required when ai.lint or ai.review is enabled."),
     )
-    error = _advisory_failure_error([prose_only])
-    assert_that(error).is_instance_of(AIError)
-    assert_that(error.__class__).is_equal_to(AIError)
+    assert_that(_advisory_provider_error([prose_only])).is_none()
 
 
 def test_advisory_only_rejects_diff_flags() -> None:
