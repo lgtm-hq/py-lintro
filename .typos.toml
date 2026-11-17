@@ -16,11 +16,14 @@
 extend-ignore-re = [
   # An upper-case word followed by a lower-case English suffix: an acronym or
   # HTTP/SQL verb inflected as a word (``PATCHed``, ``ANDed``, ``DELETEs``,
-  # ``UPDATEd``). typos reads the tail of the upper-case run plus the suffix
-  # as its own word and "fixes" ``DELETEs`` to ``DELETEEs`` (#3509). Whole
-  # words only: ``DELET``, ``DELETEsx`` and ``delets`` are still reported.
-  # Trade-off: an all-caps misspelling with such a suffix is not reported.
-  "\\b[A-Z]{2,}e?[sd]\\b",
+  # ``UPDATEd``), also inside snake_case names (``test_handles_DELETEs``).
+  # typos reads the tail of the upper-case run plus the suffix as its own
+  # word and "fixes" ``DELETEs`` to ``DELETEEs`` (#3509). ``_`` counts as a
+  # boundary because ``\\b`` does not fire next to it. ``DELET``, ``DELETEsx``
+  # and ``delets`` are still reported, and so are all-caps misspellings
+  # (``RECIEVED``); only the upper-case-stem-plus-lower-case-suffix form of a
+  # misspelling (``ADRESSs``) is hidden.
+  "(?:\\b|_)[A-Z]{2,}e?[sd](?:\\b|_)",
   # Example ``rustc``/``clippy --version`` strings quote a real commit hash.
   "ded5c06cf2?",
   # S1 release-validation fixture records the npm integrity prefixes verbatim.

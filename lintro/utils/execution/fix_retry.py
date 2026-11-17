@@ -101,15 +101,18 @@ def _carry_earlier_changes(result: ToolResult, earlier: list[str]) -> ToolResult
         earlier: Applied-change lines from every pass before it, in order.
 
     Returns:
-        ``result`` with ``earlier`` listed under its output and prepended to
+        ``result`` with ``earlier`` listed ahead of its output and prepended to
         its metadata entries, or ``result`` itself when there are none.
     """
     if not earlier:
         return result
+    # Lead with what earlier passes applied, then the final pass's own
+    # report, so a final "could not be fixed" line does not read as if the
+    # run fixed nothing.
     listing = "\n".join(
         ["Applied by earlier fix passes:", *(f"  {entry}" for entry in earlier)],
     )
-    output = f"{result.output}\n{listing}" if result.output else listing
+    output = f"{listing}\n{result.output}" if result.output else listing
     metadata = {
         **result.metadata,
         APPLIED_CHANGES_KEY: [*earlier, *_pass_changes(result)],

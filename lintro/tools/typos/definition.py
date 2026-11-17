@@ -7,8 +7,8 @@ understanding programming conventions (identifiers, escape sequences, etc.).
 
 from __future__ import annotations
 
+import hashlib
 import subprocess  # nosec B404 - used safely with shell disabled
-from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -98,6 +98,12 @@ _AFTER_WRITE_NOTE: str = (
     "corrected on disk. The fixed/remaining counts below could not be "
     "verified and are reported conservatively; re-run "
     "`lintro check --tools typos` to confirm."
+)
+
+
+# Heads the per-correction listing in a fix run's output.
+_APPLIED_HEADER: str = (
+    "Corrections written (line numbers refer to the file before the fix):"
 )
 
 
@@ -463,6 +469,11 @@ class TyposPlugin(BaseToolPlugin):
                 initial_measured=False,
             )
 
+        # Fingerprint the files the write pass may touch, so the listing
+        # below only names files whose bytes actually changed.
+        candidates = _single_candidate_findings(initial_issues)
+        before_write = _file_digests(candidates, cwd=ctx.cwd)
+
         # Apply corrections in place. A clean ``--write-changes`` run prints
         # nothing and exits 0 (verified against typos 1.49.0), so any error
         # record or non-zero exit without a parseable report is a real write
@@ -514,8 +525,9 @@ class TyposPlugin(BaseToolPlugin):
             initial_count = fixed_count + remaining_count
 
         applied = _applied_corrections(
-            initial=initial_issues,
-            remaining=remaining_issues,
+            candidates=candidates,
+            before=before_write,
+            after=_file_digests(candidates, cwd=ctx.cwd),
         )
         return ToolResult.from_outcome(
             ToolOutcome(
@@ -593,76 +605,92 @@ class TyposPlugin(BaseToolPlugin):
         )
 
 
-_LINE_BREAKS: frozenset[str] = frozenset("\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
-
-
 def _display_safe(text: str) -> str:
-    r"""Escape control and other non-printable characters for one display line.
+    r"""Escape backslashes and non-printable characters for one display line.
 
     File names, words and replacements come from the scanned tree, so a
     newline or terminal escape in any of them could forge extra listing
     entries or recolour the console. Each such character is replaced with
-    its Python escape (``\\n``, ``\\x1b``, ``\\u2028``), so every entry stays
-    on one line.
+    its Python escape (``\\n``, ``\\x1b``, ``\\u202e``), so every entry stays
+    on one line. A literal backslash is doubled, so a name containing ``\\``
+    followed by ``n`` cannot be confused with one containing a newline.
 
     Args:
         text: Untrusted text.
 
     Returns:
-        The text with every non-printable character escaped.
+        The text with every backslash and non-printable character escaped.
     """
-    return "".join(char if char.isprintable() else repr(char)[1:-1] for char in text)
+    return "".join(
+        "\\\\" if char == "\\" else char if char.isprintable() else repr(char)[1:-1]
+        for char in text
+    )
+
+
+def _single_candidate_findings(issues: list[TyposIssue]) -> list[TyposIssue]:
+    """Select the findings ``--write-changes`` applies.
+
+    typos auto-applies a finding only when it offers exactly one correction.
+    File-name findings (no line number) are excluded because the write pass
+    runs with ``--no-check-filenames``.
+
+    Args:
+        issues: Findings from the scan taken just before the write pass.
+
+    Returns:
+        The findings the write pass rewrites, in report order.
+    """
+    return [i for i in issues if len(i.corrections) == 1 and i.line > 0]
+
+
+def _file_digests(issues: list[TyposIssue], cwd: str | None) -> dict[str, str]:
+    """Hash every file named by ``issues``.
+
+    Args:
+        issues: Findings whose files to hash.
+        cwd: Directory the reported paths are relative to.
+
+    Returns:
+        SHA-256 hex digest per reported path; an unreadable file maps to an
+        empty string.
+    """
+    base = Path(cwd) if cwd else Path.cwd()
+    digests: dict[str, str] = {}
+    for path in dict.fromkeys(i.file for i in issues):
+        try:
+            digests[path] = hashlib.sha256((base / path).read_bytes()).hexdigest()
+        except OSError:
+            digests[path] = ""
+    return digests
 
 
 def _applied_corrections(
-    initial: list[TyposIssue],
-    remaining: list[TyposIssue],
+    candidates: list[TyposIssue],
+    before: dict[str, str],
+    after: dict[str, str],
 ) -> list[str]:
-    """List the corrections ``--write-changes`` applied, one line each.
+    """List the corrections a successful ``--write-changes`` pass applied.
 
-    typos auto-applies a word only when it has exactly one correction, so
-    words offering several are never listed. For each file and word, the
-    number of corrections applied is the number of pre-scan reports minus
-    the number the re-check still makes.
-
-    Line numbers are given only when they can be trusted: a configured
-    replacement that contains a line break shifts every line after it, so in
-    such a file entries are listed without a line number. Otherwise the line
-    of each corrected occurrence is the pre-scan line the re-check no longer
-    reports. Byte offsets are never compared: an earlier fix on the same line
-    shifts them.
+    Each entry is a finding from the scan taken immediately before the write
+    that the write pass applies, so the list never nets out a correction
+    against a typo the rewrite introduced. Entries for a file whose bytes did
+    not change are dropped. Line numbers refer to the file before the fix.
 
     Args:
-        initial: Findings from the pre-fix scan.
-        remaining: Findings from the post-fix re-check.
+        candidates: Single-candidate findings from the pre-write scan.
+        before: File digests taken before the write pass.
+        after: File digests taken after it.
 
     Returns:
-        ``file:line: old -> new`` (or ``file: old -> new``) lines in pre-scan
-        order, every field escaped by :func:`_display_safe`.
+        ``file:line: old -> new`` lines in report order, every field escaped
+        by :func:`_display_safe`.
     """
-    applied = [i for i in initial if len(i.corrections) == 1]
-    before = Counter((i.file, i.typo) for i in applied)
-    after = Counter((i.file, i.typo) for i in remaining)
-    budget = {key: max(0, n - after[key]) for key, n in before.items()}
-    shifted = {i.file for i in applied if _LINE_BREAKS & set(i.corrections[0])}
-    surviving_lines = Counter((i.file, i.line, i.typo) for i in remaining)
-    lines: list[str] = []
-    for issue in applied:
-        key = (issue.file, issue.typo)
-        if not budget[key]:
-            continue
-        where = _display_safe(issue.file)
-        if issue.file not in shifted:
-            line_key = (issue.file, issue.line, issue.typo)
-            if surviving_lines[line_key]:
-                surviving_lines[line_key] -= 1
-                continue
-            where = f"{where}:{issue.line}"
-        budget[key] -= 1
-        old = _display_safe(issue.typo)
-        new = _display_safe(issue.corrections[0])
-        lines.append(f"{where}: {old} -> {new}")
-    return lines
+    return [
+        f"{_display_safe(issue.file)}:{issue.line}: "
+        f"{_display_safe(issue.typo)} -> {_display_safe(issue.corrections[0])}"
+        for issue in candidates
+        if before.get(issue.file) != after.get(issue.file)
+    ]
 
 
 def _fix_summary(
@@ -686,9 +714,11 @@ def _fix_summary(
     elif fixed:
         summary = f"Fixed {fixed} typo(s)."
     elif remaining:
-        summary = f"Found {remaining} typo(s) that could not be fixed."
+        summary = f"{remaining} typo(s) could not be auto-corrected."
     else:
         summary = "No typos found."
     if not applied:
         return summary
-    return "\n".join([summary, *(f"  {line}" for line in applied)])
+    return "\n".join(
+        [summary, _APPLIED_HEADER, *(f"  {line}" for line in applied)],
+    )

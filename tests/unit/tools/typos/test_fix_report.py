@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,12 +11,14 @@ from assertpy import assert_that
 
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.typos.definition import TyposPlugin
-from lintro.utils.execution.fix_retry import APPLIED_CHANGES_KEY, run_fix_with_retry
+from lintro.utils.execution.fix_retry import run_fix_with_retry
+
+_HEADER = "Corrections written (line numbers refer to the file before the fix):"
+_CLEAN = SubprocessResult(returncode=0, stdout="", stderr="", output="")
 
 
 def _finding(
     line: int,
-    offset: int,
     typo: str,
     corrections: list[str],
     path: str = "doc.txt",
@@ -23,8 +26,7 @@ def _finding(
     """Build one JSON line of ``typos --format json`` output.
 
     Args:
-        line: 1-based line number.
-        offset: Byte offset within the line.
+        line: 1-based line number (0 for a file-name finding).
         typo: Misspelled word.
         corrections: Suggested replacements.
         path: Reported file path.
@@ -32,20 +34,20 @@ def _finding(
     Returns:
         A JSON-encoded typos finding.
     """
-    return json.dumps(
-        {
-            "type": "typo",
-            "path": path,
-            "line_num": line,
-            "byte_offset": offset,
-            "typo": typo,
-            "corrections": corrections,
-        },
-    )
+    record: dict[str, object] = {
+        "type": "typo",
+        "path": path,
+        "byte_offset": 0,
+        "typo": typo,
+        "corrections": corrections,
+    }
+    if line:
+        record["line_num"] = line
+    return json.dumps(record)
 
 
 def _found(*lines: str) -> SubprocessResult:
-    """Build the result of a typos run that reported findings.
+    """Build the result of a typos scan that reported findings.
 
     Args:
         *lines: JSON finding lines.
@@ -57,47 +59,73 @@ def _found(*lines: str) -> SubprocessResult:
     return SubprocessResult(returncode=2, stdout=stdout, stderr="", output=stdout)
 
 
-_CLEAN = SubprocessResult(returncode=0, stdout="", stderr="", output="")
+def _typos(
+    scans: list[SubprocessResult],
+    targets: list[Path],
+    writes: bool = True,
+) -> Callable[..., SubprocessResult]:
+    """Stand in for the typos binary over canned scans.
+
+    Args:
+        scans: Results of the detect and re-check scans, in call order.
+        targets: Files a ``--write-changes`` call rewrites.
+        writes: Whether a write call changes the targets' bytes.
+
+    Returns:
+        A ``_run_subprocess_result`` replacement.
+    """
+    queue: Iterator[SubprocessResult] = iter(scans)
+
+    def _run(cmd: list[str], **_kwargs: object) -> SubprocessResult:
+        if "--write-changes" not in cmd:
+            return next(queue)
+        for target in targets if writes else []:
+            target.write_text(target.read_text() + "written\n")
+        return _CLEAN
+
+    return _run
 
 
-def _target(tmp_path: Path) -> str:
-    """Create the file every canned run is pointed at.
+def _target(tmp_path: Path, name: str = "doc.txt") -> Path:
+    """Create a file the canned runs point at.
 
     Args:
         tmp_path: Directory to create it in.
+        name: File name.
 
     Returns:
         The file's path.
     """
-    target = tmp_path / "doc.txt"
+    target = tmp_path / name
     target.write_text("placeholder\n")
-    return str(target)
+    return target
 
 
-def _fix_output(
+def _fix_lines(
     plugin: TyposPlugin,
     tmp_path: Path,
-    detect: SubprocessResult,
-    recheck: SubprocessResult,
-) -> str:
-    """Run ``fix`` over canned detect / write / re-check passes.
+    scans: list[SubprocessResult],
+    writes: bool = True,
+) -> list[str]:
+    """Run one ``fix`` over ``doc.txt`` and split its output into lines.
 
     Args:
         plugin: Plugin under test.
         tmp_path: Directory holding the target file.
-        detect: Result of the pre-fix scan.
-        recheck: Result of the post-fix re-check.
+        scans: Detect and re-check results.
+        writes: Whether the write pass changes the file.
 
     Returns:
-        The fix result's display output.
+        The fix result's display output, one entry per line.
     """
+    target = _target(tmp_path)
     with patch.object(
         plugin,
         "_run_subprocess_result",
-        side_effect=[detect, _CLEAN, recheck],
+        side_effect=_typos(scans, [target], writes=writes),
     ):
-        result = plugin.fix([_target(tmp_path)], {})
-    return result.output or ""
+        result = plugin.fix([str(target)], {})
+    return (result.output or "").splitlines()
 
 
 def test_fix_output_lists_each_applied_correction(
@@ -110,62 +138,76 @@ def test_fix_output_lists_each_applied_correction(
         typos_plugin: Plugin fixture with version checking mocked out.
         tmp_path: Pytest temporary directory fixture.
     """
-    detect = _found(
-        _finding(1, 0, "teh", ["the"]),
-        _finding(3, 26, "DELET", ["DELETE"]),
-    )
+    detect = _found(_finding(1, "teh", ["the"]), _finding(3, "DELET", ["DELETE"]))
 
-    output = _fix_output(typos_plugin, tmp_path, detect=detect, recheck=_CLEAN)
+    lines = _fix_lines(typos_plugin, tmp_path, [detect, _CLEAN])
 
-    assert_that(output.splitlines()).is_equal_to(
+    assert_that(lines).is_equal_to(
         [
             "Fixed 2 typo(s).",
+            _HEADER,
             "  doc.txt:1: teh -> the",
             "  doc.txt:3: DELET -> DELETE",
         ],
     )
 
 
-def test_fix_output_omits_typos_the_recheck_still_reports(
+def test_fix_output_skips_ambiguous_and_file_name_findings(
     typos_plugin: TyposPlugin,
     tmp_path: Path,
 ) -> None:
-    """A word still present after the write is not listed as changed.
+    """Only findings ``--write-changes`` applies are listed.
 
-    typos leaves ambiguous words alone, and a second occurrence on the same
-    line keeps its word even though its byte offset moved.
+    A word with several candidates is left alone by typos, and file names are
+    never rewritten because the write pass skips them.
 
     Args:
         typos_plugin: Plugin fixture with version checking mocked out.
         tmp_path: Pytest temporary directory fixture.
     """
-    detect = _found(
-        _finding(1, 0, "teh", ["the"]),
-        _finding(1, 8, "teh", ["the"]),
-        _finding(2, 0, "CONNEC", ["CONNECT", "CONNED"]),
-    )
-    recheck = _found(
-        _finding(1, 8, "teh", ["the"]),
-        _finding(2, 0, "CONNEC", ["CONNECT", "CONNED"]),
+    ambiguous = _finding(2, "CONNEC", ["CONNECT", "CONNED"])
+    file_name = _finding(0, "recieve", ["receive"])
+    detect = _found(_finding(1, "teh", ["the"]), ambiguous, file_name)
+
+    lines = _fix_lines(
+        typos_plugin,
+        tmp_path,
+        [detect, _found(ambiguous, file_name)],
     )
 
-    output = _fix_output(typos_plugin, tmp_path, detect=detect, recheck=recheck)
-
-    assert_that(output.splitlines()).is_equal_to(
+    assert_that(lines).is_equal_to(
         [
             "Fixed 1 typo(s); 2 could not be auto-corrected.",
+            _HEADER,
             "  doc.txt:1: teh -> the",
         ],
     )
 
 
-def test_fix_output_drops_line_numbers_when_a_replacement_adds_lines(
+def test_fix_output_omits_files_whose_bytes_did_not_change(
     typos_plugin: TyposPlugin,
     tmp_path: Path,
 ) -> None:
-    r"""A multi-line replacement shifts lines, so no line number is claimed.
+    """A finding is not claimed as written when its file is byte-identical.
 
-    With ``foo = "hello\\nworld"`` configured, ``foo`` on line 1 becomes two
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    detect = _found(_finding(1, "teh", ["the"]))
+
+    lines = _fix_lines(typos_plugin, tmp_path, [detect, _CLEAN], writes=False)
+
+    assert_that(lines).is_equal_to(["Fixed 1 typo(s)."])
+
+
+def test_fix_output_keeps_pre_fix_lines_when_a_replacement_adds_lines(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    r"""A multi-line replacement is listed at its pre-fix line.
+
+    With ``foo = "hello\nworld"`` configured, ``foo`` on line 1 becomes two
     lines and the ambiguous ``CONNEC`` moves from line 2 to line 3 untouched.
     It must not be listed as corrected (review of #3515).
 
@@ -173,67 +215,97 @@ def test_fix_output_drops_line_numbers_when_a_replacement_adds_lines(
         typos_plugin: Plugin fixture with version checking mocked out.
         tmp_path: Pytest temporary directory fixture.
     """
+    ambiguous = ["CONNECT", "CONNED"]
     detect = _found(
-        _finding(1, 0, "foo", ["hello\nworld"]),
-        _finding(2, 0, "CONNEC", ["CONNECT", "CONNED"]),
+        _finding(1, "foo", ["hello\nworld"]),
+        _finding(2, "CONNEC", ambiguous),
     )
-    recheck = _found(_finding(3, 0, "CONNEC", ["CONNECT", "CONNED"]))
 
-    output = _fix_output(typos_plugin, tmp_path, detect=detect, recheck=recheck)
+    lines = _fix_lines(
+        typos_plugin,
+        tmp_path,
+        [detect, _found(_finding(3, "CONNEC", ambiguous))],
+    )
 
-    assert_that(output.splitlines()).is_equal_to(
+    assert_that(lines).is_equal_to(
         [
             "Fixed 1 typo(s); 1 could not be auto-corrected.",
-            "  doc.txt: foo -> hello\\nworld",
+            _HEADER,
+            "  doc.txt:1: foo -> hello\\nworld",
         ],
     )
 
 
-def test_fix_output_escapes_control_characters_in_paths(
+def test_fix_output_escapes_file_names(
     typos_plugin: TyposPlugin,
     tmp_path: Path,
 ) -> None:
-    """A file name cannot forge listing entries or emit terminal escapes.
+    """File names cannot forge entries, emit escapes, or collide when shown.
 
     Args:
         typos_plugin: Plugin fixture with version checking mocked out.
         tmp_path: Pytest temporary directory fixture.
     """
     evil = "evil\nFORGED:0: foo -> bar\x1b[31m.txt"
-    detect = _found(_finding(1, 0, "teh", ["the"], path=evil))
+    newline, backslash_n = "a\nb.txt", "a\\nb.txt"
+    targets = [_target(tmp_path, name) for name in (evil, newline, backslash_n)]
+    detect = _found(
+        *(_finding(1, "teh", ["the"], path=t.name) for t in targets),
+    )
 
-    output = _fix_output(typos_plugin, tmp_path, detect=detect, recheck=_CLEAN)
+    with patch.object(
+        typos_plugin,
+        "_run_subprocess_result",
+        side_effect=_typos([detect, _CLEAN], targets),
+    ):
+        result = typos_plugin.fix([str(t) for t in targets], {})
 
-    assert_that(output.splitlines()).is_equal_to(
+    assert_that((result.output or "").splitlines()).is_equal_to(
         [
-            "Fixed 1 typo(s).",
+            "Fixed 3 typo(s).",
+            _HEADER,
             "  evil\\nFORGED:0: foo -> bar\\x1b[31m.txt:1: teh -> the",
+            "  a\\nb.txt:1: teh -> the",
+            "  a\\\\nb.txt:1: teh -> the",
         ],
     )
 
 
-def test_retry_keeps_corrections_from_passes_before_the_last(
+def test_retry_lists_a_rewrite_that_introduced_the_same_word(
     typos_plugin: TyposPlugin,
     tmp_path: Path,
 ) -> None:
-    """An unfixable leftover triggers retries that write nothing; the list stays.
+    r"""A rewrite never nets out against a typo another rewrite introduced.
+
+    With ``foo = "teh"`` configured, ``foo\nteh\n`` becomes ``teh\nthe\n``
+    in the first pass and ``the\nthe\n`` in the second (review of #3515).
+    The earlier pass's rewrites lead, then the final pass's report.
 
     Args:
         typos_plugin: Plugin fixture with version checking mocked out.
         tmp_path: Pytest temporary directory fixture.
     """
-    leftover = _finding(2, 0, "CONNEC", ["CONNECT", "CONNED"])
-    first = _found(_finding(1, 0, "teh", ["the"]), leftover)
-    later = _found(leftover)
-    passes = [first, _CLEAN, later, later, _CLEAN, later, later, _CLEAN, later]
+    target = _target(tmp_path)
+    first = _found(_finding(1, "foo", ["teh"]), _finding(2, "teh", ["the"]))
+    introduced = _found(_finding(1, "teh", ["the"]))
+    scans = [first, introduced, introduced, _CLEAN]
 
-    with patch.object(typos_plugin, "_run_subprocess_result", side_effect=passes):
-        result = run_fix_with_retry(typos_plugin, [_target(tmp_path)], {}, 3)
+    with patch.object(
+        typos_plugin,
+        "_run_subprocess_result",
+        side_effect=_typos(scans, [target]),
+    ):
+        result = run_fix_with_retry(typos_plugin, [str(target)], {}, 3)
 
-    assert_that(result.fixed_issues_count).is_equal_to(1)
-    assert_that(result.output).contains("  doc.txt:1: teh -> the")
-    assert_that(result.metadata[APPLIED_CHANGES_KEY]).is_equal_to(
-        ["doc.txt:1: teh -> the"],
+    assert_that((result.output or "").splitlines()).is_equal_to(
+        [
+            "Applied by earlier fix passes:",
+            "  doc.txt:1: foo -> teh",
+            "  doc.txt:2: teh -> the",
+            "Fixed 1 typo(s).",
+            _HEADER,
+            "  doc.txt:1: teh -> the",
+        ],
     )
 
 
@@ -254,7 +326,7 @@ def test_write_pass_never_renames_files(
         return _CLEAN
 
     with patch.object(typos_plugin, "_run_subprocess_result", side_effect=_record):
-        typos_plugin.fix([_target(tmp_path)], {})
+        typos_plugin.fix([str(_target(tmp_path))], {})
 
     skips = ["--no-check-filenames" in cmd for cmd in commands]
     writes = ["--write-changes" in cmd for cmd in commands]
