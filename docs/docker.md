@@ -386,6 +386,8 @@ docker compose run --rm lintro check --tools ruff,prettier
 - `--output FILE` - Save output to file
 - `--exclude TEXT` - Patterns to exclude
 - `--include-venv` - Include virtual environment directories
+- `--strict-missing-tools` - Fail when a selected tool is missing or below its minimum
+  version
 
 **Tool-specific options:**
 
@@ -657,6 +659,14 @@ Tools can be skipped for several reasons:
 
 Skipped tools appear in the summary table with a `SKIP` status and a note explaining
 why, so you always know what happened.
+
+With `--strict-missing-tools` (or `execution.strict_missing_tools: true`) a tool that is
+missing or below the minimum version fails the run instead of being skipped. The
+tools-backed image (`ghcr.io/lgtm-hq/py-lintro`) bundles the external tools at their
+pinned versions, so a strict failure there points at the image rather than your project.
+The minimal image (`ghcr.io/lgtm-hq/py-lintro-base`) does not, so combine strict mode
+with `--tools` to name the tools you supply. See
+[Strict Mode for Missing Tools](configuration.md#strict-mode-for-missing-tools).
 
 **Example output:**
 
