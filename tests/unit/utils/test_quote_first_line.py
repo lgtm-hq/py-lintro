@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
-from lintro.parsers.base_parser import quote_first_line
+from lintro.utils.quoting import quote_first_line
 
 
 @pytest.mark.parametrize(
@@ -19,6 +19,31 @@ from lintro.parsers.base_parser import quote_first_line
             40,
             "error: bad",
             id="ansi-sequences",
+        ),
+        pytest.param(
+            "\x1b]0;title\x07\x1b[31mboom",
+            20,
+            "boom",
+            id="osc-title-ended-by-bel",
+        ),
+        pytest.param(
+            "\x1b]8;;https://x.test\x1b\\link\x1b]8;;\x1b\\ ok",
+            20,
+            "link ok",
+            id="osc-hyperlink-ended-by-st",
+        ),
+        pytest.param(
+            "\x1bPq#0\x1b\\a\x1b(Bb\x1b7c\x1b=d",
+            20,
+            "abcd",
+            id="dcs-charset-and-single-escapes",
+        ),
+        pytest.param("\x9b31mred\x9d0;t\x9cz", 20, "redz", id="c1-csi-and-osc"),
+        pytest.param(
+            "\x1b]0;unterminated\nnext",
+            20,
+            "next",
+            id="unterminated-osc-ends-at-newline",
         ),
         pytest.param("a\tb\x00c\x07d", 20, "a bcd", id="control-characters"),
         pytest.param("abcdefghij", 5, "abcd…", id="cut-to-limit"),

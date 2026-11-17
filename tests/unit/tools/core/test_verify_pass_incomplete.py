@@ -254,6 +254,75 @@ def test_refused_verify_check_is_unknown_and_never_verified(
     assert_that([issue.message for issue in folded.issues]).contains("new")
 
 
+@dataclass
+class _EscapingRefusalCheck(_RefusingCheck):
+    """Verify check that lets a refused command escape as an exception."""
+
+    def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
+        """Run the command without catching its refusal.
+
+        Args:
+            paths: Unused scan paths.
+            options: Unused runtime options.
+
+        Returns:
+            Never; the refusal propagates.
+        """
+        self._run_subprocess(list(self.command))
+        return ToolResult(name=_TOOL, success=True)
+
+
+@pytest.mark.parametrize(
+    ("after_run", "lead"),
+    [
+        pytest.param(False, f"lintro refused to run {_TOOL}", id="refused"),
+        pytest.param(True, f"lintro cannot trust {_TOOL}'s results", id="after-run"),
+    ],
+)
+def test_escaped_refusal_is_named_by_its_own_lead_in_not_as_a_crash(
+    monkeypatch: pytest.MonkeyPatch,
+    after_run: bool,
+    lead: str,
+) -> None:
+    """A refusal escaping ``check`` reads as the refusal, not a crash (#3497).
+
+    An npx integrity failure found after the run means npx did run the tool,
+    so "the verify check could not run" would be wrong.
+
+    Args:
+        monkeypatch: Pytest patch fixture.
+        after_run: Whether the refusal came after the tool ran.
+        lead: The lead-in the residual reason must carry.
+    """
+    registered = SimpleNamespace(
+        definition=SimpleNamespace(
+            claims=[Claim(patterns=["*.py"], capabilities={Cap.FIX, Cap.CHECK})],
+        ),
+    )
+    monkeypatch.setattr(
+        lintro_tools,
+        "tool_manager",
+        SimpleNamespace(get_tool={_TOOL: registered}.__getitem__),
+    )
+    check = _EscapingRefusalCheck()
+    if after_run:
+        check = _EscapingRefusalCheck(command=(sys.executable, "-c", "pass"))
+        monkeypatch.setattr(plugin_base, "run_subprocess", _untrusted_npx_cache)
+
+    outcomes = run_verify_pass(
+        tools_to_run=[_TOOL],
+        scope=VerifyScope(files=(_A, _B), narrowed=True),
+        configure=lambda *, tool_name: cast("VerifiableTool", check),
+    )
+
+    assert_that(outcomes).is_length(1)
+    assert_that(outcomes[0].status).is_equal_to(VerifyStatus.UNKNOWN)
+    assert_that(outcomes[0].unknown_reason).starts_with(
+        f"the verify check did not complete ({lead}: ",
+    )
+    assert_that(outcomes[0].unknown_reason).does_not_contain("could not run")
+
+
 def test_failed_verify_reason_is_quoted_without_terminal_control_codes() -> None:
     """ANSI colour and control characters never reach the residual reason."""
     verify = incomplete_run_result(

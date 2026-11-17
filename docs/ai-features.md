@@ -215,7 +215,13 @@ they never contribute to the `chk` issue counts. One exception: a round short-ci
 by the [convergence stop rule](#review-convergence-deterministic-re-review-stop) returns
 before the advisory tools run at all, so `--fail-on-findings` is inert on that
 invocation. With `--output json`, they appear under an additive `advisory` key so
-existing consumers of the review JSON keep working.
+existing consumers of the review JSON keep working; each entry carries
+`execution_failed` and `findings_complete`.
+
+An advisory tool that did not complete, for example one whose command lintro refused, is
+an error rather than a result, even when it reported findings from the invocations that
+did run: the text output names the reason under the tool's header, and `--advisory-only`
+exits 2.
 
 `idiom-review` offers two modes:
 
@@ -517,6 +523,12 @@ alongside the diff, and never acted on by lintro itself. A report that is missin
 oversized, or malformed is not fatal: the review runs from the diff alone and the posted
 header says `linter facts unavailable for this head`. The two flags are mutually
 exclusive.
+
+A tool that did not run or did not complete (lintro refused its command, its npx cache
+failed the integrity check, it crashed or timed out) gets one line in the digest,
+`Tool: <name> | did not run / incomplete: <reason>`, ahead of the findings, so the model
+never reads its silence as a clean result. Findings it did report are kept, and it is
+counted apart from the tools that ran.
 
 ### Review coverage completeness
 

@@ -10,10 +10,12 @@ from typing import TYPE_CHECKING, Any, Final
 from loguru import logger
 
 from lintro.ai.prompts.review import format_lint_results_section
+from lintro.ai.review.lint_completeness import incomplete_lint_reason
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.tools import tool_manager
+from lintro.tools.core.incomplete_run import incomplete_run_result
 from lintro.utils.execution.tool_configuration import (
     configure_tool_for_execution,
     get_tools_to_run,
@@ -163,18 +165,21 @@ def run_lint_on_changed_files(
             )
             attempted = tool
             result = tool.check(paths=changed_files, options={})
-        except Exception:
-            # A refused command is reported as an execution failure, not
-            # dropped like an ordinary crash (#3486).
+        except Exception as exc:
+            # A refused command is reported as an execution failure (#3486),
+            # and so is a crash: dropping it would let the prompt read the
+            # tool's silence as a clean result (#3497).
             refused = refused_command_failure(attempted, name=tool_name, fix=False)
             if refused is None:
                 logger.warning(
-                    "Lint bridge skipped {} after check failure",
+                    "Lint bridge: {} check failed",
                     tool_name,
                     exc_info=True,
                 )
-                continue
-            # Already marked by ``refused_command_failure``.
+                refused = incomplete_run_result(
+                    name=tool_name,
+                    reason=f"check crashed: {type(exc).__name__}: {exc}",
+                )
             results.append(refused)
             continue
         results.append(mark_refused_command(attempted, result, fix=False))
@@ -189,6 +194,10 @@ def format_lint_results_for_prompt(
 ) -> str:
     """Format lint tool results as a compact prompt digest.
 
+    A tool that did not run or did not complete gets one line naming why,
+    ahead of the findings, so its silence never reads as a clean result
+    (#3497). Findings it did report are kept like any other.
+
     Args:
         results: Tool results from ``run_lint_on_changed_files``.
         max_entries: Maximum number of issue entries to include.
@@ -196,6 +205,11 @@ def format_lint_results_for_prompt(
     Returns:
         Lint digest wrapped in ``<lint_results>`` tags, or empty string.
     """
+    notes = [
+        f"Tool: {result.name} | did not run / incomplete: {reason}"
+        for result in results
+        if (reason := incomplete_lint_reason(result))
+    ]
     lines: list[str] = []
     for result in results:
         if not result.issues:
@@ -215,10 +229,10 @@ def format_lint_results_for_prompt(
         if len(lines) >= max_entries:
             break
 
-    if not lines:
+    if not lines and not notes:
         return ""
 
-    digest = "\n\n".join(lines)
+    digest = "\n\n".join([*notes, *lines])
     if len(lines) >= max_entries:
         digest += "\n\n(truncated lint digest)"
     return format_lint_results_section(digest=digest)
@@ -346,12 +360,24 @@ def load_lint_report(path: Path) -> list[ToolResult]:
             _parse_report_issue(raw, where=f"{where}.issues[{position}]")
             for position, raw in enumerate(raw_issues)
         ]
+        # A tool that did not run or did not complete stays marked, so the
+        # digest says so instead of reading its silence as clean (#3497).
+        execution_failed = entry.get("execution_failed") is True
+        timed_out = entry.get("timed_out") is True
+        output = entry.get("output")
         results.append(
             ToolResult(
                 name=name,
-                success=bool(entry.get("success", True)),
+                success=(
+                    bool(entry.get("success", True))
+                    and not execution_failed
+                    and not timed_out
+                ),
                 issues_count=len(issues),
                 issues=issues,
+                output=output if isinstance(output, str) else None,
+                execution_failed=execution_failed,
+                timed_out=timed_out,
             ),
         )
     return results
@@ -437,12 +463,20 @@ def restrict_lint_results_to_files(
                 continue
             if relative in changed:
                 kept.append(issue)
+        # A tool that failed only on files outside the review is clean on the
+        # changed files; one that failed without findings, or did not
+        # complete, keeps its failure so the digest names it (#3497).
+        incomplete = result.execution_failed or result.timed_out
         restricted.append(
             ToolResult(
                 name=result.name,
-                success=result.success,
+                success=result.success
+                or (bool(result.issues) and not kept and not incomplete),
                 issues_count=len(kept),
                 issues=kept,
+                output=result.output,
+                execution_failed=result.execution_failed,
+                timed_out=result.timed_out,
             ),
         )
     if outside_root:

@@ -27,10 +27,6 @@ IssueT = TypeVar("IssueT", bound="BaseIssue")
 # Pre-compiled regex for ANSI escape sequences
 _ANSI_ESCAPE_PATTERN: re.Pattern[str] = re.compile(r"\x1b\[[0-9;]*m")
 
-#: Any ANSI CSI sequence (colours, cursor moves, line erases), for text that
-#: is quoted back to the user rather than parsed.
-_ANSI_CONTROL_PATTERN: re.Pattern[str] = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
-
 
 def extract_optional_str(
     item: Mapping[str, object],
@@ -173,35 +169,6 @@ def is_empty_output(output: str | None) -> bool:
         False
     """
     return output is None or not output.strip()
-
-
-def quote_first_line(text: str | None, *, limit: int) -> str:
-    """Return the first non-empty line of tool output, safe to quote.
-
-    Tool output that explains a failure is quoted into reasons that reach the
-    terminal and JSON reports. ANSI sequences and other non-printable
-    characters are removed, whitespace controls become spaces, and the line
-    is cut to ``limit`` characters with an ellipsis.
-
-    Args:
-        text: Raw tool output, or None.
-        limit: Longest quote returned, ellipsis included; at least 1.
-
-    Returns:
-        The cleaned line, or an empty string when the output has none.
-    """
-    for raw in _ANSI_CONTROL_PATTERN.sub("", text or "").splitlines():
-        line = "".join(
-            char if char.isprintable() else " " if char.isspace() else ""
-            for char in raw
-        ).strip()
-        if line:
-            break
-    else:
-        return ""
-    if len(line) > limit:
-        line = line[: max(limit - 1, 0)].rstrip() + "…"
-    return line
 
 
 def strip_ansi_codes(text: str) -> str:

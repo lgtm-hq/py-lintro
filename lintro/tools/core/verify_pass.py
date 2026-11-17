@@ -92,14 +92,17 @@ from lintro.models.core.tool_outcome import (
 )
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
-from lintro.parsers.base_parser import quote_first_line
 from lintro.utils.check_answered import check_answered
 from lintro.utils.file_cache import FingerprintSnapshot, snapshot_fingerprints
 from lintro.utils.path_filtering import (
     setup_exclude_patterns,
     walk_files_with_excludes,
 )
-from lintro.utils.refused_command import mark_refused_command
+from lintro.utils.quoting import quote_first_line
+from lintro.utils.refused_command import (
+    mark_refused_command,
+    refused_command_failure,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -736,6 +739,7 @@ def run_verify_pass(
             )
             continue
         started = time.monotonic()
+        tool: VerifiableTool | None = None
         try:
             tool = configure(tool_name=name)
             # A refusal the plugin caught still marks the run incomplete, so
@@ -750,6 +754,22 @@ def run_verify_pass(
             # not run.
             raise
         except (KeyError, OSError, RuntimeError, ValueError) as exc:
+            refused = refused_command_failure(tool, name=name, fix=False)
+            if refused is not None:
+                # A refusal that escaped the plugin, possibly an npx integrity
+                # failure found after the tool ran: name it with the refusal's
+                # own lead-in instead of as a crash (#3497).
+                reason = _incomplete_reason(refused)
+                logger.warning(f"Verify pass for {name}: {reason}")
+                outcomes.append(
+                    VerifyOutcome(
+                        tool=name,
+                        result=None,
+                        status=VerifyStatus.UNKNOWN,
+                        unknown_reason=reason,
+                    ),
+                )
+                continue
             # A brand-new failure path: the row that follows flips to failed
             # with a note that reads like a lint finding, so say plainly that
             # the residual is unknown rather than measured. The traceback

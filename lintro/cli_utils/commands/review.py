@@ -119,6 +119,7 @@ from lintro.utils.execution.advisory import (
     ADVISORY_ERROR_PROVIDER_REQUIRED,
     advisory_findings_count,
     advisory_results_to_payload,
+    advisory_tool_errored,
     advisory_tools_errored,
     render_advisory_results,
     resolve_advisory_tools,
@@ -474,17 +475,9 @@ def _advisory_failure_error(results: list[ToolResult]) -> AIError:
         ``AIProviderRequiredError`` when the failure is a missing provider,
         otherwise a generic ``AIError`` with the tool's output.
     """
-    from lintro.enums.tool_run_status import ToolRunStatus, tool_run_status
-
-    failed = next(
-        result
-        for result in results
-        if tool_run_status(
-            result=result,
-            issue_count=result.issues_count or 0,
-        )
-        in {ToolRunStatus.ERRORED, ToolRunStatus.TIMED_OUT}
-    )
+    # The same predicate as ``advisory_tools_errored``, so a tool that did
+    # not complete but reported findings is found here too (#3497).
+    failed = next(result for result in results if advisory_tool_errored(result))
     message = failed.output or f"{failed.name} failed"
     metadata = failed.metadata
     if metadata.get(ADVISORY_ERROR_METADATA_KEY) == (ADVISORY_ERROR_PROVIDER_REQUIRED):
@@ -1088,6 +1081,13 @@ def _prepare(
                 prepared.lint_tool_count,
                 prepared.lint_issue_count,
             )
+            if prepared.lint_incomplete_count:
+                # Never counted as tools that ran: their silence is no
+                # verdict, and the prompt names each one (#3497).
+                logger.warning(
+                    "Lint: {} tool(s) did not run or did not complete",
+                    prepared.lint_incomplete_count,
+                )
         if prepared.lint_note and options.output_format == "terminal":
             logger.warning(prepared.lint_note)
     return prepared

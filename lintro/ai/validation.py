@@ -20,8 +20,8 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from lintro.models.core.result_completeness import is_incomplete_result
-from lintro.parsers.base_parser import quote_first_line
 from lintro.utils.check_answered import check_answered
+from lintro.utils.quoting import quote_first_line
 from lintro.utils.refused_command import mark_refused_command
 
 if TYPE_CHECKING:

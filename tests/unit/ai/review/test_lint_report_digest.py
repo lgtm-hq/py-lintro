@@ -67,7 +67,7 @@ def test_report_digest_is_restricted_to_the_changed_files(tmp_path: Path) -> Non
         encoding="utf-8",
     )
 
-    digest, tools, issues, note = build_lint_digest_from_report(
+    digest, counts, note = build_lint_digest_from_report(
         context=_context(),
         report_path=report,
     )
@@ -76,20 +76,94 @@ def test_report_digest_is_restricted_to_the_changed_files(tmp_path: Path) -> Non
     assert_that(digest).contains("<lint_results>")
     assert_that(digest).contains("src/main.py")
     assert_that(digest).does_not_contain("src/other.py")
-    assert_that(tools).is_equal_to(2)
-    assert_that(issues).is_equal_to(1)
+    assert_that((counts.ran, counts.incomplete, counts.issues)).is_equal_to((2, 0, 1))
     assert_that(note).is_empty()
+
+
+def test_report_names_tools_that_did_not_complete(tmp_path: Path) -> None:
+    """A refused or timed-out tool in the report is named, never read as clean.
+
+    A tool that failed only on files outside the review stays clean, and a
+    refused tool's real finding on a changed file is kept (#3497).
+    """
+    report = tmp_path / "results.json"
+    report.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "tool": "tsc",
+                        "success": False,
+                        "execution_failed": True,
+                        "output": "lintro refused to run tsc: \x1b]0;t\x07bad arg\nmore",
+                        "issues": [],
+                    },
+                    {
+                        "tool": "eslint",
+                        "success": False,
+                        "timed_out": True,
+                        "output": "eslint timed out after 30s",
+                    },
+                    {
+                        "tool": "oxlint",
+                        "success": False,
+                        "execution_failed": True,
+                        "output": "lintro cannot trust oxlint's results: cache changed",
+                        "issues": [
+                            {
+                                "file": "src/main.py",
+                                "line": 3,
+                                "code": "no-x",
+                                "message": "kept",
+                            },
+                        ],
+                    },
+                    {
+                        "tool": "ruff",
+                        "success": False,
+                        "issues": [
+                            {
+                                "file": "src/other.py",
+                                "line": 2,
+                                "code": "E501",
+                                "message": "out",
+                            },
+                        ],
+                    },
+                ],
+            },
+        ),
+        encoding="utf-8",
+    )
+
+    digest, counts, _note = build_lint_digest_from_report(
+        context=_context(),
+        report_path=report,
+    )
+
+    assert_that(digest).contains(
+        "Tool: tsc | did not run / incomplete: lintro refused to run tsc: bad arg",
+    )
+    assert_that(digest).contains("Tool: eslint | did not run / incomplete: timed out")
+    assert_that(digest).contains(
+        "Tool: oxlint | did not run / incomplete: lintro cannot trust oxlint's",
+    )
+    assert_that(digest).contains("Code: no-x | Message: kept")
+    assert_that(digest).does_not_contain("Tool: ruff")
+    assert_that((counts.ran, counts.incomplete, counts.issues)).is_equal_to((1, 3, 1))
 
 
 def test_unusable_report_yields_a_header_note_not_an_error(tmp_path: Path) -> None:
     """A missing or malformed report degrades to a note; the review still runs."""
-    digest, tools, issues, note = build_lint_digest_from_report(
+    digest, counts, note = build_lint_digest_from_report(
         context=_context(),
         report_path=tmp_path / "absent.json",
     )
 
     assert_that(digest).is_none()
-    assert_that((tools, issues)).is_equal_to((0, 0))
+    assert_that((counts.ran, counts.incomplete, counts.issues)).is_equal_to(
+        (0, 0, 0),
+    )
     assert_that(note).starts_with(LINT_FACTS_UNAVAILABLE)
     assert_that(note).contains("absent.json")
 

@@ -25,6 +25,7 @@ from lintro.ai.review.lint_bridge import (
     restrict_lint_results_to_files,
     run_lint_on_changed_files,
 )
+from lintro.ai.review.lint_completeness import LintRunCounts, count_lint_results
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -185,7 +186,7 @@ def build_lint_digest(
     *,
     context: ReviewContext,
     lintro_config: LintroConfig,
-) -> tuple[str | None, int, int]:
+) -> tuple[str | None, LintRunCounts]:
     """Run lintro over the changed files and digest the results.
 
     Args:
@@ -193,16 +194,16 @@ def build_lint_digest(
         lintro_config: Loaded project configuration.
 
     Returns:
-        tuple[str | None, int, int]: The prompt digest (None when empty), the
-        number of tools that ran, and the total issues they reported.
+        tuple[str | None, LintRunCounts]: The prompt digest (None when empty)
+        and how many tools ran, how many did not run or did not complete,
+        and the total issues they reported.
     """
     results = run_lint_on_changed_files(
         changed_files=[file.path for file in context.changed_files],
         lintro_config=lintro_config,
     )
     digest = format_lint_results_for_prompt(results=results)
-    issues = sum(result.issues_count or 0 for result in results)
-    return (digest or None), len(results), issues
+    return (digest or None), count_lint_results(results)
 
 
 #: Header wording for a run that asked for a saved lint report and got none.
@@ -233,7 +234,7 @@ def build_lint_digest_from_report(
     *,
     context: ReviewContext,
     report_path: Path,
-) -> tuple[str | None, int, int, str]:
+) -> tuple[str | None, LintRunCounts, str]:
     """Digest a saved lintro JSON report for the prompt (``--lint-report``).
 
     The report was produced elsewhere — in CI, by the untrusted lint job on
@@ -248,20 +249,19 @@ def build_lint_digest_from_report(
         report_path: Path to the saved report.
 
     Returns:
-        tuple[str | None, int, int, str]: The prompt digest (None when
-        empty), the number of tools in the report, the issues kept after
-        restricting to changed files, and the header note (empty when the
-        report was usable).
+        tuple[str | None, LintRunCounts, str]: The prompt digest (None when
+        empty); how many tools in the report completed, how many did not,
+        and the issues kept after restricting to changed files; and the
+        header note (empty when the report was usable).
     """
     try:
         results = load_lint_report(report_path)
     except LintReportError as exc:
         logger.warning("{}: {}", LINT_FACTS_UNAVAILABLE, exc)
-        return None, 0, 0, f"{LINT_FACTS_UNAVAILABLE}: {exc}"
+        return None, LintRunCounts(0, 0, 0), f"{LINT_FACTS_UNAVAILABLE}: {exc}"
     restricted = restrict_lint_results_to_files(
         results=results,
         changed_files=[file.path for file in context.changed_files],
     )
     digest = format_lint_results_for_prompt(results=restricted)
-    issues = sum(result.issues_count or 0 for result in restricted)
-    return (digest or None), len(results), issues, ""
+    return (digest or None), count_lint_results(restricted), ""

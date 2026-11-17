@@ -29,6 +29,7 @@ from lintro.config.config_loader import get_config
 from lintro.enums.action import Action
 from lintro.enums.advisory_tools_value import AdvisoryToolsValue
 from lintro.enums.tool_run_status import ToolRunStatus, tool_run_status
+from lintro.models.core.result_completeness import is_incomplete_result
 from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools import tool_manager
@@ -36,6 +37,7 @@ from lintro.utils.execution.tool_configuration import (
     SkippedTool,
     configure_tool_for_execution,
 )
+from lintro.utils.quoting import quote_first_line
 from lintro.utils.refused_command import mark_refused_command
 from lintro.utils.unified_config import UnifiedConfigManager
 
@@ -50,12 +52,16 @@ __all__ = [
     "AdvisorySelection",
     "advisory_findings_count",
     "advisory_results_to_payload",
+    "advisory_tool_errored",
     "advisory_tools_errored",
     "get_advisory_tool_names",
     "render_advisory_results",
     "resolve_advisory_tools",
     "run_advisory_tools",
 ]
+
+#: Longest reason quoted for an advisory tool that did not complete.
+_INCOMPLETE_REASON_LIMIT: int = 200
 
 #: Typed ``ToolResult.metadata`` key for an advisory execution failure.
 ADVISORY_ERROR_METADATA_KEY = "advisory_error"
@@ -263,22 +269,51 @@ def advisory_tools_errored(results: list[ToolResult]) -> bool:
     Findings also set ``success=False``; those still have issues and are
     not errors. A skip is not an error. Use
     :func:`~lintro.enums.tool_run_status.tool_run_status` so this stays
-    aligned with the other result surfaces.
+    aligned with the other result surfaces. A tool that did not complete,
+    such as one whose command lintro refused, counts as errored even when
+    it reported findings from the invocations that did run (#3497).
 
     Args:
         results: Advisory tool results.
 
     Returns:
-        True when at least one tool errored or timed out.
+        True when at least one tool errored, timed out or did not complete.
     """
-    return any(
-        tool_run_status(
-            result=result,
-            issue_count=result.issues_count,
-        )
-        in {ToolRunStatus.ERRORED, ToolRunStatus.TIMED_OUT}
-        for result in results
+    return any(advisory_tool_errored(result) for result in results)
+
+
+def advisory_tool_errored(result: ToolResult) -> bool:
+    """Return whether one advisory tool failed to run or did not complete.
+
+    Args:
+        result: One advisory tool's result.
+
+    Returns:
+        True when the tool errored, timed out, or did not complete.
+    """
+    return is_incomplete_result(result) or tool_run_status(
+        result=result,
+        issue_count=result.issues_count,
+    ) in {ToolRunStatus.ERRORED, ToolRunStatus.TIMED_OUT}
+
+
+def _incomplete_note(result: ToolResult) -> str | None:
+    """Name why an advisory tool did not complete, for the text output.
+
+    Args:
+        result: One advisory tool's result.
+
+    Returns:
+        ``"did not run / incomplete: <reason>"``, or None when it completed.
+    """
+    if not is_incomplete_result(result):
+        return None
+    reason = (
+        "timed out"
+        if result.timed_out
+        else quote_first_line(result.output, limit=_INCOMPLETE_REASON_LIMIT)
     )
+    return f"did not run / incomplete: {reason or 'execution failed'}"
 
 
 def render_advisory_results(
@@ -316,6 +351,11 @@ def render_advisory_results(
             success=result.success,
             issues_count=result.issues_count,
         )
+        # The issue table drops the output, so a refusal beside real
+        # findings would otherwise go unmentioned (#3497).
+        note = _incomplete_note(result)
+        if note:
+            header = f"{header}\n  {note}"
         blocks.append(f"{header}\n{body}".rstrip())
     return "\n\n".join(blocks)
 
@@ -327,7 +367,8 @@ def advisory_results_to_payload(results: list[ToolResult]) -> list[dict[str, obj
         results: Advisory tool results.
 
     Returns:
-        One dictionary per tool with its findings as display rows.
+        One dictionary per tool with its findings as display rows, and
+        whether the run failed to execute or left its findings incomplete.
     """
     payload: list[dict[str, object]] = []
     for result in results:
@@ -340,6 +381,8 @@ def advisory_results_to_payload(results: list[ToolResult]) -> list[dict[str, obj
                 "skip_reason": result.skip_reason,
                 "issues_count": result.issues_count,
                 "issues": [issue.to_display_row() for issue in result.issues],
+                "execution_failed": result.execution_failed,
+                "findings_complete": result.findings_complete,
             },
         )
     return payload
