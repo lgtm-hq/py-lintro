@@ -7,6 +7,7 @@ understanding programming conventions (identifiers, escape sequences, etc.).
 
 from __future__ import annotations
 
+import hashlib
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +35,7 @@ from lintro.plugins.base import BaseToolPlugin, PreparedExecution
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.argv_batching import argv_cost, chunk_paths
+from lintro.utils.execution.fix_retry import APPLIED_CHANGES_KEY
 
 # Constants for typos configuration
 TYPOS_DEFAULT_TIMEOUT: int = 30
@@ -96,6 +98,13 @@ _AFTER_WRITE_NOTE: str = (
     "corrected on disk. The fixed/remaining counts below could not be "
     "verified and are reported conservatively; re-run "
     "`lintro check --tools typos` to confirm."
+)
+
+
+# Heads the per-correction listing in a fix run's output.
+_APPLIED_HEADER: str = (
+    "Corrections written, from the scan taken just before the fix "
+    "(line numbers refer to the file before the fix):"
 )
 
 
@@ -461,15 +470,24 @@ class TyposPlugin(BaseToolPlugin):
                 initial_measured=False,
             )
 
+        # Fingerprint the files the write pass may touch, so the listing
+        # below only names files whose bytes actually changed.
+        candidates = _single_candidate_findings(initial_issues)
+        before_write = _file_digests(candidates, cwd=ctx.cwd)
+
         # Apply corrections in place. A clean ``--write-changes`` run prints
         # nothing and exits 0 (verified against typos 1.49.0), so any error
         # record or non-zero exit without a parseable report is a real write
         # failure. ``stop_on_failure`` keeps a failing batch from rewriting
         # the batches that follow it.
+        # ``--no-check-filenames`` keeps the write pass from renaming files:
+        # a rename is a structural change a formatter must not make, and the
+        # re-check would then look for the old path. File-name typos are
+        # still detected by the scans and reported as remaining.
         written = self._run_batched(
             files=files,
             ctx=ctx,
-            extra_args=["--write-changes"],
+            extra_args=["--write-changes", "--no-check-filenames"],
             stop_on_failure=True,
         )
         if written.failed:
@@ -507,6 +525,11 @@ class TyposPlugin(BaseToolPlugin):
         if initial_count != fixed_count + remaining_count:
             initial_count = fixed_count + remaining_count
 
+        applied = _applied_corrections(
+            candidates=candidates,
+            before=before_write,
+            after=_file_digests(candidates, cwd=ctx.cwd),
+        )
         return ToolResult.from_outcome(
             ToolOutcome(
                 execution=Checked(success=remaining_count == 0, inspected_files=True),
@@ -518,7 +541,14 @@ class TyposPlugin(BaseToolPlugin):
                 issues_count=remaining_count,
             ),
             name=self.definition.name,
-            output=_fix_summary(fixed=fixed_count, remaining=remaining_count),
+            output=_fix_summary(
+                fixed=fixed_count,
+                remaining=remaining_count,
+                applied=applied,
+            ),
+            # The fix-retry merge carries these across convergence passes,
+            # so a later pass that wrote nothing cannot hide them.
+            metadata={APPLIED_CHANGES_KEY: applied},
             # Only the surviving typos are reported as issues: unfixed typos
             # appear in both the initial and post-fix reports, so combining
             # the lists would double-count them.
@@ -576,20 +606,120 @@ class TyposPlugin(BaseToolPlugin):
         )
 
 
-def _fix_summary(fixed: int, remaining: int) -> str:
+def _display_safe(text: str) -> str:
+    r"""Escape backslashes and non-printable characters for one display line.
+
+    File names, words and replacements come from the scanned tree, so a
+    newline or terminal escape in any of them could forge extra listing
+    entries or recolour the console. Each such character is replaced with
+    its Python escape (``\\n``, ``\\x1b``, ``\\u202e``), so every entry stays
+    on one line. A literal backslash is doubled, so a name containing ``\\``
+    followed by ``n`` cannot be confused with one containing a newline.
+
+    Args:
+        text: Untrusted text.
+
+    Returns:
+        The text with every backslash and non-printable character escaped.
+    """
+    return "".join(
+        "\\\\" if char == "\\" else char if char.isprintable() else repr(char)[1:-1]
+        for char in text
+    )
+
+
+def _single_candidate_findings(issues: list[TyposIssue]) -> list[TyposIssue]:
+    """Select the findings ``--write-changes`` applies.
+
+    typos auto-applies a finding only when it offers exactly one correction.
+    File-name findings (no line number) are excluded because the write pass
+    runs with ``--no-check-filenames``.
+
+    Args:
+        issues: Findings from the scan taken just before the write pass.
+
+    Returns:
+        The findings the write pass rewrites, in report order.
+    """
+    return [i for i in issues if len(i.corrections) == 1 and i.line > 0]
+
+
+def _file_digests(issues: list[TyposIssue], cwd: str | None) -> dict[str, str]:
+    """Hash every file named by ``issues``.
+
+    Args:
+        issues: Findings whose files to hash.
+        cwd: Directory the reported paths are relative to.
+
+    Returns:
+        SHA-256 hex digest per reported path; an unreadable file maps to an
+        empty string.
+    """
+    base = Path(cwd) if cwd else Path.cwd()
+    digests: dict[str, str] = {}
+    for path in dict.fromkeys(i.file for i in issues):
+        try:
+            digests[path] = hashlib.sha256((base / path).read_bytes()).hexdigest()
+        except OSError:
+            digests[path] = ""
+    return digests
+
+
+def _applied_corrections(
+    candidates: list[TyposIssue],
+    before: dict[str, str],
+    after: dict[str, str],
+) -> list[str]:
+    """List the corrections a successful ``--write-changes`` pass applied.
+
+    Each entry is a finding from the scan taken immediately before the write
+    that the write pass applies, so the list never nets out a correction
+    against a typo the rewrite introduced. Entries for a file whose bytes did
+    not change are dropped. Line numbers refer to the file before the fix.
+
+    Args:
+        candidates: Single-candidate findings from the pre-write scan.
+        before: File digests taken before the write pass.
+        after: File digests taken after it.
+
+    Returns:
+        ``file:line: old -> new`` lines in report order, every field escaped
+        by :func:`_display_safe`.
+    """
+    return [
+        f"{_display_safe(issue.file)}:{issue.line}: "
+        f"{_display_safe(issue.typo)} -> {_display_safe(issue.corrections[0])}"
+        for issue in candidates
+        if before.get(issue.file) != after.get(issue.file)
+    ]
+
+
+def _fix_summary(
+    fixed: int,
+    remaining: int,
+    applied: list[str] | None = None,
+) -> str:
     """Compose the human-readable summary of a fix run.
 
     Args:
         fixed: Number of typos typos corrected.
         remaining: Number of typos that survived the fix pass.
+        applied: One ``file:line: old -> new`` line per correction written,
+            listed under the summary so a spelling rewrite is never silent.
 
     Returns:
-        A one-line summary of the fix outcome.
+        The summary line, followed by the applied corrections if any.
     """
     if fixed and remaining:
-        return f"Fixed {fixed} typo(s); {remaining} could not be auto-corrected."
-    if fixed:
-        return f"Fixed {fixed} typo(s)."
-    if remaining:
-        return f"Found {remaining} typo(s) that could not be fixed."
-    return "No typos found."
+        summary = f"Fixed {fixed} typo(s); {remaining} could not be auto-corrected."
+    elif fixed:
+        summary = f"Fixed {fixed} typo(s)."
+    elif remaining:
+        summary = f"{remaining} typo(s) could not be auto-corrected."
+    else:
+        summary = "No typos found."
+    if not applied:
+        return summary
+    return "\n".join(
+        [summary, _APPLIED_HEADER, *(f"  {line}" for line in applied)],
+    )

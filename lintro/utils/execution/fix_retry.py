@@ -18,7 +18,14 @@ from lintro.utils.execution.result_shaping import get_remaining_count
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
-__all__ = ["run_fix_with_retry"]
+__all__ = ["APPLIED_CHANGES_KEY", "run_fix_with_retry"]
+
+#: ``ToolResult.metadata`` key under which a fix pass may list the edits it
+#: wrote, one display line each. Convergence retries keep only the last pass's
+#: output, so :func:`run_fix_with_retry` carries earlier passes' entries into
+#: the merged result; otherwise a final pass that wrote nothing would hide
+#: every rewrite made before it (#3509).
+APPLIED_CHANGES_KEY = "applied_changes"
 
 
 def _incomplete_reason(result: ToolResult) -> str:
@@ -73,6 +80,46 @@ def _mark_incomplete_unknown(result: ToolResult) -> ToolResult:
     )
 
 
+def _pass_changes(result: ToolResult) -> list[str]:
+    """Return the applied-change lines one fix pass recorded.
+
+    Args:
+        result: One fix pass.
+
+    Returns:
+        The pass's ``APPLIED_CHANGES_KEY`` entries, or an empty list.
+    """
+    entries = result.metadata.get(APPLIED_CHANGES_KEY)
+    return [str(entry) for entry in entries] if isinstance(entries, list) else []
+
+
+def _carry_earlier_changes(result: ToolResult, earlier: list[str]) -> ToolResult:
+    """Show the edits earlier passes wrote on the final pass's result.
+
+    Args:
+        result: The final fix pass.
+        earlier: Applied-change lines from every pass before it, in order.
+
+    Returns:
+        ``result`` with ``earlier`` listed ahead of its output and prepended to
+        its metadata entries, or ``result`` itself when there are none.
+    """
+    if not earlier:
+        return result
+    # Lead with what earlier passes applied, then the final pass's own
+    # report, so a final "could not be fixed" line does not read as if the
+    # run fixed nothing.
+    listing = "\n".join(
+        ["Applied by earlier fix passes:", *(f"  {entry}" for entry in earlier)],
+    )
+    output = f"{listing}\n{result.output}" if result.output else listing
+    metadata = {
+        **result.metadata,
+        APPLIED_CHANGES_KEY: [*earlier, *_pass_changes(result)],
+    }
+    return replace(result, output=output, metadata=metadata)
+
+
 def run_fix_with_retry(
     tool: BaseToolPlugin,
     paths: list[str],
@@ -83,6 +130,8 @@ def run_fix_with_retry(
 
     Retries ``fix()`` up to ``max_retries`` times, keeping the initial issue
     count from the first pass and the remaining count from the last pass.
+    Edits that earlier passes listed under ``APPLIED_CHANGES_KEY`` are carried
+    into the merged result.
 
     Args:
         tool: The tool plugin to execute.
@@ -106,6 +155,7 @@ def run_fix_with_retry(
     initial_issues_count = result.initial_issues_count
     first_pass_initial_issues = result.initial_issues
     remaining = get_remaining_count(result)
+    earlier_changes: list[str] = []
 
     for attempt in range(2, max_retries + 1):
         # An incomplete report or failed execution is not a convergence
@@ -121,10 +171,13 @@ def run_fix_with_retry(
             f"{getattr(getattr(tool, 'definition', None), 'name', 'unknown')} "
             f"({remaining} remaining issues)",
         )
+        earlier_changes.extend(_pass_changes(result))
         result = tool.fix(paths, options)
         ToolResult.validate_outcome(result)
         result = _mark_incomplete_unknown(result)
         remaining = get_remaining_count(result)
+
+    result = _carry_earlier_changes(result, earlier_changes)
 
     # Merge: keep initial_issues_count and initial_issues from first pass,
     # rest from last pass, including failure accounting and execution metadata.

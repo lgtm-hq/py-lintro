@@ -24,7 +24,8 @@ def _find_project_root() -> Path:
     raise RuntimeError("pyproject.toml not found in parent directories")
 
 
-SAMPLE_DIR = _find_project_root() / "test_samples"
+PROJECT_ROOT = _find_project_root()
+SAMPLE_DIR = PROJECT_ROOT / "test_samples"
 TYPOS_SAMPLES = SAMPLE_DIR / "tools" / "spelling" / "typos"
 CLEAN_SAMPLE = TYPOS_SAMPLES / "typos_clean.txt"
 VIOLATION_SAMPLE = TYPOS_SAMPLES / "typos_violations.txt"
@@ -58,3 +59,17 @@ def typos_clean_file(tmp_path: Path) -> str:
     dst = tmp_path / "typos_clean.txt"
     shutil.copy(CLEAN_SAMPLE, dst)
     return str(dst)
+
+
+@pytest.fixture
+def typos_project_config_dir(tmp_path: Path) -> Path:
+    """Copy the repository's ``.typos.toml`` into a temp directory.
+
+    Args:
+        tmp_path: Pytest fixture providing a temporary directory.
+
+    Returns:
+        The temp directory, where typos discovers the copied config.
+    """
+    shutil.copy(PROJECT_ROOT / ".typos.toml", tmp_path / ".typos.toml")
+    return tmp_path

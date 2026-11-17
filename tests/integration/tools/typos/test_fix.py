@@ -68,3 +68,80 @@ def test_fix_clean_file_is_noop(
     assert_that(result.fixed_issues_count).is_equal_to(0)
     assert_that(result.remaining_issues_count).is_equal_to(0)
     assert_that(Path(typos_clean_file).read_text(encoding="utf-8")).is_equal_to(before)
+
+
+def test_fix_leaves_http_verb_plurals_alone_under_repo_config(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    typos_project_config_dir: Path,
+) -> None:
+    """Verify the repo's ``.typos.toml`` keeps ``DELETEs`` from becoming ``DELETEEs``.
+
+    typos splits ``DELETEs`` into ``DELET`` + ``Es`` and its fix inserts an
+    ``E`` (#3509). The project config is copied next to the sample so typos
+    discovers it the way it does inside the repository.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        typos_project_config_dir: Temp directory holding the repo's config.
+    """
+    sample = typos_project_config_dir / "verbs.txt"
+    text = (
+        "three failed rechecks or DELETEs in a row\n"
+        "GETs, PUTs, POSTs, PATCHes, HEADs, CONNECTs and TRACEs\n"
+        "UPDATEs, SELECTs, INSERTs, ROTATEs, DELETEd and PATCHed\n"
+        "x_DELETEs, my_UPDATEd_rows and test_handles_DELETEs\n"
+        "DELETEs_DELETEs, GETs_PUTs_DELETEs and x_UPDATEd_DELETEs_y\n"
+    )
+    sample.write_text(text, encoding="utf-8")
+    plugin = get_plugin("typos")
+
+    result = plugin.fix([str(sample)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.initial_issues_count).is_equal_to(0)
+    assert_that(sample.read_text(encoding="utf-8")).is_equal_to(text)
+
+
+def test_repo_config_still_reports_misspellings_near_verb_plurals(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    typos_project_config_dir: Path,
+) -> None:
+    """Verify the verb-plural ignore pattern only covers whole inflected words.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        typos_project_config_dir: Temp directory holding the repo's config.
+    """
+    sample = typos_project_config_dir / "near.txt"
+    sample.write_text("DELET, DELETEsx and delets\n", encoding="utf-8")
+    plugin = get_plugin("typos")
+
+    result = plugin.check([str(sample)], {})
+
+    assert_that([getattr(i, "typo", None) for i in result.issues or []]).is_equal_to(
+        ["DELET", "DELET", "delets"],
+    )
+
+
+def test_fix_never_renames_a_misspelled_file(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """Verify fix corrects the content but reports, not renames, the file name.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    sample = tmp_path / "recieve.txt"
+    sample.write_text("teh cat\n", encoding="utf-8")
+    plugin = get_plugin("typos")
+
+    result = plugin.fix([str(sample)], {})
+
+    assert_that((tmp_path / "receive.txt").exists()).is_false()
+    assert_that(sample.read_text(encoding="utf-8")).is_equal_to("the cat\n")
+    assert_that(result.fixed_issues_count).is_equal_to(1)
+    assert_that([getattr(i, "typo", None) for i in result.issues or []]).is_equal_to(
+        ["recieve"],
+    )
