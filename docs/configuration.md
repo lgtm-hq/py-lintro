@@ -883,7 +883,7 @@ strict or not: the tool is counted as one that did not run, and the lint digest 
 the model names it as `Tool: <name> | unavailable: <reason>. <install hint>`. The one
 difference strict mode makes there is that a below-minimum tool gets that line too,
 where without strict mode it is a skip and gets no line. A `--lint-report` saved from a
-strict `lintro chk` run carries the same `unavailable` rows and gives the same digest.
+strict `lintro check` run carries the same `unavailable` rows and gives the same digest.
 
 #### Disabling a tool from `pyproject.toml`
 
