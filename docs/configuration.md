@@ -116,15 +116,17 @@ The configuration system works in a specific order:
      without reliable package identity, including cargo and rustup proxies, are
      re-probed. Failed probes of resolved executables are retried on the next lookup.
      Use `lintro check --no-cache` to force fresh probes in every execution directory.
-   - `strict_missing_tools`: When `true`, unavailable tools fail the run (exit 1).
-     Default `false` — missing tools report `status: unavailable` with a remediation
-     hint and do not count as a lint failure. Unavailable results carry a frozen
-     `Unavailable(reason, strict)` outcome, retain unknown fix counts, and expose
-     `unavailable_reason` separately from a deliberate skip's `skip_reason`. In JSON, a
-     non-strict unavailable result has `skipped: false` and `success: true`; use
-     `status` or `unavailable` to detect that it did not run. Runtime capabilities
-     include `supports_stdin`: `true`/`false` when declared by the tool definition, or
-     `null` when unspecified.
+   - `strict_missing_tools`: When `true`, unavailable tools, and installed tools below
+     the minimum version, fail the run (exit 1); the `--strict-missing-tools` flag on
+     `chk` and `fmt` sets it for one run (see
+     [Strict Mode for Missing Tools](#strict-mode-for-missing-tools)). Default `false` —
+     missing tools report `status: unavailable` with a remediation hint and do not count
+     as a lint failure. Unavailable results carry a frozen `Unavailable(reason, strict)`
+     outcome, retain unknown fix counts, and expose `unavailable_reason` separately from
+     a deliberate skip's `skip_reason`. In JSON, a non-strict unavailable result has
+     `skipped: false` and `success: true`; use `status` or `unavailable` to detect that
+     it did not run. Runtime capabilities include `supports_stdin`: `true`/`false` when
+     declared by the tool definition, or `null` when unspecified.
    - `version_check_timeout`: Seconds one tool version probe (`<tool> --version`) may
      run (default: `30`, minimum `1`). A probe that times out is retried once with
      double the budget, capped at `120` seconds; a budget already at or above `120` is
@@ -492,8 +494,9 @@ A timed-out tool reports:
 Every per-tool object also includes `status`, one of `ok`, `failed`, `skipped`, or
 `unavailable` (see `lintro.enums.tool_result_status.ToolResultStatus`). Missing binaries
 set `status: unavailable` and `unavailable: true`; they are not a lint failure unless
-`execution.strict_missing_tools` is enabled. `lintro list-tools` table output has a
-matching Status column.
+`execution.strict_missing_tools` (or `--strict-missing-tools`) is enabled, which also
+reports a below-minimum tool as `unavailable` instead of `skipped`. `lintro list-tools`
+table output has a matching Status column.
 
 `summary.timed_out_tools` lists the tools that timed out, in execution order:
 
@@ -823,7 +826,64 @@ and a note explaining the reason. Common skip reasons:
 | Version check messages   | Tool version below minimum required                                                                                                                     |
 
 Skipped tools do not affect exit codes — only tools that run and find issues contribute
-to a non-zero exit.
+to a non-zero exit. The exception is strict mode, below.
+
+### Strict Mode for Missing Tools
+
+By default a tool that is not installed, or is older than Lintro's minimum version, is
+reported as `⚠️ UNAVAIL` / `⏭️ SKIP` and the run still exits 0. A local run can then
+pass while CI, which has the tool, fails. Strict mode turns those rows into failures:
+
+```bash
+lintro check --strict-missing-tools
+lintro format --strict-missing-tools
+```
+
+```yaml
+# .lintro-config.yaml
+execution:
+  strict_missing_tools: true
+```
+
+The flag overrides the config key for one run; `--no-strict-missing-tools` turns it off
+for a run when the config enables it.
+
+| Why the tool did not run                                   | Default           | Strict                |
+| ---------------------------------------------------------- | ----------------- | --------------------- |
+| Binary not found, or the version probe failed              | `UNAVAIL`, exit 0 | `UNAVAIL`, **exit 1** |
+| Installed but below the minimum version                    | `SKIP`, exit 0    | `UNAVAIL`, **exit 1** |
+| No files matched the tool's patterns                       | not a failure     | not a failure         |
+| `disabled in config`, `not in enabled_tools`, `deferred`   | `SKIP`, exit 0    | `SKIP`, exit 0        |
+| Missing project config or `node_modules` (e.g. `vale`)     | `SKIP`, exit 0    | `SKIP`, exit 0        |
+| Lintro refused the command (unreadable path, bad argument) | failed, exit 1    | failed, exit 1        |
+
+A strict failure names the tool, says why it could not run and ends with the install or
+upgrade hint, in the summary row and in JSON `unavailable_reason`. It is an execution
+failure, not a finding: `issues_count` stays `0`, `status` is `unavailable`,
+`unavailable` is `true` and `success` is `false`. Findings from the tools that did run
+are reported as usual. Without strict mode the JSON is unchanged, so a below-minimum
+tool still reports `status: skipped` with its `skip_reason`.
+
+Strict mode applies to every tool the run selected: the tools named with `--tools`, or
+otherwise the tools the config enables (or, without a config, the tools picked by
+language detection). Narrow the set with `--tools` or `execution.enabled_tools` to make
+strict mode cover only the tools you expect to have installed.
+`LINTRO_ALLOW_VERSION_LAG` still lets a listed below-minimum tool run, and
+`--auto-install` only installs Node.js project dependencies, so it does not install a
+missing tool.
+
+"No files matched" covers Black too when it runs next to Ruff. Lintro decides whether
+Black or Ruff formats Python before it discovers files, but a Black that is missing or
+below the minimum only fails a strict run when the run has Python files for Black to
+check; otherwise its row reports no files, as it would for any other tool.
+
+`lintro review --with-lint` reads the same config key (review has no flag). Its
+in-process lint pass over the changed files never fails the review on a missing tool,
+strict or not: the tool is counted as one that did not run, and the lint digest given to
+the model names it as `Tool: <name> | unavailable: <reason>. <install hint>`. The one
+difference strict mode makes there is that a below-minimum tool gets that line too,
+where without strict mode it is a skip and gets no line. A `--lint-report` saved from a
+strict `lintro check` run carries the same `unavailable` rows and gives the same digest.
 
 #### Disabling a tool from `pyproject.toml`
 
@@ -940,15 +1000,77 @@ $ lintro install prettier --upgrade
              lintro's version, or keep the project pin.
 ```
 
-The comparison is deliberately literal, not a semver range solve: a spec that names the
-recommended version exactly — `3.9.4`, `^3.9.4`, `~3.9.4`, `=3.9.4`, `v3.9.4` — is not a
-conflict and upgrades normally. On a first install of a declared-but-missing package,
-those same spellings emit the manager's install-all command (`npm install`,
-`bun install`, …) so the lockfile pin is restored, rather than a versioned add that
-would rewrite the range. Anything else, including a wider range such as `^3.9.0` that a
-resolver _would_ satisfy with 3.9.4, is reported so you decide. Erring toward asking is
-deliberate: the cost of a needless question is far below the cost of silently rewriting
-someone's `package.json`.
+lintro sorts the declared spec into one of three classes by its shape alone. It does not
+resolve semver ranges against the registry; the project's package manager does that.
+
+- **Exact-compatible** — a full version with at most one `^`, `~` (or `~>`) or `=`
+  operator and at most one `v`, the way node-semver reads them. Build metadata
+  (`+build`) is ignored, as npm ignores it. One that names the recommended version —
+  `3.9.4`, `^3.9.4`, `~3.9.4`, `=3.9.4`, `v3.9.4`, `^v3.9.4`, `3.9.4+build` — is not a
+  conflict and upgrades normally. A different version, including `^3.9.0` that a
+  resolver _would_ satisfy with 3.9.4, is reported so you decide.
+- **Range** — `>=3.9.4`, `3.9.x`, `3`, `*`, `1.2.3 - 2.0.0`, `||` unions. When the range
+  can reach lintro's minimum version for the tool, it is not a conflict: your range
+  governs. A first install of a declared-but-missing package runs the project install
+  (below). `--upgrade` does not rewrite the range: it asks you to update within it or
+  pin lintro's version. lintro reads both bounds of each `||` alternative, as npm's
+  `semver.intersects` does. When no release at or above the minimum lies inside any
+  alternative (`2.x`, `<3`, `~2.8`, `1 - 2`, `>=4 <3.5`, `>3.x <4`), lintro reports it
+  and runs nothing, because the project install would only end with a version lintro
+  rejects. A prerelease upper bound counts as its release (`<4.0.0-0` admits 3.x). A
+  range whose answer depends on a prerelease it admits (`>=3.9.5-rc.1 <=3.9.5-rc.3`), or
+  that lintro cannot parse, is reported the same way rather than installed. So is any
+  range npm itself rejects — a leading zero (`>=03.2.0`), a number above JavaScript's
+  largest safe integer, a malformed prerelease or build suffix (`>=3.2.0-01`,
+  `>=3.2.0+foo..bar`) — even when another `||` alternative is valid
+  (`>=3.2.0 || 3.x.5`).
+- **Opaque** — `workspace:*`, `npm:` aliases, git and tarball URLs, local paths,
+  dist-tags. lintro reports how the project manages the tool ("this project manages
+  prettier via the workspace protocol (`workspace:*`) in package.json; lintro will not
+  override it") and leaves it to you.
+
+Why `^3.1.0` is a conflict while `>=3.1.0` is not, although both admit 3.9.4: a caret or
+tilde on a full version is how npm records the version a project actually adopted, so
+lintro compares that version with its own, and a difference is a decision for you. A
+comparator range such as `>=3.1.0` states only a floor, and lintro leaves the choice
+within it to your package manager.
+
+lintro enforces a minimum, not a ceiling. If your range lets the project install bring a
+version above the one lintro recommends (you declare `>=4`, lintro recommends 3.9.4, and
+`npm install` brings 4.x), the install is reported as a plain success: after it runs,
+lintro checks only that the installed version meets the tool's minimum.
+
+On a first install of a declared-but-missing exact-compatible match or range, lintro
+runs the manager's install-all command (`npm install`, `bun install`, …) in the project
+root, so the declared version is restored from the lockfile rather than rewritten by a
+versioned add. That command installs **every** dependency the project declares, can
+update the lockfile and runs install scripts, so the plan says so, and
+`lintro doctor --fix` prints the same line before it runs the install:
+
+```console
+$ lintro install prettier
+  …
+  To install (1):
+    prettier             npm install
+      installs the whole project's dependencies (`npm install` in /path/to/project), not only prettier
+```
+
+Erring toward asking is deliberate: the cost of a needless question is far below the
+cost of silently rewriting someone's `package.json`.
+
+**Yarn Berry has no global install.** Yarn 2 and later removed `yarn global`. When
+`--global` would use yarn inside a project whose `packageManager` names `yarn@2` or
+later, or that has a `.yarnrc.yml` and no yarn version declared, lintro lists the tool
+for manual installation instead of planning `yarn global add`. The tags `yarn@berry`,
+`yarn@stable` and `yarn@canary`, and ranges whose lowest major is 2 or more (`yarn@^4`),
+count as Berry too: Corepack rejects them, and Yarn 1 refuses to run `yarn global` under
+a `packageManager` that does not name its own version. Yarn 1 keeps `yarn global add`
+only when there is no `packageManager` field or the field starts with `yarn@1.` (or
+`yarn@0.`), the check Yarn 1.22 itself makes before every command: `yarn@1.22.22` and
+`yarn@1.x` work, while under `yarn@1`, `yarn@^1.22.0` or `yarn@>=1` every yarn command,
+`yarn add` included, exits with an error. lintro then lists the tool for manual
+installation and suggests no yarn command: set the field to an exact version such as
+`yarn@1.22.22`, or install the tool through your own setup.
 
 **Planning matches execution.** The version probe for npm-installed tools resolves
 through the same chain a check uses, so `lintro install` reports on the binary
@@ -3559,48 +3681,6 @@ lintro check my-crate/ --tools cargo_deny
 
 # Set a longer timeout for large workspaces
 lintro check . --tools cargo_deny --tool-options "cargo_deny:timeout=120"
-```
-
-#### Cargo-audit Configuration
-
-Cargo-audit checks `Cargo.lock` files against the RustSec advisory database. Lintro
-audits every lockfile among the checked files, one `cargo audit` run per lockfile, and
-reports each finding with the absolute path of the lockfile it came from.
-
-- Lockfiles discovered under a `vendor/` or `target/` directory are not audited: they
-  hold vendored or packaged copies of other crates, not a resolution the project builds
-  with. Only the path components between a root and the lockfile count. The root is the
-  deepest directory you passed that contains the lockfile, otherwise the directory
-  lintro runs from when it contains the lockfile; if the outermost ancestor of the
-  lockfile holding a `.git` entry (directory or file) is deeper, that is the root
-  instead. With no such root nothing is excluded.
-- So naming a directory audits it: `lintro check vendor/foo` audits
-  `vendor/foo/Cargo.lock`, and `lintro check vendor/foo .` audits it too. A file does
-  not count as a directory you passed, so `lintro check vendor/foo/Cargo.lock` leaves
-  that lockfile out and says to pass its directory instead. The same holds for the
-  changed files `lintro watch`, AI review and fix re-runs hand to cargo-audit: a changed
-  `vendor/dep/Cargo.lock` is not audited, even though `vendor/dep` has its own
-  `Cargo.toml`. A vendored git submodule is still excluded, because the outermost `.git`
-  is used, and a repository that itself sits under an unrelated `vendor/` or `target/`
-  directory is audited, because nothing above the repository counts.
-- Excluded lockfiles are named in the output (the first five, then a count). When some
-  lockfiles are audited, the note follows the findings. When every lockfile found was
-  excluded, cargo-audit is reported as skipped, not failed, with a reason naming them,
-  rather than as "No Cargo.lock found".
-- The advisory database is fetched for the first lockfile only; later runs in the same
-  check pass `--no-fetch`.
-- The timeout is one budget for the whole check, shared by every lockfile. When it runs
-  out, the result keeps the findings and output of the lockfiles already audited and
-  still names the excluded ones.
-
-**Available Options via `--tool-options`:**
-
-| Option    | Type    | Description                                           |
-| --------- | ------- | ----------------------------------------------------- |
-| `timeout` | integer | Timeout in seconds for the whole check (default: 120) |
-
-```bash
-lintro check . --tools cargo_audit --tool-options "cargo_audit:timeout=300"
 ```
 
 ### Shell Tools

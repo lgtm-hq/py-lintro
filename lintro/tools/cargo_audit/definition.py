@@ -8,8 +8,7 @@ advisory database.
 from __future__ import annotations
 
 import subprocess  # nosec B404 - used safely with shell disabled
-import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -19,15 +18,8 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
-from lintro.models.core.tool_outcome import (
-    Checked,
-    NoFiles,
-    Skipped,
-    TimedOut,
-    ToolOutcome,
-)
+from lintro.models.core.tool_outcome import Checked, NoFiles, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
-from lintro.parsers.cargo_audit.cargo_audit_issue import CargoAuditIssue
 from lintro.parsers.cargo_audit.cargo_audit_parser import (
     extract_cargo_audit_payload,
     parse_cargo_audit_output,
@@ -42,230 +34,30 @@ from lintro.tools.core.option_validators import (
 
 # Constants for cargo-audit configuration
 CARGO_AUDIT_DEFAULT_TIMEOUT: int = 120  # Network operations can be slow
-CARGO_AUDIT_LOCKFILE: str = "Cargo.lock"
-CARGO_AUDIT_FILE_PATTERNS: list[str] = [CARGO_AUDIT_LOCKFILE]
-# Lockfiles under these directories belong to third-party or generated crates:
-# ``cargo vendor`` copies dependencies into ``vendor/`` and ``cargo package``
-# leaves packaged copies under ``target/``. Neither is a resolution the project
-# builds with, so auditing them reports findings nobody here can fix.
-CARGO_AUDIT_SKIP_DIRS: frozenset[str] = frozenset({"vendor", "target"})
+CARGO_AUDIT_FILE_PATTERNS: list[str] = ["Cargo.lock"]
 
 
-# How many excluded lockfiles the output names before summarising the rest.
-CARGO_AUDIT_EXCLUDED_SHOWN: int = 5
-
-
-def _anchor_dirs(paths: list[str]) -> list[Path]:
-    """Return the requested directories that judge what is third-party.
-
-    Only a directory passed to ``check`` is an anchor. A file is not: watch
-    mode, the AI review bridge and fix re-runs hand over lists of changed or
-    discovered files, so a ``vendor/dep/Cargo.lock`` among them was not asked
-    for and must not lift its own exclusion.
+def _find_cargo_root(paths: list[str]) -> Path | None:
+    """Return the nearest directory containing Cargo.lock for given paths.
 
     Args:
-        paths: Paths passed to ``check``: the user's command-line targets, or
-            the file list another caller hands over.
+        paths: List of file paths to search from.
 
     Returns:
-        Each path that is a directory, resolved and deepest first.
+        Path to directory containing Cargo.lock, or None if not found.
     """
-    dirs = {path for path in (Path(p).resolve() for p in paths) if path.is_dir()}
-    return sorted(dirs, key=lambda d: len(d.parts), reverse=True)
-
-
-def _outermost_repo(lock_root: Path) -> Path | None:
-    """Return the outermost ancestor of a lockfile holding a ``.git`` entry.
-
-    The entry may be a directory or the ``.git`` file a submodule or worktree
-    has. The outermost one is taken because a vendored git submodule carries
-    its own ``.git`` file, and the repository that vendors it is the one
-    whose layout decides.
-
-    Args:
-        lock_root: Directory holding a Cargo.lock, resolved.
-
-    Returns:
-        That ancestor (``lock_root`` itself included), or None outside any
-        repository.
-    """
-    for candidate in reversed([lock_root, *lock_root.parents]):
-        if (candidate / ".git").exists():
-            return candidate
-    return None
-
-
-def _judging_root(
-    lock_root: Path,
-    *,
-    anchors: list[Path],
-    cwd: Path,
-) -> Path | None:
-    """Return the directory below which ``vendor``/``target`` parts count.
-
-    The rule never depends on which files were handed over, only on the
-    directories the caller named, the process directory and the repository:
-
-    1. Start from the deepest requested directory containing the lockfile,
-       otherwise the process working directory when it contains it.
-    2. Take the outermost ``.git`` ancestor of the lockfile instead when it
-       is deeper, so a directory above the repository, such as an unrelated
-       ``vendor/`` holding the whole checkout, never counts.
-    3. With neither, there is no root and nothing is excluded.
-
-    Args:
-        lock_root: Directory holding a Cargo.lock, resolved.
-        anchors: Requested directories, deepest first.
-        cwd: Process working directory, resolved.
-
-    Returns:
-        The judging root, or None.
-    """
-    containing = [lock_root, *lock_root.parents]
-    start = next((anchor for anchor in anchors if anchor in containing), None)
-    if start is None and cwd in containing:
-        start = cwd
-    roots = [root for root in (start, _outermost_repo(lock_root)) if root]
-    return max(roots, key=lambda root: len(root.parts), default=None)
-
-
-def _is_third_party(lock_root: Path, *, anchors: list[Path], cwd: Path) -> bool:
-    """Tell whether a lockfile was discovered inside a vendored or build tree.
-
-    Only path components between the judging root (see ``_judging_root``)
-    and the lockfile count. A directory the caller named is never excluded,
-    even when its own path runs through ``vendor/`` or ``target/``: asking
-    for ``vendor/foo`` audits ``vendor/foo``.
-
-    Args:
-        lock_root: Directory holding a Cargo.lock, resolved.
-        anchors: Requested directories, deepest first.
-        cwd: Process working directory, resolved.
-
-    Returns:
-        True when a directory between the judging root and ``lock_root`` is
-        named ``vendor`` or ``target``. False when there is no judging root.
-    """
-    root = _judging_root(lock_root, anchors=anchors, cwd=cwd)
-    if root is None:
-        return False
-    parts = lock_root.relative_to(root).parts
-    return any(part in CARGO_AUDIT_SKIP_DIRS for part in parts)
-
-
-@dataclass(frozen=True)
-class _LockRoots:
-    """Lockfile directories found for a check, split by whether to audit them.
-
-    Attributes:
-        audited: Directories whose Cargo.lock is audited, sorted.
-        excluded: Directories whose Cargo.lock was discovered under a
-            ``vendor/`` or ``target/`` directory and is not audited, sorted.
-    """
-
-    audited: list[Path]
-    excluded: list[Path]
-
-
-def _find_lock_roots(
-    files: list[str],
-    *,
-    requested: list[str],
-) -> _LockRoots:
-    """Return every directory owning a Cargo.lock the given files belong to.
-
-    Each lockfile is a separate dependency resolution, so a file set spanning
-    unrelated crates needs one audit per lockfile. A workspace keeps a single
-    lockfile at its root, so its members all resolve to that one directory.
-
-    Args:
-        files: Discovered file paths to search from.
-        requested: Paths passed to ``check``. A directory among them is
-            audited even under ``vendor/`` or ``target/``; a file is not.
-
-    Returns:
-        The distinct directories holding the nearest Cargo.lock above each
-        file, sorted for a deterministic run order, split into the ones to
-        audit and the ones under ``vendor/`` or ``target/``. Both lists are
-        empty when no lockfile is found.
-    """
-    roots: set[Path] = set()
-    for raw_path in files:
+    for raw_path in paths:
         current = Path(raw_path).resolve()
         # If it's a file, start from its parent
         if current.is_file():
             current = current.parent
         # Search upward for Cargo.lock
-        for candidate in [current, *current.parents]:
-            if (candidate / CARGO_AUDIT_LOCKFILE).exists():
-                roots.add(candidate)
-                break
-    anchors = _anchor_dirs(requested)
-    cwd = Path.cwd().resolve()
-    excluded = {
-        root for root in roots if _is_third_party(root, anchors=anchors, cwd=cwd)
-    }
-    return _LockRoots(audited=sorted(roots - excluded), excluded=sorted(excluded))
+        for candidate in [current, *list(current.parents)]:
+            lock_file = candidate / "Cargo.lock"
+            if lock_file.exists():
+                return candidate
 
-
-def _excluded_names(excluded: list[Path]) -> str:
-    """Name the lockfiles left out as vendored or build-tree copies.
-
-    Args:
-        excluded: Directories whose Cargo.lock was not audited.
-
-    Returns:
-        Up to ``CARGO_AUDIT_EXCLUDED_SHOWN`` lockfiles, comma-separated and
-        relative to the process directory when they lie below it, followed
-        by a count of the rest.
-    """
-    cwd = Path.cwd().resolve()
-    names = []
-    for root in excluded[:CARGO_AUDIT_EXCLUDED_SHOWN]:
-        lockfile = root / CARGO_AUDIT_LOCKFILE
-        try:
-            names.append(str(lockfile.relative_to(cwd)))
-        except ValueError:
-            names.append(str(lockfile))
-    rest = len(excluded) - len(names)
-    if rest:
-        names.append(f"and {rest} more")
-    return ", ".join(names)
-
-
-@dataclass(frozen=True)
-class _AuditRun:
-    """The interpreted result of auditing one Cargo.lock root.
-
-    Attributes:
-        issues: Vulnerabilities parsed from the report.
-        success: Whether the command ran and produced a usable report.
-        parse_failed: Whether the report was missing or schema-invalid.
-        output: Combined command output, kept for display.
-    """
-
-    issues: list[CargoAuditIssue]
-    success: bool
-    parse_failed: bool
-    output: str
-
-
-def _shown_output(runs: list[_AuditRun], *, excluded: str | None) -> list[str]:
-    """Collect the text a result shows besides its own status line.
-
-    Args:
-        runs: Audits that completed, in run order.
-        excluded: Note naming the lockfiles left out, if any were.
-
-    Returns:
-        The output of every run that has issues or failed without them,
-        followed by the exclusion note, so excluded lockfiles are named on
-        every result that audited something.
-    """
-    shown = [run.output for run in runs if run.issues or not run.success]
-    if excluded:
-        shown.append(f"Also found {excluded}.")
-    return shown
+    return None
 
 
 @register_tool
@@ -315,8 +107,7 @@ class CargoAuditPlugin(BaseToolPlugin):
         """Set tool-specific options.
 
         Args:
-            timeout: Overall timeout in seconds, shared by every lockfile
-                audited in one check.
+            timeout: Timeout in seconds.
             **kwargs: Additional options.
         """
         validate_positive_int(timeout, "timeout")
@@ -324,21 +115,13 @@ class CargoAuditPlugin(BaseToolPlugin):
         options = filter_none_options(timeout=timeout)
         super().set_options(**options, **kwargs)
 
-    def _build_command(self, *, fetch: bool = True) -> list[str]:
+    def _build_command(self) -> list[str]:
         """Build the cargo-audit command.
-
-        Args:
-            fetch: Whether cargo-audit may update the advisory database. Once
-                one lockfile has been audited the database is current, so
-                later lockfiles reuse it instead of fetching it again.
 
         Returns:
             Command list for running cargo-audit with JSON output.
         """
-        cmd = ["cargo", "audit", "--json"]
-        if not fetch:
-            cmd.append("--no-fetch")
-        return cmd
+        return ["cargo", "audit", "--json"]
 
     def doc_url(self, code: str) -> str | None:
         """Return RustSec advisory URL for the given advisory ID.
@@ -367,70 +150,54 @@ class CargoAuditPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        # Audit every lockfile the filtered file list belongs to.
-        found = _find_lock_roots(ctx.files, requested=paths)
-        lock_roots = found.audited
-        excluded = (
-            f"vendored or build-tree Cargo.lock under vendor/ or target/, "
-            f"not audited: {_excluded_names(found.excluded)}; pass that "
-            "directory to lintro to audit it"
-            if found.excluded
-            else None
-        )
-        if not lock_roots and excluded:
-            # Still a non-failing skip, but a security scanner must not claim
-            # it found no lockfile when it chose not to read one.
-            return ToolResult.from_outcome(
-                ToolOutcome(execution=Skipped(f"only {excluded}")),
-                name=self.definition.name,
-            )
-        if not lock_roots:
+        # Find Cargo.lock root from filtered file list
+        cargo_root = _find_cargo_root(ctx.files)
+        if cargo_root is None:
             return ToolResult.from_outcome(
                 ToolOutcome(execution=NoFiles()),
                 name=self.definition.name,
                 output="No Cargo.lock found; skipping cargo-audit.",
             )
 
-        # The timeout is one budget for the whole check, not one per lockfile.
-        deadline = time.monotonic() + ctx.timeout
-        runs: list[_AuditRun] = []
-        for lock_root in lock_roots:
-            remaining = deadline - time.monotonic()
-            # A parsed report proves the advisory database is in place.
-            fetched = any(not run.parse_failed for run in runs)
-            run = (
-                self._audit_root(lock_root, timeout=remaining, fetch=not fetched)
-                if remaining > 0
-                else None
+        cmd = self._build_command()
+        try:
+            proc = self._run_subprocess_result(
+                cmd,
+                timeout=ctx.timeout,
+                cwd=str(cargo_root),
             )
-            if run is None:
-                # The scan is incomplete; keep what earlier roots found and
-                # said, and still name the lockfiles left out.
-                timed_out_issues = [i for r in runs for i in r.issues]
-                message = "\n".join(
-                    [
-                        f"cargo-audit timed out: the {ctx.timeout}s budget "
-                        f"ran out auditing {lock_root / CARGO_AUDIT_LOCKFILE}",
-                        *_shown_output(runs, excluded=excluded),
-                    ],
-                )
-                return ToolResult.from_outcome(
-                    ToolOutcome(
-                        execution=TimedOut(message),
-                        issues_count=len(timed_out_issues),
-                    ),
-                    name=self.definition.name,
-                    issues=timed_out_issues,
-                )
-            runs.append(run)
+        except subprocess.TimeoutExpired:
+            return ToolResult.from_outcome(
+                ToolOutcome(
+                    execution=TimedOut(f"cargo-audit timed out after {ctx.timeout}s"),
+                ),
+                name=self.definition.name,
+            )
 
-        issues = [issue for run in runs for issue in run.issues]
-        # Every root must run and report cleanly, with no vulnerabilities.
-        # cargo-audit exits non-zero both for findings and for execution
-        # errors, so a failed run with nothing parsed is never a clean scan.
-        overall_success = all(run.success for run in runs) and not issues
+        success = proc.success
+        # cargo-audit writes its JSON report to stdout; parse stdout only so a
+        # stderr warning cannot corrupt parsing (see #1043). ``output``
+        # (combined) is retained for display.
+        output = proc.output
+        payload = extract_cargo_audit_payload(proc.stdout)
+        issues = parse_cargo_audit_output(proc.stdout, data=payload)
 
-        shown = _shown_output(runs, excluded=excluded)
+        # A missing or schema-invalid report cannot establish a clean scan,
+        # even when the subprocess succeeds (see #1044 and #3003).
+        parse_failure = payload is None
+        if parse_failure:
+            success = False
+        parse_failures_count = 1 if parse_failure else 0
+
+        # Determine overall success: subprocess must succeed AND no issues found.
+        # cargo-audit returns non-zero if vulnerabilities found, but also if
+        # execution fails. If subprocess failed with no issues parsed, it's
+        # an execution error (not a clean scan).
+        overall_success = success and len(issues) == 0
+
+        # Show output when there are issues OR when subprocess failed without
+        # issues (execution error case)
+        should_show_output = bool(issues) or not success
 
         return ToolResult.from_outcome(
             ToolOutcome(
@@ -438,59 +205,9 @@ class CargoAuditPlugin(BaseToolPlugin):
                 issues_count=len(issues),
             ),
             name=self.definition.name,
-            output="\n".join(shown) if shown else None,
+            output=output if should_show_output else None,
             issues=issues,
-            parse_failures_count=sum(1 for run in runs if run.parse_failed),
-        )
-
-    def _audit_root(
-        self,
-        lock_root: Path,
-        *,
-        timeout: float,
-        fetch: bool,
-    ) -> _AuditRun | None:
-        """Audit the Cargo.lock in one directory.
-
-        Args:
-            lock_root: Directory holding the Cargo.lock to audit. cargo-audit
-                runs there so it also picks up that project's
-                ``.cargo/audit.toml``.
-            timeout: Time left in the check's budget, in seconds.
-            fetch: Whether cargo-audit may update the advisory database.
-
-        Returns:
-            The interpreted run, or ``None`` when it timed out.
-        """
-        cmd = self._build_command(fetch=fetch)
-        try:
-            proc = self._run_subprocess_result(
-                cmd,
-                timeout=timeout,
-                cwd=str(lock_root),
-            )
-        except subprocess.TimeoutExpired:
-            return None
-
-        # cargo-audit writes its JSON report to stdout; parse stdout only so a
-        # stderr warning cannot corrupt parsing (see #1043). ``output``
-        # (combined) is retained for display.
-        payload = extract_cargo_audit_payload(proc.stdout)
-        # Each finding names its own lockfile, so the same advisory in two
-        # lockfiles stays two findings in reports and baselines.
-        lockfile = str(lock_root / CARGO_AUDIT_LOCKFILE)
-        issues = [
-            replace(issue, file=lockfile)
-            for issue in parse_cargo_audit_output(proc.stdout, data=payload)
-        ]
-        # A missing or schema-invalid report cannot establish a clean scan,
-        # even when the subprocess succeeds (see #1044 and #3003).
-        parse_failed = payload is None
-        return _AuditRun(
-            issues=issues,
-            success=proc.success and not parse_failed,
-            parse_failed=parse_failed,
-            output=proc.output,
+            parse_failures_count=parse_failures_count,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

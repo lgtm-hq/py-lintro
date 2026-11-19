@@ -220,6 +220,7 @@ TOOL_ANALYSIS_EXEMPT: dict[str, str] = {
 # No dedicated docs/configuration.md section.
 CONFIGURATION_EXEMPT: dict[str, str] = {
     "idiom-review": "not in configuration.md; documented under AI features — TODO(#1496)",
+    "cargo_audit": "no configuration.md section yet (#1490)",
     "rustfmt": "no configuration.md section yet (#1490)",
     "pytest": "only appears in the tool-ordering table, no dedicated section (#1490)",
 }

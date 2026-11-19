@@ -11,7 +11,6 @@ import inspect
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
-from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
@@ -19,8 +18,6 @@ from assertpy import assert_that
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
-from lintro.plugins.subprocess_executor import SubprocessResult
-from lintro.tools.cargo_audit.definition import CargoAuditPlugin
 from lintro.utils.tool_executor import run_lint_tools_simple
 from lintro.watch.runner import WatchRunner
 
@@ -457,60 +454,3 @@ def test_unavailable_tool_renders_diagnosis_in_watch(strict: bool) -> None:
     assert len(lines) == 1
     assert "UNAVAIL: binary missing" in lines[0]
     assert "passed" not in lines[0]
-
-
-def test_watched_change_to_a_vendored_lockfile_is_not_audited(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A changed ``vendor/dep/Cargo.lock`` is excluded, as ``lintro check .`` does.
-
-    Watch mode hands cargo-audit the changed files, not a directory the user
-    named, so the vendored lockfile must not lift its own exclusion (#2400).
-
-    Args:
-        tmp_path: Temporary watched root.
-        monkeypatch: Pytest fixture used to run from the watched root.
-    """
-    lockfile = tmp_path / "vendor" / "dep" / "Cargo.lock"
-    lockfile.parent.mkdir(parents=True)
-    lockfile.write_text("version = 3\n")
-    # A real vendored crate has its own manifest, a project marker that must
-    # not become the root the exclusion is judged from.
-    (lockfile.parent / "Cargo.toml").write_text(
-        '[package]\nname = "dep"\nversion = "0.1.0"\n',
-    )
-    (tmp_path / ".git").mkdir()
-    monkeypatch.chdir(tmp_path)
-    audited: list[object] = []
-
-    def fake_audit(*_args: object, **kwargs: object) -> SubprocessResult:
-        audited.append(kwargs.get("cwd"))
-        return SubprocessResult(returncode=0, stdout="", stderr="", output="")
-
-    lines: list[str] = []
-    runner = WatchRunner(
-        restrict_to=["cargo_audit"],
-        watch_paths=[str(tmp_path)],
-        emit=lines.append,
-        baseline=False,
-    )
-    with (
-        patch(
-            "lintro.plugins.execution_preparation.verify_tool_version",
-            return_value=None,
-        ),
-        patch.object(
-            CargoAuditPlugin,
-            "_run_subprocess_result",
-            autospec=True,
-            side_effect=fake_audit,
-        ),
-    ):
-        exit_code = runner.run_batch({str(lockfile)})
-
-    assert_that(audited).is_empty()
-    assert_that(exit_code).is_equal_to(0)
-    assert_that("\n".join(lines)).contains(
-        "cargo_audit: ⏭️ skipped: only vendored or build-tree Cargo.lock",
-    )
