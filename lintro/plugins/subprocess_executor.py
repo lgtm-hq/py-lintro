@@ -5,7 +5,6 @@ This module provides safe subprocess execution with validation and streaming.
 
 from __future__ import annotations
 
-import contextlib
 import os
 import subprocess  # nosec B404 - subprocess used safely with shell=False
 import sys
@@ -19,8 +18,13 @@ from loguru import logger
 from lintro.exceptions.errors import UnsafeCommandError
 from lintro.models.core.subprocess_result import SubprocessResult as SubprocessResult
 from lintro.plugins.subprocess_failure import format_subprocess_failure
-from lintro.utils.npx_call import npx_child_env, npx_shell_safe_command
+from lintro.utils.npx_call import (
+    npx_cache_option,
+    npx_child_env,
+    npx_shell_safe_command,
+)
 from lintro.utils.npx_integrity import NpxExit
+from lintro.utils.process_stop import run_reaped, stop_process
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -332,10 +336,9 @@ def run_subprocess(
             timeout=timeout,
             npx_exit=npx_exit,
         ) as spawn_cmd:
-            result = subprocess.run(  # nosec B603 - args list, shell=False
+            result = _run_captured(
+                cmd,
                 spawn_cmd,
-                capture_output=True,
-                text=True,
                 timeout=timeout,
                 cwd=cwd,
                 env=effective_env,
@@ -399,6 +402,47 @@ def run_subprocess(
             f"Command not found: {cmd[0]}. "
             f"Please ensure it is installed and in your PATH.",
         ) from e
+
+
+def _run_captured(
+    cmd: list[str],
+    spawn_cmd: list[str],
+    *,
+    timeout: float,
+    cwd: str | None,
+    env: dict[str, str] | None,
+    stdin: int | None,
+) -> subprocess.CompletedProcess[str]:
+    """Run *spawn_cmd* to completion, capturing its output as text.
+
+    An npx fallback with a cache is run by
+    :func:`~lintro.utils.process_stop.run_reaped`, which stops and reaps npx
+    (its whole tree on Windows) on any exception, before
+    :func:`npx_shell_safe_command` cleans up the cache or lets go of its
+    install lock (#3530). Any other command runs as ``subprocess.run``.
+
+    Args:
+        cmd: Command as lintro built it.
+        spawn_cmd: Argv actually spawned.
+        timeout: Timeout in seconds.
+        cwd: Working directory.
+        env: Full environment, or None to inherit.
+        stdin: Standard input, or None to inherit.
+
+    Returns:
+        The finished process.
+    """
+    if npx_cache_option(cmd) is not None:
+        return run_reaped(spawn_cmd, timeout=timeout, cwd=cwd, env=env, stdin=stdin)
+    return subprocess.run(  # nosec B603 - args list, shell=False
+        spawn_cmd,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        cwd=cwd,
+        env=env,
+        stdin=stdin,
+    )
 
 
 def run_subprocess_streaming(
@@ -493,8 +537,10 @@ def _stream_subprocess(
     Returns:
         SubprocessResult with the merged stream in ``stdout``.
 
+    A timeout raises ``subprocess.TimeoutExpired`` from the reading, once
+    the child has been stopped and reaped.
+
     Raises:
-        subprocess.TimeoutExpired: If command times out.
         FileNotFoundError: If command executable is not found.
     """
     try:
@@ -509,87 +555,6 @@ def _stream_subprocess(
             env=env,
             bufsize=1,  # Line buffering
         )
-
-        output_lines: list[str] = []
-
-        def read_output() -> None:
-            """Read output lines in a separate thread."""
-            if process.stdout:
-                for line in process.stdout:
-                    stripped = line.rstrip("\n")
-                    output_lines.append(stripped)
-                    if line_handler:
-                        line_handler(stripped)
-
-        # Use a thread to read output so we can enforce timeout.
-        # Track elapsed wall time so the reader join and the subsequent
-        # process.wait() share a single timeout budget rather than each
-        # receiving the full timeout (which could allow ~2x the configured
-        # limit). See issue #1047.
-        start_time = time.monotonic()
-        reader_thread = threading.Thread(target=read_output, daemon=True)
-        reader_thread.start()
-        reader_thread.join(timeout=timeout)
-
-        if reader_thread.is_alive():
-            # Timeout occurred during reading - kill the process
-            logger.warning(
-                f"Subprocess {cmd[0]} timed out after {timeout}s (reading output)",
-            )
-            process.kill()
-            # Brief timeout for cleanup; ignore if process doesn't die cleanly
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                process.wait(timeout=1.0)
-            raise subprocess.TimeoutExpired(
-                cmd=cmd,
-                timeout=timeout,
-                output="\n".join(output_lines),
-            )
-
-        # Reading completed, now wait for process to finish using only the
-        # remaining slice of the timeout budget.
-        elapsed = time.monotonic() - start_time
-        remaining_timeout = max(0.0, timeout - elapsed)
-        try:
-            returncode = process.wait(timeout=remaining_timeout)
-        except subprocess.TimeoutExpired as e:
-            logger.warning(
-                f"Subprocess {cmd[0]} timed out after {timeout}s (during wait)",
-            )
-            process.kill()
-            process.wait(timeout=1.0)
-            raise subprocess.TimeoutExpired(
-                cmd=cmd,
-                timeout=timeout,
-                output="\n".join(output_lines),
-            ) from e
-
-        raw_output = "\n".join(output_lines)
-        output = raw_output
-        if returncode != 0:
-            output_preview = output[:500]
-            if output_preview:
-                logger.debug(
-                    f"Subprocess {cmd[0]} exited with code {returncode}, "
-                    f"output: {output_preview}",
-                )
-            if not output.strip():
-                output = format_subprocess_failure(
-                    tool_name=cmd[0],
-                    cmd=cmd,
-                    returncode=returncode,
-                    cwd=cwd,
-                    timeout=timeout,
-                )
-                logger.warning(output)
-
-        return SubprocessResult(
-            returncode=returncode,
-            stdout=raw_output,
-            stderr="",
-            output=output,
-        )
-
     except FileNotFoundError as e:
         logger.warning(
             f"Command not found: {cmd[0]}. Ensure it is installed and in PATH.",
@@ -598,3 +563,121 @@ def _stream_subprocess(
             f"Command not found: {cmd[0]}. "
             f"Please ensure it is installed and in your PATH.",
         ) from e
+
+    # However the run ends, npx is stopped and reaped before the caller's npx
+    # context cleans up the cache or lets go of its install lock (#3530).
+    finished = False
+    try:
+        result = _collect_stream(
+            process,
+            cmd=cmd,
+            timeout=timeout,
+            cwd=cwd,
+            line_handler=line_handler,
+        )
+        finished = True
+    finally:
+        if not finished:
+            stop_process(process)
+    return result
+
+
+def _collect_stream(
+    process: subprocess.Popen[str],
+    *,
+    cmd: list[str],
+    timeout: float,
+    cwd: str | None,
+    line_handler: Callable[[str], None] | None,
+) -> SubprocessResult:
+    """Read a streaming child's merged output until it exits.
+
+    Args:
+        process: The running child.
+        cmd: Command as lintro built it, for messages.
+        timeout: Timeout in seconds.
+        cwd: Working directory, for messages.
+        line_handler: Optional callback called for each line of output.
+
+    Returns:
+        SubprocessResult with the merged stream in ``stdout``.
+
+    Raises:
+        subprocess.TimeoutExpired: If command times out; the child has been
+            stopped and reaped.
+    """
+    output_lines: list[str] = []
+
+    def read_output() -> None:
+        """Read output lines in a separate thread."""
+        if process.stdout:
+            for line in process.stdout:
+                stripped = line.rstrip("\n")
+                output_lines.append(stripped)
+                if line_handler:
+                    line_handler(stripped)
+
+    # Use a thread to read output so we can enforce timeout.
+    # Track elapsed wall time so the reader join and the subsequent
+    # process.wait() share a single timeout budget rather than each
+    # receiving the full timeout (which could allow ~2x the configured
+    # limit). See issue #1047.
+    start_time = time.monotonic()
+    reader_thread = threading.Thread(target=read_output, daemon=True)
+    reader_thread.start()
+    reader_thread.join(timeout=timeout)
+
+    if reader_thread.is_alive():
+        # Timeout occurred during reading - kill the process
+        logger.warning(
+            f"Subprocess {cmd[0]} timed out after {timeout}s (reading output)",
+        )
+        stop_process(process)
+        raise subprocess.TimeoutExpired(
+            cmd=cmd,
+            timeout=timeout,
+            output="\n".join(output_lines),
+        )
+
+    # Reading completed, now wait for process to finish using only the
+    # remaining slice of the timeout budget.
+    elapsed = time.monotonic() - start_time
+    remaining_timeout = max(0.0, timeout - elapsed)
+    try:
+        returncode = process.wait(timeout=remaining_timeout)
+    except subprocess.TimeoutExpired as e:
+        logger.warning(
+            f"Subprocess {cmd[0]} timed out after {timeout}s (during wait)",
+        )
+        stop_process(process)
+        raise subprocess.TimeoutExpired(
+            cmd=cmd,
+            timeout=timeout,
+            output="\n".join(output_lines),
+        ) from e
+
+    raw_output = "\n".join(output_lines)
+    output = raw_output
+    if returncode != 0:
+        output_preview = output[:500]
+        if output_preview:
+            logger.debug(
+                f"Subprocess {cmd[0]} exited with code {returncode}, "
+                f"output: {output_preview}",
+            )
+        if not output.strip():
+            output = format_subprocess_failure(
+                tool_name=cmd[0],
+                cmd=cmd,
+                returncode=returncode,
+                cwd=cwd,
+                timeout=timeout,
+            )
+            logger.warning(output)
+
+    return SubprocessResult(
+        returncode=returncode,
+        stdout=raw_output,
+        stderr="",
+        output=output,
+    )

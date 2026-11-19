@@ -33,8 +33,13 @@ from lintro.tools.core.version_checking import (
     get_minimum_versions as _get_minimum_versions_impl,
 )
 from lintro.utils.env import get_subprocess_env
-from lintro.utils.npx_call import npx_child_env, npx_shell_safe_command
+from lintro.utils.npx_call import (
+    npx_cache_option,
+    npx_child_env,
+    npx_shell_safe_command,
+)
 from lintro.utils.npx_integrity import NpxExit
+from lintro.utils.process_stop import run_reaped
 
 # Sentinel value for unknown/unspecified version requirements
 VERSION_UNKNOWN: str = "unknown"
@@ -214,14 +219,19 @@ def _run_probe(
         timeout=timeout,
         npx_exit=npx_exit,
     ) as spawn_cmd:
-        result = subprocess.run(  # nosec B603 - args list, shell=False
-            spawn_cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=env,
-            cwd=cwd,
-        )
+        if npx_cache_option(cmd) is not None:
+            # npx is stopped and reaped on any exception, before the context
+            # cleans up its cache or lets go of its install lock (#3530).
+            result = run_reaped(spawn_cmd, timeout=timeout, env=env, cwd=cwd)
+        else:
+            result = subprocess.run(  # nosec B603 - args list, shell=False
+                spawn_cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=env,
+                cwd=cwd,
+            )
         npx_exit.record(result.returncode, result.stderr)
     return result
 

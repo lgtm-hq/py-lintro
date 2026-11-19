@@ -734,9 +734,9 @@ def test_repair_never_deletes_a_lock_npx_took_on_a_recreated_entry(
     npx_lock = bad / "concurrency.lock"
     delete = npx_aside.delete_aside
 
-    def npx_recreates_then_delete(path: Path) -> None:
+    def npx_recreates_then_delete(path: Path, *, dir_fd: int | None = None) -> None:
         npx_lock.mkdir(parents=True)
-        delete(path)
+        delete(path, dir_fd=dir_fd)
 
     monkeypatch.setattr(npx_aside, "delete_aside", npx_recreates_then_delete)
 

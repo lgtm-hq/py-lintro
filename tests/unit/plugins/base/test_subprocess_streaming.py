@@ -74,6 +74,14 @@ class _RecordingProcess:
         """Record that the process was killed."""
         self.kill_count += 1
 
+    def poll(self) -> int | None:
+        """Report the exit status once killed, else that it is running.
+
+        Returns:
+            int | None: The return code after a kill, None before.
+        """
+        return self.returncode if self.kill_count else None
+
 
 # =============================================================================
 # run_subprocess_streaming - Success Cases
@@ -243,9 +251,10 @@ def test_streaming_timeout_during_wait() -> None:
     assert_that(caught.value.cmd).is_equal_to(["slow", "cmd"])
     assert_that(caught.value.output).is_equal_to("partial")
     assert_that(process.kill_count).is_equal_to(1)
-    # Killed, then waited again for the corpse with the fixed cleanup budget.
+    # Killed, then waited for until it exits, without a budget: the npx
+    # context must not clean up beneath a process still running (#3530).
     assert_that(process.wait_timeouts).is_length(2)
-    assert_that(process.wait_timeouts[1]).is_equal_to(1.0)
+    assert_that(process.wait_timeouts[1]).is_none()
 
 
 # =============================================================================

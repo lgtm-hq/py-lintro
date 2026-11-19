@@ -1654,7 +1654,10 @@ def check_unchanged(
         npx_exit: How npx ended, when the caller recorded it. A fresh entry
             without a lockfile after npx exited with an error is an install
             failure; after any other exit it is refused like any other
-            entry that does not match its lockfile.
+            entry that does not match its lockfile. The status is the
+            tool's as much as npx's (a linter that finds issues exits 1),
+            so an install counts as failed only when the entry shows it
+            never completed (:func:`install_unfinished`).
 
     Raises:
         NpxInstallError: npx exited with an error and left a fresh entry
@@ -1664,20 +1667,9 @@ def check_unchanged(
             above an entry.
     """
     real = Path(os.path.realpath(cache))
-    if before.entries and _directory_rows(real) != before.directories:
-        raise NpxIntegrityError(
-            _changed_message(f"lintro's npm cache {real} (an entry was moved)"),
-        )
-    for name, fingerprint in before.entries.items():
-        entry = real / "_npx" / name
-        try:
-            unchanged = entry_fingerprint(entry) == fingerprint
-        except OSError:
-            unchanged = False
-        if not unchanged:
-            raise NpxIntegrityError(
-                _changed_message(f"lintro's npm cache entry {entry}"),
-            )
+    changed = existing_change(real, before)
+    if changed is not None:
+        raise NpxIntegrityError(changed)
     deadline = time.monotonic() + wait_limit(timeout)
     for entry in _entries(real, ran=True):
         if entry.name not in before.entries:
@@ -1688,20 +1680,103 @@ def check_unchanged(
     _modules_above(real, ran=True)
 
 
-def install_unfinished(entry: Path) -> bool:
-    """Report whether npm never finished installing into a fresh entry.
+def existing_change(real: Path, before: CacheState) -> str | None:
+    """Explain how the entries verified before the spawn changed, if they did.
 
-    npm writes ``package-lock.json`` last, once the tree is in place, and
-    npx runs the tool only after that. Without it, the install stopped.
+    This is the part of :func:`check_unchanged` that needs no finished run:
+    it holds whether npx exited or was stopped, so it is also checked after a
+    run that ended in an exception (#3530).
 
     Args:
-        entry: A ``_npx`` entry that appeared during the run.
+        real: The ``--cache`` the npx command carried, resolved.
+        before: What :func:`verified_cache` found.
 
     Returns:
-        True when the entry has no ``package-lock.json`` at all (not even a
-        link), so npm never wrote one.
+        Why the cache cannot be trusted when an entry, the cache directory or
+        ``_npx`` changed; None when all are as verified.
     """
-    return not os.path.lexists(entry / "package-lock.json")
+    if before.entries and _directory_rows(real) != before.directories:
+        return _changed_message(f"lintro's npm cache {real} (an entry was moved)")
+    for name, fingerprint in before.entries.items():
+        entry = real / "_npx" / name
+        try:
+            unchanged = entry_fingerprint(entry) == fingerprint
+        except OSError:
+            unchanged = False
+        if not unchanged:
+            return _changed_message(f"lintro's npm cache entry {entry}")
+    return None
+
+
+def install_unfinished(entry: Path, *, dir_fd: int | None = None) -> bool:
+    """Report whether npm never finished installing into a fresh entry.
+
+    npm links the packages' executables into ``node_modules/.bin`` and then
+    writes ``package-lock.json`` last, and npx runs the tool only after both.
+    An entry with neither never got as far as a runnable tool. An entry that
+    has executables but no lockfile did, so the tool may have run from it: it
+    is not called unfinished, and is refused as any entry that does not match
+    its lockfile is, with the entry kept as evidence.
+
+    Anything that cannot be read counts as finished, so it is never removed
+    as unfinished.
+
+    Args:
+        entry: A ``_npx`` entry that appeared during the run; a bare name
+            when *dir_fd* is given.
+        dir_fd: Open ``_npx`` directory *entry* is relative to, or None.
+
+    Returns:
+        True when *entry* is a real directory with no ``package-lock.json``
+        (not even a link) and no executable in ``node_modules/.bin``.
+    """
+    try:
+        top = os.stat(entry, dir_fd=dir_fd, follow_symlinks=False)
+        if not stat.S_ISDIR(top.st_mode):
+            return False
+        os.stat(entry / "package-lock.json", dir_fd=dir_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return False
+    else:
+        return False
+    return not _has_executables(entry / "node_modules" / ".bin", dir_fd)
+
+
+def _has_executables(bin_dir: Path, dir_fd: int | None) -> bool:
+    """Report whether a ``node_modules/.bin`` holds anything.
+
+    Args:
+        bin_dir: The directory; relative to *dir_fd* when one is given.
+        dir_fd: Directory descriptor *bin_dir* is relative to, or None.
+
+    Returns:
+        False only when it is missing or an empty real directory; True for
+        anything else, including what cannot be read.
+    """
+    try:
+        mode = os.stat(bin_dir, dir_fd=dir_fd, follow_symlinks=False).st_mode
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    if not stat.S_ISDIR(mode):
+        return True
+    try:
+        if dir_fd is None:
+            return bool(os.listdir(bin_dir))
+        fd = os.open(bin_dir, os.O_RDONLY | _O_DIRECTORY, dir_fd=dir_fd)
+        try:
+            return bool(os.listdir(fd))
+        finally:
+            os.close(fd)
+    except OSError:
+        return True
+
+
+#: Opens a directory only, where the platform can say so.
+_O_DIRECTORY: int = getattr(os, "O_DIRECTORY", 0)
 
 
 def _install_failed_message(entry: Path, npx_exit: NpxExit) -> str:
