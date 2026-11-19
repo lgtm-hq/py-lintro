@@ -25,7 +25,11 @@ from lintro.utils.output.constants import (
     DEFAULT_TEMP_PREFIX,
     DEFAULT_TIMESTAMP_FORMAT,
 )
-from lintro.utils.output.helpers import html_escape, markdown_escape
+from lintro.utils.output.helpers import (
+    html_escape,
+    markdown_escape,
+    render_markdown_notes,
+)
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
@@ -435,6 +439,7 @@ class OutputManager:
                 lines.append("")
             else:
                 lines.append("No issues found.\n")
+            lines.extend(render_markdown_notes(r))
         return "\n".join(lines)
 
     def _write_html_report(

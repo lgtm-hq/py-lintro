@@ -6,6 +6,7 @@ lookups fail, must never read as "no files" or as a clean pass.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import socket
@@ -16,6 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 from assertpy import assert_that
 
+from lintro.utils.tool_metadata import tool_notes
 from tests.integration._tools import require_tool
 from tests.integration.tools.osv_scanner.conftest import VIOLATION_SAMPLE
 
@@ -81,6 +83,40 @@ def dead_proxy(monkeypatch: pytest.MonkeyPatch) -> str:
     monkeypatch.delenv("NO_PROXY", raising=False)
     monkeypatch.delenv("no_proxy", raising=False)
     return url
+
+
+@pytest.fixture
+def dead_resolver(dead_proxy: str, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Leave only the OSV API reachable, so dependency resolution fails.
+
+    Vulnerability lookups go straight to the OSV API, as in the other tests
+    here; dependency resolution (deps.dev over gRPC) goes to the closed
+    local proxy port, so it reaches nothing.
+
+    Args:
+        dead_proxy: Proxy URL on a closed local port.
+        monkeypatch: Pytest fixture for environment changes.
+
+    Returns:
+        The proxy URL.
+    """
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.setenv(name, "api.osv.dev,osv.dev")
+    return dead_proxy
+
+
+def _note(result: ToolResult) -> str:
+    """Return the one note a result carries.
+
+    Args:
+        result: The plugin's result.
+
+    Returns:
+        The note's message.
+    """
+    notes = tool_notes(result.metadata)
+    assert_that(notes).is_length(1)
+    return notes[0]["message"]
 
 
 def test_unreadable_lockfile_is_an_incomplete_run(
@@ -202,9 +238,11 @@ def test_private_package_beside_a_vulnerable_one_is_a_complete_scan(
     assert_that(result.execution_failed).is_false()
     assert_that(result.inspected_files).is_true()
     assert_that(result.issues_count).is_greater_than(0)
-    assert_that(result.output).starts_with("Note: OSV-Scanner scanned").contains(
+    assert_that(_note(result)).starts_with("OSV-Scanner scanned").contains(
         _PRIVATE_PACKAGE,
     )
+    # The note is kept apart from the report, which still parses.
+    assert_that(json.loads(result.output or "")).contains_key("results")
 
 
 def test_private_package_alone_is_a_clean_complete_scan(
@@ -226,7 +264,8 @@ def test_private_package_alone_is_a_clean_complete_scan(
     assert_that(result.success).is_true()
     assert_that(result.execution_failed).is_false()
     assert_that(result.inspected_files).is_true()
-    assert_that(result.output).contains("requirements.txt").contains(
+    assert_that(result.output).is_none()
+    assert_that(_note(result)).contains("requirements.txt").contains(
         _PRIVATE_PACKAGE,
     )
 
@@ -250,6 +289,40 @@ def test_private_package_with_the_network_down_is_incomplete(
     result = get_plugin("osv_scanner").check([str(tmp_path)], {})
 
     _assert_incomplete(result)
+
+
+@pytest.mark.parametrize(
+    "requirements",
+    [f"six==1.16.0\n{_PRIVATE_PACKAGE}==1.2.3\n", "six==1.16.0\n", "flask==3.0.0\n"],
+    ids=["private-package", "public-only", "vulnerable"],
+)
+def test_resolution_service_outage_is_an_incomplete_run(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+    dead_resolver: str,
+    requirements: str,
+) -> None:
+    """deps.dev unreachable with OSV lookups working is never a clean scan.
+
+    osv-scanner logs only a failed resolution here and exits 127 (or 1 beside
+    a finding); the indirect dependencies were not checked because of an
+    outage, not because the registry lacks a package.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+        dead_resolver: Proxy URL on a closed local port, OSV API exempt.
+        requirements: The requirements.txt content.
+    """
+    (tmp_path / "requirements.txt").write_text(requirements)
+
+    result = get_plugin("osv_scanner").check([str(tmp_path)], {})
+
+    _assert_incomplete(result)
+    assert_that(result.output).contains("requirements.txt: ").contains(
+        "rpc error",
+    )
+    assert_that(tool_notes(result.metadata)).is_empty()
 
 
 def test_failed_resolution_under_an_excluded_path_is_a_clean_scan(

@@ -290,13 +290,23 @@ These fail-closed checks also apply without a fingerprint baseline:
   or parse, or for a failed vulnerability lookup, makes the run incomplete and keeps the
   findings from the sources it did read. The one exception is a line that names one
   existing file under an excluded path, matched exactly as a finding for that file would
-  be. A line whose file cannot be identified is always kept. A failed
+  be. A line whose file cannot be identified is always kept. The reading fails closed:
+  an error is harmless only when it has one exactly known shape, a failed
   transitive-dependency resolution (`extracting as transitivedependency/requirements` or
-  `.../pomxml` with `failed resolution for <path>`, for example a package that is not on
-  public PyPI) is not a skipped source: the manifest's own packages were scanned, so the
-  run stays complete and the output carries a note naming the manifest. OSV-Scanner
-  exits 127 for any logged error, so a 127 explained only by such notes or by excluded
-  files is a verdict. A run without a complete report (empty stdout, an error object, a
+  `.../pomxml`, `failed resolution for <path>: ...`) naming one existing file whose
+  whole error is the registry's answer that it has no such package or version
+  (`package ...: not found`, `version ...: not found`, also wrapped as
+  `failed resolving {Maven:...}: ...`) or that no version satisfies the requirements
+  (`resolution impossible:` and its cause lines). The manifest's own packages were then
+  scanned, so the run stays complete and carries a note naming the manifest: the console
+  prints it under the tool's result, the summary table's Notes column says "indirect
+  dependencies not resolved", Markdown quotes it, and JSON keeps it under
+  `metadata.notes`, while `output` stays OSV-Scanner's raw report. Any other resolution
+  error (the resolution service unreachable: `rpc error`, `max retries exhausted`, a
+  timeout, a refused connection) or any line never seen before makes the run incomplete
+  and is quoted. OSV-Scanner exits 127 for any logged error, so a 127 is a verdict only
+  when every line it printed, apart from progress output, belongs to such a note or to
+  an excluded file. A run without a complete report (empty stdout, an error object, a
   `results` value that is not a list), any other failed exit beside a report with no
   vulnerabilities (including `{"results": []}`), and any failed exit other than 1 are
   execution failures with unknown inspection. The output names the reason and quotes

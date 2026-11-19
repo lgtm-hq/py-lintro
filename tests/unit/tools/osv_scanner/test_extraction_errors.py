@@ -19,6 +19,7 @@ from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools.osv_scanner.definition import OsvScannerPlugin
 from lintro.utils.meaningful_run import baseline_is_eligible
+from lintro.utils.tool_metadata import tool_notes
 
 _PRIVATE = "zz-private-internal-pkg-xq"
 
@@ -253,6 +254,23 @@ def _assert_complete(result: ToolResult) -> None:
     ).is_true()
 
 
+def _note(result: ToolResult) -> str:
+    """Return the one note a result carries.
+
+    Args:
+        result: The plugin's result.
+
+    Returns:
+        The note's message.
+    """
+    notes = tool_notes(result.metadata)
+    assert_that(notes).is_length(1)
+    assert_that(notes[0]["summary"]).is_equal_to(
+        "indirect dependencies not resolved",
+    )
+    return notes[0]["message"]
+
+
 def _assert_incomplete(result: ToolResult) -> None:
     """Assert a result is an incomplete run, never a verdict.
 
@@ -286,11 +304,13 @@ def test_private_package_beside_a_vulnerable_one_is_a_complete_scan(
     assert_that(result.issues).extracting("vuln_id").is_equal_to(
         ["GHSA-68rp-wp8r-4726"],
     )
-    assert_that(result.output).starts_with(
-        "Note: OSV-Scanner scanned the packages listed in these manifests but "
+    assert_that(_note(result)).is_equal_to(
+        "OSV-Scanner scanned the packages listed in these manifests but "
         "could not resolve their indirect dependencies, so those were not "
         f"checked: requirements.txt: package System(7):{_PRIVATE}: not found",
     )
+    # The note is kept apart, so the raw report still parses.
+    assert_that(json.loads(result.output or "")).contains_key("results")
 
 
 @pytest.mark.parametrize(
@@ -353,10 +373,12 @@ def test_failed_resolution_alone_is_a_clean_complete_scan(
     _assert_complete(result)
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
-    assert_that(result.output).starts_with("Note: OSV-Scanner scanned")
+    assert_that(result.output).is_none()
+    note = _note(result)
+    assert_that(note).starts_with("OSV-Scanner scanned")
     for text in quoted:
-        assert_that(result.output).contains(text)
-    assert_that(result.output).does_not_contain(str(tmp_path).lstrip("/"))
+        assert_that(note).contains(text)
+    assert_that(note).does_not_contain(str(tmp_path).lstrip("/"))
 
 
 @pytest.mark.parametrize(
@@ -366,15 +388,20 @@ def test_failed_resolution_alone_is_a_clean_complete_scan(
             127,
             _EMPTY_REPORT,
             _DEAD_NETWORK_STDERR_2_7,
-            "OSV-Scanner could not extract every package source or look up its "
-            "vulnerabilities, so the scan is incomplete: max retries exceeded",
+            [
+                "requirements.txt: max retries exhausted: failed after 4 "
+                "attempts: rpc error: code = Unavailable",
+                "max retries exceeded: attempt 4",
+            ],
         ),
         (
             127,
             "",
             _DEAD_NETWORK_STDERR_2_4,
-            "OSV-Scanner exited with an error and printed no report: error when "
-            "retrieving vulns: max retries exceeded",
+            [
+                "requirements.txt: rpc error: code = Unavailable",
+                "error when retrieving vulns: max retries exceeded",
+            ],
         ),
     ],
     ids=["2.7.1", "2.4.0"],
@@ -385,7 +412,7 @@ def test_failed_resolution_with_the_network_down_is_incomplete(
     returncode: int,
     stdout: str,
     stderr: str,
-    quoted: str,
+    quoted: list[str],
 ) -> None:
     """The vulnerability lookup failing too still makes the run incomplete."""
     result = _check(
@@ -398,8 +425,13 @@ def test_failed_resolution_with_the_network_down_is_incomplete(
     )
 
     _assert_incomplete(result)
-    # The quote starts at the lookup failure, not at the resolution warning.
-    assert_that(result.output).starts_with(quoted)
+    # Both failures are quoted, the resolution failure once.
+    assert_that(result.output).starts_with(
+        "OSV-Scanner could not extract every package source",
+    )
+    for text in quoted:
+        assert_that(result.output).contains(text)
+    assert_that((result.output or "").count("rpc error")).is_equal_to(1)
     assert_that(result.output).does_not_contain(str(tmp_path).lstrip("/"))
 
 

@@ -36,7 +36,7 @@ from lintro.models.core.sarif_enrichment import AISarifEnrichment
 from lintro.models.core.severity_counts import SeverityCounts, SeverityDelta
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.json_output import serialize_tool_result, timed_out_tool_names
-from lintro.utils.output.helpers import sanitize_csv_value
+from lintro.utils.output.helpers import render_markdown_notes, sanitize_csv_value
 from lintro.utils.output.parser_registration import ParserError
 from lintro.utils.output.parser_registry import ParserRegistry
 from lintro.utils.output.text_blocks import bound_diagnostic, markdown_code_block
@@ -291,6 +291,7 @@ def render_markdown_report(
                 lines.append("No issues found.\n")
             if result.execution_failed:
                 lines.extend(_render_markdown_execution_failure(result))
+        lines.extend(render_markdown_notes(result))
     return "\n".join(lines)
 
 

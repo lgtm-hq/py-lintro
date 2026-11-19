@@ -46,12 +46,14 @@ from lintro.tools.core.incomplete_run import (
 )
 from lintro.tools.core.option_validators import validate_bool, validate_positive_int
 from lintro.tools.osv_scanner.extraction_log import (
+    RESOLUTION_NOTE_SUMMARY,
     ExtractionErrors,
     resolution_note,
     skipped_reason,
     sort_extraction_errors,
 )
 from lintro.utils.path_filtering import resolve_exclude_anchors, should_exclude_path
+from lintro.utils.tool_metadata import ToolNote, with_tool_notes
 
 # Constants
 OSV_SCANNER_DEFAULT_TIMEOUT: int = 120  # Network operations can be slow
@@ -424,9 +426,7 @@ class OsvScannerPlugin(BaseToolPlugin):
             )
 
         # Parse the JSON report from stdout only; stderr may carry human-readable
-        # log lines that must not corrupt JSON parsing (see #1043). ``output``
-        # (combined) is retained for display and plain-text signal detection.
-        output = proc.output
+        # log lines that must not corrupt JSON parsing (see #1043).
         parsed_issues = parse_osv_scanner_output(proc.stdout)
         # Apply .lintro-ignore / --exclude patterns to the reported lockfile
         # paths. osv-scanner does its own discovery and has no equivalent
@@ -470,17 +470,24 @@ class OsvScannerPlugin(BaseToolPlugin):
             paths=paths,
         )
 
-        note = resolution_note(extraction.notes, scan_root)
-        shown = "\n".join(part for part in (note, output if issues else "") if part)
+        # The note travels in metadata, so ``output`` stays the JSON report.
+        metadata = with_tool_notes(
+            suppression_metadata,
+            [
+                ToolNote(summary=RESOLUTION_NOTE_SUMMARY, message=note)
+                for note in (resolution_note(extraction.notes, scan_root),)
+                if note
+            ],
+        )
         return ToolResult.from_outcome(
             ToolOutcome(
                 execution=Checked(success=overall_success, inspected_files=True),
                 issues_count=len(issues),
             ),
             name=self.definition.name,
-            output=shown or None,
+            output=proc.stdout if issues else None,
             issues=issues,
-            metadata=suppression_metadata,
+            metadata=metadata,
             parse_failures_count=0,
         )
 
@@ -534,7 +541,11 @@ class OsvScannerPlugin(BaseToolPlugin):
         if skipped:
             # osv-scanner skips a source it cannot read or parse and scans the
             # rest, so the findings it did report are real but not complete.
-            reason = skipped_reason(skipped, scan_root)
+            reason = skipped_reason(
+                skipped,
+                scan_root,
+                unexplained=extraction.unexplained,
+            )
         elif not report_ok:
             reason, parse_failures = self._report_gap(
                 proc=proc,
@@ -571,10 +582,9 @@ class OsvScannerPlugin(BaseToolPlugin):
         exit, or exit 1 with no vulnerability in the report, is osv-scanner
         failing part of the scan (a network error, say): an empty
         ``results`` list then proves nothing was checked. The exception is
-        exit 127 when every error it logged was a failed transitive
-        resolution or lay under an excluded path: osv-scanner exits 127 for
-        any logged error, and those leave the scanned packages' verdict
-        intact.
+        exit 127 when every error it logged is a transitive resolution the
+        registry answered (no such package or version, or no version fits)
+        or lay under an excluded path; a transport failure never is.
 
         Args:
             proc: The finished osv-scanner process.

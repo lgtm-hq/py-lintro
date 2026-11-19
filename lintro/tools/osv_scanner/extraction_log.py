@@ -7,27 +7,41 @@ osv-scanner logs one line per plugin that did not succeed::
 ``<message>`` is ``<path>: <error>`` for an extractor that failed on one file
 and, for an extractor that failed on several, an empty first line followed by
 one tab-indented ``<path>: <error>`` line per file. Otherwise it is the
-plugin's failure reason, which may run over several lines. Paths are printed
-relative to ``/`` (the root osv-scanner walks from), with no leading
-separator. Checked against osv-scanner 2.4.0 and 2.7.1 and their source
-(``pkg/osvscanner/scan.go``, ``logPluginStatus``).
+plugin's failure reason. Paths are printed relative to ``/`` (the root
+osv-scanner walks from), with no leading separator. Checked against
+osv-scanner 2.4.0 and 2.7.1 and their source (``pkg/osvscanner/scan.go``,
+``logPluginStatus``; osv-scalibr ``enricher/transitivedependency``; deps.dev
+``util/resolve``).
 
-Two kinds of entry are told apart:
+The reader **fails closed**. Every error is a skipped source, which leaves the
+scan incomplete, unless it has one exactly known harmless shape: a
+**resolution note**. That is a message of the optional transitive-dependency
+enricher (``transitivedependency/requirements`` or
+``transitivedependency/pomxml``)::
 
-* a **skipped source**: an extractor could not read or parse a lockfile or
-  manifest (``python/requirements``, ``javascript/packagelockjson``,
-  ``go/gomod``, ``java/pomxml``, ``rust/cargolock``, ...), or a lookup
-  plugin such as ``vulnmatch/osvdev`` failed. That part of the scan did not
-  happen.
-* a **resolution note**: the optional transitive-dependency enricher
-  (``transitivedependency/requirements`` or ``transitivedependency/pomxml``)
-  could not resolve the indirect dependencies of a manifest it had already
-  read, for example because a package is not on the public registry. Its
-  message is ``failed resolution for <path>: <error>``, several of them
-  joined by newlines. The manifest's directly listed packages were scanned.
+    failed resolution for <path>: <ending>
 
-An entry is a resolution note only when its plugin, its wording and an
-existing regular file all say so; anything else is a skipped source.
+where ``<path>`` names one existing regular file and ``<ending>`` is, in full,
+one of the registry answers in :data:`HARMLESS_RESOLUTION_ENDINGS`: the
+package or version is not on the public registry, or the requirements cannot
+be satisfied. Those mean the manifest's directly listed packages were scanned
+and only their indirect dependencies were not resolved. Any other ending —
+a transport failure (``rpc error``, ``max retries exhausted``, a timeout, a
+refused connection, TLS, DNS, an HTTP status) or text never seen before — is a
+skipped source, so an outage of the resolution service is never a clean scan.
+
+The enricher also logs each failure as a warning line before the error block.
+Every line is given one owner by its position and form alone, never by
+comparing its text with another line:
+
+* a header line starts a block; a block continues only with the lines the
+  real tool prints under a header (a tab-indented ``<path>: <error>`` line,
+  and for a transitive enricher a further ``failed resolution for`` message
+  and the cause lines of a ``resolution impossible:`` message);
+* a ``failed resolution for`` line outside a block is a warning echo, judged
+  on its own by the same allow-list;
+* blank lines and the progress lines in :data:`INFO_PREFIXES` carry no error;
+* every other line is unexplained.
 """
 
 from __future__ import annotations
@@ -57,6 +71,15 @@ TRANSITIVE_PLUGINS: frozenset[str] = frozenset(
 #: How each transitive enricher names a manifest it could not resolve.
 _RESOLUTION_PREFIX: str = "failed resolution for "
 
+#: The first line of the pip-style resolver's "unsatisfiable" error.
+_IMPOSSIBLE: str = "resolution impossible:"
+
+#: How each cause line under ``resolution impossible:`` starts.
+_CAUSE_PREFIXES: tuple[str, ...] = (
+    "no candidates at all for: ",
+    "requirements conflict: ",
+)
+
 #: Lines osv-scanner prints on every run; they report no error.
 PROGRESS_PREFIXES: tuple[str, ...] = (
     "Scanning dir ",
@@ -66,10 +89,43 @@ PROGRESS_PREFIXES: tuple[str, ...] = (
 )
 
 #: Informational lines that do not make osv-scanner exit with an error.
-_INFO_PREFIXES: tuple[str, ...] = (
+INFO_PREFIXES: tuple[str, ...] = (
     *PROGRESS_PREFIXES,
     "Filtered ",
     "Warning: enricher transitivedependency/",
+)
+
+_NAME = r"[A-Za-z0-9._-]+"
+#: deps.dev prints PyPI as ``System(7)`` and Maven as ``Maven``.
+_SYSTEM = r"(?:[A-Za-z]+|System\(\d+\))"
+_PACKAGE_KEY = rf"{_SYSTEM}:{_NAME}(?::{_NAME})?"
+_VERSION = r"[A-Za-z0-9._+~!-]+"
+_VERSION_KEY = rf"{_PACKAGE_KEY}\[[A-Za-z]+:{_VERSION}\]"
+#: deps.dev's ``ErrNotFound``, returned only for a gRPC ``NotFound`` reply.
+_NOT_FOUND = rf"(?:package {_PACKAGE_KEY}|version {_VERSION_KEY}): not found"
+_MAVEN_ROOT = rf"\{{Maven:{_NAME}:{_NAME}\[Concrete:{_VERSION}\] \{{\}}\}}"
+_CAUSE = (
+    rf'(?:no candidates at all for: {_NAME}|requirements conflict: {_NAME}:) "[^"\n]*"'
+)
+
+#: The only endings after ``failed resolution for <path>: `` that are
+#: harmless, each matched against the whole remaining message:
+#:
+#: * ``package System(7):<name>: not found`` and
+#:   ``version <key>[Concrete:<v>]: not found``: the registry answered that it
+#:   has no such package or version (a private package);
+#: * ``failed resolving {Maven:<g>:<a>[Concrete:<v>] {}}: <the same>``: the
+#:   Maven enricher wrapping that answer;
+#: * ``resolution impossible:`` followed by one or more
+#:   ``no candidates at all for: <name> "<spec>"`` or
+#:   ``requirements conflict: <name>: "<specs>"`` lines: the registry answered
+#:   and no version satisfies the requirements. deps.dev raises this only from
+#:   versions it received; a lookup that failed in transport is returned as
+#:   its own error instead.
+HARMLESS_RESOLUTION_ENDINGS: tuple[re.Pattern[str], ...] = (
+    re.compile(_NOT_FOUND),
+    re.compile(rf"failed resolving {_MAVEN_ROOT}: {_NOT_FOUND}"),
+    re.compile(rf"{re.escape(_IMPOSSIBLE)}(?:\n{_CAUSE})+"),
 )
 
 
@@ -82,12 +138,14 @@ class EntryKind(StrEnum):
 
 @dataclass(frozen=True)
 class ExtractionEntry:
-    """One error osv-scanner reported for a plugin.
+    """One error osv-scanner reported.
 
     Attributes:
         kind: Whether a source was skipped or only its resolution failed.
-        plugin: The plugin osv-scanner named in parentheses.
+        plugin: The plugin osv-scanner named in parentheses; empty for a
+            warning echo, which names none.
         text: The entry as printed, path included.
+        lines: Indices of the standard-error lines this entry owns.
         source: Absolute path of the one regular file the entry names, or
             None when it names none or cannot be told apart.
         printed_path: ``source`` as osv-scanner printed it, without the
@@ -97,6 +155,7 @@ class ExtractionEntry:
     kind: EntryKind
     plugin: str
     text: str
+    lines: tuple[int, ...] = ()
     source: str | None = None
     printed_path: str | None = None
 
@@ -106,14 +165,28 @@ class ExtractionLog:
     """What osv-scanner's standard error says about the extraction.
 
     Attributes:
-        entries: Every error osv-scanner reported, in order.
-        unexplained: Lines that are neither progress, information nor part
-            of an extraction error; one of them may be what made osv-scanner
+        entries: Every error block entry osv-scanner reported, in order.
+        echoes: The warning lines the transitive enricher logs before its
+            block, each classified on its own.
+        unexplained: Indices of lines that are neither progress, information
+            nor part of an entry; one of them may be what made osv-scanner
             exit with an error.
+        lines: The standard-error lines the indices refer to.
     """
 
     entries: tuple[ExtractionEntry, ...]
-    unexplained: tuple[str, ...]
+    echoes: tuple[ExtractionEntry, ...]
+    unexplained: tuple[int, ...]
+    lines: tuple[str, ...] = ()
+
+    @property
+    def unexplained_text(self) -> tuple[str, ...]:
+        """Return the unexplained lines as printed.
+
+        Returns:
+            The lines, in order.
+        """
+        return tuple(self.lines[index] for index in self.unexplained)
 
 
 @dataclass(frozen=True)
@@ -121,20 +194,25 @@ class ExtractionErrors:
     """The extraction errors of one run, sorted by what they mean.
 
     Attributes:
-        skipped: Errors for a source that was not scanned, or a failed
-            lookup; each leaves the scan incomplete.
+        skipped: Errors for a source that was not scanned, a failed lookup,
+            or a resolution that failed for an unrecognised reason; each
+            leaves the scan incomplete.
         notes: Failed transitive resolutions of a manifest whose directly
-            listed packages were scanned.
+            listed packages were scanned, for a reason known to be harmless.
         failure_message: osv-scanner's own message for a failed run: the
             lines no extraction error explains, with paths shortened.
-        explains_failed_exit: Whether these errors, none of which skipped a
-            source, account for everything osv-scanner logged.
+        explains_failed_exit: Whether every error line osv-scanner logged
+            belongs to a recognised harmless entry.
+        unexplained: The lines no entry owns, as printed, to quote beside the
+            skipped sources; osv-scanner's "No package sources found", which
+            only restates that sources were skipped, is left out.
     """
 
     skipped: tuple[ExtractionEntry, ...]
     notes: tuple[ExtractionEntry, ...]
     failure_message: str
     explains_failed_exit: bool
+    unexplained: str = ""
 
 
 def _named_file(path_text: str, scan_root: Path) -> tuple[str, str] | None:
@@ -160,7 +238,7 @@ def _named_file(path_text: str, scan_root: Path) -> tuple[str, str] | None:
     return (absolute if absolute in files else files.pop()), path_text
 
 
-def source_of(text: str, scan_root: Path) -> tuple[str, str] | None:
+def source_of(text: str, scan_root: Path) -> tuple[str, str, str] | None:
     """Return the one regular file at the start of ``<path>: <error>``.
 
     The path may itself contain ``": "``, so every split point on the first
@@ -172,166 +250,189 @@ def source_of(text: str, scan_root: Path) -> tuple[str, str] | None:
         scan_root: Directory osv-scanner ran in.
 
     Returns:
-        The absolute path and the printed form, or None when no split, or
-        more than one, names an existing regular file.
+        The absolute path, the printed form and the error after the path, or
+        None when no split, or more than one, names an existing regular file.
     """
     first_line = text.split("\n", 1)[0]
-    found: dict[str, tuple[str, str]] = {}
+    found: dict[str, tuple[str, str, str]] = {}
     start = 0
     while (index := first_line.find(": ", start)) >= 0:
         named = _named_file(first_line[:index], scan_root)
         if named is not None:
-            found[os.path.realpath(named[0])] = named
+            found[os.path.realpath(named[0])] = (*named, text[index + 2 :])
         start = index + 1
     if len(found) != 1:
         return None
     return next(iter(found.values()))
 
 
-def _entry(plugin: str, text: str, scan_root: Path) -> ExtractionEntry:
+def is_harmless_ending(ending: str) -> bool:
+    """Return whether a resolution error is a known harmless registry answer.
+
+    Args:
+        ending: The message after ``failed resolution for <path>: ``.
+
+    Returns:
+        True only when the whole message is one allow-listed shape.
+    """
+    return any(pattern.fullmatch(ending) for pattern in HARMLESS_RESOLUTION_ENDINGS)
+
+
+def _entry(
+    plugin: str,
+    text: str,
+    lines: tuple[int, ...],
+    scan_root: Path,
+    *,
+    transitive: bool,
+) -> ExtractionEntry:
     """Classify one reported error.
 
     Args:
-        plugin: The plugin osv-scanner named.
+        plugin: The plugin osv-scanner named, or empty for a warning echo.
         text: The entry as printed.
+        lines: The standard-error lines the entry owns.
         scan_root: Directory osv-scanner ran in.
+        transitive: Whether a transitive enricher printed it.
 
     Returns:
-        A resolution note when the plugin, wording and file all agree, else a
-        skipped source.
+        A resolution note when the enricher, wording, file and the whole
+        error after the path all match a harmless shape, else a skipped
+        source.
     """
-    if plugin in TRANSITIVE_PLUGINS and text.startswith(_RESOLUTION_PREFIX):
-        named = source_of(text.removeprefix(_RESOLUTION_PREFIX), scan_root)
-        if named is not None:
-            return ExtractionEntry(
-                kind=EntryKind.RESOLUTION,
-                plugin=plugin,
-                text=text,
-                source=named[0],
-                printed_path=named[1],
-            )
-        return ExtractionEntry(kind=EntryKind.SKIPPED_SOURCE, plugin=plugin, text=text)
-    named = source_of(text, scan_root)
+    resolution = transitive and text.startswith(_RESOLUTION_PREFIX)
+    named = source_of(
+        text.removeprefix(_RESOLUTION_PREFIX) if resolution else text,
+        scan_root,
+    )
+    harmless = resolution and named is not None and is_harmless_ending(named[2])
     return ExtractionEntry(
-        kind=EntryKind.SKIPPED_SOURCE,
+        kind=EntryKind.RESOLUTION if harmless else EntryKind.SKIPPED_SOURCE,
         plugin=plugin,
         text=text,
+        lines=lines,
         source=named[0] if named else None,
         printed_path=named[1] if named else None,
     )
 
 
-def _is_continuation(line: str, *, plugin: str, earlier: set[str]) -> bool:
-    """Return whether a line continues the error block above it.
+def _read_message(
+    lines: list[str],
+    start: int,
+    first: str,
+) -> tuple[str, tuple[int, ...], int]:
+    """Read one ``failed resolution for`` message from its first line on.
 
-    A tab-indented line is one file of a multi-file error. A transitive
-    enricher's message may run over several lines; it also logs each failure
-    as a warning before the block, so only lines already printed are taken.
+    Only a ``resolution impossible:`` message runs over several lines: its
+    cause lines, then one blank line, follow directly beneath it.
 
     Args:
-        line: The line after the block so far.
-        plugin: The block's plugin.
-        earlier: Lines printed before the block's header.
+        lines: Every standard-error line.
+        start: Index of the message's first line.
+        first: The message text on that line.
 
     Returns:
-        True when the line belongs to the block.
+        The message, the indices it owns, and the index after it.
     """
-    if _HEADER_RE.match(line):
-        return False
-    if line.startswith("\t"):
-        return True
-    if plugin not in TRANSITIVE_PLUGINS or line.startswith(_INFO_PREFIXES):
-        return False
-    return line.startswith(_RESOLUTION_PREFIX) or (
-        bool(line.strip()) and line in earlier
-    )
+    text = [first]
+    owned = [start]
+    end = start + 1
+    if first.endswith(_IMPOSSIBLE):
+        while end < len(lines) and lines[end].startswith(_CAUSE_PREFIXES):
+            text.append(lines[end])
+            owned.append(end)
+            end += 1
+        if len(text) > 1 and end < len(lines) and not lines[end]:
+            owned.append(end)
+            end += 1
+    return "\n".join(text), tuple(owned), end
 
 
-def _block_entries(
-    plugin: str,
-    detail: str,
-    continuation: list[str],
+def _read_block(
+    lines: list[str],
+    start: int,
+    match: re.Match[str],
     scan_root: Path,
-) -> list[ExtractionEntry]:
-    """Split one error block into its entries.
+) -> tuple[list[ExtractionEntry], int]:
+    """Read one error block from its header line on.
 
     Args:
-        plugin: The block's plugin.
-        detail: The text after the plugin on the header line.
-        continuation: The lines that belong to the block.
+        lines: Every standard-error line.
+        start: Index of the header line.
+        match: The header match.
         scan_root: Directory osv-scanner ran in.
 
     Returns:
-        One entry per file or per resolution failure.
+        One entry per file or per message, and the index after the block.
     """
-    texts: list[str] = [detail] if detail.strip() else []
-    for line in continuation:
+    plugin = match.group("plugin")
+    transitive = plugin in TRANSITIVE_PLUGINS
+    detail = match.group("detail").strip()
+    messages: list[tuple[str, tuple[int, ...]]] = []
+    end = start + 1
+    if detail:
+        text, owned, end = _read_message(lines, start, detail)
+        messages.append((text, owned))
+    while end < len(lines):
+        line = lines[end]
         if line.startswith("\t"):
-            texts.append(line.strip())
-        elif line.startswith(_RESOLUTION_PREFIX) or not texts:
-            texts.append(line)
+            messages.append((line.strip(), (end,)))
+            end += 1
+        elif transitive and line.startswith(_RESOLUTION_PREFIX):
+            text, owned, end = _read_message(lines, end, line)
+            messages.append((text, owned))
         else:
-            texts[-1] = f"{texts[-1]}\n{line}"
-    if not texts:
+            break
+    if not messages:
         # A header with nothing after it names no source; never drop it.
-        texts = [f"{plugin} reported an error"]
-    return [_entry(plugin, text.rstrip(), scan_root) for text in texts]
+        messages = [(f"{plugin} reported an error", (start,))]
+    elif start not in messages[0][1]:
+        messages[0] = (messages[0][0], (start, *messages[0][1]))
+    entries = [
+        _entry(plugin, text, owned, scan_root, transitive=transitive)
+        for text, owned in messages
+    ]
+    return entries, end
 
 
 def read_extraction_log(stderr: str | None, scan_root: Path) -> ExtractionLog:
     """Read every extraction error from osv-scanner's standard error.
+
+    Each line gets exactly one owner, decided by its position and form; see
+    the module docstring.
 
     Args:
         stderr: What osv-scanner printed on standard error.
         scan_root: Directory osv-scanner ran in.
 
     Returns:
-        The reported errors and the lines nothing explains.
+        The reported errors, the warning echoes and the lines nothing
+        explains.
     """
     lines = [line.rstrip("\r") for line in (stderr or "").splitlines()]
     entries: list[ExtractionEntry] = []
-    in_block: set[int] = set()
+    echoes: list[ExtractionEntry] = []
+    unexplained: list[int] = []
     index = 0
     while index < len(lines):
-        match = _HEADER_RE.match(lines[index].strip())
-        if match is None:
+        line = lines[index]
+        match = _HEADER_RE.match(line)
+        if match is not None:
+            block, index = _read_block(lines, index, match, scan_root)
+            entries.extend(block)
+        elif line.startswith(_RESOLUTION_PREFIX):
+            text, owned, index = _read_message(lines, index, line)
+            echoes.append(_entry("", text, owned, scan_root, transitive=True))
+        else:
+            if line.strip() and not line.startswith(INFO_PREFIXES):
+                unexplained.append(index)
             index += 1
-            continue
-        plugin = match.group("plugin")
-        earlier = set(lines[:index])
-        end = index + 1
-        while end < len(lines) and _is_continuation(
-            lines[end],
-            plugin=plugin,
-            earlier=earlier,
-        ):
-            end += 1
-        entries.extend(
-            _block_entries(
-                plugin,
-                match.group("detail").strip(),
-                lines[index + 1 : end],
-                scan_root,
-            ),
-        )
-        in_block.update(range(index, end))
-        index = end
-    noted = {
-        line
-        for entry in entries
-        if entry.kind is EntryKind.RESOLUTION
-        for line in entry.text.splitlines()
-    }
-    unexplained = tuple(
-        line
-        for number, line in enumerate(lines)
-        if number not in in_block
-        and line.strip()
-        and not line.strip().startswith(_INFO_PREFIXES)
-        # Each transitive failure is also logged as a warning before its block.
-        and line not in noted
+    return ExtractionLog(
+        entries=tuple(entries),
+        echoes=tuple(echoes),
+        unexplained=tuple(unexplained),
+        lines=tuple(lines),
     )
-    return ExtractionLog(entries=tuple(entries), unexplained=unexplained)
 
 
 def diagnostic_lines(text: str | None) -> str:
@@ -397,6 +498,10 @@ def shown_entry(entry: ExtractionEntry, scan_root: Path) -> str:
     return text.replace(entry.printed_path, shown)
 
 
+#: The short form of a resolution note, for a summary table's Notes column.
+RESOLUTION_NOTE_SUMMARY: str = "indirect dependencies not resolved"
+
+
 def resolution_note(notes: tuple[ExtractionEntry, ...], scan_root: Path) -> str:
     """Name the manifests whose indirect dependencies were not resolved.
 
@@ -405,30 +510,46 @@ def resolution_note(notes: tuple[ExtractionEntry, ...], scan_root: Path) -> str:
         scan_root: Directory osv-scanner ran in.
 
     Returns:
-        A note for the output, or an empty string when there is none.
+        The note, or an empty string when there is none.
     """
     if not notes:
         return ""
     shown = "\n".join(shown_entry(entry, scan_root) for entry in notes)
     return (
-        "Note: OSV-Scanner scanned the packages listed in these manifests but "
+        "OSV-Scanner scanned the packages listed in these manifests but "
         "could not resolve their indirect dependencies, so those were not "
         "checked: "
         f"{tool_message_excerpt(shown)}"
     )
 
 
-def skipped_reason(skipped: tuple[ExtractionEntry, ...], scan_root: Path) -> str:
+def skipped_reason(
+    skipped: tuple[ExtractionEntry, ...],
+    scan_root: Path,
+    *,
+    unexplained: str = "",
+) -> str:
     """Name the sources osv-scanner skipped, for an incomplete run.
 
     Args:
         skipped: The errors that left part of the scan undone.
         scan_root: Directory osv-scanner ran in.
+        unexplained: Other error lines osv-scanner printed, quoted after the
+            skipped sources so a failed lookup is never left out.
 
     Returns:
         The reason, quoting osv-scanner's own errors.
     """
-    shown = "\n".join(shown_entry(entry, scan_root) for entry in skipped)
+    # A resolution failure is printed twice, as a warning and as the error;
+    # quote it once. Which lines each entry owns is unaffected.
+    shown = "\n".join(
+        dict.fromkeys(
+            [
+                *(shown_entry(entry, scan_root) for entry in skipped),
+                *([relative_to_root(unexplained, scan_root)] if unexplained else []),
+            ],
+        ),
+    )
     return (
         "OSV-Scanner could not extract every package source or look up "
         "its vulnerabilities, so the scan is incomplete: "
@@ -455,23 +576,38 @@ def sort_extraction_errors(
 
     Returns:
         The skipped sources, the resolution notes, the message to quote for
-        a failed run, and whether the errors explain a failed exit.
+        a failed run, and whether the errors explain a failed exit: exit 127
+        is a verdict only when every line that is not progress or blank
+        belongs to an entry, and every entry is a harmless resolution or
+        lies under an excluded path.
     """
     log = read_extraction_log(stderr, scan_root)
     skipped: list[ExtractionEntry] = []
     notes: list[ExtractionEntry] = []
-    for entry in log.entries:
+    for entry in (*log.entries, *log.echoes):
         if entry.source is not None and is_excluded(entry.source):
             logger.debug(
                 f"[osv-scanner] Ignoring extraction error for an excluded "
                 f"path: {entry.source}",
             )
             continue
-        (notes if entry.kind is EntryKind.RESOLUTION else skipped).append(entry)
-    quoted = "\n".join(log.unexplained) or diagnostic_lines(stderr)
+        if entry.kind is not EntryKind.RESOLUTION:
+            skipped.append(entry)
+        elif entry.plugin:
+            # A harmless echo owns its own lines; the note comes from the
+            # error block, which names the enricher.
+            notes.append(entry)
+    quoted = "\n".join(log.unexplained_text) or diagnostic_lines(stderr)
     return ExtractionErrors(
         skipped=tuple(skipped),
         notes=tuple(notes),
         failure_message=relative_to_root(tool_message_excerpt(quoted), scan_root),
-        explains_failed_exit=bool(log.entries) and not skipped and not log.unexplained,
+        explains_failed_exit=(
+            bool(log.entries) and not skipped and not log.unexplained
+        ),
+        unexplained="\n".join(
+            line
+            for line in log.unexplained_text
+            if not line.startswith("No package sources found")
+        ),
     )
