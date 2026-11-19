@@ -279,12 +279,20 @@ These fail-closed checks also apply without a fingerprint baseline:
   unknown inspection. Only a malformed report counts parse failures. The output names
   the reason, and the module when several ran, instead of the raw report. In `fmt`, a
   stage without a complete report leaves fixed and remaining counts unknown, and merging
-  several modules keeps that unknown residual, the execution failure and any timeout.
-- OSV-Scanner reports "no package sources found" as a no-files run, not a scan. A run
-  without a complete report (empty stdout, an error object, a `results` value that is
-  not a list, or a failed exit beside a report with no vulnerabilities) is an execution
-  failure with unknown inspection, and its output names the reason or OSV-Scanner's own
-  message.
+  several modules keeps that unknown residual, the execution failure and any timeout. A
+  `--fix` run that logs an error beside a valid report (for example
+  `Failed to fix issues: ... permission denied` for a read-only file) is incomplete the
+  same way, and its output quotes that error.
+- OSV-Scanner reports "no package sources found" as a no-files run only when it reported
+  no extraction error. It prints the same message when every lockfile it found was
+  unreadable or malformed; that run is an execution failure, never "no files". Any
+  `Error during extraction` line (an unreadable or malformed source, or a failed
+  vulnerability lookup) makes the run incomplete and keeps the findings from the sources
+  it did read, unless the source lies under an excluded path. A run without a complete
+  report (empty stdout, an error object, a `results` value that is not a list), a failed
+  exit beside a report with no vulnerabilities (including `{"results": []}`), and any
+  failed exit other than 1 are execution failures with unknown inspection. The output
+  names the reason and quotes OSV-Scanner's own message.
 - commitlint reads commit messages, not files. A completed run (a clean exit or reported
   violations) counts as inspected. A failed exit with no violation (a broken
   `commitlint.config.js`) is an execution failure with unknown inspection, named with

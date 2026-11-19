@@ -153,11 +153,15 @@ def test_check_no_vulnerabilities(
     assert_that(result.issues_count).is_equal_to(0)
 
 
-def test_check_clean_scan_with_log_prefix_and_nonzero_exit(
+def test_check_empty_results_with_log_prefix_and_nonzero_exit_is_incomplete(
     osv_scanner_plugin: OsvScannerPlugin,
     tmp_path: Path,
 ) -> None:
-    """Check treats empty parsed results as success despite non-zero exit."""
+    """A failed exit with an empty ``results`` list is no clean scan (#3352).
+
+    osv-scanner 2.7.1 prints exactly this report when its vulnerability
+    queries fail, so an empty list proves nothing was checked.
+    """
     lockfile = tmp_path / "requirements.txt"
     copy_sample(
         tmp_path,
@@ -180,7 +184,10 @@ def test_check_clean_scan_with_log_prefix_and_nonzero_exit(
     ):
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
-    assert_that(result.success).is_true()
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.inspected_files).is_none()
     assert_that(result.issues_count).is_equal_to(0)
 
 
