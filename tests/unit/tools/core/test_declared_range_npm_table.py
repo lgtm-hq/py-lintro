@@ -148,6 +148,28 @@ _NPM_TABLE: tuple[tuple[str, str], ...] = (
     ("~v3.9.4", "TTT"),
     ("^v3.9", "TTT"),
     (">=3.6.0-0 <3.6.0", "TFF"),
+    # Review round 3: ranges npm rejects, and empty ranges, same script.
+    (">=9007199254740992", "EEE"),
+    (">=999999999999999999999", "EEE"),
+    (">=9007199254740991", "TTT"),
+    ("9007199254740991.x", "EEE"),
+    (">=03.2.0", "EEE"),
+    (">=3.02.0", "EEE"),
+    (">=3.2.0-01", "EEE"),
+    (">=3.2.0-rc.01", "EEE"),
+    (">=3.2.0-rc..1", "EEE"),
+    (">=3.2.0-0", "TTT"),
+    (">=3.2.0+foo..bar", "EEE"),
+    (">=3.2.0+foo.", "EEE"),
+    (">=3.2.0+01", "TTT"),
+    (">=3.2.0 || 3.x.5", "EEE"),
+    (">=3.2.0 || >=03.2.0", "EEE"),
+    ("3.x+build", "TTT"),
+    (">3.6.0 <=3.6.0", "FFF"),
+    (">=4.0.0-0 <3", "FFF"),
+    ("3.9.5-rc.1", "FFF"),
+    ("3.9.5-rc.1 >=3.0.0", "FFF"),
+    (">=4 <4.0.0-rc.1", "FFF"),
 )
 
 #: Known conservative answers: ``?`` marks a minimum where the reader says
@@ -157,15 +179,13 @@ _CONSERVATIVE: dict[str, str] = {
     # npm's intersects treats versions as continuous; no release lies
     # strictly between 3.9.3 and 3.9.4, so ``npm install`` finds nothing.
     ">3.9.3 <3.9.4": "??F",
-    # Same reading, with an inclusive upper bound equal to the lower one.
-    ">3.9.4 <=3.9.4": "???",
     # Prerelease lower bounds admit prereleases of 3.9.5 / 3.6.0, which rank
     # above the minimum; the reader does not order prereleases.
     ">=3.9.5-rc.1 <=3.9.5-rc.3": "???",
-    "3.9.5-rc.1 || 2.x": "???",
     ">=3.6.0-0 <3.6.0": "?FF",
-    # npm rejects a number after a wildcard.
-    "3.x.5": "???",
+    # The prerelease upper bound reads as 4.0.0, which a prerelease of 4.0.0
+    # could sit below; the reader does not order prereleases.
+    ">=4 <4.0.0-rc.1": "???",
 }
 
 _LETTER: dict[bool | None, str] = {True: "T", False: "F", None: "?"}

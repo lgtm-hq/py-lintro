@@ -959,7 +959,11 @@ resolve semver ranges against the registry; the project's package manager does t
   and runs nothing, because the project install would only end with a version lintro
   rejects. A prerelease upper bound counts as its release (`<4.0.0-0` admits 3.x). A
   range whose answer depends on a prerelease it admits (`>=3.9.5-rc.1 <=3.9.5-rc.3`), or
-  that lintro cannot parse, is reported the same way rather than installed.
+  that lintro cannot parse, is reported the same way rather than installed. So is any
+  range npm itself rejects — a leading zero (`>=03.2.0`), a number above JavaScript's
+  largest safe integer, a malformed prerelease or build suffix (`>=3.2.0-01`,
+  `>=3.2.0+foo..bar`) — even when another `||` alternative is valid
+  (`>=3.2.0 || 3.x.5`).
 - **Opaque** — `workspace:*`, `npm:` aliases, git and tarball URLs, local paths,
   dist-tags. lintro reports how the project manages the tool ("this project manages
   prettier via the workspace protocol (`workspace:*`) in package.json; lintro will not
@@ -970,6 +974,11 @@ tilde on a full version is how npm records the version a project actually adopte
 lintro compares that version with its own, and a difference is a decision for you. A
 comparator range such as `>=3.1.0` states only a floor, and lintro leaves the choice
 within it to your package manager.
+
+lintro enforces a minimum, not a ceiling. If your range lets the project install bring a
+version above the one lintro recommends (you declare `>=4`, lintro recommends 3.9.4, and
+`npm install` brings 4.x), the install is reported as a plain success: after it runs,
+lintro checks only that the installed version meets the tool's minimum.
 
 On a first install of a declared-but-missing exact-compatible match or range, lintro
 runs the manager's install-all command (`npm install`, `bun install`, …) in the project
@@ -997,9 +1006,11 @@ for manual installation instead of planning `yarn global add`. The tags `yarn@be
 count as Berry too: Corepack rejects them, and Yarn 1 refuses to run `yarn global` under
 a `packageManager` that does not name its own version. Yarn 1 keeps `yarn global add`
 only when there is no `packageManager` field or the field starts with `yarn@1.` (or
-`yarn@0.`), the check Yarn 1.22 itself makes: `yarn@1.22.22` and `yarn@1.x` work, while
-`yarn@1`, `yarn@^1.22.0` and `yarn@>=1` make it exit with an error, so lintro lists the
-tool for manual installation there too.
+`yarn@0.`), the check Yarn 1.22 itself makes before every command: `yarn@1.22.22` and
+`yarn@1.x` work, while under `yarn@1`, `yarn@^1.22.0` or `yarn@>=1` every yarn command,
+`yarn add` included, exits with an error. lintro then lists the tool for manual
+installation and suggests no yarn command: set the field to an exact version such as
+`yarn@1.22.22`, or install the tool through your own setup.
 
 **Planning matches execution.** The version probe for npm-installed tools resolves
 through the same chain a check uses, so `lintro install` reports on the binary

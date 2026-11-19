@@ -17,7 +17,9 @@ release, so a prerelease upper bound reads as its release: a release is below
 This does not resolve a range against a registry. Whenever the answer would
 depend on a prerelease the range admits, or a comparator is not one this
 module parses, it says "cannot tell" and the caller asks the user rather than
-installing.
+installing. A range npm's semver rejects (a leading zero, a number above
+``Number.MAX_SAFE_INTEGER``, an empty or malformed prerelease or build
+identifier, in any ``||`` alternative) is always "cannot tell".
 """
 
 from __future__ import annotations
@@ -34,8 +36,22 @@ Release = tuple[int, int, int]
 COMPARATOR = re.compile(
     r"(?P<op><=|>=|<|>|=|~>|~|\^)?v?"
     r"(?P<parts>(?:\d+|[xX*])(?:\.(?:\d+|[xX*])){0,2})"
-    r"(?:-(?P<pre>[0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?",
+    r"(?:-(?P<pre>[0-9A-Za-z.-]+))?(?:\+(?P<build>[0-9A-Za-z.-]+))?",
 )
+
+#: A version number as the semver grammar writes it: no leading zero.
+_NUMBER = re.compile(r"0|[1-9]\d*")
+
+#: A prerelease identifier: a number without a leading zero, or alphanumerics
+#: and hyphens with at least one non-digit.
+_PRERELEASE_ID = re.compile(r"0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*")
+
+#: A build identifier: any non-empty run of alphanumerics and hyphens.
+_BUILD_ID = re.compile(r"[0-9A-Za-z-]+")
+
+#: JavaScript's ``Number.MAX_SAFE_INTEGER``; npm's semver rejects any version
+#: number above it.
+_MAX_SAFE_INTEGER = 2**53 - 1
 
 #: An operator separated from its version by whitespace (``>= 3.9.4``).
 DETACHED_OPERATOR = re.compile(r"(<=|>=|<|>|=|~>|~|\^)\s+")
@@ -71,15 +87,18 @@ class _Interval:
     """The releases one comparator, or one comparator set, admits.
 
     Attributes:
-        lowest: Lowest admitted release. It is always inclusive: over
-            releases, ``>A.B.C`` is ``>=A.B.(C+1)``.
+        lowest: Lowest admitted release. Over releases, ``>A.B.C`` is
+            ``>=A.B.(C+1)``, so it is inclusive unless ``lowest_exclusive``.
         upper: Bounding release, or None when there is no upper bound.
         upper_inclusive: Whether ``upper`` itself is admitted.
+        lowest_exclusive: Whether ``lowest`` itself is excluded. Only the
+            continuous reading (``loose`` in :func:`_interval`) sets it.
     """
 
     lowest: Release
     upper: Release | None
     upper_inclusive: bool = False
+    lowest_exclusive: bool = False
 
     def meet(self, other: _Interval) -> _Interval:
         """Return the releases both intervals admit.
@@ -90,31 +109,35 @@ class _Interval:
         Returns:
             The intersection.
         """
-        lowest = max(self.lowest, other.lowest)
+        # At one release an exclusive bound is the stricter lower bound.
+        lowest, exclusive = max(
+            (self.lowest, self.lowest_exclusive),
+            (other.lowest, other.lowest_exclusive),
+        )
         uppers = [
             (bound.upper, bound.upper_inclusive)
             for bound in (self, other)
             if bound.upper is not None
         ]
         if not uppers:
-            return _Interval(lowest, None)
+            return _Interval(lowest, None, lowest_exclusive=exclusive)
         upper, inclusive = min(uppers)
-        return _Interval(lowest, upper, inclusive)
+        return _Interval(lowest, upper, inclusive, lowest_exclusive=exclusive)
 
     def admits_at_least(self, floor: Release) -> bool:
-        """Report whether some admitted release is at or above *floor*.
+        """Report whether some admitted version is at or above *floor*.
 
         Args:
             floor: Lowest acceptable release.
 
         Returns:
-            True when a release at or above *floor* lies inside the interval.
+            True when a version at or above *floor* lies inside the interval.
         """
-        lowest = max(self.lowest, floor)
+        lowest, exclusive = max((self.lowest, self.lowest_exclusive), (floor, False))
         if self.upper is None:
             return True
-        if self.upper_inclusive:
-            return lowest <= self.upper
+        if lowest == self.upper:
+            return self.upper_inclusive and not exclusive
         return lowest < self.upper
 
 
@@ -136,20 +159,21 @@ def range_admits_at_least(spec: str, floor: str) -> bool | None:
     Returns:
         True when at least one ``||`` alternative admits a release at or
         above *floor*, False when none does, and None when that cannot be
-        read with confidence.
+        read with confidence. npm rejects a whole range when one alternative
+        is invalid, so any unreadable alternative makes the answer None,
+        whatever the others say.
     """
     floor_match = _RELEASE.fullmatch(floor.strip())
     if floor_match is None:
         return None
     floor_release = _release(tuple(int(part) for part in floor_match.groups()))
-    verdicts: list[bool | None] = []
-    for alternative in spec.split("||"):
-        try:
-            comparators = _comparators(alternative)
-        except _UnparsedError:
-            verdicts.append(None)
-            continue
-        verdicts.append(_alternative_verdict(comparators, floor_release))
+    try:
+        parsed = [_comparators(alternative) for alternative in spec.split("||")]
+        verdicts = [
+            _alternative_verdict(comparators, floor_release) for comparators in parsed
+        ]
+    except _UnparsedError:
+        return None
     if any(verdict is True for verdict in verdicts):
         return True
     if all(verdict is False for verdict in verdicts):
@@ -199,19 +223,27 @@ def _alternative_verdict(
         release qualifies but npm's answer could still be "yes". That
         happens in two ways. npm lets a comparator written with
         ``A.B.C-pre`` admit other prereleases of ``A.B.C``, which rank above
-        *floor* when ``A.B.C`` does. And ``semver.intersects`` treats
-        versions as continuous, so ``>3.9.3 <3.9.4`` intersects
-        ``>=3.2.0`` although no release lies between the two bounds.
+        *floor* when ``A.B.C`` does, unless an upper bound below ``A.B.C``
+        excludes them (``>=4.0.0-0 <3``). An exact prerelease
+        (``3.9.5-rc.1``) admits only itself, which never satisfies a
+        release floor, so it is not such a case. And ``semver.intersects``
+        treats versions as continuous, so ``>3.9.3 <3.9.4`` intersects
+        ``>=3.2.0`` although no release lies between the two bounds, while
+        ``>3.9.4 <=3.9.4`` is empty either way. A bound past the largest
+        number npm accepts propagates :class:`_UnparsedError` from
+        :func:`_bump`.
     """
-    if _meet_all(comparators, loose=False).admits_at_least(floor):
+    strict = _meet_all(comparators, loose=False)
+    if strict.admits_at_least(floor):
         return True
     if _meet_all(comparators, loose=True).admits_at_least(floor):
         return None
-    if any(
-        comparator.prerelease and _release(comparator.parts) > floor
-        for comparator in comparators
-    ):
-        return None
+    for comparator in comparators:
+        if not comparator.prerelease or comparator.op in ("", "="):
+            continue
+        release = _release(comparator.parts)
+        if release > floor and (strict.upper is None or strict.upper >= release):
+            return None
     return False
 
 
@@ -256,9 +288,13 @@ def _parse(word: str) -> _Comparator:
         The parsed comparator.
 
     Raises:
-        _UnparsedError: When *word* is not a comparator, a wildcard is
-            followed by a number (``3.x.5``, which npm rejects), or a
-            prerelease follows a partial version.
+        _UnparsedError: When *word* is not a comparator or breaks a rule
+            npm's semver enforces: a wildcard followed by a number
+            (``3.x.5``), a number with a leading zero (``03.2.0``) or above
+            ``Number.MAX_SAFE_INTEGER``, a numeric prerelease identifier
+            with a leading zero (``3.2.0-01``), or an empty prerelease or
+            build identifier (``3.2.0+foo..bar``). A prerelease after a
+            partial version is not read either.
     """
     match = COMPARATOR.fullmatch(word)
     if match is None:
@@ -268,10 +304,16 @@ def _parse(word: str) -> _Comparator:
     for part in written:
         if not part.isdigit():
             break
+        if _NUMBER.fullmatch(part) is None or int(part) > _MAX_SAFE_INTEGER:
+            raise _UnparsedError(word)
         parts.append(int(part))
     if any(part.isdigit() for part in written[len(parts) :]):
         raise _UnparsedError(word)
-    if match["pre"] is not None and len(parts) != 3:
+    if match["pre"] is not None and (
+        len(parts) != 3 or not _identifiers_valid(match["pre"], _PRERELEASE_ID)
+    ):
+        raise _UnparsedError(word)
+    if match["build"] is not None and not _identifiers_valid(match["build"], _BUILD_ID):
         raise _UnparsedError(word)
     op = match["op"] or ""
     return _Comparator(
@@ -326,8 +368,11 @@ def _interval(comparator: _Comparator, *, loose: bool = False) -> _Interval:
     if op == ">=":
         return _Interval(_release(parts), None)
     if op == ">":
-        lowest = _release(parts) if full and (pre or loose) else _bump(parts)
-        return _Interval(lowest, None)
+        if full and pre:
+            return _Interval(_release(parts), None)
+        if full and loose:
+            return _Interval(_release(parts), None, lowest_exclusive=True)
+        return _Interval(_bump(parts), None)
     if op == "<":
         return _Interval(_ZERO, _release(parts))
     if op == "<=":
@@ -386,9 +431,29 @@ def _bump(parts: tuple[int, ...]) -> Release:
     Returns:
         ``(3,)`` gives ``4.0.0``, ``(3, 1)`` gives ``3.2.0`` and
         ``(3, 1, 4)`` gives ``3.1.5``.
+
+    Raises:
+        _UnparsedError: When the bumped number passes
+            ``Number.MAX_SAFE_INTEGER``; npm rejects such a bound
+            (``9007199254740991.x``).
     """
+    if parts[-1] >= _MAX_SAFE_INTEGER:
+        raise _UnparsedError(".".join(str(part) for part in parts))
     bumped = (*parts[:-1], parts[-1] + 1)
     return _release(bumped)
+
+
+def _identifiers_valid(text: str, identifier: re.Pattern[str]) -> bool:
+    """Check a dot-separated prerelease or build suffix.
+
+    Args:
+        text: The suffix without its ``-`` or ``+``.
+        identifier: Pattern each identifier must match in full.
+
+    Returns:
+        True when every identifier is non-empty and matches *identifier*.
+    """
+    return all(identifier.fullmatch(part) for part in text.split("."))
 
 
 def _release(parts: tuple[int, ...]) -> Release:

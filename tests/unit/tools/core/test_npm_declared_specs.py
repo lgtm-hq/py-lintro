@@ -88,14 +88,27 @@ _EXCLUDING_RANGES: tuple[str, ...] = (
     "<3.6.0 >=3.6.0",
     "3.6.0 - 3.5.0",
     ">3.x <4",
+    # Empty, and an exact prerelease never satisfies a release minimum.
+    ">3.9.4 <=3.9.4",
+    ">=4.0.0-0 <3",
+    "2.x || 3.9.5-rc.1",
 )
 
 #: Ranges whose bounds lintro does not read with confidence.
 _UNREADABLE_RANGES: tuple[str, ...] = (
-    # npm rejects a number after a wildcard.
+    # npm's semver rejects each of these (it throws), so no install may run:
+    # a number after a wildcard, a leading zero, a number above
+    # Number.MAX_SAFE_INTEGER, a leading zero in a numeric prerelease
+    # identifier, an empty build identifier.
     "3.x.5",
-    # The prerelease alternative could resolve to 3.9.5-rc.1.
-    "2.x || 3.9.5-rc.1",
+    ">=03.2.0",
+    ">=9007199254740992",
+    ">=3.2.0-01",
+    ">=3.2.0+foo..bar",
+    # One readable alternative does not rescue an invalid one.
+    ">=3.2.0 || 3.x.5",
+    # A prerelease lower bound could admit prereleases of 3.9.5.
+    ">=3.9.5-rc.1 <=3.9.5-rc.3",
 )
 
 #: Opaque specs and the form each message must name.
@@ -589,11 +602,13 @@ def test_yarn_classic_refuses_global_under_a_field_it_rejects(
     upgrading: bool,
     tmp_path: Path,
 ) -> None:
-    """Yarn 1 runs ``yarn global`` only under ``yarn@0.`` or ``yarn@1.``.
+    """Yarn 1 runs no command unless the field starts ``yarn@0.``/``yarn@1.``.
 
-    Yarn 1.22.22 exits 1 on ``yarn global add`` under each of these fields
+    Yarn 1.22.22 checks the field before every command, so ``yarn global
+    add`` and ``yarn add --dev`` both exit 1 under each of these fields
     ("This project's package.json defines packageManager ... However the
-    current global version of Yarn is 1.22.22").
+    current global version of Yarn is 1.22.22"). The hint therefore names
+    no yarn command and asks for an exact version in the field.
 
     Args:
         package_manager: ``packageManager`` field.
@@ -608,10 +623,11 @@ def test_yarn_classic_refuses_global_under_a_field_it_rejects(
 
     assert_that(is_manual_hint(hint)).is_true()
     assert_that(hint).contains(
-        f"packageManager is `{package_manager}`",
-        "yarn add --dev prettier@3.9.4",
+        f"`packageManager` field (`{package_manager}`)",
+        "does not name an exact Yarn 1 version",
+        "`yarn@1.22.22`",
     )
-    assert_that(hint).does_not_contain("Yarn Berry")
+    assert_that(hint).does_not_contain("yarn add", "yarn global", "Yarn Berry")
 
 
 @pytest.mark.parametrize(

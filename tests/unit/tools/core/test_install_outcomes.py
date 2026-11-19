@@ -472,6 +472,41 @@ def test_upgrade_exit_0_still_outdated_is_not_re_suggested() -> None:
     assert_that([name for name, _reason in quick_fix.blocked]).is_equal_to(["ruff"])
 
 
+def test_project_install_above_the_recommended_version_is_success() -> None:
+    """Lintro enforces a minimum, not a ceiling (#2045).
+
+    A project declaring ``>=4`` gets prettier 4.x from ``npm install`` while
+    lintro recommends 3.9.4. Only the minimum is checked, so that install is
+    a plain success and nothing is flagged for another attempt.
+    """
+    installer = _installer()
+    tool = ManifestTool(
+        name="prettier",
+        version="3.9.4",
+        min_version="3.2.0",
+        install_type="npm",
+        install_package="prettier",
+        version_command=("prettier", "--version"),
+    )
+
+    with (
+        patch("lintro.tools.core.tool_installer.subprocess.run") as mock_run,
+        patch(
+            "lintro.tools.core.tool_installer.shutil.which",
+            return_value="/usr/local/bin/prettier",
+        ),
+    ):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="4.1.0", stderr=""),
+        ]
+        result = installer._run_install(tool, "npm install")
+
+    assert_that(result.outcome).is_equal_to(InstallOutcome.SUCCESS)
+    assert_that(result.success).is_true()
+    assert_that(unresolved_tool_names([result])).is_empty()
+
+
 def test_not_discoverable_message_names_the_destination_directory(
     tmp_path: Path,
 ) -> None:
