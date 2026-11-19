@@ -60,7 +60,13 @@ _RETARGETING_UV_PIP_OPTIONS = frozenset(
 )
 #: Environment forms of the uv options above. uv documents no variable for
 #: ``--target`` or ``--prefix`` (``UV_TARGET``/``UV_PREFIX`` do not exist).
-_RETARGETING_UV_ENV = ("UV_PYTHON", "UV_SYSTEM_PYTHON")
+#: ``UV_WORKING_DIR`` (``--directory``) moves the directory uv discovers the
+#: environment from, and uv then logs the environment relative to that
+#: directory, so lintro cannot place it. Every other uv variable that can
+#: change the choice (``UV_PROJECT``, ``UV_CONFIG_FILE``, ``UV_NO_CONFIG``,
+#: ...) is inherited by the ``uv pip list`` query and so is reflected in
+#: its answer; ``UV_PROJECT_ENVIRONMENT`` does not affect ``uv pip``.
+_RETARGETING_UV_ENV = ("UV_PYTHON", "UV_SYSTEM_PYTHON", "UV_WORKING_DIR")
 #: ``cargo install`` options that make cargo read configuration other than
 #: ``$CARGO_HOME``'s (``--path`` starts discovery at the package) or override it.
 _CARGO_CONFIG_OPTIONS = frozenset({"--path", "--config", "-Z"})
@@ -231,6 +237,32 @@ def _env_path(name: str) -> Path | None:
     return path
 
 
+def _uses_option(args: list[str], options: frozenset[str]) -> bool:
+    """Return whether *args* pass any of *options*, in any spelling.
+
+    Matches ``--opt``, ``--opt=value``, ``-o``, a short option with its
+    value attached (``-ovalue``, ``-o=value``) and one bundled after other
+    short flags (``-qo value``), as cargo and uv both accept. Any letter of
+    a short-flag group that names one of *options* counts, even when it may
+    belong to another flag's attached value: a false match only makes the
+    destination unknown.
+
+    Args:
+        args: Command arguments.
+        options: Option names, including the dashes.
+
+    Returns:
+        True when any argument may be one of the options.
+    """
+    short = {option[1] for option in options if len(option) == 2}
+    for arg in args:
+        if arg.split("=", 1)[0] in options:
+            return True
+        if arg[:1] == "-" and arg[1:2] not in ("", "-") and short & set(arg[1:]):
+            return True
+    return False
+
+
 def _option_value(args: list[str], option: str) -> str | None:
     """Return the value of ``--opt value`` or ``--opt=value`` in *args*.
 
@@ -258,34 +290,70 @@ def _cargo_home() -> Path:
     return _env_path("CARGO_HOME") or Path.home() / ".cargo"
 
 
-def _cargo_config_root() -> Path | None:
-    """Return ``install.root`` from the config file ``cargo install`` reads.
+def _config_file(directory: Path) -> Path | None:
+    """Return the cargo config file in *directory*, as cargo picks it.
 
-    ``cargo install`` ignores project configuration and starts discovery at
-    ``$CARGO_HOME``. There it reads the legacy ``config`` file whenever it
-    exists, even next to a ``config.toml`` (cargo warns and uses ``config``).
+    Cargo reads the legacy ``config`` file whenever it exists, even next to
+    a ``config.toml`` (it warns and uses ``config``).
+
+    Args:
+        directory: Directory that may hold ``config`` or ``config.toml``.
 
     Returns:
-        The configured install root, or None when no file sets it.
-
-    Raises:
-        _UnknownDestinationError: When the file cannot be parsed or sets a
-            root that is not a clean absolute path. Cargo resolves a relative
-            root differently by version and spelling (against the working
-            directory without a trailing slash, against the config location
-            with one), so lintro does not guess.
+        The file cargo reads there, or None when there is none.
     """
-    home = _cargo_home()
-    config = next(
-        (home / name for name in ("config", "config.toml") if (home / name).is_file()),
+    return next(
+        (
+            directory / name
+            for name in ("config", "config.toml")
+            if (directory / name).is_file()
+        ),
         None,
     )
-    if config is None:
-        return None
+
+
+def _cargo_config_files() -> list[Path]:
+    """Return the config files ``cargo install`` reads, nearest first.
+
+    ``cargo install`` ignores project configuration and starts discovery at
+    ``$CARGO_HOME``: it reads ``.cargo/config[.toml]`` in ``$CARGO_HOME``
+    and in every directory above it, then ``$CARGO_HOME/config[.toml]``. A
+    nearer file wins.
+
+    Returns:
+        The files that exist, in cargo's precedence order.
+    """
+    home = _cargo_home()
+    candidates = [
+        *(_config_file(directory / ".cargo") for directory in (home, *home.parents)),
+        _config_file(home),
+    ]
+    return [path for path in candidates if path is not None]
+
+
+def _config_install_root(config: Path) -> Path | None:
+    """Return ``install.root`` from one cargo config file.
+
+    Args:
+        config: Config file to read.
+
+    Returns:
+        The configured install root, or None when the file does not set it.
+
+    Raises:
+        _UnknownDestinationError: When the file cannot be parsed, includes
+            other files, or sets a root that is not a clean absolute path.
+            Cargo resolves a relative root differently by version and
+            spelling (against the working directory without a trailing
+            slash, against the config location with one), so lintro does
+            not guess.
+    """
     try:
         data = tomllib.loads(config.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise _UnknownDestinationError from exc
+    if "include" in data:
+        raise _UnknownDestinationError
     install = data.get("install", {})
     if not isinstance(install, dict):
         raise _UnknownDestinationError
@@ -298,12 +366,26 @@ def _cargo_config_root() -> Path | None:
     return path
 
 
+def _cargo_config_root() -> Path | None:
+    """Return ``install.root`` from the configuration ``cargo install`` reads.
+
+    Returns:
+        The root set by the nearest config file that sets one, or None when
+        no file sets it.
+    """
+    for config in _cargo_config_files():
+        root = _config_install_root(config)
+        if root is not None:
+            return root
+    return None
+
+
 def _cargo_install_bin(args: list[str], *, cwd: Path) -> Path:
     """Return where ``cargo install`` puts executables.
 
     Precedence follows cargo: ``--root``, ``CARGO_INSTALL_ROOT``, the
-    ``install.root`` value in ``$CARGO_HOME``'s config, then ``$CARGO_HOME``
-    (``~/.cargo``).
+    ``install.root`` value from the configuration discovered at
+    ``$CARGO_HOME``, then ``$CARGO_HOME`` (``~/.cargo``).
 
     Args:
         args: ``cargo`` arguments after the program name.
@@ -316,7 +398,7 @@ def _cargo_install_bin(args: list[str], *, cwd: Path) -> Path:
         _UnknownDestinationError: When ``--root`` is not a clean path, or an
             option makes cargo read other configuration.
     """
-    if _CARGO_CONFIG_OPTIONS.intersection(arg.split("=", 1)[0] for arg in args):
+    if _uses_option(args, _CARGO_CONFIG_OPTIONS):
         raise _UnknownDestinationError
     root_arg = _option_value(args, "--root")
     if root_arg is not None:
@@ -414,7 +496,7 @@ def _uv_pip_scripts(uv: str, args: list[str], *, cwd: Path) -> Path:
             install, or uv does not name exactly one virtual or conda
             environment.
     """
-    if _RETARGETING_UV_PIP_OPTIONS.intersection(arg.split("=", 1)[0] for arg in args):
+    if _uses_option(args, _RETARGETING_UV_PIP_OPTIONS):
         raise _UnknownDestinationError
     if any(os.environ.get(name) for name in _RETARGETING_UV_ENV):
         raise _UnknownDestinationError

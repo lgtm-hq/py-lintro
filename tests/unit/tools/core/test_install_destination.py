@@ -29,6 +29,7 @@ from lintro.tools.core.tool_registry import ManifestRegistry, ManifestTool
 
 _REAL_RUN = subprocess.run
 _UV_PIP_LIST = ("uv", "pip", "list", "--offline", "-v")
+_UV_LOGS_DOT_VENV = "DEBUG Using Python 3.14.6 environment at: .venv"
 _ENV_OVERRIDES = (
     "CARGO_HOME",
     "CARGO_INSTALL_ROOT",
@@ -437,8 +438,13 @@ def test_uv_pip_names_an_absolute_conda_environment(machine: _FakeMachine) -> No
 @pytest.mark.parametrize(
     ("env", "stderr"),
     [
-        ({"UV_PYTHON": "/usr/bin/python3"}, "environment at: .venv"),
-        ({"UV_SYSTEM_PYTHON": "1"}, "environment at: .venv"),
+        # Each variable case logs a usable .venv, so only the variable
+        # itself can make the destination unknown.
+        ({"UV_PYTHON": "/usr/bin/python3"}, _UV_LOGS_DOT_VENV),
+        ({"UV_SYSTEM_PYTHON": "1"}, _UV_LOGS_DOT_VENV),
+        # uv logs the environment relative to UV_WORKING_DIR, not the
+        # directory the install ran in, which holds a .venv of its own.
+        ({"UV_WORKING_DIR": "/other/project"}, _UV_LOGS_DOT_VENV),
         (
             {},
             "DEBUG Using `--target` directory at `/t`\n"
@@ -460,6 +466,7 @@ def test_uv_pip_names_an_absolute_conda_environment(machine: _FakeMachine) -> No
     ids=[
         "uv-python-env",
         "uv-system-python-env",
+        "uv-working-dir-env",
         "configured-target",
         "configured-prefix",
         "not-a-venv",
@@ -494,6 +501,45 @@ def test_uv_pip_destination_uv_does_not_pin_down_is_unknown(
     result = _install("uv pip install tool", install_type="pip")
 
     _assert_unknown(result, "where uv installed it")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "uv pip install -p/opt/py/bin/python tool",
+        "uv pip install -p=3.12 tool",
+        "uv pip install -qp 3.12 tool",
+        "uv pip install -t/opt/target tool",
+        "uv pip install --python=3.12 tool",
+    ],
+    ids=[
+        "python-attached",
+        "python-equals",
+        "python-bundled",
+        "target-attached",
+        "python-long-equals",
+    ],
+)
+def test_uv_pip_retargeting_option_in_any_spelling_is_unknown(
+    machine: _FakeMachine,
+    command: str,
+) -> None:
+    """``-p``/``-t`` with an attached or bundled value retarget uv too.
+
+    uv itself would log the project ``.venv``, so only the option can make
+    the destination unknown, and lintro never asks uv.
+
+    Args:
+        machine: Fake PATH lookups and subprocesses.
+        command: Install command that ran.
+    """
+    _make_venv(machine.workdir / ".venv")
+    machine.answers[_UV_PIP_LIST] = _Reply(stderr=f"{_UV_LOGS_DOT_VENV}\n")
+
+    result = _install(command, install_type="pip")
+
+    _assert_unknown(result, "where uv installed it")
+    assert_that(machine.queries).does_not_contain(_UV_PIP_LIST)
 
 
 def _write_cargo_config(directory: Path, name: str, root: str) -> None:
@@ -550,13 +596,80 @@ def test_cargo_legacy_config_beats_config_toml(
 
 
 @pytest.mark.parametrize(
+    ("configs", "expected"),
+    [
+        ({"ch/config.toml": "home", "x/.cargo/config.toml": "above"}, "above"),
+        (
+            {
+                "ch/config.toml": "home",
+                "x/.cargo/config.toml": "above",
+                "x/ch/.cargo/config": "nearest",
+            },
+            "nearest",
+        ),
+        ({"ch/config.toml": "home", "x/.cargo/config.toml": None}, "home"),
+    ],
+    ids=["parent-beats-home", "home-dot-cargo-is-nearest", "parent-without-root"],
+)
+def test_cargo_config_above_cargo_home_wins_as_in_cargo(
+    machine: _FakeMachine,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    configs: dict[str, str | None],
+    expected: str,
+) -> None:
+    """Cargo reads ``.cargo/config*`` from CARGO_HOME upward; nearer wins.
+
+    ``ch`` is ``$CARGO_HOME`` (``<tmp>/x/ch``); the other keys are relative
+    to ``<tmp>``. A value of None writes a file that sets no install root.
+
+    Args:
+        machine: Fake PATH lookups and subprocesses.
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary directory provided by pytest.
+        configs: Config files to write and the root each one names.
+        expected: Root whose ``bin`` the message must name.
+    """
+    cargo_home = tmp_path / "x" / "ch"
+    monkeypatch.setenv("CARGO_HOME", str(cargo_home))
+    for relative, root in configs.items():
+        path = (
+            cargo_home / relative.removeprefix("ch/")
+            if relative.startswith("ch/")
+            else tmp_path / relative
+        )
+        if root is None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("[build]\njobs = 1\n")
+        else:
+            _write_cargo_config(path.parent, path.name, f"{tmp_path}/{root}")
+
+    result = _install("cargo install tool", install_type="cargo")
+
+    _assert_names(result, f"{tmp_path}/{expected}/bin")
+    assert_that(machine.queries).is_empty()
+
+
+@pytest.mark.parametrize(
     ("command", "root"),
     [
         ("cargo install tool", "relative/"),
         ("cargo install --path . tool", "/abs"),
         ("cargo install --config install.root='/x' tool", "/abs"),
+        ("cargo install --config=install.root='/x' tool", "/abs"),
+        ("cargo install -Zunstable-options tool", "/abs"),
+        ("cargo install -Zfoo=bar tool", "/abs"),
+        ("cargo -Zfoo install tool", "/abs"),
     ],
-    ids=["relative-root", "path-install", "config-override"],
+    ids=[
+        "relative-root",
+        "path-install",
+        "config-override",
+        "config-override-attached",
+        "unstable-flag-attached",
+        "unstable-flag-attached-value",
+        "unstable-flag-before-subcommand",
+    ],
 )
 def test_cargo_root_lintro_cannot_pin_down_is_unknown(
     machine: _FakeMachine,
@@ -738,15 +851,24 @@ def test_unknown_destination_is_stated_not_guessed(
     assert_that(result.message).does_not_contain("\x1b")
 
 
-def test_unparseable_cargo_config_is_unknown(machine: _FakeMachine) -> None:
-    """A cargo config lintro cannot read never yields a guessed root.
+@pytest.mark.parametrize(
+    "content",
+    ["[install\nroot = \n", 'include = "more.toml"\n[install]\nroot = "/abs"\n'],
+    ids=["unparseable", "includes-another-file"],
+)
+def test_unreadable_cargo_config_is_unknown(
+    machine: _FakeMachine,
+    content: str,
+) -> None:
+    """A cargo config lintro cannot read in full never yields a guessed root.
 
     Args:
         machine: Fake PATH lookups and subprocesses.
+        content: Text of ``$CARGO_HOME/config.toml``.
     """
     config_dir = machine.home / ".cargo"
     config_dir.mkdir(parents=True)
-    (config_dir / "config.toml").write_text("[install\nroot = \n")
+    (config_dir / "config.toml").write_text(content)
 
     result = _install("cargo install tool", install_type="cargo")
 
