@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.182.0] - 2026-11-19
+
+### Added
+
+- **cli**: add --strict-missing-tools to fail on missing or outdated tools (#3524)
+  (8ce6821)
+
 ## [0.181.9] - 2026-11-19
 
 ### Fixed
