@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.182.4] - 2026-11-19
+
+### Fixed
+
+- **tools**: name golangci-lint, osv-scanner and commitlint run failures (#3546)
+  (44dac86)
+
 ## [0.182.3] - 2026-11-19
 
 ### Fixed
