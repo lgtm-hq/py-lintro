@@ -296,7 +296,9 @@ class YamllintPlugin(BaseToolPlugin):
         if self.options.get("no_warnings", False):
             cmd.append("--no-warnings")
 
-        cmd.append(target)
+        # The target may be relative to run_dir, so a name such as
+        # ``-config.yaml`` would otherwise be read as an option.
+        cmd.extend(["--", target])
         logger.debug(f"[YamllintPlugin] Processing file: {abs_file}")
         logger.debug(f"[YamllintPlugin] Command: {' '.join(cmd)} (cwd={run_dir})")
 
