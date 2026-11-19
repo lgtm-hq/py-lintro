@@ -16,6 +16,7 @@ from assertpy import assert_that
 from click.testing import CliRunner
 
 from lintro.cli import cli
+from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.semgrep.semgrep_issue import SemgrepIssue
 from lintro.rules import resolve_rule_pack
 from lintro.tools.semgrep.definition import SemgrepPlugin
@@ -156,6 +157,21 @@ def _isolate_semgrep(
     monkeypatch.setenv("SEMGREP_ENABLE_VERSION_CHECK", "0")
 
 
+def _assert_complete_scan_with_findings(result: ToolResult) -> None:
+    """Pin a scan that ran to completion and reported findings.
+
+    A complete Semgrep scan with findings fails the run (``success`` is false)
+    without being an execution failure, and its findings are certified.
+
+    Args:
+        result: Result of one plugin check.
+    """
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.findings_complete).is_true()
+    assert_that(result.parse_failures_count).is_in(None, 0)
+
+
 # Out-of-scope files that run a formatter, passed explicitly beside one script.
 OUT_OF_SCOPE = ["format.sh", "descripts/generate.sh", "src/ordinary.js"]
 
@@ -187,7 +203,7 @@ def test_plugin_reports_native_commands(
     """
     _isolate_semgrep(monkeypatch, script_project)
     result = SemgrepPlugin().check(scope, {"rule_packs": [PACK], "jobs": 1})
-    assert_that(result.success).is_true()
+    _assert_complete_scan_with_findings(result)
     assert_that(result.inspected_files).is_true()
     assert_that(result.skipped).is_false()
     findings = [issue for issue in result.issues if isinstance(issue, SemgrepIssue)]
@@ -222,7 +238,7 @@ def test_every_declared_formatter_example_matches(
     (tmp_path / "pyproject.toml").touch()
     _isolate_semgrep(monkeypatch, tmp_path)
     result = SemgrepPlugin().check(["."], {"rule_packs": [PACK], "jobs": 1})
-    assert_that(result.success).is_true()
+    _assert_complete_scan_with_findings(result)
     assert_that(result.inspected_files).is_true()
     assert_that(result.issues_count).is_equal_to(len(examples))
     actual = {
