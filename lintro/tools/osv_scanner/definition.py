@@ -48,10 +48,10 @@ from lintro.tools.core.option_validators import validate_bool, validate_positive
 from lintro.tools.osv_scanner.extraction_log import (
     RESOLUTION_NOTE_SUMMARY,
     ExtractionErrors,
-    relative_to_root,
     resolution_note,
     skipped_reason,
     sort_extraction_errors,
+    unrecognised_reason,
 )
 from lintro.tools.osv_scanner.routine_lines import RoutineLines
 from lintro.utils.path_filtering import resolve_exclude_anchors, should_exclude_path
@@ -442,9 +442,7 @@ class OsvScannerPlugin(BaseToolPlugin):
         # below: for a security scanner an unknown result must never read as
         # a clean pass (#1028, #1044, #3352).
         extraction = self._extraction_errors(
-            # Standard error only: the combined output holds the JSON report,
-            # whose lines are not log lines. It stands in only when no report
-            # was printed, to quote a runner's own failure message.
+            # Not the combined output, whose report lines are not log lines.
             stderr=proc.stderr or ("" if proc.stdout.strip() else proc.output),
             paths=paths,
             scan_root=scan_root,
@@ -565,7 +563,7 @@ class OsvScannerPlugin(BaseToolPlugin):
                 parsed_issues=parsed_issues,
                 errors_tolerated=extraction.explains_failed_exit,
                 message=extraction.failure_message,
-            ) or self._unrecognised_reason(extraction, scan_root)
+            ) or unrecognised_reason(extraction.unexplained, scan_root)
         if reason is None:
             return None
         return incomplete_run_result(
@@ -573,33 +571,6 @@ class OsvScannerPlugin(BaseToolPlugin):
             reason=reason,
             issues=issues,
             parse_failures=parse_failures,
-        )
-
-    @staticmethod
-    def _unrecognised_reason(
-        extraction: ExtractionErrors,
-        scan_root: Path,
-    ) -> str | None:
-        """Name the lines that keep an otherwise clean exit from a verdict.
-
-        A line that is neither routine nor part of a recognised entry may be
-        a failed lookup or an error lintro has not seen. At any exit status,
-        beside findings or not, the scan then cannot be shown complete, so
-        the lines are quoted instead of dropped (#3352).
-
-        Args:
-            extraction: The extraction errors osv-scanner reported.
-            scan_root: Directory osv-scanner ran in.
-
-        Returns:
-            The reason, or None when every line was recognised.
-        """
-        if not extraction.unrecognised:
-            return None
-        quoted = relative_to_root(extraction.unexplained, scan_root)
-        return (
-            "OSV-Scanner printed a message lintro does not recognise, so the "
-            f"scan cannot be shown to be complete: {tool_message_excerpt(quoted)}"
         )
 
     @staticmethod
@@ -612,15 +583,13 @@ class OsvScannerPlugin(BaseToolPlugin):
     ) -> str | None:
         """Name why a failed exit beside a valid report is not a verdict.
 
-        Only reached when every line osv-scanner printed is routine or part
-        of a recognised entry. osv-scanner exits 1 when it found
-        vulnerabilities. Any other failed exit, or exit 1 with no
-        vulnerability in the report, is osv-scanner failing part of the scan
-        (a network error, say): an empty ``results`` list then proves nothing
-        was checked. The exception is exit 127 when every error it logged is
-        a transitive resolution the registry answered (no such package or
-        version, or no version fits) or lay under an excluded path; a
-        transport failure never is.
+        osv-scanner exits 1 when it found vulnerabilities. Any other failed
+        exit, or exit 1 with no vulnerability in the report, is osv-scanner
+        failing part of the scan (a network error, say): an empty
+        ``results`` list then proves nothing was checked. The exception is
+        exit 127 when every error it logged is a transitive resolution the
+        registry answered (no such package or version, or no version fits)
+        or lay under an excluded path; a transport failure never is.
 
         Args:
             proc: The finished osv-scanner process.
@@ -658,17 +627,10 @@ class OsvScannerPlugin(BaseToolPlugin):
     ) -> ExtractionErrors:
         """Sort the extraction errors osv-scanner reported.
 
-        osv-scanner prints ``Error during extraction: ...`` for a lockfile or
-        manifest it cannot open or parse, for a failed vulnerability lookup,
-        and for a failed transitive-dependency resolution, then carries on
-        (checked against osv-scanner 2.4.0 and 2.7.1; see
-        :mod:`lintro.tools.osv_scanner.extraction_log`). Not every source it
-        skips is reported: a lockfile in a format version it does not support
-        (``"lockfileVersion": 99``) is logged as "found 0 packages" with no
-        error line, so that run still reads as a complete scan. An error
-        naming one regular file under an excluded path is dropped, as a
-        finding there would be (#1725); one whose file cannot be identified
-        is kept.
+        See :mod:`lintro.tools.osv_scanner.extraction_log` for what each
+        error means and :mod:`lintro.tools.osv_scanner.routine_lines` for the
+        lines that carry none. An error naming one regular file under an
+        excluded path is dropped, as a finding there would be (#1725).
 
         Args:
             stderr: What osv-scanner printed on standard error.

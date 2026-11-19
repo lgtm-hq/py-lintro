@@ -562,6 +562,30 @@ def skipped_reason(
     )
 
 
+def unrecognised_reason(unrecognised: str, scan_root: Path) -> str | None:
+    """Name the lines that keep an otherwise clean exit from a verdict.
+
+    A line that is neither routine nor part of a recognised entry may be a
+    failed lookup or an error lintro has not seen. At any exit status, beside
+    findings or not, the scan then cannot be shown complete, so the lines are
+    quoted instead of dropped.
+
+    Args:
+        unrecognised: The unrecognised lines, joined by newlines.
+        scan_root: Directory osv-scanner ran in.
+
+    Returns:
+        The reason, or None when every line was recognised.
+    """
+    if not unrecognised:
+        return None
+    quoted = tool_message_excerpt(relative_to_root(unrecognised, scan_root))
+    return (
+        "OSV-Scanner printed a message lintro does not recognise, so the scan "
+        f"cannot be shown to be complete: {quoted}"
+    )
+
+
 def sort_extraction_errors(
     stderr: str | None,
     scan_root: Path,
