@@ -11,10 +11,16 @@ alone would leave them writing into the entry. On POSIX an npx run is
 therefore started as the leader of its own session (:func:`own_group`) and
 the whole process group is killed. Its group id is npx's process id, and
 that id cannot be reused while npx is unreaped, so the group is signalled
-only while ``poll()`` says npx is still running. Ctrl-C at the terminal goes
-to the terminal's foreground group, which no longer includes npx: lintro
-gets the ``KeyboardInterrupt`` and ends the group itself. A child that moves
-itself into another session or group escapes this.
+only while ``poll()`` says npx is still running, and only by the thread
+that reaps it. Ctrl-C at the terminal goes to the terminal's foreground
+group, which no longer includes npx: lintro's handler asks every live npx
+run to stop, and the thread running each one ends its group
+(:mod:`lintro.utils.stop_on_signal`). A child that moves itself into
+another session or group escapes this.
+
+Once stopping has begun, a repeated Ctrl-C on the main thread is held until
+npx has been reaped and the npx context has cleaned up and released its
+lock, then re-raised (:func:`~lintro.utils.stop_on_signal.defer_signals`).
 
 On Windows ``npx`` is ``npx.cmd``: killing the process lintro started ends
 ``cmd.exe`` only, and the ``node`` it started would go on installing. There
@@ -30,9 +36,12 @@ import contextlib
 import os
 import signal
 import subprocess  # nosec B404 - argv lists only, shell=False
+import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import IO, Any
+
+from lintro.utils.stop_on_signal import POLL_SECONDS, current_run, defer_signals
 
 #: Seconds ``taskkill`` may take to end a process tree.
 _TASKKILL_SECONDS: float = 10.0
@@ -112,6 +121,9 @@ def stop_process(
             it has, through a repeated Ctrl-C too. Cleanup that must not run
             beneath a live process needs None; anything else may give up.
     """
+    # Hold a repeated Ctrl-C until npx is reaped and the npx context has
+    # cleaned up; it is re-raised after that (#3530).
+    defer_signals()
     if process.poll() is not None:
         return  # Exited, and poll() has reaped it.
     if os.name == "nt" if windows is None else windows:
@@ -136,6 +148,36 @@ def stop_process(
         return
     with contextlib.suppress(subprocess.TimeoutExpired):
         process.wait(timeout=wait_seconds)
+
+
+def _communicate(
+    process: subprocess.Popen[str],
+    *,
+    timeout: float,
+) -> tuple[str, str]:
+    """Collect *process*'s output until it exits, watching for a stop request.
+
+    Args:
+        process: The running child.
+        timeout: Seconds before giving up.
+
+    Returns:
+        Its stdout and stderr. ``subprocess.TimeoutExpired`` propagates when
+        the child runs past *timeout*, and
+        :class:`~lintro.utils.stop_on_signal.Stopped` when a signal asked
+        lintro to stop.
+    """
+    run = current_run()
+    deadline = time.monotonic() + timeout
+    while True:
+        left = deadline - time.monotonic()
+        if run is None or left <= POLL_SECONDS:
+            return process.communicate(timeout=max(left, 0.0))
+        try:
+            return process.communicate(timeout=POLL_SECONDS)
+        except subprocess.TimeoutExpired:
+            # Retrying communicate() loses no output.
+            run.raise_if_requested()
 
 
 def run_reaped(
@@ -180,7 +222,7 @@ def run_reaped(
     ) as process:
         finished = False
         try:
-            stdout, stderr = process.communicate(timeout=timeout)
+            stdout, stderr = _communicate(process, timeout=timeout)
             finished = True
         except subprocess.TimeoutExpired as exc:
             stop_process(process, group=True)

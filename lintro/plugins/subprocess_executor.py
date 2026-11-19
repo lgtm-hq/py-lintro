@@ -26,6 +26,7 @@ from lintro.utils.npx_call import (
 )
 from lintro.utils.npx_integrity import NpxExit
 from lintro.utils.process_stop import own_group, run_reaped, stop_process
+from lintro.utils.stop_on_signal import POLL_SECONDS, current_run
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -600,6 +601,27 @@ def _stream_subprocess(
     return result
 
 
+def _join_watching_for_stop(reader: threading.Thread, *, deadline: float) -> None:
+    """Wait for *reader* until *deadline*, stopping early if lintro is told to.
+
+    Inside an npx run, a signal that asked lintro to stop is noticed within
+    :data:`~lintro.utils.stop_on_signal.POLL_SECONDS`, in whichever thread
+    runs npx (#3530).
+
+    Args:
+        reader: The thread reading the child's output.
+        deadline: :func:`time.monotonic` time of the timeout.
+    """
+    run = current_run()
+    while reader.is_alive():
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return
+        reader.join(timeout=left if run is None else min(left, POLL_SECONDS))
+        if run is not None:
+            run.raise_if_requested()
+
+
 def _collect_stream(
     process: subprocess.Popen[str],
     *,
@@ -645,7 +667,7 @@ def _collect_stream(
     start_time = time.monotonic()
     reader_thread = threading.Thread(target=read_output, daemon=True)
     reader_thread.start()
-    reader_thread.join(timeout=timeout)
+    _join_watching_for_stop(reader_thread, deadline=start_time + timeout)
 
     if reader_thread.is_alive():
         # Timeout occurred during reading - kill the process

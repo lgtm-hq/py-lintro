@@ -1723,6 +1723,15 @@ def install_unfinished(
     an interruption, any exception while npx was still running), whatever
     else it holds: it is unfinished.
 
+    That rule cannot tell an install npm never finished from a finished one
+    whose lockfile was deleted while the tool was still running: if such a
+    run then times out (or is interrupted), its entry is removed and the
+    result is the timeout, with no "cannot trust" refusal. That is accepted
+    on purpose. The run's result is already reported as incomplete (a
+    timeout is ``execution_failed``, with no findings), nothing is executed
+    from the removed entry, and the next run installs it afresh and
+    verifies it.
+
     When npx exited by itself, its status is the tool's too, and an entry
     with executables but no lockfile may have run the tool before it lost
     the lockfile. Only an entry with neither got no further than the
