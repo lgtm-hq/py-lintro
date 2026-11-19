@@ -55,7 +55,11 @@ from lintro.tools.core.timeout_utils import (
     create_timeout_result,
     run_subprocess_with_timeout,
 )
-from lintro.tools.golangci_lint.report_gap import module_reason, report_gap
+from lintro.tools.golangci_lint.report_gap import (
+    fix_diagnostic_gap,
+    module_reason,
+    report_gap,
+)
 
 # Constants for golangci-lint configuration
 GOLANGCI_LINT_DEFAULT_TIMEOUT: int = 120
@@ -522,19 +526,30 @@ class GolangciLintPlugin(BaseToolPlugin):
             )
 
         results = [
-            self._fix_module_root(module_root=root, timeout=ctx.timeout)
+            self._fix_module_root(
+                module_root=root,
+                timeout=ctx.timeout,
+                labelled=len(module_roots) > 1,
+            )
             for root in module_roots
         ]
         if len(results) == 1:
             return results[0]
         return _merge_fix_results(name=self.definition.name, results=results)
 
-    def _fix_module_root(self, *, module_root: Path, timeout: int) -> ToolResult:
+    def _fix_module_root(
+        self,
+        *,
+        module_root: Path,
+        timeout: int,
+        labelled: bool = False,
+    ) -> ToolResult:
         """Run the check/fix/re-check cycle for a single Go module root.
 
         Args:
             module_root: Directory containing the module's ``go.mod``.
             timeout: Timeout in seconds for each golangci-lint invocation.
+            labelled: Whether reasons name the module, because several ran.
 
         Returns:
             ToolResult for this module root.
@@ -577,7 +592,11 @@ class GolangciLintPlugin(BaseToolPlugin):
         )
         if gap:
             return self._incomplete_fix_result(
-                reason=gap[0],
+                reason=module_reason(
+                    gap[0],
+                    module_root=module_root,
+                    labelled=labelled,
+                ),
                 parse_failures=gap[1],
                 issues=initial_issues,
                 initial_issues=initial_issues,
@@ -636,16 +655,18 @@ class GolangciLintPlugin(BaseToolPlugin):
         initial_count = max(initial_count, fixed_count + remaining_count)
 
         # The --fix run or the re-check could not run, or printed a malformed
-        # report: the residual is unknown and the run is incomplete (#3352).
+        # report, or the fixer logged an error beside a valid report: the
+        # residual is unknown and the run is incomplete (#3352).
+        fix_gap = report_gap(
+            run_success=success_fix,
+            output=output_fix,
+            found_issues=bool(fix_issues),
+            parse_failures=fix_failures,
+        )
         gaps = [
             gap
             for gap in (
-                report_gap(
-                    run_success=success_fix,
-                    output=output_fix,
-                    found_issues=bool(fix_issues),
-                    parse_failures=fix_failures,
-                ),
+                fix_gap or fix_diagnostic_gap(output_fix, module_root=module_root),
                 report_gap(
                     run_success=success_after,
                     output=output_after,
@@ -659,7 +680,10 @@ class GolangciLintPlugin(BaseToolPlugin):
             # The initial check was complete, so only these stages count.
             counts = [count for _, count in gaps if count is not None]
             return self._incomplete_fix_result(
-                reason="\n".join(reason for reason, _ in gaps),
+                reason="\n".join(
+                    module_reason(reason, module_root=module_root, labelled=labelled)
+                    for reason, _ in gaps
+                ),
                 parse_failures=sum(counts) if counts else None,
                 issues=remaining_issues,
                 initial_issues=initial_issues,
@@ -667,14 +691,11 @@ class GolangciLintPlugin(BaseToolPlugin):
             )
 
         # golangci-lint exits non-zero both when lint issues remain and when the
-        # run itself errors (config/build/fixer failure). A failed --fix run must
-        # not be reported as a successful format, and its diagnostic output must
-        # never be dropped: gate success on the fix command succeeding and always
-        # surface the fix command's output whenever it failed — regardless of how
-        # many issues the re-check parsed — so a fixer/config/build error can't be
-        # hidden behind a re-check that happens to report remaining issues.
-        # Both stages printed complete reports; a failed exit here only means
-        # findings remain, which the re-check lists.
+        # run itself errors (config/build/fixer failure). Every stage error was
+        # turned into an incomplete result above, keeping its diagnostic; here
+        # both stages printed complete reports with nothing else to report, so
+        # a failed exit only means findings remain, which the re-check lists.
+        # Success still requires the fix command itself to succeed.
         success = remaining_count == 0 and success_after and success_fix
 
         return ToolResult.from_outcome(

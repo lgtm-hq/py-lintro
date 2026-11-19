@@ -222,3 +222,82 @@ def test_merge_keeps_an_unmeasured_module_residual() -> None:
     assert_that(result.remaining_issues_count).is_none()
     assert_that(result.execution_failed).is_true()
     assert_that(result.success).is_false()
+
+
+#: What a current golangci-lint v2 logs when ``--fix`` cannot write a read-only file.
+_FIX_PERMISSION_ERROR = (
+    'level=warning msg="[runner] Failed to fix issues: main.go: open main.go: '
+    'permission denied"\n'
+)
+
+
+def test_fixer_error_beside_valid_findings_is_an_incomplete_fix(
+    golangci_lint_plugin: GolangciLintPlugin,
+    tmp_path: Path,
+) -> None:
+    """Valid findings do not show the fixer finished; its error is kept."""
+    _module(tmp_path)
+    stages = [
+        _completed(1, GOLANGCI_JSON_ONE_ISSUE),  # initial check
+        _completed(1, GOLANGCI_JSON_ONE_ISSUE, _FIX_PERMISSION_ERROR),  # --fix
+        _completed(1, GOLANGCI_JSON_ONE_ISSUE),  # re-check
+    ]
+    with patch("subprocess.run", side_effect=stages):
+        result = golangci_lint_plugin.fix([str(tmp_path)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.inspected_files).is_none()
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.parse_failures_count).is_zero()
+    assert_that(result.issues).extracting("code").is_equal_to(["errcheck"])
+    assert_that(result.output).is_equal_to(
+        "golangci-lint --fix reported an error, so the fix is incomplete: "
+        + _FIX_PERMISSION_ERROR.strip(),
+    )
+
+
+def test_fix_notice_logs_beside_valid_findings_keep_the_measured_fix(
+    golangci_lint_plugin: GolangciLintPlugin,
+    tmp_path: Path,
+) -> None:
+    """Warning and info logs that are no fixer failure leave the fix complete."""
+    _module(tmp_path)
+    notice = (
+        'level=warning msg="[config_reader] The configuration option is '
+        'deprecated"\n'
+        'level=info msg="[runner] linters took 1s"\n'
+    )
+    stages = [
+        _completed(1, GOLANGCI_JSON_ONE_ISSUE),
+        _completed(1, GOLANGCI_JSON_ONE_ISSUE, notice),
+        _completed(1, GOLANGCI_JSON_ONE_ISSUE),
+    ]
+    with patch("subprocess.run", side_effect=stages):
+        result = golangci_lint_plugin.fix([str(tmp_path)], {})
+
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.residual_unknown).is_false()
+    assert_that(result.remaining_issues_count).is_equal_to(1)
+    assert_that(result.inspected_files).is_true()
+
+
+def test_multi_module_fix_names_each_failing_module(
+    golangci_lint_plugin: GolangciLintPlugin,
+    tmp_path: Path,
+) -> None:
+    """Two modules failing alike stay two reasons, each naming its module."""
+    first = _module(tmp_path / "a")
+    second = _module(tmp_path / "b")
+
+    with patch("subprocess.run", return_value=_completed(3, "", _CONFIG_ERROR)):
+        result = golangci_lint_plugin.fix([str(tmp_path)], {})
+
+    reason = "golangci-lint exited with an error and printed no report: "
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.residual_unknown_reason).starts_with(
+        f"{first.resolve()}: {reason}",
+    ).contains(f"; {second.resolve()}: {reason}")
+    assert_that(
+        [line.split(": ", 1)[0] for line in (result.output or "").splitlines()],
+    ).is_equal_to([str(first.resolve()), str(second.resolve())])

@@ -8,13 +8,20 @@ invocation produced no complete verdict, without dumping the raw report.
 
 from __future__ import annotations
 
-import json
+import os
 from pathlib import Path
 
-from lintro.tools.core.incomplete_run import (
-    malformed_report_reason,
-    tool_message_excerpt,
-)
+from lintro.tools.core import incomplete_run
+from lintro.tools.core.incomplete_run import text_beside_report, tool_message_excerpt
+
+#: Text every golangci-lint JSON report holds, clean or not.
+_REPORT_MARKER: str = '"Issues"'
+
+#: Log levels golangci-lint uses for messages that do not stop a run.
+_NOTICE_LEVELS: tuple[str, ...] = ("level=warning", "level=info", "level=debug")
+
+#: Lower-cased text of golangci-lint's warning for fixes it could not write.
+_FIX_FAILED: str = "failed to fix"
 
 
 def report_gap(
@@ -26,15 +33,12 @@ def report_gap(
 ) -> tuple[str, int | None] | None:
     """Name why one golangci-lint invocation produced no complete verdict.
 
-    With ``--output.json.path stdout`` golangci-lint prints its JSON report on
-    every completed run, clean or not, and writes its own logs and errors to
-    stderr, which the subprocess boundary appends after stdout. A failed exit
-    whose output holds no ``Issues`` report is therefore golangci-lint failing
-    to run (a config, build or lock error), not a malformed report, and is
-    never counted as a parse failure (#3352). A report with invalid records is
-    malformed and keeps its count. A valid report behind a failed exit that
-    lists no findings (the text-only or JSON concurrency exit 3) is an
-    execution failure with zero parse failures.
+    A failed exit whose output holds no ``Issues`` report is golangci-lint
+    failing to run (a config, build or lock error), not a malformed report,
+    and is never counted as a parse failure (#3352). A report with invalid
+    records is malformed and keeps its count. A valid report behind a failed
+    exit that lists no findings (the text-only or JSON concurrency exit 3) is
+    an execution failure with zero parse failures.
 
     Args:
         run_success: Whether golangci-lint exited 0.
@@ -46,44 +50,57 @@ def report_gap(
         The reason and the parse-failure count to report (None when no report
         was printed), or None when the report is complete.
     """
-    text = (output or "").strip()
-    if not text:
-        if run_success:
-            return "golangci-lint printed no report.", None
-        return "golangci-lint exited with an error and printed no report.", None
-    if not run_success and '"Issues"' not in text:
-        return (
-            "golangci-lint exited with an error and printed no report: "
-            f"{tool_message_excerpt(text)}",
-            None,
-        )
-    if parse_failures:
-        return malformed_report_reason("golangci-lint", parse_failures), parse_failures
-    if not run_success and not found_issues:
-        # Quote golangci-lint's own message, not the (empty) report itself.
-        detail = tool_message_excerpt(text_beside_report(text))
-        return (
-            f"golangci-lint exited with an error and reported no findings: {detail}",
-            0,
-        )
-    return None
+    return incomplete_run.report_gap(
+        tool="golangci-lint",
+        output=output,
+        run_success=run_success,
+        found_issues=found_issues,
+        parse_failures=parse_failures,
+        report_marker=_REPORT_MARKER,
+    )
 
 
-def text_beside_report(text: str) -> str:
-    """Return a combined output with its leading JSON report cut out.
+def fix_diagnostic_gap(
+    output: str | None,
+    *,
+    module_root: Path,
+) -> tuple[str, int] | None:
+    """Name an error a ``--fix`` run logged beside a complete report.
+
+    Valid findings do not show the fixer finished: golangci-lint exits 1 with
+    a full report when it could not write a fix (a read-only file, say) and
+    only logs ``[runner] Failed to fix issues: ...``. That line, an
+    error-level log line, or any other text that is not a warning, info or
+    debug log is an execution diagnostic, so the fix result is incomplete.
 
     Args:
-        text: Output holding one decodable JSON report.
+        output: Combined output of the ``--fix`` invocation.
+        module_root: Directory golangci-lint ran in; paths under it are
+            quoted relative to it so the quote keeps the error itself.
 
     Returns:
-        The text before and after the report.
+        The reason and a zero parse-failure count, or None when golangci-lint
+        logged nothing beyond notices.
     """
-    start = text.find("{")
-    try:
-        _, end = json.JSONDecoder().raw_decode(text, start)
-    except ValueError:
-        return text
-    return f"{text[:start]}\n{text[end:]}"
+    text = (output or "").strip()
+    if _REPORT_MARKER not in text:
+        return None
+    diagnostics = [
+        line.strip()
+        for line in text_beside_report(text).splitlines()
+        if line.strip()
+        and (not line.strip().startswith(_NOTICE_LEVELS) or _FIX_FAILED in line.lower())
+    ]
+    if not diagnostics:
+        return None
+    quoted = "\n".join(diagnostics)
+    for root in {str(module_root), str(module_root.resolve())}:
+        quoted = quoted.replace(root + os.sep, "")
+    return (
+        "golangci-lint --fix reported an error, so the fix is incomplete: "
+        f"{tool_message_excerpt(quoted)}",
+        0,
+    )
 
 
 def module_reason(reason: str, *, module_root: Path, labelled: bool) -> str:
