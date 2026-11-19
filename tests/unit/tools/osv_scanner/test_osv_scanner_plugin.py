@@ -22,6 +22,10 @@ from lintro.tools.osv_scanner.definition import (
 )
 from tests.test_samples_helpers import copy_sample
 
+# What a current osv-scanner v2 prints at exit 0 for a scan with no vulnerability.
+# Exit 0 with an empty stdout is no report at all (#3352).
+_CLEAN_REPORT = '{"results": []}'
+
 
 def _proc(
     *,
@@ -141,7 +145,7 @@ def test_check_no_vulnerabilities(
     with patch.object(
         osv_scanner_plugin,
         "_run_subprocess_result",
-        return_value=_proc(success=True),
+        return_value=_proc(success=True, stdout=_CLEAN_REPORT),
     ):
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
@@ -616,8 +620,8 @@ def test_check_with_suppressions_detects_stale(
         osv_scanner_plugin,
         "_run_subprocess_result",
         side_effect=[
-            _proc(success=True),  # gating scan
-            _proc(success=True),  # probe scan
+            _proc(success=True, stdout=_CLEAN_REPORT),  # gating scan
+            _proc(success=True, stdout=_CLEAN_REPORT),  # probe scan
         ],
     ):
         result = osv_scanner_plugin.check([str(lockfile)], {})
@@ -648,7 +652,7 @@ def test_check_without_config_no_metadata(
     with patch.object(
         osv_scanner_plugin,
         "_run_subprocess_result",
-        return_value=_proc(success=True),
+        return_value=_proc(success=True, stdout=_CLEAN_REPORT),
     ):
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
@@ -682,7 +686,7 @@ def test_check_suppressions_disabled(
     with patch.object(
         osv_scanner_plugin,
         "_run_subprocess_result",
-        return_value=_proc(success=True),
+        return_value=_proc(success=True, stdout=_CLEAN_REPORT),
     ) as mock_run:
         result = osv_scanner_plugin.check(
             [str(lockfile)],
@@ -721,7 +725,7 @@ def test_check_suppressions_probe_timeout(
         osv_scanner_plugin,
         "_run_subprocess_result",
         side_effect=[
-            _proc(success=True),  # gating scan succeeds
+            _proc(success=True, stdout=_CLEAN_REPORT),  # gating scan succeeds
             subprocess.TimeoutExpired(cmd=["osv-scanner"], timeout=120),  # probe
         ],
     ):
@@ -845,7 +849,7 @@ def test_suppressions_classified_when_probe_findings_are_all_excluded(
         osv_scanner_plugin,
         "_run_subprocess_result",
         side_effect=[
-            _proc(success=True),  # gating scan
+            _proc(success=True, stdout=_CLEAN_REPORT),  # gating scan
             _proc(success=False, stdout=probe_report),  # probe: excluded finding
         ],
     ):

@@ -35,6 +35,10 @@ from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.batch_runner import batch_timeout_result
+from lintro.tools.core.incomplete_run import (
+    incomplete_run_result,
+    tool_message_excerpt,
+)
 from lintro.tools.core.option_validators import validate_positive_int
 
 # Constants for Commitlint configuration
@@ -209,6 +213,19 @@ class CommitlintPlugin(BaseToolPlugin):
                 output=skip_message,
             )
 
+        # A failed exit with no parsed violation is commitlint failing to run
+        # (a broken config, a missing preset), not a verdict on the commit
+        # message: the run is incomplete and proves nothing was read (#3352).
+        if not result.success and not issues:
+            return incomplete_run_result(
+                name=self.definition.name,
+                reason=(
+                    "commitlint exited with an error and reported no violations: "
+                    f"{tool_message_excerpt(result.stderr or combined_output)}"
+                ),
+                cwd=ctx.cwd,
+            )
+
         issues_count: int = len(issues)
         success_flag: bool = result.success and issues_count == 0
 
@@ -216,6 +233,10 @@ class CommitlintPlugin(BaseToolPlugin):
         if success_flag:
             final_output = None
 
+        # commitlint reads commit messages, not files. A completed run (exit 0,
+        # or violations it reported) did read its input, so it reports
+        # ``inspected_files=True``; an unknown value here would make every run
+        # that includes commitlint ineligible for the severity baseline (#3352).
         return ToolResult.from_outcome(
             ToolOutcome(
                 execution=Checked(success=success_flag, inspected_files=True),

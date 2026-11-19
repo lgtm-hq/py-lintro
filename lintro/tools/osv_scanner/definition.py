@@ -22,6 +22,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
+from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.models.core.tool_outcome import Checked, NoFiles, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.osv_scanner import (
@@ -38,6 +39,11 @@ from lintro.plugins.execution_preparation import (
 )
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.incomplete_run import (
+    incomplete_run_result,
+    malformed_report_reason,
+    tool_message_excerpt,
+)
 from lintro.tools.core.option_validators import validate_bool, validate_positive_int
 from lintro.utils.path_filtering import resolve_exclude_anchors, should_exclude_path
 
@@ -47,6 +53,11 @@ OSV_SCANNER_DEFAULT_TIMEOUT: int = 120  # Network operations can be slow
 # Placeholder source path used by the parser when a result carries no source.
 # It is not a real filesystem path and must never be exclusion-matched.
 _UNKNOWN_SOURCE: str = "lockfile"
+
+#: Output of a scan that found no lockfile or manifest to scan (#3352).
+OSV_NO_SOURCES_MESSAGE: str = (
+    "No package sources found: OSV-Scanner found no lockfile or manifest to scan."
+)
 
 
 @register_tool
@@ -386,72 +397,62 @@ class OsvScannerPlugin(BaseToolPlugin):
         )
         excluded_count = len(parsed_issues) - len(issues)
         payload = extract_osv_scanner_payload(proc.stdout)
-        parse_failures_count = 0 if payload is not None else None
-        no_op_success = False
 
-        # Treat "no package sources found" as a successful no-op, not an error.
-        # osv-scanner returns non-zero when it finds no lockfiles to scan.
+        # "No package sources found" is no work, not a scan: osv-scanner exits
+        # non-zero (128) with an empty stdout. Report it as a no-files run so
+        # the summary says nothing was scanned, never as an inspection (#3352).
         if (
             not success
             and len(issues) == 0
             and output
             and "no package sources found" in output.lower()
         ):
-            success = True
-            no_op_success = True
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=NoFiles()),
+                name=self.definition.name,
+                output=OSV_NO_SOURCES_MESSAGE,
+                parse_failures_count=0,
+            )
+
+        # Without a complete report the scan result is unknown. For a security
+        # scanner an unknown result must never be reported as a clean pass
+        # (#1028, #1044), and an exit code proves no inspection (#3352).
+        if payload is None or not self._payload_has_valid_results(payload):
+            reason, parse_failures = self._report_gap(proc=proc, payload=payload)
+            return incomplete_run_result(
+                name=self.definition.name,
+                reason=reason,
+                issues=issues,
+                parse_failures=parse_failures,
+            )
 
         # Some osv-scanner builds emit log lines before JSON and may exit
         # non-zero even when the parsed results list is empty.
-        if (
-            not success
-            and len(issues) == 0
-            and payload is not None
-            and self._payload_has_valid_results(payload)
-            and len(payload["results"]) == 0
-        ):
+        if not success and len(issues) == 0 and len(payload["results"]) == 0:
             success = True
 
         # Every finding lived under an excluded path. osv-scanner still exits
         # non-zero because it saw vulnerabilities, but for lintro the scan is
-        # clean. Gated on a valid payload so genuine execution failures still
-        # fail closed (#1725).
-        if (
-            not success
-            and excluded_count
-            and not issues
-            and payload is not None
-            and self._payload_has_valid_results(payload)
-        ):
+        # clean (#1725).
+        if not success and excluded_count and not issues:
             success = True
 
-        # Fail closed on unparseable output. If osv-scanner produced stdout that
-        # we could not parse as JSON — and it is not a recognized no-op — the
-        # scan result is unknown. For a security scanner an unknown result must
-        # never be reported as a clean pass (see #1044).
-        parse_failure = (
-            payload is None and bool(proc.stdout.strip()) and not no_op_success
-        )
-        if parse_failure:
-            success = False
-            parse_failures_count = 1
-
-        # Fail closed on malformed exit-0 payloads. osv-scanner may exit 0 while
-        # emitting an error-shaped object (``{"error": ...}``) or a payload whose
-        # ``results`` key is missing or not a list. Such a payload parses as JSON
-        # but is not a real scan report, so its true result is unknown. A security
-        # gate must treat this as a failure, never a clean pass (see #1028).
-        if payload is not None and not self._payload_has_valid_results(payload):
-            success = False
-            parse_failures_count = 1
+        # A failed exit beside a complete report that lists no vulnerability
+        # is osv-scanner failing part of the scan (a network error, say), not
+        # a verdict: the findings are incomplete.
+        if not success and not parsed_issues:
+            return incomplete_run_result(
+                name=self.definition.name,
+                reason=(
+                    "OSV-Scanner exited with an error and reported no "
+                    f"vulnerabilities: {tool_message_excerpt(proc.stderr or output)}"
+                ),
+                parse_failures=0,
+            )
 
         # Determine overall success: subprocess must succeed AND no issues
-        # found. A non-zero exit with 0 parsed issues indicates an execution
-        # error (e.g. network failure), not a clean scan.
+        # found.
         overall_success = success and len(issues) == 0
-
-        # Show output when there are issues OR when subprocess failed without
-        # issues (execution error case)
-        should_show_output = bool(issues) or not success
 
         # Suppression staleness check
         suppression_metadata = self._check_suppression_staleness(
@@ -461,23 +462,50 @@ class OsvScannerPlugin(BaseToolPlugin):
             paths=paths,
         )
 
-        if no_op_success and parse_failures_count is None:
-            parse_failures_count = 0
-
         return ToolResult.from_outcome(
             ToolOutcome(
-                execution=Checked(
-                    success=overall_success,
-                    inspected_files=not no_op_success,
-                ),
+                execution=Checked(success=overall_success, inspected_files=True),
                 issues_count=len(issues),
             ),
             name=self.definition.name,
-            output=output if should_show_output else None,
+            output=output if issues else None,
             issues=issues,
             metadata=suppression_metadata,
-            parse_failures_count=parse_failures_count,
+            parse_failures_count=0,
         )
+
+    @staticmethod
+    def _report_gap(
+        *,
+        proc: SubprocessResult,
+        payload: dict[str, Any] | None,
+    ) -> tuple[str, int | None]:
+        """Name why an osv-scanner run left no complete report.
+
+        Args:
+            proc: The finished osv-scanner process.
+            payload: The JSON object found on stdout, if any.
+
+        Returns:
+            The reason and the parse-failure count (None when no report was
+            printed at all, so nothing could be parsed).
+        """
+        if not proc.stdout.strip():
+            if proc.success:
+                return "OSV-Scanner printed no report.", None
+            return (
+                "OSV-Scanner exited with an error and printed no report: "
+                f"{tool_message_excerpt(proc.stderr or proc.output)}",
+                None,
+            )
+        error = payload.get("error") if payload is not None else None
+        if isinstance(error, str) and error.strip():
+            return (
+                "OSV-Scanner reported an error instead of a scan report: "
+                f"{tool_message_excerpt(error)}",
+                1,
+            )
+        return malformed_report_reason("OSV-Scanner", 1), 1
 
     def _check_suppression_staleness(
         self,

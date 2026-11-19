@@ -272,6 +272,23 @@ These fail-closed checks also apply without a fingerprint baseline:
   empty stdout at any exit (for example a `.sqlfluff` with a broken section header), a
   failed exit that prints text instead of JSON (`Error: Unknown dialect 'bogus'`), any
   exit other than 1 with violations, and a timeout.
+- golangci-lint prints its JSON report on every completed run and writes its logs and
+  errors to stderr. A failed exit without an `Issues` report (a broken `.golangci.yml`,
+  a build or lock error), empty output, a malformed report, and a failed exit beside a
+  valid report with no findings (the concurrency exit 3) are execution failures with
+  unknown inspection. Only a malformed report counts parse failures. The output names
+  the reason, and the module when several ran, instead of the raw report. In `fmt`, a
+  stage without a complete report leaves fixed and remaining counts unknown, and merging
+  several modules keeps that unknown residual, the execution failure and any timeout.
+- OSV-Scanner reports "no package sources found" as a no-files run, not a scan. A run
+  without a complete report (empty stdout, an error object, a `results` value that is
+  not a list, or a failed exit beside a report with no vulnerabilities) is an execution
+  failure with unknown inspection, and its output names the reason or OSV-Scanner's own
+  message.
+- commitlint reads commit messages, not files. A completed run (a clean exit or reported
+  violations) counts as inspected. A failed exit with no violation (a broken
+  `commitlint.config.js`) is an execution failure with unknown inspection, named with
+  commitlint's own message.
 - Fix convergence retries stop at the first pass that failed to execute, timed out,
   could not measure its residual, or printed a malformed report, so a later clean pass
   cannot replace that failure. Such a pass, the first one included and with retries

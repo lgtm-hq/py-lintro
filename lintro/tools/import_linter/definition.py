@@ -36,6 +36,7 @@ from lintro.parsers.import_linter.import_linter_parser import (
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.incomplete_run import incomplete_run_result
 
 # Constants for import-linter configuration
 IMPORT_LINTER_DEFAULT_TIMEOUT: int = 60
@@ -356,15 +357,9 @@ class ImportLinterPlugin(BaseToolPlugin):
             stream.strip() for stream in (run.stdout, run.stderr) if stream.strip()
         ]
         reason = "\n".join(captured) or "lint-imports produced no output."
-        return ToolResult.from_outcome(
-            ToolOutcome(
-                execution=Checked(success=False, inspected_files=None),
-                issues_count=len(issues),
-            ),
+        return incomplete_run_result(
             name=self.definition.name,
-            findings_complete=False,
-            execution_failed=True,
-            output=(
+            reason=(
                 f"import-linter failed (exit {run.returncode}) running:\n"
                 f"  {' '.join(cmd)}\n"
                 f"{reason}"

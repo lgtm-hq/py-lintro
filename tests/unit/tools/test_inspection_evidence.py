@@ -187,7 +187,10 @@ def test_absent_go_report_cannot_qualify_for_publication(
         result = getattr(plugin, action)([str(tmp_path)], {})
 
     assert_that(result.success).is_false()
-    assert_that(result.parse_failures_count).is_equal_to(1)
+    # No report is golangci-lint failing to run, not a malformed report.
+    assert_that(result.parse_failures_count or 0).is_zero()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.inspected_files).is_none()
     assert_that(result.issues_count).is_zero()
     assert_that(
         baseline_is_eligible(
