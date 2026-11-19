@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.182.3] - 2026-11-19
+
+### Fixed
+
+- **npx**: report a timed-out cold install as a timeout and remove it (#3532) (ef4d61b)
+
 ## [0.182.2] - 2026-11-19
 
 ### Fixed
