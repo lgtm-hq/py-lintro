@@ -148,6 +148,7 @@
     },
     {
       "name": "cargo_deny",
+      "min_version": "0.14.0",
       "install": {
         "type": "cargo",
         "package": "cargo-deny"

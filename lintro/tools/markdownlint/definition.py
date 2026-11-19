@@ -264,6 +264,7 @@ class MarkdownlintPlugin(BaseToolPlugin):
                 plugin=self,
                 timeout=ctx.timeout,
                 cmd=cmd,
+                cwd=ctx.cwd,
             )
         finally:
             # Clean up temp config file if created

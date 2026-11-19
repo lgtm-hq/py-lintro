@@ -27,6 +27,10 @@ from lintro.parsers.cargo_audit.cargo_audit_parser import (
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.option_validators import (
+    filter_none_options,
+    validate_positive_int,
+)
 
 # Constants for cargo-audit configuration
 CARGO_AUDIT_DEFAULT_TIMEOUT: int = 120  # Network operations can be slow
@@ -95,23 +99,21 @@ class CargoAuditPlugin(BaseToolPlugin):
             default_timeout=CARGO_AUDIT_DEFAULT_TIMEOUT,
         )
 
-    def set_options(self, **kwargs: Any) -> None:
+    def set_options(
+        self,
+        timeout: int | None = None,
+        **kwargs: Any,
+    ) -> None:
         """Set tool-specific options.
 
         Args:
-            **kwargs: Options to set, including timeout.
-
-        Raises:
-            ValueError: If timeout is negative or not a number.
+            timeout: Timeout in seconds.
+            **kwargs: Additional options.
         """
-        if "timeout" in kwargs:
-            timeout = kwargs["timeout"]
-            if timeout is not None:
-                if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
-                    raise ValueError("timeout must be a number")
-                if timeout < 0:
-                    raise ValueError("timeout must be non-negative")
-        super().set_options(**kwargs)
+        validate_positive_int(timeout, "timeout")
+
+        options = filter_none_options(timeout=timeout)
+        super().set_options(**options, **kwargs)
 
     def _build_command(self) -> list[str]:
         """Build the cargo-audit command.

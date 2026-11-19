@@ -71,7 +71,7 @@ def test_management_help_documents_certified_tools_and_mixed_selection(
 
     assert_that(result.exit_code).is_zero()
     assert_that(text).contains(
-        "Certified check findings: ruff, black.",
+        "Certified check findings: ruff, black, bandit, semgrep.",
         "Default or mixed selections abort",
         "no failing tool is silently omitted",
     )

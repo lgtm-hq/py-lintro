@@ -115,38 +115,30 @@ def test_set_options_timeout(cargo_audit_plugin: CargoAuditPlugin) -> None:
     assert_that(cargo_audit_plugin.options.get("timeout")).is_equal_to(180)
 
 
-def test_set_options_invalid_timeout(cargo_audit_plugin: CargoAuditPlugin) -> None:
-    """Verify negative integer timeout raises ValueError.
-
-    Args:
-        cargo_audit_plugin: The plugin instance.
-    """
-    with pytest.raises(ValueError, match="non-negative"):
-        cargo_audit_plugin.set_options(timeout=-1)
-
-
-def test_set_options_negative_float_timeout(
+@pytest.mark.parametrize(
+    ("timeout", "message"),
+    [
+        pytest.param(-1, "must be positive", id="negative"),
+        pytest.param(0, "must be positive", id="zero"),
+        pytest.param(-1.5, "must be an integer", id="float"),
+        pytest.param("invalid", "must be an integer", id="string"),
+        pytest.param(True, "must be an integer", id="boolean"),
+    ],
+)
+def test_set_options_rejects_invalid_timeout(
     cargo_audit_plugin: CargoAuditPlugin,
+    timeout: object,
+    message: str,
 ) -> None:
-    """Verify negative float timeout raises ValueError.
+    """The shared validator rejects anything but a positive integer timeout.
 
     Args:
         cargo_audit_plugin: The plugin instance.
+        timeout: An invalid timeout value.
+        message: Expected fragment of the ValueError message.
     """
-    with pytest.raises(ValueError, match="non-negative"):
-        cargo_audit_plugin.set_options(timeout=-1.5)
-
-
-def test_set_options_non_numeric_timeout(
-    cargo_audit_plugin: CargoAuditPlugin,
-) -> None:
-    """Verify non-numeric timeout raises ValueError.
-
-    Args:
-        cargo_audit_plugin: The plugin instance.
-    """
-    with pytest.raises(ValueError, match="must be a number"):
-        cargo_audit_plugin.set_options(timeout="invalid")
+    with pytest.raises(ValueError, match=message):
+        cargo_audit_plugin.set_options(timeout=timeout)  # type: ignore[arg-type]
 
 
 def test_fix_raises_not_implemented(cargo_audit_plugin: CargoAuditPlugin) -> None:

@@ -31,7 +31,8 @@ if TYPE_CHECKING:
     from lintro.models.core.run_artifact import RunArtifact
 
 BASELINE_SCAN_HELP = (
-    "Certified check findings: ruff, black. Use --tools to select supported tools. "
+    "Certified check findings: ruff, black, bandit, semgrep. "
+    "Use --tools to select supported tools. "
     "Default or mixed selections abort if any active result is incomplete or "
     "cannot certify its findings; no failing tool is silently omitted."
 )

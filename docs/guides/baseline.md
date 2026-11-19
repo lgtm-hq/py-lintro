@@ -52,16 +52,21 @@ Keep a separate unfiltered check for tools outside the supported selection.
 
 ## Supported tools and scope
 
-Certified **check** findings currently come from `ruff` and `black`. These producers
-certify native lint verdicts and complete reports. A supported tool can still fail
-inspection or parsing; those errors cannot be acknowledged.
+Certified **check** findings currently come from `ruff`, `black`, `semgrep`, and
+`bandit`. These producers certify native lint verdicts and complete reports. A supported
+tool can still fail inspection or parsing; those errors cannot be acknowledged. For
+`semgrep` and `bandit` a report counts as complete only when every record in it parsed:
+a report with even one record lintro had to drop is an incomplete run (execution failed,
+findings not complete) that names the dropped records, keeps the findings it could read,
+and cannot be baselined. The same holds for a Bandit report naming files it could not
+scan.
 
 Other producers, including `shellcheck`, `hadolint`, `shfmt`, `dotenv-linter`,
-`pydoclint`, `sqlfluff`, `mypy`, `pylint`, and `bandit`, do not yet certify failed
-findings for baselining. Their findings stay visible and failing under
-`check --baseline`, even if the baseline contains matching entries. A successful, fully
-inspected result with coherent findings can participate without explaining a failure,
-but a nonzero native exit alone never proves completeness.
+`pydoclint`, `sqlfluff`, `mypy`, and `pylint`, do not yet certify failed findings for
+baselining. Their findings stay visible and failing under `check --baseline`, even if
+the baseline contains matching entries. A successful, fully inspected result with
+coherent findings can participate without explaining a failure, but a nonzero native
+exit alone never proves completeness.
 
 The shared per-file runner does not certify reports from sequence-only parsers: some
 parsers discard malformed records without counting them. Surviving findings and even a
@@ -248,11 +253,12 @@ These fail-closed checks also apply without a fingerprint baseline:
   stdout, or non-JSON output behind an exit other than 0 or 1) is logged as an execution
   or configuration error with Ruff's own message, not as unparsed diagnostic records.
 - Bandit treats a run that could not execute, printed no usable JSON (including empty
-  stdout at exit 0), listed files it could not scan, or reported a non-list `errors`
-  container (one parse failure) as an execution failure. Inspection stays unknown, so
-  such a run never updates a baseline. Files Bandit could not scan are named with its
-  reason instead of the raw report. When no Python files match, the result is still "no
-  files", not a failure.
+  stdout at exit 0), listed files it could not scan, reported a non-list `errors`
+  container (one parse failure), or contained finding records lintro could not parse
+  (one parse failure each, whether or not other findings parsed) as an execution
+  failure. Inspection stays unknown, so such a run never updates a baseline. Files
+  Bandit could not scan and dropped records are named instead of the raw report. When no
+  Python files match, the result is still "no files", not a failure.
 - Stylelint, html-validate and Vale print a report on every completed run, even a clean
   one (`[]`, or `{}` for Vale). Empty output, a failed exit with nothing parsed, Vale's
   runtime-error object (one parse failure, not one per key) and a report with malformed

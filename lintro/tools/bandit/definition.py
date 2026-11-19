@@ -134,6 +134,21 @@ def _scan_errors_reason(errors: list[Any]) -> str:
     return "\n".join(lines)
 
 
+def _dropped_records_reason(dropped: int) -> str:
+    """Name the report records the parser could not read.
+
+    Args:
+        dropped: How many records of Bandit's ``results`` were skipped.
+
+    Returns:
+        A one-line reason saying the findings are incomplete.
+    """
+    return (
+        f"Bandit reported {dropped} finding record(s) lintro could not parse; "
+        "its findings are incomplete."
+    )
+
+
 def _failed_run_result(
     *,
     output: str,
@@ -466,10 +481,6 @@ class BanditPlugin(BaseToolPlugin):
         Returns:
             ToolResult with check results.
         """
-        # Merge runtime options
-        merged_options = dict(self.options)
-        merged_options.update(options)
-
         # Use shared preparation for version check, path validation, file discovery
         ctx = self.prepare(paths, options)
         if isinstance(ctx, ToolResult):
@@ -574,14 +585,24 @@ class BanditPlugin(BaseToolPlugin):
                     parse_failures=1,
                 )
 
-            # Files Bandit could not scan, or a run that failed to execute,
-            # leave the findings incomplete and the inspected set unknown.
-            # Scan errors are named rather than dumping the whole report.
-            if errors or execution_failure:
+            # The parser skips malformed records; each one is a parse failure.
+            # Count them before any "no files" decision, which would otherwise
+            # hide a report whose only records were dropped (#2400).
+            # ``_extract_bandit_json`` guarantees ``results`` is a list.
+            dropped = len(bandit_data["results"]) - len(issues)
+
+            # Files Bandit could not scan, records the parser had to drop, or
+            # a run that failed to execute leave the findings incomplete and
+            # the inspected set unknown. Scan errors and drops are named
+            # rather than dumping the whole report.
+            if errors or dropped or execution_failure:
+                reasons = [_scan_errors_reason(errors)] if errors else []
+                if dropped:
+                    reasons.append(_dropped_records_reason(dropped))
                 return _failed_run_result(
-                    output=output if execution_failure else _scan_errors_reason(errors),
+                    output=output if execution_failure else "\n".join(reasons),
                     issues=issues,
-                    parse_failures=0,
+                    parse_failures=dropped,
                 )
 
             # A clean report whose metrics name none of the requested files
@@ -595,15 +616,20 @@ class BanditPlugin(BaseToolPlugin):
                     output=BANDIT_ALL_EXCLUDED_MESSAGE,
                 )
 
+            # Every record parsed and every file was scanned: the findings
+            # are complete and can be baselined.
             return ToolResult.from_outcome(
                 ToolOutcome(
-                    execution=Checked(success=True, inspected_files=True),
+                    # Findings fail the check, as in most tools; the exit code
+                    # already failed on them.
+                    execution=Checked(success=not issues, inspected_files=True),
                     issues_count=len(issues),
                 ),
                 name=self.definition.name,
                 output=None,
                 issues=issues,
                 parse_failures_count=0,
+                findings_complete=True,
             )
 
         except (json.JSONDecodeError, ValueError) as e:
