@@ -13,8 +13,16 @@ This deliberately mirrors runtime resolution (#1811), where a project-local
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from lintro.enums.declared_spec_kind import DeclaredSpecKind
 from lintro.enums.install_context import InstallContext, PackageManager
 from lintro.tools.core.install_strategies.base import InstallStrategy
+from lintro.tools.core.install_strategies.declared_spec import (
+    classify_declared_spec,
+    describe_opaque_spec,
+    exact_version,
+)
 from lintro.tools.core.install_strategies.environment import InstallEnvironment
 from lintro.tools.core.install_strategies.node_project import (
     NODE_MANAGER_COMMANDS,
@@ -96,7 +104,7 @@ class NpmStrategy(InstallStrategy):
         conflict = _pin_conflict(env, pkg, tool_version, upgrading=False)
         if conflict is not None:
             return conflict
-        return _node_add_command(env, pkg, tool_version)
+        return _node_add_command(env, pkg, tool_version, upgrading=False)
 
     def upgrade_hint(
         self,
@@ -133,29 +141,60 @@ class NpmStrategy(InstallStrategy):
         conflict = _pin_conflict(env, pkg, tool_version, upgrading=True)
         if conflict is not None:
             return conflict
-        return _node_add_command(env, pkg, tool_version)
+        return _node_add_command(env, pkg, tool_version, upgrading=True)
 
 
 def _node_add_command(
     env: InstallEnvironment,
     package: str,
     version: str,
+    *,
+    upgrading: bool,
 ) -> str:
     """Build the manager-appropriate add command for a package.
+
+    Yarn Berry (2 and later) removed ``yarn global``, so a global add on a
+    Berry project gets a manual hint instead of a command that fails with
+    "The 'yarn global' commands have been removed in 2.x" (#2045). ``yarn
+    dlx`` runs a package once; it does not install one, so it is not offered
+    as a substitute.
 
     Args:
         env: The current install environment.
         package: npm package name.
         version: Version lintro recommends.
+        upgrading: Whether the caller is planning an upgrade rather than a
+            first install. Only changes the wording of a manual hint.
 
     Returns:
-        Shell command string.
+        Shell command string, or a manual-action message.
     """
     manager, _source = env.node_manager()
+    spec = f"{package}@{version}"
+    global_install = env.installs_globally()
+    project = env.node_project
+    if (
+        global_install
+        and manager is PackageManager.YARN
+        and project is not None
+        and project.yarn_berry
+    ):
+        local = add_dependency_command(
+            manager=manager,
+            spec=spec,
+            global_install=False,
+        )
+        verb = "Upgrade" if upgrading else "Install"
+        return (
+            f"{verb} {package} manually: this project uses Yarn Berry (2 or "
+            f"later), which has no global install, so lintro will not run "
+            f"`yarn global add`. Run `{local}` to add it to the project, or "
+            f"install it globally with another package manager."
+        )
     return add_dependency_command(
         manager=manager,
-        spec=f"{package}@{version}",
-        global_install=env.installs_globally(),
+        spec=spec,
+        global_install=global_install,
     )
 
 
@@ -166,23 +205,32 @@ def _pin_conflict(
     *,
     upgrading: bool,
 ) -> str | None:
-    """Report a project-local pin that disagrees with lintro's recommendation.
+    """Protect the spec a project declares from being rewritten by lintro.
 
-    Only the *declared* spec is compared, because that is what the project
-    author wrote down and what an install or upgrade command would overwrite. A
-    spec that already names the recommended version (``3.9.4``, ``^3.9.4``,
-    ``~3.9.4``, ``=3.9.4``, ``v3.9.4``) is not a conflict.
+    Only the *declared* spec is consulted, because that is what the project
+    author wrote down and what an install or upgrade command would overwrite.
+    The spec is classified by shape (#2045):
 
-    The advice differs by path. A declared-but-missing package does not need a
-    versioned add at all — it needs the project's own dependencies installed,
-    which restores the pinned version from the lockfile. That is true even when
-    the declared spec already names lintro's version: ``npm install -D
-    prettier@3.9.4`` would still rewrite ``^3.9.4`` (and can downgrade a
-    lockfile that resolved a newer 3.9.x). Suggesting a versioned add there
-    would be suggesting the very rewrite this guard exists to stop. On the
-    install path a matching declaration therefore returns the manager's
-    install-all command. On the upgrade path a matching declaration is not a
-    conflict and the versioned add proceeds.
+    - **Exact-compatible** (``3.9.4``, ``^3.9.4``, ``~3.9.4``, ``=3.9.4``,
+      ``v3.9.4``; one prefix stripped once) is compared with lintro's version.
+      A different version is a conflict that needs an explicit decision.
+    - **Range** (``>=3.9.4``, ``3.9.x``, ``*``, ``||`` unions) is never a
+      conflict: the project's range governs. The install path installs the
+      project's dependencies and lets the resolver satisfy it. The upgrade
+      path does not rewrite the range either; it asks for a decision.
+    - **Opaque** (``workspace:``, ``npm:`` aliases, git and tarball URLs,
+      local paths, dist-tags) is never called a conflict. lintro names the
+      form and does not override it.
+
+    A declared-but-missing package does not need a versioned add at all. It
+    needs the project's own dependencies installed, which restores the
+    declared version from the lockfile. ``npm install -D prettier@3.9.4``
+    would rewrite ``^3.9.4`` (and turns ``>=3.9.4`` into ``^3.9.4``), so on
+    the install path a matching or range declaration returns the manager's
+    install-all command. The install plan announces that this installs the
+    whole project's dependencies (:func:`whole_project_install_root`). On the
+    upgrade path a matching exact declaration is not a conflict and the
+    versioned add proceeds.
 
     Args:
         env: The current install environment.
@@ -192,10 +240,9 @@ def _pin_conflict(
             installed tool rather than a first install.
 
     Returns:
-        A manual-action message when the pin conflicts, the manager's
-        install-all command when a matching declaration should be restored
-        from the lockfile, or None when there is no pin to protect (or an
-        upgrade of a matching pin should proceed).
+        A manual-action message, the manager's install-all command, or None
+        when there is no declaration to protect (or an upgrade of a matching
+        exact declaration should proceed).
     """
     project = env.node_project
     if project is None or env.prefer_global:
@@ -204,15 +251,31 @@ def _pin_conflict(
     if declared is None:
         return None
     manager, _source = env.node_manager()
-    if declared.lstrip("^~=v ").strip() == version:
-        if upgrading:
-            return None
-        return NODE_MANAGER_COMMANDS[manager].install_all
+    restore = NODE_MANAGER_COMMANDS[manager].install_all
     adopt = add_dependency_command(
         manager=manager,
         spec=f"{package}@{version}",
         global_install=False,
     )
+    kind = classify_declared_spec(declared)
+    if kind is DeclaredSpecKind.OPAQUE:
+        verb = "Upgrade" if upgrading else "Install"
+        return (
+            f"{verb} {package} through the project: this project manages "
+            f"{package} via {describe_opaque_spec(declared)} (`{declared}`) "
+            f"in package.json; lintro will not override it."
+        )
+    if kind is DeclaredSpecKind.RANGE:
+        if not upgrading:
+            return restore
+        return (
+            f"Upgrade {package} explicitly: this project declares the range "
+            f"`{declared}` in package.json, which lintro will not rewrite. "
+            f"Update {package} within that range with {manager}, or run "
+            f"`{adopt}` to pin lintro's version {version}."
+        )
+    if exact_version(declared) == version:
+        return None if upgrading else restore
     difference = (
         f"this project declares {declared} in package.json but lintro "
         f"recommends {version}."
@@ -222,12 +285,37 @@ def _pin_conflict(
             f"Upgrade {package} explicitly: {difference} "
             f"Run `{adopt}` to adopt lintro's version, or keep the project pin."
         )
-    restore = NODE_MANAGER_COMMANDS[manager].install_all
     return (
         f"Install {package} from the project: {difference} "
         f"Run `{restore}` to install the version this project pins, or "
         f"`{adopt}` to adopt lintro's instead."
     )
+
+
+def whole_project_install_root(
+    env: InstallEnvironment,
+    command: str,
+) -> Path | None:
+    """Return the project root when *command* installs the whole project.
+
+    ``npm install`` (and its bun, pnpm and yarn equivalents) installs every
+    dependency the manifest declares, runs install scripts and can update the
+    lockfile. :func:`_pin_conflict` plans it for one declared tool, so the
+    install plan has to say that it does more than install that tool (#2045).
+
+    Args:
+        env: The current install environment.
+        command: A planned install command.
+
+    Returns:
+        The project root the command runs in, or None when the command is not
+        a project-wide install.
+    """
+    project = env.node_project
+    if project is None or env.installs_globally():
+        return None
+    project_wide = {commands.install_all for commands in NODE_MANAGER_COMMANDS.values()}
+    return project.root if command in project_wide else None
 
 
 def _brew_hint(

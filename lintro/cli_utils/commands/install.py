@@ -17,6 +17,7 @@ from pathlib import Path
 
 import click
 from rich.console import Console
+from rich.markup import escape
 
 from lintro.cli_utils.install_output import (
     render_install_results,
@@ -333,6 +334,17 @@ def _display_plan(console: Console, plan: object) -> None:
         console.print(f"  [bold]To install ({len(plan.to_install)}):[/bold]")
         for tool, cmd in plan.to_install:
             console.print(f"    {tool.name:<20} [dim]{cmd}[/dim]")
+            root = plan.project_installs.get(tool.name)
+            if root is not None:
+                # A project-wide install fetches every declared dependency and
+                # runs its install scripts; asking for one tool must not do
+                # that unannounced (#2045).
+                console.print(
+                    f"      [yellow]installs the whole project's dependencies "
+                    f"(`{cmd}` in {escape(str(root))}), not only "
+                    f"{tool.name}[/yellow]",
+                    highlight=False,
+                )
 
     if plan.to_upgrade:
         console.print(f"  [bold]To upgrade ({len(plan.to_upgrade)}):[/bold]")

@@ -40,6 +40,9 @@ from lintro.tools.core.install_hints import (
 )
 from lintro.tools.core.install_plan import InstallPlan, InstallResult
 from lintro.tools.core.install_strategies import get_strategy
+from lintro.tools.core.install_strategies.npm_strategy import (
+    whole_project_install_root,
+)
 from lintro.tools.core.install_strategies.package_names import script_tool_name
 from lintro.tools.core.node_fallback import REGISTRY_RUNNERS
 from lintro.tools.core.tool_registry import ManifestRegistry, ManifestTool
@@ -310,6 +313,26 @@ class ToolInstaller:
                 plan.manual.append((tool, hint))
                 return
         plan.to_install.append((tool, hint))
+        self._note_project_install(plan, tool, hint)
+
+    def _note_project_install(
+        self,
+        plan: InstallPlan,
+        tool: ManifestTool,
+        command: str,
+    ) -> None:
+        """Record a planned command that installs the whole Node project.
+
+        Args:
+            plan: Plan to annotate.
+            tool: Tool the command was planned for.
+            command: The planned install command.
+        """
+        if tool.install_type != "npm":
+            return
+        root = whole_project_install_root(self._context.environment, command)
+        if root is not None:
+            plan.project_installs[tool.name] = root
 
     def _check_prerequisites(self, tool: ManifestTool) -> str | None:
         """Check if prerequisites for installing a tool are met.

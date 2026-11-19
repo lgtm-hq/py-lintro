@@ -940,15 +940,45 @@ $ lintro install prettier --upgrade
              lintro's version, or keep the project pin.
 ```
 
-The comparison is deliberately literal, not a semver range solve: a spec that names the
-recommended version exactly — `3.9.4`, `^3.9.4`, `~3.9.4`, `=3.9.4`, `v3.9.4` — is not a
-conflict and upgrades normally. On a first install of a declared-but-missing package,
-those same spellings emit the manager's install-all command (`npm install`,
-`bun install`, …) so the lockfile pin is restored, rather than a versioned add that
-would rewrite the range. Anything else, including a wider range such as `^3.9.0` that a
-resolver _would_ satisfy with 3.9.4, is reported so you decide. Erring toward asking is
-deliberate: the cost of a needless question is far below the cost of silently rewriting
-someone's `package.json`.
+lintro sorts the declared spec into one of three classes by its shape alone. It does not
+solve semver ranges itself; the project's package manager does that.
+
+- **Exact-compatible** — a full version with at most one `^`, `~`, `=` or `v` prefix,
+  stripped once. One that names the recommended version — `3.9.4`, `^3.9.4`, `~3.9.4`,
+  `=3.9.4`, `v3.9.4` — is not a conflict and upgrades normally. A different version,
+  including `^3.9.0` that a resolver _would_ satisfy with 3.9.4, is reported so you
+  decide.
+- **Range** — `>=3.9.4`, `3.9.x`, `3`, `*`, `1.2.3 - 2.0.0`, `||` unions. Never a
+  conflict: your range governs. A first install of a declared-but-missing package runs
+  the project install (below). `--upgrade` does not rewrite the range: it asks you to
+  update within it or pin lintro's version.
+- **Opaque** — `workspace:*`, `npm:` aliases, git and tarball URLs, local paths,
+  dist-tags. lintro reports how the project manages the tool ("this project manages
+  prettier via the workspace protocol (`workspace:*`) in package.json; lintro will not
+  override it") and leaves it to you.
+
+On a first install of a declared-but-missing exact-compatible match or range, lintro
+runs the manager's install-all command (`npm install`, `bun install`, …) in the project
+root, so the declared version is restored from the lockfile rather than rewritten by a
+versioned add. That command installs **every** dependency the project declares, can
+update the lockfile and runs install scripts, so the plan says so:
+
+```console
+$ lintro install prettier
+  …
+  To install (1):
+    prettier             npm install
+      installs the whole project's dependencies (`npm install` in /path/to/project), not only prettier
+```
+
+Erring toward asking is deliberate: the cost of a needless question is far below the
+cost of silently rewriting someone's `package.json`.
+
+**Yarn Berry has no global install.** Yarn 2 and later removed `yarn global`. When
+`--global` would use yarn inside a project whose `packageManager` names `yarn@2` or
+later, or that has a `.yarnrc.yml` and no yarn version declared, lintro lists the tool
+for manual installation instead of planning `yarn global add`. Yarn 1 keeps
+`yarn global add`.
 
 **Planning matches execution.** The version probe for npm-installed tools resolves
 through the same chain a check uses, so `lintro install` reports on the binary
