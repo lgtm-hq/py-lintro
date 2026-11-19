@@ -472,14 +472,33 @@ def test_upgrade_exit_0_still_outdated_is_not_re_suggested() -> None:
     assert_that([name for name, _reason in quick_fix.blocked]).is_equal_to(["ruff"])
 
 
-def test_project_install_above_the_recommended_version_is_success() -> None:
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="fake shell-script binary is not executable on Windows",
+)
+def test_project_install_above_the_recommended_version_is_success(
+    tmp_path: Path,
+) -> None:
     """Lintro enforces a minimum, not a ceiling (#2045).
 
     A project declaring ``>=4`` gets prettier 4.x from ``npm install`` while
     lintro recommends 3.9.4. Only the minimum is checked, so that install is
     a plain success and nothing is flagged for another attempt.
+
+    The installed binary lives in the temp project's ``node_modules/.bin``
+    and PATH lookups find nothing, so the result does not depend on whether
+    the machine running the test happens to have prettier installed.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
     """
-    installer = _installer()
+    _write_node_project(tmp_path)
+    local_bin = tmp_path / "node_modules" / ".bin"
+    local_bin.mkdir(parents=True)
+    binary = local_bin / "prettier"
+    binary.write_text('#!/bin/sh\necho "4.1.0"\n', encoding="utf-8")
+    binary.chmod(0o755)
+    installer = _node_installer(tmp_path)
     tool = ManifestTool(
         name="prettier",
         version="3.9.4",
@@ -491,10 +510,7 @@ def test_project_install_above_the_recommended_version_is_success() -> None:
 
     with (
         patch("lintro.tools.core.tool_installer.subprocess.run") as mock_run,
-        patch(
-            "lintro.tools.core.tool_installer.shutil.which",
-            return_value="/usr/local/bin/prettier",
-        ),
+        patch("lintro.tools.core.tool_installer.shutil.which", return_value=None),
     ):
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="", stderr=""),
