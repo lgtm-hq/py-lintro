@@ -4,6 +4,8 @@ This module owns the parts that talk to :mod:`watchdog`:
 
 * :class:`LintroEventHandler` translates raw filesystem events into
   debounced change notifications, filtering out ignored paths.
+* :class:`StartupReplayFilter` drops the events macOS FSEvents delivers at
+  stream start for changes made before watching began.
 * :func:`watch_paths` sets up an observer over the requested paths, blocks
   until interrupted, and shuts everything down cleanly on Ctrl-C.
 
@@ -13,7 +15,10 @@ unit-tested with synthetic events, without a real filesystem or sleeps.
 
 from __future__ import annotations
 
+import os
 import threading
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -33,11 +38,31 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DEFAULT_IGNORE_PATTERNS",
+    "DEFAULT_OBSERVER_REPLAYS_STARTUP",
     "VENV_IGNORE_PATTERNS",
     "LintroEventHandler",
     "ObserverLike",
+    "StartupReplayFilter",
     "watch_paths",
 ]
+
+#: Whether watchdog's default ``Observer`` on this platform is the macOS
+#: FSEvents backend. FSEvents delivers, at stream start, events for changes
+#: made shortly before the stream was created; inotify (Linux) and
+#: ReadDirectoryChangesW (Windows) do not.
+DEFAULT_OBSERVER_REPLAYS_STARTUP: bool = (
+    Observer.__module__ == "watchdog.observers.fsevents"
+)
+
+# How long after start an event may still be a startup replay. FSEvents
+# delivers the replay with its first callback, within milliseconds; the bound
+# only limits what a volume whose clock disagrees with ours can lose.
+_STARTUP_REPLAY_WINDOW_S = 5.0
+
+# Change times that are whole multiples of 10 ms come from coarse timestamp
+# filesystems (HFS+ and FAT store seconds, exFAT 10 ms units). Such a stamp
+# can round a change made just after start to before it, so it proves nothing.
+_COARSE_STAMP_NS = 10_000_000
 
 
 class ObserverLike(Protocol):
@@ -136,6 +161,71 @@ def _build_ignore_spec(patterns: Iterable[str]) -> pathspec.GitIgnoreSpec:
     return pathspec.GitIgnoreSpec.from_lines(list(patterns))
 
 
+@dataclass(frozen=True)
+class StartupReplayFilter:
+    """Recognise events for changes made before watching started.
+
+    A ``created`` or ``modified`` event counts as a startup replay when it is
+    delivered within ``window_s`` of the start and the file's inode change
+    time (``st_ctime``) is older than the start. The change time is used
+    rather than the modification time because nothing can set it back:
+    ``touch -t``, ``cp -p``, ``tar`` and ``rsync -t`` all leave an old
+    ``st_mtime`` but stamp ``st_ctime`` with the current time, so a file they
+    write after start is still reported.
+
+    Anything the filter cannot prove old is kept: a path that no longer
+    exists or cannot be stat'ed, and a change time from a coarse timestamp
+    filesystem. Moves are never passed to it, because files inside a
+    renamed directory keep their old change time.
+
+    Attributes:
+        started_ns: Wall-clock start, in ``time.time_ns()`` nanoseconds.
+        deadline: ``clock()`` value after which nothing is treated as replay.
+        clock: Monotonic clock used for the window; injectable for tests.
+        stat: ``os.stat``-compatible function; injectable for tests.
+    """
+
+    started_ns: int
+    deadline: float
+    clock: Callable[[], float] = field(default=time.monotonic, compare=False)
+    stat: Callable[[str], os.stat_result] = field(default=os.stat, compare=False)
+
+    @classmethod
+    def starting_now(
+        cls,
+        *,
+        window_s: float = _STARTUP_REPLAY_WINDOW_S,
+    ) -> StartupReplayFilter:
+        """Build a filter whose start is the current moment.
+
+        Args:
+            window_s: Seconds after start during which events are checked.
+
+        Returns:
+            A filter anchored at the current wall-clock and monotonic time.
+        """
+        return cls(started_ns=time.time_ns(), deadline=time.monotonic() + window_s)
+
+    def __call__(self, path: str) -> bool:
+        """Return whether an event for ``path`` replays a pre-start change.
+
+        Args:
+            path: Path of a ``created`` or ``modified`` file event.
+
+        Returns:
+            True only when the file provably last changed before the start.
+        """
+        if self.clock() > self.deadline:
+            return False
+        try:
+            changed_ns = self.stat(path).st_ctime_ns
+        except OSError:
+            return False
+        if changed_ns % _COARSE_STAMP_NS == 0:
+            return False
+        return changed_ns < self.started_ns
+
+
 class LintroEventHandler(FileSystemEventHandler):
     """Translate watchdog events into debounced, filtered change signals.
 
@@ -151,6 +241,7 @@ class LintroEventHandler(FileSystemEventHandler):
         path_filter: Callable[[str], bool] | None = None,
         ignore_roots: Iterable[Path] | None = None,
         on_event: Callable[[str, str], None] | None = None,
+        is_startup_replay: Callable[[str], bool] | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -164,6 +255,10 @@ class LintroEventHandler(FileSystemEventHandler):
             ignore_roots: Optional roots that ignore patterns are relative to.
                 Ancestors above these roots do not participate in matching.
             on_event: Optional callback receiving each accepted path and event kind.
+            is_startup_replay: Optional predicate returning True for a
+                ``created``/``modified`` path whose event only replays a
+                change made before watching started; such events are
+                dropped. Moves are never checked.
         """
         super().__init__()
         self._on_change = on_change
@@ -171,6 +266,7 @@ class LintroEventHandler(FileSystemEventHandler):
         self._path_filter = path_filter
         self._ignore_roots = tuple(ignore_roots or ())
         self._on_event = on_event
+        self._is_startup_replay = is_startup_replay
 
     def _handle(self, path: str, kind: str) -> None:
         """Forward a path to ``on_change`` unless it is ignored or out of scope.
@@ -182,6 +278,12 @@ class LintroEventHandler(FileSystemEventHandler):
         if self._is_ignored(path):
             return
         if self._path_filter is not None and not self._path_filter(path):
+            return
+        if (
+            kind != "moved"
+            and self._is_startup_replay is not None
+            and self._is_startup_replay(path)
+        ):
             return
         if self._on_event is not None:
             self._on_event(path, kind)
@@ -263,6 +365,7 @@ def watch_paths(
     console: Console | None = None,
     stop_event: threading.Event | None = None,
     observer_factory: Callable[[], ObserverLike] | None = None,
+    drop_startup_replay: bool | None = None,
 ) -> None:
     """Watch paths and invoke ``on_batch`` with debounced change sets.
 
@@ -286,6 +389,11 @@ def watch_paths(
             a fresh event is created and the loop runs until KeyboardInterrupt.
         observer_factory: Optional factory returning a watchdog-Observer-like
             object. Injectable for tests; defaults to ``watchdog.Observer``.
+        drop_startup_replay: Whether to drop the events the observer delivers
+            at start for files changed before watching began (see
+            :class:`StartupReplayFilter`). ``None`` turns it on only for the
+            default observer on macOS (:data:`DEFAULT_OBSERVER_REPLAYS_STARTUP`);
+            a caller passing ``observer_factory`` decides for its observer.
 
     Raises:
         BaseException: Re-raised when native observer startup fails.
@@ -322,6 +430,14 @@ def watch_paths(
             resolved.is_relative_to(directory) for directory in watched_dirs
         )
 
+    if drop_startup_replay is None:
+        drop_startup_replay = (
+            observer_factory is None and DEFAULT_OBSERVER_REPLAYS_STARTUP
+        )
+    # Anchored before the observer starts: an earlier anchor can only keep
+    # more events, never drop a change made after start.
+    replay_filter = StartupReplayFilter.starting_now() if drop_startup_replay else None
+
     debouncer = Debouncer(callback=on_batch, delay_ms=debounce_ms)
     handler = LintroEventHandler(
         on_change=debouncer.on_change,
@@ -329,6 +445,7 @@ def watch_paths(
         path_filter=_in_scope,
         ignore_roots=watched_dirs | {path.parent for path in watched_files},
         on_event=on_event,
+        is_startup_replay=replay_filter,
     )
 
     factory: Callable[[], ObserverLike] = observer_factory or Observer

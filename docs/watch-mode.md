@@ -77,6 +77,14 @@ keystroke. Tune it with `--debounce`:
 lintro watch --debounce 500
 ```
 
+Watch mode reacts only to changes made after it starts. On macOS, FSEvents can deliver
+events for a file written just before the watch began; watch mode drops those when the
+file's inode change time (`st_ctime`, which `touch -t` and `cp -p` cannot backdate) is
+older than the start, so a file saved right before `lintro watch --fix` is not formatted
+until you change it again. Moves are always reported, and so are files on coarse
+timestamp filesystems (HFS+, FAT, exFAT), where the stamp cannot prove the change is
+older.
+
 ### Ignored Paths
 
 By default, watch mode ignores noisy or irrelevant locations such as `.git/`,

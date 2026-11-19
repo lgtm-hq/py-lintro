@@ -15,7 +15,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from lintro.watch.runner import WatchRunner
-from lintro.watch.watcher import watch_paths
+from lintro.watch.watcher import DEFAULT_OBSERVER_REPLAYS_STARTUP, watch_paths
 
 # Upper bound for each wait. Waits return as soon as their condition holds,
 # so this only matters when the watcher is broken or the machine is starved.
@@ -219,29 +219,41 @@ def _start_watch(
     recorder: _WatchRecorder,
     ready: threading.Event,
     stop: threading.Event,
+    on_batch: Callable[[set[str]], object] | None = None,
 ) -> tuple[threading.Thread, list[BaseException]]:
     """Start a real watcher while retaining worker exceptions for assertions.
+
+    The wrapped observer is watchdog's default one, so the watcher is told to
+    drop startup replays exactly as it would for that observer unwrapped.
 
     Args:
         root: Directory observed recursively.
         recorder: Sink for debounced batches and accepted events.
         ready: Event set after native observer startup.
         stop: Event requesting watcher shutdown.
+        on_batch: Optional batch consumer run before the recorder sees the
+            batch, so a wait on the recorder returns after it finished.
 
     Returns:
         Worker thread and mutable list of uncaught worker exceptions.
     """
     errors: list[BaseException] = []
 
+    def _on_batch(batch: set[str]) -> None:
+        if on_batch is not None:
+            on_batch(batch)
+        recorder.on_batch(batch)
+
     def _run() -> None:
         try:
             watch_paths(
                 [str(root)],
-                on_batch=recorder.on_batch,
+                on_batch=_on_batch,
                 on_event=recorder.on_event,
                 debounce_ms=25,
                 stop_event=stop,
                 observer_factory=lambda: _SignalingObserver(ready),
+                drop_startup_replay=DEFAULT_OBSERVER_REPLAYS_STARTUP,
             )
         except BaseException as exc:  # pragma: no cover - asserted in parent thread
             errors.append(exc)
@@ -399,6 +411,105 @@ def test_real_observer_ignores_lintro_run_output(tmp_path: Path) -> None:
     assert_that(errors).is_empty()
     assert_that(recorder.all_paths()).does_not_contain(str(report))
     assert_that(recorder.kinds_for(report)).is_empty()
+
+
+def test_file_saved_just_before_start_does_not_trigger_a_batch(
+    tmp_path: Path,
+) -> None:
+    """A file written right before watching starts is not reported until it changes.
+
+    FSEvents (macOS) used to deliver the pre-start write as a live event (#3525).
+    The fence is written after start and native backends deliver events in
+    write order, so once its batch is seen any replay would already be recorded.
+    """
+    saved = tmp_path / "saved.py"
+    saved.write_text("value = 1\n", encoding="utf-8")
+    ready = threading.Event()
+    stop = threading.Event()
+    recorder = _WatchRecorder()
+
+    worker, errors = _start_watch(tmp_path, recorder=recorder, ready=ready, stop=stop)
+    try:
+        after_start = _handshake_watcher(tmp_path, ready=ready, recorder=recorder)
+        assert_that(recorder.all_paths()).does_not_contain(str(saved))
+        assert_that(recorder.kinds_for(saved)).is_empty()
+
+        saved.write_text("value = 2\n", encoding="utf-8")
+        recorder.expect_batch_with(saved, since=after_start)
+    finally:
+        _stop_watch(stop, worker)
+
+    assert_that(worker.is_alive()).is_false()
+    assert_that(errors).is_empty()
+
+
+def test_change_made_immediately_after_start_is_reported(tmp_path: Path) -> None:
+    """Dropping startup replays must not swallow a write made right after start."""
+    saved = tmp_path / "saved.py"
+    saved.write_text("value = 1\n", encoding="utf-8")
+    ready = threading.Event()
+    stop = threading.Event()
+    recorder = _WatchRecorder()
+
+    worker, errors = _start_watch(tmp_path, recorder=recorder, ready=ready, stop=stop)
+    try:
+        assert_that(
+            ready.wait(timeout=_DEADLINE_S),
+            description=f"native observer did not start within {_DEADLINE_S}s",
+        ).is_true()
+        saved.write_text("value = 2\n", encoding="utf-8")
+        recorder.expect_batch_with(saved)
+    finally:
+        _stop_watch(stop, worker)
+
+    assert_that(worker.is_alive()).is_false()
+    assert_that(errors).is_empty()
+
+
+def test_fix_mode_does_not_format_a_file_saved_before_start(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--fix`` formats only files changed after start (#3525).
+
+    The startup replay used to reach the runner, which then reformatted a
+    file nobody had touched since watching began.
+    """
+    monkeypatch.chdir(tmp_path)
+    unformatted = "value=( 1,2 )\n"
+    saved = tmp_path / "saved.py"
+    saved.write_text(unformatted, encoding="utf-8")
+    lines: list[str] = []
+    runner = WatchRunner(
+        auto_fix=True,
+        restrict_to=["ruff"],
+        watch_paths=[str(tmp_path)],
+        emit=lines.append,
+    )
+    ready = threading.Event()
+    stop = threading.Event()
+    recorder = _WatchRecorder()
+
+    worker, errors = _start_watch(
+        tmp_path,
+        recorder=recorder,
+        ready=ready,
+        stop=stop,
+        on_batch=runner.run_batch,
+    )
+    try:
+        after_start = _handshake_watcher(tmp_path, ready=ready, recorder=recorder)
+        assert_that(saved.read_text(encoding="utf-8")).is_equal_to(unformatted)
+        assert_that(recorder.all_paths()).does_not_contain(str(saved))
+
+        saved.write_text(unformatted, encoding="utf-8")
+        recorder.expect_batch_with(saved, since=after_start)
+    finally:
+        _stop_watch(stop, worker)
+
+    assert_that(worker.is_alive()).is_false()
+    assert_that(errors).is_empty()
+    assert_that(saved.read_text(encoding="utf-8")).is_equal_to("value = (1, 2)\n")
 
 
 def test_watch_runner_invokes_real_executor_contract(
