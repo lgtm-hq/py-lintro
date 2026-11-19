@@ -51,16 +51,18 @@ def _is_third_party(lock_root: Path, *, base: Path) -> bool:
     Args:
         lock_root: Directory holding a Cargo.lock.
         base: Execution directory; only components below it are considered,
-            so a project that itself lives under a ``target`` folder still
-            audits its own lockfile.
+            so a project that itself lives under a ``target`` or ``vendor``
+            folder still audits its own lockfile.
 
     Returns:
         True when a directory between ``base`` and ``lock_root`` is skipped.
+        False for a lockfile at or above ``base``, or outside it, since no
+        part of its path lies below the scan root.
     """
     try:
         parts = lock_root.relative_to(base).parts
     except ValueError:
-        parts = lock_root.parts
+        return False
     return any(part in CARGO_AUDIT_SKIP_DIRS for part in parts)
 
 

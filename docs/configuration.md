@@ -3561,6 +3561,30 @@ lintro check my-crate/ --tools cargo_deny
 lintro check . --tools cargo_deny --tool-options "cargo_deny:timeout=120"
 ```
 
+#### Cargo-audit Configuration
+
+Cargo-audit checks `Cargo.lock` files against the RustSec advisory database. Lintro
+audits every lockfile among the checked files, one `cargo audit` run per lockfile, and
+reports each finding with the absolute path of the lockfile it came from.
+
+- Lockfiles under a `vendor/` or `target/` directory below the scanned directory are not
+  audited: they hold vendored or packaged copies of other crates, not a resolution the
+  project builds with. A project that itself lives under a folder with one of those
+  names is still audited.
+- The advisory database is fetched for the first lockfile only; later runs in the same
+  check pass `--no-fetch`.
+- The timeout is one budget for the whole check, shared by every lockfile.
+
+**Available Options via `--tool-options`:**
+
+| Option    | Type    | Description                                           |
+| --------- | ------- | ----------------------------------------------------- |
+| `timeout` | integer | Timeout in seconds for the whole check (default: 120) |
+
+```bash
+lintro check . --tools cargo_audit --tool-options "cargo_audit:timeout=300"
+```
+
 ### Shell Tools
 
 #### ShellCheck Configuration

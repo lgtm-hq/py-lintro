@@ -14,6 +14,7 @@ from assertpy import assert_that
 from lintro.parsers.semgrep.semgrep_issue import SemgrepIssue
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.semgrep.definition import SemgrepPlugin
+from lintro.utils.result_reason import incomplete_reason
 from tests.test_samples_helpers import copy_sample
 
 _VALID_FINDING = {
@@ -22,6 +23,22 @@ _VALID_FINDING = {
     "start": {"line": 2, "col": 3},
     "extra": {"message": "Test finding", "severity": "WARNING"},
 }
+
+
+def _reason_led(raw: str, *, dropped: int) -> str:
+    """Return the output Semgrep reports for a scan with dropped entries.
+
+    Args:
+        raw: Semgrep's own output.
+        dropped: Entries the parser could not read.
+
+    Returns:
+        The reason line followed by the raw output (#2400).
+    """
+    return (
+        f"Semgrep reported {dropped} record(s) lintro could not parse; its "
+        f"findings are incomplete.\n{raw}"
+    )
 
 
 @pytest.mark.parametrize("results", [[], [_VALID_FINDING]], ids=["empty", "finding"])
@@ -362,7 +379,10 @@ def test_check_failed_process_without_parsed_findings(
     assert_that(result.issues).is_empty()
     assert_that(result.issues_count).is_zero()
     assert_that(result.parse_failures_count or 0).is_equal_to(len(results))
-    assert_that(result.output).is_equal_to(f"{report}\nscan failed")
+    raw = f"{report}\nscan failed"
+    assert_that(result.output).is_equal_to(
+        _reason_led(raw, dropped=len(results)) if results else raw,
+    )
 
 
 @pytest.mark.parametrize("returncode", [0, 1, 2])
@@ -416,7 +436,15 @@ def test_check_counts_dropped_findings(
     assert_that(result.issues_count).is_equal_to(expected_count)
     assert_that(result.issues).is_length(expected_count)
     assert_that(result.parse_failures_count).is_equal_to(dropped)
-    assert_that(result.output).is_equal_to(f"{report}\nscan diagnostic")
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.findings_complete).is_false()
+    # The reason leads, so the one-line digest names the drops (#2400).
+    assert_that(result.output).is_equal_to(
+        _reason_led(f"{report}\nscan diagnostic", dropped=dropped),
+    )
+    assert_that(incomplete_reason(result)).starts_with(
+        f"Semgrep reported {dropped} record(s) lintro could not parse",
+    )
     if expected_count:
         issue = cast(list[SemgrepIssue], result.issues)[0]
         assert_that((issue.check_id, issue.file, issue.line)).is_equal_to(
@@ -490,7 +518,9 @@ def test_check_counts_malformed_errors(
         issue = cast(list[SemgrepIssue], result.issues)[0]
         assert_that(issue.message).is_equal_to("[test.rule] WARNING: Test finding")
     assert_that(result.parse_failures_count).is_equal_to(dropped + finding_drops)
-    assert_that(result.output).is_equal_to(report)
+    assert_that(result.output).is_equal_to(
+        _reason_led(report, dropped=dropped + finding_drops),
+    )
 
 
 @pytest.mark.parametrize("returncode", [0, 1, 2])

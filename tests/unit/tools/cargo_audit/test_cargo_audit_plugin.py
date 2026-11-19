@@ -18,6 +18,7 @@ from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.cargo_audit.definition import (
     CARGO_AUDIT_DEFAULT_TIMEOUT,
     CargoAuditPlugin,
+    _find_lock_roots,
 )
 from lintro.utils.fingerprint_baseline import fingerprint
 
@@ -703,3 +704,34 @@ def test_vendored_and_build_lockfiles_are_not_audited(
 
     assert_that(audited).is_equal_to([(tmp_path / "app").resolve()])
     assert_that(result.success).is_true()
+
+
+@pytest.mark.parametrize(
+    "base",
+    ["vendor/proj/src", "elsewhere"],
+    ids=["below-the-lockfile", "outside-the-project"],
+)
+def test_lockfile_outside_the_scan_root_is_judged_below_it_only(
+    tmp_path: Path,
+    base: str,
+) -> None:
+    """Only path parts below the scan root decide what is third-party (#2400).
+
+    A project located under a folder named ``vendor`` is the user's own crate
+    even when its lockfile is not below the execution directory.
+
+    Args:
+        tmp_path: Temporary directory holding ``vendor/proj``.
+        base: Execution directory, relative to ``tmp_path``.
+    """
+    project = tmp_path / "vendor" / "proj"
+    (project / "src").mkdir(parents=True)
+    (project / "Cargo.lock").write_text("version = 3\n")
+    (tmp_path / base).mkdir(parents=True, exist_ok=True)
+
+    roots = _find_lock_roots(
+        [str(project / "Cargo.lock")],
+        base=(tmp_path / base).resolve(),
+    )
+
+    assert_that(roots).is_equal_to([project.resolve()])

@@ -16,6 +16,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.tools.trufflehog.definition import TrufflehogPlugin
+from lintro.utils.result_reason import incomplete_reason
 from tests.unit.tools.trufflehog.conftest import (
     make_subprocess_result,
     sample_finding_line,
@@ -206,4 +207,8 @@ def test_check_timeout_and_failure_report_both_reasons(
         "1 batch(es) timed out and 1 batch(es) failed",
         "timed out",
         "fatal: boom",
+    )
+    # The one-line reason the digest and --advisory-only print names both.
+    assert_that(incomplete_reason(result)).is_equal_to(
+        "timed out and failed (1 batch(es) timed out and 1 batch(es) failed:)",
     )

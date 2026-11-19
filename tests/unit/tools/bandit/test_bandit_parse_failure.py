@@ -142,13 +142,25 @@ def test_check_valid_json_reports_no_parse_failures(tmp_path: Path) -> None:
     assert_that(result.parse_failures_count).is_equal_to(0)
 
 
-def test_check_counts_dropped_records_and_withholds_certification(
+@pytest.mark.parametrize(
+    ("keep_valid", "with_metrics"),
+    [(False, True), (False, False), (True, True)],
+    ids=["only-malformed", "only-malformed-empty-metrics", "mixed"],
+)
+def test_check_with_dropped_records_is_an_incomplete_run(
     tmp_path: Path,
+    keep_valid: bool,
+    with_metrics: bool,
 ) -> None:
-    """A record the parser skips is a parse failure, so findings are not complete.
+    """A record the parser skips makes the run incomplete, never a pass (#2400).
+
+    Without metrics the report would otherwise read as "every file excluded"
+    and hide the dropped record behind a no-files result.
 
     Args:
         tmp_path: Temporary directory path for the target Python file.
+        keep_valid: Whether a well-formed finding sits next to the bad one.
+        with_metrics: Whether the report's metrics name the scanned file.
     """
     py_file = tmp_path / "mod.py"
     py_file.write_text("x = 1\n")
@@ -160,10 +172,11 @@ def test_check_counts_dropped_records_and_withholds_certification(
         "test_id": "B101",
         "issue_text": "Use of assert detected.",
     }
+    malformed = {**kept, "line_number": "one"}
     report = {
         "errors": [],
-        "results": [kept, {**kept, "line_number": "one"}],
-        "metrics": {str(py_file): {"loc": 1}},
+        "results": [kept, malformed] if keep_valid else [malformed],
+        "metrics": {str(py_file): {"loc": 1}} if with_metrics else {},
     }
     completed: CompletedProcess[str] = CompletedProcess(
         args=["bandit"],
@@ -184,6 +197,11 @@ def test_check_counts_dropped_records_and_withholds_certification(
     ):
         result = BanditPlugin().check([str(py_file)], {})
 
-    assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.no_files).is_false()
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
     assert_that(result.findings_complete).is_false()
+    assert_that(result.inspected_files).is_none()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.issues_count).is_equal_to(1 if keep_valid else 0)
+    assert_that(result.output).contains("1 finding record(s) lintro could not parse")

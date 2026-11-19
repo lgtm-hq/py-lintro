@@ -10,6 +10,8 @@ Each incomplete shape gets its own reason rather than the first line of the
 tool's output, which for a partial parse is often one of its findings:
 
 - timed out: ``timed out``;
+- timed out and also failed otherwise (one batch of a batched scan timed
+  out, another failed): ``timed out and failed`` with the output's first line;
 - an execution failure (a refused command, an npx integrity refusal, a
   crash): the first line of the output, which those producers lead with;
 - a report that could not be fully parsed: how much of it could not be;
@@ -45,6 +47,11 @@ def incomplete_reason(result: ToolResult) -> str | None:
     """
     if result.skipped or result.unavailable:
         return None
+    if result.timed_out and result.execution_failed:
+        # Part of the run timed out and another part failed on its own (a
+        # batched scanner): name both, with the output's own summary line.
+        line = quote_first_line(result.output, limit=_QUOTE_LIMIT)
+        return _with_detail("timed out and failed", line)
     if result.timed_out:
         return "timed out"
     if result.execution_failed:
