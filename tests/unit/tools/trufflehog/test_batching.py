@@ -157,3 +157,53 @@ def test_check_batch_timeout_reports_timed_out(
     assert_that(result.timed_out).is_true()
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.output).contains("timed out")
+
+
+def test_check_timeout_and_failure_report_both_reasons(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A timed-out batch next to a failed batch is reported as both (#2400).
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(
+        "lintro.tools.core.argv_batching.argv_byte_budget",
+        lambda: 1,
+    )
+    for name in ("aaa_good.py", "mmm_bad.py", "zzz_slow.py"):
+        (tmp_path / name).write_text("value = 1\n")
+
+    def fake_run(cmd: list[str], **_kwargs: object) -> object:
+        scanned = next(a for a in cmd if a.endswith(".py"))
+        if scanned.endswith("zzz_slow.py"):
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=1)
+        if scanned.endswith("mmm_bad.py"):
+            return make_subprocess_result(stderr="fatal: boom", returncode=1)
+        return make_subprocess_result(stdout=sample_finding_line(file=scanned))
+
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        side_effect=fake_run,
+    ):
+        result = trufflehog_plugin.check(
+            [
+                str(tmp_path / name)
+                for name in ("aaa_good.py", "mmm_bad.py", "zzz_slow.py")
+            ],
+            {},
+        )
+
+    assert_that(result.timed_out).is_true()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.output).contains(
+        "1 batch(es) timed out and 1 batch(es) failed",
+        "timed out",
+        "fatal: boom",
+    )

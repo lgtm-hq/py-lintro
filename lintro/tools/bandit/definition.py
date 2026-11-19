@@ -591,15 +591,22 @@ class BanditPlugin(BaseToolPlugin):
                     output=BANDIT_ALL_EXCLUDED_MESSAGE,
                 )
 
+            # The parser skips malformed records; each one is a parse failure,
+            # so a report with drops never certifies complete findings.
+            # ``_extract_bandit_json`` guarantees ``results`` is a list.
+            dropped = len(bandit_data["results"]) - len(issues)
             return ToolResult.from_outcome(
                 ToolOutcome(
-                    execution=Checked(success=True, inspected_files=True),
+                    # Findings fail the check, as in most tools; the exit code
+                    # already failed on them.
+                    execution=Checked(success=not issues, inspected_files=True),
                     issues_count=len(issues),
                 ),
                 name=self.definition.name,
                 output=None,
                 issues=issues,
-                parse_failures_count=0,
+                parse_failures_count=dropped,
+                findings_complete=dropped == 0,
             )
 
         except (json.JSONDecodeError, ValueError) as e:

@@ -47,6 +47,54 @@ YAMLLINT_FILE_PATTERNS: list[str] = [
     ".yamllint.yaml",
 ]
 YAMLLINT_FORMATS: tuple[str, ...] = tuple(m.name.lower() for m in YamllintFormat)
+# ANSI underline that yamllint's ``colored`` format wraps each file header in.
+_COLORED_HEADER: tuple[str, str] = ("\x1b[4m", "\x1b[0m")
+
+
+def _show_path(output: str, *, passed: str, shown: str) -> str:
+    """Replace the path yamllint was given with the path lintro reports.
+
+    yamllint prints a file exactly as it was passed. Each of its formats puts
+    that path in fixed places, and only those places are rewritten:
+    ``parsable`` starts each problem line with ``path:``; ``standard`` (and
+    ``auto`` without a terminal) prints ``path`` alone as a header;
+    ``colored`` underlines that header; ``github`` opens ``::group::path``
+    and names ``file=path,`` in each annotation.
+
+    Args:
+        output: Raw yamllint output for one file.
+        passed: The path given to yamllint.
+        shown: The path to show instead.
+
+    Returns:
+        The output with every file reference naming ``shown``.
+    """
+    if passed == shown:
+        return output
+    start, end = _COLORED_HEADER
+    exact = {
+        passed: shown,
+        f"{start}{passed}{end}": f"{start}{shown}{end}",
+        f"::group::{passed}": f"::group::{shown}",
+    }
+    prefixes = [
+        (f"{passed}:", f"{shown}:"),
+        (f"::error file={passed},", f"::error file={shown},"),
+        (f"::warning file={passed},", f"::warning file={shown},"),
+    ]
+    lines = []
+    for line in output.splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        newline = line[len(body) :]
+        if body in exact:
+            body = exact[body]
+        else:
+            for old, new in prefixes:
+                if body.startswith(old):
+                    body = new + body[len(old) :]
+                    break
+        lines.append(body + newline)
+    return "".join(lines)
 
 
 @register_tool
@@ -181,8 +229,11 @@ class YamllintPlugin(BaseToolPlugin):
 
         yamllint matches ``ignore`` patterns (top-level and per rule) against
         the path exactly as passed, so an absolute path never matches them.
-        With a config file, yamllint runs from that file's directory on a
-        relative path and decides itself which rules the file is exempt from.
+        A config file passed explicitly is used as ``yamllint -c`` would be
+        from lintro's working directory: yamllint runs there on a path
+        relative to it. A discovered config sits next to the files it governs,
+        so yamllint runs from that config's directory instead. Either way
+        yamllint decides itself which rules a file is exempt from.
 
         Args:
             abs_file: Absolute path of the YAML file to lint.
@@ -201,9 +252,13 @@ class YamllintPlugin(BaseToolPlugin):
             f"(original: {config_file})",
         )
         config_args = ["--config-file", abs_config_file]
-        config_dir = os.path.dirname(abs_config_file)
+        run_dir = (
+            os.getcwd()
+            if self.options.get("config_file")
+            else os.path.dirname(abs_config_file)
+        )
         try:
-            return config_args, config_dir, os.path.relpath(abs_file, config_dir)
+            return config_args, run_dir, os.path.relpath(abs_file, run_dir)
         except ValueError:
             # Different drive on Windows: no relative path exists.
             return config_args, file_dir, abs_file
@@ -251,11 +306,10 @@ class YamllintPlugin(BaseToolPlugin):
                 timeout=timeout,
                 cwd=run_dir,
             )
+            # Report the same absolute path whichever directory yamllint ran
+            # in, in the raw output of every format and in parsed issues.
+            output = _show_path(output, passed=target, shown=abs_file)
             issues = parse_yamllint_output(output=output)
-            # Report the same absolute path whichever directory yamllint ran in.
-            for issue in issues:
-                if not os.path.isabs(issue.file):
-                    issue.file = os.path.normpath(os.path.join(run_dir, issue.file))
             issues_count = len(issues)
 
             if not success:

@@ -13,11 +13,13 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.cargo_audit.definition import (
     CARGO_AUDIT_DEFAULT_TIMEOUT,
     CargoAuditPlugin,
 )
+from lintro.utils.fingerprint_baseline import fingerprint
 
 
 def _proc(*, success: bool, stdout: str = "") -> SubprocessResult:
@@ -543,4 +545,161 @@ def test_check_timeout_keeps_earlier_roots_findings(
     assert_that(result.success).is_false()
     assert_that(result.timed_out).is_true()
     assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.issues).extracting("file").is_equal_to(
+        [str(first_lock.resolve())],
+    )
     assert_that(result.output).contains(str(second_lock))
+
+
+def _run_check(
+    plugin: CargoAuditPlugin,
+    paths: list[str],
+    fake_audit: object,
+    options: dict[str, object] | None = None,
+) -> ToolResult:
+    """Run ``check`` with the version gate bypassed and cargo-audit faked.
+
+    Args:
+        plugin: The plugin instance.
+        paths: Paths to check.
+        fake_audit: Replacement for ``_run_subprocess_result``.
+        options: Runtime options for the check.
+
+    Returns:
+        The plugin's ToolResult.
+    """
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(plugin, "_run_subprocess_result", side_effect=fake_audit),
+    ):
+        return plugin.check(paths, options or {})
+
+
+def test_same_advisory_in_two_lockfiles_stays_two_findings(
+    cargo_audit_plugin: CargoAuditPlugin,
+    tmp_path: Path,
+) -> None:
+    """Each finding names its own lockfile, so neither rows nor fingerprints merge.
+
+    Args:
+        cargo_audit_plugin: The plugin instance.
+        tmp_path: Temporary directory holding the crates.
+    """
+    first_lock, second_lock = _two_crates(tmp_path)
+    result = _run_check(
+        cargo_audit_plugin,
+        [str(first_lock), str(second_lock)],
+        lambda _cmd, **_kw: _proc(success=False, stdout=_report("RUSTSEC-2021-0003")),
+    )
+
+    assert_that(result.issues).extracting("file").is_equal_to(
+        [str(first_lock.resolve()), str(second_lock.resolve())],
+    )
+    keys = {
+        entry.key
+        for issue in result.issues
+        if (entry := fingerprint(issue, tool=result.name, root=tmp_path)) is not None
+    }
+    assert_that(keys).is_length(2)
+
+
+def test_timeout_is_one_budget_for_every_lockfile(
+    cargo_audit_plugin: CargoAuditPlugin,
+    tmp_path: Path,
+) -> None:
+    """A budget spent on the first lockfile leaves the next one unaudited.
+
+    Args:
+        cargo_audit_plugin: The plugin instance.
+        tmp_path: Temporary directory holding the crates.
+    """
+    first_lock, second_lock = _two_crates(tmp_path)
+    clock = [1000.0]
+    budgets: list[float] = []
+
+    def slow_audit(_cmd: list[str], **kwargs: object) -> SubprocessResult:
+        budgets.append(float(str(kwargs["timeout"])))
+        clock[0] += 30
+        return _proc(success=False, stdout=_report("RUSTSEC-2021-0003"))
+
+    with patch(
+        "lintro.tools.cargo_audit.definition.time.monotonic",
+        side_effect=lambda: clock[0],
+    ):
+        result = _run_check(
+            cargo_audit_plugin,
+            [str(first_lock), str(second_lock)],
+            slow_audit,
+            {"timeout": 30},
+        )
+
+    assert_that(budgets).is_equal_to([30.0])
+    assert_that(result.timed_out).is_true()
+    assert_that(result.issues).extracting("file").is_equal_to(
+        [str(first_lock.resolve())],
+    )
+    assert_that(result.output).contains(str(second_lock))
+
+
+@pytest.mark.parametrize(
+    ("first_report", "second_fetches"),
+    [(_report(), False), ("not json", True)],
+    ids=["first-report-parsed", "first-report-missing"],
+)
+def test_advisory_database_is_fetched_once(
+    cargo_audit_plugin: CargoAuditPlugin,
+    tmp_path: Path,
+    first_report: str,
+    second_fetches: bool,
+) -> None:
+    """Later lockfiles reuse the database once a report proves it is in place.
+
+    Args:
+        cargo_audit_plugin: The plugin instance.
+        tmp_path: Temporary directory holding the crates.
+        first_report: What cargo-audit prints for the first lockfile.
+        second_fetches: Whether the second run may still fetch.
+    """
+    first_lock, second_lock = _two_crates(tmp_path)
+    commands: list[list[str]] = []
+
+    def fake_audit(cmd: list[str], **_kw: object) -> SubprocessResult:
+        commands.append(list(cmd))
+        report = first_report if len(commands) == 1 else _report()
+        return _proc(success=True, stdout=report)
+
+    _run_check(cargo_audit_plugin, [str(first_lock), str(second_lock)], fake_audit)
+
+    assert_that(commands[0]).does_not_contain("--no-fetch")
+    assert_that("--no-fetch" not in commands[1]).is_equal_to(second_fetches)
+
+
+def test_vendored_and_build_lockfiles_are_not_audited(
+    cargo_audit_plugin: CargoAuditPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lockfiles under vendor/ or target/ belong to third-party copies.
+
+    Args:
+        cargo_audit_plugin: The plugin instance.
+        tmp_path: Temporary project root.
+        monkeypatch: Pytest fixture used to run from the project root.
+    """
+    for crate in ("app", "vendor/dep", "target/package/app-0.1.0"):
+        (tmp_path / crate).mkdir(parents=True)
+        (tmp_path / crate / "Cargo.lock").write_text("version = 3\n")
+    monkeypatch.chdir(tmp_path)
+    audited: list[Path] = []
+
+    def fake_audit(_cmd: list[str], **kwargs: object) -> SubprocessResult:
+        audited.append(Path(str(kwargs["cwd"])))
+        return _proc(success=True, stdout=_report())
+
+    result = _run_check(cargo_audit_plugin, [str(tmp_path)], fake_audit)
+
+    assert_that(audited).is_equal_to([(tmp_path / "app").resolve()])
+    assert_that(result.success).is_true()

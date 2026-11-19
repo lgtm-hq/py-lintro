@@ -331,9 +331,17 @@ class TrufflehogPlugin(BaseToolPlugin):
         if failures:
             combined = "\n".join(f.output for f in failures if f.output)
             # A batch that ran out of time leaves the scan incomplete; keep that
-            # visible instead of folding it into a plain failure.
-            timed_out = any(f.timed_out for f in failures)
+            # visible instead of folding it into a plain failure. When other
+            # batches failed for another reason, report that as well.
+            timed_out_count = sum(1 for f in failures if f.timed_out)
+            timed_out = timed_out_count > 0
+            other_failures = len(failures) - timed_out_count
             failure_output = combined or "TruffleHog failed with a non-zero exit code."
+            if timed_out and other_failures:
+                failure_output = (
+                    f"{timed_out_count} batch(es) timed out and {other_failures} "
+                    f"batch(es) failed:\n{failure_output}"
+                )
             return ToolResult.from_outcome(
                 ToolOutcome(
                     execution=(
@@ -344,6 +352,9 @@ class TrufflehogPlugin(BaseToolPlugin):
                     issues_count=len(all_issues),
                 ),
                 name=self.definition.name,
+                # A timeout alone is flagged by the outcome; a batch that also
+                # failed on its own is an execution failure next to it.
+                execution_failed=timed_out and other_failures > 0,
                 output=failure_output,
                 issues=all_issues,
                 parse_failures_count=sum(

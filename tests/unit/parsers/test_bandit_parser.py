@@ -206,7 +206,9 @@ def test_bandit_check_parses_mixed_output_json(
     result: ToolResult = tool.check([str(p)], {})
     assert_that(isinstance(result, ToolResult)).is_true()
     assert_that(result.name).is_equal_to("bandit")
-    assert_that(result.success is True).is_true()
+    # The finding fails the check; the parsed report is still complete.
+    assert_that(result.success).is_false()
+    assert_that(result.findings_complete).is_true()
     assert_that(result.issues_count).is_equal_to(1)
 
 

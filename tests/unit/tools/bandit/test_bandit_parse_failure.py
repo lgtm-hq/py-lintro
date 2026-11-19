@@ -140,3 +140,50 @@ def test_check_valid_json_reports_no_parse_failures(tmp_path: Path) -> None:
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.parse_failures_count).is_equal_to(0)
+
+
+def test_check_counts_dropped_records_and_withholds_certification(
+    tmp_path: Path,
+) -> None:
+    """A record the parser skips is a parse failure, so findings are not complete.
+
+    Args:
+        tmp_path: Temporary directory path for the target Python file.
+    """
+    py_file = tmp_path / "mod.py"
+    py_file.write_text("x = 1\n")
+    kept = {
+        "filename": str(py_file),
+        "line_number": 1,
+        "issue_severity": "LOW",
+        "issue_confidence": "HIGH",
+        "test_id": "B101",
+        "issue_text": "Use of assert detected.",
+    }
+    report = {
+        "errors": [],
+        "results": [kept, {**kept, "line_number": "one"}],
+        "metrics": {str(py_file): {"loc": 1}},
+    }
+    completed: CompletedProcess[str] = CompletedProcess(
+        args=["bandit"],
+        returncode=1,
+        stdout=json.dumps(report),
+        stderr="",
+    )
+
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch(
+            "lintro.tools.bandit.definition.subprocess.run",
+            return_value=completed,
+        ),
+    ):
+        result = BanditPlugin().check([str(py_file)], {})
+
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.findings_complete).is_false()
