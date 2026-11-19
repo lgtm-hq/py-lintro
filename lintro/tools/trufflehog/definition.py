@@ -337,11 +337,13 @@ class TrufflehogPlugin(BaseToolPlugin):
             timed_out = timed_out_count > 0
             other_failures = len(failures) - timed_out_count
             failure_output = combined or "TruffleHog failed with a non-zero exit code."
+            besides_timeout: str | None = None
             if timed_out and other_failures:
-                failure_output = (
+                besides_timeout = (
                     f"{timed_out_count} batch(es) timed out and {other_failures} "
-                    f"batch(es) failed:\n{failure_output}"
+                    "batch(es) failed"
                 )
+                failure_output = f"{besides_timeout}:\n{failure_output}"
             return ToolResult.from_outcome(
                 ToolOutcome(
                     execution=(
@@ -355,6 +357,7 @@ class TrufflehogPlugin(BaseToolPlugin):
                 # A timeout alone is flagged by the outcome; a batch that also
                 # failed on its own is an execution failure next to it.
                 execution_failed=timed_out and other_failures > 0,
+                failure_besides_timeout=besides_timeout,
                 output=failure_output,
                 issues=all_issues,
                 parse_failures_count=sum(

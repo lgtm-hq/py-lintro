@@ -210,5 +210,5 @@ def test_check_timeout_and_failure_report_both_reasons(
     )
     # The one-line reason the digest and --advisory-only print names both.
     assert_that(incomplete_reason(result)).is_equal_to(
-        "timed out and failed (1 batch(es) timed out and 1 batch(es) failed:)",
+        "timed out and failed (1 batch(es) timed out and 1 batch(es) failed)",
     )

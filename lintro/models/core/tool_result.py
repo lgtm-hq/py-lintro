@@ -182,6 +182,13 @@ class ToolResult:
     # None preserves the original reporting schema when baselining is absent.
     baselined_count: int | None = field(default=None)
 
+    # A producer that knows part of its run timed out while another part
+    # failed for a different reason (trufflehog's batches, #2400) names that
+    # second failure here. Neither flag implies it: the per-file runner sets
+    # ``execution_failed`` next to ``timed_out`` when the timeout is the only
+    # failure. Read only when both flags are set.
+    failure_besides_timeout: str | None = field(default=None, kw_only=True)
+
     @classmethod
     def from_outcome(cls, outcome: ToolOutcome, **payload: Any) -> ToolResult:
         """Construct legacy-compatible fields from explicit producer evidence.
