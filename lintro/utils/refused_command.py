@@ -20,6 +20,7 @@ from lintro.models.core.tool_outcome import (
     ToolOutcome,
 )
 from lintro.models.core.tool_result import ToolResult
+from lintro.utils.npx_integrity import NpxInstallError
 
 
 def command_refusal(tool: object) -> UnsafeCommandError | None:
@@ -95,12 +96,14 @@ def mark_refused_command(
     if refusal is None:
         return result
     # An npx integrity refusal found after the run: the tool ran, but its
-    # results cannot be trusted (#3406, #3502).
-    lead = (
-        f"lintro cannot trust {result.name}'s results"
-        if getattr(refusal, "after_run", False)
-        else f"lintro refused to run {result.name}"
-    )
+    # results cannot be trusted (#3406, #3502). A failed npx install is
+    # neither: the tool never ran (#3530).
+    if isinstance(refusal, NpxInstallError):
+        lead = f"npx could not install {result.name}"
+    elif getattr(refusal, "after_run", False):
+        lead = f"lintro cannot trust {result.name}'s results"
+    else:
+        lead = f"lintro refused to run {result.name}"
     return _refused_result(result, f"{lead}: {refusal}", fix=fix)
 
 

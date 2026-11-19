@@ -273,7 +273,7 @@ class GitleaksPlugin(BaseToolPlugin):
                 if proc.returncode != 0:
                     stderr = (proc.stderr or proc.output or "").strip()
                     logger.error(
-                        "Gitleaks exited with code %s: %s",
+                        "Gitleaks exited with code {}: {}",
                         proc.returncode,
                         stderr[:500] if stderr else "(no stderr)",
                     )
@@ -337,7 +337,7 @@ class GitleaksPlugin(BaseToolPlugin):
                     )
                 if not isinstance(data, list):
                     logger.error(
-                        "Gitleaks output was not a JSON array (got %s).",
+                        "Gitleaks output was not a JSON array (got {}).",
                         type(data).__name__,
                     )
                     return [], ToolResult.from_outcome(

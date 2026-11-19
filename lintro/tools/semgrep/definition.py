@@ -124,6 +124,34 @@ def _restore_pack_rule_ids(data: dict[str, Any], packs: list[str]) -> None:
             result["check_id"] = marker + suffix
 
 
+def _failure_output(
+    output: str,
+    *,
+    complete: bool,
+    parse_failures: int,
+) -> str | None:
+    """Return the output kept on a Semgrep result.
+
+    Args:
+        output: Semgrep's own output.
+        complete: Whether the scan produced a complete verdict.
+        parse_failures: Report entries the parser could not read.
+
+    Returns:
+        None for a complete scan. Otherwise the output, led by a reason line
+        when entries were dropped, so the one-line digest names the drops
+        instead of quoting the start of the JSON report (#2400).
+    """
+    if complete:
+        return None
+    if not parse_failures:
+        return output
+    return (
+        f"Semgrep reported {parse_failures} record(s) lintro could not parse; "
+        f"its findings are incomplete.\n{output}"
+    )
+
+
 def _withhold_hidden(result: ToolResult, warning: str | None) -> ToolResult:
     """Fail a result whose directory-scoped packs could not see some targets.
 
@@ -613,13 +641,23 @@ class SemgrepPlugin(BaseToolPlugin):
                 ToolResult.from_outcome(
                     ToolOutcome(
                         execution=Checked(
-                            success=execution_success,
+                            # Findings fail the check, as in most tools.
+                            success=execution_success and issues_count == 0,
                             inspected_files=inspected_files,
                         ),
                         issues_count=issues_count,
                     ),
                     name=self.definition.name,
-                    output=output if not execution_success else None,
+                    # Keep an incomplete run distinguishable from findings.
+                    execution_failed=not execution_success,
+                    # A completed scan accounts for every result (drops are
+                    # parse failures above), so its findings can be baselined.
+                    findings_complete=execution_success,
+                    output=_failure_output(
+                        output,
+                        complete=execution_success,
+                        parse_failures=parse_failures_count,
+                    ),
                     issues=issues,
                     parse_failures_count=parse_failures_count or None,
                 ),

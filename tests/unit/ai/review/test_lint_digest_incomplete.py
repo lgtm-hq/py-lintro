@@ -145,8 +145,32 @@ def test_crashed_tool_is_named_in_the_prompt_instead_of_dropped(
     [
         pytest.param(
             ToolResult(name="tsc", success=False, timed_out=True, output="x"),
-            "Tool: tsc | did not run / incomplete: timed out",
+            "Tool: tsc | did not run / incomplete: timed out\n",
             id="timed-out",
+        ),
+        pytest.param(
+            ToolResult(
+                name="trufflehog",
+                success=False,
+                timed_out=True,
+                execution_failed=True,
+                output="1 batch(es) timed out and 1 batch(es) failed:\nfatal: boom",
+                failure_besides_timeout="1 batch(es) timed out and 1 batch(es) failed",
+            ),
+            "Tool: trufflehog | did not run / incomplete: timed out and failed "
+            "(1 batch(es) timed out and 1 batch(es) failed)",
+            id="timed-out-and-failed",
+        ),
+        pytest.param(
+            ToolResult(
+                name="shellcheck",
+                success=False,
+                timed_out=True,
+                execution_failed=True,
+                output="a.sh:3:1: warning: foo appears unused [SC2034]",
+            ),
+            "Tool: shellcheck | did not run / incomplete: timed out\n",
+            id="per-file-timeout-quotes-no-finding",
         ),
         pytest.param(
             ToolResult(

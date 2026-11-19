@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 from unittest.mock import patch
 
@@ -76,3 +77,27 @@ def test_fix_raises_not_implemented(
     """
     with pytest.raises(NotImplementedError, match="Markdownlint cannot fix"):
         markdownlint_plugin.fix([], {})
+
+
+def test_check_timeout_records_working_directory(
+    markdownlint_plugin: MarkdownlintPlugin,
+    tmp_path: Path,
+) -> None:
+    """A timed-out run reports the directory markdownlint ran in (#2400).
+
+    Args:
+        markdownlint_plugin: The MarkdownlintPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    md_file = tmp_path / "README.md"
+    md_file.write_text("# Title\n")
+
+    with patch.object(
+        markdownlint_plugin,
+        "_run_subprocess",
+        side_effect=subprocess.TimeoutExpired(cmd=["markdownlint-cli2"], timeout=1),
+    ):
+        result = markdownlint_plugin.check([str(md_file)], {})
+
+    assert_that(result.timed_out).is_true()
+    assert_that(result.cwd).is_equal_to(str(tmp_path))

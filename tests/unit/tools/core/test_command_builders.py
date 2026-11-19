@@ -28,6 +28,7 @@ from lintro.tools.core.command_builders import (
 )
 from lintro.tools.core.node_fallback import (
     NODE_ENGINE_REQUIREMENTS,
+    NPX_ISOLATION_FLAGS,
     is_registry_fallback_command,
     notify_registry_fallback_selected,
     npx_runner_options,
@@ -1226,6 +1227,36 @@ def test_spectral_runner_fallback_uses_scoped_package(
     )
     assert_that(cmd[-2]).starts_with("@stoplight/spectral-cli@")
     assert_that(cmd[-1]).is_equal_to("spectral")
+
+
+@pytest.mark.parametrize(
+    "tool",
+    list(NodeJSBuilder().package_names),
+    ids=lambda tool: tool.value,
+)
+def test_every_npx_fallback_skips_install_scripts(
+    no_local_node_install: None,
+    tool: ToolName,
+) -> None:
+    """Every npx command lintro builds carries ``--ignore-scripts`` (#3548).
+
+    Install scripts are the usual way a process npx starts could outlive
+    npx and keep writing into the cache after a timeout, the limit
+    documented in :mod:`lintro.utils.npx_integrity`; this flag is what keeps
+    them from running.
+
+    Args:
+        no_local_node_install: Fixture removing any project-local Node install
+            from resolution.
+        tool: Node tool whose registry fallback is built.
+    """
+    assert_that(NPX_ISOLATION_FLAGS).contains("--ignore-scripts")
+    builder = NodeJSBuilder()
+    with patch("shutil.which", _which_only("npx")):
+        cmd = builder.get_command(tool.value, tool)
+
+    assert_that(cmd[0]).is_equal_to("npx")
+    assert_that(cmd[: cmd.index("--package")]).contains("--ignore-scripts")
 
 
 # =============================================================================

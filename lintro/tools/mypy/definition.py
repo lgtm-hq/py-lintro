@@ -410,16 +410,16 @@ class MypyPlugin(BaseToolPlugin):
         # Temporarily update exclude patterns for file discovery
         original_excludes = self.exclude_patterns
         self.exclude_patterns = effective_excludes
-
-        # Use shared preparation with custom excludes
-        ctx = self.prepare(
-            target_paths,
-            merged_options,
-            no_files_message="No files to check.",
-        )
-
-        # Restore original exclude patterns
-        self.exclude_patterns = original_excludes
+        try:
+            # Use shared preparation with custom excludes
+            ctx = self.prepare(
+                target_paths,
+                merged_options,
+                no_files_message="No files to check.",
+            )
+        finally:
+            # Restore original exclude patterns even when preparation raises
+            self.exclude_patterns = original_excludes
 
         if isinstance(ctx, ToolResult):
             return ctx

@@ -86,6 +86,18 @@ run has no earlier state to compare with, so a byte-identical swap made and
 undone while it runs is not seen: npx installs and runs in one process. On Windows,
 ``st_ctime`` is the creation time, so there the fingerprint relies on size,
 mtime and inode.
+
+After a cold install that timed out, lintro removes the unfinished entry and
+its lock, so the next run starts cold (:mod:`lintro.utils.npx_unfinished`). If
+a process npx started outlives npx and keeps writing into that entry by
+absolute path, a later run can reinstall the pin there, and npx can run the
+tool while that process writes into the new entry. Only install scripts could
+normally start such a process, and every npx fallback carries
+``--ignore-scripts``, so this takes a process started some other way. The
+post-run check still marks the results of such a run untrusted, but only after
+the tool has run; ``main`` before #3530 instead refused every later run before
+spawning anything, until the entry was repaired. The general problem is
+tracked in #3548.
 """
 
 from __future__ import annotations
@@ -247,6 +259,56 @@ class NpxIntegrityError(UnsafeCommandError):
     """
 
     after_run: bool = False
+
+
+class NpxInstallError(NpxIntegrityError):
+    """npx exited with an error before it finished installing the pin (#3530).
+
+    The fresh entry has no ``package-lock.json`` because npm never wrote it,
+    so the tool did not run from it: the run is incomplete, an install
+    failure rather than a cache lintro refuses to trust. It stays an
+    :class:`NpxIntegrityError` so every caller reports it as an execution
+    failure with incomplete findings.
+    """
+
+
+@dataclass
+class NpxExit:
+    """How the npx process a caller spawned ended, recorded by that caller.
+
+    The post-run check reads it to tell a failed install from a tampered one
+    (#3530): only a non-zero exit explains a fresh entry without a lockfile.
+
+    Attributes:
+        returncode: npx's exit status, or None until the caller records it.
+        stderr: What npx printed on stderr (or its merged output).
+    """
+
+    returncode: int | None = None
+    stderr: str = ""
+
+    def record(self, returncode: int | None, stderr: str | None) -> None:
+        """Record npx's exit status and error output.
+
+        Args:
+            returncode: npx's exit status.
+            stderr: npx's error output, if captured.
+        """
+        self.returncode = returncode
+        self.stderr = stderr or ""
+
+    @property
+    def failed(self) -> bool:
+        """Report whether npx exited with an error.
+
+        Returns:
+            True for a recorded non-zero exit status.
+        """
+        return self.returncode not in (None, 0)
+
+
+#: Longest tail of npx's error output quoted in an install failure.
+_NPX_ERROR_TAIL_CHARS: int = 2000
 
 
 class Refusal(str):
@@ -1585,6 +1647,7 @@ def check_unchanged(
     before: CacheState,
     *,
     timeout: float | None = None,
+    npx_exit: NpxExit | None = None,
 ) -> None:
     """Require a cache to hold what it held before the spawn, after the run.
 
@@ -1600,17 +1663,52 @@ def check_unchanged(
         cache: The ``--cache`` the npx command carried.
         before: What :func:`verified_cache` found.
         timeout: The tool's timeout in seconds, if known.
+        npx_exit: How npx ended, when the caller recorded it. A fresh entry
+            without a lockfile after npx exited with an error is an install
+            failure; after any other exit it is refused like any other
+            entry that does not match its lockfile. The status is the
+            tool's as much as npx's (a linter that finds issues exits 1),
+            so an install counts as failed only when the entry shows it
+            never completed (:func:`install_unfinished`).
 
     Raises:
+        NpxInstallError: npx exited with an error and left a fresh entry
+            it never finished installing (#3530).
         NpxIntegrityError: An entry or the cache changed during the run, a new
             entry does not match its lockfile, or a ``node_modules`` appeared
             above an entry.
     """
     real = Path(os.path.realpath(cache))
+    changed = existing_change(real, before)
+    if changed is not None:
+        raise NpxIntegrityError(changed)
+    deadline = time.monotonic() + wait_limit(timeout)
+    for entry in _entries(real, ran=True):
+        if entry.name not in before.entries:
+            _await_npm(entry, real, deadline)
+            if npx_exit is not None and npx_exit.failed and install_unfinished(entry):
+                raise NpxInstallError(_install_failed_message(entry, npx_exit))
+            _verified(entry, real, cache, fresh=True)
+    _modules_above(real, ran=True)
+
+
+def existing_change(real: Path, before: CacheState) -> str | None:
+    """Explain how the entries verified before the spawn changed, if they did.
+
+    This is the part of :func:`check_unchanged` that needs no finished run:
+    it holds whether npx exited or was stopped, so it is also checked after a
+    run that ended in an exception (#3530).
+
+    Args:
+        real: The ``--cache`` the npx command carried, resolved.
+        before: What :func:`verified_cache` found.
+
+    Returns:
+        Why the cache cannot be trusted when an entry, the cache directory or
+        ``_npx`` changed; None when all are as verified.
+    """
     if before.entries and _directory_rows(real) != before.directories:
-        raise NpxIntegrityError(
-            _changed_message(f"lintro's npm cache {real} (an entry was moved)"),
-        )
+        return _changed_message(f"lintro's npm cache {real} (an entry was moved)")
     for name, fingerprint in before.entries.items():
         entry = real / "_npx" / name
         try:
@@ -1618,12 +1716,121 @@ def check_unchanged(
         except OSError:
             unchanged = False
         if not unchanged:
-            raise NpxIntegrityError(
-                _changed_message(f"lintro's npm cache entry {entry}"),
-            )
-    deadline = time.monotonic() + wait_limit(timeout)
-    for entry in _entries(real, ran=True):
-        if entry.name not in before.entries:
-            _await_npm(entry, real, deadline)
-            _verified(entry, real, cache, fresh=True)
-    _modules_above(real, ran=True)
+            return _changed_message(f"lintro's npm cache entry {entry}")
+    return None
+
+
+def install_unfinished(
+    entry: Path,
+    *,
+    dir_fd: int | None = None,
+    npx_stopped: bool = False,
+) -> bool:
+    """Report whether npm never finished installing into a fresh entry.
+
+    npm links the packages' executables into ``node_modules/.bin``, then runs
+    the packages' install scripts, and writes ``package-lock.json`` last; npx
+    runs the tool only after that. So an entry without a lockfile never ran
+    the tool through an npx that lintro stopped (*npx_stopped*: a timeout,
+    an interruption, any exception while npx was still running), whatever
+    else it holds: it is unfinished.
+
+    That rule cannot tell an install npm never finished from a finished one
+    whose lockfile was deleted while the tool was still running: if such a
+    run then times out (or is interrupted), its entry is removed and the
+    result is the timeout, with no "cannot trust" refusal. That is accepted
+    on purpose. The run's result is already reported as incomplete (a
+    timeout is ``execution_failed``, with no findings), nothing is executed
+    from the removed entry, and the next run installs it afresh and
+    verifies it.
+
+    When npx exited by itself, its status is the tool's too, and an entry
+    with executables but no lockfile may have run the tool before it lost
+    the lockfile. Only an entry with neither got no further than the
+    install; one with executables is not called unfinished, and is refused
+    as any entry that does not match its lockfile is, kept as evidence.
+
+    Anything that cannot be read counts as finished, so it is never removed
+    as unfinished.
+
+    Args:
+        entry: A ``_npx`` entry that appeared during the run; a bare name
+            when *dir_fd* is given.
+        dir_fd: Open ``_npx`` directory *entry* is relative to, or None.
+        npx_stopped: Whether lintro stopped npx before it exited by itself.
+
+    Returns:
+        True when *entry* is a real directory with no ``package-lock.json``
+        (not even a link) and, unless *npx_stopped*, no executable in
+        ``node_modules/.bin``.
+    """
+    try:
+        top = os.stat(entry, dir_fd=dir_fd, follow_symlinks=False)
+        if not stat.S_ISDIR(top.st_mode):
+            return False
+        os.stat(entry / "package-lock.json", dir_fd=dir_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return False
+    else:
+        return False
+    if npx_stopped:
+        return True
+    return not _has_executables(entry / "node_modules" / ".bin", dir_fd)
+
+
+def _has_executables(bin_dir: Path, dir_fd: int | None) -> bool:
+    """Report whether a ``node_modules/.bin`` holds anything.
+
+    Args:
+        bin_dir: The directory; relative to *dir_fd* when one is given.
+        dir_fd: Directory descriptor *bin_dir* is relative to, or None.
+
+    Returns:
+        False only when it is missing or an empty real directory; True for
+        anything else, including what cannot be read.
+    """
+    try:
+        mode = os.stat(bin_dir, dir_fd=dir_fd, follow_symlinks=False).st_mode
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    if not stat.S_ISDIR(mode):
+        return True
+    try:
+        if dir_fd is None:
+            return bool(os.listdir(bin_dir))
+        fd = os.open(bin_dir, os.O_RDONLY | _O_DIRECTORY, dir_fd=dir_fd)
+        try:
+            return bool(os.listdir(fd))
+        finally:
+            os.close(fd)
+    except OSError:
+        return True
+
+
+#: Opens a directory only, where the platform can say so.
+_O_DIRECTORY: int = getattr(os, "O_DIRECTORY", 0)
+
+
+def _install_failed_message(entry: Path, npx_exit: NpxExit) -> str:
+    """Explain an npx install that failed, with npx's own error output.
+
+    Args:
+        entry: The unfinished ``_npx`` entry.
+        npx_exit: How npx ended.
+
+    Returns:
+        The message.
+    """
+    said = npx_exit.stderr.strip()[-_NPX_ERROR_TAIL_CHARS:]
+    detail = f" npx said:\n{said}" if said else ""
+    return (
+        f"npx exited with code {npx_exit.returncode} before it finished "
+        f"installing the pinned package into {entry} (no package-lock.json "
+        "was written), so the tool did not run and its findings are "
+        "incomplete. Run lintro again; npx reinstalls the pin."
+        f"{detail}"
+    )

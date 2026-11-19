@@ -1,0 +1,944 @@
+"""A cold npx install that did not finish is not tampering (#3530).
+
+npx is replaced by a shell script that writes into lintro's per-pin cache the
+way npm does, so nothing is downloaded. A run that times out mid-install is a
+timeout, a run whose npx exits with an error mid-install is an install
+failure, and either way the half-written entry is removed under lintro's
+exclusive install lock, so a run waiting for that lock installs afresh. An
+entry with no lockfile that npx did not explain is still refused.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import os
+import signal
+import subprocess  # nosec B404 - TimeoutExpired only; scripts run via the executors
+import sys
+import threading
+import time
+import types
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import pytest
+from assertpy import assert_that
+
+from lintro.models.core.subprocess_result import SubprocessResult
+from lintro.plugins import subprocess_executor
+from lintro.plugins.subprocess_executor import (
+    run_subprocess,
+    run_subprocess_streaming,
+)
+from lintro.tools.core.npx_cache import (
+    NpxCacheError,
+    NpxCacheLockError,
+    repair_npx_cache,
+)
+from lintro.tools.core.version_parsing import _run_probe, _run_probe_with_retry
+from lintro.utils import file_cache, npx_unfinished
+from lintro.utils.npx_call import npx_cache_option, npx_shell_safe_command
+from lintro.utils.npx_integrity import (
+    NpxExit,
+    NpxInstallError,
+    NpxIntegrityError,
+    cache_entries,
+    install_unfinished,
+)
+from lintro.utils.npx_unfinished import bound_cache
+from tests.npx_entries import LockedPackage, tool_package, write_npx_entry
+
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="the fake npx is a POSIX shell script",
+)
+
+_SPEC = "prettier@3.9.4"
+_ENTRY = "0123456789abcdef"
+
+#: Executors that spawn npx, each called as ``(argv, timeout) -> result``.
+_EXECUTORS: dict[str, Callable[[list[str], float], object]] = {
+    "run_subprocess": lambda argv, timeout: run_subprocess(argv, timeout=timeout),
+    "run_subprocess_streaming": lambda argv, timeout: run_subprocess_streaming(
+        argv,
+        timeout=timeout,
+    ),
+    "version_probe": lambda argv, timeout: _run_probe_with_retry(
+        [*argv, "--version"],
+        timeout,
+    ),
+}
+
+
+@pytest.fixture(autouse=True)
+def _private_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the real ``~/.node_modules`` out of the ancestor check.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Scoped ``HOME`` override.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+
+@pytest.fixture
+def cache(tmp_path: Path) -> Path:
+    """Per-pin npm cache, resolved, with nothing in it yet.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+
+    Returns:
+        The cache directory.
+    """
+    return Path(os.path.realpath(tmp_path)) / "npx" / _SPEC
+
+
+def _fake_npx(directory: Path, body: str) -> list[str]:
+    """Write a fake npx and return lintro's npx fallback command for it.
+
+    Args:
+        directory: Where the script goes.
+        body: Shell script body.
+
+    Returns:
+        The argv, without the per-pin cache option, which callers add.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "npx"
+    path.write_text(f"#!/bin/sh\n{body}", encoding="utf-8")
+    path.chmod(0o755)
+    return [str(path)]
+
+
+def _command(npx: list[str], cache: Path) -> list[str]:
+    """Return lintro's npx fallback shape for *cache*.
+
+    Args:
+        npx: The fake npx argv.
+        cache: Per-pin npm cache.
+
+    Returns:
+        The npx command.
+    """
+    return [*npx, "--yes", f"--cache={cache}", "--package", _SPEC, "prettier"]
+
+
+def _half_install(cache: Path, *, bins: bool = False) -> str:
+    """Return shell that leaves an entry the way a stopped npm install does.
+
+    The package is unpacked and npm's lock is held, but ``package-lock.json``,
+    which npm writes last, is not there. With *bins*, npm has also linked
+    the executables, which it does before running install scripts: the
+    shape a real install stopped during ``postinstall`` leaves.
+
+    Args:
+        cache: Per-pin npm cache.
+        bins: Whether ``node_modules/.bin`` is already linked.
+
+    Returns:
+        Shell commands.
+    """
+    entry = cache / "_npx" / _ENTRY
+    linked = (
+        f"mkdir -p '{entry}/node_modules/.bin'\n"
+        f"echo 'console.log(1)' > '{entry}/node_modules/prettier/bin.js'\n"
+        f"ln -s ../prettier/bin.js '{entry}/node_modules/.bin/prettier'\n"
+        if bins
+        else ""
+    )
+    return (
+        f"mkdir -p '{entry}/node_modules/prettier' '{entry}/concurrency.lock'\n"
+        f"echo '{{}}' > '{entry}/node_modules/prettier/package.json'\n"
+        f"{linked}"
+    )
+
+
+@pytest.mark.parametrize("executor", list(_EXECUTORS), ids=list(_EXECUTORS))
+def test_a_cold_install_that_times_out_is_a_timeout(
+    cache: Path,
+    tmp_path: Path,
+    executor: str,
+) -> None:
+    """Npx killed at the timeout mid-install: a timeout, and no entry is left.
+
+    Args:
+        cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
+        executor: Which lintro entry point spawns npx.
+    """
+    npx = _fake_npx(tmp_path / "bin", f"{_half_install(cache)}exec sleep 30\n")
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        _EXECUTORS[executor](_command(npx, cache), 1.0)
+
+    assert_that(cache_entries(cache)).is_empty()
+
+
+@pytest.mark.parametrize("executor", list(_EXECUTORS), ids=list(_EXECUTORS))
+def test_a_failed_cold_install_is_an_install_failure(
+    cache: Path,
+    tmp_path: Path,
+    executor: str,
+) -> None:
+    """Npx exits with an error mid-install: its own error, not tampering.
+
+    Args:
+        cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
+        executor: Which lintro entry point spawns npx.
+    """
+    npx = _fake_npx(
+        tmp_path / "bin",
+        f"{_half_install(cache)}"
+        f"rmdir '{cache}/_npx/{_ENTRY}/concurrency.lock'\n"
+        "echo 'npm error code ECONNRESET' >&2\nexit 1\n",
+    )
+
+    with pytest.raises(NpxInstallError) as caught:
+        _EXECUTORS[executor](_command(npx, cache), 30.0)
+
+    assert_that(str(caught.value)).contains("exited with code 1").contains(
+        "ECONNRESET",
+    ).does_not_contain("cannot be trusted")
+    assert_that(caught.value.after_run).is_false()
+    assert_that(cache_entries(cache)).is_empty()
+
+
+def _first_call_half_installs(tmp_path: Path, cache: Path, then: str) -> list[str]:
+    """Return a fake npx whose first call leaves a half install with bins.
+
+    Every later call installs the complete entry and runs the tool.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        cache: Per-pin npm cache.
+        then: Shell the first call runs after the half install.
+
+    Returns:
+        The fake npx argv.
+    """
+    staged = write_npx_entry(cache, [tool_package()], name=_ENTRY)
+    complete = tmp_path / "complete"
+    staged.rename(complete)
+    claimed = tmp_path / "first"
+    return _fake_npx(
+        tmp_path / "bin",
+        f"if mkdir '{claimed}' 2>/dev/null; then\n"
+        f"{_half_install(cache, bins=True)}{then}"
+        "fi\n"
+        f"mv '{complete}' '{cache}/_npx/{_ENTRY}'\necho '[]'\n",
+    )
+
+
+#: :data:`_EXECUTORS`, with one version probe attempt instead of the probe's
+#: retry, so the timeout reaches the test.
+_SINGLE_ATTEMPT: dict[str, Callable[[list[str], float], object]] = {
+    **_EXECUTORS,
+    "version_probe": lambda argv, timeout: _run_probe(
+        [*argv, "--version"],
+        timeout=timeout,
+        env=None,
+        cwd=None,
+    ),
+}
+
+
+@pytest.mark.parametrize("executor", list(_SINGLE_ATTEMPT), ids=list(_SINGLE_ATTEMPT))
+def test_a_cold_install_stopped_after_linking_bins_does_not_block_the_next_run(
+    cache: Path,
+    tmp_path: Path,
+    executor: str,
+) -> None:
+    """Stopped during postinstall: bins linked, no lockfile, npm's lock left.
+
+    npx runs the tool only after writing the lockfile, so the tool never ran
+    from this entry: lintro removes it with npm's lock, and the next run
+    installs at once instead of waiting on that lock and then refusing it.
+
+    Args:
+        cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
+        executor: Which lintro entry point spawns npx.
+    """
+    npx = _first_call_half_installs(tmp_path, cache, "exec sleep 30\n")
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        _SINGLE_ATTEMPT[executor](_command(npx, cache), 1.0)
+    assert_that(cache_entries(cache)).is_empty()
+
+    started = time.monotonic()
+    result = _SINGLE_ATTEMPT[executor](_command(npx, cache), 30.0)
+
+    assert_that(time.monotonic() - started).is_less_than(10.0)
+    assert_that(getattr(result, "returncode", None)).is_zero()
+    assert_that([entry.name for entry in cache_entries(cache)]).is_equal_to([_ENTRY])
+
+
+def test_a_failed_exit_after_bins_were_linked_keeps_the_entry(
+    cache: Path,
+    tmp_path: Path,
+) -> None:
+    """An npx that exited by itself may have run the tool: the entry stays.
+
+    Args:
+        cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    npx = _fake_npx(
+        tmp_path / "bin",
+        f"{_half_install(cache, bins=True)}"
+        f"rmdir '{cache}/_npx/{_ENTRY}/concurrency.lock'\n"
+        "echo '[]'\nexit 1\n",
+    )
+
+    with pytest.raises(NpxIntegrityError) as caught:
+        run_subprocess(_command(npx, cache), timeout=30)
+
+    assert_that(isinstance(caught.value, NpxInstallError)).is_false()
+    assert_that(str(caught.value)).contains("cannot be trusted")
+    assert_that(caught.value.after_run).is_true()
+    assert_that([entry.name for entry in cache_entries(cache)]).is_equal_to([_ENTRY])
+
+
+def _exit_with_bins_then_fail(cache: Path, npx_exit: NpxExit) -> None:
+    """Leave linked bins and no lockfile, record a failed exit, then raise.
+
+    Args:
+        cache: Per-pin npm cache.
+        npx_exit: Where the exit status is recorded.
+
+    Raises:
+        RuntimeError: Always, as lintro failing after npx exited.
+    """
+    bin_dir = cache / "_npx" / _ENTRY / "node_modules" / ".bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "prettier").write_text("", encoding="utf-8")
+    npx_exit.record(1, "")
+    raise RuntimeError("after npx exited")
+
+
+def test_an_error_after_npx_exited_by_itself_keeps_an_entry_with_bins(
+    cache: Path,
+) -> None:
+    """Once npx has exited with a status, an exception does not widen cleanup.
+
+    The exit status is recorded, so npx was not stopped: an entry with
+    executables and no lockfile may have run the tool, and stays.
+
+    Args:
+        cache: Per-pin npm cache.
+    """
+    npx_exit = NpxExit()
+    command = _command(["npx"], cache)
+
+    with pytest.raises(RuntimeError):
+        with npx_shell_safe_command(command, timeout=30.0, npx_exit=npx_exit):
+            _exit_with_bins_then_fail(cache, npx_exit)
+
+    assert_that([entry.name for entry in cache_entries(cache)]).is_equal_to([_ENTRY])
+
+
+#: An entry npx did not explain, by how npx exited and what it left.
+_UNEXPLAINED: dict[str, tuple[int, Callable[[Path], object], str]] = {
+    "clean-exit-without-lockfile": (
+        0,
+        lambda entry: (entry / "package-lock.json").unlink(),
+        "has no readable package-lock.json",
+    ),
+    # npx's status is the tool's too: a linter that finds issues exits 1. An
+    # entry whose install got as far as its executables, and then lost its
+    # lockfile, is tampering, not an install that failed.
+    "failed-exit-after-the-lockfile-was-deleted": (
+        1,
+        lambda entry: (entry / "package-lock.json").unlink(),
+        "has no readable package-lock.json",
+    ),
+    "failed-exit-with-a-lockfile-that-lies": (
+        1,
+        lambda entry: (entry / "node_modules" / "prettier" / "bin.js").write_text(
+            "console.log('[]');\n",
+            encoding="utf-8",
+        ),
+        "bin.js changed",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", list(_UNEXPLAINED), ids=list(_UNEXPLAINED))
+def test_an_entry_npx_did_not_explain_is_still_refused(
+    cache: Path,
+    tmp_path: Path,
+    case: str,
+) -> None:
+    """Only a failed exit with no lockfile at all reads as an install failure.
+
+    Args:
+        cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
+        case: How npx exits and what its entry holds.
+    """
+    code, damage, expected = _UNEXPLAINED[case]
+    staged = write_npx_entry(cache, [tool_package()], name=_ENTRY)
+    damage(staged)
+    aside = tmp_path / "staged"
+    staged.rename(aside)
+    npx = _fake_npx(
+        tmp_path / "bin",
+        f"mv '{aside}' '{cache}/_npx/{_ENTRY}'\necho '[]'\nexit {code}\n",
+    )
+
+    with pytest.raises(NpxIntegrityError) as caught:
+        run_subprocess(_command(npx, cache), timeout=30)
+
+    assert_that(isinstance(caught.value, NpxInstallError)).is_false()
+    assert_that(str(caught.value)).contains(expected).contains("cannot be trusted")
+    assert_that(caught.value.after_run).is_true()
+    # The entry stays, as evidence, for the next run's refusal.
+    assert_that([entry.name for entry in cache_entries(cache)]).is_equal_to([_ENTRY])
+
+
+def _wait_for(path: Path, budget: float = 20.0) -> None:
+    """Wait until *path* exists.
+
+    Args:
+        path: The marker.
+        budget: Longest wait in seconds.
+    """
+    give_up = time.monotonic() + budget
+    while not path.exists():
+        assert_that(time.monotonic()).is_less_than(give_up)
+        time.sleep(0.02)
+
+
+#: How the first run's npx stops: its body after the half install, its
+#: timeout, what it raises, and whether its executables were linked.
+_FIRST_RUN_STOPS: dict[str, tuple[str, float, type[BaseException], bool]] = {
+    "times-out": ("exec sleep 30\n", 3.0, subprocess.TimeoutExpired, False),
+    # Stopped during postinstall: bins linked, lockfile not yet written,
+    # npm's lock left behind.
+    "times-out-after-linking-bins": (
+        "exec sleep 30\n",
+        3.0,
+        subprocess.TimeoutExpired,
+        True,
+    ),
+    "fails": (
+        "{wait_go}rmdir '{lock}'\necho 'npm error code E500' >&2\nexit 1\n",
+        30.0,
+        NpxInstallError,
+        False,
+    ),
+}
+
+
+@pytest.mark.parametrize("stop", list(_FIRST_RUN_STOPS), ids=list(_FIRST_RUN_STOPS))
+def test_a_run_waiting_on_an_unfinished_cold_install_installs_afresh(
+    cache: Path,
+    tmp_path: Path,
+    stop: str,
+) -> None:
+    """Concurrent cold runs: the second is not refused over the first's leftovers.
+
+    The first run's npx starts a cold install and stops. A second run, started
+    while the first holds lintro's exclusive install lock, waits for it, then
+    finds a cold cache, installs, and its check passes.
+
+    Args:
+        cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
+        stop: How the first run's npx stops.
+    """
+    body, first_timeout, first_error, bins = _FIRST_RUN_STOPS[stop]
+    staged = write_npx_entry(cache, [tool_package()], name=_ENTRY)
+    complete = tmp_path / "complete"
+    staged.rename(complete)
+    started, go, claimed = tmp_path / "started", tmp_path / "go", tmp_path / "first"
+    wait_go = f"while [ ! -e '{go}' ]; do sleep 0.02; done\n"
+    npx = _fake_npx(
+        tmp_path / "bin",
+        f"if mkdir '{claimed}' 2>/dev/null; then\n"
+        f"{_half_install(cache, bins=bins)}touch '{started}'\n"
+        f"{body.format(wait_go=wait_go, lock=cache / '_npx' / _ENTRY / 'concurrency.lock')}"
+        "fi\n"
+        f"mv '{complete}' '{cache}/_npx/{_ENTRY}'\necho '[]'\n",
+    )
+    outcomes: dict[str, object] = {}
+
+    def run(name: str, timeout: float) -> None:
+        try:
+            outcomes[name] = run_subprocess(_command(npx, cache), timeout=timeout)
+        except (subprocess.TimeoutExpired, NpxIntegrityError) as exc:
+            outcomes[name] = exc
+
+    first = threading.Thread(target=run, args=("first", first_timeout))
+    first.start()
+    _wait_for(started)
+    second = threading.Thread(target=run, args=("second", 30.0))
+    second.start()
+    go.touch()
+    first.join(timeout=60)
+    second.join(timeout=60)
+
+    assert_that(outcomes["first"]).is_instance_of(first_error)
+    assert_that(outcomes["second"]).is_instance_of(SubprocessResult)
+    second_result = outcomes["second"]
+    assert isinstance(second_result, SubprocessResult)
+    assert_that(second_result.returncode).is_zero()
+    assert_that([entry.name for entry in cache_entries(cache)]).is_equal_to([_ENTRY])
+
+
+#: How the cache directory is swapped out during a cold run: the shell that
+#: does it, given the cache and a directory holding another unfinished
+#: entry, and where that entry is afterwards.
+_SWAPS: dict[str, tuple[str, str]] = {
+    "replaced-by-a-link": (
+        "mv '{cache}' '{cache}.moved'\nln -s '{other}' '{cache}'\n",
+        "{other}",
+    ),
+    "replaced-by-another-directory": (
+        "mv '{cache}' '{cache}.moved'\nmv '{other}' '{cache}'\n",
+        "{cache}",
+    ),
+}
+
+
+@pytest.mark.parametrize("swap", list(_SWAPS), ids=list(_SWAPS))
+def test_cleanup_never_follows_a_cache_directory_swapped_during_the_run(
+    cache: Path,
+    tmp_path: Path,
+    swap: str,
+) -> None:
+    """Only the cache directory examined before the spawn is cleaned up.
+
+    The install lock sits beside the cache, so it does not notice the cache
+    directory itself being replaced. The unfinished entry now at the cache's
+    path is not the one npx was writing, and must not be removed.
+
+    Args:
+        cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
+        swap: How the cache directory is replaced.
+    """
+    other = tmp_path / "elsewhere"
+    planted = other / "_npx" / _ENTRY / "node_modules" / "prettier"
+    planted.mkdir(parents=True)
+    (planted / "package.json").write_text("{}", encoding="utf-8")
+    script, where = _SWAPS[swap]
+    npx = _fake_npx(
+        tmp_path / "bin",
+        f"{_half_install(cache)}{script.format(cache=cache, other=other)}"
+        "exec sleep 30\n",
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_subprocess(_command(npx, cache), timeout=1.0)
+
+    survivor = Path(where.format(cache=cache, other=other)) / "_npx" / _ENTRY
+    assert_that(str(survivor / "node_modules" / "prettier" / "package.json")).exists()
+    moved = Path(f"{cache}.moved") / "_npx" / _ENTRY
+    assert_that(str(moved / "node_modules" / "prettier" / "package.json")).exists()
+
+
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root reads a directory whatever its mode",
+)
+def test_a_cleanup_that_cannot_read_the_cache_keeps_the_timeout(
+    cache: Path,
+    tmp_path: Path,
+) -> None:
+    """An error during cleanup never replaces the error that ended the run.
+
+    Args:
+        cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    npx = _fake_npx(
+        tmp_path / "bin",
+        f"{_half_install(cache)}chmod 000 '{cache}'\nexec sleep 30\n",
+    )
+    try:
+        with pytest.raises(subprocess.TimeoutExpired):
+            run_subprocess(_command(npx, cache), timeout=1.0)
+    finally:
+        cache.chmod(0o755)
+
+    # Left for the next run, which can read the cache, to check.
+    assert_that([entry.name for entry in cache_entries(cache)]).is_equal_to([_ENTRY])
+
+
+#: How a warm run's npx treats the verified entry before it times out, and
+#: what lintro raises.
+_WARM_TIMEOUTS: dict[str, tuple[str, type[BaseException]]] = {
+    "entry-untouched": ("", subprocess.TimeoutExpired),
+    "entry-changed": (
+        "printf 'console.log(1);\\n' > '{bin_js}'\n",
+        NpxIntegrityError,
+    ),
+}
+
+
+@pytest.mark.parametrize("executor", list(_EXECUTORS), ids=list(_EXECUTORS))
+@pytest.mark.parametrize("case", list(_WARM_TIMEOUTS), ids=list(_WARM_TIMEOUTS))
+def test_a_warm_run_that_times_out_still_checks_its_entry(
+    cache: Path,
+    tmp_path: Path,
+    executor: str,
+    case: str,
+) -> None:
+    """A change to a verified entry is reported even when the run timed out.
+
+    Args:
+        cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
+        executor: Which lintro entry point spawns npx.
+        case: What npx does to the entry before it hangs.
+    """
+    entry = write_npx_entry(cache, [tool_package()], name=_ENTRY)
+    body, expected = _WARM_TIMEOUTS[case]
+    bin_js = entry / "node_modules" / "prettier" / "bin.js"
+    npx = _fake_npx(
+        tmp_path / "bin",
+        f"{body.format(bin_js=bin_js)}exec sleep 30\n",
+    )
+
+    with pytest.raises(expected) as caught:
+        _EXECUTORS[executor](_command(npx, cache), 1.0)
+
+    if isinstance(caught.value, NpxIntegrityError):
+        assert_that(caught.value.after_run).is_true()
+        assert_that(str(caught.value)).contains(str(entry)).contains(
+            "TimeoutExpired",
+        )
+        assert_that(caught.value.__cause__).is_instance_of(subprocess.TimeoutExpired)
+    assert_that([e.name for e in cache_entries(cache)]).is_equal_to([_ENTRY])
+
+
+def test_an_interrupted_cold_install_is_removed(
+    cache: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ctrl-C during a cold install: the unfinished entry goes, npm lock too.
+
+    Args:
+        cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Interrupts the wait for npx's output.
+    """
+    pid_file = tmp_path / "npx.pid"
+    npx = _fake_npx(
+        tmp_path / "bin",
+        f"{_half_install(cache)}echo $$ > '{pid_file}.tmp'\n"
+        f"mv '{pid_file}.tmp' '{pid_file}'\nexec sleep 30\n",
+    )
+
+    class _Interrupted(threading.Thread):
+        """A reader thread whose join is interrupted once npx is running."""
+
+        def join(self, timeout: float | None = None) -> None:
+            """Wait for npx to start, then raise as Ctrl-C would.
+
+            Args:
+                timeout: Ignored.
+
+            Raises:
+                KeyboardInterrupt: Always.
+            """
+            _wait_for(pid_file)
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        subprocess_executor,
+        "threading",
+        types.SimpleNamespace(Thread=_Interrupted),
+    )
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            run_subprocess_streaming(_command(npx, cache), timeout=30.0)
+        assert_that(cache_entries(cache)).is_empty()
+    finally:
+        if pid_file.exists():
+            with contextlib.suppress(ProcessLookupError, ValueError):
+                os.kill(int(pid_file.read_text(encoding="utf-8")), signal.SIGKILL)
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith(("linux", "darwin")),
+    reason="Linux and macOS both offer descriptor-relative calls",
+)
+def test_posix_cleanup_works_through_the_open_npx_directory(cache: Path) -> None:
+    """Where the calls exist, ``_npx`` is held open and cleanup goes through it.
+
+    ``os.replace`` never appears in ``os.supports_dir_fd``; testing for it
+    once switched this off on every POSIX system.
+
+    Args:
+        cache: Per-pin npm cache.
+    """
+    assert_that(npx_unfinished._DIR_FD_OPS).is_true()
+    with bound_cache(cache) as bound:
+        assert bound is not None
+        held = bound._fd
+        assert held is not None
+        assert_that(os.fstat(held).st_ino).is_equal_to(
+            os.stat(cache / "_npx").st_ino,
+        )
+
+
+def test_cleanup_stays_in_the_examined_cache_when_it_is_swapped_after_the_check(
+    cache: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A swap after the identity check is not followed: the descriptor is.
+
+    The cache directory is replaced by another one holding an unfinished
+    entry of the same name between the identity comparison and the removal.
+    Removing by path would delete that entry; removing through the open
+    ``_npx`` removes the one npx was writing, wherever it now is.
+
+    Args:
+        cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Swaps the cache in the middle of the cleanup.
+    """
+    other = tmp_path / "elsewhere"
+    planted = other / "_npx" / _ENTRY / "node_modules" / "prettier"
+    planted.mkdir(parents=True)
+    (planted / "package.json").write_text("{}", encoding="utf-8")
+    moved = Path(f"{cache}.moved")
+    check = install_unfinished
+
+    def swap_then_check(entry: Path, **kwargs: Any) -> bool:
+        if not moved.exists():
+            cache.rename(moved)
+            other.rename(cache)
+        return check(entry, **kwargs)
+
+    monkeypatch.setattr(npx_unfinished, "install_unfinished", swap_then_check)
+    npx = _fake_npx(tmp_path / "bin", f"{_half_install(cache)}exec sleep 30\n")
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_subprocess(_command(npx, cache), timeout=1.0)
+
+    entry = cache / "_npx" / _ENTRY
+    assert_that(str(entry / "node_modules" / "prettier" / "package.json")).exists()
+    assert_that(cache_entries(moved)).is_empty()
+
+
+def _next_run(command: list[str]) -> object:
+    """Run *command* as a tool run does: the cache repair, then the spawn.
+
+    Args:
+        command: The npx command.
+
+    Returns:
+        The result, or the error that refused the run.
+    """
+    try:
+        repair_npx_cache(
+            npx_cache_option(command) or Path(),
+            package="prettier",
+            pin="3.9.4",
+            binary="prettier",
+            lock_wait=0.0,
+        )
+    except NpxCacheLockError:
+        pass  # As node_fallback: the spawn-time check waits for the lock.
+    except NpxCacheError as exc:
+        return exc
+    try:
+        return run_subprocess(command, timeout=30.0)
+    except NpxIntegrityError as exc:
+        return exc
+
+
+#: How the install script npx started keeps writing after the timeout. Each
+#: write that lands appends a line to ``{writes}``; one that fails does not.
+_WRITERS: dict[str, str] = {
+    # The usual shape: it writes into its own package directory, which the
+    # cleanup moves aside and deletes, so its writes fail from then on.
+    "in-its-package-directory": (
+        "cd '{entry}/node_modules/prettier' && "
+        "while [ $(date +%s) -lt $end ]; do "
+        "echo x >> log && echo w >> '{writes}'; sleep 0.05; done"
+    ),
+    # The worst case: it recreates the entry by absolute path.
+    "by-absolute-path": (
+        "while [ $(date +%s) -lt $end ]; do "
+        "mkdir -p '{entry}/node_modules/prettier' && "
+        "echo x >> '{entry}/node_modules/prettier/log' && "
+        "echo w >> '{writes}'; sleep 0.05; done"
+    ),
+}
+
+
+def _recording_tool(record: Path) -> LockedPackage:
+    """Describe a prettier whose entry point is a shell script that records runs.
+
+    Args:
+        record: File each run of the entry point appends ``ran`` to.
+
+    Returns:
+        The package, at the top of ``node_modules``.
+    """
+    base = tool_package()
+    script = f"#!/bin/sh\necho ran >> '{record}'\nsleep 0.2\necho '[]'\n"
+    return LockedPackage(
+        key=base.key,
+        files={**base.files, "bin.js": script},
+        bins=base.bins,
+    )
+
+
+def _lines(path: Path) -> list[str]:
+    """Return the lines of *path*, or none while it does not exist.
+
+    Args:
+        path: A log file.
+
+    Returns:
+        Its lines.
+    """
+    return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+
+def _overlapped_a_write(calls: list[str]) -> bool:
+    """Tell from one npx call's record whether a write landed during it.
+
+    Args:
+        calls: The lines the call appended: ``start=<writes>``, ``ran``
+            from the entry point, ``end=<writes>``.
+
+    Returns:
+        Whether the entry point ran and the write count changed meanwhile.
+    """
+    assert_that(calls).contains("ran")
+    counts = {line.partition("=")[0]: line.partition("=")[2] for line in calls}
+    return int(counts["end"]) != int(counts["start"])
+
+
+@pytest.mark.parametrize("writer", list(_WRITERS), ids=list(_WRITERS))
+def test_an_install_script_that_outlives_the_timeout_never_blocks_for_good(
+    cache: Path,
+    tmp_path: Path,
+    writer: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lintro stops npx only; a process it started may write on (#3548).
+
+    The process keeps writing into the entry for a few seconds after the
+    timeout and after lintro removed the entry. Runs started while it still
+    writes, each going through the cache repair first as a tool run does,
+    may be refused or reported untrusted, and with the by-absolute-path
+    writer npx may already have run the tool from the new entry by then. What
+    is guaranteed: no run reports a result for an npx call during which a
+    write landed, and a run started after the process stopped succeeds. The
+    fake npx runs the package's entry point, so each call records whether a
+    write landed while it ran.
+
+    Args:
+        cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
+        writer: How the process writes.
+        monkeypatch: Puts the cache under a private lintro cache root.
+    """
+    monkeypatch.setattr(file_cache, "CACHE_DIR", Path(os.path.realpath(tmp_path)))
+    entry = cache / "_npx" / _ENTRY
+    calls, writes = tmp_path / "calls.log", tmp_path / "writes.log"
+    writes.touch()
+    staged = write_npx_entry(cache, [_recording_tool(calls)], name=_ENTRY)
+    complete = tmp_path / "complete"
+    staged.rename(complete)
+    claimed, pid_file = tmp_path / "first", tmp_path / "writer.pid"
+    done = tmp_path / "writer.done"
+    script = _WRITERS[writer].format(entry=entry, writes=writes)
+    count = f"$(grep -c . '{writes}')"
+    npx = _fake_npx(
+        tmp_path / "bin",
+        f"if mkdir '{claimed}' 2>/dev/null; then\n"
+        f"{_half_install(cache, bins=True)}"
+        "end=$(( $(date +%s) + 5 ))\n"
+        f"( {script}; touch '{done}' ) </dev/null >/dev/null 2>&1 &\n"
+        f"echo $! > '{pid_file}'\nexec sleep 30\n"
+        "fi\n"
+        # Later calls install only what has no lockfile, as npx does, then
+        # run the entry point. The starting count is taken after the
+        # reinstall: a write the reinstall wiped out is not an overlap with
+        # the tool run.
+        f"if [ ! -e '{entry}/package-lock.json' ]; then\n"
+        f"rm -rf '{entry}'\ncp -R '{complete}' '{entry}'\nfi\n"
+        f"echo \"start={count}\" >> '{calls}'\n"
+        f"sh '{entry}/node_modules/.bin/prettier'\nstatus=$?\n"
+        f"echo \"end={count}\" >> '{calls}'\nexit $status\n",
+    )
+    try:
+        with pytest.raises(subprocess.TimeoutExpired):
+            run_subprocess(_command(npx, cache), timeout=1.0)
+
+        # Runs while the process still writes, then one after it stopped:
+        # each run's outcome with what its npx call recorded, if it spawned.
+        outcomes: list[tuple[object, list[str]]] = []
+        stopped = False
+        give_up = time.monotonic() + 30.0
+        while time.monotonic() < give_up:
+            stopped = done.exists()
+            seen = len(_lines(calls))
+            outcome = _next_run(_command(npx, cache))
+            outcomes.append((outcome, _lines(calls)[seen:]))
+            if stopped and isinstance(outcome, SubprocessResult):
+                break
+            time.sleep(0.2)
+
+        for outcome, recorded in outcomes:
+            if isinstance(outcome, SubprocessResult):
+                assert_that(_overlapped_a_write(recorded)).is_false()
+            else:
+                # Refused before the spawn, or reported untrusted after it.
+                assert_that(outcome).is_instance_of((NpxIntegrityError, NpxCacheError))
+        last, recorded = outcomes[-1]
+        assert_that(stopped).is_true()
+        assert_that(last).is_instance_of(SubprocessResult)
+        assert isinstance(last, SubprocessResult)
+        assert_that(last.returncode).is_zero()
+        assert_that(recorded).contains("ran")
+        assert_that([e.name for e in cache_entries(cache)]).is_equal_to([_ENTRY])
+    finally:
+        if pid_file.exists():
+            with contextlib.suppress(ProcessLookupError, ValueError):
+                os.kill(int(pid_file.read_text(encoding="utf-8")), signal.SIGKILL)
+
+
+def test_cleanup_keeps_the_entry_when_the_install_lock_moved_with_an_ancestor(
+    cache: Path,
+    tmp_path: Path,
+) -> None:
+    """An ancestor swapped during the run: the held lock is gone, nothing goes.
+
+    The directory holding the cache and lintro's install lock is moved aside
+    and the cache moved back into a new one, so the cache and ``_npx`` are
+    the directories lintro recorded. Only the lock check sees that the lock
+    lintro holds is no longer at its path, where another run could now take
+    one and install; the unfinished entry is left alone.
+
+    Args:
+        cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    parent = cache.parent
+    moved = parent.with_name(f"{parent.name}.moved")
+    npx = _fake_npx(
+        tmp_path / "bin",
+        f"{_half_install(cache)}mv '{parent}' '{moved}'\nmkdir '{parent}'\n"
+        f"mv '{moved}/{cache.name}' '{cache}'\nexec sleep 30\n",
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_subprocess(_command(npx, cache), timeout=1.0)
+
+    entry = cache / "_npx" / _ENTRY
+    assert_that(str(entry / "node_modules" / "prettier" / "package.json")).exists()
+    assert_that([e.name for e in cache_entries(cache)]).is_equal_to([_ENTRY])

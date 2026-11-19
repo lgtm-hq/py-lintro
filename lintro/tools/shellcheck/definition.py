@@ -164,16 +164,18 @@ class ShellcheckPlugin(BaseToolPlugin):
                 at its default.
             **kwargs: Other tool options.
         """
+        # Type-check first: normalising calls ``str.lower`` and would turn a
+        # non-string value into an AttributeError instead of a ValueError.
+        validate_list(exclude, "exclude")
+        validate_str(severity, "severity")
+        validate_str(shell, "shell")
+        validate_bool(external_sources, "external_sources")
+
         if severity is not None:
             severity = normalize_shellcheck_severity(severity)
 
         if shell is not None:
             shell = normalize_shellcheck_shell(shell)
-
-        validate_list(exclude, "exclude")
-        validate_str(severity, "severity")
-        validate_str(shell, "shell")
-        validate_bool(external_sources, "external_sources")
         source_paths = normalize_str_or_list(source_paths, "source_paths")
 
         options = filter_none_options(

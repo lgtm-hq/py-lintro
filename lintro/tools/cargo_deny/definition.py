@@ -11,8 +11,10 @@ import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from typing import Any
 
+from lintro._tool_versions import get_min_version
 from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
+from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
 from lintro.models.core.tool_outcome import Checked, NoFiles, TimedOut, ToolOutcome
@@ -88,7 +90,7 @@ class CargoDenyPlugin(BaseToolPlugin):
             partitionable=False,
             native_configs=["deny.toml"],
             version_command=["cargo", "deny", "--version"],
-            min_version="0.14.0",
+            min_version=get_min_version(ToolName.CARGO_DENY),
             default_options={
                 "timeout": CARGO_DENY_DEFAULT_TIMEOUT,
             },

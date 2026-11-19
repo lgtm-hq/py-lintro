@@ -15,6 +15,7 @@ from assertpy import assert_that
 from click.testing import CliRunner
 
 from lintro.cli import cli
+from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.semgrep.semgrep_issue import SemgrepIssue
 from lintro.tools.semgrep.definition import SemgrepPlugin
 from tests.integration._tools import require_tool
@@ -23,6 +24,21 @@ pytestmark = require_tool("semgrep")
 
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "rules" / "none_coercion"
 PACK = Path(__file__).parents[3] / "lintro" / "rules" / "python" / "none-coercion.yaml"
+
+
+def _assert_complete_scan_with_findings(result: ToolResult) -> None:
+    """Pin a scan that ran to completion and reported findings.
+
+    A complete Semgrep scan with findings fails the run (``success`` is false)
+    without being an execution failure, and its findings are certified.
+
+    Args:
+        result: Result of one plugin check.
+    """
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.findings_complete).is_true()
+    assert_that(result.parse_failures_count).is_in(None, 0)
 
 
 @pytest.mark.parametrize(
@@ -96,7 +112,12 @@ def test_cli_rule_pack_lists_replace_inherited_selection(
     report = json.loads(output.read_text(encoding="utf-8"))
     assert_that(report["results"]).is_length(1)
     semgrep = report["results"][0]
-    assert_that(semgrep["success"]).is_true()
+    # Findings fail the run; the scan itself completed, so it is no execution
+    # failure, carries no residual unknown and did not time out.
+    assert_that(semgrep["success"]).is_false()
+    assert_that(semgrep["status"]).is_equal_to("failed")
+    assert_that(semgrep["timed_out"]).is_false()
+    assert_that(semgrep).does_not_contain_key("execution_failed", "residual_unknown")
     findings = semgrep["issues"]
     assert_that({finding["code"] for finding in findings}).is_equal_to(expected_ids)
     assert_that(findings).is_length(len(expected_ids))
@@ -231,7 +252,7 @@ def test_plugin_runs_pack_and_native_rules_together(
         [str(source)],
         native_options,
     )
-    assert_that(original.success).is_true()
+    _assert_complete_scan_with_findings(original)
     original_ids = {
         issue.check_id
         for issue in original.issues or []
@@ -244,7 +265,7 @@ def test_plugin_runs_pack_and_native_rules_together(
         {**options, "rule_packs": ["python/none-coercion"]},
     )
 
-    assert_that(result.success).is_true()
+    _assert_complete_scan_with_findings(result)
     assert_that(result.inspected_files).is_true()
     assert_that(result.issues_count).is_equal_to(2)
     findings = [issue for issue in result.issues if isinstance(issue, SemgrepIssue)]
@@ -254,7 +275,7 @@ def test_plugin_runs_pack_and_native_rules_together(
     assert_that({issue.severity for issue in findings}).is_equal_to({"INFO", "WARNING"})
 
     restored = plugin.check([str(source)], native_options)
-    assert_that(restored.success).is_true()
+    _assert_complete_scan_with_findings(restored)
     assert_that(restored.issues_count).is_equal_to(1)
     assert_that(
         {

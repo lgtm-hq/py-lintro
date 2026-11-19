@@ -63,15 +63,14 @@ import ctypes
 import errno
 import json
 import os
-import shutil
 import stat
 import sys
 import time
-import uuid
 from pathlib import Path
 
 from loguru import logger
 
+from lintro.utils.npx_aside import aside_name, delete_aside, set_aside
 from lintro.utils.npx_install_lock import (
     NpxInstallLockError,
     shared_install_lock_now,
@@ -91,9 +90,6 @@ _LOCK_WAIT_SECONDS: float = 30.0
 
 #: Prefix for entries renamed aside before deletion.
 _STALE_PREFIX: str = STALE_PREFIX
-
-#: Characters of the original name kept in an aside name, for debugging.
-_ASIDE_BASE_CHARS: int = 32
 
 #: Times one entry is re-examined when it keeps changing type under a repair.
 _ENTRY_ATTEMPTS: int = 5
@@ -371,7 +367,7 @@ def _release(lock: Path, held: _LockId) -> None:
     if not _holds(lock, held):
         logger.debug(f"lintro no longer holds {lock}; leaving it in place")
         return
-    aside = lock.with_name(_aside_name(lock.name))
+    aside = lock.with_name(aside_name(lock.name))
     try:
         os.rename(lock, aside)
     except OSError:
@@ -495,57 +491,6 @@ def _entry_trusted(
     return True
 
 
-def _aside_name(name: str) -> str:
-    """Build a unique name, of bounded length, for an entry set aside.
-
-    Args:
-        name: The entry's current name.
-
-    Returns:
-        ``.lintro-stale-<base>-<uuid>``, where *base* is at most
-        :data:`_ASIDE_BASE_CHARS` characters of the original name with any
-        stale prefixes removed, so the result never grows with *name*.
-    """
-    base = name
-    while base.startswith(_STALE_PREFIX):
-        base = base[len(_STALE_PREFIX) :]
-    return f"{_STALE_PREFIX}{base[:_ASIDE_BASE_CHARS]}-{uuid.uuid4().hex}"
-
-
-def _delete(path: Path) -> None:
-    """Delete a path set aside, which nothing will run again.
-
-    A link is removed itself, never followed. Parts another repair removes
-    first are not failures. A leftover that stays is logged, not raised: it
-    has no npm entry name, so it cannot change what runs, and the next repair
-    tries again.
-
-    Args:
-        path: Entry already set aside, or a moved-aside name.
-    """
-    failures: list[str] = []
-
-    def record(_func: object, failed: str, exc: BaseException) -> None:
-        if not isinstance(exc, FileNotFoundError):
-            failures.append(f"{failed}: {exc}")
-
-    if path.is_dir() and not path.is_symlink():
-        if sys.version_info >= (3, 12):
-            shutil.rmtree(path, onexc=record)
-        else:  # pragma: no cover - exercised on the 3.11 CI leg
-            shutil.rmtree(path, onerror=lambda f, p, info: record(f, p, info[1]))
-    else:
-        try:
-            path.unlink(missing_ok=True)
-        except OSError as exc:
-            failures.append(f"{path}: {exc}")
-    if failures and (path.exists() or path.is_symlink()):
-        logger.warning(
-            f"lintro could not delete the npm cache leftover {path} "
-            f"({failures[0]}); it is not run and will be retried",
-        )
-
-
 def _discard(entry: Path) -> bool:
     """Rename an entry aside atomically, then delete it.
 
@@ -562,19 +507,14 @@ def _discard(entry: Path) -> bool:
         NpxCacheError: The entry is still in place and could not be moved
             aside.
     """
-    aside = entry.with_name(_aside_name(entry.name))
     try:
-        os.replace(entry, aside)
+        return set_aside(entry)
     except OSError as exc:
         # A missing source means another repair moved or removed it. If the
         # name exists again, npx may have recreated it after that move and
         # before this rename failed; refusing then is rare and errs closed,
         # and the next run validates the new entry.
-        if not (entry.exists() or entry.is_symlink()):
-            return False
         raise NpxCacheError(f"cannot remove npm cache entry {entry}: {exc}") from exc
-    _delete(aside)
-    return True
 
 
 def _clear_unless_directory(path: Path) -> bool:
@@ -678,7 +618,7 @@ def _delete_leftovers(directory: Path) -> None:
     """
     for leftover in sorted(directory.iterdir()):
         if leftover.name.startswith(_STALE_PREFIX):
-            _delete(leftover)
+            delete_aside(leftover)
 
 
 def repair_npx_cache(
@@ -768,7 +708,7 @@ def _repair_entries(
     for entry in sorted(npx_root.iterdir()):
         if entry.name.startswith(_STALE_PREFIX):
             # Already aside, so no npx run uses it: delete it where it is.
-            _delete(entry)
+            delete_aside(entry)
         else:
             _repair_entry(
                 entry,
