@@ -286,6 +286,8 @@ def run_subprocess(
     cwd: str | None = None,
     env: dict[str, str] | None = None,
     stdin: int | None = None,
+    *,
+    decode_errors: str | None = None,
 ) -> SubprocessResult:
     """Run a subprocess command safely.
 
@@ -298,6 +300,9 @@ def run_subprocess(
         stdin: Optional stdin handle for the subprocess. Defaults to ``None``
             (inherit). Pass ``subprocess.DEVNULL`` to prevent tools that prompt
             interactively from blocking when no TTY is attached.
+        decode_errors: The ``errors`` handler for decoding stdout and
+            stderr. None (the default) is Python's strict decoding, which
+            raises ``UnicodeDecodeError``; ``"replace"`` substitutes U+FFFD.
 
     Returns:
         SubprocessResult with the return code and separated stdout/stderr
@@ -336,6 +341,7 @@ def run_subprocess(
                 spawn_cmd,
                 capture_output=True,
                 text=True,
+                errors=decode_errors,
                 timeout=timeout,
                 cwd=cwd,
                 env=effective_env,

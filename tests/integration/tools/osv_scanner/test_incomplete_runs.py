@@ -545,3 +545,36 @@ def test_excluded_directory_does_not_hide_a_sibling_with_a_colon(
 
     _assert_incomplete(result)
     assert_that(result.output).contains("vendor: data/package-lock.json")
+
+
+@pytest.mark.parametrize(
+    "pins",
+    [
+        {"a": "flask", "b": "flask"},
+        {"a": "flask", "b": "requests", "c": "flask"},
+        {"a": "flask", "c": "django", "p": f"six==1.16.0\n{_PRIVATE_PACKAGE}"},
+    ],
+    ids=["two", "three", "unsatisfiable-and-private"],
+)
+def test_several_unsatisfiable_manifests_are_a_complete_scan(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+    pins: dict[str, str],
+) -> None:
+    """The blank line osv-scanner prints between their errors is read.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+        pins: Package per manifest directory; each is pinned to a version
+            that does not exist.
+    """
+    for name, package in pins.items():
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "requirements.txt").write_text(f"{package}==99999.0.0\n")
+
+    result = get_plugin("osv_scanner").check([str(tmp_path)], {})
+
+    assert_that(result.execution_failed).described_as(result.output).is_false()
+    assert_that(result.inspected_files).is_true()
+    assert_that(_note(result)).contains("resolution impossible")

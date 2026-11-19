@@ -21,10 +21,18 @@ Standard error is read as messages, not lines. A message starts with an
 ``Error during extraction`` header and continues on the lines osv-scanner
 prints under it: tab-indented ``<path>: <error>`` lines when one extractor
 failed on several files, further ``failed resolution for`` messages joined to
-a transitive one, and the cause lines of ``resolution impossible:``. Each part
-of a message is judged on its own; a message with any part that is neither a
-resolution note nor an error for a file lintro excludes is kept whole as
-error text. Every line outside such a message is error text too. Checked
+a transitive one, and the cause lines of ``resolution impossible:``. That
+error ends in a newline of its own, so osv-scanner prints one blank line after
+its last cause; after that blank line only a further ``failed resolution for``
+continues the message. Each part of a message is judged on its own; a message
+with any part that is neither a resolution note nor an error for a file lintro
+excludes is kept whole as error text. Every line outside such a message is
+error text too.
+
+A part is an error for an excluded file only when it names exactly one path:
+one existing regular file under an excluded path at its start, and no other
+path anywhere after it (no path separator, and no word that names an existing
+path in the scan root). Checked
 against osv-scanner 2.4.0 and 2.7.1 (``pkg/osvscanner/scan.go``,
 ``logPluginStatus``; osv-scalibr ``enricher/transitivedependency``; deps.dev
 ``util/resolve``).
@@ -63,8 +71,9 @@ _CAUSE_PREFIXES: tuple[str, ...] = (
     "requirements conflict: ",
 )
 
-#: What osv-scanner prints, alone, when it found nothing to scan.
-_NO_SOURCES_RE = re.compile(r"^No package sources found\b.*$")
+#: What osv-scanner prints, alone, when it found nothing to scan: the whole
+#: line, the same at 2.4.0 and 2.7.1 (``cmd/osv-scanner/internal/cmd/run.go``).
+NO_SOURCES_LINE: str = "No package sources found, --help for usage information."
 
 _NAME = r"[A-Za-z0-9._-]+"
 #: deps.dev prints PyPI as ``System(7)`` and Maven as ``Maven``.
@@ -75,8 +84,16 @@ _VERSION_KEY = rf"{_PACKAGE_KEY}\[[A-Za-z]+:{_VERSION}\]"
 #: deps.dev's ``ErrNotFound``, returned only for a gRPC ``NotFound`` reply.
 _NOT_FOUND = rf"(?:package {_PACKAGE_KEY}|version {_VERSION_KEY}): not found"
 _MAVEN_ROOT = rf"\{{Maven:{_NAME}:{_NAME}\[Concrete:{_VERSION}\] \{{\}}\}}"
+#: One requirement specifier as deps.dev's PyPI resolver prints it: an
+#: operator and a version, with the spaces the manifest had kept (2.4.0 prints
+#: ``">= 99999 , < 100000"``). ``===`` (arbitrary equality) takes any version
+#: text without spaces, commas, quotes or backslashes.
+_SPECIFIER = r' *(?:===[^\s",\\]+|(?:~=|==|!=|<=|>=|<|>) *[A-Za-z0-9._+*!-]+) *'
+#: ``%q`` of the requirements joined with ``,`` (``requirementsConflictedError``).
+_SPECIFIERS = rf'"{_SPECIFIER}(?:,{_SPECIFIER})*"'
 _CAUSE = (
-    rf'(?:no candidates at all for: {_NAME}|requirements conflict: {_NAME}:) "[^"\n]*"'
+    rf"(?:no candidates at all for: {_NAME}|requirements conflict: {_NAME}:) "
+    rf"{_SPECIFIERS}"
 )
 
 #: The only endings after ``failed resolution for <path>: `` that are
@@ -154,7 +171,7 @@ class StderrReport:
             True when that line is all osv-scanner printed besides notes and
             excluded errors.
         """
-        return len(self.errors) == 1 and bool(_NO_SOURCES_RE.match(self.errors[0]))
+        return self.errors == (NO_SOURCES_LINE,)
 
 
 def _named_file(path_text: str, scan_root: Path) -> tuple[str, str] | None:
@@ -209,6 +226,36 @@ def source_of(text: str, scan_root: Path) -> tuple[str, str, str] | None:
     return next(iter(found.values()))
 
 
+#: Characters stripped from a word before it is looked up as a path.
+_WORD_PUNCTUATION: str = "\"'`()[]{}<>,;:"
+
+
+def names_another_path(error: str, scan_root: Path) -> bool:
+    """Return whether the error after a file's path names any further path.
+
+    An error for an excluded file is dropped only when the excluded file is
+    the one path in it; ``<excluded>: failed reading <included>: ...`` is
+    about the included file as well. Any path separator counts as a path, as
+    does any word that names an existing file or directory in the scan root.
+
+    Args:
+        error: The text after the file's path, every line of it.
+        scan_root: Directory osv-scanner ran in.
+
+    Returns:
+        True when the text may name another path.
+    """
+    if "/" in error or "\\" in error or os.sep in error:
+        return True
+    for word in error.split():
+        name = word.strip(_WORD_PUNCTUATION)
+        if name in ("", ".", "..") or set(name) == {"."}:
+            continue
+        if os.path.lexists(scan_root / name):
+            return True
+    return False
+
+
 def is_harmless_ending(ending: str) -> bool:
     """Return whether a resolution error is a known harmless registry answer.
 
@@ -240,12 +287,22 @@ def _read_message(
     transitive = match.group("plugin") in TRANSITIVE_PLUGINS
     detail = match.group("detail").strip()
     parts = [detail] if detail else []
+    # True once the blank line that ends a ``resolution impossible:`` block
+    # has been read: only a further ``failed resolution for`` may follow.
+    closed = False
     end = start + 1
     while end < len(lines):
         line = lines[end]
-        causes = bool(parts) and _IMPOSSIBLE in parts[-1].split("\n", 1)[0]
-        if causes and line.startswith(_CAUSE_PREFIXES):
+        block = bool(parts) and _IMPOSSIBLE in parts[-1].split("\n", 1)[0]
+        if closed:
+            if not (transitive and line.startswith(_RESOLUTION_PREFIX)):
+                break
+            parts.append(line)
+            closed = False
+        elif block and line.startswith(_CAUSE_PREFIXES):
             parts[-1] = f"{parts[-1]}\n{line}"
+        elif block and "\n" in parts[-1] and not line.strip():
+            closed = True
         elif line.startswith("\t"):
             parts.append(line.strip())
         elif transitive and line.startswith(_RESOLUTION_PREFIX):
@@ -296,7 +353,11 @@ def read_stderr(
             resolution = transitive and part.startswith(_RESOLUTION_PREFIX)
             text = part.removeprefix(_RESOLUTION_PREFIX) if resolution else part
             named = source_of(text, scan_root)
-            if named is not None and is_excluded(named[0]):
+            if (
+                named is not None
+                and is_excluded(named[0])
+                and not names_another_path(named[2], scan_root)
+            ):
                 continue
             all_excluded = False
             if resolution and named is not None and is_harmless_ending(named[2]):

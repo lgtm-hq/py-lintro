@@ -290,26 +290,30 @@ These fail-closed checks also apply without a fingerprint baseline:
   `Failed to fix issues: ... permission denied` for a read-only file) is incomplete the
   same way, and its output quotes that error.
 - OSV-Scanner runs with `--verbosity error`, so a scan that went well prints nothing on
-  standard error. A run is a complete scan only when stdout is a report with a `results`
-  list and either standard error is empty (exit 0, or exit 1 with vulnerabilities in the
-  report) or everything on it is the one allow-listed message: a failed
-  transitive-dependency resolution (`extracting as transitivedependency/requirements` or
-  `.../pomxml`, `failed resolution for <path>: ...`) naming one existing file, whose
-  whole error is the registry's answer that it has no such package or version or that no
-  version satisfies the requirements. Such a run (exit 127 without findings, 1 with
-  them) is complete and carries a note naming the manifest: the console prints it under
-  the tool's result, the summary table's Notes column says "indirect dependencies not
+  standard error. A run is a complete scan only when stdout is exactly one JSON scan
+  report (a `results` list, only the top-level keys osv-scanner's report has, nothing
+  before or after it) and either standard error is empty (exit 0, or exit 1 with
+  vulnerabilities in the report) or everything on it is the one allow-listed message: a
+  failed transitive-dependency resolution
+  (`extracting as transitivedependency/requirements` or `.../pomxml`,
+  `failed resolution for <path>: ...`) naming one existing file, whose whole error is
+  the registry's answer that it has no such package or version or that no version
+  satisfies the requirements. Such a run (exit 127 without findings, 1 with them) is
+  complete and carries a note naming the manifest: the console prints it under the
+  tool's result, the summary table's Notes column says "indirect dependencies not
   resolved", the Markdown, HTML and plain-text reports print it, CSV reports carry it in
   a `notes` column, and JSON keeps it under `metadata.notes`, while `output` stays
-  OSV-Scanner's raw report. An `Error during extraction` message whose every file is
-  under an excluded path is dropped, as a finding for that file would be. Anything else
-  on standard error, at any exit code and in any order, makes the run an execution
-  failure with unknown inspection: an unreadable or malformed lockfile, a resolver or
-  OSV API outage, a broken configuration, an error lintro has never seen. The findings
-  OSV-Scanner reported are kept and its standard error is quoted verbatim. A failed exit
-  with nothing on standard error, and a run without a complete report, are execution
-  failures too. "No package sources found" alone at exit 128 is a no-files run; beside
-  an extraction error it is incomplete. OSV-Scanner does not report every source it
+  OSV-Scanner's raw report. An `Error during extraction` error that names exactly one
+  path, an existing file under an excluded path, is dropped, as a finding for that file
+  would be; one that also names another path is kept. Anything else on standard error,
+  at any exit code and in any order, makes the run an execution failure with unknown
+  inspection: an unreadable or malformed lockfile, a resolver or OSV API outage, a
+  broken configuration, an error lintro has never seen. The findings OSV-Scanner
+  reported are kept and its standard error is quoted verbatim. A failed exit with
+  nothing on standard error, and a run without a complete report, are execution failures
+  too. "No package sources found, --help for usage information." as the whole of
+  standard error at exit 128 is a no-files run; beside an extraction error, or with any
+  other text on its line, it is incomplete. OSV-Scanner does not report every source it
   under-reads: a lockfile in a format version it does not support
   (`"lockfileVersion": 99`) is logged as "found 0 packages" with no error and still
   reads as a complete scan. See

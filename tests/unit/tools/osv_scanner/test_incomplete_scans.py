@@ -185,7 +185,7 @@ def test_config_error_names_the_error_and_claims_no_inspection(
         (
             0,
             '{"results": "not-a-list"}',
-            "OSV-Scanner printed a report that could not be fully parsed",
+            "OSV-Scanner's report could not be read",
             1,
         ),
         (

@@ -28,7 +28,6 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.osv_scanner import (
     OsvScannerIssue,
     classify_suppressions,
-    extract_osv_scanner_payload,
     parse_osv_scanner_output,
     parse_suppressions,
 )
@@ -41,8 +40,6 @@ from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.incomplete_run import (
     incomplete_run_result,
-    malformed_report_reason,
-    tool_message_excerpt,
 )
 from lintro.tools.core.option_validators import validate_bool, validate_positive_int
 from lintro.tools.osv_scanner.extraction_log import (
@@ -51,6 +48,7 @@ from lintro.tools.osv_scanner.extraction_log import (
     read_stderr,
     resolution_note,
 )
+from lintro.tools.osv_scanner.report import ReportCheck, check_report
 from lintro.utils.path_filtering import resolve_exclude_anchors, should_exclude_path
 from lintro.utils.tool_metadata import ToolNote, with_tool_notes
 
@@ -113,7 +111,18 @@ class OsvScannerPlugin(BaseToolPlugin):
     steered from the outside, lintro's resolved exclusion set
     (``.lintro-ignore`` plus ``--exclude``) is applied to the reported
     lockfile paths instead — see :meth:`filter_excluded_issues` (#1725).
+
+    Its output is decoded with replacement, so bytes that are not UTF-8 still
+    leave standard error readable and quoted in an incomplete run.
     """
+
+    def _subprocess_decode_errors(self) -> str | None:
+        """Decode osv-scanner's output with replacement characters.
+
+        Returns:
+            ``"replace"``, so stray bytes never hide the text around them.
+        """
+        return "replace"
 
     @property
     def definition(self) -> ToolDefinition:
@@ -524,10 +533,11 @@ class OsvScannerPlugin(BaseToolPlugin):
     ) -> ToolResult | None:
         """Build the result for a run that did not finish a complete scan.
 
-        A run is complete only when stdout is a report with a ``results``
-        list and either nothing was logged at error level (exit 0, or exit 1
-        with vulnerabilities in the report) or everything logged is a
-        resolution note or an error for an excluded file (exit 0, 1 or 127).
+        A run is complete only when stdout is exactly one scan report (see
+        :mod:`lintro.tools.osv_scanner.report`) and either nothing was logged
+        at error level (exit 0, or exit 1 with vulnerabilities in the report)
+        or everything logged is a resolution note or an error for an excluded
+        file (exit 0, 1 or 127).
 
         Args:
             proc: The finished osv-scanner process.
@@ -555,15 +565,13 @@ class OsvScannerPlugin(BaseToolPlugin):
                 output=OSV_NO_SOURCES_MESSAGE,
                 parse_failures_count=0,
             )
-        payload = extract_osv_scanner_payload(proc.stdout)
-        report_ok = payload is not None and self._payload_has_valid_results(payload)
-        parse_failures: int | None = 0 if report_ok else 1
+        whole = check_report(proc.stdout)
+        parse_failures: int | None = 0 if whole.ok else 1
         if not proc.stdout.strip():
             parse_failures = None
         reason = self._gap_reason(
             proc=proc,
-            payload=payload,
-            report_ok=report_ok,
+            whole=whole,
             found=bool(parsed_issues),
             report=report,
         )
@@ -582,8 +590,7 @@ class OsvScannerPlugin(BaseToolPlugin):
     def _gap_reason(
         *,
         proc: SubprocessResult,
-        payload: dict[str, Any] | None,
-        report_ok: bool,
+        whole: ReportCheck,
         found: bool,
         report: StderrReport,
     ) -> str | None:
@@ -591,8 +598,7 @@ class OsvScannerPlugin(BaseToolPlugin):
 
         Args:
             proc: The finished osv-scanner process.
-            payload: The JSON object found on stdout, if any.
-            report_ok: Whether stdout is a report with a ``results`` list.
+            whole: Whether stdout is exactly one scan report.
             found: Whether the report lists any vulnerability.
             report: What osv-scanner printed on standard error.
 
@@ -601,16 +607,10 @@ class OsvScannerPlugin(BaseToolPlugin):
             caller appends osv-scanner's error lines verbatim.
         """
         code = proc.returncode
-        if not report_ok:
+        if not whole.ok:
             if not proc.stdout.strip():
                 return f"OSV-Scanner printed no report (exit code {code})."
-            error = payload.get("error") if payload is not None else None
-            if isinstance(error, str) and error.strip():
-                return (
-                    "OSV-Scanner reported an error instead of a scan report: "
-                    f"{tool_message_excerpt(error)}"
-                )
-            return malformed_report_reason("OSV-Scanner", 1)
+            return whole.reason
         if report.errors:
             return (
                 f"OSV-Scanner reported an error (exit code {code}), so the scan "

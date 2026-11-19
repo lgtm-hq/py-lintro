@@ -424,6 +424,10 @@ class BaseToolPlugin(ABC):
         """
         effective_timeout = self._get_effective_timeout(timeout)
         self._validate_subprocess_command(cmd)
+        # Only a plugin that asks for another decoding passes one, so every
+        # other call is made exactly as before.
+        decode_errors = self._subprocess_decode_errors()
+        decoding = {} if decode_errors is None else {"decode_errors": decode_errors}
         try:
             return run_subprocess(
                 cmd,
@@ -431,11 +435,24 @@ class BaseToolPlugin(ABC):
                 cwd,
                 env,
                 stdin,
+                **decoding,
             )
         except UnsafeCommandError as exc:
             # An npx fallback whose cache fails its integrity check (#3406).
             self._record_command_refusal(exc)
             raise
+
+    def _subprocess_decode_errors(self) -> str | None:
+        """Return how :meth:`_run_subprocess_result` decodes invalid bytes.
+
+        None, the default, is Python's strict decoding, which raises
+        ``UnicodeDecodeError``. A plugin that must quote a tool's output
+        whatever its bytes returns ``"replace"`` to get U+FFFD instead.
+
+        Returns:
+            The ``errors`` handler for decoding stdout and stderr, or None.
+        """
+        return None
 
     def _run_subprocess(
         self,
