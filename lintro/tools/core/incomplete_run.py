@@ -11,6 +11,7 @@ instead of echoing the tool's raw report.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 
 from lintro.models.core.tool_outcome import Checked, ToolOutcome
@@ -130,6 +131,26 @@ def incomplete_run_result(
     )
 
 
+def text_beside_report(text: str) -> str:
+    """Return a combined output with its leading JSON report cut out.
+
+    Args:
+        text: Output holding one decodable JSON report.
+
+    Returns:
+        The text before and after the report, or ``text`` unchanged when no
+        JSON report can be decoded from it.
+    """
+    start = text.find("{")
+    if start < 0:
+        return text
+    try:
+        _, end = json.JSONDecoder().raw_decode(text, start)
+    except ValueError:
+        return text
+    return f"{text[:start]}\n{text[end:]}"
+
+
 def report_gap(
     *,
     tool: str,
@@ -137,6 +158,7 @@ def report_gap(
     run_success: bool,
     found_issues: bool,
     parse_failures: int,
+    report_marker: str | None = None,
 ) -> tuple[str, int | None] | None:
     """Name why a run whose tool always prints a report has no verdict.
 
@@ -146,27 +168,49 @@ def report_gap(
     neither is a malformed report. Only a report with malformed records at
     a recognised verdict counts its parse failures.
 
+    A tool whose report can be recognised in its combined output passes
+    ``report_marker``. A failed exit without it is then the tool failing to
+    run; a failed exit beside a valid report that lists nothing quotes the
+    tool's own message rather than the report and counts zero parse
+    failures, and a malformed report keeps its count.
+
     Args:
         tool: Display name of the tool.
         output: What the tool printed.
         run_success: Whether the tool exited 0.
         found_issues: Whether any finding was parsed.
         parse_failures: Malformed report containers or records.
+        report_marker: Text present in every report the tool prints, when
+            its report can be told apart from its logs.
 
     Returns:
         The reason and the parse-failure count to report (None when no report
         was printed), or None when the report is complete.
     """
-    if not (output or "").strip():
+    text = (output or "").strip()
+    if not text:
         if not run_success:
             return f"{tool} exited with an error and printed no report.", None
         return f"{tool} printed no report.", None
-    if not found_issues and not run_success:
+    if report_marker is not None and not run_success and report_marker not in text:
         return (
-            f"{tool} exited with an error and reported no findings: "
-            f"{tool_message_excerpt(output)}",
+            f"{tool} exited with an error and printed no report: "
+            f"{tool_message_excerpt(text)}",
             None,
         )
+    if not found_issues and not run_success:
+        if report_marker is None:
+            return (
+                f"{tool} exited with an error and reported no findings: "
+                f"{tool_message_excerpt(text)}",
+                None,
+            )
+        if not parse_failures:
+            return (
+                f"{tool} exited with an error and reported no findings: "
+                f"{tool_message_excerpt(text_beside_report(text))}",
+                0,
+            )
     if parse_failures:
         return malformed_report_reason(tool, parse_failures), parse_failures
     return None

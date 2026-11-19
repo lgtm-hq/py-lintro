@@ -422,7 +422,17 @@ def test_executor_csv_stdout_is_clean_and_banners_go_to_stderr(
     reader = _csv.reader(_io.StringIO(captured.out))
     rows = list(reader)
     assert_that(rows[0]).is_equal_to(
-        ["tool", "issues_count", "file", "line", "code", "message", "doc_url"],
+        # ``notes`` follows the original columns, which keep their places.
+        [
+            "tool",
+            "issues_count",
+            "file",
+            "line",
+            "code",
+            "message",
+            "doc_url",
+            "notes",
+        ],
     )
     assert_that(any("F401" in row for row in rows[1:])).is_true()
     # The human UI must not pollute stdout, but must appear on stderr.
@@ -522,7 +532,17 @@ def test_executor_csv_stdout_bytes_match_file_artifact(
     # The payload still round-trips through csv.reader.
     rows = list(_csv.reader(_io.StringIO(stdout_bytes.decode("utf-8"))))
     assert_that(rows[0]).is_equal_to(
-        ["tool", "issues_count", "file", "line", "code", "message", "doc_url"],
+        # ``notes`` follows the original columns, which keep their places.
+        [
+            "tool",
+            "issues_count",
+            "file",
+            "line",
+            "code",
+            "message",
+            "doc_url",
+            "notes",
+        ],
     )
     assert_that(rows).is_length(2)
     assert_that(rows[1][0]).is_equal_to("ruff")

@@ -11,10 +11,75 @@ whitelist normalizer live in core and never import :mod:`lintro.ai`
 from __future__ import annotations
 
 import copy
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
+
+#: ``ToolResult.metadata`` key for notes about a complete result: things the
+#: reader should know that are neither findings nor a failure, such as
+#: osv-scanner's unresolved indirect dependencies. Each entry is a dict with
+#: ``summary`` (a few words, for a summary table) and ``message``.
+NOTES_KEY: str = "notes"
+
+
+@dataclass(frozen=True)
+class ToolNote:
+    """One note about a tool's result.
+
+    Attributes:
+        summary: A few words for a summary table's Notes column.
+        message: The full note.
+    """
+
+    summary: str
+    message: str
+
+
+def with_tool_notes(
+    metadata: Mapping[str, Any],
+    notes: Sequence[ToolNote],
+) -> dict[str, Any]:
+    """Return metadata with notes added under :data:`NOTES_KEY`.
+
+    Args:
+        metadata: The result's metadata.
+        notes: Notes to add; none leaves the metadata unchanged.
+
+    Returns:
+        A new metadata dict.
+    """
+    merged = dict(metadata)
+    if notes:
+        merged[NOTES_KEY] = [
+            *tool_notes(metadata),
+            *({"summary": n.summary, "message": n.message} for n in notes),
+        ]
+    return merged
+
+
+def tool_notes(metadata: Mapping[str, Any] | None) -> list[dict[str, str]]:
+    """Return the well-formed notes in a result's metadata.
+
+    Args:
+        metadata: The result's metadata, if any.
+
+    Returns:
+        Each note as ``{"summary": ..., "message": ...}``, in order.
+    """
+    raw = metadata.get(NOTES_KEY) if isinstance(metadata, Mapping) else None
+    if not isinstance(raw, list):
+        return []
+    return [
+        {"summary": note["summary"], "message": note["message"]}
+        for note in raw
+        if isinstance(note, Mapping)
+        and isinstance(note.get("summary"), str)
+        and isinstance(note.get("message"), str)
+        and note["message"].strip()
+    ]
 
 
 def get_ai_count(result: ToolResult, key: str) -> int:
@@ -95,5 +160,9 @@ def normalize_tool_metadata(raw: dict[str, Any]) -> dict[str, Any]:
     suppressions = raw.get("suppressions")
     if isinstance(suppressions, list):
         normalized["suppressions"] = [s for s in suppressions if isinstance(s, dict)]
+
+    notes = tool_notes(raw)
+    if notes:
+        normalized[NOTES_KEY] = notes
 
     return normalized

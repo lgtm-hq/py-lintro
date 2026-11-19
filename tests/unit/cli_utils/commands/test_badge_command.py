@@ -23,7 +23,10 @@ from lintro.models.core.severity_counts import SeverityCounts
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.tools.bandit.definition import BanditPlugin
-from lintro.tools.osv_scanner.definition import OsvScannerPlugin
+from lintro.tools.osv_scanner.definition import (
+    OSV_NO_SOURCES_MESSAGE,
+    OsvScannerPlugin,
+)
 from lintro.utils.meaningful_run import baseline_is_eligible
 from lintro.utils.severity_counts import count_severities
 
@@ -680,7 +683,13 @@ def test_osv_no_sources_cannot_publish_or_qualify_a_baseline(
         ["osv-scanner"],
         128 if no_sources else 0,
         "" if no_sources else report,
-        "No package sources found" if no_sources else "",
+        # What osv-scanner 2.4.0 and 2.7.1 print with nothing to scan, at
+        # the error verbosity lintro runs it with.
+        (
+            "No package sources found, --help for usage information.\n"
+            if no_sources
+            else ""
+        ),
     )
     with (
         patch(
@@ -691,7 +700,11 @@ def test_osv_no_sources_cannot_publish_or_qualify_a_baseline(
     ):
         measured = OsvScannerPlugin().check([str(tmp_path)], {})
     assert_that(measured.success).is_true()
-    assert_that(measured.output).is_none()
+    # Nothing to scan is a no-files run with a named reason (#3352).
+    assert_that(measured.no_files).is_equal_to(no_sources)
+    assert_that(measured.output).is_equal_to(
+        OSV_NO_SOURCES_MESSAGE if no_sources else None,
+    )
     assert_that(measured.inspected_files).is_equal_to(not no_sources)
     assert_that(
         baseline_is_eligible(

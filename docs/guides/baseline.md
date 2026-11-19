@@ -278,6 +278,50 @@ These fail-closed checks also apply without a fingerprint baseline:
   empty stdout at any exit (for example a `.sqlfluff` with a broken section header), a
   failed exit that prints text instead of JSON (`Error: Unknown dialect 'bogus'`), any
   exit other than 1 with violations, and a timeout.
+- golangci-lint prints its JSON report on every completed run and writes its logs and
+  errors to stderr. A failed exit without an `Issues` report (a broken `.golangci.yml`,
+  a build or lock error), empty output, a malformed report, and a failed exit beside a
+  valid report with no findings (the concurrency exit 3) are execution failures with
+  unknown inspection. Only a malformed report counts parse failures. The output names
+  the reason, and the module when several ran, instead of the raw report. In `fmt`, a
+  stage without a complete report leaves fixed and remaining counts unknown, and merging
+  several modules keeps that unknown residual, the execution failure and any timeout. A
+  `--fix` run that logs an error beside a valid report (for example
+  `Failed to fix issues: ... permission denied` for a read-only file) is incomplete the
+  same way, and its output quotes that error.
+- OSV-Scanner runs with `--verbosity error`, so a scan that went well prints nothing on
+  standard error. A run is a complete scan only when stdout is exactly one JSON scan
+  report (a `results` list, only the top-level keys osv-scanner's report has, nothing
+  before or after it) and either standard error is empty (exit 0, or exit 1 with
+  vulnerabilities in the report) or everything on it is the one allow-listed message: a
+  failed transitive-dependency resolution
+  (`extracting as transitivedependency/requirements` or `.../pomxml`,
+  `failed resolution for <path>: ...`) naming one existing file, whose whole error is
+  the registry's answer that it has no such package or version or that no version
+  satisfies the requirements. Such a run (exit 127 without findings, 1 with them) is
+  complete and carries a note naming the manifest: the console prints it under the
+  tool's result, the summary table's Notes column says "indirect dependencies not
+  resolved", the Markdown, HTML and plain-text reports print it, CSV reports carry it in
+  a `notes` column, and JSON keeps it under `metadata.notes`, while `output` stays
+  OSV-Scanner's raw report. An `Error during extraction` error that names exactly one
+  path, an existing file under an excluded path, is dropped, as a finding for that file
+  would be; one that also names another path is kept. Anything else on standard error,
+  at any exit code and in any order, makes the run an execution failure with unknown
+  inspection: an unreadable or malformed lockfile, a resolver or OSV API outage, a
+  broken configuration, an error lintro has never seen. The findings OSV-Scanner
+  reported are kept and its standard error is quoted verbatim. A failed exit with
+  nothing on standard error, and a run without a complete report, are execution failures
+  too. "No package sources found, --help for usage information." as the whole of
+  standard error at exit 128 is a no-files run; beside an extraction error, or with any
+  other text on its line, it is incomplete. OSV-Scanner does not report every source it
+  under-reads: a lockfile in a format version it does not support
+  (`"lockfileVersion": 99`) is logged as "found 0 packages" with no error and still
+  reads as a complete scan. See
+  [the configuration guide](../configuration.md#osv-scanner-configuration).
+- commitlint reads commit messages, not files. A completed run (a clean exit or reported
+  violations) counts as inspected. A failed exit with no violation (a broken
+  `commitlint.config.js`) is an execution failure with unknown inspection, named with
+  commitlint's own message.
 - Fix convergence retries stop at the first pass that failed to execute, timed out,
   could not measure its residual, or printed a malformed report, so a later clean pass
   cannot replace that failure. Such a pass, the first one included and with retries

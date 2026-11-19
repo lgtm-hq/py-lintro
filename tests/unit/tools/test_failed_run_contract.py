@@ -507,7 +507,9 @@ INVALID_PRIMARY_REPORTS = {
         '{"results": {"failed_checks": null}}',
         '{"results": {"failed_checks": {}}}',
     ],
-    "golangci_lint": ["", " \n\t ", "null", "{}", '{"Issues": null}', '{"Issues": {}}'],
+    # An absent golangci-lint report is an execution failure, not a parse
+    # failure (#3352): see the golangci-lint plugin tests.
+    "golangci_lint": ["null", "{}", '{"Issues": null}', '{"Issues": {}}'],
     "html_validate": ["null", "{}", "false", '[{"filePath":"a.html"}]'],
     "ruff": ["null", "{}", "false", '"wrong"'],
     "sqlfluff": ["null", "{}", "false", '[{"filepath":"a.sql"}]'],

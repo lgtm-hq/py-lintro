@@ -16,7 +16,7 @@ from lintro.utils.console import (
     get_summary_value,
     get_tool_emoji,
 )
-from lintro.utils.tool_metadata import get_ai_count
+from lintro.utils.tool_metadata import get_ai_count, tool_notes
 
 # Constants
 DEFAULT_REMAINING_COUNT: str = "?"
@@ -474,6 +474,17 @@ def print_summary_table(
                         notes_display = (
                             f"{_YELLOW}{', '.join(parts)} suppression(s){_RESET}"
                         )
+                # Notes the tool attached to a complete result (#3352).
+                note_summaries = list(
+                    dict.fromkeys(note["summary"] for note in tool_notes(tool_meta)),
+                )
+                if note_summaries:
+                    shown_notes = f"{_YELLOW}{'; '.join(note_summaries)}{_RESET}"
+                    notes_display = (
+                        f"{notes_display}; {shown_notes}"
+                        if notes_display
+                        else shown_notes
+                    )
 
                 if (has_execution_failure and issues_count == 0) or (
                     not success and issues_count == 0

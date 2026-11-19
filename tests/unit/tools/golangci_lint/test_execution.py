@@ -41,7 +41,12 @@ def test_invalid_report_cannot_verify_a_go_fix(
         result = golangci_lint_plugin.fix([str(tmp_path)], {})
 
     assert_that(result.success).is_false()
-    assert_that(result.parse_failures_count).is_equal_to(1)
+    # An absent report is golangci-lint failing to run, not a parse failure.
+    assert_that(result.parse_failures_count).is_equal_to(
+        1 if report.strip() else None,
+    )
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.inspected_files).is_none()
     assert_that(result.residual_unknown).is_true()
     if stage:
         assert_that(result.initial_issues).extracting("file").is_equal_to(
@@ -293,7 +298,9 @@ def test_fix_failure_is_not_masked_as_success(
     assert_that(result.success).is_false()
     assert_that(result.remaining_issues_count).is_none()
     assert_that(result.residual_unknown).is_true()
-    assert_that(result.parse_failures_count).is_equal_to(2)
+    # Neither stage printed a report: an execution failure, not a parse one.
+    assert_that(result.parse_failures_count).is_none()
+    assert_that(result.execution_failed).is_true()
     assert_that(result.output).contains("build error")
 
 
@@ -330,7 +337,12 @@ def test_fix_failure_output_preserved_with_remaining_issues(
         result = golangci_lint_plugin.fix([str(tmp_path)], {})
 
     assert_that(result.success).is_false()
-    assert_that(result.remaining_issues_count).is_equal_to(1)
+    # The fixer never ran to completion, so its residual is unmeasured; the
+    # re-check's finding is kept.
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.execution_failed).is_true()
     assert_that(result.output).contains("build error")
 
 
@@ -361,9 +373,12 @@ def test_fix_aborts_when_initial_check_fails_without_issues(
     # Only the initial check runs; --fix and the re-check are never invoked.
     assert_that(mock_run.call_count).is_equal_to(1)
     assert_that(result.success).is_false()
-    assert_that(result.initial_issues_count).is_equal_to(0)
-    assert_that(result.fixed_issues_count).is_equal_to(0)
-    assert_that(result.remaining_issues_count).is_equal_to(0)
+    # Nothing was measured, so no count is reported, not a measured zero.
+    assert_that(result.initial_issues_count).is_none()
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.residual_unknown).is_true()
+    assert_that(result.execution_failed).is_true()
     assert_that(result.output).contains("build error")
 
 

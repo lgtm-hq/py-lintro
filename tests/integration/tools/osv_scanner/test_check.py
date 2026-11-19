@@ -36,6 +36,9 @@ def test_check_file_with_vulnerabilities(
     assert_that(result.name).is_equal_to("osv_scanner")
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_greater_than(0)
+    # A scan with findings is complete: nothing at error level beside them.
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.inspected_files).is_true()
 
 
 def test_check_clean_file(
@@ -55,6 +58,8 @@ def test_check_clean_file(
     assert_that(result.name).is_equal_to("osv_scanner")
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.inspected_files).is_true()
 
 
 def test_check_empty_directory(

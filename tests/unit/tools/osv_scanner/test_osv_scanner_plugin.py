@@ -22,6 +22,10 @@ from lintro.tools.osv_scanner.definition import (
 )
 from tests.test_samples_helpers import copy_sample
 
+# What a current osv-scanner v2 prints at exit 0 for a scan with no vulnerability.
+# Exit 0 with an empty stdout is no report at all (#3352).
+_CLEAN_REPORT = '{"results": []}'
+
 
 def _proc(
     *,
@@ -141,7 +145,7 @@ def test_check_no_vulnerabilities(
     with patch.object(
         osv_scanner_plugin,
         "_run_subprocess_result",
-        return_value=_proc(success=True),
+        return_value=_proc(success=True, stdout=_CLEAN_REPORT),
     ):
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
@@ -149,11 +153,15 @@ def test_check_no_vulnerabilities(
     assert_that(result.issues_count).is_equal_to(0)
 
 
-def test_check_clean_scan_with_log_prefix_and_nonzero_exit(
+def test_check_empty_results_with_log_prefix_and_nonzero_exit_is_incomplete(
     osv_scanner_plugin: OsvScannerPlugin,
     tmp_path: Path,
 ) -> None:
-    """Check treats empty parsed results as success despite non-zero exit."""
+    """A failed exit with an empty ``results`` list is no clean scan (#3352).
+
+    osv-scanner 2.7.1 prints exactly this report when its vulnerability
+    queries fail, so an empty list proves nothing was checked.
+    """
     lockfile = tmp_path / "requirements.txt"
     copy_sample(
         tmp_path,
@@ -176,7 +184,10 @@ def test_check_clean_scan_with_log_prefix_and_nonzero_exit(
     ):
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
-    assert_that(result.success).is_true()
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.inspected_files).is_none()
     assert_that(result.issues_count).is_equal_to(0)
 
 
@@ -195,14 +206,20 @@ def test_check_no_package_sources_sets_parse_failures_count(
         dest_name=lockfile.name,
     )
 
-    osv_output = (
-        "Scanned 0 packages and found 0 vulnerabilities\nNo package sources found\n"
+    # What osv-scanner 2.4.0 and 2.7.1 print at --verbosity error for a
+    # directory with nothing to scan (exit 128).
+    osv_output = "No package sources found, --help for usage information.\n"
+    proc = SubprocessResult(
+        returncode=128,
+        stdout="",
+        stderr=osv_output,
+        output=osv_output,
     )
 
     with patch.object(
         osv_scanner_plugin,
         "_run_subprocess_result",
-        return_value=_proc(success=False, stderr=osv_output, output=osv_output),
+        return_value=proc,
     ):
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
@@ -616,8 +633,8 @@ def test_check_with_suppressions_detects_stale(
         osv_scanner_plugin,
         "_run_subprocess_result",
         side_effect=[
-            _proc(success=True),  # gating scan
-            _proc(success=True),  # probe scan
+            _proc(success=True, stdout=_CLEAN_REPORT),  # gating scan
+            _proc(success=True, stdout=_CLEAN_REPORT),  # probe scan
         ],
     ):
         result = osv_scanner_plugin.check([str(lockfile)], {})
@@ -648,7 +665,7 @@ def test_check_without_config_no_metadata(
     with patch.object(
         osv_scanner_plugin,
         "_run_subprocess_result",
-        return_value=_proc(success=True),
+        return_value=_proc(success=True, stdout=_CLEAN_REPORT),
     ):
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
@@ -682,7 +699,7 @@ def test_check_suppressions_disabled(
     with patch.object(
         osv_scanner_plugin,
         "_run_subprocess_result",
-        return_value=_proc(success=True),
+        return_value=_proc(success=True, stdout=_CLEAN_REPORT),
     ) as mock_run:
         result = osv_scanner_plugin.check(
             [str(lockfile)],
@@ -721,7 +738,7 @@ def test_check_suppressions_probe_timeout(
         osv_scanner_plugin,
         "_run_subprocess_result",
         side_effect=[
-            _proc(success=True),  # gating scan succeeds
+            _proc(success=True, stdout=_CLEAN_REPORT),  # gating scan succeeds
             subprocess.TimeoutExpired(cmd=["osv-scanner"], timeout=120),  # probe
         ],
     ):
@@ -845,7 +862,7 @@ def test_suppressions_classified_when_probe_findings_are_all_excluded(
         osv_scanner_plugin,
         "_run_subprocess_result",
         side_effect=[
-            _proc(success=True),  # gating scan
+            _proc(success=True, stdout=_CLEAN_REPORT),  # gating scan
             _proc(success=False, stdout=probe_report),  # probe: excluded finding
         ],
     ):
@@ -856,3 +873,59 @@ def test_suppressions_classified_when_probe_findings_are_all_excluded(
     assert_that(suppressions).is_length(1)
     # The excluded finding must not count as evidence the suppression is live.
     assert_that(suppressions[0]["status"]).is_equal_to("stale")
+
+
+#: The flags every osv-scanner scan lintro runs carries, in order.
+_SCAN_FLAGS = [
+    "--recursive",
+    "--format",
+    "json",
+    "--verbosity",
+    "error",
+    "--no-call-analysis=all",
+]
+
+
+def test_scan_and_probe_run_at_error_verbosity_without_call_analysis(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Both scans print errors only and skip Go call analysis (#3352)."""
+    (tmp_path / "requirements.txt").write_text("six==1.16.0\n")
+    (tmp_path / ".osv-scanner.toml").write_text(
+        '[[IgnoredVulns]]\nid = "GHSA-0000-0000-0000"\nignoreUntil = 2099-01-01\n',
+    )
+    commands: list[list[str]] = []
+
+    def run(cmd: list[str], **_: object) -> SubprocessResult:
+        commands.append(list(cmd))
+        report = '{"results": []}'
+        return SubprocessResult(returncode=0, stdout=report, stderr="", output=report)
+
+    with patch.object(osv_scanner_plugin, "_run_subprocess_result", side_effect=run):
+        result = osv_scanner_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.execution_failed).is_false()
+    assert_that(commands).is_length(2)
+    for cmd in commands:
+        assert_that(cmd[1:8]).is_equal_to(["scan", *_SCAN_FLAGS])
+    assert_that(commands[0][-3:]).is_equal_to(
+        ["--config", str(tmp_path / ".osv-scanner.toml"), str(tmp_path)],
+    )
+    assert_that(commands[1][-3:]).is_equal_to(["--config", os.devnull, str(tmp_path)])
+
+
+@pytest.mark.parametrize(
+    ("option", "value"),
+    [("verbosity", "info"), ("call_analysis", "go"), ("no_call_analysis", "")],
+)
+def test_options_that_would_undo_the_scan_flags_are_refused(
+    osv_scanner_plugin: OsvScannerPlugin,
+    option: str,
+    value: str,
+) -> None:
+    """An option lintro would silently drop is an error instead."""
+    with pytest.raises(ValueError, match="--verbosity error --no-call-analysis=all"):
+        osv_scanner_plugin.set_options(**{option: value})
+
+    assert_that(osv_scanner_plugin.options).does_not_contain_key(option)

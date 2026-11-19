@@ -32,6 +32,7 @@ from lintro.parsers.bandit.bandit_parser import parse_bandit_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.incomplete_run import incomplete_run_result
 from lintro.utils.config import load_bandit_config
 
 # Constants for Bandit configuration
@@ -174,18 +175,11 @@ def _failed_run_result(
     Returns:
         A failed ToolResult flagged as an execution failure.
     """
-    kept = issues or []
-    return ToolResult.from_outcome(
-        ToolOutcome(
-            execution=Checked(success=False, inspected_files=None),
-            issues_count=len(kept),
-        ),
+    return incomplete_run_result(
         name="bandit",
-        findings_complete=False,
-        execution_failed=True,
-        output=output,
-        issues=kept,
-        parse_failures_count=parse_failures,
+        reason=output,
+        issues=issues or (),
+        parse_failures=parse_failures,
     )
 
 

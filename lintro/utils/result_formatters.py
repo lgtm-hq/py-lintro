@@ -14,6 +14,7 @@ from loguru import logger
 from lintro.enums.action import Action, normalize_action
 from lintro.enums.tool_name import ToolName
 from lintro.models.core.tool_outcome import NoFiles
+from lintro.utils.tool_metadata import tool_notes
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
@@ -435,5 +436,9 @@ def print_tool_result(
 
     # Display suppression table for osv-scanner when suppressions exist
     _print_suppression_table(console_output_func, metadata)
+    # Notes sit apart from the tool's output, so they show beside findings
+    # tables as well as on a clean run.
+    for note in tool_notes(metadata):
+        console_output_func(text=f"Note: {note['message']}", color="yellow")
 
     console_output_func(text="")  # Blank line after each tool
