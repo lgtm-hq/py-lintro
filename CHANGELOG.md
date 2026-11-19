@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.182.2] - 2026-11-19
+
+### Fixed
+
+- **tools**: correct tool-definition defects found during the #2311 moves (#3536)
+  (d619c25)
+
 ## [0.182.1] - 2026-11-19
 
 ### Fixed
