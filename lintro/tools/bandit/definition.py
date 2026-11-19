@@ -466,10 +466,6 @@ class BanditPlugin(BaseToolPlugin):
         Returns:
             ToolResult with check results.
         """
-        # Merge runtime options
-        merged_options = dict(self.options)
-        merged_options.update(options)
-
         # Use shared preparation for version check, path validation, file discovery
         ctx = self.prepare(paths, options)
         if isinstance(ctx, ToolResult):

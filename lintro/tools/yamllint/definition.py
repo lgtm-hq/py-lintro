@@ -7,7 +7,6 @@ indentation, etc.
 
 from __future__ import annotations
 
-import fnmatch
 import os
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
@@ -15,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 import click
-import yaml
 from loguru import logger
 
 from lintro.enums.capability import Cap
@@ -178,87 +176,37 @@ class YamllintPlugin(BaseToolPlugin):
 
         return None
 
-    def _load_yamllint_ignore_patterns(
-        self,
-        config_file: str | None,
-    ) -> list[str]:
-        """Load ignore patterns from yamllint config file.
+    def _config_invocation(self, abs_file: str) -> tuple[list[str], str, str]:
+        """Choose the config arguments, working directory and path for a file.
+
+        yamllint matches ``ignore`` patterns (top-level and per rule) against
+        the path exactly as passed, so an absolute path never matches them.
+        With a config file, yamllint runs from that file's directory on a
+        relative path and decides itself which rules the file is exempt from.
 
         Args:
-            config_file: Path to yamllint config file, or None.
+            abs_file: Absolute path of the YAML file to lint.
 
         Returns:
-            list[str]: List of ignore patterns from the config file.
+            The ``--config-file`` arguments (empty without a config), the
+            directory to run in, and the path to pass to yamllint.
         """
-        if not config_file or not os.path.exists(config_file):
-            return []
-
-        ignore_patterns: list[str] = []
+        file_dir = os.path.dirname(abs_file)
+        config_file = self._find_yamllint_config(search_dir=file_dir)
+        if not config_file:
+            return [], file_dir, abs_file
+        abs_config_file = os.path.abspath(config_file)
+        logger.debug(
+            f"[YamllintPlugin] Using config file: {abs_config_file} "
+            f"(original: {config_file})",
+        )
+        config_args = ["--config-file", abs_config_file]
+        config_dir = os.path.dirname(abs_config_file)
         try:
-            with open(config_file, encoding="utf-8") as f:
-                config_data = yaml.safe_load(f)
-                if config_data and isinstance(config_data, dict):
-                    # Check for ignore patterns in line-length rule
-                    line_length_config = config_data.get("rules", {}).get(
-                        "line-length",
-                        {},
-                    )
-                    if isinstance(line_length_config, dict):
-                        ignore_value = line_length_config.get("ignore")
-                        if ignore_value:
-                            if isinstance(ignore_value, str):
-                                ignore_patterns.extend(
-                                    [
-                                        line.strip()
-                                        for line in ignore_value.split("\n")
-                                        if line.strip()
-                                    ],
-                                )
-                            elif isinstance(ignore_value, list):
-                                ignore_patterns.extend(ignore_value)
-                    logger.debug(
-                        f"[YamllintPlugin] Loaded {len(ignore_patterns)} ignore "
-                        f"patterns from {config_file}: {ignore_patterns}",
-                    )
-        except (OSError, ValueError, KeyError, yaml.YAMLError) as e:
-            logger.debug(
-                f"[YamllintPlugin] Failed to load ignore patterns "
-                f"from {config_file}: {e}",
-            )
-
-        return ignore_patterns
-
-    def _should_ignore_file(
-        self,
-        file_path: str,
-        ignore_patterns: list[str],
-    ) -> bool:
-        """Check if a file should be ignored based on yamllint ignore patterns.
-
-        Args:
-            file_path: Path to the file to check.
-            ignore_patterns: List of ignore patterns from yamllint config.
-
-        Returns:
-            bool: True if the file should be ignored, False otherwise.
-        """
-        if not ignore_patterns:
-            return False
-
-        normalized_path: str = file_path.replace("\\", "/")
-
-        for pattern in ignore_patterns:
-            pattern = pattern.strip()
-            if not pattern:
-                continue
-            if normalized_path.startswith(pattern):
-                return True
-            if f"/{pattern}" in normalized_path:
-                return True
-            if fnmatch.fnmatch(normalized_path, pattern):
-                return True
-
-        return False
+            return config_args, config_dir, os.path.relpath(abs_file, config_dir)
+        except ValueError:
+            # Different drive on Windows: no relative path exists.
+            return config_args, file_dir, abs_file
 
     def _process_single_file(
         self,
@@ -274,22 +222,14 @@ class YamllintPlugin(BaseToolPlugin):
             results: Dictionary to accumulate results across files.
         """
         abs_file: str = os.path.abspath(file_path)
-        file_dir: str = os.path.dirname(abs_file)
 
         # Build command
         cmd: list[str] = self._get_executable_command(tool_name="yamllint")
         format_option = str(self.options.get("format", YAMLLINT_FORMATS[0]))
         cmd.extend(["--format", format_option])
 
-        # Discover config file relative to the file being checked
-        config_file: str | None = self._find_yamllint_config(search_dir=file_dir)
-        if config_file:
-            abs_config_file = os.path.abspath(config_file)
-            cmd.extend(["--config-file", abs_config_file])
-            logger.debug(
-                f"[YamllintPlugin] Using config file: {abs_config_file} "
-                f"(original: {config_file})",
-            )
+        config_args, run_dir, target = self._config_invocation(abs_file)
+        cmd.extend(config_args)
 
         config_data_opt = self.options.get("config_data")
         if config_data_opt:
@@ -301,17 +241,21 @@ class YamllintPlugin(BaseToolPlugin):
         if self.options.get("no_warnings", False):
             cmd.append("--no-warnings")
 
-        cmd.append(abs_file)
+        cmd.append(target)
         logger.debug(f"[YamllintPlugin] Processing file: {abs_file}")
-        logger.debug(f"[YamllintPlugin] Command: {' '.join(cmd)}")
+        logger.debug(f"[YamllintPlugin] Command: {' '.join(cmd)} (cwd={run_dir})")
 
         try:
             success, output = self._run_subprocess(
                 cmd=cmd,
                 timeout=timeout,
-                cwd=file_dir,
+                cwd=run_dir,
             )
             issues = parse_yamllint_output(output=output)
+            # Report the same absolute path whichever directory yamllint ran in.
+            for issue in issues:
+                if not os.path.isabs(issue.file):
+                    issue.file = os.path.normpath(os.path.join(run_dir, issue.file))
             issues_count = len(issues)
 
             if not success:
@@ -393,30 +337,6 @@ class YamllintPlugin(BaseToolPlugin):
             logger.debug(
                 f"[YamllintPlugin] Files to check (first 10): {yaml_files[:10]}",
             )
-
-        # Load ignore patterns from yamllint config
-        config_file = self._find_yamllint_config(
-            search_dir=paths[0] if paths else None,
-        )
-        ignore_patterns = self._load_yamllint_ignore_patterns(config_file=config_file)
-
-        # Filter files based on ignore patterns
-        if ignore_patterns:
-            original_count = len(yaml_files)
-            yaml_files = [
-                f
-                for f in yaml_files
-                if not self._should_ignore_file(
-                    file_path=f,
-                    ignore_patterns=ignore_patterns,
-                )
-            ]
-            filtered_count = original_count - len(yaml_files)
-            if filtered_count > 0:
-                logger.debug(
-                    f"[YamllintPlugin] Filtered out {filtered_count} files based on "
-                    f"yamllint ignore patterns: {ignore_patterns}",
-                )
 
         if not yaml_files:
             return ToolResult.from_outcome(

@@ -20,6 +20,7 @@ from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
 from lintro.models.core.tool_outcome import Checked, NoFiles, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.cargo_audit.cargo_audit_issue import CargoAuditIssue
 from lintro.parsers.cargo_audit.cargo_audit_parser import (
     extract_cargo_audit_payload,
     parse_cargo_audit_output,
@@ -27,33 +28,60 @@ from lintro.parsers.cargo_audit.cargo_audit_parser import (
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.option_validators import (
+    filter_none_options,
+    validate_positive_int,
+)
 
 # Constants for cargo-audit configuration
 CARGO_AUDIT_DEFAULT_TIMEOUT: int = 120  # Network operations can be slow
-CARGO_AUDIT_FILE_PATTERNS: list[str] = ["Cargo.lock"]
+CARGO_AUDIT_LOCKFILE: str = "Cargo.lock"
+CARGO_AUDIT_FILE_PATTERNS: list[str] = [CARGO_AUDIT_LOCKFILE]
 
 
-def _find_cargo_root(paths: list[str]) -> Path | None:
-    """Return the nearest directory containing Cargo.lock for given paths.
+def _find_lock_roots(paths: list[str]) -> list[Path]:
+    """Return every directory owning a Cargo.lock the given paths belong to.
+
+    Each lockfile is a separate dependency resolution, so a file set spanning
+    unrelated crates needs one audit per lockfile. A workspace keeps a single
+    lockfile at its root, so its members all resolve to that one directory.
 
     Args:
         paths: List of file paths to search from.
 
     Returns:
-        Path to directory containing Cargo.lock, or None if not found.
+        The distinct directories holding the nearest Cargo.lock above each
+        path, sorted for a deterministic run order. Empty when none is found.
     """
+    roots: set[Path] = set()
     for raw_path in paths:
         current = Path(raw_path).resolve()
         # If it's a file, start from its parent
         if current.is_file():
             current = current.parent
         # Search upward for Cargo.lock
-        for candidate in [current, *list(current.parents)]:
-            lock_file = candidate / "Cargo.lock"
-            if lock_file.exists():
-                return candidate
+        for candidate in [current, *current.parents]:
+            if (candidate / CARGO_AUDIT_LOCKFILE).exists():
+                roots.add(candidate)
+                break
+    return sorted(roots)
 
-    return None
+
+@dataclass(frozen=True)
+class _AuditRun:
+    """The interpreted result of auditing one Cargo.lock root.
+
+    Attributes:
+        issues: Vulnerabilities parsed from the report.
+        success: Whether the command ran and produced a usable report.
+        parse_failed: Whether the report was missing or schema-invalid.
+        output: Combined command output, kept for display.
+    """
+
+    issues: list[CargoAuditIssue]
+    success: bool
+    parse_failed: bool
+    output: str
 
 
 @register_tool
@@ -95,23 +123,21 @@ class CargoAuditPlugin(BaseToolPlugin):
             default_timeout=CARGO_AUDIT_DEFAULT_TIMEOUT,
         )
 
-    def set_options(self, **kwargs: Any) -> None:
+    def set_options(
+        self,
+        timeout: int | None = None,
+        **kwargs: Any,
+    ) -> None:
         """Set tool-specific options.
 
         Args:
-            **kwargs: Options to set, including timeout.
-
-        Raises:
-            ValueError: If timeout is negative or not a number.
+            timeout: Timeout in seconds for each cargo-audit run.
+            **kwargs: Additional options.
         """
-        if "timeout" in kwargs:
-            timeout = kwargs["timeout"]
-            if timeout is not None:
-                if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
-                    raise ValueError("timeout must be a number")
-                if timeout < 0:
-                    raise ValueError("timeout must be non-negative")
-        super().set_options(**kwargs)
+        validate_positive_int(timeout, "timeout")
+
+        options = filter_none_options(timeout=timeout)
+        super().set_options(**options, **kwargs)
 
     def _build_command(self) -> list[str]:
         """Build the cargo-audit command.
@@ -148,54 +174,42 @@ class CargoAuditPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        # Find Cargo.lock root from filtered file list
-        cargo_root = _find_cargo_root(ctx.files)
-        if cargo_root is None:
+        # Audit every lockfile the filtered file list belongs to.
+        lock_roots = _find_lock_roots(ctx.files)
+        if not lock_roots:
             return ToolResult.from_outcome(
                 ToolOutcome(execution=NoFiles()),
                 name=self.definition.name,
                 output="No Cargo.lock found; skipping cargo-audit.",
             )
 
-        cmd = self._build_command()
-        try:
-            proc = self._run_subprocess_result(
-                cmd,
-                timeout=ctx.timeout,
-                cwd=str(cargo_root),
-            )
-        except subprocess.TimeoutExpired:
-            return ToolResult.from_outcome(
-                ToolOutcome(
-                    execution=TimedOut(f"cargo-audit timed out after {ctx.timeout}s"),
-                ),
-                name=self.definition.name,
-            )
+        runs: list[_AuditRun] = []
+        for lock_root in lock_roots:
+            run = self._audit_root(lock_root, timeout=ctx.timeout)
+            if run is None:
+                # The scan is incomplete; keep what earlier roots found.
+                timed_out_issues = [i for r in runs for i in r.issues]
+                return ToolResult.from_outcome(
+                    ToolOutcome(
+                        execution=TimedOut(
+                            f"cargo-audit timed out after {ctx.timeout}s "
+                            f"auditing {lock_root / CARGO_AUDIT_LOCKFILE}",
+                        ),
+                        issues_count=len(timed_out_issues),
+                    ),
+                    name=self.definition.name,
+                    issues=timed_out_issues,
+                )
+            runs.append(run)
 
-        success = proc.success
-        # cargo-audit writes its JSON report to stdout; parse stdout only so a
-        # stderr warning cannot corrupt parsing (see #1043). ``output``
-        # (combined) is retained for display.
-        output = proc.output
-        payload = extract_cargo_audit_payload(proc.stdout)
-        issues = parse_cargo_audit_output(proc.stdout, data=payload)
+        issues = [issue for run in runs for issue in run.issues]
+        # Every root must run and report cleanly, with no vulnerabilities.
+        # cargo-audit exits non-zero both for findings and for execution
+        # errors, so a failed run with nothing parsed is never a clean scan.
+        overall_success = all(run.success for run in runs) and not issues
 
-        # A missing or schema-invalid report cannot establish a clean scan,
-        # even when the subprocess succeeds (see #1044 and #3003).
-        parse_failure = payload is None
-        if parse_failure:
-            success = False
-        parse_failures_count = 1 if parse_failure else 0
-
-        # Determine overall success: subprocess must succeed AND no issues found.
-        # cargo-audit returns non-zero if vulnerabilities found, but also if
-        # execution fails. If subprocess failed with no issues parsed, it's
-        # an execution error (not a clean scan).
-        overall_success = success and len(issues) == 0
-
-        # Show output when there are issues OR when subprocess failed without
-        # issues (execution error case)
-        should_show_output = bool(issues) or not success
+        # Show a root's output when it has issues or failed without them.
+        shown = [run.output for run in runs if run.issues or not run.success]
 
         return ToolResult.from_outcome(
             ToolOutcome(
@@ -203,9 +217,46 @@ class CargoAuditPlugin(BaseToolPlugin):
                 issues_count=len(issues),
             ),
             name=self.definition.name,
-            output=output if should_show_output else None,
+            output="\n".join(shown) if shown else None,
             issues=issues,
-            parse_failures_count=parse_failures_count,
+            parse_failures_count=sum(1 for run in runs if run.parse_failed),
+        )
+
+    def _audit_root(self, lock_root: Path, *, timeout: float) -> _AuditRun | None:
+        """Audit the Cargo.lock in one directory.
+
+        Args:
+            lock_root: Directory holding the Cargo.lock to audit. cargo-audit
+                runs there so it also picks up that project's
+                ``.cargo/audit.toml``.
+            timeout: Deadline for the run, in seconds.
+
+        Returns:
+            The interpreted run, or ``None`` when it timed out.
+        """
+        cmd = self._build_command()
+        try:
+            proc = self._run_subprocess_result(
+                cmd,
+                timeout=timeout,
+                cwd=str(lock_root),
+            )
+        except subprocess.TimeoutExpired:
+            return None
+
+        # cargo-audit writes its JSON report to stdout; parse stdout only so a
+        # stderr warning cannot corrupt parsing (see #1043). ``output``
+        # (combined) is retained for display.
+        payload = extract_cargo_audit_payload(proc.stdout)
+        issues = parse_cargo_audit_output(proc.stdout, data=payload)
+        # A missing or schema-invalid report cannot establish a clean scan,
+        # even when the subprocess succeeds (see #1044 and #3003).
+        parse_failed = payload is None
+        return _AuditRun(
+            issues=issues,
+            success=proc.success and not parse_failed,
+            parse_failed=parse_failed,
+            output=proc.output,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

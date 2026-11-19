@@ -349,7 +349,7 @@ class OxlintPlugin(BaseToolPlugin):
         ]
 
         # Add quiet flag if enabled (suppress warnings, only report errors)
-        if self.options.get("quiet", False):
+        if merged_options.get("quiet", False):
             cmd.append("--quiet")
 
         # Add Lintro config injection args if available
@@ -427,7 +427,7 @@ class OxlintPlugin(BaseToolPlugin):
         ]
 
         # Add quiet flag if enabled (suppress warnings, only report errors)
-        if self.options.get("quiet", False):
+        if merged_options.get("quiet", False):
             check_cmd.append("--quiet")
 
         if config_args:

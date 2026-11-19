@@ -50,29 +50,3 @@ def test_set_options_invalid_config_file_type(
     """
     with pytest.raises(ValueError, match="config_file must be"):
         yamllint_plugin.set_options(config_file=123)  # type: ignore[arg-type]
-
-
-def test_should_ignore_file_matches_prefix(yamllint_plugin: YamllintPlugin) -> None:
-    """A file whose path starts with an ignore pattern is ignored.
-
-    Args:
-        yamllint_plugin: The YamllintPlugin instance to test.
-    """
-    result = yamllint_plugin._should_ignore_file(
-        "vendor/config.yaml",
-        ["vendor/"],
-    )
-    assert_that(result).is_true()
-
-
-def test_should_ignore_file_no_match(yamllint_plugin: YamllintPlugin) -> None:
-    """A file that doesn't match any ignore pattern is not ignored.
-
-    Args:
-        yamllint_plugin: The YamllintPlugin instance to test.
-    """
-    result = yamllint_plugin._should_ignore_file(
-        "src/config.yaml",
-        ["vendor/"],
-    )
-    assert_that(result).is_false()

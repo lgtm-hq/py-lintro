@@ -450,7 +450,7 @@ class PrettierPlugin(BaseToolPlugin):
                 if line_length:
                     cmd.extend(["--print-width", str(line_length)])
                     logger.debug(
-                        "[PrettierPlugin] Using --print-width=%s from options",
+                        "[PrettierPlugin] Using --print-width={} from options",
                         line_length,
                     )
             # Find .prettierignore by walking up from cwd
@@ -527,7 +527,7 @@ class PrettierPlugin(BaseToolPlugin):
                 if line_length:
                     fallback_args.extend(["--print-width", str(line_length)])
                     logger.debug(
-                        "[PrettierPlugin] Using --print-width=%s from options",
+                        "[PrettierPlugin] Using --print-width={} from options",
                         line_length,
                     )
             prettierignore_path = self._find_prettierignore(search_dir=ctx.cwd)

@@ -240,13 +240,16 @@ class ClippyPlugin(BaseToolPlugin):
         """Return Clippy documentation URL for the given lint name.
 
         Args:
-            code: Clippy lint name (e.g., "needless_return").
+            code: Clippy lint name, with or without the ``clippy::`` prefix
+                the parser keeps on issue codes (e.g., "clippy::needless_return").
 
         Returns:
             URL to the Clippy lint documentation.
         """
-        if code:
-            return DocUrlTemplate.CLIPPY.format(code=code)
+        # The lint index anchors on the bare lint name.
+        lint = code.removeprefix("clippy::")
+        if lint:
+            return DocUrlTemplate.CLIPPY.format(code=lint)
         return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:

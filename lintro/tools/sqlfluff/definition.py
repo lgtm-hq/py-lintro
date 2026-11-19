@@ -207,6 +207,47 @@ class SqlfluffPlugin(BaseToolPlugin):
         )
         super().set_options(**options, **kwargs)
 
+    def _build_sqlfluff_command(
+        self,
+        subcommand: list[str],
+        files: list[str],
+    ) -> list[str]:
+        """Build a sqlfluff command with the shared rule-selection options.
+
+        ``lint`` and ``fix`` accept the same dialect, rule and templater
+        flags, so both commands are built here.
+
+        Args:
+            subcommand: The sqlfluff subcommand and its own flags.
+            files: List of files to pass to sqlfluff.
+
+        Returns:
+            List of command arguments.
+        """
+        cmd: list[str] = ["sqlfluff", *subcommand]
+
+        dialect_opt = self.options.get("dialect")
+        if dialect_opt is not None:
+            cmd.extend(["--dialect", str(dialect_opt)])
+
+        # Rule lists are comma-separated per the SQLFluff CLI docs.
+        exclude_rules_opt = self.options.get("exclude_rules")
+        if isinstance(exclude_rules_opt, list) and exclude_rules_opt:
+            cmd.extend(["--exclude-rules", ",".join(map(str, exclude_rules_opt))])
+
+        rules_opt = self.options.get("rules")
+        if isinstance(rules_opt, list) and rules_opt:
+            cmd.extend(["--rules", ",".join(map(str, rules_opt))])
+
+        templater_opt = self.options.get("templater")
+        if templater_opt is not None:
+            cmd.extend(["--templater", str(templater_opt)])
+
+        # End-of-options separator handles filenames starting with '-'
+        cmd.append("--")
+        cmd.extend(files)
+        return cmd
+
     def _build_lint_command(self, files: list[str]) -> list[str]:
         """Build the sqlfluff lint command.
 
@@ -216,35 +257,10 @@ class SqlfluffPlugin(BaseToolPlugin):
         Returns:
             List of command arguments.
         """
-        cmd: list[str] = ["sqlfluff", "lint", "--format", SQLFLUFF_DEFAULT_FORMAT]
-
-        # Add dialect option
-        dialect_opt = self.options.get("dialect")
-        if dialect_opt is not None:
-            cmd.extend(["--dialect", str(dialect_opt)])
-
-        # Add exclude rules (comma-separated per SQLFluff CLI docs)
-        exclude_rules_opt = self.options.get("exclude_rules")
-        if isinstance(exclude_rules_opt, list) and exclude_rules_opt:
-            cmd.extend(["--exclude-rules", ",".join(map(str, exclude_rules_opt))])
-
-        # Add rules (comma-separated per SQLFluff CLI docs)
-        rules_opt = self.options.get("rules")
-        if isinstance(rules_opt, list) and rules_opt:
-            cmd.extend(["--rules", ",".join(map(str, rules_opt))])
-
-        # Add templater
-        templater_opt = self.options.get("templater")
-        if templater_opt is not None:
-            cmd.extend(["--templater", str(templater_opt)])
-
-        # Add end-of-options separator to handle filenames starting with '-'
-        cmd.append("--")
-
-        # Add files
-        cmd.extend(files)
-
-        return cmd
+        return self._build_sqlfluff_command(
+            ["lint", "--format", SQLFLUFF_DEFAULT_FORMAT],
+            files,
+        )
 
     def _build_fix_command(self, files: list[str]) -> list[str]:
         """Build the sqlfluff fix command.
@@ -255,35 +271,7 @@ class SqlfluffPlugin(BaseToolPlugin):
         Returns:
             List of command arguments.
         """
-        cmd: list[str] = ["sqlfluff", "fix", "--force"]
-
-        # Add dialect option
-        dialect_opt = self.options.get("dialect")
-        if dialect_opt is not None:
-            cmd.extend(["--dialect", str(dialect_opt)])
-
-        # Add exclude rules (comma-separated per SQLFluff CLI docs)
-        exclude_rules_opt = self.options.get("exclude_rules")
-        if isinstance(exclude_rules_opt, list) and exclude_rules_opt:
-            cmd.extend(["--exclude-rules", ",".join(map(str, exclude_rules_opt))])
-
-        # Add rules (comma-separated per SQLFluff CLI docs)
-        rules_opt = self.options.get("rules")
-        if isinstance(rules_opt, list) and rules_opt:
-            cmd.extend(["--rules", ",".join(map(str, rules_opt))])
-
-        # Add templater
-        templater_opt = self.options.get("templater")
-        if templater_opt is not None:
-            cmd.extend(["--templater", str(templater_opt)])
-
-        # Add end-of-options separator to handle filenames starting with '-'
-        cmd.append("--")
-
-        # Add files
-        cmd.extend(files)
-
-        return cmd
+        return self._build_sqlfluff_command(["fix", "--force"], files)
 
     def doc_url(self, code: str) -> str | None:
         """Return SQLFluff documentation URL for the given rule code.

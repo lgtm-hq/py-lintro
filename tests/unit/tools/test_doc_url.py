@@ -84,6 +84,12 @@ from lintro.tools.yamllint.definition import YamllintPlugin
             "needless_return",
             "https://rust-lang.github.io/rust-clippy/master/index.html#needless_return",
         ),
+        # clippy — issue codes keep the ``clippy::`` prefix; the anchor does not
+        (
+            ClippyPlugin,
+            "clippy::needless_return",
+            "https://rust-lang.github.io/rust-clippy/master/index.html#needless_return",
+        ),
         (ClippyPlugin, "", None),
         # markdownlint — per-rule doc page (lowercased)
         (
@@ -142,6 +148,7 @@ from lintro.tools.yamllint.definition import YamllintPlugin
         "cargo-deny-valid",
         "cargo-deny-empty",
         "clippy-valid",
+        "clippy-prefixed",
         "clippy-empty",
         "markdownlint-valid",
         "markdownlint-empty",

@@ -271,10 +271,11 @@ class TrufflehogPlugin(BaseToolPlugin):
         # handing them over. Discovery already filters dangling links, so this
         # is the narrow race window between discovery and exec.
         present_scan_paths = filter_existing_paths(source_paths)
+        present_scan_set = set(present_scan_paths)
         missing_scan_paths = [
             source_path
             for source_path in source_paths
-            if source_path not in set(present_scan_paths)
+            if source_path not in present_scan_set
         ]
         if missing_scan_paths:
             missing_list = "\n".join(f"  - {path}" for path in missing_scan_paths)
@@ -329,13 +330,21 @@ class TrufflehogPlugin(BaseToolPlugin):
 
         if failures:
             combined = "\n".join(f.output for f in failures if f.output)
+            # A batch that ran out of time leaves the scan incomplete; keep that
+            # visible instead of folding it into a plain failure.
+            timed_out = any(f.timed_out for f in failures)
+            failure_output = combined or "TruffleHog failed with a non-zero exit code."
             return ToolResult.from_outcome(
                 ToolOutcome(
-                    execution=Checked(success=False),
+                    execution=(
+                        TimedOut(failure_output)
+                        if timed_out
+                        else Checked(success=False)
+                    ),
                     issues_count=len(all_issues),
                 ),
                 name=self.definition.name,
-                output=combined or "TruffleHog failed with a non-zero exit code.",
+                output=failure_output,
                 issues=all_issues,
                 parse_failures_count=sum(
                     (f.parse_failures_count or 0) for f in failures

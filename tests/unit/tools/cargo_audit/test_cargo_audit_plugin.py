@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from subprocess import (
     TimeoutExpired,
@@ -115,38 +116,30 @@ def test_set_options_timeout(cargo_audit_plugin: CargoAuditPlugin) -> None:
     assert_that(cargo_audit_plugin.options.get("timeout")).is_equal_to(180)
 
 
-def test_set_options_invalid_timeout(cargo_audit_plugin: CargoAuditPlugin) -> None:
-    """Verify negative integer timeout raises ValueError.
-
-    Args:
-        cargo_audit_plugin: The plugin instance.
-    """
-    with pytest.raises(ValueError, match="non-negative"):
-        cargo_audit_plugin.set_options(timeout=-1)
-
-
-def test_set_options_negative_float_timeout(
+@pytest.mark.parametrize(
+    ("timeout", "message"),
+    [
+        pytest.param(-1, "must be positive", id="negative"),
+        pytest.param(0, "must be positive", id="zero"),
+        pytest.param(-1.5, "must be an integer", id="float"),
+        pytest.param("invalid", "must be an integer", id="string"),
+        pytest.param(True, "must be an integer", id="boolean"),
+    ],
+)
+def test_set_options_rejects_invalid_timeout(
     cargo_audit_plugin: CargoAuditPlugin,
+    timeout: object,
+    message: str,
 ) -> None:
-    """Verify negative float timeout raises ValueError.
+    """The shared validator rejects anything but a positive integer timeout.
 
     Args:
         cargo_audit_plugin: The plugin instance.
+        timeout: An invalid timeout value.
+        message: Expected fragment of the ValueError message.
     """
-    with pytest.raises(ValueError, match="non-negative"):
-        cargo_audit_plugin.set_options(timeout=-1.5)
-
-
-def test_set_options_non_numeric_timeout(
-    cargo_audit_plugin: CargoAuditPlugin,
-) -> None:
-    """Verify non-numeric timeout raises ValueError.
-
-    Args:
-        cargo_audit_plugin: The plugin instance.
-    """
-    with pytest.raises(ValueError, match="must be a number"):
-        cargo_audit_plugin.set_options(timeout="invalid")
+    with pytest.raises(ValueError, match=message):
+        cargo_audit_plugin.set_options(timeout=timeout)  # type: ignore[arg-type]
 
 
 def test_fix_raises_not_implemented(cargo_audit_plugin: CargoAuditPlugin) -> None:
@@ -430,3 +423,124 @@ def test_check_invalid_report_is_not_clean(
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.parse_failures_count).is_equal_to(1)
     assert_that(result.output).is_equal_to(output)
+
+
+def _report(*advisory_ids: str) -> str:
+    """Build a cargo-audit JSON report listing the given advisories.
+
+    Args:
+        *advisory_ids: RUSTSEC identifiers to report as vulnerabilities.
+
+    Returns:
+        The report as cargo-audit prints it.
+    """
+    entries = [
+        {
+            "advisory": {
+                "id": advisory_id,
+                "package": "smallvec",
+                "title": "Buffer overflow",
+                "description": "Overflow in SmallVec::insert_many",
+                "url": f"https://rustsec.org/advisories/{advisory_id}",
+            },
+            "versions": {"patched": [">=1.6.1"]},
+            "package": {"name": "smallvec", "version": "1.6.0"},
+        }
+        for advisory_id in advisory_ids
+    ]
+    return json.dumps(
+        {"vulnerabilities": {"count": len(entries), "list": entries}},
+    )
+
+
+def _two_crates(tmp_path: Path) -> tuple[Path, Path]:
+    """Create two unrelated crates, each with its own Cargo.lock.
+
+    Args:
+        tmp_path: Directory to create the crates in.
+
+    Returns:
+        The two lockfiles, clean crate first.
+    """
+    locks = []
+    for name in ("clean", "vulnerable"):
+        crate = tmp_path / name
+        crate.mkdir()
+        lock = crate / "Cargo.lock"
+        lock.write_text(f'[[package]]\nname = "{name}"\nversion = "0.1.0"\n')
+        locks.append(lock)
+    return locks[0], locks[1]
+
+
+def test_check_audits_every_lockfile(
+    cargo_audit_plugin: CargoAuditPlugin,
+    tmp_path: Path,
+) -> None:
+    """A file set spanning unrelated crates audits each of their lockfiles.
+
+    Args:
+        cargo_audit_plugin: The plugin instance.
+        tmp_path: Temporary directory holding the crates.
+    """
+    clean_lock, vulnerable_lock = _two_crates(tmp_path)
+
+    def fake_audit(_cmd: list[str], **kwargs: object) -> SubprocessResult:
+        vulnerable = Path(str(kwargs["cwd"])) == vulnerable_lock.parent
+        report = _report("RUSTSEC-2021-0003") if vulnerable else _report()
+        return _proc(success=not vulnerable, stdout=report)
+
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
+            cargo_audit_plugin,
+            "_run_subprocess_result",
+            side_effect=fake_audit,
+        ),
+    ):
+        result = cargo_audit_plugin.check([str(clean_lock), str(vulnerable_lock)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.issues).extracting("advisory_id").is_equal_to(
+        ["RUSTSEC-2021-0003"],
+    )
+    assert_that(result.parse_failures_count).is_equal_to(0)
+
+
+def test_check_timeout_keeps_earlier_roots_findings(
+    cargo_audit_plugin: CargoAuditPlugin,
+    tmp_path: Path,
+) -> None:
+    """A later lockfile timing out keeps what earlier audits found.
+
+    Args:
+        cargo_audit_plugin: The plugin instance.
+        tmp_path: Temporary directory holding the crates.
+    """
+    first_lock, second_lock = _two_crates(tmp_path)
+
+    def fake_audit(_cmd: list[str], **kwargs: object) -> SubprocessResult:
+        if Path(str(kwargs["cwd"])) == second_lock.parent:
+            raise TimeoutExpired(cmd=["cargo", "audit"], timeout=120)
+        return _proc(success=False, stdout=_report("RUSTSEC-2021-0003"))
+
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
+            cargo_audit_plugin,
+            "_run_subprocess_result",
+            side_effect=fake_audit,
+        ),
+    ):
+        result = cargo_audit_plugin.check([str(first_lock), str(second_lock)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_true()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.output).contains(str(second_lock))

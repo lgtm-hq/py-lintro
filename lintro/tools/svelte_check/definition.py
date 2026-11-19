@@ -36,10 +36,15 @@ from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.batch_runner import batch_timeout_result
 from lintro.tools.core.node_modules import ensure_node_modules
+from lintro.tools.core.option_validators import (
+    filter_none_options,
+    validate_option_types,
+)
 
 # Constants for Svelte-check configuration
 SVELTE_CHECK_DEFAULT_TIMEOUT: int = 120
 SVELTE_CHECK_FILE_PATTERNS: list[str] = ["*.svelte"]
+SVELTE_CHECK_THRESHOLDS: tuple[str, ...] = ("error", "warning", "hint")
 
 
 @register_tool
@@ -103,19 +108,13 @@ class SvelteCheckPlugin(BaseToolPlugin):
         Raises:
             ValueError: If any provided option is of an unexpected type.
         """
-        if threshold is not None:
-            if not isinstance(threshold, str):
-                raise ValueError("threshold must be a string")
-            if threshold not in ("error", "warning", "hint"):
-                raise ValueError("threshold must be 'error', 'warning', or 'hint'")
-        if tsconfig is not None and not isinstance(tsconfig, str):
-            raise ValueError("tsconfig must be a string path")
-
-        options: dict[str, object] = {
-            "threshold": threshold,
-            "tsconfig": tsconfig,
-        }
-        options = {k: v for k, v in options.items() if v is not None}
+        options = filter_none_options(threshold=threshold, tsconfig=tsconfig)
+        validate_option_types(
+            options,
+            {"threshold": str, "tsconfig": (str, "string path")},
+        )
+        if threshold is not None and threshold not in SVELTE_CHECK_THRESHOLDS:
+            raise ValueError("threshold must be 'error', 'warning', or 'hint'")
         super().set_options(**options, **kwargs)
 
     def _get_svelte_check_command(self, cwd: Path | None = None) -> list[str]:

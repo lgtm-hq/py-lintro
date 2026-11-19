@@ -8,6 +8,7 @@ aggregates the per-batch results correctly.
 
 from __future__ import annotations
 
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 from unittest.mock import patch
 
@@ -113,3 +114,46 @@ def test_check_batch_failure_fails_overall_keeping_findings(
     # The finding from the successful batch survives aggregation.
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.parse_failures_count).is_greater_than(0)
+
+
+def test_check_batch_timeout_reports_timed_out(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A batch that times out marks the aggregated scan as timed out (#2400).
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(
+        "lintro.tools.core.argv_batching.argv_byte_budget",
+        lambda: 1,
+    )
+    good = tmp_path / "aaa_good.py"
+    good.write_text("TOKEN = 'ghp_fake'\n")
+    slow = tmp_path / "zzz_slow.py"
+    slow.write_text("nothing = 1\n")
+
+    def fake_run(cmd: list[str], **_kwargs: object) -> object:
+        scanned = next(a for a in cmd if a.endswith(".py"))
+        if scanned.endswith("zzz_slow.py"):
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=1)
+        return make_subprocess_result(
+            stdout=sample_finding_line(file=scanned),
+            returncode=0,
+        )
+
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        side_effect=fake_run,
+    ):
+        result = trufflehog_plugin.check([str(good), str(slow)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_true()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.output).contains("timed out")

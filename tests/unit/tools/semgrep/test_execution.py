@@ -75,7 +75,9 @@ def test_inspection_uses_reported_scanned_paths(
         return_value=subprocess.CompletedProcess(["semgrep"], 0, report, ""),
     ):
         result = semgrep_plugin.check([str(tmp_path)], {})
-    assert_that(result.success).is_true()
+    # Findings fail the check; a clean report passes.
+    assert_that(result.success).is_equal_to(not results)
+    assert_that(result.execution_failed).is_false()
     assert_that(result.issues_count).is_equal_to(len(results))
     assert_that(result.inspected_files).is_equal_to(True if results else expected)
 
@@ -134,7 +136,8 @@ def test_check_with_mocked_subprocess_success(
     ):
         result = semgrep_plugin.check([str(test_file)], {})
 
-    assert_that(result.success).is_true()
+    assert_that(result.success).is_equal_to(not results)
+    assert_that(result.execution_failed).is_false()
     assert_that(result.issues_count).is_equal_to(len(results))
     assert_that(result.issues).is_length(len(results))
     assert_that(result.output).is_none()
@@ -147,7 +150,7 @@ def test_check_with_mocked_subprocess_findings(
     tmp_path: Path,
     returncode: int,
 ) -> None:
-    """Findings survive execution errors, while exit codes 0 and 1 succeed.
+    """Findings fail the check; only exit codes 0 and 1 count as a complete run.
 
     Args:
         semgrep_plugin: The SemgrepPlugin instance to test.
@@ -197,8 +200,11 @@ def test_check_with_mocked_subprocess_findings(
     ):
         result = semgrep_plugin.check([str(test_file)], {})
 
-    assert_that(result.success).is_equal_to(returncode in (0, 1))
-    if result.success:
+    # Findings fail the check whatever the exit code; only a non-findings
+    # exit code marks the run itself as failed.
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_equal_to(returncode not in (0, 1))
+    if returncode in (0, 1):
         assert_that(result.output).is_none()
     else:
         assert_that(result.output).contains(semgrep_output, "semgrep diagnostic")

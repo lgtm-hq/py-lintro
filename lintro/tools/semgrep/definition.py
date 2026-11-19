@@ -613,12 +613,15 @@ class SemgrepPlugin(BaseToolPlugin):
                 ToolResult.from_outcome(
                     ToolOutcome(
                         execution=Checked(
-                            success=execution_success,
+                            # Findings fail the check, as in every other tool.
+                            success=execution_success and issues_count == 0,
                             inspected_files=inspected_files,
                         ),
                         issues_count=issues_count,
                     ),
                     name=self.definition.name,
+                    # Keep an incomplete run distinguishable from findings.
+                    execution_failed=not execution_success,
                     output=output if not execution_success else None,
                     issues=issues,
                     parse_failures_count=parse_failures_count or None,

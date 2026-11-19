@@ -95,7 +95,9 @@ def test_only_shipped_rule_ids_are_restored_before_parsing(
         {"rule_packs": [pack] if enabled else []},
     )
 
-    assert_that(result.success).is_true()
+    # Every case is a finding, so the check fails without an execution error.
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_false()
     assert_that(result.parse_failures_count or 0).is_zero()
     assert_that(result.issues_count).is_equal_to(len(cases))
     assert_that(result.issues).extracting("check_id").is_equal_to(
