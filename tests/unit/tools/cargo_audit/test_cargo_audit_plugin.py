@@ -731,7 +731,8 @@ def test_lockfile_outside_the_scan_root_is_judged_below_it_only(
 
     roots = _find_lock_roots(
         [str(project / "Cargo.lock")],
-        requested=[str(tmp_path / base)],
+        requested=[str(project / "Cargo.lock")],
+        base=(tmp_path / base).resolve(),
     )
 
     assert_that(roots.audited).is_equal_to([project.resolve()])
@@ -852,3 +853,108 @@ def test_explicitly_requested_vendored_path_is_audited(
     assert_that(audited).is_equal_to([(tmp_path / requested).resolve()])
     assert_that(result.skipped).is_false()
     assert_that(result.output).is_none()
+
+
+def _rooted_lock_tree(root: Path, *crates: str) -> None:
+    """Create crates below ``root`` and mark it as the repository root.
+
+    The marker anchors the execution directory at ``root``, as in a real
+    checkout, so only a requested directory can lift an exclusion.
+
+    Args:
+        root: Directory to create the crates in.
+        *crates: Crate directories, relative to ``root``.
+    """
+    _lock_tree(root, *crates)
+    (root / ".git").mkdir()
+
+
+def test_changed_file_list_does_not_audit_a_vendored_lockfile(
+    cargo_audit_plugin: CargoAuditPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Absolute file paths, as the AI review bridge passes, never anchor.
+
+    Args:
+        cargo_audit_plugin: The plugin instance.
+        tmp_path: Temporary project root.
+        monkeypatch: Pytest fixture used to run from the project root.
+    """
+    _rooted_lock_tree(tmp_path, "app", "vendor/dep")
+    monkeypatch.chdir(tmp_path)
+    audited: list[Path] = []
+
+    def fake_audit(_cmd: list[str], **kwargs: object) -> SubprocessResult:
+        audited.append(Path(str(kwargs["cwd"])))
+        return _proc(success=True, stdout=_report())
+
+    changed = [
+        str((tmp_path / crate / "Cargo.lock").resolve())
+        for crate in ("app", "vendor/dep")
+    ]
+    result = _run_check(cargo_audit_plugin, changed, fake_audit)
+
+    assert_that(audited).is_equal_to([(tmp_path / "app").resolve()])
+    assert_that(str(result.output)).contains(
+        "not audited: vendor/dep/Cargo.lock; pass that directory to lintro",
+    )
+
+
+def test_vendored_lockfile_named_as_a_file_stays_excluded(
+    cargo_audit_plugin: CargoAuditPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Naming the lockfile itself is treated like a discovered file.
+
+    Args:
+        cargo_audit_plugin: The plugin instance.
+        tmp_path: Temporary project root.
+        monkeypatch: Pytest fixture used to run from the project root.
+    """
+    _rooted_lock_tree(tmp_path, "vendor/foo")
+    monkeypatch.chdir(tmp_path)
+    audited: list[object] = []
+
+    def fake_audit(_cmd: list[str], **kwargs: object) -> SubprocessResult:
+        audited.append(kwargs["cwd"])
+        return _proc(success=True, stdout=_report())
+
+    result = _run_check(cargo_audit_plugin, ["vendor/foo/Cargo.lock"], fake_audit)
+
+    assert_that(audited).is_empty()
+    assert_that(result.skipped).is_true()
+    assert_that(str(result.skip_reason)).is_equal_to(
+        "only vendored or build-tree Cargo.lock under vendor/ or target/, "
+        "not audited: vendor/foo/Cargo.lock; pass that directory to lintro "
+        "to audit it",
+    )
+
+
+def test_deepest_requested_directory_anchors_its_lockfile(
+    cargo_audit_plugin: CargoAuditPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``vendor/foo .`` audits vendor/foo while other vendored crates stay out.
+
+    Args:
+        cargo_audit_plugin: The plugin instance.
+        tmp_path: Temporary project root.
+        monkeypatch: Pytest fixture used to run from the project root.
+    """
+    _rooted_lock_tree(tmp_path, "app", "vendor/foo", "vendor/bar")
+    monkeypatch.chdir(tmp_path)
+    audited: list[Path] = []
+
+    def fake_audit(_cmd: list[str], **kwargs: object) -> SubprocessResult:
+        audited.append(Path(str(kwargs["cwd"])))
+        return _proc(success=True, stdout=_report())
+
+    result = _run_check(cargo_audit_plugin, ["vendor/foo", "."], fake_audit)
+
+    assert_that(audited).is_equal_to(
+        [(tmp_path / crate).resolve() for crate in ("app", "vendor/foo")],
+    )
+    assert_that(str(result.output)).contains("not audited: vendor/bar/Cargo.lock;")

@@ -3567,12 +3567,17 @@ Cargo-audit checks `Cargo.lock` files against the RustSec advisory database. Lin
 audits every lockfile among the checked files, one `cargo audit` run per lockfile, and
 reports each finding with the absolute path of the lockfile it came from.
 
-- Lockfiles discovered under a `vendor/` or `target/` directory below a path you passed
-  are not audited: they hold vendored or packaged copies of other crates, not a
-  resolution the project builds with. Only the part of the path below what you passed
-  counts, so naming the directory itself audits it: `lintro check vendor/foo` audits
-  `vendor/foo/Cargo.lock`, and a project that itself lives under a folder with one of
-  those names is still audited.
+- Lockfiles discovered under a `vendor/` or `target/` directory are not audited: they
+  hold vendored or packaged copies of other crates, not a resolution the project builds
+  with. Only the part of the path below the deepest directory you passed counts, so
+  naming the directory itself audits it: `lintro check vendor/foo` audits
+  `vendor/foo/Cargo.lock`, `lintro check vendor/foo .` audits it too, and a project that
+  itself lives under a folder with one of those names is still audited.
+- A directory lifts the exclusion; a file does not. A file path is judged from the
+  execution directory (the project root), so `lintro check vendor/foo/Cargo.lock` leaves
+  that lockfile out and says to pass its directory instead. The same holds for the
+  changed files `lintro watch` and AI review hand to cargo-audit: a changed
+  `vendor/dep/Cargo.lock` is not audited, as with `lintro check .`.
 - Excluded lockfiles are named in the output (the first five, then a count). When some
   lockfiles are audited, the note follows the findings. When every lockfile found was
   excluded, cargo-audit is reported as skipped, not failed, with a reason naming them,

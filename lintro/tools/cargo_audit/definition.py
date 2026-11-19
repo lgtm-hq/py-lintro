@@ -55,41 +55,46 @@ CARGO_AUDIT_SKIP_DIRS: frozenset[str] = frozenset({"vendor", "target"})
 CARGO_AUDIT_EXCLUDED_SHOWN: int = 5
 
 
-def _requested_dirs(paths: list[str]) -> list[Path]:
-    """Return the directories the caller asked for, deepest first.
+def _anchor_dirs(paths: list[str], *, base: Path) -> list[Path]:
+    """Return the directories that judge what is third-party, in order.
+
+    Only a directory passed to ``check`` is an anchor. A file is not: watch
+    mode, the AI review bridge and fix re-runs hand over lists of changed or
+    discovered files, so a ``vendor/dep/Cargo.lock`` among them was not asked
+    for and must not lift its own exclusion. The execution directory comes
+    last, so a lockfile no requested directory contains is judged from it.
 
     Args:
         paths: Paths passed to ``check``: the user's command-line targets, or
             the file list another caller hands over.
+        base: Execution directory.
 
     Returns:
-        Each path resolved, with a file replaced by its parent directory.
+        Each path that is a directory, resolved and deepest first, then
+        ``base``.
     """
-    dirs = set()
-    for raw_path in paths:
-        path = Path(raw_path).resolve()
-        dirs.add(path.parent if path.is_file() else path)
-    return sorted(dirs, key=lambda d: len(d.parts), reverse=True)
+    dirs = {path for path in (Path(p).resolve() for p in paths) if path.is_dir()}
+    return [*sorted(dirs, key=lambda d: len(d.parts), reverse=True), base]
 
 
-def _is_third_party(lock_root: Path, *, requested: list[Path]) -> bool:
+def _is_third_party(lock_root: Path, *, anchors: list[Path]) -> bool:
     """Tell whether a lockfile was discovered inside a vendored or build tree.
 
-    Only path components between the most specific requested directory and
-    the lockfile count. A directory the caller named is never excluded, even
-    when its own path runs through ``vendor/`` or ``target/``: asking for
-    ``vendor/foo`` audits ``vendor/foo``.
+    Only path components between the first anchor containing the lockfile
+    and the lockfile count. A directory the caller named is never excluded,
+    even when its own path runs through ``vendor/`` or ``target/``: asking
+    for ``vendor/foo`` audits ``vendor/foo``.
 
     Args:
         lock_root: Directory holding a Cargo.lock.
-        requested: Requested directories, deepest first.
+        anchors: Anchor directories, in the order to try them.
 
     Returns:
-        True when a directory below the deepest requested directory that
-        contains ``lock_root`` is skipped. False when no requested directory
-        contains it, since the lockfile then sits at or above the request.
+        True when a directory below the first anchor that contains
+        ``lock_root`` is skipped. False when no anchor contains it, since the
+        lockfile then sits at or above every anchor.
     """
-    for anchor in requested:
+    for anchor in anchors:
         try:
             parts = lock_root.relative_to(anchor).parts
         except ValueError:
@@ -112,7 +117,12 @@ class _LockRoots:
     excluded: list[Path]
 
 
-def _find_lock_roots(files: list[str], *, requested: list[str]) -> _LockRoots:
+def _find_lock_roots(
+    files: list[str],
+    *,
+    requested: list[str],
+    base: Path,
+) -> _LockRoots:
     """Return every directory owning a Cargo.lock the given files belong to.
 
     Each lockfile is a separate dependency resolution, so a file set spanning
@@ -121,8 +131,9 @@ def _find_lock_roots(files: list[str], *, requested: list[str]) -> _LockRoots:
 
     Args:
         files: Discovered file paths to search from.
-        requested: Paths passed to ``check``, used to tell lockfiles found
-            under a vendored or build tree from ones the caller asked for.
+        requested: Paths passed to ``check``. A directory among them is
+            audited even under ``vendor/`` or ``target/``; a file is not.
+        base: Execution directory, the anchor for everything else.
 
     Returns:
         The distinct directories holding the nearest Cargo.lock above each
@@ -141,8 +152,8 @@ def _find_lock_roots(files: list[str], *, requested: list[str]) -> _LockRoots:
             if (candidate / CARGO_AUDIT_LOCKFILE).exists():
                 roots.add(candidate)
                 break
-    anchors = _requested_dirs(requested)
-    excluded = {root for root in roots if _is_third_party(root, requested=anchors)}
+    anchors = _anchor_dirs(requested, base=base)
+    excluded = {root for root in roots if _is_third_party(root, anchors=anchors)}
     return _LockRoots(audited=sorted(roots - excluded), excluded=sorted(excluded))
 
 
@@ -288,7 +299,11 @@ class CargoAuditPlugin(BaseToolPlugin):
             return ctx
 
         # Audit every lockfile the filtered file list belongs to.
-        found = _find_lock_roots(ctx.files, requested=paths)
+        found = _find_lock_roots(
+            ctx.files,
+            requested=paths,
+            base=Path(ctx.cwd).resolve(),
+        )
         lock_roots = found.audited
         excluded = (
             f"vendored or build-tree Cargo.lock under vendor/ or target/, "
