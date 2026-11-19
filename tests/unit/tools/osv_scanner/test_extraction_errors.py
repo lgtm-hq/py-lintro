@@ -1,8 +1,8 @@
 """How OSV-Scanner's ``Error during extraction`` lines are read (#3352).
 
-Every standard error below is what osv-scanner 2.4.0 or 2.7.1 really printed
-for the case, with the scanned directory written as ``{root}`` (relative to
-``/``, as osv-scanner prints it).
+Every standard error below is what osv-scanner 2.4.0 or 2.7.1 prints for the
+case at ``--verbosity error``, with the scanned directory written as ``{root}``
+(relative to ``/``, as osv-scanner prints it).
 """
 
 from __future__ import annotations
@@ -23,18 +23,9 @@ from lintro.utils.tool_metadata import tool_notes
 
 _PRIVATE = "zz-private-internal-pkg-xq"
 
-_HEADER = "Scanning dir .\nStarting filesystem walk for root: /\n"
-
-_END = "End status: 1 dirs visited, 2 inodes visited, 1 Extract calls, 1.5ms elapsed, 1.5ms wall time\n"
-
 #: A requirements.txt naming a package public PyPI does not have, healthy
-#: network. 2.4.0 and 2.7.1 print the same lines.
+#: network. 2.4.0 and 2.7.1 print the same line.
 _PRIVATE_PACKAGE_STDERR = (
-    _HEADER
-    + "Scanned /{root}/requirements.txt file and found 2 packages\n"
-    + _END
-    + "failed resolution for {root}/requirements.txt: package "
-    f"System(7):{_PRIVATE}: not found\n"
     "Error during extraction: (extracting as transitivedependency/requirements) "
     f"failed resolution for {{root}}/requirements.txt: package System(7):{_PRIVATE}: "
     "not found\n"
@@ -42,13 +33,6 @@ _PRIVATE_PACKAGE_STDERR = (
 
 #: Two manifests with private packages; 2.7.1 order, joined by a newline.
 _TWO_PRIVATE_STDERR_2_7 = (
-    _HEADER + "Scanned /{root}/a/requirements.txt file and found 1 package\n"
-    "Scanned /{root}/b/requirements.txt file and found 1 package\n"
-    + _END
-    + "failed resolution for {root}/a/requirements.txt: package "
-    "System(7):zz-a: not found\n"
-    "failed resolution for {root}/b/requirements.txt: package "
-    "System(7):zz-b: not found\n"
     "Error during extraction: (extracting as transitivedependency/requirements) "
     "failed resolution for {root}/a/requirements.txt: package System(7):zz-a: "
     "not found\n"
@@ -56,12 +40,8 @@ _TWO_PRIVATE_STDERR_2_7 = (
     "not found\n"
 )
 
-#: The same in 2.4.0, which resolves the manifests in the other order.
+#: The same in 2.4.0, which may resolve the manifests in the other order.
 _TWO_PRIVATE_STDERR_2_4 = (
-    _HEADER + _END + "failed resolution for {root}/b/requirements.txt: package "
-    "System(7):zz-b: not found\n"
-    "failed resolution for {root}/a/requirements.txt: package "
-    "System(7):zz-a: not found\n"
     "Error during extraction: (extracting as transitivedependency/requirements) "
     "failed resolution for {root}/b/requirements.txt: package System(7):zz-b: "
     "not found\n"
@@ -69,30 +49,16 @@ _TWO_PRIVATE_STDERR_2_4 = (
     "not found\n"
 )
 
-#: A resolution error whose own message runs over two lines (2.4.0 and 2.7.1).
+#: A resolution error whose own message runs over two lines.
 _MULTILINE_RESOLUTION_STDERR = (
-    _HEADER
-    + _END
-    + "failed resolution for {root}/requirements.txt: resolution impossible:\n"
-    'no candidates at all for: flask "====="\n'
     "Error during extraction: (extracting as transitivedependency/requirements) "
     "failed resolution for {root}/requirements.txt: resolution impossible:\n"
     'no candidates at all for: flask "====="\n'
     "\n"
-    "Filtered 2 local/unscannable package/s from the scan.\n"
 )
 
 #: A pom.xml depending on an artifact no registry has (2.4.0 and 2.7.1).
 _MAVEN_STDERR = (
-    _HEADER
-    + "Scanned /{root}/pom.xml file and found 1 package\n"
-    + _END
-    + "Warning: enricher transitivedependency/pomxml may be risky when run on "
-    "untrusted artifacts. Please ensure you trust the source code and "
-    "artifacts.\n"
-    "failed resolution for {root}/pom.xml: failed resolving "
-    "{{Maven:x:y[Concrete:1] {{}}}}: version Maven:zz.private:nothere"
-    "[Concrete:1.2.3]: not found\n"
     "Error during extraction: (extracting as transitivedependency/pomxml) "
     "failed resolution for {root}/pom.xml: failed resolving "
     "{{Maven:x:y[Concrete:1] {{}}}}: version Maven:zz.private:nothere"
@@ -106,11 +72,6 @@ _CONNECTION_REFUSED = (
 
 #: The private-package manifest with the network down, osv-scanner 2.7.1.
 _DEAD_NETWORK_STDERR_2_7 = (
-    _HEADER
-    + _END
-    + "failed resolution for {root}/requirements.txt: max retries exhausted: "
-    f"failed after 4 attempts: rpc error: code = Unavailable desc = "
-    f"{_CONNECTION_REFUSED}\n"
     "Error during extraction: (extracting as transitivedependency/requirements) "
     "failed resolution for {root}/requirements.txt: max retries exhausted: "
     f"failed after 4 attempts: rpc error: code = Unavailable desc = "
@@ -122,21 +83,18 @@ _DEAD_NETWORK_STDERR_2_7 = (
 
 #: The same in osv-scanner 2.4.0, which then prints no report.
 _DEAD_NETWORK_STDERR_2_4 = (
-    _HEADER + _END + "failed resolution for {root}/requirements.txt: rpc error: code = "
-    f"Unavailable desc = {_CONNECTION_REFUSED}\n"
     "Error during extraction: (extracting as transitivedependency/requirements) "
     "failed resolution for {root}/requirements.txt: rpc error: code = "
     f"Unavailable desc = {_CONNECTION_REFUSED}\n"
     "error when retrieving vulns: max retries exceeded: attempt 4: request "
     'failed: Post "https://api.osv.dev/v1/querybatch": proxyconnect tcp: dial '
     "tcp 127.0.0.1:9: connect: connection refused\n"
+    "max retries exceeded: attempt 4: request failed\n"
 )
 
 #: Two malformed lockfiles read by one extractor (2.4.0 and 2.7.1).
 _TWO_MALFORMED_STDERR = (
-    _HEADER
-    + _END
-    + "Error during extraction: (extracting as javascript/packagelockjson) \n"
+    "Error during extraction: (extracting as javascript/packagelockjson) \n"
     "\t{root}/a/package-lock.json: could not extract: invalid character 'o' "
     "in literal null (expecting 'u')\n"
     "\t{root}/b/package-lock.json: could not extract: invalid character 'g' "
@@ -425,14 +383,13 @@ def test_failed_resolution_with_the_network_down_is_incomplete(
     )
 
     _assert_incomplete(result)
-    # Both failures are quoted, the resolution failure once.
-    assert_that(result.output).starts_with(
-        "OSV-Scanner could not extract every package source",
-    )
+    # Both failures are quoted, verbatim and once each.
+    assert_that(result.output).starts_with("OSV-Scanner").contains("exit code 127")
     for text in quoted:
         assert_that(result.output).contains(text)
     assert_that((result.output or "").count("rpc error")).is_equal_to(1)
-    assert_that(result.output).does_not_contain(str(tmp_path).lstrip("/"))
+    for line in stderr.format(root=str(tmp_path).lstrip("/")).splitlines():
+        assert_that(result.output).contains(line)
 
 
 @pytest.mark.parametrize(
@@ -473,12 +430,12 @@ def test_resolution_error_that_cannot_be_classified_is_incomplete(
         tmp_path,
         files=files,
         returncode=127,
-        stderr=_HEADER + _END + line,
+        stderr=line,
     )
 
     _assert_incomplete(result)
     assert_that(result.output).starts_with(
-        "OSV-Scanner could not extract every package source",
+        "OSV-Scanner reported an error (exit code 127)",
     )
 
 
@@ -535,7 +492,7 @@ def test_excluded_directory_does_not_hide_a_sibling_with_a_colon(
             "vendor: data/package-lock.json": "not json{",
         },
         returncode=127,
-        stderr=_HEADER + _END + _malformed("vendor: data/package-lock.json"),
+        stderr=_malformed("vendor: data/package-lock.json"),
     )
 
     _assert_incomplete(result)
@@ -581,7 +538,7 @@ def test_excluded_broken_lockfile_beside_a_clean_one_is_a_clean_scan(
             "vendor/package-lock.json": "not json{",
         },
         returncode=127,
-        stderr=_HEADER + _END + _malformed("vendor/package-lock.json"),
+        stderr=_malformed("vendor/package-lock.json"),
     )
 
     _assert_complete(result)
@@ -610,13 +567,13 @@ def test_path_with_a_colon_and_spaces_is_read_whole(
             "we ird: dir/package-lock.json": "not json{",
         },
         returncode=127,
-        stderr=_HEADER + _END + _malformed("we ird: dir/package-lock.json"),
+        stderr=_malformed("we ird: dir/package-lock.json"),
     )
 
     assert_that(result.execution_failed).is_equal_to(kept)
     if kept:
         assert_that(result.output).contains(
-            "incomplete: we ird: dir/package-lock.json: could not extract",
+            "/we ird: dir/package-lock.json: could not extract",
         )
 
 
@@ -637,7 +594,7 @@ def test_path_naming_two_files_keeps_the_error(
             "we ird: dir/package-lock.json": "not json{",
         },
         returncode=127,
-        stderr=_HEADER + _END + _malformed("we ird: dir/package-lock.json"),
+        stderr=_malformed("we ird: dir/package-lock.json"),
     )
 
     _assert_incomplete(result)
@@ -660,7 +617,7 @@ def test_exclusion_matches_either_spelling_of_a_symlinked_root(
     link.symlink_to(real, target_is_directory=True)
     osv_scanner_plugin.set_options(exclude_patterns=["vendor"])
     files = {"requirements.txt": "six==1.16.0\n", "vendor/package-lock.json": "x{"}
-    stderr = _HEADER + _END + _malformed("vendor/package-lock.json")
+    stderr = _malformed("vendor/package-lock.json")
     shown = _malformed("vendor: data/package-lock.json")
 
     excluded = _check(
@@ -676,7 +633,7 @@ def test_exclusion_matches_either_spelling_of_a_symlinked_root(
         link,
         files={"vendor: data/package-lock.json": "x{"},
         returncode=127,
-        stderr=_HEADER + _END + shown,
+        stderr=shown,
         printed_root=real if printed == "real" else link,
     )
 

@@ -2225,67 +2225,85 @@ still present), **Stale** (vulnerability resolved upstream — safe to remove), 
 **Expired** (past the `ignoreUntil` date). Results appear in the summary table Notes
 column and in JSON output under `metadata.suppressions`.
 
-lintro reads every line osv-scanner prints on standard error. Each line must be a
-routine message lintro knows (matched as a whole line, never by its first words), part
-of a recognised extraction error, or the error for a file under an excluded path. Any
-other line makes the run **incomplete** at every exit status, even beside findings or on
-a clean exit: the result is an execution failure with unknown inspection, real findings
-are kept, nothing is invented, the run cannot update a baseline, and the output quotes
-the line:
+**How lintro runs osv-scanner.** Every scan is
+`osv-scanner scan --recursive --format json --verbosity error --no-call-analysis=all`
+plus `--config .osv-scanner.toml` when that file exists in the scan root or a parent.
+The suppression probe uses the same flags with `--config /dev/null`.
+
+- `--verbosity error` makes osv-scanner print only errors on standard error. A scan that
+  went well prints nothing there, with or without findings, with or without an
+  `osv-scanner.toml` of its own, and for a Go project scanned without Go installed.
+- `--no-call-analysis=all` turns off call analysis, which is on by default for Go only.
+  It needs a working Go toolchain and fails with a multi-line govulncheck error when it
+  cannot run. It does not change which vulnerabilities are reported or the exit code; it
+  only annotates them with `experimental_analysis`, which lintro does not read.
+
+Both flags exist from osv-scanner 2.4.0, the minimum lintro enforces. lintro passes no
+tool option to osv-scanner, so `verbosity`, `call_analysis` and `no_call_analysis` are
+refused as tool options rather than silently ignored.
+
+**When a scan is complete.** A run is a complete scan only when stdout is a report with
+a `results` list and one of these holds:
+
+- standard error is empty and osv-scanner exited 0, or exited 1 with vulnerabilities in
+  the report;
+- everything on standard error is the one allow-listed message below (or an error for a
+  file lintro excludes), at the exit code osv-scanner gives it: 127 without findings, 1
+  with them.
+
+Every other run is **incomplete**: an execution failure with unknown inspection. The
+findings osv-scanner did report are kept, nothing is invented, the run cannot update or
+prune a baseline, and the output names the reason and quotes osv-scanner's standard
+error verbatim:
 
 ```text
-OSV-Scanner printed a message lintro does not recognise, so the scan cannot be shown to be complete: <line>
+OSV-Scanner reported an error (exit code 1), so the scan is incomplete. Its standard error:
+Error during extraction: (extracting as javascript/packagelockjson) path/to/package-lock.json: could not extract: invalid character 'g' looking for beginning of value
 ```
 
-This is deliberate. A newer osv-scanner that words a routine line differently, or adds
-one, makes runs incomplete with the new line quoted until lintro learns it; a failed
-lookup can never read as a clean scan. Report such a line so its whole-line pattern can
-be added.
+That covers an unreadable or malformed lockfile (alone, or beside lockfiles that were
+read), an outage of the dependency-resolution service or of the OSV API, a broken
+`--config` file (exit 127), a broken `osv-scanner.toml` osv-scanner found itself (exit
+130, `Ignored invalid config file at ...`), and any error text lintro has never seen.
+When a future osv-scanner prints a new error, lintro reports an incomplete run quoting
+it. This is deliberate: lintro does not try to judge errors it does not know.
 
-The routine lines, collected from osv-scanner 2.4.0 and 2.7.1, and what each is checked
-against:
+"No package sources found" alone, at exit 128 and with no extraction error, is a
+no-files run with the reason `No package sources found`. Beside an extraction error it
+means a lockfile was there and could not be read, so that run is incomplete.
+
+**The one allow-listed message.** The transitive-dependency enricher reports a manifest
+whose indirect dependencies it could not resolve because the registry has no such
+package or version (a private package), or because no version satisfies the
+requirements:
 
 ```text
-Scanning dir <dir>                                  <dir> is the scanned directory
-Starting filesystem walk for root: /                exact
-Scanned <path> file and found <n> package[s]        <path> exists (a file or a
-                                                    directory); "package" only for 1
-End status: <n> dirs visited, <n> inodes visited, <n> Extract calls, <duration> elapsed, <duration> wall time
-Filtered <n> vulnerability|vulnerabilities from output
-                                                    singular only for 1
-Filtered <n> local/unscannable package/s from the scan.
-Filtered <n> ignored package/s from the scan.
-Warning: enricher transitivedependency/pomxml may be risky when run on untrusted artifacts. Please ensure you trust the source code and artifacts.
-No package sources found, --help for usage information.
+Error during extraction: (extracting as transitivedependency/requirements) failed resolution for <path>: package System(7):<name>: not found
 ```
 
-The lines about the `.osv-scanner.toml` lintro passed with `--config` are checked
-against that file:
+It is harmless only when the enricher is `transitivedependency/requirements` or
+`transitivedependency/pomxml`, `<path>` names one existing regular file, and the whole
+text after it is one of: `package <key>: not found`,
+`version <key>[Concrete:<v>]: not found`, the Maven form
+`failed resolving {Maven:<group>:<artifact>[Concrete:<v>] {}}:` followed by one of
+those, or `resolution impossible:` followed only by `no candidates at all for: ...` and
+`requirements conflict: ...` lines. Several manifests continue the message on further
+`failed resolution for` lines, each judged the same way. A transport failure
+(`rpc error`, `max retries exhausted`, a timeout) or any other text is an error. The
+listed packages were scanned, so the run is complete and carries a note in
+`metadata.notes` (see
+[Tool Timeouts in the JSON Report](#tool-timeouts-in-the-json-report)).
 
-```text
-<ID> has been filtered out because: <reason>        an [[IgnoredVulns]] id and its
-<ID> and 1 alias have been filtered out because: <reason>
-<ID> and <n> aliases have been filtered out because: <reason>
-                                                    reason ("(no reason given)" when
-                                                    empty), a multi-line reason line
-                                                    by line
-Package <ecosystem>/<name>/<version> has been filtered out because: <reason>
-                                                    the reason of an ignoring
-                                                    [[PackageOverrides]] entry
-<config> has unused ignores:                        followed by " - <id>" lines, each
-                                                    a configured id
-<config> has unused overrides:                      followed by " - Ecosystem: ...,
-                                                    Name: ..., Reason: ..." lines,
-                                                    each a configured override
-warning: <config> has multiple ignores for <ID> - only the first will be used!
-warning: <config> has at least one ignore entry using 'ignoreUntil' which has been deprecated in favor of 'effectiveUntil'
-```
+**Excluded paths.** An `Error during extraction` message is dropped when every file it
+names is one existing regular file under a path lintro excludes (`.lintro-ignore` or
+`--exclude`), matched as a finding for that file would be. A message that names no file,
+or a path that cannot be told apart from another file, is never dropped.
 
-The `failed resolution for <path>: <error>` copies the transitive-dependency enricher
-prints before its error block are not routine lines: each is judged by the same three
-harmless shapes as the error block (see
-[the baseline guide](guides/baseline.md#execution-checks-for-all-runs)), and any other
-error in one makes the run incomplete.
+**Known limit.** osv-scanner does not report every source it under-reads. A lockfile in
+a format version it does not support (for example `"lockfileVersion": 99`) is logged as
+"found 0 packages" with no error, and osv-scanner 2.4.0 reads only the first document of
+a two-document `pnpm-lock.yaml` (15 of 651 packages in vuejs/core) without an error.
+Such a scan reads as complete; lintro cannot detect it.
 
 **Usage Examples:**
 

@@ -1,7 +1,10 @@
-"""Real osv-scanner runs that did not scan everything (#3352).
+"""Real osv-scanner runs: which are complete scans and which are not (#3352).
 
-A lockfile osv-scanner cannot read or parse, and a scan whose vulnerability
-lookups fail, must never read as "no files" or as a clean pass.
+lintro runs osv-scanner at ``--verbosity error``. A lockfile osv-scanner
+cannot read or parse, a broken configuration, and a scan whose lookups fail
+must never read as "no files" or as a clean pass; a private package, a
+configuration with ignores, and a Go module scanned without Go installed are
+complete scans.
 """
 
 from __future__ import annotations
@@ -205,9 +208,7 @@ def test_failed_vulnerability_lookup_is_not_a_clean_scan(
     result = get_plugin("osv_scanner").check([str(tmp_path)], {})
 
     _assert_incomplete(result)
-    assert_that(result.output).contains("connection").does_not_contain(
-        str(tmp_path).lstrip(os.sep),
-    )
+    assert_that(result.output).contains("connection refused")
 
 
 #: A package name no public registry has, as an internal package would be.
@@ -245,9 +246,9 @@ def test_private_package_beside_a_vulnerable_one_is_a_complete_scan(
     assert_that(json.loads(result.output or "")).contains_key("results")
 
 
-#: Suppressions that make osv-scanner print each kind of configuration line:
-#: a filtered vulnerability with a reason over two lines, an unused ignore,
-#: a duplicate, and an ignored package beside an unused override.
+#: Ignores of the kinds real projects keep in their ``osv-scanner.toml``: a
+#: filtered vulnerability with a reason over two lines, an ignore that matches
+#: nothing, a duplicate, and package overrides, one of them unused.
 _CONFIG = '''
 [[IgnoredVulns]]
 id = "PYSEC-2026-2151"
@@ -257,12 +258,10 @@ second line of the reason"""
 
 [[IgnoredVulns]]
 id = "GHSA-zzzz-zzzz-zzzz"
-ignoreUntil = 2099-01-01
 reason = "never matches"
 
 [[IgnoredVulns]]
 id = "PYSEC-2026-2151"
-ignoreUntil = 2099-01-01
 
 [[PackageOverrides]]
 name = "six"
@@ -277,26 +276,125 @@ ignore = true
 '''
 
 
-def test_suppression_messages_leave_the_scan_complete(
+@pytest.mark.parametrize(
+    "name",
+    ["osv-scanner.toml", ".osv-scanner.toml"],
+    ids=["found-by-osv-scanner", "passed-by-lintro"],
+)
+def test_configuration_with_ignores_is_a_complete_scan(
     get_plugin: Callable[[str], BaseToolPlugin],
     tmp_path: Path,
+    name: str,
 ) -> None:
-    """Every line a real .osv-scanner.toml makes osv-scanner print is known.
+    """A configuration's own messages are not errors, so the scan is complete.
 
-    Unrecognised standard error makes a run incomplete at any exit status,
-    so this guards honest configurations against that rule.
+    ``osv-scanner.toml`` is the file osv-scanner finds itself, as in DOMPurify
+    and es-toolkit; lintro passes ``.osv-scanner.toml`` with ``--config``.
 
     Args:
         get_plugin: Fixture factory to get plugin instances.
         tmp_path: Pytest fixture providing a temporary directory.
+        name: The configuration file's name.
     """
-    (tmp_path / "requirements.txt").write_text("flask==3.0.0\nsix==1.16.0\n")
-    (tmp_path / ".osv-scanner.toml").write_text(_CONFIG)
+    (tmp_path / "requirements.txt").write_text(
+        f"{VIOLATION_SAMPLE.read_text()}\nflask==3.0.0\nsix==1.16.0\n",
+    )
+    (tmp_path / name).write_text(_CONFIG)
 
     result = get_plugin("osv_scanner").check([str(tmp_path)], {})
 
     assert_that(result.execution_failed).described_as(result.output).is_false()
     assert_that(result.inspected_files).is_true()
+    assert_that(result.issues_count).is_greater_than(0)
+
+
+@pytest.mark.parametrize(
+    ("name", "message"),
+    [
+        (".osv-scanner.toml", "Failed to read config file"),
+        ("osv-scanner.toml", "Ignored invalid config file at"),
+    ],
+    ids=["passed-by-lintro", "found-by-osv-scanner"],
+)
+def test_broken_configuration_is_an_incomplete_run(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+    name: str,
+    message: str,
+) -> None:
+    """A configuration osv-scanner cannot read never leaves a verdict.
+
+    Passed with ``--config`` it stops the scan (exit 127); found by
+    osv-scanner's own discovery it is ignored and the scan runs without it
+    (exit 130), so its ignores are lost.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+        name: The configuration file's name.
+        message: The start of osv-scanner's error.
+    """
+    (tmp_path / "requirements.txt").write_text("six==1.16.0\n")
+    (tmp_path / name).write_text("this is = = not toml\n")
+
+    result = get_plugin("osv_scanner").check(
+        [str(tmp_path)],
+        {"check_suppressions": False},
+    )
+
+    _assert_incomplete(result)
+    assert_that(result.output).contains(message).contains("toml:")
+
+
+#: A Go module with a known-vulnerable dependency.
+_GO_MOD = """module example.com/demo
+
+go 1.21
+
+require golang.org/x/text v0.3.0
+"""
+
+_GO_SUM = (
+    "golang.org/x/text v0.3.0 h1:g61tztE5qeGQ89tm6NTjjM9VPIm088od1l6aSorWRWg=\n"
+    "golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=\n"
+)
+
+
+def test_go_module_without_go_installed_is_a_complete_scan(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without Go on PATH the dependencies are still scanned from go.mod.
+
+    Call analysis, the only step that needs Go, is off.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+        monkeypatch: Pytest fixture for environment changes.
+    """
+    scanner = shutil.which("osv-scanner") or pytest.fail("osv-scanner not on PATH")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    (tools / "osv-scanner").symlink_to(scanner)
+    path = os.pathsep.join([str(tools), "/usr/bin", "/bin"])
+    if shutil.which("go", path=path) is not None:
+        pytest.skip("Go is installed in a system directory")
+    monkeypatch.setenv("PATH", path)
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "go.mod").write_text(_GO_MOD)
+    (project / "go.sum").write_text(_GO_SUM)
+    (project / "main.go").write_text(
+        'package main\n\nimport _ "golang.org/x/text/language"\n\nfunc main() {}\n',
+    )
+
+    result = get_plugin("osv_scanner").check([str(project)], {})
+
+    assert_that(result.execution_failed).described_as(result.output).is_false()
+    assert_that(result.inspected_files).is_true()
+    assert_that(result.issues_count).is_greater_than(0)
 
 
 def test_private_package_alone_is_a_clean_complete_scan(

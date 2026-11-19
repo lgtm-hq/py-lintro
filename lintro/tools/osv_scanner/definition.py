@@ -47,13 +47,10 @@ from lintro.tools.core.incomplete_run import (
 from lintro.tools.core.option_validators import validate_bool, validate_positive_int
 from lintro.tools.osv_scanner.extraction_log import (
     RESOLUTION_NOTE_SUMMARY,
-    ExtractionErrors,
+    StderrReport,
+    read_stderr,
     resolution_note,
-    skipped_reason,
-    sort_extraction_errors,
-    unrecognised_reason,
 )
-from lintro.tools.osv_scanner.routine_lines import RoutineLines
 from lintro.utils.path_filtering import resolve_exclude_anchors, should_exclude_path
 from lintro.utils.tool_metadata import ToolNote, with_tool_notes
 
@@ -69,8 +66,30 @@ OSV_NO_SOURCES_MESSAGE: str = (
     "No package sources found: OSV-Scanner found no lockfile or manifest to scan."
 )
 
-#: Lower-cased text osv-scanner prints when it found nothing to scan.
-_NO_SOURCES_SIGNAL: str = "no package sources found"
+#: Flags on every osv-scanner scan. At ``--verbosity error`` a scan that went
+#: well prints nothing on standard error, so anything printed is an error
+#: (see :mod:`lintro.tools.osv_scanner.extraction_log`). Call analysis (on by
+#: default for Go only) is off: lintro does not read its result, and it fails
+#: when Go or govulncheck cannot run. Both flags exist from osv-scanner 2.4.0,
+#: the minimum lintro enforces.
+_SCAN_FLAGS: tuple[str, ...] = (
+    "--recursive",
+    "--format",
+    "json",
+    "--verbosity",
+    "error",
+    "--no-call-analysis=all",
+)
+
+#: Options osv-scanner has that would undo :data:`_SCAN_FLAGS`. lintro passes
+#: no tool option to osv-scanner, so one of these would be silently ignored;
+#: it is refused instead.
+_FIXED_OPTIONS: frozenset[str] = frozenset(
+    {"verbosity", "call_analysis", "no_call_analysis"},
+)
+
+#: osv-scanner's exit status when it found nothing to scan.
+_NO_SOURCES_EXIT: int = 128
 
 #: osv-scanner's exit status for a scan that found vulnerabilities.
 _VULNERABILITIES_FOUND_EXIT: int = 1
@@ -136,7 +155,16 @@ class OsvScannerPlugin(BaseToolPlugin):
         Args:
             **kwargs: Options to set, including timeout and
                 check_suppressions.
+
+        Raises:
+            ValueError: If an option would change a flag lintro relies on.
         """
+        fixed = sorted(_FIXED_OPTIONS.intersection(kwargs))
+        if fixed:
+            raise ValueError(
+                f"osv_scanner option(s) {', '.join(fixed)} cannot be set: lintro "
+                f"always runs osv-scanner with {' '.join(_SCAN_FLAGS)}",
+            )
         if "timeout" in kwargs:
             validate_positive_int(kwargs["timeout"], "timeout")
         if "check_suppressions" in kwargs:
@@ -147,9 +175,10 @@ class OsvScannerPlugin(BaseToolPlugin):
         """Build the osv-scanner scan command.
 
         Uses --recursive to let osv-scanner discover lockfiles itself,
-        rather than maintaining a separate list of file patterns.
-        Passes --config explicitly because osv-scanner's auto-discovery
-        does not work reliably in --recursive mode.
+        rather than maintaining a separate list of file patterns, and the
+        rest of :data:`_SCAN_FLAGS`. Passes --config explicitly because
+        osv-scanner's auto-discovery does not work reliably in --recursive
+        mode.
 
         Args:
             scan_root: Root directory to scan recursively.
@@ -157,13 +186,7 @@ class OsvScannerPlugin(BaseToolPlugin):
         Returns:
             Command list for running osv-scanner with JSON output.
         """
-        cmd = [
-            *self._get_executable_command("osv-scanner"),
-            "scan",
-            "--recursive",
-            "--format",
-            "json",
-        ]
+        cmd = [*self._get_executable_command("osv-scanner"), "scan", *_SCAN_FLAGS]
 
         config = self._find_config_file(scan_root)
         if config is not None:
@@ -188,9 +211,7 @@ class OsvScannerPlugin(BaseToolPlugin):
         return [
             *self._get_executable_command("osv-scanner"),
             "scan",
-            "--recursive",
-            "--format",
-            "json",
+            *_SCAN_FLAGS,
             "--config",
             os.devnull,
             str(scan_root),
@@ -441,7 +462,7 @@ class OsvScannerPlugin(BaseToolPlugin):
         # A run without a complete verdict never reaches the scan result
         # below: for a security scanner an unknown result must never read as
         # a clean pass (#1028, #1044, #3352).
-        extraction = self._extraction_errors(
+        report = self._read_stderr(
             # Not the combined output, whose report lines are not log lines.
             stderr=proc.stderr or ("" if proc.stdout.strip() else proc.output),
             paths=paths,
@@ -451,8 +472,7 @@ class OsvScannerPlugin(BaseToolPlugin):
             proc=proc,
             parsed_issues=parsed_issues,
             issues=issues,
-            extraction=extraction,
-            scan_root=scan_root,
+            report=report,
         )
         if gap is not None:
             return gap
@@ -478,7 +498,7 @@ class OsvScannerPlugin(BaseToolPlugin):
             suppression_metadata,
             [
                 ToolNote(summary=RESOLUTION_NOTE_SUMMARY, message=note)
-                for note in (resolution_note(extraction.notes, scan_root),)
+                for note in (resolution_note(report.notes, scan_root),)
                 if note
             ],
         )
@@ -500,36 +520,34 @@ class OsvScannerPlugin(BaseToolPlugin):
         proc: SubprocessResult,
         parsed_issues: list[OsvScannerIssue],
         issues: list[OsvScannerIssue],
-        extraction: ExtractionErrors,
-        scan_root: Path,
+        report: StderrReport,
     ) -> ToolResult | None:
         """Build the result for a run that did not finish a complete scan.
+
+        A run is complete only when stdout is a report with a ``results``
+        list and either nothing was logged at error level (exit 0, or exit 1
+        with vulnerabilities in the report) or everything logged is a
+        resolution note or an error for an excluded file (exit 0, 1 or 127).
 
         Args:
             proc: The finished osv-scanner process.
             parsed_issues: Findings parsed from the report, before exclusions.
             issues: The findings left after exclusions.
-            extraction: The extraction errors osv-scanner reported.
-            scan_root: Directory osv-scanner ran in.
+            report: What osv-scanner printed on standard error.
 
         Returns:
             A no-files result when there was nothing to scan, an incomplete
             run result when the scan was not complete, or None when the report
             is a complete verdict.
         """
-        skipped = extraction.skipped
-        # "No package sources found" with no source it failed to read is no
-        # work, not a scan: report it as a no-files run (#3352). When a source
-        # could not be read the same message is printed, but a lockfile is
-        # there and was not scanned, so that run is incomplete instead; so is
-        # one that printed anything lintro does not recognise.
+        # "No package sources found" alone is no work, not a scan (#3352).
+        # When a source could not be read the same line is printed beside its
+        # extraction error, and that run is incomplete instead.
         if (
-            not proc.success
+            proc.returncode == _NO_SOURCES_EXIT
             and not parsed_issues
-            and not skipped
-            and not extraction.notes
-            and not extraction.unrecognised
-            and _NO_SOURCES_SIGNAL in (proc.output or "").lower()
+            and not report.notes
+            and report.only_no_sources
         ):
             return ToolResult.from_outcome(
                 ToolOutcome(execution=NoFiles()),
@@ -539,33 +557,20 @@ class OsvScannerPlugin(BaseToolPlugin):
             )
         payload = extract_osv_scanner_payload(proc.stdout)
         report_ok = payload is not None and self._payload_has_valid_results(payload)
-        reason: str | None
         parse_failures: int | None = 0 if report_ok else 1
         if not proc.stdout.strip():
             parse_failures = None
-        if skipped:
-            # osv-scanner skips a source it cannot read or parse and scans the
-            # rest, so the findings it did report are real but not complete.
-            reason = skipped_reason(
-                skipped,
-                scan_root,
-                unexplained=extraction.unexplained,
-            )
-        elif not report_ok:
-            reason, parse_failures = self._report_gap(
-                proc=proc,
-                payload=payload,
-                message=extraction.failure_message,
-            )
-        else:
-            reason = self._failed_exit_reason(
-                proc=proc,
-                parsed_issues=parsed_issues,
-                errors_tolerated=extraction.explains_failed_exit,
-                message=extraction.failure_message,
-            ) or unrecognised_reason(extraction.unexplained, scan_root)
+        reason = self._gap_reason(
+            proc=proc,
+            payload=payload,
+            report_ok=report_ok,
+            found=bool(parsed_issues),
+            report=report,
+        )
         if reason is None:
             return None
+        if report.printed:
+            reason = "\n".join((reason, *report.printed))
         return incomplete_run_result(
             name=self.definition.name,
             reason=reason,
@@ -574,63 +579,64 @@ class OsvScannerPlugin(BaseToolPlugin):
         )
 
     @staticmethod
-    def _failed_exit_reason(
+    def _gap_reason(
         *,
         proc: SubprocessResult,
-        parsed_issues: list[OsvScannerIssue],
-        errors_tolerated: bool,
-        message: str,
+        payload: dict[str, Any] | None,
+        report_ok: bool,
+        found: bool,
+        report: StderrReport,
     ) -> str | None:
-        """Name why a failed exit beside a valid report is not a verdict.
-
-        osv-scanner exits 1 when it found vulnerabilities. Any other failed
-        exit, or exit 1 with no vulnerability in the report, is osv-scanner
-        failing part of the scan (a network error, say): an empty
-        ``results`` list then proves nothing was checked. The exception is
-        exit 127 when every error it logged is a transitive resolution the
-        registry answered (no such package or version, or no version fits)
-        or lay under an excluded path; a transport failure never is.
+        """Name why a run is not a complete scan, before osv-scanner's text.
 
         Args:
             proc: The finished osv-scanner process.
-            parsed_issues: Findings parsed from the report, before exclusions.
-            errors_tolerated: Whether the extraction errors account for every
-                error osv-scanner logged and none of them skipped a source.
-            message: osv-scanner's own message, quoted.
+            payload: The JSON object found on stdout, if any.
+            report_ok: Whether stdout is a report with a ``results`` list.
+            found: Whether the report lists any vulnerability.
+            report: What osv-scanner printed on standard error.
 
         Returns:
-            The reason, or None when the exit status is a scan verdict.
+            The reason, or None when the run is a complete verdict. The
+            caller appends osv-scanner's error lines verbatim.
         """
-        if proc.success:
-            return None
-        if errors_tolerated and proc.returncode == _LOGGED_ERROR_EXIT:
-            return None
-        if not parsed_issues:
+        code = proc.returncode
+        if not report_ok:
+            if not proc.stdout.strip():
+                return f"OSV-Scanner printed no report (exit code {code})."
+            error = payload.get("error") if payload is not None else None
+            if isinstance(error, str) and error.strip():
+                return (
+                    "OSV-Scanner reported an error instead of a scan report: "
+                    f"{tool_message_excerpt(error)}"
+                )
+            return malformed_report_reason("OSV-Scanner", 1)
+        if report.errors:
             return (
-                "OSV-Scanner exited with an error and reported no "
-                f"vulnerabilities: {message}"
+                f"OSV-Scanner reported an error (exit code {code}), so the scan "
+                "is incomplete. Its standard error:"
             )
-        if proc.returncode != _VULNERABILITIES_FOUND_EXIT:
-            return (
-                f"OSV-Scanner exited with an error (exit code {proc.returncode}) "
-                f"after reporting {len(parsed_issues)} vulnerabilities; the scan "
-                f"is incomplete: {message}"
-            )
-        return None
+        if code == 0 or (code == _VULNERABILITIES_FOUND_EXIT and found):
+            return None
+        if code == _LOGGED_ERROR_EXIT and report.explained:
+            return None
+        return (
+            f"OSV-Scanner exited with an error (exit code {code}) that nothing "
+            "it printed explains, so the scan is incomplete."
+        )
 
-    def _extraction_errors(
+    def _read_stderr(
         self,
         *,
         stderr: str,
         paths: list[str],
         scan_root: Path,
-    ) -> ExtractionErrors:
-        """Sort the extraction errors osv-scanner reported.
+    ) -> StderrReport:
+        """Sort what osv-scanner printed on standard error.
 
-        See :mod:`lintro.tools.osv_scanner.extraction_log` for what each
-        error means and :mod:`lintro.tools.osv_scanner.routine_lines` for the
-        lines that carry none. An error naming one regular file under an
-        excluded path is dropped, as a finding there would be (#1725).
+        See :mod:`lintro.tools.osv_scanner.extraction_log`. A message naming
+        only regular files under excluded paths is dropped, as a finding
+        there would be (#1725).
 
         Args:
             stderr: What osv-scanner printed on standard error.
@@ -638,17 +644,13 @@ class OsvScannerPlugin(BaseToolPlugin):
             scan_root: Directory osv-scanner ran in.
 
         Returns:
-            The errors that skipped a source, the resolution notes, the
-            lines lintro does not recognise, and whether the errors explain
-            a failed exit on their own.
+            The resolution notes and the error lines.
         """
         patterns = self._active_exclude_patterns()
         anchors = resolve_exclude_anchors(paths) if patterns else ()
-        return sort_extraction_errors(
+        return read_stderr(
             stderr,
             scan_root,
-            # The same configuration the scan command passes with --config.
-            routine=RoutineLines.for_run(scan_root, self._find_config_file(scan_root)),
             is_excluded=lambda source: self._source_is_excluded(
                 source,
                 patterns=patterns,
@@ -656,40 +658,6 @@ class OsvScannerPlugin(BaseToolPlugin):
                 scan_root=scan_root,
             ),
         )
-
-    @staticmethod
-    def _report_gap(
-        *,
-        proc: SubprocessResult,
-        payload: dict[str, Any] | None,
-        message: str,
-    ) -> tuple[str, int | None]:
-        """Name why an osv-scanner run left no complete report.
-
-        Args:
-            proc: The finished osv-scanner process.
-            payload: The JSON object found on stdout, if any.
-            message: osv-scanner's own message, quoted.
-
-        Returns:
-            The reason and the parse-failure count (None when no report was
-            printed at all, so nothing could be parsed).
-        """
-        if not proc.stdout.strip():
-            if proc.success:
-                return "OSV-Scanner printed no report.", None
-            return (
-                f"OSV-Scanner exited with an error and printed no report: {message}",
-                None,
-            )
-        error = payload.get("error") if payload is not None else None
-        if isinstance(error, str) and error.strip():
-            return (
-                "OSV-Scanner reported an error instead of a scan report: "
-                f"{tool_message_excerpt(error)}",
-                1,
-            )
-        return malformed_report_reason("OSV-Scanner", 1), 1
 
     def _check_suppression_staleness(
         self,

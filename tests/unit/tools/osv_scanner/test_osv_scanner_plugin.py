@@ -206,20 +206,20 @@ def test_check_no_package_sources_sets_parse_failures_count(
         dest_name=lockfile.name,
     )
 
-    # What osv-scanner 2.4.0 and 2.7.1 print for a directory with nothing to
-    # scan (exit 128).
-    osv_output = (
-        "Scanning dir .\n"
-        "Starting filesystem walk for root: /\n"
-        "End status: 1 dirs visited, 1 inodes visited, 0 Extract calls, "
-        "174.583µs elapsed, 175µs wall time\n"
-        "No package sources found, --help for usage information.\n"
+    # What osv-scanner 2.4.0 and 2.7.1 print at --verbosity error for a
+    # directory with nothing to scan (exit 128).
+    osv_output = "No package sources found, --help for usage information.\n"
+    proc = SubprocessResult(
+        returncode=128,
+        stdout="",
+        stderr=osv_output,
+        output=osv_output,
     )
 
     with patch.object(
         osv_scanner_plugin,
         "_run_subprocess_result",
-        return_value=_proc(success=False, stderr=osv_output, output=osv_output),
+        return_value=proc,
     ):
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
@@ -873,3 +873,59 @@ def test_suppressions_classified_when_probe_findings_are_all_excluded(
     assert_that(suppressions).is_length(1)
     # The excluded finding must not count as evidence the suppression is live.
     assert_that(suppressions[0]["status"]).is_equal_to("stale")
+
+
+#: The flags every osv-scanner scan lintro runs carries, in order.
+_SCAN_FLAGS = [
+    "--recursive",
+    "--format",
+    "json",
+    "--verbosity",
+    "error",
+    "--no-call-analysis=all",
+]
+
+
+def test_scan_and_probe_run_at_error_verbosity_without_call_analysis(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Both scans print errors only and skip Go call analysis (#3352)."""
+    (tmp_path / "requirements.txt").write_text("six==1.16.0\n")
+    (tmp_path / ".osv-scanner.toml").write_text(
+        '[[IgnoredVulns]]\nid = "GHSA-0000-0000-0000"\nignoreUntil = 2099-01-01\n',
+    )
+    commands: list[list[str]] = []
+
+    def run(cmd: list[str], **_: object) -> SubprocessResult:
+        commands.append(list(cmd))
+        report = '{"results": []}'
+        return SubprocessResult(returncode=0, stdout=report, stderr="", output=report)
+
+    with patch.object(osv_scanner_plugin, "_run_subprocess_result", side_effect=run):
+        result = osv_scanner_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.execution_failed).is_false()
+    assert_that(commands).is_length(2)
+    for cmd in commands:
+        assert_that(cmd[1:8]).is_equal_to(["scan", *_SCAN_FLAGS])
+    assert_that(commands[0][-3:]).is_equal_to(
+        ["--config", str(tmp_path / ".osv-scanner.toml"), str(tmp_path)],
+    )
+    assert_that(commands[1][-3:]).is_equal_to(["--config", os.devnull, str(tmp_path)])
+
+
+@pytest.mark.parametrize(
+    ("option", "value"),
+    [("verbosity", "info"), ("call_analysis", "go"), ("no_call_analysis", "")],
+)
+def test_options_that_would_undo_the_scan_flags_are_refused(
+    osv_scanner_plugin: OsvScannerPlugin,
+    option: str,
+    value: str,
+) -> None:
+    """An option lintro would silently drop is an error instead."""
+    with pytest.raises(ValueError, match="--verbosity error --no-call-analysis=all"):
+        osv_scanner_plugin.set_options(**{option: value})
+
+    assert_that(osv_scanner_plugin.options).does_not_contain_key(option)

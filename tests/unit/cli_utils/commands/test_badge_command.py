@@ -683,15 +683,10 @@ def test_osv_no_sources_cannot_publish_or_qualify_a_baseline(
         ["osv-scanner"],
         128 if no_sources else 0,
         "" if no_sources else report,
-        # What osv-scanner 2.4.0 and 2.7.1 print with nothing to scan.
+        # What osv-scanner 2.4.0 and 2.7.1 print with nothing to scan, at
+        # the error verbosity lintro runs it with.
         (
-            (
-                f"Scanning dir {tmp_path}\n"
-                "Starting filesystem walk for root: /\n"
-                "End status: 1 dirs visited, 1 inodes visited, 0 Extract calls, "
-                "132.792µs elapsed, 133µs wall time\n"
-                "No package sources found, --help for usage information.\n"
-            )
+            "No package sources found, --help for usage information.\n"
             if no_sources
             else ""
         ),

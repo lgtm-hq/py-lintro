@@ -1,6 +1,7 @@
 """OSV-Scanner runs without a complete scan report (#3352).
 
-Each process below is what a current osv-scanner v2 really prints for the case.
+Each process below is what osv-scanner 2.4.0 or 2.7.1 prints for the case at
+``--verbosity error``, where a scan that went well prints nothing.
 """
 
 from __future__ import annotations
@@ -19,24 +20,13 @@ from lintro.tools.osv_scanner.definition import (
     OsvScannerPlugin,
 )
 
-_NO_SOURCES_STDERR = (
-    "Scanning dir .\n"
-    "Starting filesystem walk for root: /\n"
-    "No package sources found, --help for usage information.\n"
-)
+_NO_SOURCES_STDERR = "No package sources found, --help for usage information.\n"
 
 _LOCKFILE: dict[str, str] = {"requirements.txt": "flask==3.0.0\n"}
 
-#: The progress lines osv-scanner prints before any error.
-_PROGRESS = (
-    "Scanning dir .\n"
-    "Starting filesystem walk for root: /\n"
-    "End status: 1 dirs visited, 2 inodes visited, 1 Extract calls, 1.5ms elapsed, 1.5ms wall time\n"
-)
-
 #: What osv-scanner 2.7.1 logs when its vulnerability queries fail.
 _QUERY_FAILED_STDERR = (
-    _PROGRESS + "Error during extraction: (extracting as vulnmatch/osvdev) max retries "
+    "Error during extraction: (extracting as vulnmatch/osvdev) max retries "
     "exceeded: attempt 4: request failed: Post "
     '"https://api.osv.dev/v1/querybatch": proxyconnect tcp: dial tcp '
     "127.0.0.1:9: connect: connection refused\n"
@@ -44,13 +34,15 @@ _QUERY_FAILED_STDERR = (
 
 #: What osv-scanner 2.4.0 logs for the same failure.
 _QUERY_FAILED_STDERR_2_4 = (
-    _PROGRESS + "error when retrieving vulns: max retries exceeded: attempt 4: "
+    "error when retrieving vulns: max retries exceeded: attempt 4: "
     "request failed: connection refused\n"
 )
 
 _BAD_CONFIG_STDERR = (
     "Failed to read config file: toml: line 2: expected end of table array "
     "name delimiter ']', but got '\\n' instead\n"
+    "toml: line 2: expected end of table array name delimiter ']', but got "
+    "'\\n' instead\n"
 )
 
 
@@ -174,16 +166,15 @@ def test_config_error_names_the_error_and_claims_no_inspection(
     assert_that(result.findings_complete).is_false()
     assert_that(result.inspected_files).is_none()
     assert_that(result.parse_failures_count).is_none()
-    assert_that(result.output).starts_with(
-        "OSV-Scanner exited with an error and printed no report: "
-        "Failed to read config file",
+    assert_that(result.output).is_equal_to(
+        "OSV-Scanner printed no report (exit code 127).\n" + _BAD_CONFIG_STDERR.strip(),
     )
 
 
 @pytest.mark.parametrize(
     ("returncode", "stdout", "reason", "parse_failures"),
     [
-        (0, "", "OSV-Scanner printed no report.", None),
+        (0, "", "OSV-Scanner printed no report (exit code 0).", None),
         (
             0,
             '{"error": "failed to load config"}',
@@ -200,8 +191,8 @@ def test_config_error_names_the_error_and_claims_no_inspection(
         (
             1,
             '{"results": [{"source": {"path": "requirements.txt"}}]}',
-            "OSV-Scanner exited with an error and reported no vulnerabilities: "
-            "network unreachable",
+            "OSV-Scanner reported an error (exit code 1), so the scan is "
+            "incomplete. Its standard error:\nnetwork unreachable",
             0,
         ),
     ],
@@ -262,8 +253,7 @@ def test_source_that_cannot_be_extracted_is_not_a_no_files_run(
     empty directory; only the extraction error tells the cases apart.
     """
     stderr = (
-        _PROGRESS
-        + _extraction_error(tmp_path, name, message)
+        _extraction_error(tmp_path, name, message)
         + "No package sources found, --help for usage information.\n"
     )
 
@@ -283,8 +273,7 @@ def test_source_that_cannot_be_extracted_is_not_a_no_files_run(
     assert_that(result.parse_failures_count).is_none()
     assert_that(result.issues).is_empty()
     assert_that(result.output).is_equal_to(
-        "OSV-Scanner could not extract every package source or look up its "
-        f"vulnerabilities, so the scan is incomplete: {name}: {message}",
+        f"OSV-Scanner printed no report (exit code 128).\n{stderr.strip()}",
     )
 
 
@@ -293,7 +282,7 @@ def test_readable_lockfile_beside_a_broken_one_keeps_its_findings(
     tmp_path: Path,
 ) -> None:
     """Findings from the lockfile read survive; the run is still incomplete."""
-    stderr = _PROGRESS + _extraction_error(
+    stderr = _extraction_error(
         tmp_path,
         "package-lock.json",
         "could not extract: invalid character 'g' looking for beginning of value",
@@ -327,7 +316,7 @@ def test_extraction_error_under_an_excluded_path_keeps_the_verdict(
 ) -> None:
     """A broken source lintro excludes does not make the scan incomplete."""
     osv_scanner_plugin.set_options(exclude_patterns=["vendor"])
-    stderr = _PROGRESS + _extraction_error(
+    stderr = _extraction_error(
         tmp_path,
         "vendor/package-lock.json",
         "could not extract: invalid character 'g' looking for beginning of value",
@@ -377,8 +366,9 @@ def test_failed_exit_with_an_empty_report_is_not_a_clean_scan(
     assert_that(result.execution_failed).is_true()
     assert_that(result.findings_complete).is_false()
     assert_that(result.inspected_files).is_none()
-    assert_that(result.output).contains(quoted)
-    assert_that(result.output).does_not_contain("Scanning dir")
+    assert_that(result.output).starts_with(
+        f"OSV-Scanner reported an error (exit code {returncode})",
+    ).contains(quoted)
 
 
 def test_failed_exit_beside_findings_keeps_them_and_is_incomplete(
@@ -398,6 +388,5 @@ def test_failed_exit_beside_findings_keeps_them_and_is_incomplete(
     assert_that(result.findings_complete).is_false()
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.output).starts_with(
-        "OSV-Scanner exited with an error (exit code 127) after reporting 1 "
-        "vulnerabilities",
-    )
+        "OSV-Scanner reported an error (exit code 127)",
+    ).contains("error when retrieving vulns")

@@ -289,44 +289,31 @@ These fail-closed checks also apply without a fingerprint baseline:
   `--fix` run that logs an error beside a valid report (for example
   `Failed to fix issues: ... permission denied` for a read-only file) is incomplete the
   same way, and its output quotes that error.
-- OSV-Scanner reports "no package sources found" as a no-files run only when it reported
-  no extraction error. It prints the same message when every lockfile it found was
-  unreadable or malformed; that run is an execution failure, never "no files". An
-  `Error during extraction` line for a lockfile or manifest OSV-Scanner could not read
-  or parse, or for a failed vulnerability lookup, makes the run incomplete and keeps the
-  findings from the sources it did read. The one exception is a line that names one
-  existing file under an excluded path, matched exactly as a finding for that file would
-  be. A line whose file cannot be identified is always kept. The reading fails closed:
-  an error is harmless only when it has one exactly known shape, a failed
+- OSV-Scanner runs with `--verbosity error`, so a scan that went well prints nothing on
+  standard error. A run is a complete scan only when stdout is a report with a `results`
+  list and either standard error is empty (exit 0, or exit 1 with vulnerabilities in the
+  report) or everything on it is the one allow-listed message: a failed
   transitive-dependency resolution (`extracting as transitivedependency/requirements` or
-  `.../pomxml`, `failed resolution for <path>: ...`) naming one existing file whose
-  whole error is the registry's answer that it has no such package or version
-  (`package ...: not found`, `version ...: not found`, also wrapped as
-  `failed resolving {Maven:...}: ...`) or that no version satisfies the requirements
-  (`resolution impossible:` and its cause lines). The manifest's own packages were then
-  scanned, so the run stays complete and carries a note naming the manifest: the console
-  prints it under the tool's result, the summary table's Notes column says "indirect
-  dependencies not resolved", the Markdown, HTML and plain-text reports print it, CSV
-  reports carry it in a `notes` column, and JSON keeps it under `metadata.notes`, while
-  `output` stays OSV-Scanner's raw report. Any other resolution error (the resolution
-  service unreachable: `rpc error`, `max retries exhausted`, a timeout, a refused
-  connection) or any line never seen before makes the run incomplete and is quoted.
-  Every other line OSV-Scanner prints must be one of its routine messages, matched as a
-  whole line (never by its first words) and, for suppression lines, against the
-  `.osv-scanner.toml` that was passed; the list is in
-  [the configuration guide](../configuration.md#osv-scanner-configuration). A line that
-  is none of these makes the run incomplete at any exit status, beside findings or on a
-  clean exit alike, keeps the findings, and is quoted. So an osv-scanner release that
-  prints a line lintro does not know yet gives an incomplete run quoting that line, on
-  purpose, until the line is added. OSV-Scanner exits 127 for any logged error, so a 127
-  is a verdict only when every line it printed, apart from routine lines, belongs to
-  such a note or to an excluded file. A run without a complete report (empty stdout, an
-  error object, a `results` value that is not a list), any other failed exit beside a
-  report with no vulnerabilities (including `{"results": []}`), and any failed exit
-  other than 1 are execution failures with unknown inspection. The output names the
-  reason and quotes OSV-Scanner's own message. OSV-Scanner does not report every source
-  it skips: a lockfile in a format version it does not support (`"lockfileVersion": 99`)
-  is logged as "found 0 packages" with no error and still reads as a complete scan.
+  `.../pomxml`, `failed resolution for <path>: ...`) naming one existing file, whose
+  whole error is the registry's answer that it has no such package or version or that no
+  version satisfies the requirements. Such a run (exit 127 without findings, 1 with
+  them) is complete and carries a note naming the manifest: the console prints it under
+  the tool's result, the summary table's Notes column says "indirect dependencies not
+  resolved", the Markdown, HTML and plain-text reports print it, CSV reports carry it in
+  a `notes` column, and JSON keeps it under `metadata.notes`, while `output` stays
+  OSV-Scanner's raw report. An `Error during extraction` message whose every file is
+  under an excluded path is dropped, as a finding for that file would be. Anything else
+  on standard error, at any exit code and in any order, makes the run an execution
+  failure with unknown inspection: an unreadable or malformed lockfile, a resolver or
+  OSV API outage, a broken configuration, an error lintro has never seen. The findings
+  OSV-Scanner reported are kept and its standard error is quoted verbatim. A failed exit
+  with nothing on standard error, and a run without a complete report, are execution
+  failures too. "No package sources found" alone at exit 128 is a no-files run; beside
+  an extraction error it is incomplete. OSV-Scanner does not report every source it
+  under-reads: a lockfile in a format version it does not support
+  (`"lockfileVersion": 99`) is logged as "found 0 packages" with no error and still
+  reads as a complete scan. See
+  [the configuration guide](../configuration.md#osv-scanner-configuration).
 - commitlint reads commit messages, not files. A completed run (a clean exit or reported
   violations) counts as inspected. A failed exit with no violation (a broken
   `commitlint.config.js`) is an execution failure with unknown inspection, named with
