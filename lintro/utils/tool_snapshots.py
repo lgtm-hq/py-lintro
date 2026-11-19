@@ -12,6 +12,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Protocol
 
+from lintro.models.core.tool_outcome import Skipped, ToolOutcome, Unavailable
 from lintro.models.core.tool_result import ToolResult
 from lintro.models.core.tool_snapshot import ToolSnapshot
 
@@ -254,6 +255,69 @@ def snapshot_to_unavailable_result(
         Frozen unavailable execution result.
     """
     return _get_provider().snapshot_to_unavailable_result(snapshot, strict=strict)
+
+
+def strict_failure_reason(reason: str, hint: str | None) -> str:
+    """Append the install hint to the reason a strict run fails on.
+
+    The reason is what the summary row and ``unavailable_reason`` show, so a
+    strict failure carries its own remedy there instead of only in the tool's
+    log output (#3371).
+
+    Args:
+        reason: Why the tool could not run.
+        hint: Install or upgrade guidance, if the probe has any.
+
+    Returns:
+        The reason, followed by the hint when one exists.
+    """
+    if not hint or hint in reason:
+        return reason
+    return f"{reason.rstrip().rstrip('.')}. {hint}"
+
+
+def below_minimum_result(
+    *,
+    name: str,
+    reason: str,
+    detail: str,
+    hint: str | None = None,
+    strict: bool | None = None,
+) -> ToolResult:
+    """Build the result for an installed tool older than lintro's minimum.
+
+    By default the tool is skipped and the run is unaffected. Under the
+    missing-tool policy (``execution.strict_missing_tools`` or
+    ``--strict-missing-tools``) an outdated binary is as unusable as an absent
+    one, so it takes the same strict ``Unavailable`` outcome: the run fails,
+    no finding is invented, and the reason carries the upgrade hint (#3371).
+
+    Args:
+        name: Tool name the result reports under.
+        reason: Why the version gate refused the binary.
+        detail: Human-readable explanation, including the install or upgrade
+            hint. It is prefixed ``Skipping <name>:`` for a skip and
+            ``<name> unavailable:`` for a strict failure, so the output agrees
+            with the row's status.
+        hint: Install or upgrade guidance appended to a strict failure reason.
+        strict: Override for the missing-tool policy; None reads configuration.
+
+    Returns:
+        A skipped result, or a strict unavailable result that fails the run.
+    """
+    strict_policy = is_strict_missing_tools() if strict is None else strict
+    if strict_policy:
+        outcome = ToolOutcome(
+            execution=Unavailable(
+                reason=strict_failure_reason(reason, hint),
+                strict=True,
+            ),
+        )
+        output = f"{name} unavailable: {detail}"
+    else:
+        outcome = ToolOutcome(execution=Skipped(reason))
+        output = f"Skipping {name}: {detail}"
+    return ToolResult.from_outcome(outcome, name=name, output=output)
 
 
 ALLOW_VERSION_LAG_ENV: str = "LINTRO_ALLOW_VERSION_LAG"

@@ -42,6 +42,7 @@ from lintro.tools.core.node_fallback import (
 from lintro.utils.tool_snapshots import (
     SnapshotProvider,
     register_snapshot_provider,
+    strict_failure_reason,
 )
 from lintro.utils.tool_snapshots import (
     lookup_snapshot as lookup_snapshot,
@@ -1101,10 +1102,12 @@ def snapshot_to_unavailable_result(
     if hint:
         message = f"{message}. {hint}"
 
+    # A strict run fails on this row, so its reason carries the remedy (#3371).
+    reason = strict_failure_reason(error, hint) if strict_missing else error
     result = ToolResult.from_outcome(
         ToolOutcome(
             execution=Unavailable(
-                reason=error,
+                reason=reason,
                 strict=strict_missing,
                 probe_failure=snapshot.probe_failure,
                 probe_seconds=snapshot.probe_seconds,

@@ -6,6 +6,8 @@ from lintro.api import core as api
 from lintro.api.pipeline import run_lint_with_ai
 from lintro.cli_utils.diff_option import validate_diff_base_ref
 from lintro.cli_utils.order_explain import emit_order_explanation
+from lintro.cli_utils.strict_option import strict_missing_tools_option
+from lintro.config.run_overrides import strict_missing_tools_override
 from lintro.exceptions.errors import ConfigurationError
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
 from lintro.utils.tool_options import parse_tool_options
@@ -125,6 +127,7 @@ DEFAULT_ACTION: str = "fmt"
     is_flag=True,
     help="Auto-install Node.js dependencies if node_modules is missing",
 )
+@strict_missing_tools_option
 @click.option(
     "--yes",
     "-y",
@@ -177,6 +180,7 @@ def format_command(
     stream: bool,
     debug: bool,
     auto_install: bool,
+    strict_missing_tools: bool | None,
     yes: bool,
     dry_run: bool,
     no_art: bool,
@@ -212,6 +216,8 @@ def format_command(
         stream: bool: Whether to stream tool output in real-time.
         debug: bool: Whether to enable debug output on console.
         auto_install: bool: Whether to auto-install Node.js deps if missing.
+        strict_missing_tools: bool | None: Override
+            ``execution.strict_missing_tools`` for this run; None keeps config.
         yes: bool: Skip confirmation prompt and proceed immediately.
         dry_run: bool: Preview would-be fixes without modifying any files.
         no_art: bool: Suppress the decorative ASCII art printed after the run.
@@ -245,30 +251,31 @@ def format_command(
 
     # Run the AI-aware pipeline: execute, AI-enhance, render.
     try:
-        exit_code: int = run_lint_with_ai(
-            action=DEFAULT_ACTION,
-            paths=normalized_paths,
-            tools=tools,
-            ignore_conflicts=ignore_conflicts,
-            tool_options=tool_options,
-            exclude=exclude,
-            include_venv=include_venv,
-            group_by=group_by,
-            output_format=output_format,
-            verbose=verbose,
-            raw_output=raw_output,
-            output_file=output,
-            diff_base=diff_base,
-            debug=debug,
-            stream=stream,
-            no_log=no_log,
-            auto_install=auto_install,
-            yes=yes,
-            dry_run=dry_run,
-            no_art=no_art,
-            profile=profile,
-            baseline=baseline,
-        )
+        with strict_missing_tools_override(strict_missing_tools):
+            exit_code: int = run_lint_with_ai(
+                action=DEFAULT_ACTION,
+                paths=normalized_paths,
+                tools=tools,
+                ignore_conflicts=ignore_conflicts,
+                tool_options=tool_options,
+                exclude=exclude,
+                include_venv=include_venv,
+                group_by=group_by,
+                output_format=output_format,
+                verbose=verbose,
+                raw_output=raw_output,
+                output_file=output,
+                diff_base=diff_base,
+                debug=debug,
+                stream=stream,
+                no_log=no_log,
+                auto_install=auto_install,
+                yes=yes,
+                dry_run=dry_run,
+                no_art=no_art,
+                profile=profile,
+                baseline=baseline,
+            )
     except ConfigurationError as exc:
         click.echo(str(exc), err=True)
         raise SystemExit(1) from exc

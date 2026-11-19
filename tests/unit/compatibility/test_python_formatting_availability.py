@@ -307,3 +307,56 @@ def test_notice_preserves_unexpected_probe_errors_as_failures() -> None:
     assert_that(decision.black_result.execution_failed).is_true()
     assert_that(decision.black_result.output).contains("ValueError", "invalid evidence")
     assert_that(decision.ruff_format_check).is_true()
+
+
+@pytest.mark.parametrize("strict", [False, True], ids=["default", "strict"])
+def test_below_minimum_black_follows_the_missing_tool_policy(
+    monkeypatch: pytest.MonkeyPatch,
+    strict: bool,
+) -> None:
+    """An outdated Black is a skip by default and a failing row when strict (#3371).
+
+    Args:
+        monkeypatch: Environment isolation fixture.
+        strict: Missing-tool policy for this run.
+    """
+    monkeypatch.delenv("LINTRO_ALLOW_VERSION_LAG", raising=False)
+    hint = "Upgrade via: pip install 'black>=2.0'"
+    black = ToolSnapshot(
+        name="black",
+        available=True,
+        version="1.0",
+        min_version="2.0",
+        remediation_hint=hint,
+    )
+    ruff = ToolSnapshot(name="ruff", available=True, version_check_passed=True)
+    with patch(
+        "lintro.utils.tool_snapshots.get_tool_snapshot",
+        side_effect=[black, ruff],
+    ):
+        decision = resolve_python_formatting(
+            {"ruff", "black"},
+            action=Action.CHECK,
+            ruff_options={},
+            strict_missing_tools=strict,
+        )
+    if decision is None or decision.black_result is None:
+        pytest.fail("A blocked Black must keep its result")
+    result = decision.black_result
+    # Pinned in full: the tool name appears once, in the prefix (#3371).
+    prefix = "black unavailable" if strict else "Skipping black"
+    assert_that(result.output).is_equal_to(
+        f"{prefix}: below minimum 2.0, found 1.0. {hint}",
+    )
+    reason = result.unavailable_reason if strict else result.skip_reason
+    assert_that(reason).is_equal_to(
+        (
+            f"below minimum 2.0, found 1.0. {hint}"
+            if strict
+            else "below minimum 2.0, found 1.0"
+        ),
+    )
+    assert_that(result.success).is_equal_to(not strict)
+    assert_that(result.skipped).is_equal_to(not strict)
+    assert_that(result.unavailable).is_equal_to(strict)
+    assert_that(result.issues_count).is_zero()
