@@ -12,6 +12,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
+
 from lintro.config.config_loader import get_config
 from lintro.enums.action import Action, normalize_action
 from lintro.enums.tool_name import ToolName
@@ -397,19 +399,40 @@ def resolve_run_formatting(
     )
     if decision is None or not _blocks_on_strict_black(decision):
         return decision
-    black = configure_tool_for_execution(
-        tool=tool_manager.get_tool("black"),
-        tool_name="black",
-        config_manager=config_manager,
-        tool_option_dict=options,
-        action=action,
-        selected_tools=set(selected_tools),
-        lintro_config=lintro_config,
-        paths=paths,
-        formatting_decision=decision,
-        **{"exclude": None, "include_venv": False, "incremental": False, **configure},
-    )
-    if _discover_black_files(black, paths):
+    # Scoping runs before any tool executes, so nothing it raises may escape:
+    # that would abort the other tools. A failure keeps the unscoped result,
+    # treating Black as having files; "no files" would be a silent pass.
+    try:
+        black = configure_tool_for_execution(
+            tool=tool_manager.get_tool("black"),
+            tool_name="black",
+            config_manager=config_manager,
+            tool_option_dict=options,
+            action=action,
+            selected_tools=set(selected_tools),
+            lintro_config=lintro_config,
+            paths=paths,
+            formatting_decision=decision,
+            **{
+                "exclude": None,
+                "include_venv": False,
+                "incremental": False,
+                **configure,
+            },
+        )
+    except Exception as exc:
+        # Black's own configuration is bad: report it on Black's row, as the
+        # per-tool path would, without dropping the strict failure.
+        logger.opt(exception=exc).debug("Could not configure black for scoping")
+        return _with_configuration_error(decision, exc)
+    try:
+        has_files = bool(_discover_black_files(black, paths))
+    except Exception as exc:
+        logger.opt(exception=exc).warning(
+            f"Could not discover black's files; keeping its result: {exc}",
+        )
+        has_files = True
+    if has_files:
         return decision
     suffixes = [p.removeprefix("*") for p in black.definition.file_patterns]
     kinds = "/".join(s for s in suffixes if s.startswith(".")) or "Python"
@@ -419,6 +442,28 @@ def resolve_run_formatting(
         output=f"No {kinds} files found to check.",
     )
     return replace(decision, black_result=no_files)
+
+
+def _with_configuration_error(
+    decision: PythonFormattingDecision,
+    exc: Exception,
+) -> PythonFormattingDecision:
+    """Add a Black configuration error to Black's blocked result.
+
+    Args:
+        decision: Decision whose Black result is a strict failure.
+        exc: Error raised while configuring Black.
+
+    Returns:
+        The decision, with the error appended to Black's output in the text
+        the per-tool path reports a configuration crash with.
+    """
+    result = decision.black_result
+    if result is None:
+        return decision
+    error = f"Tool execution failed: {type(exc).__name__}: {exc}"
+    output = f"{result.output}\n{error}" if result.output else error
+    return replace(decision, black_result=replace(result, output=output))
 
 
 def _discover_black_files(black: BaseToolPlugin, paths: Sequence[str]) -> list[str]:

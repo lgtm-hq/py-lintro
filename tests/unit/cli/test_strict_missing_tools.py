@@ -17,9 +17,14 @@ from click.testing import CliRunner, Result
 
 from lintro.cli import cli
 from lintro.config.config_loader import get_config
+from lintro.config.lintro_config import LintroConfig
+from lintro.enums.action import Action
 from lintro.enums.probe_failure import ProbeFailure
 from lintro.models.core.tool_snapshot import ToolSnapshot
 from lintro.utils import tool_snapshots
+from lintro.utils.execution.tool_configuration import resolve_run_formatting
+from lintro.utils.unified_config import UnifiedConfigManager
+from tests.unit.conftest import init_git_repo
 
 Probe = Callable[..., ToolSnapshot]
 
@@ -477,3 +482,85 @@ def test_strict_old_black_output_agrees_with_status(
     output = _json_row(result.stdout, "black")["output"]
     assert_that(output).starts_with("black unavailable: below minimum 2.14.0")
     assert_that(output).does_not_contain("Skipping")
+
+
+def test_strict_bad_black_option_keeps_other_tools_running(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Black configuration error while scoping Black never aborts the run.
+
+    Black is configured at run level to scope its strict result, before any
+    tool executes; its error belongs on Black's row, and Ruff still runs.
+
+    Args:
+        tmp_path: Project with one Python file.
+        monkeypatch: Probe replacement control.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("LINTRO_ALLOW_VERSION_LAG", raising=False)
+    (tmp_path / "app.py").write_text("VALUE = 1\n")
+
+    result = _invoke(
+        monkeypatch,
+        _old_black_with_ruff(ruff_runs=True),
+        "chk",
+        "--strict-missing-tools",
+        "--tools",
+        "ruff,black",
+        "--tool-options",
+        "black:line_length=bad",
+        "--output-format",
+        "json",
+        str(tmp_path),
+    )
+
+    assert_that(result.exit_code).is_equal_to(1)
+    ruff = _json_row(result.stdout, "ruff")
+    assert_that(ruff["status"]).is_not_equal_to("unavailable")
+    black = _json_row(result.stdout, "black")
+    assert_that(black).contains_entry({"status": "unavailable"}, {"success": False})
+    assert_that(black["output"]).contains(
+        "black unavailable: below minimum 2.14.0",
+        "Tool execution failed: ValueError",
+    )
+
+
+def test_strict_black_scoping_survives_unresolvable_diff_base(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A diff base Black's file discovery cannot resolve keeps the strict failure.
+
+    The error must not escape the run-level scoping, and the fallback is
+    "Black had files", never "no files", which would pass strict mode silently.
+
+    Args:
+        tmp_path: Git repository with one committed Python file.
+        monkeypatch: Probe replacement control.
+    """
+    init_git_repo(tmp_path, files={"app.py": "VALUE = 1\n"})
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("LINTRO_ALLOW_VERSION_LAG", raising=False)
+    monkeypatch.setattr(
+        tool_snapshots,
+        "get_tool_snapshot",
+        _old_black_with_ruff(ruff_runs=True),
+    )
+    config = LintroConfig()
+    config.execution.strict_missing_tools = True
+
+    decision = resolve_run_formatting(
+        ["ruff", "black"],
+        action=Action.CHECK,
+        paths=[str(tmp_path)],
+        config_manager=UnifiedConfigManager(),
+        lintro_config=config,
+        diff_base="no-such-ref",
+    )
+
+    if decision is None or decision.black_result is None:
+        pytest.fail("A blocked Black must keep its result")
+    assert_that(decision.run_black).is_false()
+    assert_that(decision.black_result.unavailable).is_true()
+    assert_that(decision.black_result.success).is_false()

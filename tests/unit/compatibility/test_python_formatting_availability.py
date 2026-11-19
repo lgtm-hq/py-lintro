@@ -343,7 +343,19 @@ def test_below_minimum_black_follows_the_missing_tool_policy(
     if decision is None or decision.black_result is None:
         pytest.fail("A blocked Black must keep its result")
     result = decision.black_result
-    assert_that(result.output).contains("below minimum 2.0", hint)
+    # Pinned in full: the tool name appears once, in the prefix (#3371).
+    prefix = "black unavailable" if strict else "Skipping black"
+    assert_that(result.output).is_equal_to(
+        f"{prefix}: below minimum 2.0, found 1.0. {hint}",
+    )
+    reason = result.unavailable_reason if strict else result.skip_reason
+    assert_that(reason).is_equal_to(
+        (
+            f"below minimum 2.0, found 1.0. {hint}"
+            if strict
+            else "below minimum 2.0, found 1.0"
+        ),
+    )
     assert_that(result.success).is_equal_to(not strict)
     assert_that(result.skipped).is_equal_to(not strict)
     assert_that(result.unavailable).is_equal_to(strict)

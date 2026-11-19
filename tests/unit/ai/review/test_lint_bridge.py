@@ -484,7 +484,7 @@ def _strict_probe(name: str, **kwargs: object) -> ToolSnapshot:
         ("notes.txt", None),
         (
             "app.py",
-            "Tool: black | unavailable: black: below minimum 24.0.0, found 2.0.0. "
+            "Tool: black | unavailable: below minimum 24.0.0, found 2.0.0. "
             "Upgrade via: uv tool upgrade black",
         ),
     ],
@@ -526,3 +526,37 @@ def test_review_digest_names_strict_black_only_when_it_had_files(
     ]
     assert_that(black.success).is_equal_to(black_note is None)
     assert_that(notes).is_equal_to([black_note] if black_note else [])
+
+
+def test_review_digest_keeps_other_tools_when_black_config_is_bad(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Black configuration error while scoping Black drops only Black's entry.
+
+    Args:
+        tmp_path: Isolated project root.
+        monkeypatch: Working-directory and probe control.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("LINTRO_ALLOW_VERSION_LAG", raising=False)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.lintro.black]\nline_length = "bad"\n',
+    )
+    (tmp_path / "app.py").write_text("import os\n")
+    monkeypatch.setattr(tool_snapshots, "get_tool_snapshot", _strict_probe)
+    config = LintroConfig()
+    config.execution.strict_missing_tools = True
+
+    with patch.object(lint_bridge, "get_tools_to_run") as selection:
+        selection.return_value.to_run = ["ruff", "black"]
+        results = run_lint_on_changed_files(
+            changed_files=[str(tmp_path / "app.py")],
+            lintro_config=config,
+        )
+
+    digest = format_lint_results_for_prompt(results=results)
+    assert_that(digest).contains("F401")
+    black = next(result for result in results if result.name == "black")
+    assert_that(black.unavailable).is_true()
+    assert_that(black.output).contains("Tool execution failed: ValueError")
