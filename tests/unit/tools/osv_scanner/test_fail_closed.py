@@ -317,7 +317,15 @@ def _run(
     )
     plugin = OsvScannerPlugin()
     plugin.set_options(exclude_patterns=[_EXCLUDED_DIR])
-    with patch.object(plugin, "_run_subprocess_result", return_value=proc):
+    # The version probe runs the real binary; pass it so these tests do not
+    # depend on whether osv-scanner is installed (#3352).
+    with (
+        patch(
+            "lintro.tools.osv_scanner.definition.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(plugin, "_run_subprocess_result", return_value=proc),
+    ):
         return plugin.check([str(root)], {"check_suppressions": False})
 
 
