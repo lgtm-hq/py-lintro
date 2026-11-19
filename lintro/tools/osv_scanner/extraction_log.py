@@ -40,8 +40,11 @@ comparing its text with another line:
   and the cause lines of a ``resolution impossible:`` message);
 * a ``failed resolution for`` line outside a block is a warning echo, judged
   on its own by the same allow-list;
-* blank lines and the progress lines in :data:`INFO_PREFIXES` carry no error;
-* every other line is unexplained.
+* blank lines and the routine messages of
+  :mod:`lintro.tools.osv_scanner.routine_lines`, each matched as a whole
+  line, carry no error;
+* every other line is unrecognised, and an unrecognised line leaves the run
+  incomplete at any exit status.
 """
 
 from __future__ import annotations
@@ -56,6 +59,7 @@ from pathlib import Path
 from loguru import logger
 
 from lintro.tools.core.incomplete_run import tool_message_excerpt
+from lintro.tools.osv_scanner.routine_lines import RoutineLines
 
 #: The first line osv-scanner prints for a plugin that did not succeed.
 _HEADER_RE = re.compile(
@@ -78,21 +82,6 @@ _IMPOSSIBLE: str = "resolution impossible:"
 _CAUSE_PREFIXES: tuple[str, ...] = (
     "no candidates at all for: ",
     "requirements conflict: ",
-)
-
-#: Lines osv-scanner prints on every run; they report no error.
-PROGRESS_PREFIXES: tuple[str, ...] = (
-    "Scanning dir ",
-    "Starting filesystem walk",
-    "End status:",
-    "Scanned ",
-)
-
-#: Informational lines that do not make osv-scanner exit with an error.
-INFO_PREFIXES: tuple[str, ...] = (
-    *PROGRESS_PREFIXES,
-    "Filtered ",
-    "Warning: enricher transitivedependency/",
 )
 
 _NAME = r"[A-Za-z0-9._-]+"
@@ -168,9 +157,8 @@ class ExtractionLog:
         entries: Every error block entry osv-scanner reported, in order.
         echoes: The warning lines the transitive enricher logs before its
             block, each classified on its own.
-        unexplained: Indices of lines that are neither progress, information
-            nor part of an entry; one of them may be what made osv-scanner
-            exit with an error.
+        unexplained: Indices of lines that are neither routine nor part of
+            an entry: the unrecognised lines, any of which may be an error.
         lines: The standard-error lines the indices refer to.
     """
 
@@ -178,6 +166,18 @@ class ExtractionLog:
     echoes: tuple[ExtractionEntry, ...]
     unexplained: tuple[int, ...]
     lines: tuple[str, ...] = ()
+
+    @property
+    def owned_text(self) -> tuple[str, ...]:
+        """Return the lines the error entries own, in order.
+
+        Returns:
+            The lines.
+        """
+        owned = sorted(
+            {index for entry in (*self.entries, *self.echoes) for index in entry.lines},
+        )
+        return tuple(self.lines[index] for index in owned if self.lines[index])
 
     @property
     def unexplained_text(self) -> tuple[str, ...]:
@@ -203,16 +203,25 @@ class ExtractionErrors:
             lines no extraction error explains, with paths shortened.
         explains_failed_exit: Whether every error line osv-scanner logged
             belongs to a recognised harmless entry.
-        unexplained: The lines no entry owns, as printed, to quote beside the
-            skipped sources; osv-scanner's "No package sources found", which
-            only restates that sources were skipped, is left out.
+        unrecognised: The lines that are neither routine nor part of an
+            entry, as printed. Any one of them leaves the run incomplete,
+            whatever the exit status.
     """
 
     skipped: tuple[ExtractionEntry, ...]
     notes: tuple[ExtractionEntry, ...]
     failure_message: str
     explains_failed_exit: bool
-    unexplained: str = ""
+    unrecognised: tuple[str, ...] = ()
+
+    @property
+    def unexplained(self) -> str:
+        """Return the unrecognised lines as one quote.
+
+        Returns:
+            The lines joined by newlines.
+        """
+        return "\n".join(self.unrecognised)
 
 
 def _named_file(path_text: str, scan_root: Path) -> tuple[str, str] | None:
@@ -395,7 +404,11 @@ def _read_block(
     return entries, end
 
 
-def read_extraction_log(stderr: str | None, scan_root: Path) -> ExtractionLog:
+def read_extraction_log(
+    stderr: str | None,
+    scan_root: Path,
+    routine: RoutineLines | None = None,
+) -> ExtractionLog:
     """Read every extraction error from osv-scanner's standard error.
 
     Each line gets exactly one owner, decided by its position and form; see
@@ -404,11 +417,14 @@ def read_extraction_log(stderr: str | None, scan_root: Path) -> ExtractionLog:
     Args:
         stderr: What osv-scanner printed on standard error.
         scan_root: Directory osv-scanner ran in.
+        routine: The routine lines of this run; by default those of a run
+            with no configuration file.
 
     Returns:
         The reported errors, the warning echoes and the lines nothing
         explains.
     """
+    routine = routine or RoutineLines.for_run(scan_root)
     lines = [line.rstrip("\r") for line in (stderr or "").splitlines()]
     entries: list[ExtractionEntry] = []
     echoes: list[ExtractionEntry] = []
@@ -423,9 +439,12 @@ def read_extraction_log(stderr: str | None, scan_root: Path) -> ExtractionLog:
         elif line.startswith(_RESOLUTION_PREFIX):
             text, owned, index = _read_message(lines, index, line)
             echoes.append(_entry("", text, owned, scan_root, transitive=True))
+        elif not line.strip():
+            index += 1
+        elif length := routine.length_at(lines, index):
+            index += length
         else:
-            if line.strip() and not line.startswith(INFO_PREFIXES):
-                unexplained.append(index)
+            unexplained.append(index)
             index += 1
     return ExtractionLog(
         entries=tuple(entries),
@@ -433,20 +452,6 @@ def read_extraction_log(stderr: str | None, scan_root: Path) -> ExtractionLog:
         unexplained=tuple(unexplained),
         lines=tuple(lines),
     )
-
-
-def diagnostic_lines(text: str | None) -> str:
-    """Drop osv-scanner's progress lines so a quote starts at the error.
-
-    Args:
-        text: What osv-scanner printed on standard error.
-
-    Returns:
-        The remaining lines, or ``text`` unchanged when nothing else is left.
-    """
-    lines = (text or "").splitlines()
-    kept = [line for line in lines if not line.strip().startswith(PROGRESS_PREFIXES)]
-    return "\n".join(kept) if any(line.strip() for line in kept) else (text or "")
 
 
 def display_path(source: str, scan_root: Path) -> str:
@@ -562,6 +567,7 @@ def sort_extraction_errors(
     scan_root: Path,
     *,
     is_excluded: Callable[[str], bool],
+    routine: RoutineLines | None = None,
 ) -> ExtractionErrors:
     """Sort the extraction errors osv-scanner reported by what they mean.
 
@@ -573,15 +579,16 @@ def sort_extraction_errors(
         stderr: What osv-scanner printed on standard error.
         scan_root: Directory osv-scanner ran in.
         is_excluded: Whether lintro excludes a source path.
+        routine: The routine lines of this run.
 
     Returns:
         The skipped sources, the resolution notes, the message to quote for
-        a failed run, and whether the errors explain a failed exit: exit 127
-        is a verdict only when every line that is not progress or blank
-        belongs to an entry, and every entry is a harmless resolution or
-        lies under an excluded path.
+        a failed run, the unrecognised lines, and whether the errors explain
+        a failed exit: exit 127 is a verdict only when every line that is
+        not routine or blank belongs to an entry, and every entry is a
+        harmless resolution or lies under an excluded path.
     """
-    log = read_extraction_log(stderr, scan_root)
+    log = read_extraction_log(stderr, scan_root, routine)
     skipped: list[ExtractionEntry] = []
     notes: list[ExtractionEntry] = []
     for entry in (*log.entries, *log.echoes):
@@ -597,7 +604,13 @@ def sort_extraction_errors(
             # A harmless echo owns its own lines; the note comes from the
             # error block, which names the enricher.
             notes.append(entry)
-    quoted = "\n".join(log.unexplained_text) or diagnostic_lines(stderr)
+    # Quote what is not routine: the unrecognised lines first, else the
+    # error entries, else everything osv-scanner printed.
+    quoted = (
+        "\n".join(log.unexplained_text)
+        or "\n".join(log.owned_text)
+        or (stderr or "").strip()
+    )
     return ExtractionErrors(
         skipped=tuple(skipped),
         notes=tuple(notes),
@@ -605,9 +618,5 @@ def sort_extraction_errors(
         explains_failed_exit=(
             bool(log.entries) and not skipped and not log.unexplained
         ),
-        unexplained="\n".join(
-            line
-            for line in log.unexplained_text
-            if not line.startswith("No package sources found")
-        ),
+        unrecognised=log.unexplained_text,
     )

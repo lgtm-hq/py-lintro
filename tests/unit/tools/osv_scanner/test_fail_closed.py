@@ -24,7 +24,6 @@ from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools.osv_scanner.definition import OsvScannerPlugin
 from lintro.tools.osv_scanner.extraction_log import (
-    INFO_PREFIXES,
     read_extraction_log,
     sort_extraction_errors,
 )
@@ -72,6 +71,37 @@ _UNSEEN_ERRORS: tuple[str, ...] = (
     "failed resolution for {root}/pom/pom.xml: package System(7):zz: not found",
     "\tprivate/requirements.txt: could not extract",
     'requirements conflict: flask: "==1" (after a timeout)',
+    # Text after a routine line's opening words is not that routine line.
+    "Scanned failed: rpc error",
+    "Filtered 0 vulns; error querying: timeout",
+    "Warning: enricher transitivedependency/requirements failed: "
+    "rpc error: code = Unavailable",
+)
+
+#: Every routine line the captured runs printed, stated here rather than
+#: taken from the reader, so the oracle cannot share the reader's mistakes.
+_ROUTINE_LINES: frozenset[str] = frozenset(
+    {
+        "Scanning dir .",
+        "Starting filesystem walk for root: /",
+        "End status: 1 dirs visited, 2 inodes visited, 1 Extract calls, "
+        "1.5ms elapsed, 1.5ms wall time",
+        "Warning: enricher transitivedependency/pomxml may be risky when run "
+        "on untrusted artifacts. Please ensure you trust the source code and "
+        "artifacts.",
+        "Scanned /{root}/clean/requirements.txt file and found 1 package",
+        "Scanned /{root}/conflict/requirements.txt file and found 2 packages",
+        "Scanned /{root}/impossible/requirements.txt file and found 1 package",
+        "Scanned /{root}/mixed/pom.xml file and found 1 package",
+        "Scanned /{root}/mixed/requirements.txt file and found 2 packages",
+        "Scanned /{root}/mixed/sub/requirements.txt file and found 1 package",
+        "Scanned /{root}/pom/pom.xml file and found 1 package",
+        "Scanned /{root}/private/requirements.txt file and found 2 packages",
+        "Scanned /{root}/privvuln/requirements.txt file and found 2 packages",
+        "Scanned /{root}/two/a/requirements.txt file and found 1 package",
+        "Scanned /{root}/two/b/requirements.txt file and found 1 package",
+        "Scanned /{root}/version/requirements.txt file and found 1 package",
+    },
 )
 
 
@@ -204,15 +234,32 @@ def _complete(stderr: str, root: Path) -> bool:
 
 
 def _is_error_line(line: str) -> bool:
-    """Return whether a line is more than progress output or a blank.
+    """Return whether a line is neither a known routine line nor a blank.
 
     Args:
-        line: One standard-error line.
+        line: One standard-error line, with ``{root}`` in place.
 
     Returns:
         True when the reader must account for it.
     """
-    return bool(line.strip()) and not line.startswith(INFO_PREFIXES)
+    return bool(line.strip()) and line not in _ROUTINE_LINES
+
+
+def test_oracle_lists_every_routine_line_of_the_captures() -> None:
+    """The oracle's list covers what the captures print, and nothing else.
+
+    Every capture line is a routine line, a blank, or part of an error; the
+    routine list is exactly the lines no error block or echo can own.
+    """
+    error_forms = ("Error during extraction: ", "failed resolution for ", "\t")
+    causes = ("no candidates at all for: ", "requirements conflict: ")
+    printed = set(_real_lines(CAPTURES))
+    routine = {
+        line
+        for line in printed
+        if line.strip() and not line.startswith((*error_forms, *causes))
+    }
+    assert_that(routine).is_equal_to(set(_ROUTINE_LINES))
 
 
 def test_every_real_harmless_run_is_complete(scan_root: Path) -> None:
@@ -328,7 +375,12 @@ def test_every_line_has_exactly_one_owner(scan_root: Path) -> None:
         ]
         owners = [*owned, *log.unexplained]
         assert_that(len(owners)).is_equal_to(len(set(owners)))
-        errors = {i for i, line in enumerate(log.lines) if _is_error_line(line)}
+        printed_root = str(scan_root).lstrip("/")
+        errors = {
+            i
+            for i, line in enumerate(log.lines)
+            if _is_error_line(line.replace(printed_root, "{root}"))
+        }
         assert_that(errors - set(owners)).is_empty()
 
 

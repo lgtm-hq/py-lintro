@@ -206,8 +206,14 @@ def test_check_no_package_sources_sets_parse_failures_count(
         dest_name=lockfile.name,
     )
 
+    # What osv-scanner 2.4.0 and 2.7.1 print for a directory with nothing to
+    # scan (exit 128).
     osv_output = (
-        "Scanned 0 packages and found 0 vulnerabilities\nNo package sources found\n"
+        "Scanning dir .\n"
+        "Starting filesystem walk for root: /\n"
+        "End status: 1 dirs visited, 1 inodes visited, 0 Extract calls, "
+        "174.583µs elapsed, 175µs wall time\n"
+        "No package sources found, --help for usage information.\n"
     )
 
     with patch.object(

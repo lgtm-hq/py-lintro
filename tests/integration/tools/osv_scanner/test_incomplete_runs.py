@@ -245,6 +245,60 @@ def test_private_package_beside_a_vulnerable_one_is_a_complete_scan(
     assert_that(json.loads(result.output or "")).contains_key("results")
 
 
+#: Suppressions that make osv-scanner print each kind of configuration line:
+#: a filtered vulnerability with a reason over two lines, an unused ignore,
+#: a duplicate, and an ignored package beside an unused override.
+_CONFIG = '''
+[[IgnoredVulns]]
+id = "PYSEC-2026-2151"
+ignoreUntil = 2099-01-01
+reason = """accepted for this test
+second line of the reason"""
+
+[[IgnoredVulns]]
+id = "GHSA-zzzz-zzzz-zzzz"
+ignoreUntil = 2099-01-01
+reason = "never matches"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-2151"
+ignoreUntil = 2099-01-01
+
+[[PackageOverrides]]
+name = "six"
+ecosystem = "PyPI"
+ignore = true
+reason = "vendored copy"
+
+[[PackageOverrides]]
+name = "zz-nothere"
+ecosystem = "PyPI"
+ignore = true
+'''
+
+
+def test_suppression_messages_leave_the_scan_complete(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """Every line a real .osv-scanner.toml makes osv-scanner print is known.
+
+    Unrecognised standard error makes a run incomplete at any exit status,
+    so this guards honest configurations against that rule.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    (tmp_path / "requirements.txt").write_text("flask==3.0.0\nsix==1.16.0\n")
+    (tmp_path / ".osv-scanner.toml").write_text(_CONFIG)
+
+    result = get_plugin("osv_scanner").check([str(tmp_path)], {})
+
+    assert_that(result.execution_failed).described_as(result.output).is_false()
+    assert_that(result.inspected_files).is_true()
+
+
 def test_private_package_alone_is_a_clean_complete_scan(
     get_plugin: Callable[[str], BaseToolPlugin],
     tmp_path: Path,

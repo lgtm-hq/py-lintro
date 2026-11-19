@@ -25,7 +25,7 @@ _PRIVATE = "zz-private-internal-pkg-xq"
 
 _HEADER = "Scanning dir .\nStarting filesystem walk for root: /\n"
 
-_END = "End status: 1 dirs visited, 2 inodes visited, 1 Extract calls\n"
+_END = "End status: 1 dirs visited, 2 inodes visited, 1 Extract calls, 1.5ms elapsed, 1.5ms wall time\n"
 
 #: A requirements.txt naming a package public PyPI does not have, healthy
 #: network. 2.4.0 and 2.7.1 print the same lines.

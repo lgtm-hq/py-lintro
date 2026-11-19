@@ -20,7 +20,7 @@ from lintro.tools.osv_scanner.definition import (
 )
 
 _NO_SOURCES_STDERR = (
-    "Scanning dir /repo\n"
+    "Scanning dir .\n"
     "Starting filesystem walk for root: /\n"
     "No package sources found, --help for usage information.\n"
 )
@@ -29,9 +29,9 @@ _LOCKFILE: dict[str, str] = {"requirements.txt": "flask==3.0.0\n"}
 
 #: The progress lines osv-scanner prints before any error.
 _PROGRESS = (
-    "Scanning dir /repo\n"
+    "Scanning dir .\n"
     "Starting filesystem walk for root: /\n"
-    "End status: 1 dirs visited, 2 inodes visited, 1 Extract calls\n"
+    "End status: 1 dirs visited, 2 inodes visited, 1 Extract calls, 1.5ms elapsed, 1.5ms wall time\n"
 )
 
 #: What osv-scanner 2.7.1 logs when its vulnerability queries fail.
