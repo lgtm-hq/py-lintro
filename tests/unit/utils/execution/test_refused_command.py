@@ -290,7 +290,7 @@ def _run_lint_bridge(
             get_tool_config=lambda _: SimpleNamespace(lintro_tool_config={}),
         ),
     )
-    monkeypatch.setattr(lint_bridge, "resolve_python_formatting", lambda *_, **__: None)
+    monkeypatch.setattr(lint_bridge, "resolve_run_formatting", lambda *_, **__: None)
     monkeypatch.setattr(tool_manager, "get_tool", tools.__getitem__)
     monkeypatch.setattr(lint_bridge, "configure_tool_for_execution", _copy_configured)
     return lint_bridge.run_lint_on_changed_files(

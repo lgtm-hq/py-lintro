@@ -249,7 +249,7 @@ def _executor_doubles(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """
     # Execution doubles bypass real plugin capability evidence. Ownership has
     # separate integration coverage with real plugin definitions.
-    monkeypatch.setattr(te, "resolve_python_formatting", lambda *args, **kwargs: None)
+    monkeypatch.setattr(te, "resolve_run_formatting", lambda *args, **kwargs: None)
     configured: list[dict[str, Any]] = []
 
     def _record_configure(*, tool: Any, **kwargs: Any) -> Any:

@@ -21,6 +21,26 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.182.1] - 2026-11-19
+
+### Fixed
+
+- **install**: classify declared npm specs and announce project installs (#3533)
+  (47c14f1)
+
+## [0.182.0] - 2026-11-19
+
+### Added
+
+- **cli**: add --strict-missing-tools to fail on missing or outdated tools (#3524)
+  (8ce6821)
+
+## [0.181.9] - 2026-11-19
+
+### Fixed
+
+- **install**: name the directory the executed install command used (#3523) (0f201eb)
+
 ## [0.181.8] - 2026-11-19
 
 ### Changed

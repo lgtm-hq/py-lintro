@@ -13,7 +13,7 @@ from pathlib import Path
 from loguru import logger
 
 from lintro.config.lintro_config import LintroConfig
-from lintro.models.core.tool_outcome import NoFiles, Skipped, ToolOutcome
+from lintro.models.core.tool_outcome import NoFiles, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.file_discovery import (
     discover_files,
@@ -169,6 +169,7 @@ def verify_tool_version(
         None if version check passes, or a skip/unavailable result if it fails.
     """
     from lintro.utils.tool_snapshots import (
+        below_minimum_result,
         get_tool_snapshot,
         is_strict_missing_tools,
         snapshot_to_unavailable_result,
@@ -208,16 +209,13 @@ def verify_tool_version(
 
     error = snapshot.probe_error or "version check failed"
     hint = snapshot.remediation_hint or ""
-    skip_message = (
-        f"Skipping {definition.name}: {error}. "
-        f"Minimum required: {snapshot.min_version}. "
-        f"{hint}"
-    ).strip()
+    detail = f"{error}. Minimum required: {snapshot.min_version}. {hint}".strip()
 
-    return ToolResult.from_outcome(
-        ToolOutcome(execution=Skipped(error)),
+    return below_minimum_result(
         name=definition.name,
-        output=skip_message,
+        reason=error,
+        detail=detail,
+        hint=hint,
     )
 
 

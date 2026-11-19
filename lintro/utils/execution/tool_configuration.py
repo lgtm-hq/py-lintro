@@ -7,18 +7,24 @@ and determining which tools to run.
 from __future__ import annotations
 
 import difflib
-from collections.abc import Sequence
-from dataclasses import dataclass, field
+from collections.abc import Collection, Sequence
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from loguru import logger
 
 from lintro.config.config_loader import get_config
 from lintro.enums.action import Action, normalize_action
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tools_value import ToolsValue
 from lintro.models.core.python_formatting_decision import PythonFormattingDecision
+from lintro.models.core.tool_outcome import NoFiles, ToolOutcome
+from lintro.models.core.tool_result import ToolResult
 from lintro.tools import tool_manager
 from lintro.utils.execution_paths import get_execution_cwd
+from lintro.utils.file_cache import ToolCache
+from lintro.utils.path_filtering import walk_files_with_excludes
 from lintro.utils.python_formatting import resolve_python_formatting
 from lintro.utils.unified_config import UnifiedConfigManager
 
@@ -332,6 +338,157 @@ def configure_tool_for_execution(
             )
 
     return tool
+
+
+def _blocks_on_strict_black(decision: PythonFormattingDecision | None) -> bool:
+    """Tell whether the decision would fail the run on Black's strict result.
+
+    Args:
+        decision: Ruff/Black ownership resolved for the run, if any.
+
+    Returns:
+        True when Black cannot run and its result is a strict unavailable
+        failure, so whether Black had files decides if that failure counts.
+    """
+    if decision is None or decision.run_black:
+        return False
+    result = decision.black_result
+    return result is not None and result.unavailable and not result.success
+
+
+def resolve_run_formatting(
+    selected_tools: Collection[str],
+    *,
+    action: Action,
+    paths: Sequence[str],
+    config_manager: UnifiedConfigManager,
+    lintro_config: LintroConfig,
+    tool_option_dict: dict[str, dict[str, object]] | None = None,
+    **configure: Any,
+) -> PythonFormattingDecision | None:
+    """Resolve Ruff/Black ownership for a run and scope Black's strict result.
+
+    Ownership is resolved before any file discovery, so a blocked Black
+    result is built for every run selecting Ruff and Black. Every other tool
+    reports "no files" before its version gate, and strict mode must not fail
+    on a tool that had nothing to check (#3371), so a strict Black failure is
+    kept only when Black had files.
+
+    Args:
+        selected_tools: Tools selected for this run.
+        action: Executed check or format action.
+        paths: Scan targets of the run.
+        config_manager: Configuration source for Ruff options and Black.
+        lintro_config: Loaded configuration, including the strict policy.
+        tool_option_dict: ``--tool-options`` overrides, keyed by tool.
+        **configure: Remaining :func:`configure_tool_for_execution` arguments
+            the run configures its tools with (``exclude``, ``include_venv``,
+            ``incremental``, ``diff_base``).
+
+    Returns:
+        The decision, or None when Ruff and Black are not both selected.
+    """
+    options = tool_option_dict or {}
+    ruff_config = config_manager.get_tool_config("ruff").lintro_tool_config or {}
+    decision = resolve_python_formatting(
+        selected_tools,
+        action=action,
+        ruff_options={**ruff_config, **options.get("ruff", {})},
+        cache_root=Path(get_execution_cwd(list(paths))),
+        strict_missing_tools=lintro_config.execution.strict_missing_tools,
+    )
+    if decision is None or not _blocks_on_strict_black(decision):
+        return decision
+    # Scoping runs before any tool executes, so nothing it raises may escape:
+    # that would abort the other tools. A failure keeps the unscoped result,
+    # treating Black as having files; "no files" would be a silent pass.
+    try:
+        black = configure_tool_for_execution(
+            tool=tool_manager.get_tool("black"),
+            tool_name="black",
+            config_manager=config_manager,
+            tool_option_dict=options,
+            action=action,
+            selected_tools=set(selected_tools),
+            lintro_config=lintro_config,
+            paths=paths,
+            formatting_decision=decision,
+            **{
+                "exclude": None,
+                "include_venv": False,
+                "incremental": False,
+                **configure,
+            },
+        )
+    except Exception as exc:
+        # Black's own configuration is bad: report it on Black's row, as the
+        # per-tool path would, without dropping the strict failure.
+        logger.opt(exception=exc).debug("Could not configure black for scoping")
+        return _with_configuration_error(decision, exc)
+    try:
+        has_files = bool(_discover_black_files(black, paths))
+    except Exception as exc:
+        logger.opt(exception=exc).warning(
+            f"Could not discover black's files; keeping its result: {exc}",
+        )
+        has_files = True
+    if has_files:
+        return decision
+    suffixes = [p.removeprefix("*") for p in black.definition.file_patterns]
+    kinds = "/".join(s for s in suffixes if s.startswith(".")) or "Python"
+    no_files = ToolResult.from_outcome(
+        ToolOutcome(execution=NoFiles()),
+        name=black.definition.name,
+        output=f"No {kinds} files found to check.",
+    )
+    return replace(decision, black_result=no_files)
+
+
+def _with_configuration_error(
+    decision: PythonFormattingDecision,
+    exc: Exception,
+) -> PythonFormattingDecision:
+    """Add a Black configuration error to Black's blocked result.
+
+    Args:
+        decision: Decision whose Black result is a strict failure.
+        exc: Error raised while configuring Black.
+
+    Returns:
+        The decision, with the error appended to Black's output in the text
+        the per-tool path reports a configuration crash with.
+    """
+    result = decision.black_result
+    if result is None:
+        return decision
+    error = f"Tool execution failed: {type(exc).__name__}: {exc}"
+    output = f"{result.output}\n{error}" if result.output else error
+    return replace(decision, black_result=replace(result, output=output))
+
+
+def _discover_black_files(black: BaseToolPlugin, paths: Sequence[str]) -> list[str]:
+    """Find the files Black would check, without touching its incremental cache.
+
+    Args:
+        black: Black plugin configured for this run.
+        paths: Scan targets of the run.
+
+    Returns:
+        The files Black's own discovery would hand it.
+    """
+    diff_base = black.options.get("diff_base")
+    files = walk_files_with_excludes(
+        paths=list(paths),
+        file_patterns=list(black.definition.file_patterns),
+        exclude_patterns=list(black.exclude_patterns),
+        include_venv=black.include_venv,
+        diff_base=diff_base if isinstance(diff_base, str) else None,
+    )
+    if files and black.options.get("incremental"):
+        # Read, never write: Black does not run, so its cache must not
+        # record these files as checked.
+        files = ToolCache.load(black.definition.name).get_changed_files(files)
+    return files
 
 
 def get_tool_display_name(tool_name: str) -> str:

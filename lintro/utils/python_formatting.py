@@ -5,7 +5,6 @@ from pathlib import Path
 
 from lintro.enums.action import Action
 from lintro.models.core.python_formatting_decision import PythonFormattingDecision
-from lintro.models.core.tool_outcome import Skipped, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.models.core.tool_snapshot import ToolSnapshot
 from lintro.utils import tool_snapshots
@@ -170,10 +169,18 @@ def _blocked_black_result(
         return tool_snapshots.snapshot_to_unavailable_result(snapshot, strict=strict)
     if black_runs:
         return None
-    return ToolResult.from_outcome(
-        ToolOutcome(execution=Skipped(reason)),
+    # The reason names the tool for the ownership text; the result's row and
+    # output prefix already do, so drop it from both.
+    bare = reason.removeprefix(f"{snapshot.name}: ")
+    detail = bare
+    if snapshot.remediation_hint:
+        detail = f"{detail}. {snapshot.remediation_hint}"
+    return tool_snapshots.below_minimum_result(
         name="black",
-        output=f"Skipping black: {reason}",
+        reason=bare,
+        detail=detail,
+        hint=snapshot.remediation_hint,
+        strict=strict,
     )
 
 

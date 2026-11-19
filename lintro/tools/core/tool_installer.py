@@ -19,10 +19,10 @@ Usage:
 
 from __future__ import annotations
 
+import os
 import shlex
 import shutil
 import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
-import sysconfig
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -31,6 +31,13 @@ from loguru import logger
 
 from lintro.enums.install_outcome import InstallOutcome
 from lintro.tools.core.install_context import RuntimeContext
+from lintro.tools.core.install_destination import (
+    InstallDestination,
+    clear_probe_cache,
+    has_control_characters,
+    install_destination,
+    path_export_line,
+)
 from lintro.tools.core.install_hints import (
     SCRIPT_HINT_PREFIX,
     has_install_script,
@@ -40,6 +47,9 @@ from lintro.tools.core.install_hints import (
 )
 from lintro.tools.core.install_plan import InstallPlan, InstallResult
 from lintro.tools.core.install_strategies import get_strategy
+from lintro.tools.core.install_strategies.npm_strategy import (
+    whole_project_install_root,
+)
 from lintro.tools.core.install_strategies.package_names import script_tool_name
 from lintro.tools.core.node_fallback import REGISTRY_RUNNERS
 from lintro.tools.core.tool_registry import ManifestRegistry, ManifestTool
@@ -59,9 +69,25 @@ __all__ = [
     "InstallPlan",
     "InstallResult",
     "ToolInstaller",
+    "has_path_separator",
     "is_resolved_command_discoverable",
     "resolve_version_command",
 ]
+
+
+def has_path_separator(argv0: str) -> bool:
+    """Return whether *argv0* names a path rather than a bare command.
+
+    Uses the platform's own separators so the answer agrees with
+    :meth:`pathlib.Path.is_absolute` (a backslash counts on Windows only).
+
+    Args:
+        argv0: First element of a command argv.
+
+    Returns:
+        True when *argv0* contains a path separator.
+    """
+    return any(sep is not None and sep in argv0 for sep in (os.sep, os.altsep))
 
 
 def _is_wrapper_probe(command: Sequence[str]) -> bool:
@@ -71,12 +97,13 @@ def _is_wrapper_probe(command: Sequence[str]) -> bool:
         command: Version-command argv (manifest or resolved).
 
     Returns:
-        True when argv[0] is ``sh``/``bash``/``cargo`` or contains ``/``.
+        True when argv[0] is ``sh``/``bash``/``cargo`` or contains a path
+        separator.
     """
     if not command:
         return False
     main_cmd = command[0]
-    return main_cmd in _INDIRECT_PROBE_COMMANDS or "/" in main_cmd
+    return main_cmd in _INDIRECT_PROBE_COMMANDS or has_path_separator(main_cmd)
 
 
 def _is_node_modules_bin(path: Path) -> bool:
@@ -149,9 +176,10 @@ def is_resolved_command_discoverable(command: Sequence[str]) -> bool:
       fallback, not an install — not discoverable.
     * An absolute path under ``node_modules/.bin`` that exists is
       discoverable even when that directory is not on PATH.
-    * Wrapper probes (``sh``/``bash``/``cargo``, or a path containing ``/``
-      that is not a local Node bin) cannot answer whether the tool itself is
-      discoverable, so they count as discoverable as today.
+    * Any other argv[0] that names a path (relative or absolute) is
+      discoverable exactly when that file exists: a missing file cannot run.
+    * Wrapper probes (``sh``/``bash``/``cargo``) cannot answer whether the
+      tool itself is discoverable, so they count as discoverable.
     * Anything else is discoverable only when ``shutil.which`` finds it.
 
     Args:
@@ -170,6 +198,9 @@ def is_resolved_command_discoverable(command: Sequence[str]) -> bool:
 
     main_path = Path(main_cmd)
     if main_path.is_absolute() and _is_node_modules_bin(main_path):
+        return main_path.exists()
+
+    if has_path_separator(main_cmd):
         return main_path.exists()
 
     if _is_wrapper_probe(command):
@@ -310,6 +341,26 @@ class ToolInstaller:
                 plan.manual.append((tool, hint))
                 return
         plan.to_install.append((tool, hint))
+        self._note_project_install(plan, tool, hint)
+
+    def _note_project_install(
+        self,
+        plan: InstallPlan,
+        tool: ManifestTool,
+        command: str,
+    ) -> None:
+        """Record a planned command that installs the whole Node project.
+
+        Args:
+            plan: Plan to annotate.
+            tool: Tool the command was planned for.
+            command: The planned install command.
+        """
+        if tool.install_type != "npm":
+            return
+        root = whole_project_install_root(self._context.environment, command)
+        if root is not None:
+            plan.project_installs[tool.name] = root
 
     def _check_prerequisites(self, tool: ManifestTool) -> str | None:
         """Check if prerequisites for installing a tool are met.
@@ -339,10 +390,7 @@ class ToolInstaller:
         if not tool.version_command:
             return None
 
-        try:
-            command = self._resolved_version_command(tool)
-        except ImportError:
-            return None
+        command = self._resolved_version_command(tool)
         main_cmd = command[0]
         if main_cmd in REGISTRY_RUNNERS:
             return None
@@ -427,13 +475,6 @@ class ToolInstaller:
         """
         strategy = get_strategy(tool.install_type)
         env = self._context.environment
-        _args = (
-            env,
-            tool.name,
-            tool.version,
-            tool.install_package,
-            tool.install_component,
-        )
         if strategy is None:
             return (
                 f"Upgrade {tool.name} manually"
@@ -441,7 +482,7 @@ class ToolInstaller:
                 else f"Install {tool.name} manually"
             )
         if upgrade:
-            hint = strategy.upgrade_hint(*_args)
+            hint = strategy.tool_hint(env, tool, upgrade=True)
             # For brew upgrades, validate that brew actually manages this
             # package — if not, use the non-brew install command instead
             # (strategies may prefer brew when available, so we can't just
@@ -452,7 +493,7 @@ class ToolInstaller:
                     pkg = tool.install_package or tool.name
                     hint = f"Upgrade {pkg} manually (not managed by Homebrew)"
             return hint
-        return strategy.install_hint(*_args)
+        return strategy.tool_hint(env, tool, upgrade=False)
 
     def _install_cwd(self, tool: ManifestTool) -> Path | None:
         """Return the directory an install command should run from.
@@ -495,6 +536,9 @@ class ToolInstaller:
         Returns:
             List of results for each install/upgrade action, in plan order.
         """
+        # Package-manager answers are reused within this batch only; a later
+        # batch in the same process (watch, MCP) asks again (#2042).
+        clear_probe_cache()
         results: list[InstallResult] = []
         actions: list[tuple[ManifestTool, str]] = [
             *plan.to_install,
@@ -539,10 +583,7 @@ class ToolInstaller:
             # Nothing to probe with — trust the exit code.
             return True
 
-        try:
-            command = self._resolved_version_command(tool)
-        except ImportError:
-            command = list(tool.version_command)
+        command = self._resolved_version_command(tool)
         return is_resolved_command_discoverable(command)
 
     _INSTALL_TIMEOUT_SECONDS = 300
@@ -640,45 +681,62 @@ class ToolInstaller:
                 command=command,
             )
 
-    def _not_discoverable_message(self, tool: ManifestTool) -> str:
+    def _not_discoverable_message(self, tool: ManifestTool, command: str) -> str:
         """Explain a successful command that left the tool undiscoverable.
 
         Args:
             tool: Tool whose binary could not be found after install.
+            command: Install command that ran and exited zero.
 
         Returns:
-            Message naming the install destination directory and the PATH
-            remedy, rather than a generic "needs manual action".
+            Message naming the directory *command* installed into and the
+            PATH remedy, or saying plainly that the directory is unknown,
+            rather than a generic "needs manual action".
         """
-        bin_dir = self._install_destination_dir(tool)
-        return (
+        destination = self._install_destination(tool, command)
+        bin_dir = destination.directory
+        # install_destination already refuses such paths; this guard keeps a
+        # control character from ever reaching a line meant to be pasted.
+        if bin_dir is None or has_control_characters(str(bin_dir)):
+            where = (
+                f"where {destination.manager} installed it"
+                if destination.manager
+                else "where it was installed"
+            )
+            return (
+                f"Install command succeeded but {tool.name} is still not "
+                f"discoverable, and lintro could not determine {where}; "
+                f"find the directory that holds {tool.name} and add it to PATH"
+            )
+        message = (
             f"Install command succeeded but {tool.name} is still not "
-            f"discoverable. It was expected under {bin_dir} and was not "
-            f"found; inspect that directory, or add it to PATH, for "
-            f'example: export PATH="{bin_dir}:$PATH"'
+            f"discoverable. It was expected under {bin_dir}, where "
+            f"{destination.manager} installs it, and was not found; inspect "
+            f"that directory, or add it to PATH"
         )
+        export_line = path_export_line(bin_dir)
+        if export_line is None:
+            return message
+        return f"{message}, for example: {export_line}"
 
-    def _install_destination_dir(self, tool: ManifestTool) -> Path:
-        """Return the directory an install of *tool* is expected to land in.
+    def _install_destination(
+        self,
+        tool: ManifestTool,
+        command: str,
+    ) -> InstallDestination:
+        """Return where the executed *command* put *tool*'s executable.
+
+        Derived from the command that ran, never from ``install_type``: a
+        ``binary`` or ``pip`` tool may have gone through ``brew install``.
 
         Args:
             tool: Tool whose binary could not be found after install.
+            command: Install command that ran.
 
         Returns:
-            Concrete destination directory named in the PATH remedy.
+            Manager name and destination directory (None when unknown).
         """
-        dest = self._install_cwd(tool)
-        if dest is not None:
-            return dest / "node_modules" / ".bin"
-        if tool.install_type == "npm":
-            npm = shutil.which("npm")
-            if npm is not None:
-                return Path(npm).parent
-        if tool.install_type == "pip":
-            return Path(sysconfig.get_path("scripts"))
-        if tool.install_type == "cargo":
-            return Path.home() / ".cargo" / "bin"
-        return Path.home() / ".local" / "bin"
+        return install_destination(command, cwd=self._install_cwd(tool))
 
     def _verified_result(
         self,
@@ -709,7 +767,7 @@ class ToolInstaller:
             return InstallResult(
                 tool=tool,
                 outcome=InstallOutcome.NOT_DISCOVERABLE,
-                message=self._not_discoverable_message(tool),
+                message=self._not_discoverable_message(tool, command),
                 duration_seconds=duration,
                 command=command,
             )

@@ -28,7 +28,6 @@ from lintro.models.core.tool_outcome import (
     FixMeasured,
     FixUnmeasured,
     NoFiles,
-    Skipped,
     TimedOut,
     ToolOutcome,
 )
@@ -47,6 +46,7 @@ from lintro.tools.core.option_validators import (
 from lintro.tools.core.timeout_utils import (
     run_subprocess_with_timeout,
 )
+from lintro.utils.tool_snapshots import below_minimum_result
 
 # Constants for Clippy configuration
 CLIPPY_DEFAULT_TIMEOUT: int = 120
@@ -204,20 +204,17 @@ class ClippyPlugin(BaseToolPlugin):
             return None  # Version check passed
 
         # Version check failed - return skip result with warning
-        skip_message = (
-            f"Skipping {self.definition.name}: {version_info.error_message}. "
+        detail = (
+            f"{version_info.error_message}. "
             f"Minimum required: {version_info.min_version}. "
             f"{version_info.install_hint}"
         )
 
-        return ToolResult.from_outcome(
-            ToolOutcome(
-                execution=Skipped(
-                    version_info.error_message or "Clippy version check failed",
-                ),
-            ),
+        return below_minimum_result(
             name=self.definition.name,
-            output=skip_message,
+            reason=version_info.error_message or "Clippy version check failed",
+            detail=detail,
+            hint=version_info.install_hint,
         )
 
     def set_options(

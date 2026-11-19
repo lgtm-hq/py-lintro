@@ -20,7 +20,9 @@ from lintro.ai.review.lint_bridge import (
 from lintro.config.lintro_config import LintroConfig
 from lintro.models.core.python_formatting_decision import PythonFormattingDecision
 from lintro.models.core.tool_result import ToolResult
+from lintro.models.core.tool_snapshot import ToolSnapshot
 from lintro.tools import tool_manager
+from lintro.utils import tool_snapshots
 
 
 def test_run_lint_on_changed_files_returns_empty_for_no_paths() -> None:
@@ -81,7 +83,7 @@ def test_run_lint_on_changed_files_invokes_tool_check() -> None:
                 return_value=mock_tool,
             ),
             patch(
-                "lintro.ai.review.lint_bridge.resolve_python_formatting",
+                "lintro.ai.review.lint_bridge.resolve_run_formatting",
                 return_value=None,
             ),
             patch(
@@ -423,7 +425,7 @@ def test_lint_bridge_suppresses_black_from_recorded_decision(
     ruff.check.return_value = ToolResult(name="ruff", success=True)
     with (
         patch.object(lint_bridge, "get_tools_to_run") as selection,
-        patch.object(lint_bridge, "resolve_python_formatting", return_value=decision),
+        patch.object(lint_bridge, "resolve_run_formatting", return_value=decision),
         patch.object(tool_manager, "get_tool", return_value=ruff) as build,
         patch.object(
             lint_bridge,
@@ -445,3 +447,116 @@ def test_lint_bridge_suppresses_black_from_recorded_decision(
     build.assert_called_once_with("ruff")
     ruff.check.assert_called_once_with(paths=["a.py"], options={})
     assert_that(configure.call_args.kwargs["formatting_decision"]).is_same_as(decision)
+
+
+def _strict_probe(name: str, **kwargs: object) -> ToolSnapshot:
+    """Probe Black below the minimum and Ruff runnable.
+
+    Args:
+        name: Tool under inspection.
+        **kwargs: Ignored probe options.
+
+    Returns:
+        Capability evidence for the Ruff/Black ownership decision.
+    """
+    if name == "black":
+        return ToolSnapshot(
+            name=name,
+            available=True,
+            version="2.0.0",
+            version_check_passed=False,
+            min_version="24.0.0",
+            probe_error="black 2.0.0 is below minimum 24.0.0",
+            remediation_hint="Upgrade via: uv tool upgrade black",
+        )
+    return ToolSnapshot(
+        name=name,
+        available=True,
+        version="0.15.0",
+        version_check_passed=True,
+        min_version="0.1.0",
+    )
+
+
+@pytest.mark.parametrize(
+    ("changed", "black_note"),
+    [
+        ("notes.txt", None),
+        (
+            "app.py",
+            "Tool: black | unavailable: below minimum 24.0.0, found 2.0.0. "
+            "Upgrade via: uv tool upgrade black",
+        ),
+    ],
+    ids=["no-python-files", "python-file"],
+)
+def test_review_digest_names_strict_black_only_when_it_had_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    changed: str,
+    black_note: str | None,
+) -> None:
+    """``lintro review`` under strict mode notes a blocked Black only with files.
+
+    Args:
+        tmp_path: Isolated project root.
+        monkeypatch: Working-directory and probe control.
+        changed: The one changed file in the review.
+        black_note: Expected digest note for Black, or None for none.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("LINTRO_ALLOW_VERSION_LAG", raising=False)
+    (tmp_path / changed).write_text("VALUE = 1\n")
+    monkeypatch.setattr(tool_snapshots, "get_tool_snapshot", _strict_probe)
+    config = LintroConfig()
+    config.execution.strict_missing_tools = True
+
+    with patch.object(lint_bridge, "get_tools_to_run") as selection:
+        selection.return_value.to_run = ["ruff", "black"]
+        results = run_lint_on_changed_files(
+            changed_files=[str(tmp_path / changed)],
+            lintro_config=config,
+        )
+
+    black = next(result for result in results if result.name == "black")
+    notes = [
+        line
+        for line in format_lint_results_for_prompt(results=results).splitlines()
+        if line.startswith("Tool: black")
+    ]
+    assert_that(black.success).is_equal_to(black_note is None)
+    assert_that(notes).is_equal_to([black_note] if black_note else [])
+
+
+def test_review_digest_keeps_other_tools_when_black_config_is_bad(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Black configuration error while scoping Black drops only Black's entry.
+
+    Args:
+        tmp_path: Isolated project root.
+        monkeypatch: Working-directory and probe control.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("LINTRO_ALLOW_VERSION_LAG", raising=False)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.lintro.black]\nline_length = "bad"\n',
+    )
+    (tmp_path / "app.py").write_text("import os\n")
+    monkeypatch.setattr(tool_snapshots, "get_tool_snapshot", _strict_probe)
+    config = LintroConfig()
+    config.execution.strict_missing_tools = True
+
+    with patch.object(lint_bridge, "get_tools_to_run") as selection:
+        selection.return_value.to_run = ["ruff", "black"]
+        results = run_lint_on_changed_files(
+            changed_files=[str(tmp_path / "app.py")],
+            lintro_config=config,
+        )
+
+    digest = format_lint_results_for_prompt(results=results)
+    assert_that(digest).contains("F401")
+    black = next(result for result in results if result.name == "black")
+    assert_that(black.unavailable).is_true()
+    assert_that(black.output).contains("Tool execution failed: ValueError")

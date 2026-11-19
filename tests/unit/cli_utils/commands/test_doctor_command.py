@@ -1254,3 +1254,115 @@ def test_ai_check_hint_keeps_its_extra_brackets() -> None:
     assert_that(buffer.getvalue()).contains(
         "Install with: uv pip install 'lintro[cursor]'",
     )
+
+
+def test_doctor_fix_announces_a_whole_project_install() -> None:
+    """``doctor --fix`` says when it is about to install a whole project (#2045).
+
+    ``lintro install`` already announced it; the doctor path planned and ran
+    the same ``npm install`` without a word.
+    """
+    root = Path("/work/demo")
+    runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
+    prettier = _make_tool(name="prettier", version="3.9.4", install_type="npm")
+    plan = InstallPlan(
+        to_install=[(prettier, "npm install")],
+        project_installs={"prettier": root},
+    )
+    executed = [
+        InstallResult(
+            tool=prettier,
+            outcome=InstallOutcome.SUCCESS,
+            message="installed",
+            command="npm install",
+            step=1,
+            total_steps=1,
+        ),
+    ]
+
+    with (
+        p1,
+        p2,
+        patch("shutil.which", return_value=None),
+        patch(
+            "lintro.tools.core.snapshots.probe_all_tools",
+            return_value=_missing_snapshots(),
+        ),
+        patch(
+            "lintro.tools.core.tool_installer.ToolInstaller.plan",
+            return_value=plan,
+        ),
+        patch(
+            "lintro.tools.core.tool_installer.ToolInstaller.execute",
+            return_value=executed,
+        ),
+        patch(
+            "lintro.cli_utils.commands.doctor._fixable_results",
+            side_effect=lambda results: [
+                ToolCheckResult(tool=prettier, status=ToolStatus.MISSING),
+            ],
+        ),
+    ):
+        result = runner.invoke(doctor_command, ["--fix"])
+
+    output = " ".join(result.output.split())
+    notice = (
+        "installs the whole project's dependencies "
+        f"(`npm install` in {root}), not only prettier"
+    )
+    assert_that(output).contains(notice)
+    # Announced before the install runs, not after.
+    assert_that(output.index(notice)).is_less_than(output.index("[1/1]"))
+
+
+def test_doctor_fix_shows_the_manual_hint_for_a_tool_it_cannot_install() -> None:
+    """``doctor --fix`` prints what the user must do for a manual tool (#2045).
+
+    A declared range that cannot reach lintro's minimum lands on the plan's
+    manual list and nothing runs for it; before this, ``doctor --fix`` said
+    nothing about it at all.
+    """
+    runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
+    prettier = _make_tool(name="prettier", version="3.9.4", install_type="npm")
+    hint = (
+        "Install prettier explicitly: this project declares the range `2.x` "
+        "in package.json, which does not admit lintro's version 3.9.4. Run "
+        "`npm install -D prettier@3.9.4` to adopt lintro's version, or widen "
+        "the range."
+    )
+    plan = InstallPlan(manual=[(prettier, hint)])
+
+    with (
+        p1,
+        p2,
+        patch("shutil.which", return_value=None),
+        patch(
+            "lintro.tools.core.snapshots.probe_all_tools",
+            return_value=_missing_snapshots(),
+        ),
+        patch(
+            "lintro.tools.core.tool_installer.ToolInstaller.plan",
+            return_value=plan,
+        ),
+        patch(
+            "lintro.tools.core.tool_installer.ToolInstaller.execute",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.doctor._fixable_results",
+            side_effect=lambda results: [
+                ToolCheckResult(tool=prettier, status=ToolStatus.MISSING),
+            ],
+        ),
+    ):
+        result = runner.invoke(doctor_command, ["--fix"])
+
+    output = " ".join(result.output.split())
+    assert_that(output).contains(
+        "Manual installation required (1):",
+        "prettier",
+        "declares the range `2.x` in package.json",
+        "`npm install -D prettier@3.9.4`",
+    )

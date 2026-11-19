@@ -36,7 +36,9 @@ required):
 - **Many wrapped tools are external (non-Python) and optional.** `uv sync` does NOT
   install prettier, hadolint, shellcheck, actionlint, oxlint, taplo, gitleaks,
   `markdownlint-cli2`, rustfmt/cargo, etc. `lintro check .` silently **skips** any tool
-  missing from `PATH`, so it still passes without them. `tests/integration/**` behaves
+  missing from `PATH` (or below its minimum version), so it still passes without them;
+  pass `--strict-missing-tools` (or set `execution.strict_missing_tools: true`) to make
+  such a tool fail the run with an install hint instead. `tests/integration/**` behaves
   the same way: every module that drives a wrapped tool gates on
   `tests/integration/_tools.py::require_tool` (or `require_command`, where the
   invocation comes from the plugin's own resolution), which runs the tool's version
