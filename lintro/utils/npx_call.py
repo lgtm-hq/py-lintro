@@ -460,6 +460,8 @@ class _ColdInstall:
         entries that show npm never finished
         (:func:`~lintro.utils.npx_integrity.install_unfinished`). Never
         raises, so the exception that ended the run is the one reported.
+        A process npx started can outlive this removal; see
+        :func:`_after_unfinished_run` for that limit (#3548).
 
         Args:
             before: What the cache held before the spawn.
@@ -495,6 +497,15 @@ def _after_unfinished_run(
     are not judged, being possibly half-written; the next run verifies them.
     An interruption (``KeyboardInterrupt``, ``SystemExit``) is left to
     propagate unchanged.
+
+    Limit (#3548): lintro stops npx, not what npx started. If such a process
+    outlives npx and keeps writing into the removed entry by absolute path, a
+    later run can reinstall the pin there and npx can run the tool while that
+    process writes into the new entry. ``--ignore-scripts`` on every npx
+    fallback keeps install scripts, the usual source of such a process, from
+    running. The post-run check still marks that run's results untrusted,
+    though only after the tool ran; ``main`` before #3530 refused every later
+    run before spawning anything, until the entry was repaired.
 
     Args:
         cache: The ``--cache`` the npx command carried.

@@ -47,7 +47,7 @@ from lintro.utils.npx_integrity import (
     install_unfinished,
 )
 from lintro.utils.npx_unfinished import bound_cache
-from tests.npx_entries import tool_package, write_npx_entry
+from tests.npx_entries import LockedPackage, tool_package, write_npx_entry
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32",
@@ -756,21 +756,69 @@ def _next_run(command: list[str]) -> object:
         return exc
 
 
-#: How the install script npx started keeps writing after the timeout.
+#: How the install script npx started keeps writing after the timeout. Each
+#: write that lands appends a line to ``{writes}``; one that fails does not.
 _WRITERS: dict[str, str] = {
     # The usual shape: it writes into its own package directory, which the
     # cleanup moves aside and deletes, so its writes fail from then on.
     "in-its-package-directory": (
         "cd '{entry}/node_modules/prettier' && "
-        "while [ $(date +%s) -lt $end ]; do echo x >> log; sleep 0.05; done"
+        "while [ $(date +%s) -lt $end ]; do "
+        "echo x >> log && echo w >> '{writes}'; sleep 0.05; done"
     ),
     # The worst case: it recreates the entry by absolute path.
     "by-absolute-path": (
         "while [ $(date +%s) -lt $end ]; do "
         "mkdir -p '{entry}/node_modules/prettier' && "
-        "echo x >> '{entry}/node_modules/prettier/log'; sleep 0.05; done"
+        "echo x >> '{entry}/node_modules/prettier/log' && "
+        "echo w >> '{writes}'; sleep 0.05; done"
     ),
 }
+
+
+def _recording_tool(record: Path) -> LockedPackage:
+    """Describe a prettier whose entry point is a shell script that records runs.
+
+    Args:
+        record: File each run of the entry point appends ``ran`` to.
+
+    Returns:
+        The package, at the top of ``node_modules``.
+    """
+    base = tool_package()
+    script = f"#!/bin/sh\necho ran >> '{record}'\nsleep 0.2\necho '[]'\n"
+    return LockedPackage(
+        key=base.key,
+        files={**base.files, "bin.js": script},
+        bins=base.bins,
+    )
+
+
+def _lines(path: Path) -> list[str]:
+    """Return the lines of *path*, or none while it does not exist.
+
+    Args:
+        path: A log file.
+
+    Returns:
+        Its lines.
+    """
+    return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+
+def _overlapped_a_write(calls: list[str]) -> bool:
+    """Tell from one npx call's record whether a write landed during it.
+
+    Args:
+        calls: The lines the call appended: ``start=<writes>``, ``ran``
+            from the entry point, ``end=<writes>``.
+
+    Returns:
+        Whether the entry point ran and the write count changed meanwhile.
+    """
+    assert_that(calls).contains("ran")
+    counts = {line.partition("=")[0]: line.partition("=")[2] for line in calls}
+    return int(counts["end"]) != int(counts["start"])
 
 
 @pytest.mark.parametrize("writer", list(_WRITERS), ids=list(_WRITERS))
@@ -780,28 +828,35 @@ def test_an_install_script_that_outlives_the_timeout_never_blocks_for_good(
     writer: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Lintro stops npx only; the script it started may write on (#3548).
+    """Lintro stops npx only; a process it started may write on (#3548).
 
-    The script keeps writing into the entry for a few seconds after the
-    timeout and after lintro removed the entry. Runs started right after,
-    each going through the cache repair first as a tool run does, end in a
-    successful run within the normal lock deadline; any run refused while
-    the script still writes is not repeated once it has stopped.
+    The process keeps writing into the entry for a few seconds after the
+    timeout and after lintro removed the entry. Runs started while it still
+    writes, each going through the cache repair first as a tool run does,
+    may be refused or reported untrusted, and with the by-absolute-path
+    writer npx may already have run the tool from the new entry by then. What
+    is guaranteed: no run reports a result for an npx call during which a
+    write landed, and a run started after the process stopped succeeds. The
+    fake npx runs the package's entry point, so each call records whether a
+    write landed while it ran.
 
     Args:
         cache: Per-pin npm cache.
         tmp_path: Temporary directory provided by pytest.
-        writer: How the script writes.
+        writer: How the process writes.
         monkeypatch: Puts the cache under a private lintro cache root.
     """
     monkeypatch.setattr(file_cache, "CACHE_DIR", Path(os.path.realpath(tmp_path)))
     entry = cache / "_npx" / _ENTRY
-    staged = write_npx_entry(cache, [tool_package()], name=_ENTRY)
+    calls, writes = tmp_path / "calls.log", tmp_path / "writes.log"
+    writes.touch()
+    staged = write_npx_entry(cache, [_recording_tool(calls)], name=_ENTRY)
     complete = tmp_path / "complete"
     staged.rename(complete)
     claimed, pid_file = tmp_path / "first", tmp_path / "writer.pid"
     done = tmp_path / "writer.done"
-    script = _WRITERS[writer].format(entry=entry)
+    script = _WRITERS[writer].format(entry=entry, writes=writes)
+    count = f"$(grep -c . '{writes}')"
     npx = _fake_npx(
         tmp_path / "bin",
         f"if mkdir '{claimed}' 2>/dev/null; then\n"
@@ -810,30 +865,78 @@ def test_an_install_script_that_outlives_the_timeout_never_blocks_for_good(
         f"( {script}; touch '{done}' ) </dev/null >/dev/null 2>&1 &\n"
         f"echo $! > '{pid_file}'\nexec sleep 30\n"
         "fi\n"
-        # Later calls install only what has no lockfile, as npx does.
+        f"echo \"start={count}\" >> '{calls}'\n"
+        # Later calls install only what has no lockfile, as npx does, then
+        # run the entry point.
         f"if [ ! -e '{entry}/package-lock.json' ]; then\n"
-        f"rm -rf '{entry}'\ncp -R '{complete}' '{entry}'\nfi\necho '[]'\n",
+        f"rm -rf '{entry}'\ncp -R '{complete}' '{entry}'\nfi\n"
+        f"sh '{entry}/node_modules/.bin/prettier'\nstatus=$?\n"
+        f"echo \"end={count}\" >> '{calls}'\nexit $status\n",
     )
     try:
         with pytest.raises(subprocess.TimeoutExpired):
             run_subprocess(_command(npx, cache), timeout=1.0)
 
-        # Runs while the script still writes, then one after it stopped.
-        outcomes: list[object] = []
+        # Runs while the process still writes, then one after it stopped:
+        # each run's outcome with what its npx call recorded, if it spawned.
+        outcomes: list[tuple[object, list[str]]] = []
+        stopped = False
         give_up = time.monotonic() + 30.0
         while time.monotonic() < give_up:
             stopped = done.exists()
-            outcomes.append(_next_run(_command(npx, cache)))
-            if stopped and isinstance(outcomes[-1], SubprocessResult):
+            seen = len(_lines(calls))
+            outcome = _next_run(_command(npx, cache))
+            outcomes.append((outcome, _lines(calls)[seen:]))
+            if stopped and isinstance(outcome, SubprocessResult):
                 break
             time.sleep(0.2)
 
-        last = outcomes[-1]
+        for outcome, recorded in outcomes:
+            if isinstance(outcome, SubprocessResult):
+                assert_that(_overlapped_a_write(recorded)).is_false()
+            else:
+                # Refused before the spawn, or reported untrusted after it.
+                assert_that(outcome).is_instance_of((NpxIntegrityError, NpxCacheError))
+        last, recorded = outcomes[-1]
+        assert_that(stopped).is_true()
         assert_that(last).is_instance_of(SubprocessResult)
         assert isinstance(last, SubprocessResult)
         assert_that(last.returncode).is_zero()
+        assert_that(recorded).contains("ran")
         assert_that([e.name for e in cache_entries(cache)]).is_equal_to([_ENTRY])
     finally:
         if pid_file.exists():
             with contextlib.suppress(ProcessLookupError, ValueError):
                 os.kill(int(pid_file.read_text(encoding="utf-8")), signal.SIGKILL)
+
+
+def test_cleanup_keeps_the_entry_when_the_install_lock_moved_with_an_ancestor(
+    cache: Path,
+    tmp_path: Path,
+) -> None:
+    """An ancestor swapped during the run: the held lock is gone, nothing goes.
+
+    The directory holding the cache and lintro's install lock is moved aside
+    and the cache moved back into a new one, so the cache and ``_npx`` are
+    the directories lintro recorded. Only the lock check sees that the lock
+    lintro holds is no longer at its path, where another run could now take
+    one and install; the unfinished entry is left alone.
+
+    Args:
+        cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    parent = cache.parent
+    moved = parent.with_name(f"{parent.name}.moved")
+    npx = _fake_npx(
+        tmp_path / "bin",
+        f"{_half_install(cache)}mv '{parent}' '{moved}'\nmkdir '{parent}'\n"
+        f"mv '{moved}/{cache.name}' '{cache}'\nexec sleep 30\n",
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_subprocess(_command(npx, cache), timeout=1.0)
+
+    entry = cache / "_npx" / _ENTRY
+    assert_that(str(entry / "node_modules" / "prettier" / "package.json")).exists()
+    assert_that([e.name for e in cache_entries(cache)]).is_equal_to([_ENTRY])

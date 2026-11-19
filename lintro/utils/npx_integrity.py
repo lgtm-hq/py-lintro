@@ -86,6 +86,18 @@ run has no earlier state to compare with, so a byte-identical swap made and
 undone while it runs is not seen: npx installs and runs in one process. On Windows,
 ``st_ctime`` is the creation time, so there the fingerprint relies on size,
 mtime and inode.
+
+After a cold install that timed out, lintro removes the unfinished entry and
+its lock, so the next run starts cold (:mod:`lintro.utils.npx_unfinished`). If
+a process npx started outlives npx and keeps writing into that entry by
+absolute path, a later run can reinstall the pin there, and npx can run the
+tool while that process writes into the new entry. Only install scripts could
+normally start such a process, and every npx fallback carries
+``--ignore-scripts``, so this takes a process started some other way. The
+post-run check still marks the results of such a run untrusted, but only after
+the tool has run; ``main`` before #3530 instead refused every later run before
+spawning anything, until the entry was repaired. The general problem is
+tracked in #3548.
 """
 
 from __future__ import annotations
