@@ -340,7 +340,11 @@ def npx_shell_safe_command(
     exception propagates unchanged. A cold install that npx left unfinished,
     after such an exception or after npx exited with an error, is removed
     under the exclusive lock, from the cache directory recorded before the
-    spawn only (:mod:`lintro.utils.npx_unfinished`). The caller must have
+    spawn only (:mod:`lintro.utils.npx_unfinished`). After an exception
+    raised before npx exited by itself (an *npx_exit* with no status yet),
+    every fresh entry without ``package-lock.json`` goes, since npx runs the
+    tool only after writing it; after npx exited with an error, only one
+    that has no executables either. The caller must have
     stopped and reaped npx before the exception leaves the block.
 
     Args:
@@ -403,13 +407,19 @@ def npx_shell_safe_command(
             # npx did not finish: it timed out, could not start, or lintro
             # was interrupted. There is no result to check; the caller
             # reports the failure itself (#3530).
-            _after_unfinished_run(cache, before, installing, exc)
+            _after_unfinished_run(
+                cache,
+                before,
+                installing,
+                exc,
+                npx_stopped=npx_exit is not None and npx_exit.returncode is None,
+            )
             raise
         try:
             check_unchanged(cache, before, timeout=timeout, npx_exit=npx_exit)
         except NpxInstallError:
             if installing is not None:
-                installing.discard_unfinished(before)
+                installing.discard_unfinished(before, npx_stopped=False)
             raise
         except NpxIntegrityError as exc:
             exc.after_run = True
@@ -433,7 +443,7 @@ class _ColdInstall:
     lock: HeldInstallLock
     cache: BoundCache | None
 
-    def discard_unfinished(self, before: CacheState) -> None:
+    def discard_unfinished(self, before: CacheState, *, npx_stopped: bool) -> None:
         """Remove the entries npx left unfinished, while the lock is ours.
 
         Only a cold install, under lintro's exclusive per-pin lock, is cleaned
@@ -445,6 +455,9 @@ class _ColdInstall:
 
         Args:
             before: What the cache held before the spawn.
+            npx_stopped: Whether lintro stopped npx before it exited by
+                itself; then npx never ran the tool from an entry without
+                a lockfile, and every such entry goes.
         """
         if self.cache is None:
             return
@@ -453,7 +466,7 @@ class _ColdInstall:
         except NpxIntegrityError as exc:
             logger.warning(f"lintro left npx's unfinished install in place: {exc}")
             return
-        self.cache.discard_unfinished(keep=before.entries)
+        self.cache.discard_unfinished(keep=before.entries, npx_stopped=npx_stopped)
 
 
 def _after_unfinished_run(
@@ -461,6 +474,8 @@ def _after_unfinished_run(
     before: CacheState,
     installing: _ColdInstall | None,
     exc: BaseException,
+    *,
+    npx_stopped: bool,
 ) -> None:
     """Clean up, or check what can be checked, after npx did not finish.
 
@@ -478,13 +493,15 @@ def _after_unfinished_run(
         before: What the cache held before the spawn.
         installing: The cold install, or None for a warm run.
         exc: What ended the run.
+        npx_stopped: Whether npx had not exited by itself when *exc* was
+            raised (no exit status was recorded).
 
     Raises:
         NpxChangedDuringRunError: An entry verified before a warm run
             changed; it names *exc* too and is chained from it.
     """
     if installing is not None:
-        installing.discard_unfinished(before)
+        installing.discard_unfinished(before, npx_stopped=npx_stopped)
         return
     if not before.entries or not isinstance(exc, Exception):
         return

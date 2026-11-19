@@ -251,10 +251,10 @@ def test_streaming_timeout_during_wait() -> None:
     assert_that(caught.value.cmd).is_equal_to(["slow", "cmd"])
     assert_that(caught.value.output).is_equal_to("partial")
     assert_that(process.kill_count).is_equal_to(1)
-    # Killed, then waited for until it exits, without a budget: the npx
-    # context must not clean up beneath a process still running (#3530).
+    # Killed, then waited for with the fixed cleanup budget: a command that
+    # is not an npx install must not hang lintro if it cannot exit (#3530).
     assert_that(process.wait_timeouts).is_length(2)
-    assert_that(process.wait_timeouts[1]).is_none()
+    assert_that(process.wait_timeouts[1]).is_equal_to(1.0)
 
 
 # =============================================================================

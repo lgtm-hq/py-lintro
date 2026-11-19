@@ -1708,15 +1708,26 @@ def existing_change(real: Path, before: CacheState) -> str | None:
     return None
 
 
-def install_unfinished(entry: Path, *, dir_fd: int | None = None) -> bool:
+def install_unfinished(
+    entry: Path,
+    *,
+    dir_fd: int | None = None,
+    npx_stopped: bool = False,
+) -> bool:
     """Report whether npm never finished installing into a fresh entry.
 
-    npm links the packages' executables into ``node_modules/.bin`` and then
-    writes ``package-lock.json`` last, and npx runs the tool only after both.
-    An entry with neither never got as far as a runnable tool. An entry that
-    has executables but no lockfile did, so the tool may have run from it: it
-    is not called unfinished, and is refused as any entry that does not match
-    its lockfile is, with the entry kept as evidence.
+    npm links the packages' executables into ``node_modules/.bin``, then runs
+    the packages' install scripts, and writes ``package-lock.json`` last; npx
+    runs the tool only after that. So an entry without a lockfile never ran
+    the tool through an npx that lintro stopped (*npx_stopped*: a timeout,
+    an interruption, any exception while npx was still running), whatever
+    else it holds: it is unfinished.
+
+    When npx exited by itself, its status is the tool's too, and an entry
+    with executables but no lockfile may have run the tool before it lost
+    the lockfile. Only an entry with neither got no further than the
+    install; one with executables is not called unfinished, and is refused
+    as any entry that does not match its lockfile is, kept as evidence.
 
     Anything that cannot be read counts as finished, so it is never removed
     as unfinished.
@@ -1725,10 +1736,12 @@ def install_unfinished(entry: Path, *, dir_fd: int | None = None) -> bool:
         entry: A ``_npx`` entry that appeared during the run; a bare name
             when *dir_fd* is given.
         dir_fd: Open ``_npx`` directory *entry* is relative to, or None.
+        npx_stopped: Whether lintro stopped npx before it exited by itself.
 
     Returns:
         True when *entry* is a real directory with no ``package-lock.json``
-        (not even a link) and no executable in ``node_modules/.bin``.
+        (not even a link) and, unless *npx_stopped*, no executable in
+        ``node_modules/.bin``.
     """
     try:
         top = os.stat(entry, dir_fd=dir_fd, follow_symlinks=False)
@@ -1741,6 +1754,8 @@ def install_unfinished(entry: Path, *, dir_fd: int | None = None) -> bool:
         return False
     else:
         return False
+    if npx_stopped:
+        return True
     return not _has_executables(entry / "node_modules" / ".bin", dir_fd)
 
 

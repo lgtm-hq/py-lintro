@@ -5,6 +5,7 @@ This module provides safe subprocess execution with validation and streaming.
 
 from __future__ import annotations
 
+import functools
 import os
 import subprocess  # nosec B404 - subprocess used safely with shell=False
 import sys
@@ -24,10 +25,14 @@ from lintro.utils.npx_call import (
     npx_shell_safe_command,
 )
 from lintro.utils.npx_integrity import NpxExit
-from lintro.utils.process_stop import run_reaped, stop_process
+from lintro.utils.process_stop import own_group, run_reaped, stop_process
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+#: Seconds a killed child that is not an npx install gets to exit before
+#: lintro moves on without it (one stuck in the kernel cannot be waited out).
+_STOP_WAIT_SECONDS: float = 1.0
 
 # Cache for compiled binary detection
 _IS_COMPILED_BINARY: bool | None = None
@@ -538,11 +543,17 @@ def _stream_subprocess(
         SubprocessResult with the merged stream in ``stdout``.
 
     A timeout raises ``subprocess.TimeoutExpired`` from the reading, once
-    the child has been stopped and reaped.
+    the child has been stopped. An npx fallback with a cache runs in its own
+    process group, which is killed as a whole, and lintro waits until npx
+    has exited, however long that takes: the npx context cleans up the cache
+    and lets go of its install lock next (#3530). Any other child is killed
+    and given :data:`_STOP_WAIT_SECONDS` to exit, so one stuck in the kernel
+    cannot hang lintro.
 
     Raises:
         FileNotFoundError: If command executable is not found.
     """
+    npx_cache = npx_cache_option(cmd) is not None
     try:
         # Use Popen for streaming output
         # Args list, shell=False
@@ -554,6 +565,7 @@ def _stream_subprocess(
             cwd=cwd,
             env=env,
             bufsize=1,  # Line buffering
+            start_new_session=npx_cache and own_group(),
         )
     except FileNotFoundError as e:
         logger.warning(
@@ -566,6 +578,11 @@ def _stream_subprocess(
 
     # However the run ends, npx is stopped and reaped before the caller's npx
     # context cleans up the cache or lets go of its install lock (#3530).
+    stop = functools.partial(
+        stop_process,
+        group=npx_cache,
+        wait_seconds=None if npx_cache else _STOP_WAIT_SECONDS,
+    )
     finished = False
     try:
         result = _collect_stream(
@@ -574,11 +591,12 @@ def _stream_subprocess(
             timeout=timeout,
             cwd=cwd,
             line_handler=line_handler,
+            stop=stop,
         )
         finished = True
     finally:
         if not finished:
-            stop_process(process)
+            stop(process)
     return result
 
 
@@ -589,6 +607,7 @@ def _collect_stream(
     timeout: float,
     cwd: str | None,
     line_handler: Callable[[str], None] | None,
+    stop: Callable[[subprocess.Popen[str]], None],
 ) -> SubprocessResult:
     """Read a streaming child's merged output until it exits.
 
@@ -598,13 +617,14 @@ def _collect_stream(
         timeout: Timeout in seconds.
         cwd: Working directory, for messages.
         line_handler: Optional callback called for each line of output.
+        stop: Stops the child after a timeout.
 
     Returns:
         SubprocessResult with the merged stream in ``stdout``.
 
     Raises:
         subprocess.TimeoutExpired: If command times out; the child has been
-            stopped and reaped.
+            stopped.
     """
     output_lines: list[str] = []
 
@@ -632,7 +652,7 @@ def _collect_stream(
         logger.warning(
             f"Subprocess {cmd[0]} timed out after {timeout}s (reading output)",
         )
-        stop_process(process)
+        stop(process)
         raise subprocess.TimeoutExpired(
             cmd=cmd,
             timeout=timeout,
@@ -649,7 +669,7 @@ def _collect_stream(
         logger.warning(
             f"Subprocess {cmd[0]} timed out after {timeout}s (during wait)",
         )
-        stop_process(process)
+        stop(process)
         raise subprocess.TimeoutExpired(
             cmd=cmd,
             timeout=timeout,

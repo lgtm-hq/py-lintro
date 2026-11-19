@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shutil
 import stat
 from collections.abc import Collection, Iterator
 from pathlib import Path
@@ -35,10 +36,15 @@ from loguru import logger
 from lintro.utils.npx_aside import set_aside
 from lintro.utils.npx_integrity import STALE_PREFIX, install_unfinished
 
-#: Whether ``_npx`` can be held open and worked in by descriptor.
+#: Whether ``_npx`` can be held open and worked in by descriptor: the calls
+#: :func:`~lintro.utils.npx_aside.set_aside` and :func:`install_unfinished`
+#: make with ``dir_fd``. Python lists ``os.rename`` in ``supports_dir_fd``
+#: but never ``os.replace``, though both take ``src_dir_fd``; the aside
+#: helpers therefore call ``os.rename`` when given a descriptor.
 _DIR_FD_OPS: bool = (
-    {os.open, os.stat, os.replace, os.unlink, os.rmdir} <= os.supports_dir_fd
+    {os.open, os.stat, os.rename, os.unlink, os.rmdir} <= os.supports_dir_fd
     and os.listdir in os.supports_fd
+    and shutil.rmtree.avoids_symlink_attacks
     and hasattr(os, "O_DIRECTORY")
 )
 
@@ -135,7 +141,12 @@ class BoundCache:
             os.close(self._fd)
             self._fd = None
 
-    def discard_unfinished(self, keep: Collection[str]) -> None:
+    def discard_unfinished(
+        self,
+        keep: Collection[str],
+        *,
+        npx_stopped: bool,
+    ) -> None:
         """Remove the entries npx left unfinished, if the cache is unchanged.
 
         Never raises: whatever stops the cleanup is logged, everything is
@@ -144,6 +155,9 @@ class BoundCache:
 
         Args:
             keep: Names of the entries that were there before the spawn.
+            npx_stopped: Whether lintro stopped npx before it exited by
+                itself; then any fresh entry without a lockfile goes
+                (:func:`~lintro.utils.npx_integrity.install_unfinished`).
         """
         try:
             unchanged = self._path_identities() == self._ids
@@ -159,7 +173,7 @@ class BoundCache:
         for name in sorted(names):
             if name in keep or name.startswith(STALE_PREFIX):
                 continue
-            self._discard(name)
+            self._discard(name, npx_stopped=npx_stopped)
 
     def _leave(self, reason: str) -> None:
         """Log that nothing was removed, and why.
@@ -172,17 +186,21 @@ class BoundCache:
             f"({reason}); the next lintro run checks it",
         )
 
-    def _discard(self, name: str) -> None:
+    def _discard(self, name: str, *, npx_stopped: bool) -> None:
         """Remove one entry if npx never finished installing it.
+
+        Its npm ``concurrency.lock`` goes with it, so a run waiting for the
+        pin, or the next one, starts cold at once.
 
         Args:
             name: The entry's name in ``_npx``.
+            npx_stopped: Whether lintro stopped npx before it exited.
         """
         if self._fd is not None:
             entry, dir_fd = Path(name), self._fd
         else:
             entry, dir_fd = self._real / "_npx" / name, None
-        if not install_unfinished(entry, dir_fd=dir_fd):
+        if not install_unfinished(entry, dir_fd=dir_fd, npx_stopped=npx_stopped):
             return
         try:
             set_aside(entry, dir_fd=dir_fd)

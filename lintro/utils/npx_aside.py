@@ -129,7 +129,12 @@ def set_aside(entry: Path, *, dir_fd: int | None = None) -> bool:
     """
     aside = entry.with_name(aside_name(entry.name))
     try:
-        os.replace(entry, aside, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+        if dir_fd is None:
+            os.replace(entry, aside)
+        else:
+            # ``os.rename`` is what ``os.supports_dir_fd`` vouches for; on
+            # POSIX it replaces exactly as ``os.replace`` does.
+            os.rename(entry, aside, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
     except OSError:
         # A missing source means another repair moved or removed it.
         if not _lexists(entry, dir_fd):
