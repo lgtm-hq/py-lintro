@@ -34,6 +34,7 @@ from lintro.tools.core.version_checking import (
 )
 from lintro.utils.env import get_subprocess_env
 from lintro.utils.npx_call import npx_child_env, npx_shell_safe_command
+from lintro.utils.npx_integrity import NpxExit
 
 # Sentinel value for unknown/unspecified version requirements
 VERSION_UNKNOWN: str = "unknown"
@@ -207,8 +208,13 @@ def _run_probe(
     Returns:
         subprocess.CompletedProcess[str]: The finished probe.
     """
-    with npx_shell_safe_command(cmd, timeout=timeout) as spawn_cmd:
-        return subprocess.run(  # nosec B603 - args list, shell=False
+    npx_exit = NpxExit()
+    with npx_shell_safe_command(
+        cmd,
+        timeout=timeout,
+        npx_exit=npx_exit,
+    ) as spawn_cmd:
+        result = subprocess.run(  # nosec B603 - args list, shell=False
             spawn_cmd,
             capture_output=True,
             text=True,
@@ -216,6 +222,8 @@ def _run_probe(
             env=env,
             cwd=cwd,
         )
+        npx_exit.record(result.returncode, result.stderr)
+    return result
 
 
 def _run_probe_with_retry(
