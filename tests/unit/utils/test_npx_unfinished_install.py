@@ -32,7 +32,7 @@ from lintro.plugins.subprocess_executor import (
     run_subprocess_streaming,
 )
 from lintro.tools.core.version_parsing import _run_probe, _run_probe_with_retry
-from lintro.utils import npx_install_lock, npx_unfinished
+from lintro.utils import npx_call, npx_install_lock, npx_unfinished
 from lintro.utils.npx_call import npx_shell_safe_command
 from lintro.utils.npx_integrity import (
     NpxExit,
@@ -42,6 +42,7 @@ from lintro.utils.npx_integrity import (
     install_unfinished,
 )
 from lintro.utils.npx_unfinished import bound_cache
+from lintro.utils.process_stop import ChildStillRunningError
 from tests.npx_entries import tool_package, write_npx_entry
 
 pytestmark = pytest.mark.skipif(
@@ -903,3 +904,35 @@ def test_a_ctrl_c_during_cleanup_finishes_it_before_the_lock_goes(
         if pid_file.exists():
             with contextlib.suppress(ProcessLookupError, ValueError):
                 os.kill(int(pid_file.read_text(encoding="utf-8")), signal.SIGKILL)
+
+
+def test_an_npx_that_outlives_the_wait_keeps_its_entry_and_its_lock(
+    cache: Path,
+) -> None:
+    """Once lintro gives up on npx, nothing is removed and the lock stays.
+
+    The lock goes when lintro exits; here the test lets go of it.
+
+    Args:
+        cache: Per-pin npm cache.
+
+    Raises:
+        ChildStillRunningError: Inside the block, as an executor raises it.
+    """
+    entry = cache / "_npx" / _ENTRY
+    try:
+        with pytest.raises(ChildStillRunningError):
+            with npx_shell_safe_command(_command(["npx"], cache), timeout=30.0):
+                (entry / "node_modules" / "prettier").mkdir(parents=True)
+                raise ChildStillRunningError(os.getpid())
+
+        assert_that([found.name for found in cache_entries(cache)]).is_equal_to(
+            [_ENTRY],
+        )
+        with npx_install_lock.shared_install_lock_now(cache) as free:
+            assert_that(free).is_false()
+    finally:
+        while npx_call._HELD_UNTIL_EXIT:
+            npx_call._HELD_UNTIL_EXIT.pop().close()
+    with npx_install_lock.shared_install_lock_now(cache) as free:
+        assert_that(free).is_true()

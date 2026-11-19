@@ -12,18 +12,31 @@ import threading
 import time
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 from assertpy import assert_that
 from loguru import logger
 
-from lintro.utils.process_stop import run_reaped, stop_process
-from lintro.utils.process_tree import read_process_table
+from lintro.utils import process_stop
+from lintro.utils.process_stop import ChildStillRunningError, run_reaped, stop_process
+from lintro.utils.process_tree import Identity, ProcessTable, system_table
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32",
     reason="the child is a POSIX sleep; Windows is exercised through windows=True",
 )
+
+
+def _system() -> ProcessTable:
+    """Return this system's process table, which every POSIX test host has.
+
+    Returns:
+        The table.
+    """
+    table = system_table()
+    assert table is not None  # narrow type for mypy
+    return table
 
 
 def _sleeper() -> subprocess.Popen[str]:
@@ -314,7 +327,11 @@ def test_without_a_process_table_only_the_child_is_stopped(tmp_path: Path) -> No
     child = _start_parent(tmp_path)
     pids = _read_pids(tmp_path / "ids")
     try:
-        stop_process(child, tree=True, read_table=lambda: None)
+        stop_process(
+            child,
+            tree=True,
+            table=ProcessTable(read_all=lambda: None, read=lambda _: None),
+        )
 
         assert_that(child.returncode).is_not_none()
         assert_that(_gone(pids["grandchild"], budget=0.5)).is_false()
@@ -354,16 +371,25 @@ def test_a_ctrl_c_while_stopping_the_tree_still_stops_all_of_it(
     child = _start_parent(tmp_path)
     pids = _read_pids(tmp_path / "ids")
     reads: list[bool] = []
+    system = _system()
 
-    def interrupted_once() -> Mapping[int, int] | None:
+    def interrupted_once() -> Mapping[int, Identity] | None:
         if not reads:
             reads.append(True)
             raise KeyboardInterrupt
-        return read_process_table()
+        return system.read_all()
 
     try:
         with pytest.raises(KeyboardInterrupt):
-            stop_process(child, tree=True, read_table=interrupted_once)
+            stop_process(
+                child,
+                tree=True,
+                table=ProcessTable(
+                    read_all=interrupted_once,
+                    read=system.read,
+                    pidfd=system.pidfd,
+                ),
+            )
 
         assert_that(child.returncode).is_not_none()
         assert_that(_gone(pids["grandchild"])).is_true()
@@ -381,7 +407,7 @@ _DRIVER = """
 import json, os, subprocess, sys, time
 mode, parent, log, ids = sys.argv[1:5]
 from lintro.utils.process_stop import run_reaped, stop_process
-from lintro.utils.process_tree import read_process_table
+from lintro.utils.process_tree import Identity, ProcessTable, system_table
 if mode == "ctrl-c":
     try:
         run_reaped([sys.executable, "-c", parent, log, ids], timeout=60.0)
@@ -392,11 +418,17 @@ bystander = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)
 child = subprocess.Popen([sys.executable, "-c", parent, log, ids])
 while not os.path.exists(ids):
     time.sleep(0.02)
+system = system_table()
 def lying():
-    table = dict(read_process_table() or {})
-    table[os.getpid()] = child.pid
+    table = dict(system.read_all() or {})
+    own = table[os.getpid()]
+    table[os.getpid()] = Identity(child.pid, own.started)
     return table
-stop_process(child, tree=True, read_table=lying)
+stop_process(
+    child,
+    tree=True,
+    table=ProcessTable(read_all=lying, read=system.read, pidfd=system.pidfd),
+)
 alive = bystander.poll() is None
 bystander.kill()
 bystander.wait()
@@ -547,5 +579,128 @@ def test_a_bounded_stop_gives_up_on_a_child_that_cannot_exit() -> None:
         assert_that(returned).is_equal_to([True])
         assert_that(child.poll()).is_none()
     finally:
+        _kill_quietly(child.pid)
+        child.wait()
+
+
+class _InterruptedWaits(_Unkillable):
+    """An unkillable child whose first *interrupts* waits are cut short."""
+
+    def __init__(self, *args: Any, interrupts: int, **kwargs: Any) -> None:
+        """Start the child.
+
+        Args:
+            *args: As for :class:`subprocess.Popen`.
+            interrupts: How many waits raise ``KeyboardInterrupt``.
+            **kwargs: As for :class:`subprocess.Popen`.
+        """
+        super().__init__(*args, **kwargs)
+        self.interrupts = interrupts
+
+    def wait(self, timeout: float | None = None) -> int:
+        """Raise ``KeyboardInterrupt`` while any are left, then wait.
+
+        Args:
+            timeout: As for :meth:`subprocess.Popen.wait`.
+
+        Returns:
+            The exit status.
+
+        Raises:
+            KeyboardInterrupt: While interruptions are left.
+        """
+        if self.interrupts:
+            self.interrupts -= 1
+            raise KeyboardInterrupt
+        return super().wait(timeout)
+
+
+def _stop_in_thread(
+    child: subprocess.Popen[str],
+    budget: float = 10.0,
+) -> tuple[list[KeyboardInterrupt], float]:
+    """Stop *child* after a Ctrl-C, without letting a hang hold the test.
+
+    Args:
+        child: The child.
+        budget: Longest wait for the stop, in seconds.
+
+    Returns:
+        What the stop raised, and how long it took.
+    """
+    raised: list[KeyboardInterrupt] = []
+
+    def stop() -> None:
+        try:
+            stop_process(child, pending=KeyboardInterrupt())
+        except KeyboardInterrupt as exc:
+            raised.append(exc)
+
+    began = time.monotonic()
+    stopper = threading.Thread(target=stop, daemon=True)
+    stopper.start()
+    stopper.join(timeout=budget)
+    return raised, time.monotonic() - began
+
+
+def test_a_second_ctrl_c_still_waits_for_a_child_that_exits() -> None:
+    """A casual second Ctrl-C does not end the wait; the child is reaped."""
+    child = _InterruptedWaits(  # nosec B603 - fixed argv
+        [sys.executable, "-c", "import time; time.sleep(1)"],
+        text=True,
+        interrupts=1,
+    )
+    try:
+        raised, _ = _stop_in_thread(child)
+
+        assert_that(raised).is_empty()
+        assert_that(child.returncode).is_equal_to(0)
+    finally:
+        _kill_quietly(child.pid)
+        child.wait()
+
+
+def test_ctrl_c_stops_waiting_for_a_child_sigkill_did_not_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Past the deadline lintro raises, leaving the child unreaped.
+
+    Args:
+        monkeypatch: Shortens the deadline.
+    """
+    monkeypatch.setattr(process_stop, "_STUCK_SECONDS", 0.3)
+    child = _Unkillable(  # nosec B603 - fixed argv
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        text=True,
+    )
+    try:
+        raised, took = _stop_in_thread(child)
+
+        assert_that(raised).is_length(1)
+        assert_that(raised[0]).is_instance_of(ChildStillRunningError)
+        assert_that(took).is_less_than(5.0)
+        assert_that(child.returncode).is_none()
+    finally:
+        _kill_quietly(child.pid)
+        child.wait()
+
+
+def test_a_third_ctrl_c_stops_waiting_at_once() -> None:
+    """The deadline is not waited for once the user has insisted."""
+    child = _InterruptedWaits(  # nosec B603 - fixed argv
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        text=True,
+        interrupts=1_000,
+    )
+    try:
+        raised, took = _stop_in_thread(child)
+
+        assert_that(raised).is_length(1)
+        assert_that(raised[0]).is_instance_of(ChildStillRunningError)
+        assert_that(raised[0].__cause__).is_instance_of(KeyboardInterrupt)
+        assert_that(took).is_less_than(process_stop._STUCK_SECONDS)
+        assert_that(child.interrupts).is_equal_to(1_000 - 2)
+    finally:
+        child.interrupts = 0
         _kill_quietly(child.pid)
         child.wait()
