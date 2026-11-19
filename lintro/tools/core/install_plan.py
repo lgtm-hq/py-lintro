@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from lintro.enums.install_outcome import InstallOutcome
 from lintro.tools.core.manifest_models import ManifestTool
@@ -51,6 +52,10 @@ class InstallPlan:
         outdated: Tools with outdated versions (not upgrading).
         skipped: Tools skipped (e.g., Rust tools when cargo unavailable).
         manual: Tools that require manual installation, with install hints.
+        project_installs: Tool name to project root, for planned commands
+            that install the whole project's dependencies (``npm install``)
+            rather than the tool alone. The plan display announces these
+            (#2045).
     """
 
     to_install: list[tuple[ManifestTool, str]] = field(default_factory=list)
@@ -59,6 +64,7 @@ class InstallPlan:
     outdated: list[tuple[ManifestTool, str]] = field(default_factory=list)
     skipped: list[tuple[ManifestTool, str]] = field(default_factory=list)
     manual: list[tuple[ManifestTool, str]] = field(default_factory=list)
+    project_installs: dict[str, Path] = field(default_factory=dict)
 
     @property
     def has_work(self) -> bool:

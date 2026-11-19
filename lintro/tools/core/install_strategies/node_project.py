@@ -20,6 +20,7 @@ silently replace a project's pin with lintro's manifest recommendation.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from loguru import logger
 from lintro.enums.install_context import PackageManager
 from lintro.enums.node_manager_source import NodeManagerSource
 from lintro.models.core.node_manager_commands import NodeManagerCommands
+from lintro.tools.core.install_strategies.declared_range import range_lowest_major
 
 #: Lockfile name to the manager that writes it. Ordered most-specific first so
 #: a repository mid-migration (two lockfiles present) resolves deterministically
@@ -76,10 +78,20 @@ NODE_MANAGER_COMMANDS: dict[PackageManager, NodeManagerCommands] = {
     PackageManager.YARN: NodeManagerCommands(
         # Yarn Berry dropped the `-D` short flag; `--dev` works on both.
         dev_add="yarn add --dev",
+        # Yarn Classic only: Berry removed `yarn global`, so the npm strategy
+        # refuses the global path on a Berry project (NodeProject.yarn_berry).
         global_add="yarn global add",
         install_all="yarn install",
     ),
 }
+
+#: ``packageManager`` values under which Yarn 1 still runs ``yarn global``.
+#: Yarn 1.22 checks the nearest field against exactly this pattern and
+#: otherwise exits with "This project's package.json defines packageManager:
+#: yarn@^1.22.0. However the current global version of Yarn is 1.22.22", so
+#: ``yarn@1.22.22`` and ``yarn@1.x`` pass while ``yarn@1``, ``yarn@^1.22.0``
+#: and ``yarn@>=1`` do not (#2045).
+_YARN_CLASSIC_GLOBAL_FIELD = re.compile(r"yarn@[01]\.")
 
 #: Derived so it can never disagree with the command table above.
 NODE_MANAGERS: frozenset[PackageManager] = frozenset(NODE_MANAGER_COMMANDS)
@@ -104,12 +116,34 @@ class NodeProject:
         lockfile_manager: Manager implied by a lockfile in ``root``, or None.
         dependencies: Merged declared dependency specs, package name to spec
             (e.g. ``{"prettier": "^3.4.0"}``).
+        yarn_berry: Whether the project uses Yarn 2 or later: the nearest
+            ``packageManager`` field names ``yarn@2`` or above (a version,
+            a range whose lowest major is 2 or more, or the ``berry``,
+            ``stable`` or ``canary`` tag), or, with no yarn version
+            declared, a ``.yarnrc.yml`` sits in the project root or an
+            ancestor inside the search boundary.
+        package_manager_field: Raw nearest ``packageManager`` value that
+            named a known manager, or None.
     """
 
     root: Path
     declared_manager: PackageManager | None
     lockfile_manager: PackageManager | None
     dependencies: dict[str, str]
+    yarn_berry: bool = False
+    package_manager_field: str | None = None
+
+    @property
+    def yarn_classic_refuses_global(self) -> bool:
+        """Report whether Yarn 1 would refuse ``yarn global`` here.
+
+        Returns:
+            True when a ``packageManager`` field is declared and does not
+            name a 0.x or 1.x version the way Yarn 1 requires
+            (``yarn@1.22.22``, ``yarn@1.x``).
+        """
+        field = self.package_manager_field
+        return field is not None and _YARN_CLASSIC_GLOBAL_FIELD.match(field) is None
 
     def declared_spec(self, package: str) -> str | None:
         """Return the version spec this project declares for *package*.
@@ -273,8 +307,9 @@ def detect_node_project(start: Path | None = None) -> NodeProject | None:
         # field of its own — both live at the repository root. Keep walking for
         # that evidence so a nested manifest does not silently downgrade the
         # decision to "whichever manager is installed".
-        declared_manager, lockfile_manager = _ancestor_manager_evidence(
-            chain[index:],
+        evidence = chain[index:]
+        declared_manager, lockfile_manager, declared_field = _ancestor_manager_evidence(
+            evidence,
             manifest,
         )
         return NodeProject(
@@ -282,8 +317,64 @@ def detect_node_project(start: Path | None = None) -> NodeProject | None:
             declared_manager=declared_manager,
             lockfile_manager=lockfile_manager,
             dependencies=_read_dependencies(manifest),
+            yarn_berry=_is_yarn_berry(declared_field, evidence),
+            package_manager_field=declared_field,
         )
     return None
+
+
+#: Yarn release channels that resolve to Yarn 2 or later.
+_BERRY_TAGS: frozenset[str] = frozenset({"berry", "stable", "canary"})
+
+
+def _is_yarn_berry(declared_field: str | None, directories: tuple[Path, ...]) -> bool:
+    """Decide whether a project uses Yarn 2 or later.
+
+    A ``packageManager`` field naming a yarn version is authoritative in both
+    directions, so ``yarn@1.22.22`` stays Classic even beside a stray
+    ``.yarnrc.yml``. Otherwise a ``.yarnrc.yml``, the configuration file only
+    Berry reads (Classic reads ``.yarnrc``), marks the project as Berry.
+
+    Args:
+        declared_field: Raw ``packageManager`` value that chose the declared
+            manager, or None.
+        directories: Project root followed by its ancestors inside the search
+            boundary, nearest first.
+
+    Returns:
+        True when the project uses Yarn Berry.
+    """
+    if declared_field is not None:
+        name, _, version = declared_field.partition("@")
+        if name.strip().lower() == PackageManager.YARN:
+            berry = _yarn_version_is_berry(version.strip())
+            if berry is not None:
+                return berry
+    return any((directory / ".yarnrc.yml").is_file() for directory in directories)
+
+
+def _yarn_version_is_berry(version: str) -> bool | None:
+    """Read the yarn generation a ``packageManager`` version names.
+
+    Corepack accepts only an exact version here, but the field is still
+    written by hand. Yarn 1 refuses to run ``yarn global`` under any
+    ``packageManager`` that does not name its own version ("This project's
+    package.json defines packageManager: yarn@berry. However the current
+    global version of Yarn is 1.22.22"), so the tags ``berry``, ``stable``
+    and ``canary`` and ranges whose lowest major is 2 or more all mean
+    ``yarn global add`` cannot work and count as Berry.
+
+    Args:
+        version: Text after ``yarn@``, possibly with a ``+sha...`` hash.
+
+    Returns:
+        True for Berry, False for Classic, None when the text says neither.
+    """
+    lowered = version.lower()
+    if lowered in _BERRY_TAGS:
+        return True
+    major = range_lowest_major(lowered)
+    return None if major is None else major >= 2
 
 
 def _read_manifest(manifest_path: Path) -> dict[str, object]:
@@ -309,31 +400,36 @@ def _read_manifest(manifest_path: Path) -> dict[str, object]:
 def _ancestor_manager_evidence(
     directories: tuple[Path, ...],
     manifest: dict[str, object],
-) -> tuple[PackageManager | None, PackageManager | None]:
+) -> tuple[PackageManager | None, PackageManager | None, str | None]:
     """Collect manager evidence from a project and its ancestors.
 
     The nearest evidence of each kind wins, so a workspace package that *does*
     declare its own ``packageManager`` still overrides the repository root.
+    *directories* comes from :func:`search_chain`, so evidence is never read
+    above the ``.git`` / ``$HOME`` boundary (#2040, #2045).
 
     Args:
         directories: Project root followed by its ancestors, nearest first.
         manifest: Parsed manifest of the project root.
 
     Returns:
-        Tuple of the declared manager and the lockfile manager, either None.
+        Tuple of the declared manager, the lockfile manager and the raw
+        ``packageManager`` value that named the declared manager; any of them
+        may be None.
     """
-    declared = _parse_package_manager_field(manifest.get("packageManager"))
+    raw = manifest.get("packageManager")
+    declared = _parse_package_manager_field(raw)
     lockfile = _lockfile_manager(directories[0])
     for directory in directories[1:]:
         if declared is not None and lockfile is not None:
             break
         if declared is None and (directory / "package.json").is_file():
-            declared = _parse_package_manager_field(
-                _read_manifest(directory / "package.json").get("packageManager"),
-            )
+            raw = _read_manifest(directory / "package.json").get("packageManager")
+            declared = _parse_package_manager_field(raw)
         if lockfile is None:
             lockfile = _lockfile_manager(directory)
-    return declared, lockfile
+    declared_field = raw if declared is not None and isinstance(raw, str) else None
+    return declared, lockfile, declared_field
 
 
 def _lockfile_manager(root: Path) -> PackageManager | None:

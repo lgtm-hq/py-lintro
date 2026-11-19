@@ -1000,15 +1000,77 @@ $ lintro install prettier --upgrade
              lintro's version, or keep the project pin.
 ```
 
-The comparison is deliberately literal, not a semver range solve: a spec that names the
-recommended version exactly — `3.9.4`, `^3.9.4`, `~3.9.4`, `=3.9.4`, `v3.9.4` — is not a
-conflict and upgrades normally. On a first install of a declared-but-missing package,
-those same spellings emit the manager's install-all command (`npm install`,
-`bun install`, …) so the lockfile pin is restored, rather than a versioned add that
-would rewrite the range. Anything else, including a wider range such as `^3.9.0` that a
-resolver _would_ satisfy with 3.9.4, is reported so you decide. Erring toward asking is
-deliberate: the cost of a needless question is far below the cost of silently rewriting
-someone's `package.json`.
+lintro sorts the declared spec into one of three classes by its shape alone. It does not
+resolve semver ranges against the registry; the project's package manager does that.
+
+- **Exact-compatible** — a full version with at most one `^`, `~` (or `~>`) or `=`
+  operator and at most one `v`, the way node-semver reads them. Build metadata
+  (`+build`) is ignored, as npm ignores it. One that names the recommended version —
+  `3.9.4`, `^3.9.4`, `~3.9.4`, `=3.9.4`, `v3.9.4`, `^v3.9.4`, `3.9.4+build` — is not a
+  conflict and upgrades normally. A different version, including `^3.9.0` that a
+  resolver _would_ satisfy with 3.9.4, is reported so you decide.
+- **Range** — `>=3.9.4`, `3.9.x`, `3`, `*`, `1.2.3 - 2.0.0`, `||` unions. When the range
+  can reach lintro's minimum version for the tool, it is not a conflict: your range
+  governs. A first install of a declared-but-missing package runs the project install
+  (below). `--upgrade` does not rewrite the range: it asks you to update within it or
+  pin lintro's version. lintro reads both bounds of each `||` alternative, as npm's
+  `semver.intersects` does. When no release at or above the minimum lies inside any
+  alternative (`2.x`, `<3`, `~2.8`, `1 - 2`, `>=4 <3.5`, `>3.x <4`), lintro reports it
+  and runs nothing, because the project install would only end with a version lintro
+  rejects. A prerelease upper bound counts as its release (`<4.0.0-0` admits 3.x). A
+  range whose answer depends on a prerelease it admits (`>=3.9.5-rc.1 <=3.9.5-rc.3`), or
+  that lintro cannot parse, is reported the same way rather than installed. So is any
+  range npm itself rejects — a leading zero (`>=03.2.0`), a number above JavaScript's
+  largest safe integer, a malformed prerelease or build suffix (`>=3.2.0-01`,
+  `>=3.2.0+foo..bar`) — even when another `||` alternative is valid
+  (`>=3.2.0 || 3.x.5`).
+- **Opaque** — `workspace:*`, `npm:` aliases, git and tarball URLs, local paths,
+  dist-tags. lintro reports how the project manages the tool ("this project manages
+  prettier via the workspace protocol (`workspace:*`) in package.json; lintro will not
+  override it") and leaves it to you.
+
+Why `^3.1.0` is a conflict while `>=3.1.0` is not, although both admit 3.9.4: a caret or
+tilde on a full version is how npm records the version a project actually adopted, so
+lintro compares that version with its own, and a difference is a decision for you. A
+comparator range such as `>=3.1.0` states only a floor, and lintro leaves the choice
+within it to your package manager.
+
+lintro enforces a minimum, not a ceiling. If your range lets the project install bring a
+version above the one lintro recommends (you declare `>=4`, lintro recommends 3.9.4, and
+`npm install` brings 4.x), the install is reported as a plain success: after it runs,
+lintro checks only that the installed version meets the tool's minimum.
+
+On a first install of a declared-but-missing exact-compatible match or range, lintro
+runs the manager's install-all command (`npm install`, `bun install`, …) in the project
+root, so the declared version is restored from the lockfile rather than rewritten by a
+versioned add. That command installs **every** dependency the project declares, can
+update the lockfile and runs install scripts, so the plan says so, and
+`lintro doctor --fix` prints the same line before it runs the install:
+
+```console
+$ lintro install prettier
+  …
+  To install (1):
+    prettier             npm install
+      installs the whole project's dependencies (`npm install` in /path/to/project), not only prettier
+```
+
+Erring toward asking is deliberate: the cost of a needless question is far below the
+cost of silently rewriting someone's `package.json`.
+
+**Yarn Berry has no global install.** Yarn 2 and later removed `yarn global`. When
+`--global` would use yarn inside a project whose `packageManager` names `yarn@2` or
+later, or that has a `.yarnrc.yml` and no yarn version declared, lintro lists the tool
+for manual installation instead of planning `yarn global add`. The tags `yarn@berry`,
+`yarn@stable` and `yarn@canary`, and ranges whose lowest major is 2 or more (`yarn@^4`),
+count as Berry too: Corepack rejects them, and Yarn 1 refuses to run `yarn global` under
+a `packageManager` that does not name its own version. Yarn 1 keeps `yarn global add`
+only when there is no `packageManager` field or the field starts with `yarn@1.` (or
+`yarn@0.`), the check Yarn 1.22 itself makes before every command: `yarn@1.22.22` and
+`yarn@1.x` work, while under `yarn@1`, `yarn@^1.22.0` or `yarn@>=1` every yarn command,
+`yarn add` included, exits with an error. lintro then lists the tool for manual
+installation and suggests no yarn command: set the field to an exact version such as
+`yarn@1.22.22`, or install the tool through your own setup.
 
 **Planning matches execution.** The version probe for npm-installed tools resolves
 through the same chain a check uses, so `lintro install` reports on the binary

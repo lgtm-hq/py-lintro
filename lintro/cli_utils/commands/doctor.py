@@ -37,7 +37,9 @@ from lintro.ai.interface import resolve_ai_config
 from lintro.ai.provider_blocks import format_invalid_ai_config
 from lintro.cli_utils.install_output import (
     render_install_results,
+    render_manual_installs,
     render_outcome_summary,
+    render_planned_install,
     unresolved_tool_names,
 )
 from lintro.cli_utils.order_explain import render_doctor_order_section
@@ -986,6 +988,9 @@ def _run_fix(
         r.status in (ToolStatus.OUTDATED, ToolStatus.INCOMPATIBLE) for r in fixable
     )
     plan = installer.plan(tools=tool_names, upgrade=has_outdated)
+    for tool, command in plan.to_install:
+        if tool.name in plan.project_installs:
+            render_planned_install(console, plan, tool, command)
     install_results = installer.execute(plan)
 
     render_install_results(console, install_results)
@@ -993,6 +998,8 @@ def _run_fix(
     if plan.skipped:
         for tool, reason in plan.skipped:
             console.print(f"  [yellow]SKIP[/yellow]  {tool.name}: {reason}")
+
+    render_manual_installs(console, plan)
 
     console.print()
     render_outcome_summary(console, install_results)

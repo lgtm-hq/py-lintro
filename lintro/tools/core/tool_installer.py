@@ -47,6 +47,9 @@ from lintro.tools.core.install_hints import (
 )
 from lintro.tools.core.install_plan import InstallPlan, InstallResult
 from lintro.tools.core.install_strategies import get_strategy
+from lintro.tools.core.install_strategies.npm_strategy import (
+    whole_project_install_root,
+)
 from lintro.tools.core.install_strategies.package_names import script_tool_name
 from lintro.tools.core.node_fallback import REGISTRY_RUNNERS
 from lintro.tools.core.tool_registry import ManifestRegistry, ManifestTool
@@ -338,6 +341,26 @@ class ToolInstaller:
                 plan.manual.append((tool, hint))
                 return
         plan.to_install.append((tool, hint))
+        self._note_project_install(plan, tool, hint)
+
+    def _note_project_install(
+        self,
+        plan: InstallPlan,
+        tool: ManifestTool,
+        command: str,
+    ) -> None:
+        """Record a planned command that installs the whole Node project.
+
+        Args:
+            plan: Plan to annotate.
+            tool: Tool the command was planned for.
+            command: The planned install command.
+        """
+        if tool.install_type != "npm":
+            return
+        root = whole_project_install_root(self._context.environment, command)
+        if root is not None:
+            plan.project_installs[tool.name] = root
 
     def _check_prerequisites(self, tool: ManifestTool) -> str | None:
         """Check if prerequisites for installing a tool are met.
@@ -452,13 +475,6 @@ class ToolInstaller:
         """
         strategy = get_strategy(tool.install_type)
         env = self._context.environment
-        _args = (
-            env,
-            tool.name,
-            tool.version,
-            tool.install_package,
-            tool.install_component,
-        )
         if strategy is None:
             return (
                 f"Upgrade {tool.name} manually"
@@ -466,7 +482,7 @@ class ToolInstaller:
                 else f"Install {tool.name} manually"
             )
         if upgrade:
-            hint = strategy.upgrade_hint(*_args)
+            hint = strategy.tool_hint(env, tool, upgrade=True)
             # For brew upgrades, validate that brew actually manages this
             # package — if not, use the non-brew install command instead
             # (strategies may prefer brew when available, so we can't just
@@ -477,7 +493,7 @@ class ToolInstaller:
                     pkg = tool.install_package or tool.name
                     hint = f"Upgrade {pkg} manually (not managed by Homebrew)"
             return hint
-        return strategy.install_hint(*_args)
+        return strategy.tool_hint(env, tool, upgrade=False)
 
     def _install_cwd(self, tool: ManifestTool) -> Path | None:
         """Return the directory an install command should run from.
