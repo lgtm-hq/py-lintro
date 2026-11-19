@@ -56,6 +56,18 @@ def sanitize_csv_value(value: str) -> str:
     return value
 
 
+def note_messages(result: ToolResult) -> list[str]:
+    """Return the messages of the notes a tool attached to its result.
+
+    Args:
+        result: The tool result.
+
+    Returns:
+        One message per note, in order; none without notes.
+    """
+    return [note["message"] for note in tool_notes(getattr(result, "metadata", None))]
+
+
 def render_markdown_notes(result: ToolResult) -> list[str]:
     """Render the notes a tool attached to its result as Markdown.
 
@@ -66,6 +78,45 @@ def render_markdown_notes(result: ToolResult) -> list[str]:
         A quoted line and a blank line per note; none without notes.
     """
     lines: list[str] = []
-    for note in tool_notes(getattr(result, "metadata", None)):
-        lines.extend((f"> **Note:** {markdown_escape(note['message'])}", ""))
+    for message in note_messages(result):
+        lines.extend((f"> **Note:** {markdown_escape(message)}", ""))
     return lines
+
+
+def render_html_notes(result: ToolResult) -> list[str]:
+    """Render the notes a tool attached to its result as HTML.
+
+    Args:
+        result: The tool result.
+
+    Returns:
+        One escaped paragraph per note; none without notes.
+    """
+    return [
+        f"<p><strong>Note:</strong> {html_escape(message)}</p>"
+        for message in note_messages(result)
+    ]
+
+
+def render_plain_notes(result: ToolResult) -> list[str]:
+    """Render the notes a tool attached to its result as plain text.
+
+    Args:
+        result: The tool result.
+
+    Returns:
+        One line per note; none without notes.
+    """
+    return [f"Note: {message}" for message in note_messages(result)]
+
+
+def csv_notes(result: ToolResult) -> str:
+    """Return a result's notes as one CSV cell.
+
+    Args:
+        result: The tool result.
+
+    Returns:
+        The note messages joined by newlines, sanitised; empty without notes.
+    """
+    return sanitize_csv_value("\n".join(note_messages(result)))

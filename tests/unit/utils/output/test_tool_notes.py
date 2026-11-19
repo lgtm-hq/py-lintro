@@ -8,6 +8,8 @@ it and the raw report still parses.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import re
 from pathlib import Path
@@ -16,12 +18,17 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.action import Action
+from lintro.enums.output_format import OutputFormat
 from lintro.models.core.tool_outcome import Checked, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.osv_scanner import OsvScannerIssue
 from lintro.utils.execution.run_renderer import _display_fix_result
 from lintro.utils.json_output import serialize_tool_result
-from lintro.utils.output.file_writer import render_markdown_report
+from lintro.utils.output.file_writer import (
+    render_csv_report,
+    render_markdown_report,
+    write_output_file,
+)
 from lintro.utils.output.manager import OutputManager
 from lintro.utils.summary_tables import print_summary_table
 from lintro.utils.tool_metadata import ToolNote, with_tool_notes
@@ -154,3 +161,114 @@ def test_json_keeps_the_note_apart_from_a_parseable_report() -> None:
         [{"summary": "indirect dependencies not resolved", "message": _NOTE}],
     )
     assert_that(json.loads(payload["output"])).contains_key("results")
+
+
+#: The columns saved CSV reports had before notes, in their original order.
+_CSV_COLUMNS = ["tool", "issues_count", "file", "line", "code", "message", "doc_url"]
+
+
+def _saved(tmp_path: Path, result: ToolResult, output_format: OutputFormat) -> str:
+    """Write one result with ``--output`` and read the file back.
+
+    Args:
+        tmp_path: Directory for the report.
+        result: The result to write.
+        output_format: The report format.
+
+    Returns:
+        The saved report.
+    """
+    path = tmp_path / f"report.{output_format.value}"
+    write_output_file(
+        output_path=str(path),
+        output_format=output_format,
+        all_results=[result],
+        action=Action.CHECK,
+        total_issues=result.issues_count,
+        total_fixed=0,
+    )
+    return path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("findings", [True, False], ids=["findings", "clean"])
+def test_saved_html_reports_qualify_the_result_with_the_note(
+    findings: bool,
+    tmp_path: Path,
+) -> None:
+    """Both HTML reports print the note under the tool, beside "No issues".
+
+    Args:
+        findings: Whether the scan found a vulnerability.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    result = _result(findings=findings)
+    manager = OutputManager(base_dir=str(tmp_path / "runs"))
+    manager._write_html_report(results=[result])
+
+    for report in (
+        _saved(tmp_path, result, OutputFormat.HTML),
+        (manager.run_dir / "report.html").read_text(encoding="utf-8"),
+    ):
+        assert_that(report).contains(f"<p><strong>Note:</strong> {_NOTE}</p>")
+        if not findings:
+            assert_that(report).contains("<p>No issues found.</p>")
+
+
+@pytest.mark.parametrize("findings", [True, False], ids=["findings", "clean"])
+def test_saved_plain_report_shows_the_note(findings: bool, tmp_path: Path) -> None:
+    """The plain-text report prints the note in the tool's section.
+
+    Args:
+        findings: Whether the scan found a vulnerability.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    report = _saved(tmp_path, _result(findings=findings), OutputFormat.PLAIN)
+
+    section = report.split("osv_scanner:", 1)[1].split("Total Issues:", 1)[0]
+    assert_that(section).contains(f"Note: {_NOTE}")
+
+
+@pytest.mark.parametrize("findings", [True, False], ids=["findings", "clean"])
+def test_csv_reports_add_a_notes_column_after_the_original_ones(
+    findings: bool,
+    tmp_path: Path,
+) -> None:
+    """``--output`` CSV and ``summary.csv`` keep their columns and add notes.
+
+    Args:
+        findings: Whether the scan found a vulnerability.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    result = _result(findings=findings)
+    manager = OutputManager(base_dir=str(tmp_path / "runs"))
+    manager._write_csv_summary(results=[result])
+    reports = {
+        "output": (_saved(tmp_path, result, OutputFormat.CSV), _CSV_COLUMNS),
+        "summary": (
+            (manager.run_dir / "summary.csv").read_text(encoding="utf-8"),
+            _CSV_COLUMNS[:-1],
+        ),
+    }
+
+    for name, (text, columns) in reports.items():
+        rows = list(csv.DictReader(io.StringIO(text)))
+        assert_that(list(rows[0])).described_as(name).is_equal_to(
+            [*columns, "notes"],
+        )
+        assert_that([row["notes"] for row in rows]).described_as(name).is_equal_to(
+            [_NOTE],
+        )
+
+
+def test_csv_notes_cell_is_empty_for_a_result_without_notes() -> None:
+    """A tool that attached no note leaves the new column empty."""
+    result = ToolResult.from_outcome(
+        ToolOutcome(execution=Checked(success=True, inspected_files=True)),
+        name="ruff",
+        parse_failures_count=0,
+    )
+
+    rows = list(csv.DictReader(io.StringIO(render_csv_report([result]))))
+
+    assert_that(rows[0]["notes"]).is_equal_to("")
+    assert_that(rows[0]["tool"]).is_equal_to("ruff")

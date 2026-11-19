@@ -26,8 +26,10 @@ from lintro.utils.output.constants import (
     DEFAULT_TIMESTAMP_FORMAT,
 )
 from lintro.utils.output.helpers import (
+    csv_notes,
     html_escape,
     markdown_escape,
+    render_html_notes,
     render_markdown_notes,
 )
 
@@ -490,6 +492,7 @@ class OutputManager:
                 html_content.append("</table>")
             else:
                 html_content.append("<p>No issues found.</p>")
+            html_content.extend(render_html_notes(r))
         html_content.append("</body></html>")
         self.write_html(content="\n".join(html_content))
 
@@ -504,8 +507,18 @@ class OutputManager:
                 run.
         """
         rows: list[list[str]] = []
-        header: list[str] = ["tool", "issues_count", "file", "line", "code", "message"]
+        # ``notes`` is appended so the original columns keep their positions.
+        header: list[str] = [
+            "tool",
+            "issues_count",
+            "file",
+            "line",
+            "code",
+            "message",
+            "notes",
+        ]
         for r in results:
+            notes = csv_notes(r)
             if hasattr(r, "issues") and r.issues:
                 for issue in r.issues:
                     raw_file = getattr(issue, "file", "") or ""
@@ -517,10 +530,11 @@ class OutputManager:
                             _format_issue_line(getattr(issue, "line", None)),
                             _format_issue_field(issue.get_code()),
                             _format_issue_field(getattr(issue, "message", "") or ""),
+                            notes,
                         ],
                     )
             else:
-                rows.append([r.name, str(r.issues_count), "", "", "", ""])
+                rows.append([r.name, str(r.issues_count), "", "", "", "", notes])
         self.write_csv(rows=rows, header=header)
 
     def cleanup_old_runs(self) -> None:

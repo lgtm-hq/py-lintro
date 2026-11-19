@@ -300,19 +300,27 @@ These fail-closed checks also apply without a fingerprint baseline:
   (`resolution impossible:` and its cause lines). The manifest's own packages were then
   scanned, so the run stays complete and carries a note naming the manifest: the console
   prints it under the tool's result, the summary table's Notes column says "indirect
-  dependencies not resolved", Markdown quotes it, and JSON keeps it under
-  `metadata.notes`, while `output` stays OSV-Scanner's raw report. Any other resolution
-  error (the resolution service unreachable: `rpc error`, `max retries exhausted`, a
-  timeout, a refused connection) or any line never seen before makes the run incomplete
-  and is quoted. OSV-Scanner exits 127 for any logged error, so a 127 is a verdict only
-  when every line it printed, apart from progress output, belongs to such a note or to
-  an excluded file. A run without a complete report (empty stdout, an error object, a
-  `results` value that is not a list), any other failed exit beside a report with no
-  vulnerabilities (including `{"results": []}`), and any failed exit other than 1 are
-  execution failures with unknown inspection. The output names the reason and quotes
-  OSV-Scanner's own message. OSV-Scanner does not report every source it skips: a
-  lockfile in a format version it does not support (`"lockfileVersion": 99`) is logged
-  as "found 0 packages" with no error and still reads as a complete scan.
+  dependencies not resolved", the Markdown, HTML and plain-text reports print it, CSV
+  reports carry it in a `notes` column, and JSON keeps it under `metadata.notes`, while
+  `output` stays OSV-Scanner's raw report. Any other resolution error (the resolution
+  service unreachable: `rpc error`, `max retries exhausted`, a timeout, a refused
+  connection) or any line never seen before makes the run incomplete and is quoted.
+  Every other line OSV-Scanner prints must be one of its routine messages, matched as a
+  whole line (never by its first words) and, for suppression lines, against the
+  `.osv-scanner.toml` that was passed; the list is in
+  [the configuration guide](../configuration.md#osv-scanner-configuration). A line that
+  is none of these makes the run incomplete at any exit status, beside findings or on a
+  clean exit alike, keeps the findings, and is quoted. So an osv-scanner release that
+  prints a line lintro does not know yet gives an incomplete run quoting that line, on
+  purpose, until the line is added. OSV-Scanner exits 127 for any logged error, so a 127
+  is a verdict only when every line it printed, apart from routine lines, belongs to
+  such a note or to an excluded file. A run without a complete report (empty stdout, an
+  error object, a `results` value that is not a list), any other failed exit beside a
+  report with no vulnerabilities (including `{"results": []}`), and any failed exit
+  other than 1 are execution failures with unknown inspection. The output names the
+  reason and quotes OSV-Scanner's own message. OSV-Scanner does not report every source
+  it skips: a lockfile in a format version it does not support (`"lockfileVersion": 99`)
+  is logged as "found 0 packages" with no error and still reads as a complete scan.
 - commitlint reads commit messages, not files. A completed run (a clean exit or reported
   violations) counts as inspected. A failed exit with no violation (a broken
   `commitlint.config.js`) is an execution failure with unknown inspection, named with

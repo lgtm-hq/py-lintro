@@ -36,7 +36,13 @@ from lintro.models.core.sarif_enrichment import AISarifEnrichment
 from lintro.models.core.severity_counts import SeverityCounts, SeverityDelta
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.json_output import serialize_tool_result, timed_out_tool_names
-from lintro.utils.output.helpers import render_markdown_notes, sanitize_csv_value
+from lintro.utils.output.helpers import (
+    csv_notes,
+    render_html_notes,
+    render_markdown_notes,
+    render_plain_notes,
+    sanitize_csv_value,
+)
 from lintro.utils.output.parser_registration import ParserError
 from lintro.utils.output.parser_registry import ParserRegistry
 from lintro.utils.output.text_blocks import bound_diagnostic, markdown_code_block
@@ -192,6 +198,9 @@ _CSV_REPORT_HEADER: list[str] = [
     "code",
     "message",
     "doc_url",
+    # Appended after the original columns so their positions do not change:
+    # the notes a tool attached to a complete result (#3352).
+    "notes",
 ]
 
 
@@ -212,6 +221,7 @@ def render_csv_report(all_results: Sequence[ToolResult]) -> str:
     for result in all_results:
         merged_issues = _merged_issues(result)
         merged_count = len(merged_issues)
+        notes = csv_notes(result)
         if merged_issues:
             for issue in merged_issues:
                 rows.append(
@@ -223,12 +233,13 @@ def render_csv_report(all_results: Sequence[ToolResult]) -> str:
                         sanitize_csv_value(issue.get_code()),
                         sanitize_csv_value(str(issue.message or "")),
                         sanitize_csv_value(str(issue.doc_url or "")),
+                        notes,
                     ],
                 )
         else:
             rows.append(
                 [sanitize_csv_value(result.name), sanitize_csv_value(str(merged_count))]
-                + ["", "", "", "", ""],
+                + ["", "", "", "", "", notes],
             )
     buffer = io.StringIO()
     writer = csv.writer(buffer)
@@ -474,6 +485,7 @@ def write_output_file(
                 html_lines.append("</table>")
             else:
                 html_lines.append("<p>No issues found.</p>")
+            html_lines.extend(render_html_notes(result))
         html_lines.append("</body></html>")
         output_file.write_text("\n".join(html_lines), encoding="utf-8")
 
@@ -516,6 +528,7 @@ def write_output_file(
                 output_text = result.output
                 if output_text and output_text.strip():
                     lines.append(output_text.strip())
+            lines.extend(render_plain_notes(result))
             lines.append("")
         lines.append(f"Total Issues: {total_issues}")
         if action == Action.FIX:

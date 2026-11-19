@@ -498,6 +498,34 @@ set `status: unavailable` and `unavailable: true`; they are not a lint failure u
 reports a below-minimum tool as `unavailable` instead of `skipped`. `lintro list-tools`
 table output has a matching Status column.
 
+A per-tool object may carry `metadata.notes`: things to know about a complete result
+that are neither findings nor a failure. Each note is an object with `summary` (a few
+words, shown in the summary table's Notes column) and `message` (the full text). Today
+only OSV-Scanner sets one, naming the manifests whose indirect dependencies it could not
+resolve, so a clean result reads "clean for the packages that were checked". The note
+never replaces `output`, which stays the tool's own report:
+
+```json
+{
+  "tool": "osv_scanner",
+  "success": true,
+  "issues_count": 0,
+  "metadata": {
+    "notes": [
+      {
+        "summary": "indirect dependencies not resolved",
+        "message": "OSV-Scanner scanned the packages listed in these manifests but could not resolve their indirect dependencies, so those were not checked: requirements.txt: package System(7):internal-pkg: not found"
+      }
+    ]
+  }
+}
+```
+
+The console prints each note under the tool's result, and the Markdown, HTML and
+plain-text reports print it in the tool's section. CSV reports (`--output-format csv`,
+`--output <file>.csv` and the run directory's `summary.csv`) have a `notes` column after
+the original ones, filled on each of the tool's rows and empty for a tool without notes.
+
 `summary.timed_out_tools` lists the tools that timed out, in execution order:
 
 ```json
@@ -2196,6 +2224,68 @@ suppressions to classify each `.osv-scanner.toml` entry as **Active** (vulnerabi
 still present), **Stale** (vulnerability resolved upstream — safe to remove), or
 **Expired** (past the `ignoreUntil` date). Results appear in the summary table Notes
 column and in JSON output under `metadata.suppressions`.
+
+lintro reads every line osv-scanner prints on standard error. Each line must be a
+routine message lintro knows (matched as a whole line, never by its first words), part
+of a recognised extraction error, or the error for a file under an excluded path. Any
+other line makes the run **incomplete** at every exit status, even beside findings or on
+a clean exit: the result is an execution failure with unknown inspection, real findings
+are kept, nothing is invented, the run cannot update a baseline, and the output quotes
+the line:
+
+```text
+OSV-Scanner printed a message lintro does not recognise, so the scan cannot be shown to be complete: <line>
+```
+
+This is deliberate. A newer osv-scanner that words a routine line differently, or adds
+one, makes runs incomplete with the new line quoted until lintro learns it; a failed
+lookup can never read as a clean scan. Report such a line so its whole-line pattern can
+be added.
+
+The routine lines, collected from osv-scanner 2.4.0 and 2.7.1, and what each is checked
+against:
+
+```text
+Scanning dir <dir>                                  <dir> is the scanned directory
+Starting filesystem walk for root: /                exact
+Scanned <path> file and found <n> package[s]        <path> exists (a file or a
+                                                    directory); "package" only for 1
+End status: <n> dirs visited, <n> inodes visited, <n> Extract calls, <duration> elapsed, <duration> wall time
+Filtered <n> vulnerability|vulnerabilities from output
+                                                    singular only for 1
+Filtered <n> local/unscannable package/s from the scan.
+Filtered <n> ignored package/s from the scan.
+Warning: enricher transitivedependency/pomxml may be risky when run on untrusted artifacts. Please ensure you trust the source code and artifacts.
+No package sources found, --help for usage information.
+```
+
+The lines about the `.osv-scanner.toml` lintro passed with `--config` are checked
+against that file:
+
+```text
+<ID> has been filtered out because: <reason>        an [[IgnoredVulns]] id and its
+<ID> and 1 alias have been filtered out because: <reason>
+<ID> and <n> aliases have been filtered out because: <reason>
+                                                    reason ("(no reason given)" when
+                                                    empty), a multi-line reason line
+                                                    by line
+Package <ecosystem>/<name>/<version> has been filtered out because: <reason>
+                                                    the reason of an ignoring
+                                                    [[PackageOverrides]] entry
+<config> has unused ignores:                        followed by " - <id>" lines, each
+                                                    a configured id
+<config> has unused overrides:                      followed by " - Ecosystem: ...,
+                                                    Name: ..., Reason: ..." lines,
+                                                    each a configured override
+warning: <config> has multiple ignores for <ID> - only the first will be used!
+warning: <config> has at least one ignore entry using 'ignoreUntil' which has been deprecated in favor of 'effectiveUntil'
+```
+
+The `failed resolution for <path>: <error>` copies the transitive-dependency enricher
+prints before its error block are not routine lines: each is judged by the same three
+harmless shapes as the error block (see
+[the baseline guide](guides/baseline.md#execution-checks-for-all-runs)), and any other
+error in one makes the run incomplete.
 
 **Usage Examples:**
 
