@@ -865,11 +865,13 @@ def test_an_install_script_that_outlives_the_timeout_never_blocks_for_good(
         f"( {script}; touch '{done}' ) </dev/null >/dev/null 2>&1 &\n"
         f"echo $! > '{pid_file}'\nexec sleep 30\n"
         "fi\n"
-        f"echo \"start={count}\" >> '{calls}'\n"
         # Later calls install only what has no lockfile, as npx does, then
-        # run the entry point.
+        # run the entry point. The starting count is taken after the
+        # reinstall: a write the reinstall wiped out is not an overlap with
+        # the tool run.
         f"if [ ! -e '{entry}/package-lock.json' ]; then\n"
         f"rm -rf '{entry}'\ncp -R '{complete}' '{entry}'\nfi\n"
+        f"echo \"start={count}\" >> '{calls}'\n"
         f"sh '{entry}/node_modules/.bin/prettier'\nstatus=$?\n"
         f"echo \"end={count}\" >> '{calls}'\nexit $status\n",
     )
