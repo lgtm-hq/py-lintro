@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import signal
 import subprocess  # nosec B404 - spawns a sleeping child, argv list only
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.utils.process_stop import run_reaped, stop_process
+from lintro.utils.process_tree import read_process_table
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32",
@@ -178,90 +182,304 @@ def _kill_quietly(*pids: int) -> None:
             os.kill(pid, signal.SIGKILL)
 
 
+def _survivors(marker: str, budget: float = 10.0) -> list[str]:
+    """Return the live processes whose command line holds *marker*.
+
+    Zombies waiting for init to reap them are not counted: they run nothing.
+
+    Args:
+        marker: Text only the test's own processes carry, such as a path.
+        budget: How long to wait for them to go.
+
+    Returns:
+        Their ``ps`` lines; empty once none is left.
+    """
+    give_up = time.monotonic() + budget
+    while True:
+        listed = subprocess.run(  # nosec B603 B607 - fixed argv
+            ["ps", "-A", "-o", "pid=,stat=,command="],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.splitlines()
+        alive = [
+            line
+            for line in listed
+            if marker in line and "Z" not in line.split(maxsplit=2)[1]
+        ]
+        if not alive or time.monotonic() >= give_up:
+            return alive
+        time.sleep(0.05)
+
+
+def _start_parent(tmp_path: Path, then: str = "") -> subprocess.Popen[str]:
+    """Start :data:`_PARENT` directly, the way npx is started.
+
+    Args:
+        tmp_path: Where its log and ids go.
+        then: What it runs once the ids are recorded.
+
+    Returns:
+        The running child.
+    """
+    return subprocess.Popen(  # nosec B603 - fixed argv
+        [
+            sys.executable,
+            "-c",
+            _PARENT.format(then=then),
+            str(tmp_path / "log"),
+            str(tmp_path / "ids"),
+        ],
+        text=True,
+    )
+
+
 def test_a_timeout_stops_what_the_child_started_too(tmp_path: Path) -> None:
     """The install scripts npm runs under npx go when npx is stopped.
 
-    The child leads its own session and group, so a Ctrl-C at the terminal
-    reaches lintro alone, and lintro ends the whole group.
+    The child runs in lintro's own session and group, as on ``main``, so
+    the terminal's Ctrl-C still reaches it; lintro finds its grandchild in
+    the process table instead.
 
     Args:
         tmp_path: Temporary directory provided by pytest.
     """
     log, ids = tmp_path / "log", tmp_path / "ids"
-    script = _PARENT.format(then="")
     pids: dict[str, int] = {}
     try:
         with pytest.raises(subprocess.TimeoutExpired):
             run_reaped(
-                [sys.executable, "-c", script, str(log), str(ids)],
+                [sys.executable, "-c", _PARENT.format(then=""), str(log), str(ids)],
                 timeout=3.0,
             )
         pids = _read_pids(ids)
-        assert_that(pids["group"]).is_equal_to(pids["child"])
-        assert_that(pids["session"]).is_equal_to(pids["child"])
-        assert_that(pids["session"]).is_not_equal_to(os.getsid(0))
+        assert_that(pids["group"]).is_equal_to(os.getpgid(0))
+        assert_that(pids["session"]).is_equal_to(os.getsid(0))
         assert_that(_gone(pids["grandchild"])).is_true()
         assert_that(_stays_still(log)).is_true()
     finally:
         _kill_quietly(*(pid for name, pid in pids.items() if "child" in name))
 
 
-def test_ctrl_c_in_lintro_stops_the_child_and_what_it_started(
+#: A child whose grandchild keeps starting processes that append to a log
+#: and stay, the way a busy install script does; the log's path is in each
+#: one's command line.
+_FORKER = (
+    "import subprocess, sys, time\n"
+    "log = sys.argv[1]\n"
+    'loop = (\'while :; do sh -c "echo x >> $0; exec sleep 30" "$0" & \''
+    " 'sleep 0.01; done')\n"
+    "subprocess.Popen(['sh', '-c', loop, log])\n"
+    "time.sleep(60)\n"
+)
+
+
+def test_a_descendant_that_keeps_forking_is_stopped_with_all_it_started(
     tmp_path: Path,
 ) -> None:
-    """A ``KeyboardInterrupt`` mid-run reaps the child and ends its group.
-
-    The child sends lintro ``SIGINT`` itself once it is running, as a
-    Ctrl-C at the terminal would; ``subprocess.run`` would leave it
-    unreaped after a quarter of a second, and its children running.
+    """The tree is frozen from the top, so nothing new escapes the stop.
 
     Args:
         tmp_path: Temporary directory provided by pytest.
     """
-    log, ids = tmp_path / "log", tmp_path / "ids"
-    script = _PARENT.format(
-        then="import signal\nos.kill(os.getppid(), signal.SIGINT)\n",
+    log = tmp_path / "forker.log"
+    child = subprocess.Popen(  # nosec B603 - fixed argv
+        [sys.executable, "-c", _FORKER, str(log)],
+        text=True,
     )
-    previous = signal.signal(signal.SIGINT, signal.default_int_handler)
-    pids: dict[str, int] = {}
     try:
-        with pytest.raises(KeyboardInterrupt):
-            run_reaped(
-                [sys.executable, "-c", script, str(log), str(ids)],
-                timeout=30.0,
-            )
-        pids = _read_pids(ids)
-        with pytest.raises(ProcessLookupError):
-            os.kill(pids["child"], 0)
-        assert_that(_gone(pids["grandchild"])).is_true()
+        give_up = time.monotonic() + 20.0
+        while not log.exists() or log.stat().st_size < 20:
+            assert_that(time.monotonic()).is_less_than(give_up)
+            time.sleep(0.02)
+
+        stop_process(child, tree=True)
+
+        assert_that(child.returncode).is_not_none()
+        assert_that(_survivors(str(log))).is_empty()
         assert_that(_stays_still(log)).is_true()
     finally:
-        signal.signal(signal.SIGINT, previous)
-        _kill_quietly(*(pid for name, pid in pids.items() if "child" in name))
+        child.kill()
+        child.wait()
 
 
-def test_a_child_that_exited_by_itself_leaves_its_former_group_alone(
-    tmp_path: Path,
-) -> None:
-    """Once the leader is reaped its group id may be reused: nothing is signalled.
+def test_without_a_process_table_only_the_child_is_stopped(tmp_path: Path) -> None:
+    """Lintro falls back to killing npx alone, says so, and does not fail.
 
     Args:
         tmp_path: Temporary directory provided by pytest.
     """
-    log, ids = tmp_path / "log", tmp_path / "ids"
-    script = _PARENT.format(then="sys.exit(0)\n")
-    leader = subprocess.Popen(  # nosec B603 - fixed argv
-        [sys.executable, "-c", script, str(log), str(ids)],
-        start_new_session=True,
-    )
-    leader.wait()
-    grandchild = _read_pids(ids)["grandchild"]
+    messages: list[str] = []
+    sink = logger.add(messages.append, level="DEBUG", format="{message}")
+    child = _start_parent(tmp_path)
+    pids = _read_pids(tmp_path / "ids")
     try:
-        stop_process(leader, group=True)
+        stop_process(child, tree=True, read_table=lambda: None)
+
+        assert_that(child.returncode).is_not_none()
+        assert_that(_gone(pids["grandchild"], budget=0.5)).is_false()
+        assert_that("".join(messages)).contains("could not read the process table")
+    finally:
+        logger.remove(sink)
+        _kill_quietly(pids["grandchild"])
+
+
+def test_a_child_that_exited_by_itself_leaves_its_children_alone(
+    tmp_path: Path,
+) -> None:
+    """Once npx is reaped its id, and its children's, may be reused.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    child = _start_parent(tmp_path, then="sys.exit(0)\n")
+    child.wait()
+    grandchild = _read_pids(tmp_path / "ids")["grandchild"]
+    try:
+        stop_process(child, tree=True)
 
         assert_that(_gone(grandchild, budget=0.5)).is_false()
     finally:
         _kill_quietly(grandchild)
+
+
+def test_a_ctrl_c_while_stopping_the_tree_still_stops_all_of_it(
+    tmp_path: Path,
+) -> None:
+    """The interruption is re-raised once the tree is gone and npx reaped.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    child = _start_parent(tmp_path)
+    pids = _read_pids(tmp_path / "ids")
+    reads: list[bool] = []
+
+    def interrupted_once() -> Mapping[int, int] | None:
+        if not reads:
+            reads.append(True)
+            raise KeyboardInterrupt
+        return read_process_table()
+
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            stop_process(child, tree=True, read_table=interrupted_once)
+
+        assert_that(child.returncode).is_not_none()
+        assert_that(_gone(pids["grandchild"])).is_true()
+        assert_that(_stays_still(tmp_path / "log")).is_true()
+    finally:
+        _kill_quietly(*(pid for name, pid in pids.items() if "child" in name))
+
+
+#: Runs lintro's side in its own session, so no signal reaches pytest, and
+#: prints one JSON line. ``ctrl-c``: the child sends SIGINT to lintro alone
+#: while it runs (npx keeps running). ``lie``: the process table claims that
+#: lintro itself descends from the child, and a bystander shares lintro's
+#: process group, which a group signal would reach.
+_DRIVER = """
+import json, os, subprocess, sys, time
+mode, parent, log, ids = sys.argv[1:5]
+from lintro.utils.process_stop import run_reaped, stop_process
+from lintro.utils.process_tree import read_process_table
+if mode == "ctrl-c":
+    try:
+        run_reaped([sys.executable, "-c", parent, log, ids], timeout=60.0)
+    except KeyboardInterrupt:
+        print(json.dumps({"ended": "KeyboardInterrupt"}), flush=True)
+    raise SystemExit(0)
+bystander = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+child = subprocess.Popen([sys.executable, "-c", parent, log, ids])
+while not os.path.exists(ids):
+    time.sleep(0.02)
+def lying():
+    table = dict(read_process_table() or {})
+    table[os.getpid()] = child.pid
+    return table
+stop_process(child, tree=True, read_table=lying)
+alive = bystander.poll() is None
+bystander.kill()
+bystander.wait()
+print(json.dumps({"ended": "survived", "bystander": alive}), flush=True)
+"""
+
+
+def _drive(tmp_path: Path, mode: str, then: str = "") -> dict[str, object]:
+    """Run :data:`_DRIVER` in a new session and return what it printed.
+
+    Args:
+        tmp_path: Where the driver's child writes its log and ids.
+        mode: ``ctrl-c`` or ``lie``.
+        then: What the driver's child runs once its ids are recorded.
+
+    Returns:
+        The driver's JSON line, parsed.
+    """
+    driver = subprocess.run(  # nosec B603 - fixed argv
+        [
+            sys.executable,
+            "-c",
+            _DRIVER,
+            mode,
+            _PARENT.format(then=then),
+            str(tmp_path / "log"),
+            str(tmp_path / "ids"),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60.0,
+        start_new_session=True,
+        check=False,
+    )
+    assert_that(driver.returncode).described_as(driver.stderr).is_equal_to(0)
+    result: dict[str, object] = json.loads(driver.stdout.splitlines()[-1])
+    return result
+
+
+def test_ctrl_c_in_lintro_alone_stops_the_child_and_what_it_started(
+    tmp_path: Path,
+) -> None:
+    """A ``KeyboardInterrupt`` while npx runs reaps it and ends its children.
+
+    The signal goes to lintro's process only, so npx is still running when
+    lintro handles it; ``subprocess.run`` would kill npx alone and wait a
+    quarter of a second for it.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    pids: dict[str, int] = {}
+    try:
+        result = _drive(
+            tmp_path,
+            "ctrl-c",
+            then="import signal\nos.kill(os.getppid(), signal.SIGINT)\n",
+        )
+        pids = _read_pids(tmp_path / "ids")
+
+        assert_that(result).is_equal_to({"ended": "KeyboardInterrupt"})
+        assert_that(_gone(pids["child"])).is_true()
+        assert_that(_gone(pids["grandchild"])).is_true()
+        assert_that(_stays_still(tmp_path / "log")).is_true()
+    finally:
+        _kill_quietly(*(pid for name, pid in pids.items() if "child" in name))
+
+
+def test_only_verified_descendants_are_signalled(tmp_path: Path) -> None:
+    """Lintro and the rest of its group survive; no group is signalled.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    pids: dict[str, int] = {}
+    try:
+        result = _drive(tmp_path, "lie")
+        pids = _read_pids(tmp_path / "ids")
+
+        assert_that(result).is_equal_to({"ended": "survived", "bystander": True})
+        assert_that(_gone(pids["grandchild"])).is_true()
+    finally:
+        _kill_quietly(*(pid for name, pid in pids.items() if "child" in name))
 
 
 class _InterruptedOnce(subprocess.Popen[str]):

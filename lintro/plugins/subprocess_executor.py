@@ -25,8 +25,7 @@ from lintro.utils.npx_call import (
     npx_shell_safe_command,
 )
 from lintro.utils.npx_integrity import NpxExit
-from lintro.utils.process_stop import own_group, run_reaped, stop_process
-from lintro.utils.stop_on_signal import POLL_SECONDS, current_run
+from lintro.utils.process_stop import run_reaped, stop_process
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -422,8 +421,8 @@ def _run_captured(
     """Run *spawn_cmd* to completion, capturing its output as text.
 
     An npx fallback with a cache is run by
-    :func:`~lintro.utils.process_stop.run_reaped`, which stops and reaps npx
-    (its whole tree on Windows) on any exception, before
+    :func:`~lintro.utils.process_stop.run_reaped`, which stops npx and what
+    it started and reaps npx on any exception, before
     :func:`npx_shell_safe_command` cleans up the cache or lets go of its
     install lock (#3530). Any other command runs as ``subprocess.run``.
 
@@ -544,15 +543,17 @@ def _stream_subprocess(
         SubprocessResult with the merged stream in ``stdout``.
 
     A timeout raises ``subprocess.TimeoutExpired`` from the reading, once
-    the child has been stopped. An npx fallback with a cache runs in its own
-    process group, which is killed as a whole, and lintro waits until npx
-    has exited, however long that takes: the npx context cleans up the cache
-    and lets go of its install lock next (#3530). Any other child is killed
-    and given :data:`_STOP_WAIT_SECONDS` to exit, so one stuck in the kernel
+    the child has been stopped. For an npx fallback with a cache, the
+    processes npx started are killed with it, and lintro waits until npx has
+    exited, however long that takes: the npx context cleans up the cache and
+    lets go of its install lock next (#3530). Any other child is killed and
+    given :data:`_STOP_WAIT_SECONDS` to exit, so one stuck in the kernel
     cannot hang lintro.
 
     Raises:
         FileNotFoundError: If command executable is not found.
+        BaseException: Whatever ended the run early, once the child has been
+            stopped (``subprocess.TimeoutExpired`` on a timeout).
     """
     npx_cache = npx_cache_option(cmd) is not None
     try:
@@ -566,7 +567,6 @@ def _stream_subprocess(
             cwd=cwd,
             env=env,
             bufsize=1,  # Line buffering
-            start_new_session=npx_cache and own_group(),
         )
     except FileNotFoundError as e:
         logger.warning(
@@ -581,12 +581,11 @@ def _stream_subprocess(
     # context cleans up the cache or lets go of its install lock (#3530).
     stop = functools.partial(
         stop_process,
-        group=npx_cache,
+        tree=npx_cache,
         wait_seconds=None if npx_cache else _STOP_WAIT_SECONDS,
     )
-    finished = False
     try:
-        result = _collect_stream(
+        return _collect_stream(
             process,
             cmd=cmd,
             timeout=timeout,
@@ -594,32 +593,9 @@ def _stream_subprocess(
             line_handler=line_handler,
             stop=stop,
         )
-        finished = True
-    finally:
-        if not finished:
-            stop(process)
-    return result
-
-
-def _join_watching_for_stop(reader: threading.Thread, *, deadline: float) -> None:
-    """Wait for *reader* until *deadline*, stopping early if lintro is told to.
-
-    Inside an npx run, a signal that asked lintro to stop is noticed within
-    :data:`~lintro.utils.stop_on_signal.POLL_SECONDS`, in whichever thread
-    runs npx (#3530).
-
-    Args:
-        reader: The thread reading the child's output.
-        deadline: :func:`time.monotonic` time of the timeout.
-    """
-    run = current_run()
-    while reader.is_alive():
-        left = deadline - time.monotonic()
-        if left <= 0:
-            return
-        reader.join(timeout=left if run is None else min(left, POLL_SECONDS))
-        if run is not None:
-            run.raise_if_requested()
+    except BaseException as exc:
+        stop(process, pending=exc)
+        raise
 
 
 def _collect_stream(
@@ -629,7 +605,7 @@ def _collect_stream(
     timeout: float,
     cwd: str | None,
     line_handler: Callable[[str], None] | None,
-    stop: Callable[[subprocess.Popen[str]], None],
+    stop: Callable[..., None],
 ) -> SubprocessResult:
     """Read a streaming child's merged output until it exits.
 
@@ -667,7 +643,7 @@ def _collect_stream(
     start_time = time.monotonic()
     reader_thread = threading.Thread(target=read_output, daemon=True)
     reader_thread.start()
-    _join_watching_for_stop(reader_thread, deadline=start_time + timeout)
+    reader_thread.join(timeout=timeout)
 
     if reader_thread.is_alive():
         # Timeout occurred during reading - kill the process

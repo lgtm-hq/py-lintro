@@ -19,7 +19,6 @@ from loguru import logger
 from lintro.exceptions.errors import UnsafeCommandError
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.npx_integrity import NpxIntegrityError
-from lintro.utils.stop_on_signal import signal_guard
 
 if TYPE_CHECKING:
     from lintro.enums.action import Action
@@ -285,12 +284,7 @@ class AsyncToolExecutor:
             return (name, result)
 
         tasks = [run_with_name(name, tool) for name, tool in tools]
-        # The tools run in worker threads, which no signal reaches: while they
-        # run, a stop signal on this (main) thread stops their npx runs too.
-        # Installed inside the event loop, so asyncio's own Ctrl-C handling
-        # is chained, not replaced (#3530).
-        with signal_guard():
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
         def _elapsed(name: str) -> float:
             started = started_at.get(name)

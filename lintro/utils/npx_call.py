@@ -53,6 +53,7 @@ this applies on Windows too, where the same variables reach Node.
 from __future__ import annotations
 
 import contextlib
+import functools
 import os
 import re
 import shlex
@@ -77,7 +78,7 @@ from lintro.utils.npx_integrity import (
     wait_limit,
 )
 from lintro.utils.npx_unfinished import BoundCache, bound_cache
-from lintro.utils.stop_on_signal import Stoppable, defer_signals
+from lintro.utils.process_stop import finish_uninterrupted
 
 #: npx/bunx flags that take the package spec as the next argument.
 PACKAGE_FLAGS: frozenset[str] = frozenset({"-p", "--package"})
@@ -348,10 +349,9 @@ def npx_shell_safe_command(
     that has no executables either. The caller must have
     stopped and reaped npx before the exception leaves the block.
 
-    The run is registered with :mod:`lintro.utils.stop_on_signal` from
-    before the lock wait until the lock is released, so Ctrl-C, ``SIGTERM``
-    or ``SIGHUP`` stops it in whichever thread it runs; on the main thread a
-    repeated signal during the cleanup is re-raised once it is done.
+    A Ctrl-C during that cleanup does not cut it short: the cleanup is
+    completed before the lock is released, and the interruption is raised
+    afterwards (:func:`~lintro.utils.process_stop.finish_uninterrupted`).
 
     Args:
         cmd: Command about to be spawned.
@@ -382,64 +382,70 @@ def npx_shell_safe_command(
         with _quoted_argv(cmd, windows=windows, inline_limit=inline_limit) as argv:
             yield argv
         return
-    # Registered until the lock is released, so a stop signal reaches this
-    # run in whichever thread it runs (:mod:`lintro.utils.stop_on_signal`).
-    with Stoppable():
-        deadline = time.monotonic() + wait_limit(timeout)
-        with install_lock(cache, shared=True, deadline=deadline):
+    deadline = time.monotonic() + wait_limit(timeout)
+    with install_lock(cache, shared=True, deadline=deadline):
+        before = verified_cache(cache, timeout=_remaining(deadline))
+    with contextlib.ExitStack() as cold_install:
+        installing: _ColdInstall | None = None
+        if not before.entries:
+            # A cold pin: install it under the exclusive lock, held until the
+            # run is checked, so no other lintro run sees npx's half-written
+            # entry (#3421). Check again once the lock is held: the run that
+            # held it may have installed the pin meanwhile.
+            held = cold_install.enter_context(
+                install_lock(cache, shared=False, deadline=deadline),
+            )
             before = verified_cache(cache, timeout=_remaining(deadline))
-        with contextlib.ExitStack() as cold_install:
-            installing: _ColdInstall | None = None
-            if not before.entries:
-                # A cold pin: install it under the exclusive lock, held until the
-                # run is checked, so no other lintro run sees npx's half-written
-                # entry (#3421). Check again once the lock is held: the run that
-                # held it may have installed the pin meanwhile.
-                held = cold_install.enter_context(
-                    install_lock(cache, shared=False, deadline=deadline),
-                )
-                before = verified_cache(cache, timeout=_remaining(deadline))
-                if before.entries:
-                    # Installed while this run waited: run warm, without the lock.
-                    cold_install.close()
-                else:
-                    # Record which cache directory npx installs into, so cleanup
-                    # can never be pointed anywhere else, then make the last
-                    # check before npx installs: the lock is still ours.
-                    bound = cold_install.enter_context(bound_cache(cache))
-                    held.check()
-                    installing = _ColdInstall(held, bound)
-            try:
-                with _quoted_argv(
-                    cmd,
-                    windows=windows,
-                    inline_limit=inline_limit,
-                ) as argv:
-                    yield argv
-            except BaseException as exc:
-                # npx did not finish: it timed out, could not start, or lintro
-                # was interrupted. There is no result to check; the caller
-                # reports the failure itself (#3530). A repeated Ctrl-C waits
-                # until the cleanup is done and the lock released.
-                defer_signals()
-                _after_unfinished_run(
+            if before.entries:
+                # Installed while this run waited: run warm, without the lock.
+                cold_install.close()
+            else:
+                # Record which cache directory npx installs into, so cleanup
+                # can never be pointed anywhere else, then make the last
+                # check before npx installs: the lock is still ours.
+                bound = cold_install.enter_context(bound_cache(cache))
+                held.check()
+                installing = _ColdInstall(held, bound)
+        try:
+            with _quoted_argv(
+                cmd,
+                windows=windows,
+                inline_limit=inline_limit,
+            ) as argv:
+                yield argv
+        except BaseException as exc:
+            # npx did not finish: it timed out, could not start, or lintro
+            # was interrupted. There is no result to check; the caller
+            # reports the failure itself (#3530). A repeated Ctrl-C waits
+            # until the cleanup is done; the lock is released after it.
+            npx_stopped = npx_exit is not None and npx_exit.returncode is None
+            finish_uninterrupted(
+                functools.partial(
+                    _after_unfinished_run,
                     cache,
                     before,
                     installing,
                     exc,
-                    npx_stopped=npx_exit is not None and npx_exit.returncode is None,
+                    npx_stopped=npx_stopped,
+                ),
+                pending=exc,
+            )
+            raise
+        try:
+            check_unchanged(cache, before, timeout=timeout, npx_exit=npx_exit)
+        except NpxInstallError:
+            if installing is not None:
+                finish_uninterrupted(
+                    functools.partial(
+                        installing.discard_unfinished,
+                        before,
+                        npx_stopped=False,
+                    ),
                 )
-                raise
-            try:
-                check_unchanged(cache, before, timeout=timeout, npx_exit=npx_exit)
-            except NpxInstallError:
-                if installing is not None:
-                    defer_signals()
-                    installing.discard_unfinished(before, npx_stopped=False)
-                raise
-            except NpxIntegrityError as exc:
-                exc.after_run = True
-                raise
+            raise
+        except NpxIntegrityError as exc:
+            exc.after_run = True
+            raise
 
 
 class NpxChangedDuringRunError(NpxIntegrityError):

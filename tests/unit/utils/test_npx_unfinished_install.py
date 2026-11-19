@@ -32,7 +32,7 @@ from lintro.plugins.subprocess_executor import (
     run_subprocess_streaming,
 )
 from lintro.tools.core.version_parsing import _run_probe, _run_probe_with_retry
-from lintro.utils import npx_unfinished
+from lintro.utils import npx_install_lock, npx_unfinished
 from lintro.utils.npx_call import npx_shell_safe_command
 from lintro.utils.npx_integrity import (
     NpxExit,
@@ -760,18 +760,55 @@ def _gone(pid: int, budget: float = 10.0) -> bool:
     return False
 
 
-@pytest.mark.parametrize("executor", list(_SINGLE_ATTEMPT), ids=list(_SINGLE_ATTEMPT))
-def test_a_stopped_install_takes_its_install_scripts_with_it(
-    cache: Path,
-    tmp_path: Path,
-    executor: str,
-) -> None:
-    """The postinstall npm runs under npx stops writing when npx is stopped.
+class _AtRelease:
+    """What the cache and the postinstall log hold as each install lock goes."""
+
+    def __init__(self, cache: Path, log: Path) -> None:
+        """Watch *cache* and *log*.
+
+        Args:
+            cache: Per-pin npm cache.
+            log: What the fake postinstall appends to.
+        """
+        self.cache, self.log = cache, log
+        self.seen: list[tuple[int, list[str]]] = []
+
+    def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Record the log's size and the entries just before each release.
+
+        Args:
+            monkeypatch: Wraps the lock module's release.
+        """
+        release = npx_install_lock._release
+
+        def recording(fd: int) -> None:
+            size = self.log.stat().st_size if self.log.exists() else 0
+            self.seen.append(
+                (size, sorted(entry.name for entry in cache_entries(self.cache))),
+            )
+            release(fd)
+
+        monkeypatch.setattr(npx_install_lock, "_release", recording)
+
+    def last(self) -> tuple[int, list[str]]:
+        """Return what the exclusive lock's release, the last one, saw.
+
+        Returns:
+            The log's size and the cache's entries at that moment.
+        """
+        assert_that(self.seen).is_not_empty()
+        return self.seen[-1]
+
+
+def _postinstall_npx(tmp_path: Path, cache: Path) -> tuple[list[str], Path, Path]:
+    """Write a fake npx whose postinstall child keeps appending to a log.
 
     Args:
-        cache: Per-pin npm cache.
         tmp_path: Temporary directory provided by pytest.
-        executor: Which lintro entry point spawns npx.
+        cache: Per-pin npm cache.
+
+    Returns:
+        The npx argv, the log, and the file holding the writer's pid.
     """
     log, pid_file = tmp_path / "postinstall.log", tmp_path / "postinstall.pid"
     npx = _fake_npx(
@@ -781,15 +818,87 @@ def test_a_stopped_install_takes_its_install_scripts_with_it(
         f"echo $! > '{pid_file}.tmp'\nmv '{pid_file}.tmp' '{pid_file}'\n"
         "exec sleep 30\n",
     )
+    return npx, log, pid_file
+
+
+@pytest.mark.parametrize("executor", list(_SINGLE_ATTEMPT), ids=list(_SINGLE_ATTEMPT))
+def test_a_stopped_install_takes_its_install_scripts_with_it(
+    cache: Path,
+    tmp_path: Path,
+    executor: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The postinstall npm runs under npx is gone before the lock is released.
+
+    npx runs in lintro's process group, so lintro finds the postinstall in
+    the process table: nothing writes into the cache once another run can
+    take the lock.
+
+    Args:
+        cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
+        executor: Which lintro entry point spawns npx.
+        monkeypatch: Observes the install lock's release.
+    """
+    npx, log, pid_file = _postinstall_npx(tmp_path, cache)
+    at_release = _AtRelease(cache, log)
+    at_release.install(monkeypatch)
     try:
         with pytest.raises(subprocess.TimeoutExpired):
             _SINGLE_ATTEMPT[executor](_command(npx, cache), 2.0)
 
-        assert_that(_gone(int(pid_file.read_text(encoding="utf-8")))).is_true()
-        size = log.stat().st_size
+        size, entries = at_release.last()
+        assert_that(size).is_greater_than(0)
+        assert_that(entries).is_empty()
         time.sleep(0.5)
         assert_that(log.stat().st_size).is_equal_to(size)
-        assert_that(cache_entries(cache)).is_empty()
+        assert_that(_gone(int(pid_file.read_text(encoding="utf-8")))).is_true()
+    finally:
+        if pid_file.exists():
+            with contextlib.suppress(ProcessLookupError, ValueError):
+                os.kill(int(pid_file.read_text(encoding="utf-8")), signal.SIGKILL)
+
+
+@pytest.mark.parametrize("executor", list(_SINGLE_ATTEMPT), ids=list(_SINGLE_ATTEMPT))
+def test_a_ctrl_c_during_cleanup_finishes_it_before_the_lock_goes(
+    cache: Path,
+    tmp_path: Path,
+    executor: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A repeated Ctrl-C after a timeout is raised once the entry is removed.
+
+    Args:
+        cache: Per-pin npm cache.
+        tmp_path: Temporary directory provided by pytest.
+        executor: Which lintro entry point spawns npx.
+        monkeypatch: Interrupts the first cleanup check, observes the lock.
+    """
+    npx, log, pid_file = _postinstall_npx(tmp_path, cache)
+    at_release = _AtRelease(cache, log)
+    at_release.install(monkeypatch)
+    check = install_unfinished
+    interrupted: list[bool] = []
+
+    def interrupted_once(entry: Path, **kwargs: Any) -> bool:
+        if not interrupted:
+            interrupted.append(True)
+            raise KeyboardInterrupt
+        return check(entry, **kwargs)
+
+    monkeypatch.setattr(npx_unfinished, "install_unfinished", interrupted_once)
+    try:
+        with pytest.raises(KeyboardInterrupt) as caught:
+            _SINGLE_ATTEMPT[executor](_command(npx, cache), 2.0)
+
+        assert_that(interrupted).is_equal_to([True])
+        assert_that(caught.value.__context__).is_instance_of(
+            subprocess.TimeoutExpired,
+        )
+        size, entries = at_release.last()
+        assert_that(entries).is_empty()
+        time.sleep(0.5)
+        assert_that(log.stat().st_size).is_equal_to(size)
     finally:
         if pid_file.exists():
             with contextlib.suppress(ProcessLookupError, ValueError):
