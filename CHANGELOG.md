@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.181.7] - 2026-11-17
+
+### Fixed
+
+- **typos**: keep DELETEs intact and list each correction lintro fmt applies (#3515)
+  (0e41816)
+
 ## [0.181.6] - 2026-11-17
 
 ### Fixed
