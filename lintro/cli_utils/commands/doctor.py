@@ -37,6 +37,7 @@ from lintro.ai.interface import resolve_ai_config
 from lintro.ai.provider_blocks import format_invalid_ai_config
 from lintro.cli_utils.install_output import (
     render_install_results,
+    render_manual_installs,
     render_outcome_summary,
     render_planned_install,
     unresolved_tool_names,
@@ -997,6 +998,8 @@ def _run_fix(
     if plan.skipped:
         for tool, reason in plan.skipped:
             console.print(f"  [yellow]SKIP[/yellow]  {tool.name}: {reason}")
+
+    render_manual_installs(console, plan)
 
     console.print()
     render_outcome_summary(console, install_results)

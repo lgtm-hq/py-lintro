@@ -20,6 +20,7 @@ silently replace a project's pin with lintro's manifest recommendation.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -84,6 +85,14 @@ NODE_MANAGER_COMMANDS: dict[PackageManager, NodeManagerCommands] = {
     ),
 }
 
+#: ``packageManager`` values under which Yarn 1 still runs ``yarn global``.
+#: Yarn 1.22 checks the nearest field against exactly this pattern and
+#: otherwise exits with "This project's package.json defines packageManager:
+#: yarn@^1.22.0. However the current global version of Yarn is 1.22.22", so
+#: ``yarn@1.22.22`` and ``yarn@1.x`` pass while ``yarn@1``, ``yarn@^1.22.0``
+#: and ``yarn@>=1`` do not (#2045).
+_YARN_CLASSIC_GLOBAL_FIELD = re.compile(r"yarn@[01]\.")
+
 #: Derived so it can never disagree with the command table above.
 NODE_MANAGERS: frozenset[PackageManager] = frozenset(NODE_MANAGER_COMMANDS)
 
@@ -113,6 +122,8 @@ class NodeProject:
             ``stable`` or ``canary`` tag), or, with no yarn version
             declared, a ``.yarnrc.yml`` sits in the project root or an
             ancestor inside the search boundary.
+        package_manager_field: Raw nearest ``packageManager`` value that
+            named a known manager, or None.
     """
 
     root: Path
@@ -120,6 +131,19 @@ class NodeProject:
     lockfile_manager: PackageManager | None
     dependencies: dict[str, str]
     yarn_berry: bool = False
+    package_manager_field: str | None = None
+
+    @property
+    def yarn_classic_refuses_global(self) -> bool:
+        """Report whether Yarn 1 would refuse ``yarn global`` here.
+
+        Returns:
+            True when a ``packageManager`` field is declared and does not
+            name a 0.x or 1.x version the way Yarn 1 requires
+            (``yarn@1.22.22``, ``yarn@1.x``).
+        """
+        field = self.package_manager_field
+        return field is not None and _YARN_CLASSIC_GLOBAL_FIELD.match(field) is None
 
     def declared_spec(self, package: str) -> str | None:
         """Return the version spec this project declares for *package*.
@@ -294,6 +318,7 @@ def detect_node_project(start: Path | None = None) -> NodeProject | None:
             lockfile_manager=lockfile_manager,
             dependencies=_read_dependencies(manifest),
             yarn_berry=_is_yarn_berry(declared_field, evidence),
+            package_manager_field=declared_field,
         )
     return None
 

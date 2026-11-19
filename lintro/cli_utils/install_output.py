@@ -75,6 +75,28 @@ def render_planned_install(
     )
 
 
+def render_manual_installs(console: Console, plan: InstallPlan) -> None:
+    """Render the tools the plan leaves to the user, with each hint.
+
+    ``lintro install`` shows these in its plan and ``lintro doctor --fix``
+    after its install results; neither runs anything for them, so the hint
+    is the only place the user learns what to do (#2045).
+
+    Args:
+        console: Console to print to.
+        plan: Plan whose manual list is rendered.
+    """
+    if not plan.manual:
+        return
+    console.print(
+        f"  [yellow]Manual installation required ({len(plan.manual)}):[/yellow]",
+    )
+    for tool, hint in plan.manual:
+        console.print(f"    {tool.name:<20}")
+        for line in hint.split("\n"):
+            console.print(f"      [dim]{escape(line)}[/dim]", highlight=False)
+
+
 def render_install_results(
     console: Console,
     results: Sequence[InstallResult],

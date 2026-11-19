@@ -1,16 +1,23 @@
 """Read the bounds of a declared node-semver range (#2045).
 
 A declared range is not a conflict when the project's package manager can
-satisfy it with a version lintro accepts. When the range's upper bound sits
-below lintro's minimum (``2.x``, ``<3``, ``~2.8``, ``1 - 2``), running the
-project install would fetch every dependency only to end with a version that
-is too old, so the npm strategy has to tell the two apart before it plans
-``npm install``.
+satisfy it with a version lintro accepts. When no release the range admits is
+at or above lintro's minimum (``2.x``, ``<3``, ``~2.8``, ``>=4 <3.5``),
+running the project install would fetch every dependency only to end with a
+version lintro rejects, so the npm strategy has to tell the two apart before
+it plans ``npm install``.
 
-This reads bounds only. It does not resolve a range against a registry and
-does not order prereleases; whenever a bound depends on a prerelease, or a
-comparator is not one this module parses, the answer is "cannot tell" and the
-caller asks the user rather than installing.
+Each ``||`` alternative is read as an interval of releases, with both bounds
+and their inclusivity, and is reachable when some release at or above the
+minimum lies inside it. The answer is meant to match npm's own
+``semver.intersects(range, ">=<minimum>")``. lintro's minimum is always a
+release, so a prerelease upper bound reads as its release: a release is below
+``<A.B.C-pre`` or ``<=A.B.C-pre`` exactly when it is below ``A.B.C``.
+
+This does not resolve a range against a registry. Whenever the answer would
+depend on a prerelease the range admits, or a comparator is not one this
+module parses, it says "cannot tell" and the caller asks the user rather than
+installing.
 """
 
 from __future__ import annotations
@@ -36,6 +43,9 @@ DETACHED_OPERATOR = re.compile(r"(<=|>=|<|>|=|~>|~|\^)\s+")
 #: A plain release version, the only kind of floor this module compares.
 _RELEASE = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")
 
+#: The lowest release.
+_ZERO: Release = (0, 0, 0)
+
 
 class _UnparsedError(Exception):
     """A comparator or bound this module does not read with confidence."""
@@ -57,29 +67,62 @@ class _Comparator:
 
 
 @dataclass(frozen=True)
-class _Upper:
-    """The upper bound of a comparator set.
+class _Interval:
+    """The releases one comparator, or one comparator set, admits.
 
     Attributes:
-        release: Bounding version.
-        inclusive: Whether ``release`` itself is admitted.
+        lowest: Lowest admitted release. It is always inclusive: over
+            releases, ``>A.B.C`` is ``>=A.B.(C+1)``.
+        upper: Bounding release, or None when there is no upper bound.
+        upper_inclusive: Whether ``upper`` itself is admitted.
     """
 
-    release: Release
-    inclusive: bool
+    lowest: Release
+    upper: Release | None
+    upper_inclusive: bool = False
 
-    def admits_at_least(self, floor: Release) -> bool:
-        """Report whether some version at or above *floor* is below this bound.
+    def meet(self, other: _Interval) -> _Interval:
+        """Return the releases both intervals admit.
 
         Args:
-            floor: Lowest acceptable version.
+            other: Interval that must also hold.
 
         Returns:
-            True when the bound leaves room for *floor* or a later version.
+            The intersection.
         """
-        if self.inclusive:
-            return self.release >= floor
-        return self.release > floor
+        lowest = max(self.lowest, other.lowest)
+        uppers = [
+            (bound.upper, bound.upper_inclusive)
+            for bound in (self, other)
+            if bound.upper is not None
+        ]
+        if not uppers:
+            return _Interval(lowest, None)
+        upper, inclusive = min(uppers)
+        return _Interval(lowest, upper, inclusive)
+
+    def admits_at_least(self, floor: Release) -> bool:
+        """Report whether some admitted release is at or above *floor*.
+
+        Args:
+            floor: Lowest acceptable release.
+
+        Returns:
+            True when a release at or above *floor* lies inside the interval.
+        """
+        lowest = max(self.lowest, floor)
+        if self.upper is None:
+            return True
+        if self.upper_inclusive:
+            return lowest <= self.upper
+        return lowest < self.upper
+
+
+#: Admits no release (``<0.0.0``).
+_NOTHING = _Interval(_ZERO, _ZERO)
+
+#: Admits every release.
+_EVERYTHING = _Interval(_ZERO, None)
 
 
 def range_admits_at_least(spec: str, floor: str) -> bool | None:
@@ -91,9 +134,9 @@ def range_admits_at_least(spec: str, floor: str) -> bool | None:
         floor: Lowest version lintro accepts, as ``MAJOR.MINOR.PATCH``.
 
     Returns:
-        True when at least one ``||`` alternative leaves room for a version
-        at or above *floor*, False when every alternative's upper bound is
-        below it, and None when that cannot be read with confidence.
+        True when at least one ``||`` alternative admits a release at or
+        above *floor*, False when none does, and None when that cannot be
+        read with confidence.
     """
     floor_match = _RELEASE.fullmatch(floor.strip())
     if floor_match is None:
@@ -102,11 +145,11 @@ def range_admits_at_least(spec: str, floor: str) -> bool | None:
     verdicts: list[bool | None] = []
     for alternative in spec.split("||"):
         try:
-            upper = _alternative_upper(_comparators(alternative))
+            comparators = _comparators(alternative)
         except _UnparsedError:
             verdicts.append(None)
             continue
-        verdicts.append(upper is None or upper.admits_at_least(floor_release))
+        verdicts.append(_alternative_verdict(comparators, floor_release))
     if any(verdict is True for verdict in verdicts):
         return True
     if all(verdict is False for verdict in verdicts):
@@ -139,6 +182,37 @@ def range_lowest_major(spec: str) -> int | None:
             return None
         majors.append(max(bounded))
     return min(majors) if majors else None
+
+
+def _alternative_verdict(
+    comparators: list[_Comparator],
+    floor: Release,
+) -> bool | None:
+    """Decide whether one comparator set admits *floor* or a later release.
+
+    Args:
+        comparators: Comparators that must all hold.
+        floor: Lowest acceptable release.
+
+    Returns:
+        True or False from the releases the set admits, or None when no
+        release qualifies but npm's answer could still be "yes". That
+        happens in two ways. npm lets a comparator written with
+        ``A.B.C-pre`` admit other prereleases of ``A.B.C``, which rank above
+        *floor* when ``A.B.C`` does. And ``semver.intersects`` treats
+        versions as continuous, so ``>3.9.3 <3.9.4`` intersects
+        ``>=3.2.0`` although no release lies between the two bounds.
+    """
+    if _meet_all(comparators, loose=False).admits_at_least(floor):
+        return True
+    if _meet_all(comparators, loose=True).admits_at_least(floor):
+        return None
+    if any(
+        comparator.prerelease and _release(comparator.parts) > floor
+        for comparator in comparators
+    ):
+        return None
+    return False
 
 
 def _comparators(alternative: str) -> list[_Comparator]:
@@ -182,16 +256,23 @@ def _parse(word: str) -> _Comparator:
         The parsed comparator.
 
     Raises:
-        _UnparsedError: When *word* is not a comparator.
+        _UnparsedError: When *word* is not a comparator, a wildcard is
+            followed by a number (``3.x.5``, which npm rejects), or a
+            prerelease follows a partial version.
     """
     match = COMPARATOR.fullmatch(word)
     if match is None:
         raise _UnparsedError(word)
+    written = match["parts"].split(".")
     parts: list[int] = []
-    for part in match["parts"].split("."):
+    for part in written:
         if not part.isdigit():
             break
         parts.append(int(part))
+    if any(part.isdigit() for part in written[len(parts) :]):
+        raise _UnparsedError(word)
+    if match["pre"] is not None and len(parts) != 3:
+        raise _UnparsedError(word)
     op = match["op"] or ""
     return _Comparator(
         op="~" if op == "~>" else op,
@@ -200,47 +281,64 @@ def _parse(word: str) -> _Comparator:
     )
 
 
-def _alternative_upper(comparators: list[_Comparator]) -> _Upper | None:
-    """Return the tightest upper bound of a comparator set.
+def _meet_all(comparators: list[_Comparator], *, loose: bool) -> _Interval:
+    """Return the releases every comparator in a set admits.
 
     Args:
         comparators: Comparators that must all hold.
+        loose: Read ``>A.B.C`` as ``>=A.B.C`` (see :func:`_interval`).
 
     Returns:
-        The lowest upper bound, or None when the set has none.
+        The intersection of the comparators' intervals.
     """
-    bounds = [_upper(comparator) for comparator in comparators]
-    present = [bound for bound in bounds if bound is not None]
-    if not present:
-        return None
-    return min(present, key=lambda bound: (bound.release, bound.inclusive))
+    interval = _EVERYTHING
+    for comparator in comparators:
+        interval = interval.meet(_interval(comparator, loose=loose))
+    return interval
 
 
-def _upper(comparator: _Comparator) -> _Upper | None:
-    """Return the upper bound one comparator sets.
+def _interval(comparator: _Comparator, *, loose: bool = False) -> _Interval:
+    """Return the releases one comparator admits.
+
+    Follows node-semver's desugaring: ``3.x`` is ``>=3.0.0 <4.0.0``, ``>3.x``
+    is ``>=4.0.0``, ``<=3.1`` is ``<3.2.0``, and ``<*`` and ``>*`` admit
+    nothing. A prerelease on a lower bound (``>=A.B.C-pre``, ``>A.B.C-pre``)
+    admits releases from ``A.B.C``; on an upper bound (``<A.B.C-pre``,
+    ``<=A.B.C-pre``) releases below ``A.B.C``. An exact prerelease admits no
+    release.
 
     Args:
         comparator: Parsed comparator.
+        loose: Read ``>A.B.C`` as ``>=A.B.C``. Over releases that admits one
+            version too many; it stands in for the continuous reading npm's
+            ``semver.intersects`` uses, where ``>A.B.C`` reaches arbitrarily
+            close to ``A.B.C``.
 
     Returns:
-        The bound, or None when the comparator sets no upper bound.
-
-    Raises:
-        _UnparsedError: When the bound would depend on a prerelease, or the
-            comparator admits nothing (``<*``).
+        The admitted releases.
     """
-    op, parts = comparator.op, comparator.parts
-    if op in (">", ">=") or not parts and op != "<":
-        return None
+    op, parts, pre = comparator.op, comparator.parts, comparator.prerelease
+    if not parts:
+        return _NOTHING if op in ("<", ">") else _EVERYTHING
+    full = len(parts) == 3
     if op in ("~", "^"):
-        return _Upper(_caret_or_tilde_ceiling(op, parts), inclusive=False)
-    if comparator.prerelease or not parts:
-        raise _UnparsedError(op)
-    if len(parts) == 3 and op != "<":
-        return _Upper(_release(parts), inclusive=True)
+        return _Interval(_release(parts), _caret_or_tilde_ceiling(op, parts))
+    if op == ">=":
+        return _Interval(_release(parts), None)
+    if op == ">":
+        lowest = _release(parts) if full and (pre or loose) else _bump(parts)
+        return _Interval(lowest, None)
     if op == "<":
-        return _Upper(_release(parts), inclusive=False)
-    return _Upper(_bump(parts), inclusive=False)
+        return _Interval(_ZERO, _release(parts))
+    if op == "<=":
+        if not full:
+            return _Interval(_ZERO, _bump(parts))
+        return _Interval(_ZERO, _release(parts), upper_inclusive=not pre)
+    if not full:
+        return _Interval(_release(parts), _bump(parts))
+    if pre:
+        return _NOTHING
+    return _Interval(_release(parts), _release(parts), upper_inclusive=True)
 
 
 def _caret_or_tilde_ceiling(op: str, parts: tuple[int, ...]) -> Release:

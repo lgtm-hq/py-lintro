@@ -47,6 +47,8 @@ _EXACT_SPECS: tuple[str, ...] = (
     # npm ignores build metadata when comparing versions.
     "3.9.4+build",
     "=3.9.4+build.7",
+    # node-semver reads ``~>`` as ``~``.
+    "~>3.9.4",
 )
 
 _RANGE_SPECS: tuple[str, ...] = (
@@ -62,6 +64,12 @@ _RANGE_SPECS: tuple[str, ...] = (
     "^2.0.0 || ^3.0.0",
     "3.9.x || >=4",
     "3.0.0 - 3.9.4",
+    # A release is below ``<A.B.C-pre`` exactly when it is below ``A.B.C``.
+    "<4.0.0-rc.1",
+    "<4.0.0-0",
+    ">=3.0.0 <4.0.0-0",
+    "<3.9.5-0",
+    "2.x || <4.0.0-rc.1",
 )
 
 #: Ranges whose upper bound is below lintro's version 3.9.4.
@@ -75,12 +83,19 @@ _EXCLUDING_RANGES: tuple[str, ...] = (
     "1 - 2",
     ">=2.0.0 <3.0.0",
     "1.x || 2.x",
+    # Lower bounds count too: these admit no release at or above 3.9.4.
+    ">=4 <3.5",
+    "<3.6.0 >=3.6.0",
+    "3.6.0 - 3.5.0",
+    ">3.x <4",
 )
 
 #: Ranges whose bounds lintro does not read with confidence.
 _UNREADABLE_RANGES: tuple[str, ...] = (
-    "<3.9.5-0",
-    "2.x || <4.0.0-rc.1",
+    # npm rejects a number after a wildcard.
+    "3.x.5",
+    # The prerelease alternative could resolve to 3.9.5-rc.1.
+    "2.x || 3.9.5-rc.1",
 )
 
 #: Opaque specs and the form each message must name.
@@ -540,9 +555,9 @@ def test_berry_refuses_the_global_path(
         ("yarn@1.22.22", ("yarn.lock",)),
         ("yarn@1.22.22", ("yarn.lock", ".yarnrc.yml")),
         (None, ("yarn.lock",)),
-        ("yarn@^1.22.0", ("yarn.lock",)),
+        ("yarn@1.x", ("yarn.lock",)),
     ],
-    ids=["field-1", "field-1-beats-yarnrc", "lockfile-only", "range-caret-1"],
+    ids=["field-1", "field-1-beats-yarnrc", "lockfile-only", "range-1-x"],
 )
 def test_yarn_classic_keeps_yarn_global_add(
     package_manager: str | None,
@@ -562,6 +577,69 @@ def test_yarn_classic_keeps_yarn_global_add(
     hint = _npm().install_hint(env, "prettier", "3.9.4", "prettier", None)
 
     assert_that(hint).is_equal_to("yarn global add prettier@3.9.4")
+
+
+@pytest.mark.parametrize(
+    "package_manager",
+    ["yarn@^1.22.0", "yarn@>=1", "yarn@1", "yarn@~1.22.0"],
+)
+@pytest.mark.parametrize("upgrading", [False, True], ids=["install", "upgrade"])
+def test_yarn_classic_refuses_global_under_a_field_it_rejects(
+    package_manager: str,
+    upgrading: bool,
+    tmp_path: Path,
+) -> None:
+    """Yarn 1 runs ``yarn global`` only under ``yarn@0.`` or ``yarn@1.``.
+
+    Yarn 1.22.22 exits 1 on ``yarn global add`` under each of these fields
+    ("This project's package.json defines packageManager ... However the
+    current global version of Yarn is 1.22.22").
+
+    Args:
+        package_manager: ``packageManager`` field.
+        upgrading: Whether the upgrade path is planned.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    root = _project(tmp_path, package_manager=package_manager, files=("yarn.lock",))
+    env = _env(root, explicit=PM.YARN, prefer_global=True)
+    hint_for = _npm().upgrade_hint if upgrading else _npm().install_hint
+
+    hint = hint_for(env, "prettier", "3.9.4", "prettier", None)
+
+    assert_that(is_manual_hint(hint)).is_true()
+    assert_that(hint).contains(
+        f"packageManager is `{package_manager}`",
+        "yarn add --dev prettier@3.9.4",
+    )
+    assert_that(hint).does_not_contain("Yarn Berry")
+
+
+@pytest.mark.parametrize(
+    ("spec", "min_version"),
+    [("<3.6.0-rc.1", "3.2.0"), ("<4.0.0-0", "3.9.4")],
+)
+def test_prerelease_upper_bound_installs_through_the_project(
+    spec: str,
+    min_version: str,
+    tmp_path: Path,
+) -> None:
+    """A prerelease ceiling reads as its release, so the install runs.
+
+    Args:
+        spec: Declared range.
+        min_version: Manifest minimum for prettier.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    env = _env(_project(tmp_path, declared=spec))
+    tool = dataclasses.replace(
+        ManifestRegistry.load().get("prettier"),
+        version="3.9.4",
+        min_version=min_version,
+    )
+
+    hint = _npm().tool_hint(env, tool, upgrade=False)
+
+    assert_that(hint).is_equal_to("npm install")
 
 
 def test_berry_project_local_add_is_unchanged(tmp_path: Path) -> None:

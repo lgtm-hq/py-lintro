@@ -23,8 +23,8 @@ from lintro.tools.core.install_strategies.declared_range import (
     DETACHED_OPERATOR,
 )
 
-#: Operators an exact-compatible spec may carry. At most one is stripped,
-#: followed by at most one ``v``.
+#: Operators an exact-compatible spec may carry. At most one is stripped
+#: (``~>`` counts as ``~``), followed by at most one ``v``.
 _EXACT_OPERATORS: tuple[str, ...] = ("^", "~", "=")
 
 #: A complete ``MAJOR.MINOR.PATCH`` version, optionally with a prerelease and
@@ -72,8 +72,9 @@ def classify_declared_spec(spec: str) -> DeclaredSpecKind:
 def exact_version(spec: str) -> str | None:
     """Return the version an exact-compatible spec names.
 
-    At most one ``^``, ``~`` or ``=`` operator is removed, then at most one
-    ``v``, which is how node-semver reads them: ``v3.9.4``, ``=v3.9.4`` and
+    At most one ``^``, ``~`` (or its spelling ``~>``) or ``=`` operator is
+    removed, then at most one ``v``, which is how node-semver reads them:
+    ``v3.9.4``, ``=v3.9.4``, ``~>3.9.4`` and
     ``^v3.9.4`` name ``3.9.4``, while ``^^3.9.4`` and ``vv3.9.4`` are not
     exact-compatible. Build metadata (``+build``) is dropped, because npm
     ignores it when comparing versions.
@@ -85,7 +86,10 @@ def exact_version(spec: str) -> str | None:
         The bare version, or None when the spec is not exact-compatible.
     """
     candidate = spec.strip()
-    if candidate.startswith(_EXACT_OPERATORS):
+    if candidate.startswith("~>"):
+        # node-semver reads ``~>`` as ``~``.
+        candidate = candidate[2:].strip()
+    elif candidate.startswith(_EXACT_OPERATORS):
         candidate = candidate[1:].strip()
     candidate = candidate.removeprefix("v")
     if _FULL_VERSION.fullmatch(candidate) is None:

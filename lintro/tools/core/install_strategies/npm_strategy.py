@@ -213,9 +213,11 @@ def _node_add_command(
 
     Yarn Berry (2 and later) removed ``yarn global``, so a global add on a
     Berry project gets a manual hint instead of a command that fails with
-    "The 'yarn global' commands have been removed in 2.x" (#2045). ``yarn
-    dlx`` runs a package once; it does not install one, so it is not offered
-    as a substitute.
+    "The 'yarn global' commands have been removed in 2.x" (#2045). Yarn 1
+    refuses ``yarn global`` under a ``packageManager`` field that does not
+    start with ``yarn@1.`` (``yarn@^1.22.0``), so that gets the same hint.
+    ``yarn dlx`` runs a package once; it does not install one, so it is not
+    offered as a substitute.
 
     Args:
         env: The current install environment.
@@ -231,24 +233,33 @@ def _node_add_command(
     spec = f"{package}@{version}"
     global_install = env.installs_globally()
     project = env.node_project
-    if (
-        global_install
-        and manager is PackageManager.YARN
-        and project is not None
-        and project.yarn_berry
-    ):
-        local = add_dependency_command(
-            manager=manager,
-            spec=spec,
-            global_install=False,
-        )
-        verb = "Upgrade" if upgrading else "Install"
-        return (
-            f"{verb} {package} manually: this project uses Yarn Berry (2 or "
-            f"later), which has no global install, so lintro will not run "
-            f"`yarn global add`. Run `{local}` to add it to the project, or "
-            f"install it globally with another package manager."
-        )
+    if global_install and manager is PackageManager.YARN and project is not None:
+        if project.yarn_berry:
+            reason = (
+                "this project uses Yarn Berry (2 or later), which has no "
+                "global install"
+            )
+        elif project.yarn_classic_refuses_global:
+            reason = (
+                f"this project's packageManager is "
+                f"`{project.package_manager_field}`, and Yarn 1 runs `yarn "
+                f"global` only when that field names one 1.x version (such "
+                f"as `yarn@1.22.22`)"
+            )
+        else:
+            reason = ""
+        if reason:
+            local = add_dependency_command(
+                manager=manager,
+                spec=spec,
+                global_install=False,
+            )
+            verb = "Upgrade" if upgrading else "Install"
+            return (
+                f"{verb} {package} manually: {reason}, so lintro will not run "
+                f"`yarn global add`. Run `{local}` to add it to the project, "
+                f"or install it globally with another package manager."
+            )
     return add_dependency_command(
         manager=manager,
         spec=spec,

@@ -20,6 +20,7 @@ from rich.console import Console
 
 from lintro.cli_utils.install_output import (
     render_install_results,
+    render_manual_installs,
     render_outcome_summary,
     render_planned_install,
     unresolved_tool_names,
@@ -348,14 +349,7 @@ def _display_plan(console: Console, plan: object) -> None:
             f"  [dim]Already installed: {len(plan.already_ok)} tools[/dim]",
         )
 
-    if plan.manual:
-        console.print(
-            f"  [yellow]Manual installation required ({len(plan.manual)}):[/yellow]",
-        )
-        for tool, hint in plan.manual:
-            console.print(f"    {tool.name:<20}")
-            for line in hint.split("\n"):
-                console.print(f"      [dim]{line}[/dim]")
+    render_manual_installs(console, plan)
 
     if plan.skipped:
         console.print(f"  [yellow]Skipped ({len(plan.skipped)}):[/yellow]")
