@@ -33,8 +33,10 @@ from lintro.enums.install_outcome import InstallOutcome
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_destination import (
     InstallDestination,
+    clear_probe_cache,
     has_control_characters,
     install_destination,
+    path_export_line,
 )
 from lintro.tools.core.install_hints import (
     SCRIPT_HINT_PREFIX,
@@ -518,6 +520,9 @@ class ToolInstaller:
         Returns:
             List of results for each install/upgrade action, in plan order.
         """
+        # Package-manager answers are reused within this batch only; a later
+        # batch in the same process (watch, MCP) asks again (#2042).
+        clear_probe_cache()
         results: list[InstallResult] = []
         actions: list[tuple[ManifestTool, str]] = [
             *plan.to_install,
@@ -687,14 +692,16 @@ class ToolInstaller:
                 f"discoverable, and lintro could not determine {where}; "
                 f"find the directory that holds {tool.name} and add it to PATH"
             )
-        # Single-quote the directory so pasting the line expands only $PATH.
-        return (
+        message = (
             f"Install command succeeded but {tool.name} is still not "
             f"discoverable. It was expected under {bin_dir}, where "
             f"{destination.manager} installs it, and was not found; inspect "
-            f"that directory, or add it to PATH, for example: "
-            f'export PATH={shlex.quote(str(bin_dir))}:"$PATH"'
+            f"that directory, or add it to PATH"
         )
+        export_line = path_export_line(bin_dir)
+        if export_line is None:
+            return message
+        return f"{message}, for example: {export_line}"
 
     def _install_destination(
         self,

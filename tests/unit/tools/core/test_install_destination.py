@@ -19,8 +19,8 @@ from assertpy import assert_that
 
 from lintro.enums.install_outcome import InstallOutcome
 from lintro.tools.core.install_context import RuntimeContext
-from lintro.tools.core.install_destination import probe_dir
-from lintro.tools.core.install_plan import InstallResult
+from lintro.tools.core.install_destination import clear_probe_cache
+from lintro.tools.core.install_plan import InstallPlan, InstallResult
 from lintro.tools.core.tool_installer import (
     ToolInstaller,
     is_resolved_command_discoverable,
@@ -28,20 +28,35 @@ from lintro.tools.core.tool_installer import (
 from lintro.tools.core.tool_registry import ManifestRegistry, ManifestTool
 
 _REAL_RUN = subprocess.run
-_PY_SCRIPTS_QUERY = (
-    "python3",
-    "-c",
-    "import sysconfig; print(sysconfig.get_path('scripts'))",
-)
+_UV_PIP_LIST = ("uv", "pip", "list", "--offline", "-v")
 _ENV_OVERRIDES = (
     "CARGO_HOME",
     "CARGO_INSTALL_ROOT",
     "VIRTUAL_ENV",
     "CONDA_PREFIX",
+    "UV_PYTHON",
+    "UV_SYSTEM_PYTHON",
+    "PIP_USER",
+    "PIP_TARGET",
+    "PIP_PREFIX",
 )
 
+
+@dataclass(frozen=True)
+class _Reply:
+    """A manager query's output when stderr matters.
+
+    Attributes:
+        stdout: Standard output.
+        stderr: Standard error (where uv logs with ``-v``).
+    """
+
+    stdout: str = ""
+    stderr: str = ""
+
+
 #: Answers a fake manager gives to each read-only query.
-_DEFAULT_ANSWERS: dict[tuple[str, ...], str | int | BaseException] = {
+_DEFAULT_ANSWERS: dict[tuple[str, ...], str | int | BaseException | _Reply] = {
     ("brew", "--prefix"): "/fake/homebrew",
     ("npm", "config", "get", "prefix"): "/fake/npm-prefix",
     ("pnpm", "bin", "-g"): "/fake/pnpm-home/bin",
@@ -49,7 +64,13 @@ _DEFAULT_ANSWERS: dict[tuple[str, ...], str | int | BaseException] = {
     ("yarn", "global", "bin"): "/fake/yarn/bin",
     ("uv", "tool", "dir", "--bin"): "/fake/uv-tools/bin",
     ("pipx", "environment", "--value", "PIPX_BIN_DIR"): "/fake/pipx/bin",
-    _PY_SCRIPTS_QUERY: "/fake/py/bin",
+    # An interpreter's scripts dir is not where pip installs under --user,
+    # PIP_* variables or a pip.conf, so lintro must not ask for it.
+    (
+        "python3",
+        "-c",
+        "import sysconfig; print(sysconfig.get_path('scripts'))",
+    ): "/fake/py/bin",
 }
 
 
@@ -60,28 +81,32 @@ class _FakeMachine:
     Attributes:
         home: Directory returned by ``Path.home()``.
         workdir: Process working directory.
-        answers: What each manager query does: stdout text, a non-zero exit
-            code (int), or an exception to raise.
+        answers: What each manager query does: stdout text, a ``_Reply``, a
+            non-zero exit code (int), or an exception to raise.
         queries: Every manager query seen, in order.
+        query_cwds: The ``cwd`` each query ran with, by query.
+        paths: What ``shutil.which`` resolves each program to.
     """
 
     home: Path
     workdir: Path
-    answers: dict[tuple[str, ...], str | int | BaseException] = field(
+    answers: dict[tuple[str, ...], str | int | BaseException | _Reply] = field(
         default_factory=lambda: dict(_DEFAULT_ANSWERS),
     )
     queries: list[tuple[str, ...]] = field(default_factory=list)
+    query_cwds: dict[tuple[str, ...], str | None] = field(default_factory=dict)
+    paths: dict[str, str] = field(default_factory=dict)
 
     def run(
         self,
         argv: Sequence[str],
-        **_kwargs: Any,
+        **kwargs: Any,
     ) -> subprocess.CompletedProcess[str]:
         """Answer manager queries; every install command exits zero.
 
         Args:
             argv: Command argv.
-            **_kwargs: Ignored subprocess options.
+            **kwargs: Subprocess options; ``cwd`` is recorded.
 
         Returns:
             Completed process.
@@ -93,24 +118,26 @@ class _FakeMachine:
         if key not in self.answers:
             return subprocess.CompletedProcess(argv, 0, "", "")
         self.queries.append(key)
+        self.query_cwds[key] = kwargs.get("cwd")
         answer = self.answers[key]
         if isinstance(answer, BaseException):
             raise answer
         if isinstance(answer, int):
             return subprocess.CompletedProcess(argv, answer, "", "boom")
+        if isinstance(answer, _Reply):
+            return subprocess.CompletedProcess(argv, 0, answer.stdout, answer.stderr)
         return subprocess.CompletedProcess(argv, 0, f"{answer}\n", "")
 
+    def which(self, name: str) -> str | None:
+        """Resolve programs from :attr:`paths`; the installed tool is absent.
 
-def _which(name: str) -> str | None:
-    """Resolve the package managers by name; the installed tool is absent.
+        Args:
+            name: Executable name.
 
-    Args:
-        name: Executable name.
-
-    Returns:
-        *name* for a manager the fake answers for, otherwise None.
-    """
-    return name if any(name == key[0] for key in _DEFAULT_ANSWERS) else None
+        Returns:
+            The configured location, or None.
+        """
+        return self.paths.get(name)
 
 
 @pytest.fixture
@@ -132,17 +159,19 @@ def machine(
     workdir.mkdir()
     monkeypatch.chdir(workdir)
     fake = _FakeMachine(home=home, workdir=workdir)
+    fake.paths = {key[0]: key[0] for key in _DEFAULT_ANSWERS}
+    fake.paths["rustup"] = str(home / ".cargo" / "bin" / "rustup")
     for var in _ENV_OVERRIDES:
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
     monkeypatch.setattr("lintro.tools.core.install_destination._IS_WINDOWS", False)
-    probe_dir.cache_clear()
+    clear_probe_cache()
     with (
-        patch("lintro.tools.core.tool_installer.shutil.which", side_effect=_which),
+        patch("lintro.tools.core.tool_installer.shutil.which", side_effect=fake.which),
         patch("lintro.tools.core.tool_installer.subprocess.run", side_effect=fake.run),
     ):
         yield fake
-    probe_dir.cache_clear()
+    clear_probe_cache()
 
 
 def _tool(name: str, install_type: str) -> ManifestTool:
@@ -218,19 +247,6 @@ def _assert_unknown(result: InstallResult, where: str) -> None:
     [
         ("binary", "brew install hadolint", {}, "/fake/homebrew/bin"),
         ("pip", "brew install semgrep", {}, "/fake/homebrew/bin"),
-        (
-            "pip",
-            "uv pip install 'tool>=1'",
-            {"VIRTUAL_ENV": "/venvs/a"},
-            "/venvs/a/bin",
-        ),
-        (
-            "pip",
-            "uv pip install tool",
-            {"CONDA_PREFIX": "/conda/env"},
-            "/conda/env/bin",
-        ),
-        ("pip", "python3 -m pip install tool", {}, "/fake/py/bin"),
         ("cargo", "cargo install tool", {}, "{home}/.cargo/bin"),
         ("cargo", "cargo install tool --root /roots/r", {}, "/roots/r/bin"),
         ("cargo", "cargo install --root=rel tool", {}, "{work}/rel/bin"),
@@ -242,12 +258,11 @@ def _assert_unknown(result: InstallResult, where: str) -> None:
             {"CARGO_INSTALL_ROOT": "/ir"},
             "/r/bin",
         ),
-        ("rustup", "rustup component add clippy", {}, "{home}/.cargo/bin"),
         (
             "rustup",
             "rustup component add clippy",
-            {"CARGO_INSTALL_ROOT": "/ir", "CARGO_HOME": "/ch"},
-            "/ch/bin",
+            {"CARGO_INSTALL_ROOT": "/ir"},
+            "{home}/.cargo/bin",
         ),
         ("npm", "npm install -g tool@1.0.0", {}, "/fake/npm-prefix/bin"),
         (
@@ -270,16 +285,12 @@ def _assert_unknown(result: InstallResult, where: str) -> None:
     ids=[
         "binary-brew",
         "pip-brew",
-        "uv-pip-virtual-env",
-        "uv-pip-conda",
-        "python-m-pip",
         "cargo-default",
         "cargo-root",
         "cargo-relative-root",
         "cargo-install-root-env",
         "cargo-home",
         "cargo-root-beats-env",
-        "rustup-default",
         "rustup-ignores-install-root",
         "npm-global",
         "pnpm-global",
@@ -348,7 +359,7 @@ def test_windows_npm_global_bin_is_the_prefix_itself(
     machine: _FakeMachine,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """On Windows npm links global executables into the prefix, not prefix/bin.
+    """On Windows npm links into the prefix itself, and no POSIX line is shown.
 
     Args:
         machine: Fake PATH lookups and subprocesses.
@@ -359,39 +370,267 @@ def test_windows_npm_global_bin_is_the_prefix_itself(
 
     result = _install("npm install -g tool@1.0.0", install_type="npm")
 
-    _assert_names(result, "/fake/appdata/npm")
+    assert_that(result.outcome).is_equal_to(InstallOutcome.NOT_DISCOVERABLE)
+    assert_that(result.message).contains("expected under /fake/appdata/npm,")
+    assert_that(result.message).ends_with("or add it to PATH")
+    assert_that(result.message).does_not_contain("export")
 
 
-def test_uv_pip_names_the_nearest_project_venv(machine: _FakeMachine) -> None:
-    """Without VIRTUAL_ENV, uv targets the nearest .venv above the cwd.
+def _make_venv(path: Path) -> Path:
+    """Create the marker file uv's virtual environments carry.
+
+    Args:
+        path: Environment root.
+
+    Returns:
+        *path*.
+    """
+    path.mkdir(parents=True)
+    (path / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    return path
+
+
+def test_uv_pip_names_the_environment_uv_selects(
+    machine: _FakeMachine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Uv skips a VIRTUAL_ENV that does not exist; lintro follows uv.
+
+    ``uv pip list -v`` prints the environment relative to the directory it
+    ran in, which must be the install's own directory.
 
     Args:
         machine: Fake PATH lookups and subprocesses.
+        monkeypatch: Pytest monkeypatch fixture.
     """
-    venv = machine.workdir / ".venv"
-    venv.mkdir()
-    (venv / "pyvenv.cfg").write_text("home = /usr/bin\n")
-    nested = machine.workdir / "pkg" / "sub"
-    nested.mkdir(parents=True)
+    monkeypatch.setenv("VIRTUAL_ENV", str(machine.workdir / "missing"))
+    project = machine.workdir / "project"
+    venv = _make_venv(project / ".venv")
+    machine.answers[_UV_PIP_LIST] = _Reply(
+        stderr="DEBUG Failed to inspect Python interpreter\n"
+        "DEBUG Using Python 3.14.6 environment at: .venv\n",
+    )
 
-    result = _install("uv pip install tool", install_type="pip", cwd=nested)
+    result = _install("uv pip install tool", install_type="pip", cwd=project)
 
     _assert_names(result, f"{venv}/bin")
+    assert_that(machine.query_cwds[_UV_PIP_LIST]).is_equal_to(str(project))
 
 
-def test_cargo_config_install_root_is_honoured(machine: _FakeMachine) -> None:
-    """``install.root`` in .cargo/config.toml beats CARGO_HOME, relative to it.
+def test_uv_pip_names_an_absolute_conda_environment(machine: _FakeMachine) -> None:
+    """A conda environment uv selects is named by its absolute path.
 
     Args:
         machine: Fake PATH lookups and subprocesses.
     """
-    config_dir = machine.workdir / ".cargo"
-    config_dir.mkdir()
-    (config_dir / "config.toml").write_text('[install]\nroot = "tools"\n')
+    conda = machine.workdir / "conda" / "env"
+    (conda / "conda-meta").mkdir(parents=True)
+    machine.answers[_UV_PIP_LIST] = _Reply(
+        stderr=f"Using Python 3.12.1 environment at: {conda}\n",
+    )
+
+    result = _install("uv pip install tool", install_type="pip")
+
+    _assert_names(result, f"{conda}/bin")
+
+
+@pytest.mark.parametrize(
+    ("env", "stderr"),
+    [
+        ({"UV_PYTHON": "/usr/bin/python3"}, "environment at: .venv"),
+        ({"UV_SYSTEM_PYTHON": "1"}, "environment at: .venv"),
+        (
+            {},
+            "DEBUG Using `--target` directory at `/t`\n"
+            "DEBUG Using Python 3.14.6 environment at: .venv",
+        ),
+        (
+            {},
+            "DEBUG Using `--prefix` directory at `/p`\n"
+            "DEBUG Using Python 3.14.6 environment at: .venv",
+        ),
+        ({}, "Using Python 3.14.6 environment at: not-a-venv"),
+        (
+            {},
+            "Using Python 3.14.6 environment at: .venv\n"
+            "Using Python 3.14.6 environment at: other",
+        ),
+        ({}, "error: No virtual environment found"),
+    ],
+    ids=[
+        "uv-python-env",
+        "uv-system-python-env",
+        "configured-target",
+        "configured-prefix",
+        "not-a-venv",
+        "two-environments",
+        "no-environment",
+    ],
+)
+def test_uv_pip_destination_uv_does_not_pin_down_is_unknown(
+    machine: _FakeMachine,
+    monkeypatch: pytest.MonkeyPatch,
+    env: dict[str, str],
+    stderr: str,
+) -> None:
+    """Uv variables, configured targets and unclear answers are not guessed.
+
+    ``VIRTUAL_ENV`` is set to a real environment throughout, so a lintro that
+    read it directly would name a directory uv did not use.
+
+    Args:
+        machine: Fake PATH lookups and subprocesses.
+        monkeypatch: Pytest monkeypatch fixture.
+        env: uv variables to set.
+        stderr: What ``uv pip list -v`` logs.
+    """
+    monkeypatch.setenv("VIRTUAL_ENV", str(_make_venv(machine.workdir / "active")))
+    _make_venv(machine.workdir / ".venv")
+    (machine.workdir / "not-a-venv").mkdir()
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    machine.answers[_UV_PIP_LIST] = _Reply(stderr=f"{stderr}\n")
+
+    result = _install("uv pip install tool", install_type="pip")
+
+    _assert_unknown(result, "where uv installed it")
+
+
+def _write_cargo_config(directory: Path, name: str, root: str) -> None:
+    """Write a cargo config file that sets ``install.root``.
+
+    Args:
+        directory: Directory to write into.
+        name: File name, ``config`` or ``config.toml``.
+        root: Value for ``install.root``.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / name).write_text(f'[install]\nroot = "{root}"\n')
+
+
+def test_cargo_install_reads_only_cargo_home_config(
+    machine: _FakeMachine,
+    tmp_path: Path,
+) -> None:
+    """``cargo install`` ignores a project ``.cargo/config.toml``.
+
+    Args:
+        machine: Fake PATH lookups and subprocesses.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    _write_cargo_config(machine.workdir / ".cargo", "config.toml", "/project-root")
+    _write_cargo_config(machine.home / ".cargo", "config.toml", f"{tmp_path}/home-root")
 
     result = _install("cargo install tool", install_type="cargo")
 
-    _assert_names(result, f"{machine.workdir}/tools/bin")
+    _assert_names(result, f"{tmp_path}/home-root/bin")
+
+
+def test_cargo_legacy_config_beats_config_toml(
+    machine: _FakeMachine,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """With both files in CARGO_HOME, cargo reads the legacy ``config``.
+
+    Args:
+        machine: Fake PATH lookups and subprocesses.
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    cargo_home = tmp_path / "cargo-home"
+    monkeypatch.setenv("CARGO_HOME", str(cargo_home))
+    _write_cargo_config(cargo_home, "config.toml", f"{tmp_path}/from-toml")
+    _write_cargo_config(cargo_home, "config", f"{tmp_path}/from-legacy")
+
+    result = _install("cargo install tool", install_type="cargo")
+
+    _assert_names(result, f"{tmp_path}/from-legacy/bin")
+    assert_that(machine.queries).is_empty()
+
+
+@pytest.mark.parametrize(
+    ("command", "root"),
+    [
+        ("cargo install tool", "relative/"),
+        ("cargo install --path . tool", "/abs"),
+        ("cargo install --config install.root='/x' tool", "/abs"),
+    ],
+    ids=["relative-root", "path-install", "config-override"],
+)
+def test_cargo_root_lintro_cannot_pin_down_is_unknown(
+    machine: _FakeMachine,
+    command: str,
+    root: str,
+) -> None:
+    """A relative root, a ``--path`` install or ``--config`` is not guessed.
+
+    Args:
+        machine: Fake PATH lookups and subprocesses.
+        command: Install command that ran.
+        root: ``install.root`` in ``$CARGO_HOME/config.toml``.
+    """
+    _write_cargo_config(machine.home / ".cargo", "config.toml", root)
+
+    result = _install(command, install_type="cargo")
+
+    _assert_unknown(result, "where cargo installed it")
+
+
+def test_homebrew_rustup_names_its_keg(
+    machine: _FakeMachine,
+    tmp_path: Path,
+) -> None:
+    """Keg-only Homebrew rustup keeps its proxies in the keg's bin.
+
+    Args:
+        machine: Fake PATH lookups and subprocesses.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    cellar = tmp_path / "Cellar" / "rustup" / "1.28.2"
+    (cellar / "bin").mkdir(parents=True)
+    (cellar / "bin" / "rustup").write_text("")
+    opt = tmp_path / "opt" / "rustup"
+    opt.parent.mkdir()
+    opt.symlink_to(cellar)
+    machine.paths["rustup"] = str(opt / "bin" / "rustup")
+    machine.answers["brew", "--prefix", "rustup"] = str(opt)
+
+    result = _install("rustup component add rustfmt", install_type="rustup")
+
+    _assert_names(result, f"{opt}/bin")
+
+
+@pytest.mark.parametrize(
+    ("rustup_path", "brew_prefix"),
+    [
+        (None, "/opt/homebrew/opt/rustup"),
+        ("/usr/bin/rustup", "/opt/homebrew/opt/rustup"),
+        ("/usr/bin/rustup", 1),
+    ],
+    ids=["not-on-path", "outside-keg", "brew-fails"],
+)
+def test_rustup_outside_known_layouts_is_unknown(
+    machine: _FakeMachine,
+    rustup_path: str | None,
+    brew_prefix: str | int,
+) -> None:
+    """A rustup in neither CARGO_HOME/bin nor its Homebrew keg is not guessed.
+
+    Args:
+        machine: Fake PATH lookups and subprocesses.
+        rustup_path: Where ``rustup`` resolves, or None.
+        brew_prefix: ``brew --prefix rustup`` answer.
+    """
+    if rustup_path is None:
+        del machine.paths["rustup"]
+    else:
+        machine.paths["rustup"] = rustup_path
+    machine.answers["brew", "--prefix", "rustup"] = brew_prefix
+
+    result = _install("rustup component add rustfmt", install_type="rustup")
+
+    _assert_unknown(result, "where rustup installed it")
 
 
 @pytest.mark.parametrize(
@@ -417,19 +656,18 @@ def test_cargo_config_install_root_is_honoured(machine: _FakeMachine) -> None:
         ("pnpm add -g t", 1, {}, "where pnpm installed it"),
         ("bun add -g t", "relative/bin", {}, "where bun installed it"),
         ("pip install t", None, {}, "where pip installed it"),
-        ("python3 -m pip install t", 1, {}, "where pip installed it"),
-        ("python3 -m pip install --user t", None, {}, "where pip installed it"),
+        ("python3 -m pip install t", None, {}, "where pip installed it"),
+        (
+            "python3 -m pip install t",
+            None,
+            {"PIP_USER": "1", "PIP_TARGET": "/t", "PIP_PREFIX": "/p"},
+            "where pip installed it",
+        ),
         ("uv pip install t", None, {}, "where uv installed it"),
         (
             "uv pip install --system t",
             None,
             {"VIRTUAL_ENV": "/v"},
-            "where uv installed it",
-        ),
-        (
-            "uv pip install t",
-            None,
-            {"VIRTUAL_ENV": "venv"},
             "where uv installed it",
         ),
         (
@@ -459,11 +697,10 @@ def test_cargo_config_install_root_is_honoured(machine: _FakeMachine) -> None:
         "pnpm-fails",
         "bun-relative",
         "bare-pip",
-        "python-m-pip-fails",
-        "python-m-pip-user",
+        "python-m-pip",
+        "python-m-pip-env",
         "uv-pip-no-env",
         "uv-pip-system",
-        "uv-pip-relative-venv",
         "cargo-home-escape",
         "cargo-install-root-relative",
         "sudo-wrapper",
@@ -507,8 +744,8 @@ def test_unparseable_cargo_config_is_unknown(machine: _FakeMachine) -> None:
     Args:
         machine: Fake PATH lookups and subprocesses.
     """
-    config_dir = machine.workdir / ".cargo"
-    config_dir.mkdir()
+    config_dir = machine.home / ".cargo"
+    config_dir.mkdir(parents=True)
     (config_dir / "config.toml").write_text("[install\nroot = \n")
 
     result = _install("cargo install tool", install_type="cargo")
@@ -576,6 +813,23 @@ def test_each_manager_is_queried_once_per_run(machine: _FakeMachine) -> None:
     )
     assert_that(messages[2]).contains("/fake/homebrew/bin")
     assert_that(messages[3]).contains("/fake/npm-prefix/bin")
+
+
+def test_each_install_batch_asks_the_manager_again(machine: _FakeMachine) -> None:
+    """A later batch in the same process sees a prefix changed in between.
+
+    Args:
+        machine: Fake PATH lookups and subprocesses.
+    """
+    installer = ToolInstaller(ManifestRegistry.load(), RuntimeContext.detect())
+    plan = InstallPlan(to_install=[(_tool("tool", "binary"), "brew install tool")])
+
+    first = installer.execute(plan)
+    machine.answers["brew", "--prefix"] = "/moved/homebrew"
+    second = installer.execute(plan)
+
+    _assert_names(first[0], "/fake/homebrew/bin")
+    _assert_names(second[0], "/moved/homebrew/bin")
 
 
 @pytest.mark.parametrize("exists", [True, False], ids=["present", "missing"])
