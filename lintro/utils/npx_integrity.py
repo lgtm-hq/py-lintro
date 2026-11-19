@@ -249,6 +249,56 @@ class NpxIntegrityError(UnsafeCommandError):
     after_run: bool = False
 
 
+class NpxInstallError(NpxIntegrityError):
+    """npx exited with an error before it finished installing the pin (#3530).
+
+    The fresh entry has no ``package-lock.json`` because npm never wrote it,
+    so the tool did not run from it: the run is incomplete, an install
+    failure rather than a cache lintro refuses to trust. It stays an
+    :class:`NpxIntegrityError` so every caller reports it as an execution
+    failure with incomplete findings.
+    """
+
+
+@dataclass
+class NpxExit:
+    """How the npx process a caller spawned ended, recorded by that caller.
+
+    The post-run check reads it to tell a failed install from a tampered one
+    (#3530): only a non-zero exit explains a fresh entry without a lockfile.
+
+    Attributes:
+        returncode: npx's exit status, or None until the caller records it.
+        stderr: What npx printed on stderr (or its merged output).
+    """
+
+    returncode: int | None = None
+    stderr: str = ""
+
+    def record(self, returncode: int | None, stderr: str | None) -> None:
+        """Record npx's exit status and error output.
+
+        Args:
+            returncode: npx's exit status.
+            stderr: npx's error output, if captured.
+        """
+        self.returncode = returncode
+        self.stderr = stderr or ""
+
+    @property
+    def failed(self) -> bool:
+        """Report whether npx exited with an error.
+
+        Returns:
+            True for a recorded non-zero exit status.
+        """
+        return self.returncode not in (None, 0)
+
+
+#: Longest tail of npx's error output quoted in an install failure.
+_NPX_ERROR_TAIL_CHARS: int = 2000
+
+
 class Refusal(str):
     """A reason an entry cannot be trusted that reinstalling it will not fix.
 
@@ -1585,6 +1635,7 @@ def check_unchanged(
     before: CacheState,
     *,
     timeout: float | None = None,
+    npx_exit: NpxExit | None = None,
 ) -> None:
     """Require a cache to hold what it held before the spawn, after the run.
 
@@ -1600,8 +1651,14 @@ def check_unchanged(
         cache: The ``--cache`` the npx command carried.
         before: What :func:`verified_cache` found.
         timeout: The tool's timeout in seconds, if known.
+        npx_exit: How npx ended, when the caller recorded it. A fresh entry
+            without a lockfile after npx exited with an error is an install
+            failure; after any other exit it is refused like any other
+            entry that does not match its lockfile.
 
     Raises:
+        NpxInstallError: npx exited with an error and left a fresh entry
+            it never finished installing (#3530).
         NpxIntegrityError: An entry or the cache changed during the run, a new
             entry does not match its lockfile, or a ``node_modules`` appeared
             above an entry.
@@ -1625,5 +1682,44 @@ def check_unchanged(
     for entry in _entries(real, ran=True):
         if entry.name not in before.entries:
             _await_npm(entry, real, deadline)
+            if npx_exit is not None and npx_exit.failed and install_unfinished(entry):
+                raise NpxInstallError(_install_failed_message(entry, npx_exit))
             _verified(entry, real, cache, fresh=True)
     _modules_above(real, ran=True)
+
+
+def install_unfinished(entry: Path) -> bool:
+    """Report whether npm never finished installing into a fresh entry.
+
+    npm writes ``package-lock.json`` last, once the tree is in place, and
+    npx runs the tool only after that. Without it, the install stopped.
+
+    Args:
+        entry: A ``_npx`` entry that appeared during the run.
+
+    Returns:
+        True when the entry has no ``package-lock.json`` at all (not even a
+        link), so npm never wrote one.
+    """
+    return not os.path.lexists(entry / "package-lock.json")
+
+
+def _install_failed_message(entry: Path, npx_exit: NpxExit) -> str:
+    """Explain an npx install that failed, with npx's own error output.
+
+    Args:
+        entry: The unfinished ``_npx`` entry.
+        npx_exit: How npx ended.
+
+    Returns:
+        The message.
+    """
+    said = npx_exit.stderr.strip()[-_NPX_ERROR_TAIL_CHARS:]
+    detail = f" npx said:\n{said}" if said else ""
+    return (
+        f"npx exited with code {npx_exit.returncode} before it finished "
+        f"installing the pinned package into {entry} (no package-lock.json "
+        "was written), so the tool did not run and its findings are "
+        "incomplete. Run lintro again; npx reinstalls the pin."
+        f"{detail}"
+    )

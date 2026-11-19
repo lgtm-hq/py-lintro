@@ -25,7 +25,7 @@ from lintro.tools.core.npx_cache import (
     npx_cache_dir,
     repair_npx_cache,
 )
-from lintro.utils import file_cache
+from lintro.utils import file_cache, npx_aside
 from lintro.utils.npx_integrity import Refusal
 from tests.npx_entries import tool_package, write_npx_entry
 
@@ -732,13 +732,13 @@ def test_repair_never_deletes_a_lock_npx_took_on_a_recreated_entry(
     """
     bad = _entry(cache, version="1.0.0")
     npx_lock = bad / "concurrency.lock"
-    delete = npx_cache._delete
+    delete = npx_aside.delete_aside
 
     def npx_recreates_then_delete(path: Path) -> None:
         npx_lock.mkdir(parents=True)
         delete(path)
 
-    monkeypatch.setattr(npx_cache, "_delete", npx_recreates_then_delete)
+    monkeypatch.setattr(npx_aside, "delete_aside", npx_recreates_then_delete)
 
     _repair(cache)
 

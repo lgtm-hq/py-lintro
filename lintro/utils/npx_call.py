@@ -64,10 +64,16 @@ from pathlib import Path
 
 from loguru import logger
 
-from lintro.utils.npx_install_lock import install_lock
+from lintro.utils.npx_aside import set_aside
+from lintro.utils.npx_install_lock import HeldInstallLock, install_lock
 from lintro.utils.npx_integrity import (
+    CacheState,
+    NpxExit,
+    NpxInstallError,
     NpxIntegrityError,
+    cache_entries,
     check_unchanged,
+    install_unfinished,
     verified_cache,
     wait_limit,
 )
@@ -303,6 +309,7 @@ def npx_shell_safe_command(
     windows: bool | None = None,
     inline_limit: int = NPX_INLINE_SCRIPT_LIMIT,
     timeout: float | None = None,
+    npx_exit: NpxExit | None = None,
 ) -> Iterator[Argv]:
     """Yield the argv to spawn so npm's shell sees every argument literally.
 
@@ -324,16 +331,28 @@ def npx_shell_safe_command(
     under the shared lock and runs without it. Waiting for that lock and for a
     concurrent npx's lock on the cache counts against *timeout*.
 
+    The cache is checked after the run only when the context exits normally,
+    once npx has exited. An exception from the block (a timeout, a failed
+    spawn) propagates unchanged, with no check: npx was stopped before it
+    finished, so there is no result to vouch for, and judging the entry it
+    was still writing would report that as tampering (#3530). A cold install
+    that npx left without its lockfile, after such an exception or after npx
+    exited with an error, is removed under the exclusive lock.
+
     Args:
         cmd: Command about to be spawned.
         windows: Whether npx runs on Windows; defaults to ``os.name == "nt"``.
         inline_limit: Longest script, in bytes, passed inline.
         timeout: The tool's timeout in seconds, which bounds that wait.
+        npx_exit: Where the caller records how npx exited, before leaving
+            the context, so a failed install is told from a tampered one.
 
     Yields:
         Argv: The argv to spawn.
 
     Raises:
+        NpxInstallError: npx exited with an error before it finished a cold
+            install; the run is incomplete, not refused as tampered.
         NpxIntegrityError: The cache failed its check before the spawn, or
             after the run, when it is marked after_run, or another lintro
             run's first install held the per-pin lock past *timeout*
@@ -350,6 +369,7 @@ def npx_shell_safe_command(
     with install_lock(cache, shared=True, deadline=deadline):
         before = verified_cache(cache, timeout=_remaining(deadline))
     with contextlib.ExitStack() as cold_install:
+        installing: HeldInstallLock | None = None
         if not before.entries:
             # A cold pin: install it under the exclusive lock, held until the
             # run is checked, so no other lintro run sees npx's half-written
@@ -365,13 +385,65 @@ def npx_shell_safe_command(
             else:
                 # Last check before npx installs: the lock is still ours.
                 held.check()
-        with _quoted_argv(cmd, windows=windows, inline_limit=inline_limit) as argv:
-            yield argv
+                installing = held
+        finished = False
         try:
-            check_unchanged(cache, before, timeout=timeout)
+            with _quoted_argv(cmd, windows=windows, inline_limit=inline_limit) as argv:
+                yield argv
+            finished = True
+        finally:
+            if not finished:
+                # npx did not finish: it timed out, could not start, or lintro
+                # was interrupted. There is no result to check; the caller
+                # reports the failure itself. An install npx left half-written
+                # goes, so the next run, maybe one waiting for this lock,
+                # starts cold instead of refusing it (#3530).
+                _discard_unfinished(cache, before, installing)
+        try:
+            check_unchanged(cache, before, timeout=timeout, npx_exit=npx_exit)
+        except NpxInstallError:
+            _discard_unfinished(cache, before, installing)
+            raise
         except NpxIntegrityError as exc:
             exc.after_run = True
             raise
+
+
+def _discard_unfinished(
+    cache: Path,
+    before: CacheState,
+    installing: HeldInstallLock | None,
+) -> None:
+    """Remove the entries this run's npx left without a lockfile.
+
+    Only a cold install, under lintro's exclusive per-pin lock, is cleaned
+    up: no other lintro run can be installing into the cache then. An entry
+    that has its lockfile stays, for the next run to verify.
+
+    Args:
+        cache: The ``--cache`` the npx command carried.
+        before: What the cache held before the spawn.
+        installing: The exclusive lock this run installs under, or None for
+            a warm run.
+    """
+    if installing is None:
+        return
+    try:
+        installing.check()
+        entries = cache_entries(Path(os.path.realpath(cache)))
+    except NpxIntegrityError as exc:
+        logger.warning(f"lintro left npx's unfinished install in {cache}: {exc}")
+        return
+    for entry in entries:
+        if entry.name in before.entries or not install_unfinished(entry):
+            continue
+        try:
+            set_aside(entry)
+        except OSError as exc:
+            logger.warning(
+                f"lintro could not remove npx's unfinished install {entry} "
+                f"({exc}); the next lintro run removes it",
+            )
 
 
 def _remaining(deadline: float) -> float:

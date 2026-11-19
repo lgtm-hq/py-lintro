@@ -20,6 +20,7 @@ from lintro.exceptions.errors import UnsafeCommandError
 from lintro.models.core.subprocess_result import SubprocessResult as SubprocessResult
 from lintro.plugins.subprocess_failure import format_subprocess_failure
 from lintro.utils.npx_call import npx_child_env, npx_shell_safe_command
+from lintro.utils.npx_integrity import NpxExit
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -322,20 +323,25 @@ def run_subprocess(
 
     # npx runs the tool through ``sh -c``; quote its arguments, and keep any
     # script file the long form needs until the process has finished (#3439).
-    spawn_scope = contextlib.ExitStack()
+    # The context sees any exception from the run, so a timeout is reported
+    # as a timeout rather than checked as a finished install (#3530).
+    npx_exit = NpxExit()
     try:
-        spawn_cmd = spawn_scope.enter_context(
-            npx_shell_safe_command(cmd, timeout=timeout),
-        )
-        result = subprocess.run(  # nosec B603 - args list, shell=False
-            spawn_cmd,
-            capture_output=True,
-            text=True,
+        with npx_shell_safe_command(
+            cmd,
             timeout=timeout,
-            cwd=cwd,
-            env=effective_env,
-            stdin=stdin,
-        )
+            npx_exit=npx_exit,
+        ) as spawn_cmd:
+            result = subprocess.run(  # nosec B603 - args list, shell=False
+                spawn_cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=cwd,
+                env=effective_env,
+                stdin=stdin,
+            )
+            npx_exit.record(result.returncode, result.stderr)
 
         combined = (result.stdout or "") + (result.stderr or "")
         if result.returncode != 0:
@@ -393,8 +399,6 @@ def run_subprocess(
             f"Command not found: {cmd[0]}. "
             f"Please ensure it is installed and in your PATH.",
         ) from e
-    finally:
-        spawn_scope.close()
 
 
 def run_subprocess_streaming(
@@ -449,8 +453,13 @@ def run_subprocess_streaming(
 
     # npx runs the tool through ``sh -c``; quote its arguments, and keep any
     # script file the long form needs until the process has finished (#3439).
-    with npx_shell_safe_command(cmd, timeout=timeout) as spawn_cmd:
-        return _stream_subprocess(
+    npx_exit = NpxExit()
+    with npx_shell_safe_command(
+        cmd,
+        timeout=timeout,
+        npx_exit=npx_exit,
+    ) as spawn_cmd:
+        result = _stream_subprocess(
             cmd=cmd,
             spawn_cmd=spawn_cmd,
             timeout=timeout,
@@ -458,6 +467,8 @@ def run_subprocess_streaming(
             env=effective_env,
             line_handler=line_handler,
         )
+        npx_exit.record(result.returncode, result.stdout)
+    return result
 
 
 def _stream_subprocess(
