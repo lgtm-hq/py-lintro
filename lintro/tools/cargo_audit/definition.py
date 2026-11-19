@@ -19,7 +19,13 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
-from lintro.models.core.tool_outcome import Checked, NoFiles, TimedOut, ToolOutcome
+from lintro.models.core.tool_outcome import (
+    Checked,
+    NoFiles,
+    Skipped,
+    TimedOut,
+    ToolOutcome,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.cargo_audit.cargo_audit_issue import CargoAuditIssue
 from lintro.parsers.cargo_audit.cargo_audit_parser import (
@@ -45,45 +51,87 @@ CARGO_AUDIT_FILE_PATTERNS: list[str] = [CARGO_AUDIT_LOCKFILE]
 CARGO_AUDIT_SKIP_DIRS: frozenset[str] = frozenset({"vendor", "target"})
 
 
-def _is_third_party(lock_root: Path, *, base: Path) -> bool:
-    """Tell whether a lockfile directory lies inside a vendored or build tree.
+# How many excluded lockfiles the output names before summarising the rest.
+CARGO_AUDIT_EXCLUDED_SHOWN: int = 5
+
+
+def _requested_dirs(paths: list[str]) -> list[Path]:
+    """Return the directories the caller asked for, deepest first.
+
+    Args:
+        paths: Paths passed to ``check``: the user's command-line targets, or
+            the file list another caller hands over.
+
+    Returns:
+        Each path resolved, with a file replaced by its parent directory.
+    """
+    dirs = set()
+    for raw_path in paths:
+        path = Path(raw_path).resolve()
+        dirs.add(path.parent if path.is_file() else path)
+    return sorted(dirs, key=lambda d: len(d.parts), reverse=True)
+
+
+def _is_third_party(lock_root: Path, *, requested: list[Path]) -> bool:
+    """Tell whether a lockfile was discovered inside a vendored or build tree.
+
+    Only path components between the most specific requested directory and
+    the lockfile count. A directory the caller named is never excluded, even
+    when its own path runs through ``vendor/`` or ``target/``: asking for
+    ``vendor/foo`` audits ``vendor/foo``.
 
     Args:
         lock_root: Directory holding a Cargo.lock.
-        base: Execution directory; only components below it are considered,
-            so a project that itself lives under a ``target`` or ``vendor``
-            folder still audits its own lockfile.
+        requested: Requested directories, deepest first.
 
     Returns:
-        True when a directory between ``base`` and ``lock_root`` is skipped.
-        False for a lockfile at or above ``base``, or outside it, since no
-        part of its path lies below the scan root.
+        True when a directory below the deepest requested directory that
+        contains ``lock_root`` is skipped. False when no requested directory
+        contains it, since the lockfile then sits at or above the request.
     """
-    try:
-        parts = lock_root.relative_to(base).parts
-    except ValueError:
-        return False
-    return any(part in CARGO_AUDIT_SKIP_DIRS for part in parts)
+    for anchor in requested:
+        try:
+            parts = lock_root.relative_to(anchor).parts
+        except ValueError:
+            continue
+        return any(part in CARGO_AUDIT_SKIP_DIRS for part in parts)
+    return False
 
 
-def _find_lock_roots(paths: list[str], *, base: Path) -> list[Path]:
-    """Return every directory owning a Cargo.lock the given paths belong to.
+@dataclass(frozen=True)
+class _LockRoots:
+    """Lockfile directories found for a check, split by whether to audit them.
+
+    Attributes:
+        audited: Directories whose Cargo.lock is audited, sorted.
+        excluded: Directories whose Cargo.lock was discovered under a
+            ``vendor/`` or ``target/`` directory and is not audited, sorted.
+    """
+
+    audited: list[Path]
+    excluded: list[Path]
+
+
+def _find_lock_roots(files: list[str], *, requested: list[str]) -> _LockRoots:
+    """Return every directory owning a Cargo.lock the given files belong to.
 
     Each lockfile is a separate dependency resolution, so a file set spanning
     unrelated crates needs one audit per lockfile. A workspace keeps a single
     lockfile at its root, so its members all resolve to that one directory.
 
     Args:
-        paths: List of file paths to search from.
-        base: Execution directory, used to recognise vendored and build trees.
+        files: Discovered file paths to search from.
+        requested: Paths passed to ``check``, used to tell lockfiles found
+            under a vendored or build tree from ones the caller asked for.
 
     Returns:
         The distinct directories holding the nearest Cargo.lock above each
-        path, sorted for a deterministic run order. Lockfiles inside
-        ``vendor/`` or ``target/`` are left out. Empty when none is found.
+        file, sorted for a deterministic run order, split into the ones to
+        audit and the ones under ``vendor/`` or ``target/``. Both lists are
+        empty when no lockfile is found.
     """
     roots: set[Path] = set()
-    for raw_path in paths:
+    for raw_path in files:
         current = Path(raw_path).resolve()
         # If it's a file, start from its parent
         if current.is_file():
@@ -93,7 +141,34 @@ def _find_lock_roots(paths: list[str], *, base: Path) -> list[Path]:
             if (candidate / CARGO_AUDIT_LOCKFILE).exists():
                 roots.add(candidate)
                 break
-    return sorted(root for root in roots if not _is_third_party(root, base=base))
+    anchors = _requested_dirs(requested)
+    excluded = {root for root in roots if _is_third_party(root, requested=anchors)}
+    return _LockRoots(audited=sorted(roots - excluded), excluded=sorted(excluded))
+
+
+def _excluded_names(excluded: list[Path]) -> str:
+    """Name the lockfiles left out as vendored or build-tree copies.
+
+    Args:
+        excluded: Directories whose Cargo.lock was not audited.
+
+    Returns:
+        Up to ``CARGO_AUDIT_EXCLUDED_SHOWN`` lockfiles, comma-separated and
+        relative to the process directory when they lie below it, followed
+        by a count of the rest.
+    """
+    cwd = Path.cwd().resolve()
+    names = []
+    for root in excluded[:CARGO_AUDIT_EXCLUDED_SHOWN]:
+        lockfile = root / CARGO_AUDIT_LOCKFILE
+        try:
+            names.append(str(lockfile.relative_to(cwd)))
+        except ValueError:
+            names.append(str(lockfile))
+    rest = len(excluded) - len(names)
+    if rest:
+        names.append(f"and {rest} more")
+    return ", ".join(names)
 
 
 @dataclass(frozen=True)
@@ -213,7 +288,22 @@ class CargoAuditPlugin(BaseToolPlugin):
             return ctx
 
         # Audit every lockfile the filtered file list belongs to.
-        lock_roots = _find_lock_roots(ctx.files, base=Path(ctx.cwd).resolve())
+        found = _find_lock_roots(ctx.files, requested=paths)
+        lock_roots = found.audited
+        excluded = (
+            f"vendored or build-tree Cargo.lock under vendor/ or target/, "
+            f"not audited: {_excluded_names(found.excluded)}; pass that "
+            "directory to lintro to audit it"
+            if found.excluded
+            else None
+        )
+        if not lock_roots and excluded:
+            # Still a non-failing skip, but a security scanner must not claim
+            # it found no lockfile when it chose not to read one.
+            return ToolResult.from_outcome(
+                ToolOutcome(execution=Skipped(f"only {excluded}")),
+                name=self.definition.name,
+            )
         if not lock_roots:
             return ToolResult.from_outcome(
                 ToolOutcome(execution=NoFiles()),
@@ -257,6 +347,9 @@ class CargoAuditPlugin(BaseToolPlugin):
 
         # Show a root's output when it has issues or failed without them.
         shown = [run.output for run in runs if run.issues or not run.success]
+        if excluded:
+            # Keep the exclusion visible next to what was audited.
+            shown.append(f"Also found {excluded}.")
 
         return ToolResult.from_outcome(
             ToolOutcome(
