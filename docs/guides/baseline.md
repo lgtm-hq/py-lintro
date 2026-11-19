@@ -285,14 +285,24 @@ These fail-closed checks also apply without a fingerprint baseline:
   same way, and its output quotes that error.
 - OSV-Scanner reports "no package sources found" as a no-files run only when it reported
   no extraction error. It prints the same message when every lockfile it found was
-  unreadable or malformed; that run is an execution failure, never "no files". Any
-  `Error during extraction` line (an unreadable or malformed source, or a failed
-  vulnerability lookup) makes the run incomplete and keeps the findings from the sources
-  it did read, unless the source lies under an excluded path. A run without a complete
-  report (empty stdout, an error object, a `results` value that is not a list), a failed
-  exit beside a report with no vulnerabilities (including `{"results": []}`), and any
-  failed exit other than 1 are execution failures with unknown inspection. The output
-  names the reason and quotes OSV-Scanner's own message.
+  unreadable or malformed; that run is an execution failure, never "no files". An
+  `Error during extraction` line for a lockfile or manifest OSV-Scanner could not read
+  or parse, or for a failed vulnerability lookup, makes the run incomplete and keeps the
+  findings from the sources it did read. The one exception is a line that names one
+  existing file under an excluded path, matched exactly as a finding for that file would
+  be. A line whose file cannot be identified is always kept. A failed
+  transitive-dependency resolution (`extracting as transitivedependency/requirements` or
+  `.../pomxml` with `failed resolution for <path>`, for example a package that is not on
+  public PyPI) is not a skipped source: the manifest's own packages were scanned, so the
+  run stays complete and the output carries a note naming the manifest. OSV-Scanner
+  exits 127 for any logged error, so a 127 explained only by such notes or by excluded
+  files is a verdict. A run without a complete report (empty stdout, an error object, a
+  `results` value that is not a list), any other failed exit beside a report with no
+  vulnerabilities (including `{"results": []}`), and any failed exit other than 1 are
+  execution failures with unknown inspection. The output names the reason and quotes
+  OSV-Scanner's own message. OSV-Scanner does not report every source it skips: a
+  lockfile in a format version it does not support (`"lockfileVersion": 99`) is logged
+  as "found 0 packages" with no error and still reads as a complete scan.
 - commitlint reads commit messages, not files. A completed run (a clean exit or reported
   violations) counts as inspected. A failed exit with no violation (a broken
   `commitlint.config.js`) is an execution failure with unknown inspection, named with

@@ -172,3 +172,151 @@ def test_failed_vulnerability_lookup_is_not_a_clean_scan(
     assert_that(result.output).contains("connection").does_not_contain(
         str(tmp_path).lstrip(os.sep),
     )
+
+
+#: A package name no public registry has, as an internal package would be.
+_PRIVATE_PACKAGE = "zz-private-internal-pkg-xq"
+
+
+def test_private_package_beside_a_vulnerable_one_is_a_complete_scan(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """A package missing from public PyPI leaves the scan complete (#3352).
+
+    osv-scanner resolves the indirect dependencies of a requirements.txt and
+    logs an extraction error for the package it cannot find there, but the
+    listed packages are still scanned. Queries the public OSV and package
+    APIs, as the other vulnerability tests here do.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    (tmp_path / "requirements.txt").write_text(
+        f"flask==3.0.0\n{_PRIVATE_PACKAGE}==1.2.3\n",
+    )
+
+    result = get_plugin("osv_scanner").check([str(tmp_path)], {})
+
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.inspected_files).is_true()
+    assert_that(result.issues_count).is_greater_than(0)
+    assert_that(result.output).starts_with("Note: OSV-Scanner scanned").contains(
+        _PRIVATE_PACKAGE,
+    )
+
+
+def test_private_package_alone_is_a_clean_complete_scan(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """osv-scanner's exit 127 for the failed resolution is not a failure.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    (tmp_path / "requirements.txt").write_text(
+        f"six==1.16.0\n{_PRIVATE_PACKAGE}==1.2.3\n",
+    )
+
+    result = get_plugin("osv_scanner").check([str(tmp_path)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.inspected_files).is_true()
+    assert_that(result.output).contains("requirements.txt").contains(
+        _PRIVATE_PACKAGE,
+    )
+
+
+def test_private_package_with_the_network_down_is_incomplete(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+    dead_proxy: str,
+) -> None:
+    """A failed resolution beside failed lookups stays an incomplete run.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+        dead_proxy: Proxy URL on a closed local port.
+    """
+    (tmp_path / "requirements.txt").write_text(
+        f"six==1.16.0\n{_PRIVATE_PACKAGE}==1.2.3\n",
+    )
+
+    result = get_plugin("osv_scanner").check([str(tmp_path)], {})
+
+    _assert_incomplete(result)
+
+
+def test_failed_resolution_under_an_excluded_path_is_a_clean_scan(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """The exclusion reads the manifest out of ``failed resolution for``.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    (tmp_path / "vendor").mkdir()
+    (tmp_path / "vendor" / "requirements.txt").write_text(
+        f"{_PRIVATE_PACKAGE}==1.2.3\n",
+    )
+    plugin = get_plugin("osv_scanner")
+    plugin.set_options(exclude_patterns=["vendor"])
+
+    result = plugin.check([str(tmp_path)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.output).is_none()
+
+
+def test_several_malformed_lockfiles_are_an_incomplete_run(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """One extractor failing on two files is not "no files" (#3352).
+
+    osv-scanner then prints the files on tab-indented lines of their own.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    for name in ("a", "b"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "package-lock.json").write_text("not json{\n")
+
+    result = get_plugin("osv_scanner").check([str(tmp_path)], {})
+
+    _assert_incomplete(result)
+    assert_that(result.output).contains("a/package-lock.json").contains(
+        "b/package-lock.json",
+    )
+
+
+def test_excluded_directory_does_not_hide_a_sibling_with_a_colon(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """``vendor: data/package-lock.json`` is not under an excluded ``vendor/``.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    (tmp_path / "vendor").mkdir()
+    (tmp_path / "vendor: data").mkdir()
+    (tmp_path / "vendor: data" / "package-lock.json").write_text("not json{\n")
+    plugin = get_plugin("osv_scanner")
+    plugin.set_options(exclude_patterns=["vendor"])
+
+    result = plugin.check([str(tmp_path)], {})
+
+    _assert_incomplete(result)
+    assert_that(result.output).contains("vendor: data/package-lock.json")
