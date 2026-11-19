@@ -28,6 +28,7 @@ from loguru import logger
 from lintro.enums.install_context import PackageManager
 from lintro.enums.node_manager_source import NodeManagerSource
 from lintro.models.core.node_manager_commands import NodeManagerCommands
+from lintro.tools.core.install_strategies.declared_range import range_lowest_major
 
 #: Lockfile name to the manager that writes it. Ordered most-specific first so
 #: a repository mid-migration (two lockfiles present) resolves deterministically
@@ -107,9 +108,11 @@ class NodeProject:
         dependencies: Merged declared dependency specs, package name to spec
             (e.g. ``{"prettier": "^3.4.0"}``).
         yarn_berry: Whether the project uses Yarn 2 or later: the nearest
-            ``packageManager`` field names ``yarn@2`` or above, or, with no
-            yarn version declared, a ``.yarnrc.yml`` sits in the project root
-            or an ancestor inside the search boundary.
+            ``packageManager`` field names ``yarn@2`` or above (a version,
+            a range whose lowest major is 2 or more, or the ``berry``,
+            ``stable`` or ``canary`` tag), or, with no yarn version
+            declared, a ``.yarnrc.yml`` sits in the project root or an
+            ancestor inside the search boundary.
     """
 
     root: Path
@@ -295,6 +298,10 @@ def detect_node_project(start: Path | None = None) -> NodeProject | None:
     return None
 
 
+#: Yarn release channels that resolve to Yarn 2 or later.
+_BERRY_TAGS: frozenset[str] = frozenset({"berry", "stable", "canary"})
+
+
 def _is_yarn_berry(declared_field: str | None, directories: tuple[Path, ...]) -> bool:
     """Decide whether a project uses Yarn 2 or later.
 
@@ -314,10 +321,35 @@ def _is_yarn_berry(declared_field: str | None, directories: tuple[Path, ...]) ->
     """
     if declared_field is not None:
         name, _, version = declared_field.partition("@")
-        major = version.split(".", 1)[0]
-        if name.strip().lower() == PackageManager.YARN and major.isdigit():
-            return int(major) >= 2
+        if name.strip().lower() == PackageManager.YARN:
+            berry = _yarn_version_is_berry(version.strip())
+            if berry is not None:
+                return berry
     return any((directory / ".yarnrc.yml").is_file() for directory in directories)
+
+
+def _yarn_version_is_berry(version: str) -> bool | None:
+    """Read the yarn generation a ``packageManager`` version names.
+
+    Corepack accepts only an exact version here, but the field is still
+    written by hand. Yarn 1 refuses to run ``yarn global`` under any
+    ``packageManager`` that does not name its own version ("This project's
+    package.json defines packageManager: yarn@berry. However the current
+    global version of Yarn is 1.22.22"), so the tags ``berry``, ``stable``
+    and ``canary`` and ranges whose lowest major is 2 or more all mean
+    ``yarn global add`` cannot work and count as Berry.
+
+    Args:
+        version: Text after ``yarn@``, possibly with a ``+sha...`` hash.
+
+    Returns:
+        True for Berry, False for Classic, None when the text says neither.
+    """
+    lowered = version.lower()
+    if lowered in _BERRY_TAGS:
+        return True
+    major = range_lowest_major(lowered)
+    return None if major is None else major >= 2
 
 
 def _read_manifest(manifest_path: Path) -> dict[str, object]:

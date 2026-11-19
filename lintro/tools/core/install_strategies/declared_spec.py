@@ -8,7 +8,9 @@ declared ``workspace:*`` was told it "declares workspace:* but lintro
 recommends 3.9.4".
 
 Classification is by prefix and shape only. lintro does not resolve semver
-ranges itself; the project's package manager does that.
+ranges itself; the project's package manager does that. Whether a range can
+reach lintro's minimum is a separate question, answered from its bounds by
+:mod:`lintro.tools.core.install_strategies.declared_range`.
 """
 
 from __future__ import annotations
@@ -16,9 +18,14 @@ from __future__ import annotations
 import re
 
 from lintro.enums.declared_spec_kind import DeclaredSpecKind
+from lintro.tools.core.install_strategies.declared_range import (
+    COMPARATOR,
+    DETACHED_OPERATOR,
+)
 
-#: Prefixes an exact-compatible spec may carry. At most one is stripped.
-_EXACT_PREFIXES: tuple[str, ...] = ("^", "~", "=", "v")
+#: Operators an exact-compatible spec may carry. At most one is stripped,
+#: followed by at most one ``v``.
+_EXACT_OPERATORS: tuple[str, ...] = ("^", "~", "=")
 
 #: A complete ``MAJOR.MINOR.PATCH`` version, optionally with a prerelease and
 #: build suffix.
@@ -26,19 +33,8 @@ _FULL_VERSION = re.compile(
     r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?",
 )
 
-#: One node-semver comparator: an optional operator and a version that may be
-#: partial (``3``, ``3.9``) or use ``x``/``X``/``*`` wildcards.
-_COMPARATOR = re.compile(
-    r"(?:<=|>=|<|>|=|~>|~|\^)?v?"
-    r"(?:\d+|[xX*])(?:\.(?:\d+|[xX*])){0,2}"
-    r"(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?",
-)
-
 #: The separator of a hyphen range (``1.2.3 - 2.0.0``).
 _HYPHEN = "-"
-
-#: An operator separated from its version by whitespace (``>= 3.9.4``).
-_DETACHED_OPERATOR = re.compile(r"(<=|>=|<|>|=|~>|~|\^)\s+")
 
 #: Opaque forms, checked in order, with the wording used to name them.
 _OPAQUE_FORMS: tuple[tuple[tuple[str, ...], str], ...] = (
@@ -62,9 +58,9 @@ def classify_declared_spec(spec: str) -> DeclaredSpecKind:
 
     Returns:
         :attr:`DeclaredSpecKind.EXACT` for a full version with at most one
-        ``^ ~ = v`` prefix, :attr:`DeclaredSpecKind.RANGE` for any other
-        node-semver range, and :attr:`DeclaredSpecKind.OPAQUE` for everything
-        else.
+        ``^ ~ =`` operator and at most one ``v``,
+        :attr:`DeclaredSpecKind.RANGE` for any other node-semver range, and
+        :attr:`DeclaredSpecKind.OPAQUE` for everything else.
     """
     if exact_version(spec) is not None:
         return DeclaredSpecKind.EXACT
@@ -76,8 +72,11 @@ def classify_declared_spec(spec: str) -> DeclaredSpecKind:
 def exact_version(spec: str) -> str | None:
     """Return the version an exact-compatible spec names.
 
-    Exactly one leading ``^``, ``~``, ``=`` or ``v`` is removed, so ``v3.9.4``
-    names ``3.9.4`` but ``=v3.9.4`` and ``^^3.9.4`` are not exact-compatible.
+    At most one ``^``, ``~`` or ``=`` operator is removed, then at most one
+    ``v``, which is how node-semver reads them: ``v3.9.4``, ``=v3.9.4`` and
+    ``^v3.9.4`` name ``3.9.4``, while ``^^3.9.4`` and ``vv3.9.4`` are not
+    exact-compatible. Build metadata (``+build``) is dropped, because npm
+    ignores it when comparing versions.
 
     Args:
         spec: The declared spec.
@@ -86,9 +85,12 @@ def exact_version(spec: str) -> str | None:
         The bare version, or None when the spec is not exact-compatible.
     """
     candidate = spec.strip()
-    if candidate.startswith(_EXACT_PREFIXES):
+    if candidate.startswith(_EXACT_OPERATORS):
         candidate = candidate[1:].strip()
-    return candidate if _FULL_VERSION.fullmatch(candidate) else None
+    candidate = candidate.removeprefix("v")
+    if _FULL_VERSION.fullmatch(candidate) is None:
+        return None
+    return candidate.split("+", 1)[0]
 
 
 def describe_opaque_spec(spec: str) -> str:
@@ -122,10 +124,10 @@ def _is_range(spec: str) -> bool:
         joined as a hyphen range. An empty spec means any version to npm.
     """
     for alternative in spec.split("||"):
-        words = _DETACHED_OPERATOR.sub(r"\1", alternative.strip()).split()
+        words = DETACHED_OPERATOR.sub(r"\1", alternative.strip()).split()
         for position, word in enumerate(words):
             if word == _HYPHEN and 0 < position < len(words) - 1:
                 continue
-            if _COMPARATOR.fullmatch(word) is None:
+            if COMPARATOR.fullmatch(word) is None:
                 return False
     return True

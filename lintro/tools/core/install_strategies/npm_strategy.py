@@ -14,10 +14,14 @@ This deliberately mirrors runtime resolution (#1811), where a project-local
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from lintro.enums.declared_spec_kind import DeclaredSpecKind
 from lintro.enums.install_context import InstallContext, PackageManager
 from lintro.tools.core.install_strategies.base import InstallStrategy
+from lintro.tools.core.install_strategies.declared_range import (
+    range_admits_at_least,
+)
 from lintro.tools.core.install_strategies.declared_spec import (
     classify_declared_spec,
     describe_opaque_spec,
@@ -34,6 +38,9 @@ from lintro.tools.core.install_strategies.package_names import (
     ecosystem_package_name,
 )
 from lintro.tools.core.install_strategies.registry import register_strategy
+
+if TYPE_CHECKING:
+    from lintro.tools.core.manifest_models import ManifestTool
 
 
 class NpmStrategy(InstallStrategy):
@@ -67,6 +74,37 @@ class NpmStrategy(InstallStrategy):
             return None
         return "bun/npm not available (install Node.js first)"
 
+    def tool_hint(
+        self,
+        env: InstallEnvironment,
+        tool: ManifestTool,
+        *,
+        upgrade: bool,
+    ) -> str:
+        """Generate the install or upgrade command, honouring ``min_version``.
+
+        A declared range is only worth a project install when it can resolve
+        to a version lintro accepts, which is the manifest minimum, not the
+        recommendation (#2045).
+
+        Args:
+            env: The current install environment.
+            tool: Manifest entry of the tool.
+            upgrade: Whether to plan an upgrade rather than an install.
+
+        Returns:
+            Shell command string, or a manual-action message.
+        """
+        hint = self.upgrade_hint if upgrade else self.install_hint
+        return hint(
+            env,
+            tool.name,
+            tool.version,
+            tool.install_package,
+            tool.install_component,
+            min_version=tool.min_version,
+        )
+
     def install_hint(
         self,
         env: InstallEnvironment,
@@ -74,6 +112,8 @@ class NpmStrategy(InstallStrategy):
         tool_version: str,
         install_package: str | None,
         _install_component: str | None,
+        *,
+        min_version: str | None = None,
     ) -> str:
         """Generate npm install hint.
 
@@ -90,6 +130,8 @@ class NpmStrategy(InstallStrategy):
             tool_version: Expected version.
             install_package: Package name override.
             _install_component: Unused for npm.
+            min_version: Lowest version lintro accepts; a declared range
+                must be able to reach it. Defaults to *tool_version*.
 
         Returns:
             Shell command string, the manager's install-all command when a
@@ -101,7 +143,13 @@ class NpmStrategy(InstallStrategy):
         brew_hint = _brew_hint(env, tool_name, verb="install")
         if brew_hint is not None:
             return brew_hint
-        conflict = _pin_conflict(env, pkg, tool_version, upgrading=False)
+        conflict = _pin_conflict(
+            env,
+            pkg,
+            tool_version,
+            minimum=min_version or tool_version,
+            upgrading=False,
+        )
         if conflict is not None:
             return conflict
         return _node_add_command(env, pkg, tool_version, upgrading=False)
@@ -113,6 +161,8 @@ class NpmStrategy(InstallStrategy):
         tool_version: str,
         install_package: str | None,
         _install_component: str | None,
+        *,
+        min_version: str | None = None,
     ) -> str:
         """Generate npm upgrade hint (npm replaces on install).
 
@@ -129,6 +179,8 @@ class NpmStrategy(InstallStrategy):
             tool_version: Expected version.
             install_package: Package name override.
             _install_component: Unused for npm.
+            min_version: Lowest version lintro accepts; a declared range
+                must be able to reach it. Defaults to *tool_version*.
 
         Returns:
             Shell command string, or a manual-action message when the project
@@ -138,7 +190,13 @@ class NpmStrategy(InstallStrategy):
         brew_hint = _brew_hint(env, tool_name, verb="upgrade")
         if brew_hint is not None:
             return brew_hint
-        conflict = _pin_conflict(env, pkg, tool_version, upgrading=True)
+        conflict = _pin_conflict(
+            env,
+            pkg,
+            tool_version,
+            minimum=min_version or tool_version,
+            upgrading=True,
+        )
         if conflict is not None:
             return conflict
         return _node_add_command(env, pkg, tool_version, upgrading=True)
@@ -203,6 +261,7 @@ def _pin_conflict(
     package: str,
     version: str,
     *,
+    minimum: str,
     upgrading: bool,
 ) -> str | None:
     """Protect the spec a project declares from being rewritten by lintro.
@@ -212,12 +271,17 @@ def _pin_conflict(
     The spec is classified by shape (#2045):
 
     - **Exact-compatible** (``3.9.4``, ``^3.9.4``, ``~3.9.4``, ``=3.9.4``,
-      ``v3.9.4``; one prefix stripped once) is compared with lintro's version.
+      ``v3.9.4``, ``^v3.9.4``, ``3.9.4+build``; one operator and one ``v``
+      stripped, build metadata dropped) is compared with lintro's version.
       A different version is a conflict that needs an explicit decision.
-    - **Range** (``>=3.9.4``, ``3.9.x``, ``*``, ``||`` unions) is never a
-      conflict: the project's range governs. The install path installs the
-      project's dependencies and lets the resolver satisfy it. The upgrade
-      path does not rewrite the range either; it asks for a decision.
+    - **Range** (``>=3.9.4``, ``3.9.x``, ``*``, ``||`` unions) that can
+      resolve to *minimum* or later is not a conflict: the project's range
+      governs. The install path installs the project's dependencies and lets
+      the resolver satisfy it. The upgrade path does not rewrite the range
+      either; it asks for a decision. A range whose upper bound is below
+      *minimum* (``2.x``, ``<3``), or one whose bounds cannot be read, is a
+      conflict and nothing runs: a project install would only end with a
+      version lintro rejects.
     - **Opaque** (``workspace:``, ``npm:`` aliases, git and tarball URLs,
       local paths, dist-tags) is never called a conflict. lintro names the
       form and does not override it.
@@ -236,6 +300,7 @@ def _pin_conflict(
         env: The current install environment.
         package: npm package name.
         version: Version lintro recommends.
+        minimum: Lowest version lintro accepts.
         upgrading: Whether the caller is planning an upgrade of an already
             installed tool rather than a first install.
 
@@ -266,6 +331,17 @@ def _pin_conflict(
             f"in package.json; lintro will not override it."
         )
     if kind is DeclaredSpecKind.RANGE:
+        admits = range_admits_at_least(declared, minimum)
+        if admits is not True:
+            return _range_conflict(
+                package,
+                declared,
+                excluded=admits is False,
+                version=version,
+                minimum=minimum,
+                adopt=adopt,
+                upgrading=upgrading,
+            )
         if not upgrading:
             return restore
         return (
@@ -289,6 +365,49 @@ def _pin_conflict(
         f"Install {package} from the project: {difference} "
         f"Run `{restore}` to install the version this project pins, or "
         f"`{adopt}` to adopt lintro's instead."
+    )
+
+
+def _range_conflict(
+    package: str,
+    declared: str,
+    *,
+    excluded: bool,
+    version: str,
+    minimum: str,
+    adopt: str,
+    upgrading: bool,
+) -> str:
+    """Explain a declared range that cannot be shown to reach lintro's minimum.
+
+    Args:
+        package: npm package name.
+        declared: The declared range.
+        excluded: True when the range's upper bound is below *minimum*; False
+            when its bounds could not be read.
+        version: Version lintro recommends.
+        minimum: Lowest version lintro accepts.
+        adopt: Command that pins lintro's version in the project.
+        upgrading: Whether the caller is planning an upgrade.
+
+    Returns:
+        A manual-action message; nothing is run for it.
+    """
+    verb = "Upgrade" if upgrading else "Install"
+    floor = (
+        f"lintro's version {version}"
+        if minimum == version
+        else f"lintro's minimum {minimum} (lintro recommends {version})"
+    )
+    reach = (
+        "does not admit"
+        if excluded
+        else "may not admit (lintro cannot read its bounds)"
+    )
+    return (
+        f"{verb} {package} explicitly: this project declares the range "
+        f"`{declared}` in package.json, which {reach} {floor}. Run `{adopt}` "
+        f"to adopt lintro's version, or widen the range."
     )
 
 

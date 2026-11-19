@@ -450,13 +450,6 @@ class ToolInstaller:
         """
         strategy = get_strategy(tool.install_type)
         env = self._context.environment
-        _args = (
-            env,
-            tool.name,
-            tool.version,
-            tool.install_package,
-            tool.install_component,
-        )
         if strategy is None:
             return (
                 f"Upgrade {tool.name} manually"
@@ -464,7 +457,7 @@ class ToolInstaller:
                 else f"Install {tool.name} manually"
             )
         if upgrade:
-            hint = strategy.upgrade_hint(*_args)
+            hint = strategy.tool_hint(env, tool, upgrade=True)
             # For brew upgrades, validate that brew actually manages this
             # package — if not, use the non-brew install command instead
             # (strategies may prefer brew when available, so we can't just
@@ -475,7 +468,7 @@ class ToolInstaller:
                     pkg = tool.install_package or tool.name
                     hint = f"Upgrade {pkg} manually (not managed by Homebrew)"
             return hint
-        return strategy.install_hint(*_args)
+        return strategy.tool_hint(env, tool, upgrade=False)
 
     def _install_cwd(self, tool: ManifestTool) -> Path | None:
         """Return the directory an install command should run from.

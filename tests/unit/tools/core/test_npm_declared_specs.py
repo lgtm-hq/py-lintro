@@ -7,6 +7,7 @@ missing global install, and the boundary for manager evidence.
 
 from __future__ import annotations
 
+import dataclasses
 import io
 import json
 from pathlib import Path
@@ -33,7 +34,20 @@ from lintro.tools.core.tool_registry import ManifestRegistry
 
 PM = PackageManager
 
-_EXACT_SPECS: tuple[str, ...] = ("3.9.4", "^3.9.4", "~3.9.4", "=3.9.4", "v3.9.4")
+_EXACT_SPECS: tuple[str, ...] = (
+    "3.9.4",
+    "^3.9.4",
+    "~3.9.4",
+    "=3.9.4",
+    "v3.9.4",
+    # node-semver reads an operator followed by one ``v`` as that version.
+    "^v3.9.4",
+    "=v3.9.4",
+    "~v3.9.4",
+    # npm ignores build metadata when comparing versions.
+    "3.9.4+build",
+    "=3.9.4+build.7",
+)
 
 _RANGE_SPECS: tuple[str, ...] = (
     ">=3.9.4",
@@ -48,7 +62,25 @@ _RANGE_SPECS: tuple[str, ...] = (
     "^2.0.0 || ^3.0.0",
     "3.9.x || >=4",
     "3.0.0 - 3.9.4",
-    "=v3.9.4",
+)
+
+#: Ranges whose upper bound is below lintro's version 3.9.4.
+_EXCLUDING_RANGES: tuple[str, ...] = (
+    "2.x",
+    "2",
+    "<3",
+    "<=3.9.3",
+    "~2.8",
+    "~3.8",
+    "1 - 2",
+    ">=2.0.0 <3.0.0",
+    "1.x || 2.x",
+)
+
+#: Ranges whose bounds lintro does not read with confidence.
+_UNREADABLE_RANGES: tuple[str, ...] = (
+    "<3.9.5-0",
+    "2.x || <4.0.0-rc.1",
 )
 
 #: Opaque specs and the form each message must name.
@@ -151,7 +183,7 @@ def test_exact_compatible_specs_name_the_bare_version(spec: str) -> None:
     assert_that(exact_version(spec)).is_equal_to("3.9.4")
 
 
-@pytest.mark.parametrize("spec", ["^^3.9.4", "vv3.9.4", "~^3.9.4", "=v3.9.4"])
+@pytest.mark.parametrize("spec", ["^^3.9.4", "vv3.9.4", "~^3.9.4", "=vv3.9.4"])
 def test_only_one_prefix_is_stripped(spec: str) -> None:
     """``lstrip`` with a character set used to strip any run of prefixes.
 
@@ -222,6 +254,106 @@ def test_upgrade_never_rewrites_a_declared_range(spec: str, tmp_path: Path) -> N
     assert_that(is_manual_hint(hint)).is_true()
     assert_that(hint).contains(f"the range `{spec}`", "npm install -D prettier@3.9.4")
     assert_that(hint).does_not_contain("but lintro recommends")
+
+
+@pytest.mark.parametrize("spec", _EXCLUDING_RANGES)
+@pytest.mark.parametrize("upgrading", [False, True], ids=["install", "upgrade"])
+def test_range_below_lintros_version_is_a_conflict(
+    spec: str,
+    upgrading: bool,
+    tmp_path: Path,
+) -> None:
+    """A range that cannot reach lintro's version runs nothing.
+
+    ``npm install`` would fetch every project dependency only to end with a
+    prettier lintro then reports as too old.
+
+    Args:
+        spec: Declared range under test.
+        upgrading: Whether the upgrade path is planned.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    env = _env(_project(tmp_path, declared=spec))
+    hint_for = _npm().upgrade_hint if upgrading else _npm().install_hint
+
+    hint = hint_for(env, "prettier", "3.9.4", "prettier", None)
+
+    assert_that(is_manual_hint(hint)).is_true()
+    assert_that(hint).contains(
+        f"the range `{spec}`",
+        "does not admit lintro's version 3.9.4",
+        "npm install -D prettier@3.9.4",
+    )
+
+
+@pytest.mark.parametrize("spec", _UNREADABLE_RANGES)
+def test_range_with_unreadable_bounds_asks_instead_of_installing(
+    spec: str,
+    tmp_path: Path,
+) -> None:
+    """When the upper bound cannot be read, the message wins over the install.
+
+    Args:
+        spec: Declared range under test.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    env = _env(_project(tmp_path, declared=spec))
+
+    hint = _npm().install_hint(env, "prettier", "3.9.4", "prettier", None)
+
+    assert_that(is_manual_hint(hint)).is_true()
+    assert_that(hint).contains(f"the range `{spec}`", "may not admit")
+
+
+@pytest.mark.parametrize(
+    ("min_version", "expected_manual"),
+    [("3.0.0", False), ("3.9.4", True)],
+    ids=["range-reaches-minimum", "range-below-minimum"],
+)
+def test_range_is_measured_against_the_manifest_minimum(
+    min_version: str,
+    expected_manual: bool,
+    tmp_path: Path,
+) -> None:
+    """``~3.5`` cannot reach 3.9.4 but does reach a 3.0.0 minimum.
+
+    Args:
+        min_version: Manifest minimum for prettier.
+        expected_manual: Whether a manual message is expected.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    env = _env(_project(tmp_path, declared="~3.5"))
+    tool = dataclasses.replace(
+        ManifestRegistry.load().get("prettier"),
+        version="3.9.4",
+        min_version=min_version,
+    )
+
+    hint = _npm().tool_hint(env, tool, upgrade=False)
+
+    assert_that(is_manual_hint(hint)).is_equal_to(expected_manual)
+    if not expected_manual:
+        assert_that(hint).is_equal_to("npm install")
+    else:
+        assert_that(hint).contains("does not admit lintro's version 3.9.4")
+
+
+@pytest.mark.parametrize("spec", ["^v3.9.4", "=v3.9.4", "3.9.4+build"])
+def test_matching_exact_spellings_upgrade_with_a_versioned_add(
+    spec: str,
+    tmp_path: Path,
+) -> None:
+    """These spellings name 3.9.4 to npm, so they are not a conflict.
+
+    Args:
+        spec: Declared spec under test.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    env = _env(_project(tmp_path, declared=spec))
+
+    hint = _npm().upgrade_hint(env, "prettier", "3.9.4", "prettier", None)
+
+    assert_that(hint).is_equal_to("npm install -D prettier@3.9.4")
 
 
 @pytest.mark.parametrize(("spec", "form"), _OPAQUE_SPECS)
@@ -316,6 +448,21 @@ def test_plan_announces_a_whole_project_install(spec: str, tmp_path: Path) -> No
     )
 
 
+def test_plan_for_an_excluding_range_runs_nothing(tmp_path: Path) -> None:
+    """``prettier: "2.x"`` lands on the manual list, not in the install queue.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    root = _project(tmp_path, declared="2.x").resolve()
+
+    project_installs, output = _plan_output(root)
+
+    assert_that(project_installs).is_empty()
+    assert_that(output).contains("Manual installation required", "range `2.x`")
+    assert_that(output).does_not_contain("To install", "whole project")
+
+
 def test_plan_does_not_announce_a_single_package_add(tmp_path: Path) -> None:
     """An undeclared tool gets a versioned add, which needs no announcement.
 
@@ -343,8 +490,23 @@ def test_plan_does_not_announce_a_single_package_add(tmp_path: Path) -> None:
         ("yarn@2.4.3+sha512.abc", ("yarn.lock",)),
         (None, ("yarn.lock", ".yarnrc.yml")),
         ("yarn", ("yarn.lock", ".yarnrc.yml")),
+        ("yarn@berry", ("yarn.lock",)),
+        ("yarn@stable", ("yarn.lock",)),
+        ("yarn@canary", ("yarn.lock",)),
+        ("yarn@^4", ("yarn.lock",)),
+        ("yarn@>=2.0.0", ("yarn.lock",)),
     ],
-    ids=["field-4", "field-2-hash", "yarnrc", "unversioned-field-yarnrc"],
+    ids=[
+        "field-4",
+        "field-2-hash",
+        "yarnrc",
+        "unversioned-field-yarnrc",
+        "tag-berry",
+        "tag-stable",
+        "tag-canary",
+        "range-caret-4",
+        "range-at-least-2",
+    ],
 )
 @pytest.mark.parametrize("upgrading", [False, True], ids=["install", "upgrade"])
 def test_berry_refuses_the_global_path(
@@ -378,8 +540,9 @@ def test_berry_refuses_the_global_path(
         ("yarn@1.22.22", ("yarn.lock",)),
         ("yarn@1.22.22", ("yarn.lock", ".yarnrc.yml")),
         (None, ("yarn.lock",)),
+        ("yarn@^1.22.0", ("yarn.lock",)),
     ],
-    ids=["field-1", "field-1-beats-yarnrc", "lockfile-only"],
+    ids=["field-1", "field-1-beats-yarnrc", "lockfile-only", "range-caret-1"],
 )
 def test_yarn_classic_keeps_yarn_global_add(
     package_manager: str | None,

@@ -13,11 +13,13 @@ class DeclaredSpecKind(StrEnum):
     manager does the resolving.
     """
 
-    #: A full version with at most one ``^``, ``~``, ``=`` or ``v`` prefix,
-    #: for example ``^3.9.4``. Compared with lintro's recommendation.
+    #: A full version with at most one ``^``, ``~`` or ``=`` operator and at
+    #: most one ``v``, for example ``^3.9.4`` or ``=v3.9.4``. Build metadata
+    #: is ignored. Compared with lintro's recommendation.
     EXACT = auto()
     #: A range such as ``>=3.9.4``, ``3.9.x``, ``*`` or ``1.x || 2.x``. The
-    #: project's range governs, so this is never a conflict.
+    #: project's range governs when it can reach lintro's minimum; a range
+    #: whose upper bound is below it is reported instead of installed.
     RANGE = auto()
     #: A spec that is not a version or a range, for example ``workspace:*``,
     #: an ``npm:`` alias, a git or tarball URL, a local path or a dist-tag.

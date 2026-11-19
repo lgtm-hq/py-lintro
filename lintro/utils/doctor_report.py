@@ -247,15 +247,8 @@ def check_tool(
     strategy = get_strategy(tool.install_type)
     env = context.environment
     if strategy:
-        _args = (
-            env,
-            tool.name,
-            tool.version,
-            tool.install_package,
-            tool.install_component,
-        )
-        hint = strategy.install_hint(*_args)
-        upgrade_hint = strategy.upgrade_hint(*_args)
+        hint = strategy.tool_hint(env, tool, upgrade=False)
+        upgrade_hint = strategy.tool_hint(env, tool, upgrade=True)
     else:
         hint = f"Install {tool.name} manually"
         upgrade_hint = f"Upgrade {tool.name} manually"

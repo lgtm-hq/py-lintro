@@ -10,9 +10,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from rich.console import Console
+from rich.markup import escape
 
 from lintro.enums.install_outcome import InstallOutcome
-from lintro.tools.core.install_plan import InstallResult
+from lintro.tools.core.install_plan import InstallPlan, InstallResult
+from lintro.tools.core.manifest_models import ManifestTool
 
 _OUTCOME_STYLES: dict[InstallOutcome, str] = {
     InstallOutcome.SUCCESS: "green",
@@ -40,6 +42,37 @@ _SUMMARY_LABELS: dict[InstallOutcome, str] = {
     InstallOutcome.TIMED_OUT: "timed out",
     InstallOutcome.MANUAL_BLOCKED: "manual action required",
 }
+
+
+def render_planned_install(
+    console: Console,
+    plan: InstallPlan,
+    tool: ManifestTool,
+    command: str,
+) -> None:
+    """Render one planned install and say when it installs the whole project.
+
+    A project-wide install (``npm install``) fetches every declared
+    dependency and runs its install scripts. Asking for one tool must not do
+    that unannounced, through ``lintro install`` or ``lintro doctor --fix``
+    (#2045).
+
+    Args:
+        console: Console to print to.
+        plan: Plan the install belongs to.
+        tool: Tool the command was planned for.
+        command: The planned command.
+    """
+    console.print(f"    {tool.name:<20} [dim]{escape(command)}[/dim]")
+    root = plan.project_installs.get(tool.name)
+    if root is None:
+        return
+    console.print(
+        f"      [yellow]installs the whole project's dependencies "
+        f"(`{escape(command)}` in {escape(str(root))}), not only "
+        f"{tool.name}[/yellow]",
+        highlight=False,
+    )
 
 
 def render_install_results(

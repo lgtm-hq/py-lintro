@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 from lintro.tools.core.install_strategies.environment import InstallEnvironment
+
+if TYPE_CHECKING:
+    from lintro.tools.core.manifest_models import ManifestTool
 
 
 class InstallStrategy(ABC):
@@ -97,3 +101,34 @@ class InstallStrategy(ABC):
             Shell command string to upgrade the tool.
         """
         ...
+
+    def tool_hint(
+        self,
+        env: InstallEnvironment,
+        tool: ManifestTool,
+        *,
+        upgrade: bool,
+    ) -> str:
+        """Generate the install or upgrade command for a manifest entry.
+
+        Callers holding a whole manifest entry use this instead of unpacking
+        it, so a strategy that needs more of the entry than the hint
+        arguments carry (the npm strategy reads ``min_version``, #2045) can
+        take it without changing every strategy's signature.
+
+        Args:
+            env: The current install environment.
+            tool: Manifest entry of the tool.
+            upgrade: Whether to plan an upgrade rather than an install.
+
+        Returns:
+            Shell command string, or a manual-action message.
+        """
+        hint = self.upgrade_hint if upgrade else self.install_hint
+        return hint(
+            env,
+            tool.name,
+            tool.version,
+            tool.install_package,
+            tool.install_component,
+        )
