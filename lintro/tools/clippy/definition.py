@@ -204,8 +204,8 @@ class ClippyPlugin(BaseToolPlugin):
             return None  # Version check passed
 
         # Version check failed - return skip result with warning
-        skip_message = (
-            f"Skipping {self.definition.name}: {version_info.error_message}. "
+        detail = (
+            f"{version_info.error_message}. "
             f"Minimum required: {version_info.min_version}. "
             f"{version_info.install_hint}"
         )
@@ -213,7 +213,7 @@ class ClippyPlugin(BaseToolPlugin):
         return below_minimum_result(
             name=self.definition.name,
             reason=version_info.error_message or "Clippy version check failed",
-            output=skip_message,
+            detail=detail,
             hint=version_info.install_hint,
         )
 

@@ -24,9 +24,8 @@ from lintro.tools.core.incomplete_run import incomplete_run_result
 from lintro.utils.execution.tool_configuration import (
     configure_tool_for_execution,
     get_tools_to_run,
+    resolve_run_formatting,
 )
-from lintro.utils.execution_paths import get_execution_cwd
-from lintro.utils.python_formatting import resolve_python_formatting
 from lintro.utils.refused_command import (
     mark_refused_command,
     refused_command_failure,
@@ -120,13 +119,12 @@ def run_lint_on_changed_files(
             return []
         config_manager = UnifiedConfigManager()
         selected_tools = set(selection.to_run)
-        ruff_config = config_manager.get_tool_config("ruff").lintro_tool_config or {}
-        decision = resolve_python_formatting(
+        decision = resolve_run_formatting(
             selected_tools,
             action=Action.CHECK,
-            ruff_options=ruff_config,
-            cache_root=Path(get_execution_cwd(changed_files)),
-            strict_missing_tools=lintro_config.execution.strict_missing_tools,
+            paths=changed_files,
+            config_manager=config_manager,
+            lintro_config=lintro_config,
         )
     except Exception:
         logger.warning(

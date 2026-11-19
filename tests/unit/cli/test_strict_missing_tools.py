@@ -344,3 +344,136 @@ def test_strict_flag_fails_fmt_for_missing_formatter(
 
     assert_that(result.exit_code).is_equal_to(1)
     assert_that(result.output).contains("shfmt not found in PATH", _INSTALL_HINT)
+
+
+def _old_black_with_ruff(*, ruff_runs: bool) -> Probe:
+    """Probe Black below the minimum, and Ruff runnable or missing.
+
+    Args:
+        ruff_runs: Whether Ruff passes the gate and takes over formatting.
+
+    Returns:
+        A probe for the Ruff/Black ownership decision and the version gate.
+    """
+
+    def probe(name: str, **kwargs: object) -> ToolSnapshot:
+        if name == "black":
+            return _too_old(name)
+        if name == "ruff" and ruff_runs:
+            return ToolSnapshot(
+                name=name,
+                available=True,
+                version="0.15.0",
+                version_check_passed=True,
+                min_version="0.1.0",
+            )
+        return _missing(name)
+
+    return probe
+
+
+@pytest.mark.parametrize("command", ["chk", "fmt"])
+@pytest.mark.parametrize("ruff_runs", [True, False], ids=["ruff-owns", "no-owner"])
+def test_strict_old_black_without_python_files_passes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    ruff_runs: bool,
+) -> None:
+    """A blocked Black with no Python files is no strict failure (#3371).
+
+    Ruff/Black ownership is decided before file discovery, so Black's strict
+    result must still give way to "no files", as every other tool's does.
+
+    Args:
+        tmp_path: Project without any Python file.
+        monkeypatch: Probe replacement control.
+        command: ``chk`` or ``fmt``.
+        ruff_runs: Whether Ruff took over formatting.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("LINTRO_ALLOW_VERSION_LAG", raising=False)
+    (tmp_path / "notes.txt").write_text("no python here\n")
+
+    result = _invoke(
+        monkeypatch,
+        _old_black_with_ruff(ruff_runs=ruff_runs),
+        command,
+        "--strict-missing-tools",
+        "--tools",
+        "ruff,black",
+        "--output-format",
+        "json",
+        str(tmp_path),
+    )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    row = _json_row(result.stdout, "black")
+    assert_that(row).contains_entry(
+        {"status": "ok"},
+        {"output": "No .py/.pyi files found to check."},
+    )
+    assert_that(json.dumps(row)).does_not_contain(_UPGRADE_HINT)
+
+
+def test_strict_old_black_with_python_files_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A blocked Black still fails strict mode when it had files to check.
+
+    Args:
+        tmp_path: Project with one formatted Python file.
+        monkeypatch: Probe replacement control.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("LINTRO_ALLOW_VERSION_LAG", raising=False)
+    (tmp_path / "app.py").write_text("VALUE = 1\n")
+
+    result = _invoke(
+        monkeypatch,
+        _old_black_with_ruff(ruff_runs=True),
+        "chk",
+        "--strict-missing-tools",
+        "--tools",
+        "ruff,black",
+        "--output-format",
+        "json",
+        str(tmp_path),
+    )
+
+    assert_that(result.exit_code).is_equal_to(1)
+    row = _json_row(result.stdout, "black")
+    assert_that(row).contains_entry({"status": "unavailable"}, {"success": False})
+    assert_that(row["unavailable_reason"]).ends_with(_UPGRADE_HINT)
+
+
+def test_strict_old_black_output_agrees_with_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A strict Black row reads "unavailable", never "Skipping".
+
+    Args:
+        tmp_path: Project with one Python file.
+        monkeypatch: Probe replacement control.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("LINTRO_ALLOW_VERSION_LAG", raising=False)
+    (tmp_path / "app.py").write_text("VALUE = 1\n")
+
+    result = _invoke(
+        monkeypatch,
+        _old_black_with_ruff(ruff_runs=True),
+        "chk",
+        "--strict-missing-tools",
+        "--tools",
+        "ruff,black",
+        "--output-format",
+        "json",
+        str(tmp_path),
+    )
+
+    output = _json_row(result.stdout, "black")["output"]
+    assert_that(output).starts_with("black unavailable: below minimum 2.14.0")
+    assert_that(output).does_not_contain("Skipping")

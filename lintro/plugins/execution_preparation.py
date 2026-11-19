@@ -209,16 +209,12 @@ def verify_tool_version(
 
     error = snapshot.probe_error or "version check failed"
     hint = snapshot.remediation_hint or ""
-    skip_message = (
-        f"Skipping {definition.name}: {error}. "
-        f"Minimum required: {snapshot.min_version}. "
-        f"{hint}"
-    ).strip()
+    detail = f"{error}. Minimum required: {snapshot.min_version}. {hint}".strip()
 
     return below_minimum_result(
         name=definition.name,
         reason=error,
-        output=skip_message,
+        detail=detail,
         hint=hint,
     )
 

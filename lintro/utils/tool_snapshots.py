@@ -280,7 +280,7 @@ def below_minimum_result(
     *,
     name: str,
     reason: str,
-    output: str,
+    detail: str,
     hint: str | None = None,
     strict: bool | None = None,
 ) -> ToolResult:
@@ -295,7 +295,10 @@ def below_minimum_result(
     Args:
         name: Tool name the result reports under.
         reason: Why the version gate refused the binary.
-        output: Human-readable message, including the install or upgrade hint.
+        detail: Human-readable explanation, including the install or upgrade
+            hint. It is prefixed ``Skipping <name>:`` for a skip and
+            ``<name> unavailable:`` for a strict failure, so the output agrees
+            with the row's status.
         hint: Install or upgrade guidance appended to a strict failure reason.
         strict: Override for the missing-tool policy; None reads configuration.
 
@@ -310,8 +313,10 @@ def below_minimum_result(
                 strict=True,
             ),
         )
+        output = f"{name} unavailable: {detail}"
     else:
         outcome = ToolOutcome(execution=Skipped(reason))
+        output = f"Skipping {name}: {detail}"
     return ToolResult.from_outcome(outcome, name=name, output=output)
 
 

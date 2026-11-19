@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import time
 from dataclasses import replace
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from lintro.enums.action import Action, normalize_action
@@ -61,12 +60,11 @@ from lintro.utils.execution.tool_configuration import (
     configure_tool_for_execution,
     get_tool_display_name,
     get_tools_to_run,
+    resolve_run_formatting,
 )
-from lintro.utils.execution_paths import get_execution_cwd
 from lintro.utils.gates import execute_gates
 from lintro.utils.npx_integrity import NpxIntegrityError
 from lintro.utils.output import OutputManager
-from lintro.utils.python_formatting import resolve_python_formatting
 from lintro.utils.refused_command import command_refusal, mark_refused_command
 from lintro.utils.unified_config import UnifiedConfigManager
 
@@ -748,13 +746,17 @@ def execute_run(
                 early_exit=True,
             )
 
-    ruff_config = config_manager.get_tool_config("ruff").lintro_tool_config or {}
-    decision = resolve_python_formatting(
+    decision = resolve_run_formatting(
         tools_to_run,
         action=ctx.action,
-        ruff_options={**ruff_config, **tool_option_dict.get("ruff", {})},
-        cache_root=Path(get_execution_cwd(paths)),
-        strict_missing_tools=ctx.lintro_config.execution.strict_missing_tools,
+        paths=paths,
+        config_manager=config_manager,
+        lintro_config=ctx.lintro_config,
+        tool_option_dict=tool_option_dict,
+        exclude=exclude,
+        include_venv=include_venv,
+        incremental=incremental,
+        diff_base=resolved_diff_base,
     )
     ctx = replace(ctx, python_formatting=decision)
     if decision is not None and not decision.run_black:

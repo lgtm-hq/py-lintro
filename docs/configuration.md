@@ -872,6 +872,19 @@ strict mode cover only the tools you expect to have installed.
 `--auto-install` only installs Node.js project dependencies, so it does not install a
 missing tool.
 
+"No files matched" covers Black too when it runs next to Ruff. Lintro decides whether
+Black or Ruff formats Python before it discovers files, but a Black that is missing or
+below the minimum only fails a strict run when the run has Python files for Black to
+check; otherwise its row reports no files, as it would for any other tool.
+
+`lintro review --with-lint` reads the same config key (review has no flag). Its
+in-process lint pass over the changed files never fails the review on a missing tool,
+strict or not: the tool is counted as one that did not run, and the lint digest given to
+the model names it as `Tool: <name> | unavailable: <reason>. <install hint>`. The one
+difference strict mode makes there is that a below-minimum tool gets that line too,
+where without strict mode it is a skip and gets no line. A `--lint-report` saved from a
+strict `lintro chk` run carries the same `unavailable` rows and gives the same digest.
+
 #### Disabling a tool from `pyproject.toml`
 
 The `tools:` section of `.lintro-config.yaml` has two equivalent `pyproject.toml`
