@@ -475,6 +475,11 @@ def test_watched_change_to_a_vendored_lockfile_is_not_audited(
     lockfile = tmp_path / "vendor" / "dep" / "Cargo.lock"
     lockfile.parent.mkdir(parents=True)
     lockfile.write_text("version = 3\n")
+    # A real vendored crate has its own manifest, a project marker that must
+    # not become the root the exclusion is judged from.
+    (lockfile.parent / "Cargo.toml").write_text(
+        '[package]\nname = "dep"\nversion = "0.1.0"\n',
+    )
     (tmp_path / ".git").mkdir()
     monkeypatch.chdir(tmp_path)
     audited: list[object] = []

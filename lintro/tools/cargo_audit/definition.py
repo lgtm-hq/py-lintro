@@ -55,52 +55,102 @@ CARGO_AUDIT_SKIP_DIRS: frozenset[str] = frozenset({"vendor", "target"})
 CARGO_AUDIT_EXCLUDED_SHOWN: int = 5
 
 
-def _anchor_dirs(paths: list[str], *, base: Path) -> list[Path]:
-    """Return the directories that judge what is third-party, in order.
+def _anchor_dirs(paths: list[str]) -> list[Path]:
+    """Return the requested directories that judge what is third-party.
 
     Only a directory passed to ``check`` is an anchor. A file is not: watch
     mode, the AI review bridge and fix re-runs hand over lists of changed or
     discovered files, so a ``vendor/dep/Cargo.lock`` among them was not asked
-    for and must not lift its own exclusion. The execution directory comes
-    last, so a lockfile no requested directory contains is judged from it.
+    for and must not lift its own exclusion.
 
     Args:
         paths: Paths passed to ``check``: the user's command-line targets, or
             the file list another caller hands over.
-        base: Execution directory.
 
     Returns:
-        Each path that is a directory, resolved and deepest first, then
-        ``base``.
+        Each path that is a directory, resolved and deepest first.
     """
     dirs = {path for path in (Path(p).resolve() for p in paths) if path.is_dir()}
-    return [*sorted(dirs, key=lambda d: len(d.parts), reverse=True), base]
+    return sorted(dirs, key=lambda d: len(d.parts), reverse=True)
 
 
-def _is_third_party(lock_root: Path, *, anchors: list[Path]) -> bool:
+def _outermost_repo(lock_root: Path) -> Path | None:
+    """Return the outermost ancestor of a lockfile holding a ``.git`` entry.
+
+    The entry may be a directory or the ``.git`` file a submodule or worktree
+    has. The outermost one is taken because a vendored git submodule carries
+    its own ``.git`` file, and the repository that vendors it is the one
+    whose layout decides.
+
+    Args:
+        lock_root: Directory holding a Cargo.lock, resolved.
+
+    Returns:
+        That ancestor (``lock_root`` itself included), or None outside any
+        repository.
+    """
+    for candidate in reversed([lock_root, *lock_root.parents]):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _judging_root(
+    lock_root: Path,
+    *,
+    anchors: list[Path],
+    cwd: Path,
+) -> Path | None:
+    """Return the directory below which ``vendor``/``target`` parts count.
+
+    The rule never depends on which files were handed over, only on the
+    directories the caller named, the process directory and the repository:
+
+    1. Start from the deepest requested directory containing the lockfile,
+       otherwise the process working directory when it contains it.
+    2. Take the outermost ``.git`` ancestor of the lockfile instead when it
+       is deeper, so a directory above the repository, such as an unrelated
+       ``vendor/`` holding the whole checkout, never counts.
+    3. With neither, there is no root and nothing is excluded.
+
+    Args:
+        lock_root: Directory holding a Cargo.lock, resolved.
+        anchors: Requested directories, deepest first.
+        cwd: Process working directory, resolved.
+
+    Returns:
+        The judging root, or None.
+    """
+    containing = [lock_root, *lock_root.parents]
+    start = next((anchor for anchor in anchors if anchor in containing), None)
+    if start is None and cwd in containing:
+        start = cwd
+    roots = [root for root in (start, _outermost_repo(lock_root)) if root]
+    return max(roots, key=lambda root: len(root.parts), default=None)
+
+
+def _is_third_party(lock_root: Path, *, anchors: list[Path], cwd: Path) -> bool:
     """Tell whether a lockfile was discovered inside a vendored or build tree.
 
-    Only path components between the first anchor containing the lockfile
+    Only path components between the judging root (see ``_judging_root``)
     and the lockfile count. A directory the caller named is never excluded,
     even when its own path runs through ``vendor/`` or ``target/``: asking
     for ``vendor/foo`` audits ``vendor/foo``.
 
     Args:
-        lock_root: Directory holding a Cargo.lock.
-        anchors: Anchor directories, in the order to try them.
+        lock_root: Directory holding a Cargo.lock, resolved.
+        anchors: Requested directories, deepest first.
+        cwd: Process working directory, resolved.
 
     Returns:
-        True when a directory below the first anchor that contains
-        ``lock_root`` is skipped. False when no anchor contains it, since the
-        lockfile then sits at or above every anchor.
+        True when a directory between the judging root and ``lock_root`` is
+        named ``vendor`` or ``target``. False when there is no judging root.
     """
-    for anchor in anchors:
-        try:
-            parts = lock_root.relative_to(anchor).parts
-        except ValueError:
-            continue
-        return any(part in CARGO_AUDIT_SKIP_DIRS for part in parts)
-    return False
+    root = _judging_root(lock_root, anchors=anchors, cwd=cwd)
+    if root is None:
+        return False
+    parts = lock_root.relative_to(root).parts
+    return any(part in CARGO_AUDIT_SKIP_DIRS for part in parts)
 
 
 @dataclass(frozen=True)
@@ -121,7 +171,6 @@ def _find_lock_roots(
     files: list[str],
     *,
     requested: list[str],
-    base: Path,
 ) -> _LockRoots:
     """Return every directory owning a Cargo.lock the given files belong to.
 
@@ -133,7 +182,6 @@ def _find_lock_roots(
         files: Discovered file paths to search from.
         requested: Paths passed to ``check``. A directory among them is
             audited even under ``vendor/`` or ``target/``; a file is not.
-        base: Execution directory, the anchor for everything else.
 
     Returns:
         The distinct directories holding the nearest Cargo.lock above each
@@ -152,8 +200,11 @@ def _find_lock_roots(
             if (candidate / CARGO_AUDIT_LOCKFILE).exists():
                 roots.add(candidate)
                 break
-    anchors = _anchor_dirs(requested, base=base)
-    excluded = {root for root in roots if _is_third_party(root, anchors=anchors)}
+    anchors = _anchor_dirs(requested)
+    cwd = Path.cwd().resolve()
+    excluded = {
+        root for root in roots if _is_third_party(root, anchors=anchors, cwd=cwd)
+    }
     return _LockRoots(audited=sorted(roots - excluded), excluded=sorted(excluded))
 
 
@@ -197,6 +248,24 @@ class _AuditRun:
     success: bool
     parse_failed: bool
     output: str
+
+
+def _shown_output(runs: list[_AuditRun], *, excluded: str | None) -> list[str]:
+    """Collect the text a result shows besides its own status line.
+
+    Args:
+        runs: Audits that completed, in run order.
+        excluded: Note naming the lockfiles left out, if any were.
+
+    Returns:
+        The output of every run that has issues or failed without them,
+        followed by the exclusion note, so excluded lockfiles are named on
+        every result that audited something.
+    """
+    shown = [run.output for run in runs if run.issues or not run.success]
+    if excluded:
+        shown.append(f"Also found {excluded}.")
+    return shown
 
 
 @register_tool
@@ -299,11 +368,7 @@ class CargoAuditPlugin(BaseToolPlugin):
             return ctx
 
         # Audit every lockfile the filtered file list belongs to.
-        found = _find_lock_roots(
-            ctx.files,
-            requested=paths,
-            base=Path(ctx.cwd).resolve(),
-        )
+        found = _find_lock_roots(ctx.files, requested=paths)
         lock_roots = found.audited
         excluded = (
             f"vendored or build-tree Cargo.lock under vendor/ or target/, "
@@ -339,14 +404,19 @@ class CargoAuditPlugin(BaseToolPlugin):
                 else None
             )
             if run is None:
-                # The scan is incomplete; keep what earlier roots found.
+                # The scan is incomplete; keep what earlier roots found and
+                # said, and still name the lockfiles left out.
                 timed_out_issues = [i for r in runs for i in r.issues]
+                message = "\n".join(
+                    [
+                        f"cargo-audit timed out: the {ctx.timeout}s budget "
+                        f"ran out auditing {lock_root / CARGO_AUDIT_LOCKFILE}",
+                        *_shown_output(runs, excluded=excluded),
+                    ],
+                )
                 return ToolResult.from_outcome(
                     ToolOutcome(
-                        execution=TimedOut(
-                            f"cargo-audit timed out: the {ctx.timeout}s budget "
-                            f"ran out auditing {lock_root / CARGO_AUDIT_LOCKFILE}",
-                        ),
+                        execution=TimedOut(message),
                         issues_count=len(timed_out_issues),
                     ),
                     name=self.definition.name,
@@ -360,11 +430,7 @@ class CargoAuditPlugin(BaseToolPlugin):
         # errors, so a failed run with nothing parsed is never a clean scan.
         overall_success = all(run.success for run in runs) and not issues
 
-        # Show a root's output when it has issues or failed without them.
-        shown = [run.output for run in runs if run.issues or not run.success]
-        if excluded:
-            # Keep the exclusion visible next to what was audited.
-            shown.append(f"Also found {excluded}.")
+        shown = _shown_output(runs, excluded=excluded)
 
         return ToolResult.from_outcome(
             ToolOutcome(

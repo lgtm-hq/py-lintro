@@ -18,7 +18,6 @@ from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.cargo_audit.definition import (
     CARGO_AUDIT_DEFAULT_TIMEOUT,
     CargoAuditPlugin,
-    _find_lock_roots,
 )
 from lintro.utils.fingerprint_baseline import fingerprint
 
@@ -39,6 +38,29 @@ def _proc(*, success: bool, stdout: str = "") -> SubprocessResult:
         stderr="",
         output=stdout,
     )
+
+
+def _write_crate(crate: Path, lock: str = "version = 3\n") -> Path:
+    """Create a crate as cargo lays it out: a manifest next to its lockfile.
+
+    A real crate always has a ``Cargo.toml``, which is also a project marker
+    lintro's execution-directory lookup stops at, so fixtures need one to
+    model real layouts (#2400).
+
+    Args:
+        crate: Crate directory, created with its parents.
+        lock: Lockfile contents.
+
+    Returns:
+        The crate's Cargo.lock.
+    """
+    crate.mkdir(parents=True, exist_ok=True)
+    (crate / "Cargo.toml").write_text(
+        '[package]\nname = "crate"\nversion = "0.1.0"\nedition = "2021"\n',
+    )
+    lockfile = crate / "Cargo.lock"
+    lockfile.write_text(lock)
+    return lockfile
 
 
 @pytest.fixture
@@ -208,8 +230,10 @@ def test_check_no_vulnerabilities(
         tmp_path: Temporary directory path.
         report_wrapper: Template for permitted text around the JSON object.
     """
-    cargo_lock = tmp_path / "Cargo.lock"
-    cargo_lock.write_text('[[package]]\nname = "test"\nversion = "1.0.0"')
+    cargo_lock = _write_crate(
+        tmp_path,
+        '[[package]]\nname = "test"\nversion = "1.0.0"',
+    )
 
     mock_output = """{
         "vulnerabilities": {
@@ -247,8 +271,10 @@ def test_check_with_vulnerabilities(
         cargo_audit_plugin: The plugin instance.
         tmp_path: Temporary directory path.
     """
-    cargo_lock = tmp_path / "Cargo.lock"
-    cargo_lock.write_text('[[package]]\nname = "test"\nversion = "1.0.0"')
+    cargo_lock = _write_crate(
+        tmp_path,
+        '[[package]]\nname = "test"\nversion = "1.0.0"',
+    )
 
     mock_output = """{
         "vulnerabilities": {
@@ -294,8 +320,10 @@ def test_check_timeout(
         cargo_audit_plugin: The plugin instance.
         tmp_path: Temporary directory path.
     """
-    cargo_lock = tmp_path / "Cargo.lock"
-    cargo_lock.write_text('[[package]]\nname = "test"\nversion = "1.0.0"')
+    cargo_lock = _write_crate(
+        tmp_path,
+        '[[package]]\nname = "test"\nversion = "1.0.0"',
+    )
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
@@ -406,8 +434,10 @@ def test_check_invalid_report_is_not_clean(
         output: Missing output or an invalid cargo-audit report.
         success: Whether the subprocess exited successfully.
     """
-    cargo_lock = tmp_path / "Cargo.lock"
-    cargo_lock.write_text('[[package]]\nname = "test"\nversion = "1.0.0"')
+    cargo_lock = _write_crate(
+        tmp_path,
+        '[[package]]\nname = "test"\nversion = "1.0.0"',
+    )
 
     with (
         patch(
@@ -467,11 +497,12 @@ def _two_crates(tmp_path: Path) -> tuple[Path, Path]:
     """
     locks = []
     for name in ("clean", "vulnerable"):
-        crate = tmp_path / name
-        crate.mkdir()
-        lock = crate / "Cargo.lock"
-        lock.write_text(f'[[package]]\nname = "{name}"\nversion = "0.1.0"\n')
-        locks.append(lock)
+        locks.append(
+            _write_crate(
+                tmp_path / name,
+                f'[[package]]\nname = "{name}"\nversion = "0.1.0"\n',
+            ),
+        )
     return locks[0], locks[1]
 
 
@@ -691,8 +722,7 @@ def test_vendored_and_build_lockfiles_are_not_audited(
         monkeypatch: Pytest fixture used to run from the project root.
     """
     for crate in ("app", "vendor/dep", "target/package/app-0.1.0"):
-        (tmp_path / crate).mkdir(parents=True)
-        (tmp_path / crate / "Cargo.lock").write_text("version = 3\n")
+        _write_crate(tmp_path / crate)
     monkeypatch.chdir(tmp_path)
     audited: list[Path] = []
 
@@ -706,49 +736,192 @@ def test_vendored_and_build_lockfiles_are_not_audited(
     assert_that(result.success).is_true()
 
 
-@pytest.mark.parametrize(
-    "base",
-    ["vendor/proj/src", "elsewhere"],
-    ids=["below-the-lockfile", "outside-the-project"],
-)
-def test_lockfile_outside_the_scan_root_is_judged_below_it_only(
-    tmp_path: Path,
-    base: str,
-) -> None:
-    """Only path parts below the scan root decide what is third-party (#2400).
+_REPO = ("repo/app", "repo/vendor/dep")
 
-    A project located under a folder named ``vendor`` is the user's own crate
-    even when its lockfile is not below the execution directory.
+
+@pytest.mark.parametrize(
+    ("crates", "repos", "cwd", "paths", "expected"),
+    [
+        pytest.param(_REPO, ["repo"], "repo", ["repo"], ["repo/app"], id="check-dot"),
+        pytest.param(
+            _REPO,
+            ["repo"],
+            "repo",
+            ["repo/vendor/dep/Cargo.lock"],
+            [],
+            id="watch-changed-vendored-lockfile",
+        ),
+        pytest.param(
+            _REPO,
+            ["repo"],
+            "repo",
+            ["repo/app/Cargo.lock", "repo/vendor/dep/Cargo.lock"],
+            ["repo/app"],
+            id="ai-bridge-absolute-files",
+        ),
+        pytest.param(
+            _REPO,
+            ["repo"],
+            "elsewhere",
+            ["repo/app/Cargo.lock", "repo/vendor/dep/Cargo.lock"],
+            ["repo/app"],
+            id="process-outside-repo-files",
+        ),
+        pytest.param(
+            _REPO,
+            ["repo"],
+            "elsewhere",
+            ["repo"],
+            ["repo/app"],
+            id="process-outside-repo-directory",
+        ),
+        pytest.param(
+            _REPO,
+            ["repo", "repo/vendor/dep"],
+            "elsewhere",
+            ["repo/app/Cargo.lock", "repo/vendor/dep/Cargo.lock"],
+            ["repo/app"],
+            id="vendored-git-submodule",
+        ),
+        pytest.param(
+            ["vendor/proj"],
+            ["vendor/proj"],
+            ".",
+            ["."],
+            ["vendor/proj"],
+            id="repo-under-unrelated-vendor-checked-from-above",
+        ),
+        pytest.param(
+            ["vendor/proj"],
+            ["vendor/proj"],
+            "elsewhere",
+            ["vendor/proj/Cargo.lock"],
+            ["vendor/proj"],
+            id="repo-under-unrelated-vendor-from-elsewhere",
+        ),
+        pytest.param(
+            ["x/vendor/dep"],
+            [],
+            "elsewhere",
+            ["x/vendor/dep/Cargo.lock"],
+            ["x/vendor/dep"],
+            id="no-repository-outside-process-dir",
+        ),
+        pytest.param(
+            _REPO,
+            ["repo"],
+            "repo",
+            ["repo/vendor/dep"],
+            ["repo/vendor/dep"],
+            id="explicit-vendored-directory",
+        ),
+        pytest.param(
+            _REPO,
+            ["repo"],
+            "repo",
+            ["repo/vendor/dep", "repo"],
+            ["repo/app", "repo/vendor/dep"],
+            id="explicit-vendored-directory-and-root",
+        ),
+    ],
+)
+def test_exclusion_root_does_not_depend_on_the_files_handed_over(
+    cargo_audit_plugin: CargoAuditPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    crates: tuple[str, ...],
+    repos: list[str],
+    cwd: str,
+    paths: list[str],
+    expected: list[str],
+) -> None:
+    """Vendored lockfiles are judged from a stable root, not from ``ctx.cwd``.
+
+    Every crate has a ``Cargo.toml``, the project marker that used to move the
+    execution directory into ``vendor/dep`` itself when only its lockfile was
+    handed over, so the vendored lockfile was audited (#2400). The root is the
+    deepest requested directory holding the lockfile, else the process
+    directory when it holds it, replaced by the outermost ``.git`` ancestor
+    when that is deeper. The first repository listed gets a ``.git``
+    directory, later ones the ``.git`` file a submodule has.
 
     Args:
-        tmp_path: Temporary directory holding ``vendor/proj``.
-        base: Execution directory, relative to ``tmp_path``.
+        cargo_audit_plugin: The plugin instance.
+        tmp_path: Temporary directory holding the layout.
+        monkeypatch: Pytest fixture used to set the process directory.
+        crates: Crate directories, relative to ``tmp_path``.
+        repos: Directories holding a ``.git`` entry.
+        cwd: Process working directory, relative to ``tmp_path``.
+        paths: Paths handed to ``check``, made absolute.
+        expected: Crates whose lockfile is audited.
     """
-    project = tmp_path / "vendor" / "proj"
-    (project / "src").mkdir(parents=True)
-    (project / "Cargo.lock").write_text("version = 3\n")
-    (tmp_path / base).mkdir(parents=True, exist_ok=True)
+    for crate in crates:
+        _write_crate(tmp_path / crate)
+    for index, repo in enumerate(repos):
+        marker = tmp_path / repo / ".git"
+        if index == 0:
+            marker.mkdir()
+        else:
+            marker.write_text("gitdir: ../../.git/modules/dep\n")
+    (tmp_path / cwd).mkdir(parents=True, exist_ok=True)
+    monkeypatch.chdir(tmp_path / cwd)
+    audited: list[Path] = []
 
-    roots = _find_lock_roots(
-        [str(project / "Cargo.lock")],
-        requested=[str(project / "Cargo.lock")],
-        base=(tmp_path / base).resolve(),
+    def fake_audit(_cmd: list[str], **kwargs: object) -> SubprocessResult:
+        audited.append(Path(str(kwargs["cwd"])))
+        return _proc(success=True, stdout=_report())
+
+    result = _run_check(
+        cargo_audit_plugin,
+        [str((tmp_path / path).resolve()) for path in paths],
+        fake_audit,
     )
 
-    assert_that(roots.audited).is_equal_to([project.resolve()])
-    assert_that(roots.excluded).is_empty()
+    assert_that(audited).is_equal_to(
+        [(tmp_path / crate).resolve() for crate in expected],
+    )
+    assert_that(result.skipped).is_equal_to(not expected)
+
+
+def test_timeout_keeps_earlier_output_and_names_excluded_lockfiles(
+    cargo_audit_plugin: CargoAuditPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A budget running out still shows earlier failures and the exclusions.
+
+    Args:
+        cargo_audit_plugin: The plugin instance.
+        tmp_path: Temporary project root.
+        monkeypatch: Pytest fixture used to run from the project root.
+    """
+    _rooted_lock_tree(tmp_path, "app", "late", "vendor/dep")
+    monkeypatch.chdir(tmp_path)
+
+    def fake_audit(_cmd: list[str], **kwargs: object) -> SubprocessResult:
+        if Path(str(kwargs["cwd"])).name == "late":
+            raise TimeoutExpired(cmd=["cargo", "audit"], timeout=120)
+        return _proc(success=False, stdout="error: failed to parse Cargo.lock")
+
+    result = _run_check(cargo_audit_plugin, ["."], fake_audit)
+
+    assert_that(result.timed_out).is_true()
+    assert_that(str(result.output)).contains(
+        "cargo-audit timed out",
+        "error: failed to parse Cargo.lock",
+        "not audited: vendor/dep/Cargo.lock;",
+    )
 
 
 def _lock_tree(root: Path, *crates: str) -> None:
-    """Create a Cargo.lock in each crate directory below ``root``.
+    """Create a crate, manifest and lockfile, in each directory below ``root``.
 
     Args:
         root: Directory to create the crates in.
         *crates: Crate directories, relative to ``root``.
     """
     for crate in crates:
-        (root / crate).mkdir(parents=True)
-        (root / crate / "Cargo.lock").write_text("version = 3\n")
+        _write_crate(root / crate)
 
 
 @pytest.mark.parametrize(

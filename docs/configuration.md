@@ -3569,22 +3569,29 @@ reports each finding with the absolute path of the lockfile it came from.
 
 - Lockfiles discovered under a `vendor/` or `target/` directory are not audited: they
   hold vendored or packaged copies of other crates, not a resolution the project builds
-  with. Only the part of the path below the deepest directory you passed counts, so
-  naming the directory itself audits it: `lintro check vendor/foo` audits
-  `vendor/foo/Cargo.lock`, `lintro check vendor/foo .` audits it too, and a project that
-  itself lives under a folder with one of those names is still audited.
-- A directory lifts the exclusion; a file does not. A file path is judged from the
-  execution directory (the project root), so `lintro check vendor/foo/Cargo.lock` leaves
+  with. Only the path components between a root and the lockfile count. The root is the
+  deepest directory you passed that contains the lockfile, otherwise the directory
+  lintro runs from when it contains the lockfile; if the outermost ancestor of the
+  lockfile holding a `.git` entry (directory or file) is deeper, that is the root
+  instead. With no such root nothing is excluded.
+- So naming a directory audits it: `lintro check vendor/foo` audits
+  `vendor/foo/Cargo.lock`, and `lintro check vendor/foo .` audits it too. A file does
+  not count as a directory you passed, so `lintro check vendor/foo/Cargo.lock` leaves
   that lockfile out and says to pass its directory instead. The same holds for the
-  changed files `lintro watch` and AI review hand to cargo-audit: a changed
-  `vendor/dep/Cargo.lock` is not audited, as with `lintro check .`.
+  changed files `lintro watch`, AI review and fix re-runs hand to cargo-audit: a changed
+  `vendor/dep/Cargo.lock` is not audited, even though `vendor/dep` has its own
+  `Cargo.toml`. A vendored git submodule is still excluded, because the outermost `.git`
+  is used, and a repository that itself sits under an unrelated `vendor/` or `target/`
+  directory is audited, because nothing above the repository counts.
 - Excluded lockfiles are named in the output (the first five, then a count). When some
   lockfiles are audited, the note follows the findings. When every lockfile found was
   excluded, cargo-audit is reported as skipped, not failed, with a reason naming them,
   rather than as "No Cargo.lock found".
 - The advisory database is fetched for the first lockfile only; later runs in the same
   check pass `--no-fetch`.
-- The timeout is one budget for the whole check, shared by every lockfile.
+- The timeout is one budget for the whole check, shared by every lockfile. When it runs
+  out, the result keeps the findings and output of the lockfiles already audited and
+  still names the excluded ones.
 
 **Available Options via `--tool-options`:**
 
