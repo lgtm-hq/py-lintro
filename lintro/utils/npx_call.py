@@ -53,7 +53,6 @@ this applies on Windows too, where the same variables reach Node.
 from __future__ import annotations
 
 import contextlib
-import functools
 import os
 import re
 import shlex
@@ -78,7 +77,6 @@ from lintro.utils.npx_integrity import (
     wait_limit,
 )
 from lintro.utils.npx_unfinished import BoundCache, bound_cache
-from lintro.utils.process_stop import ChildStillRunningError, finish_uninterrupted
 
 #: npx/bunx flags that take the package spec as the next argument.
 PACKAGE_FLAGS: frozenset[str] = frozenset({"-p", "--package"})
@@ -304,11 +302,6 @@ def npx_cache_option(cmd: Sequence[str]) -> Path | None:
     return Path(caches[-1].removeprefix(NPX_CACHE_OPTION)) if caches else None
 
 
-#: Cold installs whose npx outlived lintro's wait: their locks stay held
-#: until lintro exits.
-_HELD_UNTIL_EXIT: list[contextlib.ExitStack] = []
-
-
 @contextlib.contextmanager
 def npx_shell_safe_command(
     cmd: Sequence[str],
@@ -351,15 +344,11 @@ def npx_shell_safe_command(
     raised before npx exited by itself (an *npx_exit* with no status yet),
     every fresh entry without ``package-lock.json`` goes, since npx runs the
     tool only after writing it; after npx exited with an error, only one
-    that has no executables either. The caller must have
-    stopped and reaped npx before the exception leaves the block.
-
-    A Ctrl-C during that cleanup does not cut it short: the cleanup is
-    completed before the lock is released, and the interruption is raised
-    afterwards (:func:`~lintro.utils.process_stop.finish_uninterrupted`).
-    When the caller gave up waiting for an npx that ``SIGKILL`` did not end
-    (:class:`~lintro.utils.process_stop.ChildStillRunningError`), nothing
-    is removed and the exclusive lock stays held until lintro exits.
+    that has no executables either. On a timeout the caller has killed npx
+    and waited for it, as ``subprocess.run`` does; processes npx started
+    (an install script) are not stopped and may still write into the entry
+    afterwards, in which case the next run finds an unfinished entry and its
+    repair removes it.
 
     Args:
         cmd: Command about to be spawned.
@@ -373,8 +362,6 @@ def npx_shell_safe_command(
         Argv: The argv to spawn.
 
     Raises:
-        ChildStillRunningError: The caller gave up waiting for npx; it is
-            re-raised with the entry and the exclusive lock left as they are.
         BaseException: Whatever ended the block early (a timeout, a failed
             spawn, an interruption), re-raised once the cleanup is done.
         NpxInstallError: npx exited with an error before it finished a cold
@@ -423,41 +410,24 @@ def npx_shell_safe_command(
                 inline_limit=inline_limit,
             ) as argv:
                 yield argv
-        except ChildStillRunningError:
-            # Ctrl-C gave up on an npx that SIGKILL did not end: it may still
-            # write its entry, so nothing is removed and the exclusive lock
-            # stays held until lintro exits, which releases it (#3530).
-            _HELD_UNTIL_EXIT.append(cold_install.pop_all())
-            raise
         except BaseException as exc:
             # npx did not finish: it timed out, could not start, or lintro
             # was interrupted. There is no result to check; the caller
-            # reports the failure itself (#3530). A repeated Ctrl-C waits
-            # until the cleanup is done; the lock is released after it.
+            # reports the failure itself (#3530).
             npx_stopped = npx_exit is not None and npx_exit.returncode is None
-            finish_uninterrupted(
-                functools.partial(
-                    _after_unfinished_run,
-                    cache,
-                    before,
-                    installing,
-                    exc,
-                    npx_stopped=npx_stopped,
-                ),
-                pending=exc,
+            _after_unfinished_run(
+                cache,
+                before,
+                installing,
+                exc,
+                npx_stopped=npx_stopped,
             )
             raise
         try:
             check_unchanged(cache, before, timeout=timeout, npx_exit=npx_exit)
         except NpxInstallError:
             if installing is not None:
-                finish_uninterrupted(
-                    functools.partial(
-                        installing.discard_unfinished,
-                        before,
-                        npx_stopped=False,
-                    ),
-                )
+                installing.discard_unfinished(before, npx_stopped=False)
             raise
         except NpxIntegrityError as exc:
             exc.after_run = True
