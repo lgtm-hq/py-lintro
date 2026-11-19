@@ -21,6 +21,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.181.9] - 2026-11-19
+
+### Fixed
+
+- **install**: name the directory the executed install command used (#3523) (0f201eb)
+
+## [0.181.8] - 2026-11-19
+
+### Changed
+
+- **watch**: wait for named paths so real-observer tests survive load (#3522) (bbf193a)
+
+### Fixed
+
+- **deps**: clean up stale package.json overrides (#3531) (4be578f)
+
 ## [0.181.7] - 2026-11-17
 
 ### Fixed
