@@ -54,7 +54,9 @@ VULNERABLE_REPORT = json.dumps(
         },
     },
 )
-CLEAN_REPORT = json.dumps({"vulnerabilities": {"found": False, "list": []}})
+CLEAN_REPORT = json.dumps(
+    {"vulnerabilities": {"found": False, "count": 0, "list": []}},
+)
 
 
 def _crate(root: Path, rel: str, *, vulnerable: bool = False) -> Path:
@@ -91,6 +93,7 @@ class _FakeCargoAudit:
         clock: Fake monotonic clock, advanced by ``seconds_per_run``.
         seconds_per_run: Seconds each run takes on the fake clock.
         hang_on: Lockfile whose audit raises ``TimeoutExpired``.
+        reports: Lockfiles answered with a fixed exit status and stdout.
     """
 
     commands: list[list[str]] = field(default_factory=list)
@@ -100,6 +103,7 @@ class _FakeCargoAudit:
     clock: list[float] = field(default_factory=lambda: [1000.0])
     seconds_per_run: float = 0.0
     hang_on: Path | None = None
+    reports: dict[Path, tuple[int, str]] = field(default_factory=dict)
 
     def monotonic(self) -> float:
         """Return the fake clock.
@@ -144,8 +148,25 @@ class _FakeCargoAudit:
                 stderr="boom",
                 output="boom",
             )
-        vulnerable = "smallvec" in lock.read_text()
+        if lock in self.reports:
+            returncode, stdout = self.reports[lock]
+            return SubprocessResult(
+                returncode=returncode,
+                stdout=stdout,
+                stderr="error: boom" if returncode == 2 else "",
+                output=stdout,
+            )
+        content = lock.read_text()
+        vulnerable = "smallvec" in content
         report = VULNERABLE_REPORT if vulnerable else CLEAN_REPORT
+        if not content.strip():
+            # What cargo-audit 0.23 prints, at exit 0, for a zero-byte file.
+            report = json.dumps(
+                {
+                    "lockfile": {"dependency-count": 0},
+                    "vulnerabilities": {"found": False, "count": 0, "list": []},
+                },
+            )
         return SubprocessResult(
             returncode=1 if vulnerable or lock in self.exit_one else 0,
             stdout=report,
@@ -203,6 +224,7 @@ def _check(
     *,
     exclude: list[str] | None = None,
     timeout: int | None = None,
+    options: dict[str, object] | None = None,
 ) -> ToolResult:
     """Run the plugin's check with cargo-audit replaced by ``fake``.
 
@@ -211,6 +233,7 @@ def _check(
         paths: Paths handed to ``check``.
         exclude: Extra exclude patterns, as ``--exclude`` would add.
         timeout: Timeout budget for the check.
+        options: Options passed to ``check``, such as ``diff_base``.
 
     Returns:
         The check result.
@@ -221,7 +244,7 @@ def _check(
     if timeout is not None:
         plugin.set_options(timeout=timeout)
     with patch.object(plugin, "_run_subprocess_result", side_effect=fake):
-        return plugin.check(paths, {})
+        return plugin.check(paths, options or {})
 
 
 def test_every_lockfile_is_audited_and_each_finding_names_its_own(
@@ -363,15 +386,18 @@ def test_excluded_lockfile_gets_the_same_answer_for_every_caller(
     assert_that(fake.audited()).is_equal_to([root / "app" / "Cargo.lock"])
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.output).contains(
-        "excluded by lintro's exclude patterns: vendor/dep/Cargo.lock",
+        "excluded by lintro's exclude patterns (1): vendor/dep/Cargo.lock.",
     )
 
 
-def test_every_lockfile_excluded_is_a_skip_naming_them(
+def test_every_lockfile_excluded_is_no_files_naming_them(
     repo: Path,
     fake: _FakeCargoAudit,
 ) -> None:
-    """A run with only excluded lockfiles names them instead of "no files".
+    """Nothing in scope by configuration is "no files", and names the lockfiles.
+
+    It is not a skip: the no-silent-skip gate treats it as every other tool
+    whose inputs the user's exclude patterns remove.
 
     Args:
         repo: Repository root.
@@ -383,10 +409,12 @@ def test_every_lockfile_excluded_is_a_skip_naming_them(
     result = _check(fake, ["vendor/a/Cargo.lock", "."], exclude=["vendor/"])
 
     assert_that(fake.commands).is_empty()
-    assert_that(result.skipped).is_true()
-    assert_that(result.no_files).is_false()
-    assert_that(result.skip_reason).contains(
-        "vendor/a/Cargo.lock, vendor/b/Cargo.lock",
+    assert_that(result.skipped).is_false()
+    assert_that(result.no_files).is_true()
+    assert_that(result.success).is_true()
+    assert_that(result.output).is_equal_to(
+        "No Cargo.lock in scope: every one found is excluded by lintro's exclude "
+        "patterns, not audited (2): vendor/a/Cargo.lock, vendor/b/Cargo.lock.",
     )
 
 
@@ -418,7 +446,7 @@ def test_a_failed_lockfile_fails_the_check_beside_clean_ones(
         1 if failure == "no-report" else 0,
     )
     assert_that(result.output).contains(
-        "did not produce a complete report for b/Cargo.lock",
+        "did not produce a complete report, not audited (1): b/Cargo.lock (",
     )
 
 
@@ -446,7 +474,7 @@ def test_one_timeout_budget_covers_every_lockfile(
     assert_that(result.timed_out).is_true()
     assert_that(result.success).is_false()
     assert_that(result.output).contains(
-        "timed out after 120s; not audited: d/Cargo.lock",
+        "timed out after 120s; not audited (1): d/Cargo.lock.",
     )
 
 
@@ -469,7 +497,7 @@ def test_timeout_next_to_a_failed_lockfile_names_both(
     assert_that(result.timed_out).is_true()
     assert_that(result.execution_failed).is_true()
     assert_that(result.failure_besides_timeout).contains("a/Cargo.lock")
-    assert_that(result.output).contains("not audited: b/Cargo.lock, c/Cargo.lock")
+    assert_that(result.output).contains("not audited (2): b/Cargo.lock, c/Cargo.lock.")
 
 
 def test_lockfile_path_starting_with_dash_is_not_an_option(
@@ -493,3 +521,134 @@ def test_lockfile_path_starting_with_dash_is_not_an_option(
     )
     assert_that(cmd).does_not_contain("-", "-f")
     assert_that([i.file for i in result.issues or []]).is_equal_to([str(lock)])
+
+
+SMALLVEC_RECORD = json.loads(VULNERABLE_REPORT)["vulnerabilities"]["list"][0]
+
+
+def _report(records: list[object], *, count: int, found: bool) -> str:
+    """Render a cargo-audit report with the given records and summary fields.
+
+    Args:
+        records: The ``vulnerabilities.list`` entries.
+        count: The report's ``count``.
+        found: The report's ``found``.
+
+    Returns:
+        The JSON report.
+    """
+    return json.dumps(
+        {"vulnerabilities": {"found": found, "count": count, "list": records}},
+    )
+
+
+@pytest.mark.parametrize(
+    ("returncode", "records", "count", "found", "problem", "kept"),
+    [
+        pytest.param(0, [{}], 1, True, "1 of 1 vulnerability records unreadable", 0, id="unreadable-record"),
+        pytest.param(1, [SMALLVEC_RECORD, {"advisory": {}}], 2, True, "1 of 2 vulnerability records unreadable", 1, id="one-of-two-unreadable"),
+        pytest.param(1, [SMALLVEC_RECORD], 2, True, "report says found=True, count=2 but lists 1", 1, id="count-disagrees"),
+        pytest.param(0, [], 0, True, "report says found=True, count=0 but lists 0", 0, id="found-disagrees"),
+        pytest.param(2, [SMALLVEC_RECORD], 1, True, "exit status 2, expected 1", 1, id="exit-2-with-findings"),
+        pytest.param(0, [SMALLVEC_RECORD], 1, True, "exit status 0, expected 1", 1, id="exit-0-with-findings"),
+    ],
+)  # fmt: skip
+def test_incomplete_report_fails_and_keeps_its_valid_findings(
+    repo: Path,
+    fake: _FakeCargoAudit,
+    returncode: int,
+    records: list[object],
+    count: int,
+    found: bool,
+    problem: str,
+    kept: int,
+) -> None:
+    """A report that does not add up is a failed audit, never a clean one.
+
+    cargo-audit 0.23 exits 0 when clean, 1 when it found vulnerabilities and
+    2 on an error. Only a valid report with the matching exit is complete.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+        returncode: cargo-audit's exit status.
+        records: The report's vulnerability records.
+        count: The report's ``count``.
+        found: The report's ``found``.
+        problem: The reason the output gives.
+        kept: How many valid findings are still reported.
+    """
+    _crate(repo, "app")
+    bad = _crate(repo, "bad")
+    fake.reports[bad] = (returncode, _report(records, count=count, found=found))
+
+    result = _check(fake, ["."])
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.inspected_files).is_none()
+    assert_that(result.issues_count).is_equal_to(kept)
+    assert_that([i.file for i in result.issues or []]).is_equal_to([str(bad)] * kept)
+    assert_that(result.output).contains(
+        f"did not produce a complete report, not audited (1): bad/Cargo.lock ({problem})",
+    )
+
+
+def test_exit_one_with_a_valid_report_is_a_complete_audit(
+    repo: Path,
+    fake: _FakeCargoAudit,
+) -> None:
+    """Exit 1 is cargo-audit's "vulnerabilities found", so files were inspected.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+    """
+    _crate(repo, "app", vulnerable=True)
+
+    result = _check(fake, ["."])
+
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.inspected_files).is_true()
+    assert_that(result.output).does_not_contain("not audited")
+
+
+def test_empty_lockfile_is_not_audited(repo: Path, fake: _FakeCargoAudit) -> None:
+    """A lockfile listing no packages fails; cargo always writes the root one.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+    """
+    _crate(repo, "app")
+    (repo / "app" / "Cargo.lock").write_text("")
+
+    result = _check(fake, ["."])
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.output).contains(
+        "not audited (1): app/Cargo.lock (lockfile lists no packages)",
+    )
+
+
+def test_long_lists_of_lockfiles_are_capped(repo: Path, fake: _FakeCargoAudit) -> None:
+    """Thousands of excluded lockfiles give a count and ten names, not all.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+    """
+    _crate(repo, "app")
+    for index in range(25):
+        _crate(repo, f"vendor/dep{index:02d}")
+
+    result = _check(fake, ["."], exclude=["vendor/"])
+
+    shown = ", ".join(f"vendor/dep{index:02d}/Cargo.lock" for index in range(10))
+    assert_that(result.output).contains(
+        f"exclude patterns (25): {shown} and 15 more.",
+    )
+    assert_that(result.output).does_not_contain("vendor/dep10/Cargo.lock")

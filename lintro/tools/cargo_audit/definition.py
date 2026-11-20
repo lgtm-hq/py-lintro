@@ -19,7 +19,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
-from lintro.models.core.tool_outcome import Checked, Skipped, TimedOut, ToolOutcome
+from lintro.models.core.tool_outcome import Checked, NoFiles, TimedOut, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.cargo_audit.cargo_audit_issue import CargoAuditIssue
 from lintro.parsers.cargo_audit.cargo_audit_parser import (
@@ -45,6 +45,10 @@ CARGO_AUDIT_LOCKFILE: str = "Cargo.lock"
 CARGO_AUDIT_FILE_PATTERNS: list[str] = [CARGO_AUDIT_LOCKFILE]
 
 
+# Lists of lockfiles in notes name this many, then give a count of the rest.
+_NAMED_LIMIT: int = 10
+
+
 def _lockfiles(files: list[str]) -> list[Path]:
     """Return the distinct lockfiles among discovered files.
 
@@ -65,7 +69,7 @@ def _lockfiles(files: list[str]) -> list[Path]:
     )
 
 
-def _shown(lockfile: Path) -> str:
+def _shown(lockfile: Path | str) -> str:
     """Name a lockfile in output, relative to the process directory if below it.
 
     Args:
@@ -76,21 +80,74 @@ def _shown(lockfile: Path) -> str:
         otherwise the absolute path.
     """
     try:
-        return str(lockfile.relative_to(Path.cwd().resolve()))
+        return str(Path(lockfile).relative_to(Path.cwd().resolve()))
     except ValueError:
         return str(lockfile)
 
 
-def _names(lockfiles: list[Path]) -> str:
-    """Join lockfile names for a one-line note.
+def _names(labels: list[str]) -> str:
+    """Join names for a one-line note, naming at most ``_NAMED_LIMIT``.
+
+    Args:
+        labels: Lockfile names, already shown relative where possible.
+
+    Returns:
+        The count, then comma-separated names and how many more there are.
+    """
+    shown = ", ".join(labels[:_NAMED_LIMIT])
+    rest = len(labels) - _NAMED_LIMIT
+    return f"({len(labels)}): {shown}" + (f" and {rest} more" if rest > 0 else "")
+
+
+def _lockfile_names(lockfiles: list[Path]) -> str:
+    """Join lockfile paths for a one-line note.
 
     Args:
         lockfiles: Lockfiles to name.
 
     Returns:
-        Comma-separated lockfile names.
+        The count and the first names, see ``_names``.
     """
-    return ", ".join(_shown(lockfile) for lockfile in lockfiles)
+    return _names([_shown(lockfile) for lockfile in lockfiles])
+
+
+def _report_problem(
+    payload: dict[str, Any] | None,
+    issues: list[CargoAuditIssue],
+    returncode: int,
+) -> str | None:
+    """Say why a cargo-audit report does not establish a complete audit.
+
+    cargo-audit 0.23 exits 0 for a clean audit, 1 when it found
+    vulnerabilities and 2 on an error (an unreadable lockfile, a bad
+    argument). Only a valid report with the matching exit status is complete.
+
+    Args:
+        payload: The parsed report, or None when there was none.
+        issues: Findings parsed from it.
+        returncode: cargo-audit's exit status.
+
+    Returns:
+        The reason the audit is incomplete, or None when it is complete.
+    """
+    if payload is None:
+        return "no usable JSON report"
+    vulnerabilities = payload["vulnerabilities"]
+    records = len(vulnerabilities["list"])
+    if len(issues) != records:
+        return f"{records - len(issues)} of {records} vulnerability records unreadable"
+    count, found = vulnerabilities.get("count"), vulnerabilities.get("found")
+    if type(count) is not int or count != records or found is not (records > 0):
+        return f"report says found={found}, count={count} but lists {records}"
+    lockfile = payload.get("lockfile")
+    if isinstance(lockfile, dict) and lockfile.get("dependency-count") == 0:
+        # Cargo always records at least the root package, even for a crate
+        # with no dependencies, so a lockfile with none is not a real one.
+        return "lockfile lists no packages"
+    expected = 1 if issues else 0
+    if returncode != expected:
+        return f"exit status {returncode}, expected {expected}"
+    return None
 
 
 @dataclass(frozen=True)
@@ -100,17 +157,28 @@ class _LockfileAudit:
     Attributes:
         lockfile: The audited lockfile, resolved.
         issues: Vulnerabilities parsed from its report, each naming it.
-        complete: Whether cargo-audit produced a usable report that explains
-            its exit status.
-        parse_failed: Whether the report was missing or schema-invalid.
+        problem: Why the report does not establish a complete audit, or None.
+        parsed: Whether cargo-audit printed a report, which proves the
+            advisory database is in place.
+        parse_failures: 1 for a missing report, else its unreadable records.
         output: Combined command output, kept for display.
     """
 
     lockfile: Path
     issues: list[CargoAuditIssue]
-    complete: bool
-    parse_failed: bool
+    problem: str | None
+    parsed: bool
+    parse_failures: int
     output: str
+
+    @property
+    def complete(self) -> bool:
+        """Return whether cargo-audit produced a complete, valid report.
+
+        Returns:
+            True when nothing is wrong with the report.
+        """
+        return self.problem is None
 
 
 @dataclass(frozen=True)
@@ -138,27 +206,27 @@ class _AuditSummary:
         """
         return [issue for audit in self.audits for issue in audit.issues]
 
-    @property
-    def incomplete(self) -> list[Path]:
-        """Return the audited lockfiles without a complete report.
+    def failure_note(self) -> str | None:
+        """Name the lockfiles that failed to be audited, and why.
 
         Returns:
-            Lockfiles whose audit failed or could not be parsed.
+            One line per kind of failure, or None when there is none.
         """
-        return [audit.lockfile for audit in self.audits if not audit.complete]
-
-    def incomplete_note(self) -> str | None:
-        """Name the lockfiles whose audit did not complete.
-
-        Returns:
-            A one-line note, or None when every audit completed.
-        """
-        if not self.incomplete:
-            return None
-        return (
-            "cargo-audit did not produce a complete report for "
-            f"{_names(self.incomplete)}; those lockfiles are not audited."
-        )
+        failed = [
+            f"{_shown(audit.lockfile)} ({audit.problem})"
+            for audit in self.audits
+            if not audit.complete
+        ]
+        notes = [
+            (
+                "cargo-audit did not produce a complete report, not audited "
+                f"{_names(failed)}."
+                if failed
+                else None
+            ),
+        ]
+        shown = [note for note in notes if note]
+        return "\n".join(shown) if shown else None
 
     def text(self) -> str | None:
         """Render the output a result shows.
@@ -175,16 +243,16 @@ class _AuditSummary:
             if audit.issues or not audit.complete
         ]
         notes = [
-            self.incomplete_note(),
+            self.failure_note(),
             (
-                f"cargo-audit timed out after {self.timeout:g}s; not audited: "
-                f"{_names(self.not_audited)}."
+                f"cargo-audit timed out after {self.timeout:g}s; not audited "
+                f"{_lockfile_names(self.not_audited)}."
                 if self.not_audited
                 else None
             ),
             (
-                "Not audited, excluded by lintro's exclude patterns: "
-                f"{_names(self.excluded)}."
+                "Not audited, excluded by lintro's exclude patterns "
+                f"{_lockfile_names(self.excluded)}."
                 if self.excluded
                 else None
             ),
@@ -300,15 +368,17 @@ class CargoAuditPlugin(BaseToolPlugin):
         issues = parse_cargo_audit_output(proc.stdout, data=payload)
         for issue in issues:
             issue.file = str(lockfile)
-        # A missing or schema-invalid report cannot establish a clean scan,
-        # even when the subprocess succeeds (see #1044 and #3003). A non-zero
-        # exit is explained only by findings; without them it is a failure.
-        parse_failed = payload is None
+        # A missing, schema-invalid or inconsistent report, or an exit status
+        # other than the one the report explains, cannot establish a clean
+        # scan (see #1044 and #3003). Its valid findings are still kept.
+        problem = _report_problem(payload, issues, proc.returncode)
+        records = len(payload["vulnerabilities"]["list"]) if payload else 0
         return _LockfileAudit(
             lockfile=lockfile,
             issues=issues,
-            complete=not parse_failed and (proc.success or bool(issues)),
-            parse_failed=parse_failed,
+            problem=problem,
+            parsed=payload is not None,
+            parse_failures=1 if payload is None else records - len(issues),
             output=proc.output,
         )
 
@@ -341,6 +411,32 @@ class CargoAuditPlugin(BaseToolPlugin):
             },
         )
 
+    def _no_files_result(self, ctx: ToolResult, paths: list[str]) -> ToolResult:
+        """Explain a check in which discovery handed over no lockfile.
+
+        Args:
+            ctx: The no-files result from ``prepare``.
+            paths: Paths passed to ``check``.
+
+        Returns:
+            A no-files result naming the excluded lockfiles when an exclude
+            pattern removed any, else ``ctx``.
+        """
+        excluded = self._excluded_lockfiles(paths)
+        if not excluded:
+            return ctx
+        # Nothing is in scope by the user's own configuration, which is what
+        # "no files" means for every tool (and what the no-silent-skip gate
+        # accepts), but a security scanner names what it did not read (#3549).
+        return ToolResult.from_outcome(
+            ToolOutcome(execution=NoFiles()),
+            name=self.definition.name,
+            output=(
+                "No Cargo.lock in scope: every one found is excluded by lintro's "
+                f"exclude patterns, not audited {_names(list(map(_shown, excluded)))}."
+            ),
+        )
+
     def _audit_all(
         self,
         lockfiles: list[Path],
@@ -366,7 +462,7 @@ class CargoAuditPlugin(BaseToolPlugin):
             if remaining <= 0:
                 break
             # A parsed report proves the advisory database is in place.
-            fetch = all(audit.parse_failed for audit in audits)
+            fetch = not any(audit.parsed for audit in audits)
             try:
                 audits.append(
                     self._audit_lockfile(lockfile, timeout=remaining, fetch=fetch),
@@ -405,36 +501,21 @@ class CargoAuditPlugin(BaseToolPlugin):
         """
         ctx = self.prepare(paths, options)
         if isinstance(ctx, ToolResult):
-            excluded = self._excluded_lockfiles(paths) if ctx.no_files else []
-            if not excluded:
-                return ctx
-            # Exclusion is the user's choice, so this is a skip, but a
-            # security scanner names what it did not read rather than claim
-            # it found nothing (#3549).
-            return ToolResult.from_outcome(
-                ToolOutcome(
-                    execution=Skipped(
-                        "every Cargo.lock found is excluded by lintro's "
-                        f"exclude patterns, not audited: {_names(excluded)}",
-                    ),
-                ),
-                name=self.definition.name,
-            )
-
+            return self._no_files_result(ctx, paths) if ctx.no_files else ctx
         summary = self._audit_all(
             _lockfiles(ctx.files),
             timeout=ctx.timeout,
             excluded=self._excluded_lockfiles(paths),
         )
         issues = summary.issues
-        incomplete_note = summary.incomplete_note()
+        failure = summary.failure_note()
         payload: dict[str, Any] = {
             "name": self.definition.name,
             "issues": issues,
-            "parse_failures_count": sum(audit.parse_failed for audit in summary.audits),
+            "parse_failures_count": sum(a.parse_failures for a in summary.audits),
             # A lockfile without a complete report was not audited, whatever
             # the other lockfiles found.
-            "execution_failed": incomplete_note is not None,
+            "execution_failed": failure is not None,
         }
         if summary.not_audited:
             return ToolResult.from_outcome(
@@ -442,14 +523,16 @@ class CargoAuditPlugin(BaseToolPlugin):
                     execution=TimedOut(summary.text()),
                     issues_count=len(issues),
                 ),
-                failure_besides_timeout=incomplete_note,
+                failure_besides_timeout=failure,
                 **payload,
             )
         return ToolResult.from_outcome(
             ToolOutcome(
                 execution=Checked(
-                    success=not issues and incomplete_note is None,
-                    inspected_files=True,
+                    success=not issues and failure is None,
+                    # A lockfile that was not audited leaves inspection
+                    # unknown, as for every fail-closed check.
+                    inspected_files=None if failure else True,
                 ),
                 issues_count=len(issues),
             ),

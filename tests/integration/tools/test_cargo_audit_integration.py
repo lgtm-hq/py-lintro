@@ -119,5 +119,21 @@ def test_excluded_vendored_lockfile_is_named(repo: Path) -> None:
     assert_that(result.success).is_true()
     assert_that(result.issues or []).is_empty()
     assert_that(result.output).contains(
-        "excluded by lintro's exclude patterns: vendor/dep/Cargo.lock",
+        "excluded by lintro's exclude patterns (1): vendor/dep/Cargo.lock.",
     )
+
+
+def test_empty_lockfile_is_not_audited(repo: Path) -> None:
+    """cargo-audit passes a zero-byte lockfile as 0 dependencies; lintro fails it.
+
+    Args:
+        repo: Repository root.
+    """
+    _crate(repo, "app", vulnerable=False)
+    (repo / "app" / "Cargo.lock").write_text("")
+
+    result = CargoAuditPlugin().check(["."], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.output).contains("app/Cargo.lock (lockfile lists no packages)")

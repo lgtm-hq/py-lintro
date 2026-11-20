@@ -209,6 +209,7 @@ def test_check_no_vulnerabilities(
 
     mock_output = """{
         "vulnerabilities": {
+            "found": false,
             "count": 0,
             "list": []
         }
@@ -248,6 +249,7 @@ def test_check_with_vulnerabilities(
 
     mock_output = """{
         "vulnerabilities": {
+            "found": true,
             "count": 1,
             "list": [
                 {
@@ -426,5 +428,6 @@ def test_check_invalid_report_is_not_clean(
         f"cargo-audit report for {cargo_lock.resolve()}:\n{output}",
     )
     assert_that(result.output).contains(
-        f"did not produce a complete report for {cargo_lock.resolve()}",
+        "did not produce a complete report, not audited (1): "
+        f"{cargo_lock.resolve()} (no usable JSON report)",
     )
