@@ -39,6 +39,7 @@ from lintro.tools.core.manifest_models import (
 # continues to work.
 __all__ = [
     "CATEGORY_LABELS",
+    "KnownBadVersion",
     "ManifestRegistry",
     "ManifestTool",
     "ProfileDefinition",
@@ -66,36 +67,37 @@ def _parse_known_bad_versions(
 ) -> tuple[KnownBadVersion, ...]:
     """Read a tool's ``known_bad_versions`` list from the manifest.
 
-    An entry needs a non-empty ``versions`` specifier, ``reason`` and
-    ``reference``; a malformed entry is logged and left out.
+    Each entry must have exactly a ``versions`` PEP 440 specifier, a
+    ``reason`` and a ``reference``. A malformed entry fails the load: left
+    out, it would let the release it names run as if it were good.
 
     Args:
-        name: Tool name, for the warning.
+        name: Tool name, for the error.
         raw: The manifest value, expected to be a list of objects.
 
     Returns:
-        The well-formed entries, in manifest order.
+        The entries, in manifest order.
+
+    Raises:
+        ValueError: If the value or any entry is malformed.
     """
     if raw is None:
         return ()
     if not isinstance(raw, list):
-        _logger.warning("Tool %r has non-list known_bad_versions; ignoring", name)
-        return ()
+        raise ValueError(f"Tool {name!r}: known_bad_versions must be a list")
     entries: list[KnownBadVersion] = []
     for item in raw:
-        values = item if isinstance(item, dict) else {}
-        fields = [values.get(key) for key in _KNOWN_BAD_FIELDS]
-        if not all(isinstance(value, str) and value.strip() for value in fields):
-            _logger.warning(
-                "Tool %r has malformed known_bad_versions entry %r; ignoring",
-                name,
-                item,
+        if not isinstance(item, dict) or set(item) != set(_KNOWN_BAD_FIELDS):
+            raise ValueError(
+                f"Tool {name!r}: known_bad_versions entry {item!r} must have "
+                f"exactly the keys {list(_KNOWN_BAD_FIELDS)}",
             )
-            continue
-        versions, reason, reference = (str(value) for value in fields)
-        entries.append(
-            KnownBadVersion(versions=versions, reason=reason, reference=reference),
-        )
+        try:
+            entries.append(KnownBadVersion(**item))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Tool {name!r}: known_bad_versions entry {item!r}: {exc}",
+            ) from exc
     return tuple(entries)
 
 

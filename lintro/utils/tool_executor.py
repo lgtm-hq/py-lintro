@@ -66,7 +66,10 @@ from lintro.utils.gates import execute_gates
 from lintro.utils.npx_integrity import NpxIntegrityError
 from lintro.utils.output import OutputManager
 from lintro.utils.refused_command import command_refusal, mark_refused_command
-from lintro.utils.tool_snapshots import reset_upgrade_suggestions
+from lintro.utils.tool_snapshots import (
+    reset_upgrade_suggestions,
+    with_version_lag_note,
+)
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
@@ -805,6 +808,8 @@ def execute_run(
     )
 
     for index, result in enumerate(all_results):
+        result = with_version_lag_note(result)
+        all_results[index] = result
         if result.capability is None and not result.skipped and not result.unavailable:
             all_results[index] = replace(
                 result,

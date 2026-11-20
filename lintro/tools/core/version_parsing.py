@@ -10,7 +10,6 @@ from functools import lru_cache
 from pathlib import Path
 
 from loguru import logger
-from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 from lintro.enums.probe_failure import ProbeFailure
@@ -317,15 +316,7 @@ def find_known_bad_version(
     except ValueError:
         return None
     for entry in known_bad:
-        try:
-            specifier = SpecifierSet(entry.versions)
-        except InvalidSpecifier:
-            logger.warning(
-                f"[VersionCheck] Ignoring unparseable known-bad specifier "
-                f"{entry.versions!r}",
-            )
-            continue
-        if specifier.contains(parsed, prereleases=True):
+        if entry.specifier.contains(parsed, prereleases=True):
             return entry
     return None
 
@@ -488,10 +479,13 @@ def check_tool_version(
     install_component = None
     channel_override = None
     known_bad: tuple[KnownBadVersion, ...] = ()
-    try:
-        from lintro.tools.core.tool_registry import ManifestRegistry
+    from lintro.tools.core.tool_registry import ManifestRegistry
 
-        registry = ManifestRegistry.load()
+    # A manifest that does not load (for example a malformed known-bad entry)
+    # is not swallowed: the known-bad list could not be applied, and passing
+    # the version anyway would let a refused release run (#3556).
+    registry = ManifestRegistry.load()
+    try:
         for lookup_name in lookup_names:
             if lookup_name in registry:
                 manifest_tool = registry.get(lookup_name)

@@ -57,6 +57,7 @@ from lintro.tools.core.update_channels import WRAPPER_PROBE_NAMES
 from lintro.tools.core.version_parsing import (
     compare_versions,
     extract_version_from_output,
+    find_known_bad_version,
 )
 
 #: Version-probe entrypoints that run a wrapper or host binary rather than the
@@ -300,31 +301,7 @@ class ToolInstaller:
         installed_version = self._get_installed_version(tool)
 
         if installed_version:
-            meets_min = self._version_meets_minimum(
-                installed_version,
-                tool.min_version,
-            )
-            meets_recommended = self._version_meets_minimum(
-                installed_version,
-                tool.version,
-            )
-            if meets_recommended:
-                plan.already_ok.append(tool)
-            elif upgrade or (not meets_min and tool.min_version != tool.version):
-                skip_reason = self._check_prerequisites(tool)
-                if skip_reason:
-                    plan.manual.append((tool, skip_reason))
-                    return
-                hint = self._get_install_command(tool, upgrade=True)
-                if self._is_manual_hint(hint):
-                    if self._has_install_script(tool):
-                        hint = f"{SCRIPT_HINT_PREFIX} ({tool.name})"
-                    else:
-                        plan.manual.append((tool, hint))
-                        return
-                plan.to_upgrade.append((tool, installed_version, hint))
-            else:
-                plan.outdated.append((tool, installed_version))
+            self._plan_installed(plan, tool, installed_version, upgrade=upgrade)
             return
 
         # Missing prerequisites → manual install (not a hard skip)
@@ -342,6 +319,80 @@ class ToolInstaller:
                 return
         plan.to_install.append((tool, hint))
         self._note_project_install(plan, tool, hint)
+
+    def _plan_installed(
+        self,
+        plan: InstallPlan,
+        tool: ManifestTool,
+        installed_version: str,
+        *,
+        upgrade: bool,
+    ) -> None:
+        """Plan for a tool that is already installed.
+
+        Args:
+            plan: Plan to add to.
+            tool: Tool to plan for.
+            installed_version: The installed version.
+            upgrade: Whether to upgrade if already installed.
+        """
+        meets_min = self._version_meets_minimum(installed_version, tool.min_version)
+        meets_recommended = self._version_meets_minimum(
+            installed_version,
+            tool.version,
+        )
+        if find_known_bad_version(installed_version, tool.known_bad_versions):
+            self._plan_known_bad(plan, tool, installed_version)
+        elif meets_recommended:
+            plan.already_ok.append(tool)
+        elif upgrade or (not meets_min and tool.min_version != tool.version):
+            skip_reason = self._check_prerequisites(tool)
+            if skip_reason:
+                plan.manual.append((tool, skip_reason))
+                return
+            hint = self._get_install_command(tool, upgrade=True)
+            if self._is_manual_hint(hint):
+                if self._has_install_script(tool):
+                    hint = f"{SCRIPT_HINT_PREFIX} ({tool.name})"
+                else:
+                    plan.manual.append((tool, hint))
+                    return
+            plan.to_upgrade.append((tool, installed_version, hint))
+        else:
+            plan.outdated.append((tool, installed_version))
+
+    def _plan_known_bad(
+        self,
+        plan: InstallPlan,
+        tool: ManifestTool,
+        installed_version: str,
+    ) -> None:
+        """Plan replacing a known-bad release with the pinned version.
+
+        The run refuses a known-bad release even at or above the pin, so it
+        always needs the pinned version, with or without ``--upgrade``; the
+        manifest guard keeps the pin itself off the list (#3556). Package
+        manager upgrades install the newest release, which can be the bad
+        one, so only ``install-tools.sh`` (which installs the exact pin) is
+        planned; otherwise the plan names the version to install by hand.
+
+        Args:
+            plan: Plan to add to.
+            tool: Tool whose installed release is on its known-bad list.
+            installed_version: The refused installed version.
+        """
+        if self._has_install_script(tool):
+            hint = f"{SCRIPT_HINT_PREFIX} ({tool.name})"
+            plan.to_upgrade.append((tool, installed_version, hint))
+            return
+        plan.manual.append(
+            (
+                tool,
+                f"{installed_version} is known to give wrong results; install "
+                f"{tool.version}, the version lintro tests "
+                f"({self._get_install_command(tool)})",
+            ),
+        )
 
     def _note_project_install(
         self,

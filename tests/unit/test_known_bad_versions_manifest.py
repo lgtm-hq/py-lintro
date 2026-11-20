@@ -14,7 +14,6 @@ from typing import Any
 
 import pytest
 from assertpy import assert_that
-from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
 from lintro.tools.core.manifest_models import KnownBadVersion
 from lintro.tools.core.tool_registry import ManifestRegistry
@@ -100,8 +99,11 @@ def test_pinned_version_is_never_refused(entry: dict[str, Any]) -> None:
 
 
 @pytest.mark.parametrize("entry", _ENTRIES, ids=[e["name"] for e in _ENTRIES])
-def test_known_bad_entries_are_well_formed(entry: dict[str, Any]) -> None:
-    """Every entry parses as a specifier and carries a reason and a reference.
+def test_known_bad_entries_load_as_written(entry: dict[str, Any]) -> None:
+    """Every source entry reaches the loaded manifest unchanged and in order.
+
+    A malformed entry already fails the generator and the manifest load; this
+    catches a ``manifest.json`` that has drifted from its source.
 
     Args:
         entry: One tool entry from manifest.src.json.
@@ -109,11 +111,6 @@ def test_known_bad_entries_are_well_formed(entry: dict[str, Any]) -> None:
     raw = entry.get("known_bad_versions", [])
     loaded = ManifestRegistry.load().get(entry["name"]).known_bad_versions
 
-    assert_that(loaded).described_as(f"{entry['name']}: entries dropped").is_length(
-        len(raw),
+    assert_that(loaded).described_as(entry["name"]).is_equal_to(
+        tuple(KnownBadVersion(**item) for item in raw),
     )
-    for item in loaded:
-        try:
-            SpecifierSet(item.versions)
-        except InvalidSpecifier:
-            pytest.fail(f"{entry['name']}: bad specifier {item.versions!r}")

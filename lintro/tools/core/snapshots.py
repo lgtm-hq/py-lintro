@@ -732,6 +732,7 @@ def _snapshot_from_version(
         min_version=version_info.min_version,
         recommended_version=version_info.recommended_version or "",
         below_recommended=version_info.below_recommended,
+        known_bad=version_info.known_bad is not None,
         probe_failure=probe_failure,
         probe_seconds=(
             version_info.probe_seconds

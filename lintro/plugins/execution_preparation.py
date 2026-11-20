@@ -174,6 +174,7 @@ def verify_tool_version(
         claim_upgrade_suggestion,
         get_tool_snapshot,
         is_strict_missing_tools,
+        record_version_lag,
         snapshot_to_unavailable_result,
         upgrade_command,
     )
@@ -194,11 +195,16 @@ def verify_tool_version(
     if snapshot_is_runnable(snapshot):
         if not snapshot.version_check_passed:
             logger.warning(
-                "{} {} is refused ({}) but allowed via {}; proceeding",
+                "{} {} is below minimum {} but allowed via {}; proceeding",
                 definition.name,
                 snapshot.version,
-                snapshot.probe_error or f"minimum {snapshot.min_version}",
+                snapshot.min_version,
                 _ALLOW_VERSION_LAG_ENV,
+            )
+            record_version_lag(
+                definition.name,
+                version=str(snapshot.version),
+                minimum=snapshot.min_version,
             )
         elif snapshot.below_recommended and claim_upgrade_suggestion(
             definition.name,
@@ -216,6 +222,16 @@ def verify_tool_version(
     error = snapshot.probe_error or "version check failed"
     hint = snapshot.remediation_hint or ""
     upgrade = f"To upgrade, run: {upgrade_command(definition.name)}"
+    if snapshot.known_bad:
+        # The install hint names a range ("v2.6.0+") that includes the
+        # refused release, so name the one version to install instead.
+        pinned = (
+            f"{snapshot.recommended_version}, the version lintro tests,"
+            if snapshot.recommended_version
+            else "the version lintro tests"
+        )
+        upgrade = f"Install {pinned} by running: {upgrade_command(definition.name)}"
+        hint = ""
     detail = f"{error}. {upgrade}. {hint}".strip()
 
     # A refused security scanner fails the run: skipping it quietly would

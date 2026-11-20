@@ -145,7 +145,10 @@ def _render_tool_line(
         line.append("[XX] ", style="red bold")
         line.append(name, style="cyan")
         line.append(f"{r.installed_version or '?':<10}", style="red")
-        line.append(f"(>= {r.tool.min_version})", style="dim")
+        line.append(
+            f"(refused: {r.details})" if r.details else f"(>= {r.tool.min_version})",
+            style="dim",
+        )
         console.print(line)
         if r.advisory:
             console.print(f"         [dim]{format_advisory_line(r.advisory)}[/dim]")

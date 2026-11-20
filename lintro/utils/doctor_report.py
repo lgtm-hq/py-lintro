@@ -49,12 +49,16 @@ from lintro.tools.core.version_checking import build_outdated_version_advisory
 from lintro.tools.core.version_parsing import (
     compare_versions,
     extract_version_from_output,
+    find_known_bad_version,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from lintro.config.lintro_config import LintroConfig
     from lintro.models.core.tool_snapshot import ToolSnapshot
     from lintro.tools.core.install_context import RuntimeContext
+    from lintro.tools.core.tool_registry import KnownBadVersion
 
 __all__ = [
     "DoctorCheck",
@@ -125,6 +129,7 @@ def tool_status_for_versions(
     installed: str,
     recommended: str,
     minimum: str,
+    known_bad: Sequence[KnownBadVersion] = (),
 ) -> ToolStatus:
     """Compare an installed version against recommended and minimum versions.
 
@@ -132,10 +137,14 @@ def tool_status_for_versions(
         installed: Installed version string.
         recommended: Recommended/tested version from manifest.
         minimum: Hard minimum compatible version from manifest.
+        known_bad: The tool's known-bad releases; one of them is refused like
+            a version below the minimum, as the run refuses it (#3556).
 
     Returns:
         ToolStatus.OK, OUTDATED, INCOMPATIBLE, or UNKNOWN.
     """
+    if find_known_bad_version(installed, known_bad) is not None:
+        return ToolStatus.INCOMPATIBLE
     try:
         if compare_versions(installed, minimum) < 0:
             return ToolStatus.INCOMPATIBLE
@@ -144,6 +153,22 @@ def tool_status_for_versions(
         return ToolStatus.OK
     except ValueError:
         return ToolStatus.UNKNOWN
+
+
+def _known_bad_details(tool: ManifestTool, installed: str) -> str | None:
+    """Say why an installed known-bad release is refused, or None.
+
+    Args:
+        tool: Manifest tool entry.
+        installed: Installed version string.
+
+    Returns:
+        The refusal reason with its reference, or None when not listed.
+    """
+    entry = find_known_bad_version(installed, tool.known_bad_versions)
+    if entry is None:
+        return None
+    return f"known to give wrong results: {entry.reason} (see {entry.reference})"
 
 
 def _check_tool_from_snapshot(
@@ -192,6 +217,7 @@ def _check_tool_from_snapshot(
         installed=version,
         recommended=tool.version,
         minimum=tool.min_version,
+        known_bad=tool.known_bad_versions,
     )
     advisory = None
     if status in (ToolStatus.OUTDATED, ToolStatus.INCOMPATIBLE):
@@ -217,6 +243,7 @@ def _check_tool_from_snapshot(
         tool=tool,
         status=status,
         installed_version=version,
+        details=_known_bad_details(tool, version),
         path=binary_path,
         install_hint=hint,
         upgrade_hint=upgrade_hint,
@@ -362,6 +389,7 @@ def check_tool(
             installed=version,
             recommended=tool.version,
             minimum=tool.min_version,
+            known_bad=tool.known_bad_versions,
         )
         advisory = None
         if status in (ToolStatus.OUTDATED, ToolStatus.INCOMPATIBLE):
@@ -378,6 +406,7 @@ def check_tool(
             tool=tool,
             status=status,
             installed_version=version,
+            details=_known_bad_details(tool, version),
             path=tool_path,
             install_hint=hint,
             upgrade_hint=upgrade_hint,
