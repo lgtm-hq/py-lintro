@@ -195,13 +195,22 @@ def test_other_tool_with_unreadable_version_still_runs(
 def test_missing_scanner_keeps_the_missing_tool_result(
     tmp_path: Path,
     on_path: Callable[[str, str], Path],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A scanner that is not installed is reported missing, not version-unknown.
 
+    PATH is one empty directory, so a scanner installed in a system directory
+    of the host cannot be picked up.
+
     Args:
         tmp_path: Execution and cache directory.
-        on_path: Restricts PATH to a directory without the scanner.
+        on_path: Clears the version-lag override.
+        monkeypatch: Points PATH at an empty directory.
     """
+    empty = tmp_path / "no-tools"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+
     result = _refusal(tmp_path)
 
     assert_that(result.unavailable_reason).contains("not found")
