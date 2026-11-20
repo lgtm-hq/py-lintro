@@ -4031,20 +4031,19 @@ Lockfiles that an exclude pattern removed are named in the output
 skipped copies. If every lockfile in scope was excluded or skipped as a copy,
 cargo-audit reports "no files matched", as any tool does whose inputs are all left out,
 and its output names them (`No Cargo.lock in scope to audit.` followed by those notes).
-In a `--diff` or `--incremental` run the scope is the changed lockfiles; a `--diff` run
-in which no lockfile changed reports "no files matched" without the lists. In a `--diff`
-run the same scope applies to excluded, skipped and unreadable entries: only those in
-the diff are named. Under `--incremental`, lockfiles under `vendor/` or `target/` are
-named on every run, not only when they change. `--incremental` records a lockfile as
-checked only after a complete audit that found nothing: no vulnerabilities and no denied
-warnings. A lockfile with findings, denied warnings, or an audit that failed, was
-incomplete or was interrupted is audited again, and its findings reported again, on
-every incremental run until it is clean. An unchanged clean lockfile is not re-audited,
-so an advisory published since its last audit is only caught by a full check. lintro's
-changed set holds only paths that resolve to a file, so in a `--diff` run an unreadable
-entry is caught when it is a changed `Cargo.lock` that cannot be read, but a dangling
-symlink, symlink loop or directory named `Cargo.lock` is only caught by a full run.
-Lists of lockfiles name the first ten and give a count of the rest.
+In a `--diff` run the scope is the changed lockfiles; a `--diff` run in which no
+lockfile changed reports "no files matched" without the lists, and the same scope
+applies to excluded, skipped and unreadable entries: only those in the diff are named.
+
+cargo_audit ignores lintro's incremental cache. Its verdict depends on the advisory
+database and on the deny settings as much as on the lockfile, so an unchanged lockfile
+can change verdict when a new advisory is published. With `--incremental`, cargo_audit
+therefore audits every `Cargo.lock` in scope, exactly as a full run does, and says so in
+its output; `--diff` still narrows the scope to the changed lockfiles. lintro's changed
+set holds only paths that resolve to a file, so in a `--diff` run an unreadable entry is
+caught when it is a changed `Cargo.lock` that cannot be read, but a dangling symlink,
+symlink loop or directory named `Cargo.lock` is only caught by a full run. Lists of
+lockfiles name the first ten and give a count of the rest.
 
 **Fail closed.** A lockfile that was not audited fails the check and is named, whatever
 the other lockfiles found. Findings from a failed audit are still shown. A lockfile

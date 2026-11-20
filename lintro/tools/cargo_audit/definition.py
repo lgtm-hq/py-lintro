@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import subprocess  # nosec B404 - used safely with shell disabled
 import time
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +35,6 @@ from lintro.tools.core.option_validators import (
     validate_bool,
     validate_positive_int,
 )
-from lintro.utils.file_cache import FileFingerprint, ToolCache
 from lintro.utils.git_diff import filter_files_by_diff_for_paths
 from lintro.utils.path_filtering import (
     resolve_exclude_anchors,
@@ -295,6 +294,7 @@ class _AuditSummary:
             with that target.
         timeout: The whole check's timeout budget in seconds.
         vendored: Lockfiles skipped as vendored or build-tree copies.
+        incremental: Whether the run asked for ``--incremental``.
     """
 
     audits: list[_LockfileAudit]
@@ -304,6 +304,7 @@ class _AuditSummary:
     outside: list[tuple[Path, Path]]
     timeout: float
     vendored: list[Path]
+    incremental: bool = False
 
     @property
     def issues(self) -> list[CargoAuditIssue]:
@@ -393,23 +394,16 @@ class _AuditSummary:
                 f"audited and reported as {_shown(link)}."
                 for link, target in self.outside
             ),
+            (
+                "cargo-audit audited every Cargo.lock in scope: --incremental does "
+                "not apply to it, because advisories change independently of the "
+                "lockfile."
+                if self.incremental
+                else None
+            ),
         ]
         shown = blocks + [note for note in notes if note]
         return "\n\n".join(shown) if shown else None
-
-
-@dataclass
-class _Ledger:
-    """Which lockfiles one check audited, for the incremental cache.
-
-    Attributes:
-        attempted: Lockfiles whose audit started.
-        clean: Lockfiles whose audit completed with no findings and no
-            denied warnings; only these may stay recorded as checked.
-    """
-
-    attempted: set[Path] = field(default_factory=set)
-    clean: set[Path] = field(default_factory=set)
 
 
 @dataclass(frozen=True)
@@ -647,24 +641,24 @@ class CargoAuditPlugin(BaseToolPlugin):
         scan: _Scan,
         vendored: list[Path],
         roots: list[str],
+        incremental: bool,
     ) -> ToolResult:
         """Explain a check that leaves no lockfile to audit.
 
         Args:
             ctx: The no-files result from ``prepare``, or None when discovery
-                found lockfiles and every one was skipped as a copy.
+                found lockfiles and every one was left out.
             scan: Every Cargo.lock entry in the requested scope.
             vendored: Lockfiles skipped as vendored or build-tree copies.
             roots: Requested roots for the copy rule; empty when included.
+            incremental: Whether the run asked for ``--incremental``.
 
         Returns:
             A no-files result naming what was left out, or ``ctx`` when the
-            diff or incremental filter, not a rule, left nothing in scope.
+            diff filter, not a rule, left nothing in scope.
         """
         # A lockfile in scope that is neither excluded nor a copy means the
-        # diff or incremental filter left it out, not an exclusion (#3572).
-        # Excluded lockfiles are not in the incremental cache, so an
-        # incremental run without a diff base compares the whole tree.
+        # diff filter left it out, not an exclusion (#3572).
         quiet = any(not _vendored(r, roots) for r in scan.readable)
         excluded = [] if quiet else scan.excluded
         if ctx is not None and not excluded and not vendored:
@@ -672,7 +666,16 @@ class CargoAuditPlugin(BaseToolPlugin):
         # Nothing is in scope by configuration or by the copy rule, which is
         # what "no files" means for every tool (and what the no-silent-skip
         # gate accepts), but a security scanner names what it did not read.
-        notes = _AuditSummary([], [], excluded, [], [], 0, vendored).text()
+        notes = _AuditSummary(
+            [],
+            [],
+            excluded,
+            [],
+            [],
+            0,
+            vendored,
+            incremental,
+        ).text()
         return ToolResult.from_outcome(
             ToolOutcome(execution=NoFiles()),
             name=self.definition.name,
@@ -688,7 +691,7 @@ class CargoAuditPlugin(BaseToolPlugin):
         scan: _Scan,
         anchors: tuple[str, ...],
         vendored: list[Path],
-        ledger: _Ledger,
+        incremental: bool,
     ) -> _AuditSummary:
         """Audit each lockfile within one timeout budget for the whole check.
 
@@ -699,8 +702,7 @@ class CargoAuditPlugin(BaseToolPlugin):
             anchors: Project directories; a symlinked lockfile whose target
                 lies outside all of them is named in the output.
             vendored: Lockfiles skipped as vendored or build-tree copies.
-            ledger: Receives each lockfile as its audit starts, and again
-                when it ends clean, so an interrupted check still knows.
+            incremental: Whether the run asked for ``--incremental``.
 
         Returns:
             Every audit that finished, and the lockfiles the budget did not
@@ -714,16 +716,12 @@ class CargoAuditPlugin(BaseToolPlugin):
                 break
             # A parsed report proves the advisory database is in place.
             fetch = not any(audit.parsed for audit in audits)
-            ledger.attempted.add(lockfile)
             try:
                 audits.append(
                     self._audit_lockfile(lockfile, timeout=remaining, fetch=fetch),
                 )
             except subprocess.TimeoutExpired:
                 break
-            last = audits[-1]
-            if last.complete and not last.issues and not last.denied:
-                ledger.clean.add(lockfile)
         return _AuditSummary(
             audits=audits,
             not_audited=lockfiles[len(audits) :],
@@ -741,45 +739,8 @@ class CargoAuditPlugin(BaseToolPlugin):
             ],
             timeout=timeout,
             vendored=vendored,
+            incremental=incremental,
         )
-
-    def _restore_unaudited(
-        self,
-        paths: list[str],
-        before: dict[str, FileFingerprint],
-        ledger: _Ledger,
-    ) -> None:
-        """Keep only clean audits recorded as checked in the incremental cache.
-
-        Discovery records every lockfile it finds as checked before
-        cargo-audit runs, whatever happens next. Under the requested paths,
-        a lockfile whose audit ended clean stays recorded; one whose audit
-        started but did not end clean (findings, denied warnings, incomplete,
-        failed, interrupted) is removed, so every incremental run audits it
-        until it is clean; any other lockfile (skipped, unreadable, not
-        reached, or the tool never ran) goes back to its entry from before
-        this run, or is removed if it had none.
-
-        Args:
-            paths: Paths passed to ``check``.
-            before: The cache's entries before this run.
-            ledger: Which lockfiles this run attempted and found clean.
-        """
-        roots = [Path(os.path.abspath(p)) for p in paths]
-        cache = ToolCache.load(self.definition.name)
-        for key in list(cache.fingerprints):
-            lockfile = Path(key)
-            if (
-                lockfile.name != CARGO_AUDIT_LOCKFILE
-                or lockfile in ledger.clean
-                or not any(lockfile.is_relative_to(root) for root in roots)
-            ):
-                continue
-            if key in before and lockfile not in ledger.attempted:
-                cache.fingerprints[key] = before[key]
-            else:
-                del cache.fingerprints[key]
-        cache.save()
 
     def doc_url(self, code: str) -> str | None:
         """Return RustSec advisory URL for the given advisory ID.
@@ -797,6 +758,12 @@ class CargoAuditPlugin(BaseToolPlugin):
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check Rust dependencies for security vulnerabilities.
 
+        cargo-audit's verdict depends on the advisory database and the deny
+        settings as much as on the lockfile, so an unchanged lockfile can
+        change verdict. The incremental cache is therefore never used:
+        discovery runs as in a full check, and every lockfile in scope is
+        audited on every run. ``--diff`` still narrows the scope.
+
         Args:
             paths: List of paths to check.
             options: Additional options for the check.
@@ -804,38 +771,8 @@ class CargoAuditPlugin(BaseToolPlugin):
         Returns:
             ToolResult with security scan results.
         """
-        ledger = _Ledger()
-        # The same rule shared discovery uses to run incrementally
-        # (``prepare_execution``), so the cache is fixed whenever it ran.
-        if not bool({**self.options, **options}.get("incremental", False)):
-            return self._check(paths, options, ledger)
-        before = dict(ToolCache.load(self.definition.name).fingerprints)
-        # Whatever ends the check (an early result from prepare, an exception,
-        # an interrupt), only clean audits stay recorded as checked.
-        try:
-            return self._check(paths, options, ledger)
-        finally:
-            self._restore_unaudited(paths, before, ledger)
-
-    def _check(
-        self,
-        paths: list[str],
-        options: dict[str, object],
-        ledger: _Ledger,
-    ) -> ToolResult:
-        """Run the check, recording which lockfiles were audited and clean.
-
-        Args:
-            paths: List of paths to check.
-            options: Additional options for the check.
-            ledger: Receives the lockfiles attempted and found clean.
-
-        Returns:
-            ToolResult with security scan results.
-        """
-        ctx = self.prepare(paths, options)
-        if isinstance(ctx, ToolResult) and not ctx.no_files:
-            return ctx
+        incremental = bool({**self.options, **options}.get("incremental", False))
+        ctx = self.prepare(paths, {**options, "incremental": False})
         # In a --diff run every kind of entry is limited to the changed ones,
         # so unchanged entries neither fail the run nor fill its notes.
         scan = self._in_scope(self._scan(paths), paths, options)
@@ -843,7 +780,13 @@ class CargoAuditPlugin(BaseToolPlugin):
         roots = [] if include is True else [os.path.abspath(p) for p in paths]
         # Unreadable entries fail the check even when nothing else is in
         # scope, and each is reported once, as unreadable, not as a failed run.
-        files = [] if isinstance(ctx, ToolResult) else ctx.files
+        # When prepare stopped early (no files, or a refused or missing
+        # cargo-audit), the walk above finds the same lockfiles discovery did.
+        files = (
+            [str(entry) for entry in scan.readable]
+            if isinstance(ctx, ToolResult)
+            else ctx.files
+        )
         found = [f for f in _lockfiles(files) if f not in set(scan.unreadable)]
         vendored = sorted(
             {f for f in (*found, *scan.unreadable) if _vendored(f, roots)},
@@ -853,16 +796,19 @@ class CargoAuditPlugin(BaseToolPlugin):
             unreadable=[e for e in scan.unreadable if e not in vendored],
         )
         lockfiles = [f for f in found if f not in vendored]
+        # Nothing left in scope wins over a refused or missing cargo-audit.
         if not lockfiles and not scan.unreadable:
-            plain = ctx if isinstance(ctx, ToolResult) else None
-            return self._nothing_audited(plain, scan, vendored, roots)
+            plain = ctx if isinstance(ctx, ToolResult) and ctx.no_files else None
+            return self._nothing_audited(plain, scan, vendored, roots, incremental)
+        if isinstance(ctx, ToolResult) and not ctx.no_files:
+            return ctx
         summary = self._audit_all(
             lockfiles,
             timeout=0 if isinstance(ctx, ToolResult) else ctx.timeout,
             scan=scan,
             anchors=resolve_exclude_anchors(paths),
             vendored=vendored,
-            ledger=ledger,
+            incremental=incremental,
         )
         issues = summary.issues
         failure = summary.failure_note()

@@ -23,13 +23,12 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.config.config_loader import clear_config_cache, load_config
+from lintro.config.config_loader import load_config
 from lintro.enums.action import Action
 from lintro.models.core.tool_outcome import ToolOutcome, Unavailable
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.cargo_audit.definition import CargoAuditPlugin
-from lintro.utils.config import clear_pyproject_cache
 from lintro.utils.execution.tool_configuration import configure_tool_for_execution
 from lintro.utils.file_cache import ToolCache
 from lintro.utils.fingerprint_baseline import fingerprint
@@ -934,25 +933,17 @@ def git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return root
 
 
-@pytest.mark.parametrize("mode", ["diff", "incremental"])
 def test_scope_without_changed_lockfiles_is_not_blamed_on_exclusion(
     git_repo: Path,
     fake: _FakeCargoAudit,
-    mode: str,
 ) -> None:
-    """An unchanged app lockfile next to an excluded one stays "no files".
+    """In a --diff run, an unchanged app lockfile next to an excluded one is "no files".
 
     Args:
         git_repo: Committed repository.
         fake: The fake cargo-audit.
-        mode: Which changed-files scope the run uses.
     """
-    options: dict[str, object] = (
-        {"diff_base": "HEAD"} if mode == "diff" else {"incremental": True}
-    )
-    if mode == "incremental":
-        _check(fake, ["."], exclude=["vendor/"], options=options)
-        fake.commands.clear()
+    options: dict[str, object] = {"diff_base": "HEAD"}
 
     result = _check(fake, ["."], exclude=["vendor/"], options=options)
 
@@ -1267,9 +1258,7 @@ def test_incremental_rerun_still_names_unchanged_copies(
     git_repo: Path,
     fake: _FakeCargoAudit,
 ) -> None:
-    """A skipped copy was never audited, so every incremental run names it.
-
-    The audited app lockfile is unchanged and not audited again.
+    """Every incremental run audits app again and names the skipped copy.
 
     Args:
         git_repo: Committed repository with app and vendor/dep.
@@ -1282,8 +1271,8 @@ def test_incremental_rerun_still_names_unchanged_copies(
 
     note = "directory (1): vendor/dep/Cargo.lock;"
     assert_that(first.output).contains(note)
-    assert_that(fake.commands).is_empty()
-    assert_that(second.no_files).is_true()
+    assert_that(fake.audited()).is_equal_to([git_repo / "app" / "Cargo.lock"])
+    assert_that(second.no_files).is_false()
     assert_that(second.output).contains(note)
 
 
@@ -1347,7 +1336,7 @@ def test_a_lockfile_left_unaudited_is_audited_by_the_next_incremental_run(
         include_vendored=True if reason == "default-skip" else None,
     )
 
-    assert_that(fake.audited()).is_equal_to([lib])
+    assert_that(fake.audited()).contains(lib)
 
 
 def _cached(repo: Path) -> list[str]:
@@ -1394,13 +1383,13 @@ def three_crates(
     ],
     ids=["unavailable", "refused-version"],
 )
-def test_an_early_result_from_prepare_records_nothing_as_checked(
+def test_lockfiles_are_audited_once_cargo_audit_runs_after_an_early_result(
     repo: Path,
     fake: _FakeCargoAudit,
     three_crates: tuple[Path, Path],
     refusal: Unavailable,
 ) -> None:
-    """A run stopped by the version gate leaves every lockfile due.
+    """After the version gate stopped a run, the next run audits everything.
 
     Args:
         repo: Repository root.
@@ -1427,13 +1416,13 @@ def test_an_early_result_from_prepare_records_nothing_as_checked(
     [RuntimeError("boom"), KeyboardInterrupt()],
     ids=["exception", "keyboard-interrupt"],
 )
-def test_an_interrupted_audit_records_only_completed_audits(
+def test_an_interrupted_run_is_audited_in_full_by_the_next_run(
     repo: Path,
     fake: _FakeCargoAudit,
     three_crates: tuple[Path, Path],
     error: BaseException,
 ) -> None:
-    """Stopping mid-audit keeps app checked and leaves lib due.
+    """After an interrupted run, the next run audits every lockfile again.
 
     Args:
         repo: Repository root.
@@ -1456,9 +1445,9 @@ def test_an_interrupted_audit_records_only_completed_audits(
     ):
         plugin.check(["."], incremental)
 
-    assert_that(_cached(repo)).is_equal_to(["app/Cargo.lock"])
+    assert_that(_cached(repo)).is_empty()
     _check(fake, ["."], options=incremental)
-    assert_that(fake.audited()).is_equal_to([lib])
+    assert_that(fake.audited()).is_equal_to(list(three_crates))
 
 
 # cargo-audit 0.23.0's --json report for the same ansi_term lockfile under
@@ -1467,76 +1456,6 @@ def test_an_interrupted_audit_records_only_completed_audits(
 REPORT_MARKED_DENIED = (
     Path(__file__).with_name("cargo_audit_marked_denied_warning.json").read_text()
 )
-
-
-@pytest.mark.parametrize("source", ["tool-options", "pyproject"])
-@pytest.mark.parametrize("value", ["1", "true", "True"])
-def test_incremental_given_as_any_truthy_value_restores_the_cache(
-    tmp_path: Path,
-    repo: Path,
-    fake: _FakeCargoAudit,
-    monkeypatch: pytest.MonkeyPatch,
-    source: str,
-    value: str,
-) -> None:
-    """``incremental`` set to 1, "true" or True as a tool option restores too.
-
-    Shared discovery runs incrementally for any truthy value, so the cache
-    must be restored by the same rule: a copy skipped in the first run is
-    audited once include_vendored is set.
-
-    Args:
-        tmp_path: Pytest temporary directory, holding the cache.
-        repo: Repository root.
-        fake: The fake cargo-audit.
-        monkeypatch: Points the cache and config discovery at the test.
-        source: Where the option comes from.
-        value: The option's spelling.
-    """
-    monkeypatch.setattr("lintro.utils.file_cache.CACHE_DIR", tmp_path / "cache")
-    monkeypatch.setattr("lintro.config.config_loader._find_config_file", lambda: None)
-    _crate(repo, "app")
-    copy = _crate(repo, "vendor/dep")
-    toml = {"1": "1", "true": '"true"', "True": "true"}[value]
-
-    def configured(include: bool) -> CargoAuditPlugin:
-        """Configure the plugin as the CLI would.
-
-        Args:
-            include: Whether include_vendored is set.
-
-        Returns:
-            The configured plugin.
-        """
-        clear_config_cache()
-        clear_pyproject_cache()
-        extra = ",cargo_audit:include_vendored=True" if include else ""
-        cli = parse_tool_options(f"cargo_audit:incremental={value}{extra}")
-        (repo / "pyproject.toml").write_text(
-            f"[tool.lintro.cargo_audit]\nincremental = {toml}\n"
-            + ("include_vendored = true\n" if include else ""),
-        )
-        plugin = configure_tool_for_execution(
-            tool=CargoAuditPlugin(),
-            tool_name="cargo_audit",
-            config_manager=UnifiedConfigManager(),
-            tool_option_dict=cli if source == "tool-options" else {},
-            exclude=None,
-            include_venv=False,
-            incremental=False,
-            action=Action.CHECK,
-            selected_tools={"cargo_audit"},
-            lintro_config=load_config(None),
-        )
-        assert isinstance(plugin, CargoAuditPlugin)
-        return plugin
-
-    for include in (False, True):
-        plugin = configured(include)
-        with patch.object(plugin, "_run_subprocess_result", side_effect=fake):
-            plugin.check(["."], {})
-
-    assert_that(fake.audited()[-1:]).is_equal_to([copy])
 
 
 # The exact stderr cargo-audit printed in the tools image (CI run 44809175522)
@@ -1620,13 +1539,13 @@ def test_denied_warnings_fail_and_are_audited_again_whatever_stderr_says(
 
 
 @pytest.mark.parametrize("stderr", ["error: 1 vulnerability found!\n", *STDERR_NOISE])
-def test_a_clean_report_at_exit_zero_is_cached_whatever_stderr_says(
+def test_a_clean_report_at_exit_zero_is_clean_whatever_stderr_says(
     repo: Path,
     fake: _FakeCargoAudit,
     cache: Path,
     stderr: str,
 ) -> None:
-    """Exit 0 with a clean report is a clean audit, recorded and not repeated.
+    """Exit 0 with a clean report is a clean audit, and is audited every run.
 
     Args:
         repo: Repository root.
@@ -1640,10 +1559,10 @@ def test_a_clean_report_at_exit_zero_is_cached_whatever_stderr_says(
 
     first, second, again = _twice(fake, lock)
 
-    assert_that(first.success).is_true()
-    assert_that(first.execution_failed).is_false()
-    assert_that(second.no_files).is_true()
-    assert_that(again).is_false()
+    for result in (first, second):
+        assert_that(result.success).is_true()
+        assert_that(result.execution_failed).is_false()
+    assert_that(again).is_true()
 
 
 @pytest.mark.parametrize(
@@ -1678,3 +1597,96 @@ def test_findings_are_reported_on_every_incremental_run(
             ["RUSTSEC-2021-0003"],
         )
     assert_that(again).is_true()
+
+
+def test_a_verdict_change_without_a_lockfile_change_is_reported(
+    repo: Path,
+    fake: _FakeCargoAudit,
+    cache: Path,
+) -> None:
+    """Clean incremental run, full run with findings, incremental run again.
+
+    A new advisory changes the verdict without touching the lockfile; the
+    following incremental run audits it and reports the finding.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+        cache: Temporary incremental cache.
+    """
+    lock = _crate(repo, "app")
+    incremental: dict[str, object] = {"incremental": True}
+    fake.reports[lock] = (0, CLEAN_REPORT)
+    clean = _check(fake, ["."], options=incremental)
+    fake.reports[lock] = (1, VULNERABLE_REPORT)
+    full = _check(fake, ["."])
+    fake.commands.clear()
+
+    again = _check(fake, ["."], options=incremental)
+
+    assert_that(clean.success).is_true()
+    assert_that(full.issues_count).is_equal_to(1)
+    assert_that(fake.audited()).is_equal_to([lock])
+    assert_that(again.success).is_false()
+    assert_that(again.issues_count).is_equal_to(1)
+
+
+@pytest.mark.parametrize("incremental", [False, True], ids=["full", "incremental"])
+def test_the_incremental_note_appears_only_in_incremental_runs(
+    repo: Path,
+    fake: _FakeCargoAudit,
+    cache: Path,
+    incremental: bool,
+) -> None:
+    """An --incremental run says why every lockfile was audited.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+        cache: Temporary incremental cache.
+        incremental: Whether the run asks for --incremental.
+    """
+    _crate(repo, "app")
+
+    result = _check(fake, ["."], options={"incremental": incremental})
+
+    note = (
+        "cargo-audit audited every Cargo.lock in scope: --incremental does not "
+        "apply to it, because advisories change independently of the lockfile."
+    )
+    assert_that(result.success).is_true()
+    assert_that(result.output).is_equal_to(note if incremental else None)
+
+
+@pytest.mark.parametrize("app", [False, True], ids=["only-copies", "with-app"])
+def test_nothing_in_scope_wins_over_a_refused_cargo_audit(
+    repo: Path,
+    fake: _FakeCargoAudit,
+    app: bool,
+) -> None:
+    """Only skipped copies in scope is "no files", even if cargo-audit is refused.
+
+    With a lockfile to audit, the refusal stands.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+        app: Whether a lockfile outside vendor/ is in scope too.
+    """
+    _crate(repo, "vendor/dep")
+    if app:
+        _crate(repo, "app")
+    refusal = Unavailable("security scanner did not run: below minimum", strict=True)
+    early = ToolResult.from_outcome(ToolOutcome(refusal), name="cargo_audit")
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=early,
+    ):
+        result = _check(fake, ["."])
+
+    assert_that(fake.commands).is_empty()
+    assert_that(result.no_files).is_equal_to(not app)
+    if app:
+        assert_that(result.unavailable_reason).is_equal_to(refusal.reason)
+    else:
+        assert_that(result.output).contains("directory (1): vendor/dep/Cargo.lock;")
