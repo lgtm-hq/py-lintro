@@ -870,13 +870,21 @@ The installed version falls into one of three cases:
 
 1. **Refused**: below the minimum, or on the known-bad list. Lintro does not run the
    tool and says why, naming the installed version, the reason and the command to
-   upgrade (`lintro install --upgrade <tool>`). A refused security scanner (bandit,
-   cargo-audit, cargo-deny, checkov, cppcheck, gitleaks, osv-scanner, pip-audit,
-   semgrep, trufflehog: the tools whose `tool_type` includes `SECURITY`) **fails the
-   run**: its row is `UNAVAIL`, the reason starts with `security scanner did not run`,
-   and the exit code is 1, so a run without the scan never reads as a clean one. Any
-   other refused tool is skipped, or fails the run under
-   [strict mode](#strict-mode-for-missing-tools).
+   upgrade (`lintro install --upgrade <tool>`). For a known-bad version the message
+   names the pinned version to install, since a bad release can be newer than the pin;
+   `lintro install <tool>` (with or without `--upgrade`) plans that change, and
+   `lintro doctor` marks the tool `[XX]` with the reason. A refused security scanner
+   (bandit, cargo-audit, cargo-deny, checkov, cppcheck, gitleaks, osv-scanner,
+   pip-audit, semgrep, trufflehog: the tools whose `tool_type` includes `SECURITY`)
+   **fails the run**: its row is `UNAVAIL`, the reason starts with
+   `security scanner did not run`, and the exit code is 1, so a run without the scan
+   never reads as a clean one. Any other refused tool is skipped, or fails the run under
+   [strict mode](#strict-mode-for-missing-tools). Every report says the scanner did not
+   run and why, never "No issues found": the Markdown, HTML and plain-text reports and
+   the CSV `notes` column print it, JSON carries `status: unavailable` with
+   `unavailable_reason`, and SARIF adds an invocation with `executionSuccessful: false`
+   and a `toolExecutionNotifications` entry instead of a finding. The same applies to
+   any tool reported `UNAVAIL`, and to a tool that ran without a complete result.
 2. **Older than the pin**: the tool runs as usual, and lintro prints one suggestion per
    tool per run, saying the installed version works, which version lintro tests, and the
    upgrade command (`lintro install --upgrade <tool>`). This is not a failure and does
@@ -922,14 +930,20 @@ upgrade hint, in the summary row and in JSON `unavailable_reason`. It is an exec
 failure, not a finding: `issues_count` stays `0`, `status` is `unavailable`,
 `unavailable` is `true` and `success` is `false`. Findings from the tools that did run
 are reported as usual. Without strict mode the JSON is unchanged, so a below-minimum
-tool still reports `status: skipped` with its `skip_reason`.
+tool still reports `status: skipped` with its `skip_reason`, except a security scanner:
+a refused scanner reports `status: unavailable` and fails the run in either mode.
 
 Strict mode applies to every tool the run selected: the tools named with `--tools`, or
 otherwise the tools the config enables (or, without a config, the tools picked by
 language detection). Narrow the set with `--tools` or `execution.enabled_tools` to make
 strict mode cover only the tools you expect to have installed.
-`LINTRO_ALLOW_VERSION_LAG` still lets a listed refused tool run, and `--auto-install`
-only installs Node.js project dependencies, so it does not install a missing tool.
+`LINTRO_ALLOW_VERSION_LAG` still lets a listed tool that is below its minimum run (for
+CI images that lag a pin bump), but never a version on the tool's known-bad list: that
+stays refused. A tool the override let run is marked in the results, not only in the
+log: its summary row's Notes column reads `below minimum, allowed by override`, and its
+JSON `metadata` has a `version_lag` object (`version`, `minimum`, `allowed_by`) next to
+the matching note. `--auto-install` only installs Node.js project dependencies, so it
+does not install a missing tool.
 
 "No files matched" covers Black too when it runs next to Ruff. Lintro decides whether
 Black or Ruff formats Python before it discovers files, but a Black that is missing or
