@@ -36,6 +36,7 @@ from lintro.tools.core.version_checking import (
 from lintro.utils.env import get_subprocess_env
 from lintro.utils.npx_call import npx_child_env, npx_shell_safe_command
 from lintro.utils.npx_integrity import NpxExit
+from lintro.utils.tool_snapshots import known_bad_install_hint
 
 # Sentinel value for unknown/unspecified version requirements
 VERSION_UNKNOWN: str = "unknown"
@@ -327,8 +328,13 @@ def _refuse_known_bad(
 ) -> None:
     """Fail the version check when the installed release is known to be bad.
 
+    Runs for every parsed version, whether or not it met the minimum: a
+    release that is both below the minimum and listed must not look like an
+    ordinary lagging one, which ``LINTRO_ALLOW_VERSION_LAG`` lets run (#3556).
+    The known-bad reason replaces the below-minimum message.
+
     Args:
-        info: Version check result whose ``current_version`` met the minimum.
+        info: Version check result with a parsed ``current_version``.
         known_bad: The tool's known-bad entries from the manifest.
     """
     if info.current_version is None:
@@ -338,9 +344,23 @@ def _refuse_known_bad(
         return
     info.known_bad = entry
     info.version_check_passed = False
-    info.error_message = (
-        f"Version {info.current_version} is refused because it is known to "
-        f"give wrong results: {entry.reason} (see {entry.reference})"
+    info.error_message = known_bad_refusal(info.current_version, entry)
+    info.install_hint = known_bad_install_hint(info.recommended_version)
+
+
+def known_bad_refusal(version: str, entry: KnownBadVersion) -> str:
+    """Say that ``version`` is refused, why, and where that is recorded.
+
+    Args:
+        version: The installed version.
+        entry: The known-bad entry that names it.
+
+    Returns:
+        The refusal message.
+    """
+    return (
+        f"Version {version} is refused because it is known to give wrong "
+        f"results: {entry.reason} (see {entry.reference})"
     )
 
 
@@ -559,8 +579,7 @@ def check_tool_version(
             # If min_version is unknown, consider check passed since we got a version
             info.version_check_passed = True
 
-        if info.version_check_passed:
-            _refuse_known_bad(info, known_bad)
+        _refuse_known_bad(info, known_bad)
         if info.known_bad is not None:
             logger.debug(
                 f"[VersionCheck] Known-bad version for {tool_name}: "

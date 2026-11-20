@@ -863,20 +863,28 @@ For each tool lintro knows two versions: the **minimum**, the oldest release lin
 adapter works with (`min_version` in `lintro/tools/manifest.src.json`), and the
 **pinned** version, the one lintro installs and tests. A tool can also have a list of
 **known-bad versions** (`known_bad_versions`): releases that meet the minimum but give
-wrong results. Each entry has a PEP 440 version or range (`"==2.7.0"`,
-`">=2.4.0,<2.6.0"`), the reason and a reference.
+wrong results. Each entry has a version or range (`versions`), the reason and a
+reference. `versions` uses a deliberately small grammar, checked the same way when the
+manifest is generated and when lintro loads it: comma-separated clauses, each one of
+`==`, `!=`, `<`, `<=`, `>` or `>=` followed by a plain numeric release such as `2.7.0`,
+with a trailing `.*` allowed only after `==` and `!=` (`"==2.7.0"`, `">=2.4.0,<2.6.0"`,
+`"==2.7.*"`). Nothing else is accepted: no `~=`, no pre-release, post-release, epoch or
+local parts.
 
 The installed version falls into one of three cases:
 
 1. **Refused**: below the minimum, or on the known-bad list. Lintro does not run the
-   tool and says why, naming the installed version, the reason and the command to
-   upgrade (`lintro install --upgrade <tool>`). For a known-bad version the message
-   names the pinned version to install, since a bad release can be newer than the pin;
-   `lintro install <tool>` (with or without `--upgrade`) plans that change, and
-   `lintro doctor` marks the tool `[XX]` with the reason. A refused security scanner
-   (bandit, cargo-audit, cargo-deny, checkov, cppcheck, gitleaks, osv-scanner,
-   pip-audit, semgrep, trufflehog: the tools whose `tool_type` includes `SECURITY`)
-   **fails the run**: its row is `UNAVAIL`, the reason starts with
+   tool and says why. Below the minimum, the message names the installed version and the
+   command to upgrade (`lintro install --upgrade <tool>`). For a known-bad version it
+   names the installed version, that it is refused, the reason and reference, and ends
+   with `Install <pinned version>, the version lintro tests.`; `lintro versions`,
+   `lintro doctor` (which marks the tool `[XX]`) and the MCP `lintro_versions` tool give
+   the same hint. Lintro does not yet replace a known-bad version for you:
+   `lintro install` treats it like any other installed version, so a known-bad release
+   at or above the pin is reported as installed (#3567). Install the pinned version by
+   hand. A refused security scanner (bandit, cargo-audit, cargo-deny, checkov, cppcheck,
+   gitleaks, osv-scanner, pip-audit, semgrep, trufflehog: the tools whose `tool_type`
+   includes `SECURITY`) **fails the run**: its row is `UNAVAIL`, the reason starts with
    `security scanner did not run`, and the exit code is 1, so a run without the scan
    never reads as a clean one. Any other refused tool is skipped, or fails the run under
    [strict mode](#strict-mode-for-missing-tools). Every report says the scanner did not

@@ -51,6 +51,7 @@ from lintro.tools.core.version_parsing import (
     extract_version_from_output,
     find_known_bad_version,
 )
+from lintro.utils.tool_snapshots import known_bad_install_hint
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -171,6 +172,26 @@ def _known_bad_details(tool: ManifestTool, installed: str) -> str | None:
     return f"known to give wrong results: {entry.reason} (see {entry.reference})"
 
 
+def _upgrade_hint(tool: ManifestTool, installed: str, upgrade_hint: str) -> str:
+    """Return the upgrade hint, or what to install instead of a known-bad release.
+
+    The install strategy's upgrade command can install the newest release,
+    which can be the bad one, and lintro cannot replace a known-bad release
+    yet (#3567), so for one the hint names only the version lintro tests.
+
+    Args:
+        tool: Manifest tool entry.
+        installed: Installed version string.
+        upgrade_hint: The install strategy's upgrade hint.
+
+    Returns:
+        The hint to show.
+    """
+    if find_known_bad_version(installed, tool.known_bad_versions) is None:
+        return upgrade_hint
+    return known_bad_install_hint(tool.version)
+
+
 def _check_tool_from_snapshot(
     *,
     tool: ManifestTool,
@@ -246,7 +267,7 @@ def _check_tool_from_snapshot(
         details=_known_bad_details(tool, version),
         path=binary_path,
         install_hint=hint,
-        upgrade_hint=upgrade_hint,
+        upgrade_hint=_upgrade_hint(tool, version, upgrade_hint),
         advisory=advisory,
     )
 
@@ -409,7 +430,7 @@ def check_tool(
             details=_known_bad_details(tool, version),
             path=tool_path,
             install_hint=hint,
-            upgrade_hint=upgrade_hint,
+            upgrade_hint=_upgrade_hint(tool, version, upgrade_hint),
             advisory=advisory,
         )
     except subprocess.TimeoutExpired:

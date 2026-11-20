@@ -174,6 +174,7 @@ def verify_tool_version(
         claim_upgrade_suggestion,
         get_tool_snapshot,
         is_strict_missing_tools,
+        known_bad_install_hint,
         record_version_lag,
         snapshot_to_unavailable_result,
         upgrade_command,
@@ -220,19 +221,15 @@ def verify_tool_version(
         return None
 
     error = snapshot.probe_error or "version check failed"
-    hint = snapshot.remediation_hint or ""
-    upgrade = f"To upgrade, run: {upgrade_command(definition.name)}"
     if snapshot.known_bad:
-        # The install hint names a range ("v2.6.0+") that includes the
-        # refused release, so name the one version to install instead.
-        pinned = (
-            f"{snapshot.recommended_version}, the version lintro tests,"
-            if snapshot.recommended_version
-            else "the version lintro tests"
-        )
-        upgrade = f"Install {pinned} by running: {upgrade_command(definition.name)}"
-        hint = ""
-    detail = f"{error}. {upgrade}. {hint}".strip()
+        # ``lintro install --upgrade`` cannot replace a known-bad release yet
+        # (#3567), and the install hint's range ("v2.6.0+") can include it, so
+        # the hint names only the version lintro tests.
+        hint = known_bad_install_hint(snapshot.recommended_version)
+    else:
+        upgrade = f"To upgrade, run: {upgrade_command(definition.name)}."
+        hint = f"{upgrade} {snapshot.remediation_hint or ''}".strip()
+    detail = f"{error}. {hint}"
 
     # A refused security scanner fails the run: skipping it quietly would
     # let a run without the scan read as a clean one (#3556).
@@ -245,7 +242,7 @@ def verify_tool_version(
         name=definition.name,
         reason=error,
         detail=detail,
-        hint=f"{upgrade}. {hint}".strip(),
+        hint=hint,
         strict=True if is_security else None,
     )
 

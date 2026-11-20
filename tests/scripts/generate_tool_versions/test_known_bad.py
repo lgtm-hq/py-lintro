@@ -37,8 +37,8 @@ def _set_known_bad(fake_repo: Path, value: Any) -> None:
 @pytest.mark.parametrize(
     ("value", "problem"),
     [
-        ([{**_GOOD, "versions": "2.6.5"}], "is not a PEP 440 specifier"),
-        ([{**_GOOD, "versions": "==2.6.5 or so"}], "is not a PEP 440 specifier"),
+        ([{**_GOOD, "versions": "2.6.5"}], "must be comma-separated clauses"),
+        ([{**_GOOD, "versions": "==2.6.5 or so"}], "must be comma-separated clauses"),
         ([{"versions": "==2.6.5", "reference": "x"}], "missing keys ['reason']"),
         (
             [{"versions": "==2.6.5", "reasons": "typo", "reference": "x"}],
@@ -85,7 +85,7 @@ def test_invalid_known_bad_entry_exits_two(
 
 @pytest.mark.parametrize(
     "versions",
-    ["==2.7.0", ">=2.4.0,<2.6.0", "==2.7.*", "!=1.0, <0.9", "==3.0.0rc1"],
+    ["==2.7.0", ">=2.4.0,<2.6.0", "==2.7.*", "!=1.0, <0.9"],
 )
 def test_valid_known_bad_entry_is_written_through(
     retargeted_gen: SimpleNamespace,
@@ -97,7 +97,7 @@ def test_valid_known_bad_entry_is_written_through(
     Args:
         retargeted_gen: Generator module pointed at the fake repo.
         fake_repo: Fake repo fixture root.
-        versions: A PEP 440 specifier.
+        versions: A ``versions`` string in the known-bad grammar.
     """
     entry = {**_GOOD, "versions": versions}
     _set_known_bad(fake_repo, [entry])

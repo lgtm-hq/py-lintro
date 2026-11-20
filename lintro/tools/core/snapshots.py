@@ -742,6 +742,54 @@ def _snapshot_from_version(
     )
 
 
+def _recheck_cached_verdict(snap: ToolSnapshot) -> ToolSnapshot | None:
+    """Re-apply the current manifest's version policy to a cached snapshot.
+
+    The cache is keyed on lintro version, binary path and mtime, not on the
+    manifest, and an entry written by older code has no ``known_bad`` field.
+    A cached verdict is therefore never trusted on the known-bad question
+    (#3556): the cached version is checked against the current known-bad
+    list on every read, so a release listed after the cache was written is
+    refused without a probe.
+
+    Args:
+        snap: Snapshot read from the disk cache.
+
+    Returns:
+        The snapshot, refused when its version is now listed, or None when
+        the entry must be probed again: it was refused as known-bad but is no
+        longer listed, or its verdict disagrees with the current minimum.
+    """
+    if not snap.available or snap.version is None:
+        return snap
+    tool = _manifest_tool(snap.name)
+    if tool is None:
+        return snap
+
+    from lintro.tools.core.version_parsing import (
+        compare_versions,
+        find_known_bad_version,
+        known_bad_refusal,
+    )
+
+    entry = find_known_bad_version(snap.version, tool.known_bad_versions)
+    if entry is not None:
+        return replace(
+            snap,
+            version_check_passed=False,
+            known_bad=True,
+            below_recommended=False,
+            probe_error=known_bad_refusal(snap.version, entry),
+        )
+    if snap.known_bad:
+        return None
+    try:
+        meets_minimum = compare_versions(snap.version, tool.min_version) >= 0
+    except ValueError:
+        return snap
+    return snap if meets_minimum == snap.version_check_passed else None
+
+
 def _load_disk_cache(
     cache_file: Path,
     *,
@@ -795,7 +843,10 @@ def _load_disk_cache(
             continue
         if not _is_cached_snapshot_fresh(snap, search_root=search_root):
             continue
-        snapshots[name.lower()] = snap
+        rechecked = _recheck_cached_verdict(snap)
+        if rechecked is None:
+            continue
+        snapshots[name.lower()] = rechecked
 
     return snapshots
 

@@ -335,6 +335,24 @@ def upgrade_command(name: str) -> str:
     return f"lintro install --upgrade {name}"
 
 
+def known_bad_install_hint(pinned: str) -> str:
+    """Say what to install instead of a known-bad release.
+
+    ``lintro install --upgrade`` cannot replace a known-bad release yet
+    (#3567), and an install hint's range ("v2.6.0+") can include the refused
+    release, so the hint names only the version lintro tests.
+
+    Args:
+        pinned: The version lintro pins and tests, or empty when unknown.
+
+    Returns:
+        The hint, a sentence ending in a full stop.
+    """
+    if not pinned:
+        return "Install the version lintro tests."
+    return f"Install {pinned}, the version lintro tests."
+
+
 _upgrade_suggested: set[str] = set()
 _upgrade_suggested_lock = threading.Lock()
 

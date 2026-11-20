@@ -31,6 +31,7 @@ from typing import Any
 
 from lintro.tools.core.manifest_models import (
     KnownBadVersion,
+    ManifestError,
     ManifestTool,
     ProfileDefinition,
 )
@@ -79,23 +80,23 @@ def _parse_known_bad_versions(
         The entries, in manifest order.
 
     Raises:
-        ValueError: If the value or any entry is malformed.
+        ManifestError: If the value or any entry is malformed.
     """
     if raw is None:
         return ()
     if not isinstance(raw, list):
-        raise ValueError(f"Tool {name!r}: known_bad_versions must be a list")
+        raise ManifestError(f"Tool {name!r}: known_bad_versions must be a list")
     entries: list[KnownBadVersion] = []
     for item in raw:
         if not isinstance(item, dict) or set(item) != set(_KNOWN_BAD_FIELDS):
-            raise ValueError(
+            raise ManifestError(
                 f"Tool {name!r}: known_bad_versions entry {item!r} must have "
                 f"exactly the keys {list(_KNOWN_BAD_FIELDS)}",
             )
         try:
             entries.append(KnownBadVersion(**item))
         except (TypeError, ValueError) as exc:
-            raise ValueError(
+            raise ManifestError(
                 f"Tool {name!r}: known_bad_versions entry {item!r}: {exc}",
             ) from exc
     return tuple(entries)

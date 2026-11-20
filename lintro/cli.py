@@ -464,6 +464,32 @@ class LintroGroup(click.Group):
             int: Exit code from command execution.
 
         Raises:
+            click.ClickException: If lintro's tool manifest cannot be applied.
+        """
+        from lintro.tools.core.manifest_models import ManifestError
+
+        # A hand-edited manifest.json with an entry lintro cannot apply is a
+        # one-line error naming the tool and entry, not a traceback (#3556).
+        try:
+            return self._invoke(ctx)
+        except ManifestError as exc:
+            raise click.ClickException(
+                f"lintro's tool manifest is invalid: {exc}",
+            ) from exc
+
+    def _invoke(
+        self,
+        ctx: click.Context,
+    ) -> int:
+        """Run the command or command chain for :meth:`invoke`.
+
+        Args:
+            ctx: click.Context: The Click context.
+
+        Returns:
+            int: Exit code from command execution.
+
+        Raises:
             SystemExit: If a command exits with a non-zero exit code.
         """
         from lintro.cli_utils.command_chainer import CommandChainer

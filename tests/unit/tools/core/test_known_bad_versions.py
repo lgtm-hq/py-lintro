@@ -11,7 +11,7 @@ The rule has three cases for an installed tool version:
 The known-bad entries here are test-only: lintro still pins osv-scanner 2.7.0,
 so the real 2.7.0 entry cannot be listed until the pin moves to 2.7.1. One
 test-only bad release sits between the minimum (2.6.0) and the pin, the other
-above the pin, where an upgrade plan used to call the tool up to date.
+above the pin.
 """
 
 from __future__ import annotations
@@ -23,20 +23,22 @@ from pathlib import Path
 
 import pytest
 from assertpy import assert_that
+from click.testing import CliRunner
 from loguru import logger
 from rich.console import Console
 
-from lintro.cli_utils.commands.install import _display_plan
+from lintro.cli_utils.commands.doctor import _render_tool_line
+from lintro.cli_utils.commands.versions import versions_command
 from lintro.enums.action import Action
 from lintro.enums.tool_status import ToolStatus
 from lintro.models.core.tool_outcome import Skipped, Unavailable
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.execution_preparation import verify_tool_version
 from lintro.plugins.protocol import ToolDefinition
+from lintro.tools.core import snapshots
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.manifest_models import KnownBadVersion
 from lintro.tools.core.snapshots import ToolSnapshot
-from lintro.tools.core.tool_installer import ToolInstaller
 from lintro.tools.core.tool_registry import ManifestRegistry
 from lintro.tools.core.version_parsing import (
     check_tool_version,
@@ -66,6 +68,18 @@ _ENTRY = KnownBadVersion(
 
 _ENTRY_ABOVE_PIN = replace(_ENTRY, versions=f"=={_BAD_ABOVE_PIN}")
 
+#: A test-only bad release that is also below osv-scanner's minimum (2.6.0).
+_BAD_BELOW_MIN = "2.5.0"
+
+_ENTRY_BELOW_MIN = KnownBadVersion(
+    versions=">=2.4.0,<2.6.0",
+    reason="reads only the first document of a pnpm lockfile",
+    reference="https://example.invalid/below-minimum",
+)
+
+#: What every surface says to install instead of a known-bad osv-scanner.
+_INSTALL_PIN = "Install 2.7.0, the version lintro tests."
+
 
 def _fake_osv_scanner(directory: Path, version: str) -> Path:
     """Write an executable that answers ``--version`` like osv-scanner.
@@ -79,26 +93,39 @@ def _fake_osv_scanner(directory: Path, version: str) -> Path:
     """
     binary = directory / "osv-scanner"
     binary.write_text(
-        f"#!/bin/sh\necho 'osv-scanner version: {version}'\n",
+        f"#!/bin/sh\necho call >> \"$0.calls\"\necho 'osv-scanner version: {version}'\n",
         encoding="utf-8",
     )
     binary.chmod(0o755)
     return binary
 
 
-@pytest.fixture
-def osv_known_bad(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give osv_scanner test-only known-bad entries in the loaded manifest.
+def _probe_count(binary: Path) -> int:
+    """Count how often the fake osv-scanner ran.
+
+    Args:
+        binary: The fake executable.
+
+    Returns:
+        The number of runs recorded next to it.
+    """
+    calls = binary.parent / f"{binary.name}.calls"
+    return len(calls.read_text().splitlines()) if calls.exists() else 0
+
+
+def _list_osv_known_bad(
+    monkeypatch: pytest.MonkeyPatch,
+    entries: tuple[KnownBadVersion, ...],
+) -> None:
+    """Make the loaded manifest give osv_scanner these known-bad entries.
 
     Args:
         monkeypatch: Restores the manifest loader after the test.
+        entries: The known-bad entries.
     """
     real = ManifestRegistry.load()
     tools = {tool.name: tool for tool in real.all_tools(include_dev=True)}
-    tools["osv_scanner"] = replace(
-        tools["osv_scanner"],
-        known_bad_versions=(_ENTRY, _ENTRY_ABOVE_PIN),
-    )
+    tools["osv_scanner"] = replace(tools["osv_scanner"], known_bad_versions=entries)
     patched = ManifestRegistry(
         tools=tools,
         language_map=real.language_map,
@@ -109,6 +136,16 @@ def osv_known_bad(monkeypatch: pytest.MonkeyPatch) -> None:
         "load",
         classmethod(lambda _cls: patched),
     )
+
+
+@pytest.fixture
+def osv_known_bad(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give osv_scanner test-only known-bad entries in the loaded manifest.
+
+    Args:
+        monkeypatch: Restores the manifest loader after the test.
+    """
+    _list_osv_known_bad(monkeypatch, (_ENTRY, _ENTRY_ABOVE_PIN, _ENTRY_BELOW_MIN))
 
 
 @pytest.fixture
@@ -178,8 +215,8 @@ def test_find_known_bad_version_matches_specifiers(
 @pytest.mark.parametrize(
     ("fields", "message"),
     [
-        ({"versions": "2.6.5"}, "is not a PEP 440 specifier"),
-        ({"versions": "not a specifier"}, "is not a PEP 440 specifier"),
+        ({"versions": "2.6.5"}, "must be comma-separated clauses"),
+        ({"versions": "not a specifier"}, "must be comma-separated clauses"),
         ({"versions": ""}, "non-empty 'versions'"),
         ({"reason": " "}, "non-empty 'reason'"),
         ({"reference": ""}, "non-empty 'reference'"),
@@ -262,7 +299,7 @@ def test_registry_reads_known_bad_versions_in_order(tmp_path: Path) -> None:
     [
         (
             [{"versions": "2.6.5", "reason": "r", "reference": "x"}],
-            "is not a PEP 440 specifier",
+            "must be comma-separated clauses",
         ),
         ([{"versions": "==2.1.0", "reference": "y"}], "must have exactly the keys"),
         (
@@ -315,7 +352,10 @@ def test_version_check_fails_loudly_on_a_malformed_manifest(
     binary = _fake_osv_scanner(tmp_path, _BAD)
 
     try:
-        with pytest.raises(ValueError, match="is not a PEP 440 specifier") as raised:
+        with pytest.raises(
+            ValueError,
+            match="must be comma-separated clauses",
+        ) as raised:
             check_tool_version("osv_scanner", [str(binary)])
     finally:
         ManifestRegistry.clear_cache()
@@ -369,8 +409,9 @@ def test_refused_security_scanner_fails_the_run(
 ) -> None:
     """A known-bad osv-scanner fails; the output names the version to install.
 
-    The install hint's range ("v2.6.0+") includes the refused release, so the
-    message names the pinned version instead.
+    The install hint's range ("v2.6.0+") includes the refused release, and
+    ``lintro install --upgrade`` cannot replace it yet (#3567), so the message
+    names only the pinned version.
 
     Args:
         tmp_path: Directory holding the fake binary.
@@ -393,73 +434,11 @@ def test_refused_security_scanner_fails_the_run(
         f"Version {version} is refused",
         _ENTRY.reason,
         _ENTRY.reference,
-        "Install 2.7.0, the version lintro tests, by running: "
-        "lintro install --upgrade osv_scanner",
     )
-    assert_that(result.output).does_not_contain("v2.6.0+")
-
-
-@pytest.mark.usefixtures("osv_known_bad")
-@pytest.mark.parametrize("upgrade", [True, False], ids=["upgrade", "install"])
-def test_install_plans_the_pin_for_a_known_bad_release_above_it(
-    osv_on_path: Callable[[str], Path],
-    upgrade: bool,
-) -> None:
-    """``lintro install`` replaces a known-bad release above the pin.
-
-    The plan used to put any version at or above the pin in "already
-    installed", so the command the refusal names changed nothing.
-
-    Args:
-        osv_on_path: Writes the fake binary first on PATH.
-        upgrade: Whether ``--upgrade`` was given.
-    """
-    osv_on_path(_BAD_ABOVE_PIN)
-    installer = ToolInstaller(ManifestRegistry.load(), RuntimeContext.detect())
-
-    plan = installer.plan(["osv_scanner"], upgrade=upgrade)
-    console = Console(record=True, width=200)
-    _display_plan(console, plan)
-
-    assert_that(plan.already_ok).is_empty()
-    assert_that(
-        [(tool.name, current) for tool, current, _cmd in plan.to_upgrade],
-    ).is_equal_to([("osv_scanner", _BAD_ABOVE_PIN)])
-    assert_that(console.export_text()).contains(
-        f"osv_scanner          {_BAD_ABOVE_PIN} → 2.7.0  via install-tools.sh",
+    assert_that(result.output).ends_with(
+        f"(see {_ENTRY.reference}). Install 2.7.0, the version lintro tests.",
     )
-
-
-@pytest.mark.usefixtures("osv_known_bad")
-def test_install_names_the_pin_when_it_cannot_install_it(
-    osv_on_path: Callable[[str], Path],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Without the pinned install script the plan is a manual step naming 2.7.0.
-
-    A package manager upgrade installs the newest release, which can be the
-    bad one, so it is not planned.
-
-    Args:
-        osv_on_path: Writes the fake binary first on PATH.
-        monkeypatch: Hides the install script.
-    """
-    osv_on_path(_BAD_ABOVE_PIN)
-    monkeypatch.setattr(
-        "lintro.tools.core.install_hints.install_script_path",
-        lambda: None,
-    )
-    installer = ToolInstaller(ManifestRegistry.load(), RuntimeContext.detect())
-
-    plan = installer.plan(["osv_scanner"], upgrade=True)
-
-    assert_that(plan.already_ok).is_empty()
-    assert_that(plan.to_upgrade).is_empty()
-    assert_that([tool.name for tool, _ in plan.manual]).is_equal_to(["osv_scanner"])
-    assert_that(plan.manual[0][1]).starts_with(
-        f"{_BAD_ABOVE_PIN} is known to give wrong results; install 2.7.0, "
-        "the version lintro tests",
-    )
+    assert_that(result.output).does_not_contain("v2.6.0+", "lintro install")
 
 
 @pytest.mark.parametrize(
@@ -650,6 +629,12 @@ def test_doctor_refuses_a_known_bad_release_like_the_run(
     assert_that(result.details).is_equal_to(
         f"known to give wrong results: {_ENTRY.reason} (see {_ENTRY.reference})",
     )
+    assert_that(result.upgrade_hint).is_equal_to(_INSTALL_PIN)
+    console = Console(record=True, width=300)
+    _render_tool_line(console, result)
+    rendered = console.export_text()
+    assert_that(rendered).contains(f"\n         {_INSTALL_PIN}\n")
+    assert_that(rendered).does_not_contain("Upgrade:", "v2.6.0+")
 
 
 def test_known_bad_survives_the_snapshot_cache() -> None:
@@ -694,3 +679,212 @@ def test_upgrade_suggestion_is_shown_once_per_tool_per_run(
         "To upgrade, run: lintro install --upgrade ruff\n"
     )
     assert_that(warnings_logged).is_equal_to([expected, expected])
+
+
+@pytest.mark.usefixtures("osv_known_bad")
+def test_known_bad_below_minimum_reports_the_known_bad_reason(
+    tmp_path: Path,
+) -> None:
+    """A release below the minimum and listed is refused as known-bad.
+
+    The known-bad reason wins over "below minimum": it is the one no
+    override may waive.
+
+    Args:
+        tmp_path: Directory for the fake binary.
+    """
+    binary = _fake_osv_scanner(tmp_path, _BAD_BELOW_MIN)
+
+    info = check_tool_version("osv_scanner", [str(binary)])
+
+    assert_that(info.version_check_passed).is_false()
+    assert_that(info.known_bad).is_equal_to(_ENTRY_BELOW_MIN)
+    assert_that(info.error_message).is_equal_to(
+        f"Version {_BAD_BELOW_MIN} is refused because it is known to give wrong "
+        f"results: {_ENTRY_BELOW_MIN.reason} (see {_ENTRY_BELOW_MIN.reference})",
+    )
+    assert_that(info.install_hint).is_equal_to(_INSTALL_PIN)
+
+
+@pytest.mark.usefixtures("osv_known_bad")
+@pytest.mark.parametrize("allowed", ["*", "osv_scanner"], ids=["all", "per-tool"])
+def test_version_lag_override_does_not_run_a_known_bad_release_below_minimum(
+    tmp_path: Path,
+    osv_on_path: Callable[[str], Path],
+    monkeypatch: pytest.MonkeyPatch,
+    allowed: str,
+) -> None:
+    """The override tolerates lag, not a listed release that also lags.
+
+    Args:
+        tmp_path: Directory holding the fake binary.
+        osv_on_path: Writes the fake binary first on PATH.
+        monkeypatch: Sets the override.
+        allowed: The override's value.
+    """
+    osv_on_path(_BAD_BELOW_MIN)
+    monkeypatch.setenv("LINTRO_ALLOW_VERSION_LAG", allowed)
+
+    result = verify_tool_version(OsvScannerPlugin().definition, cwd=tmp_path)
+
+    assert result is not None  # narrow: a refused version returns a result
+    assert_that(result.success).is_false()
+    assert_that(result.unavailable_reason).is_equal_to(
+        f"security scanner did not run: Version {_BAD_BELOW_MIN} is refused "
+        f"because it is known to give wrong results: {_ENTRY_BELOW_MIN.reason} "
+        f"(see {_ENTRY_BELOW_MIN.reference}). {_INSTALL_PIN}",
+    )
+
+
+@pytest.mark.usefixtures("osv_known_bad")
+def test_versions_command_names_only_the_pin_for_a_known_bad_release(
+    osv_on_path: Callable[[str], Path],
+) -> None:
+    """``lintro versions`` and MCP ``lintro_versions`` share this hint.
+
+    Both report ``ToolVersionInfo.install_hint``; its install range
+    ("v2.6.0+") would include the refused release.
+
+    Args:
+        osv_on_path: Writes the fake binary first on PATH.
+    """
+    osv_on_path(_BAD)
+
+    result = CliRunner().invoke(versions_command, ["--json"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    osv = json.loads(result.output)["osv_scanner"]
+    assert_that(osv["install_hint"]).is_equal_to(_INSTALL_PIN)
+    assert_that(osv["error_message"]).starts_with(f"Version {_BAD} is refused")
+
+
+def _warm_osv_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    entries: tuple[KnownBadVersion, ...],
+) -> ToolSnapshot:
+    """Probe osv-scanner once so its snapshot lands in the disk cache.
+
+    Args:
+        tmp_path: The cache root.
+        monkeypatch: Sets the manifest's known-bad entries for the probe.
+        entries: osv_scanner's known-bad entries while probing.
+
+    Returns:
+        The probed snapshot.
+    """
+    _list_osv_known_bad(monkeypatch, entries)
+    return snapshots.get_tool_snapshot("osv_scanner", cache_root=tmp_path)
+
+
+def _read_osv_cache_as_a_new_process(tmp_path: Path) -> ToolSnapshot:
+    """Read osv-scanner's snapshot with the in-memory cache dropped.
+
+    Args:
+        tmp_path: The cache root.
+
+    Returns:
+        The snapshot, served from the disk cache when it is still valid.
+    """
+    with snapshots._cache_lock:
+        snapshots._memory_caches.clear()
+    return snapshots.get_tool_snapshot("osv_scanner", cache_root=tmp_path)
+
+
+@pytest.mark.parametrize("old_format", [False, True], ids=["current", "old-format"])
+def test_cached_verdict_is_rechecked_against_the_known_bad_list(
+    tmp_path: Path,
+    osv_on_path: Callable[[str], Path],
+    monkeypatch: pytest.MonkeyPatch,
+    old_format: bool,
+) -> None:
+    """A release listed after the cache was written is refused without a probe.
+
+    The cache is keyed on lintro version, binary path and mtime, so it does
+    not notice a new manifest entry, and a cache file written by older code
+    has no ``known_bad`` field at all.
+
+    Args:
+        tmp_path: The cache root.
+        osv_on_path: Writes the fake binary first on PATH.
+        monkeypatch: Sets the manifest entries and the override.
+        old_format: Whether the cached entry lacks ``known_bad``.
+    """
+    binary = osv_on_path(_BAD)
+    warm = _warm_osv_cache(tmp_path, monkeypatch, ())
+    if old_format:
+        cache_file = snapshots._cache_file_path(cache_root=tmp_path)
+        data = json.loads(cache_file.read_text())
+        del data["snapshots"]["osv_scanner"]["known_bad"]
+        cache_file.write_text(json.dumps(data))
+    probes = _probe_count(binary)
+    _list_osv_known_bad(monkeypatch, (_ENTRY,))
+    monkeypatch.setenv("LINTRO_ALLOW_VERSION_LAG", "*")
+
+    cached = _read_osv_cache_as_a_new_process(tmp_path)
+
+    assert_that(warm.version_check_passed).is_true()
+    assert_that(_probe_count(binary)).is_equal_to(probes)
+    assert_that(cached.known_bad).is_true()
+    assert_that(cached.probe_error).is_equal_to(
+        f"Version {_BAD} is refused because it is known to give wrong results: "
+        f"{_ENTRY.reason} (see {_ENTRY.reference})",
+    )
+    assert_that(snapshot_is_runnable(cached)).is_false()
+
+
+def test_cached_known_bad_verdict_is_not_trusted_once_unlisted(
+    tmp_path: Path,
+    osv_on_path: Callable[[str], Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cached refusal whose entry was removed is probed again, then runs.
+
+    Args:
+        tmp_path: The cache root.
+        osv_on_path: Writes the fake binary first on PATH.
+        monkeypatch: Sets the manifest entries.
+    """
+    binary = osv_on_path(_BAD)
+    warm = _warm_osv_cache(tmp_path, monkeypatch, (_ENTRY,))
+    probes = _probe_count(binary)
+    _list_osv_known_bad(monkeypatch, ())
+
+    cached = _read_osv_cache_as_a_new_process(tmp_path)
+
+    assert_that(warm.known_bad).is_true()
+    assert_that(_probe_count(binary)).is_greater_than(probes)
+    assert_that(cached.known_bad).is_false()
+    assert_that(snapshot_is_runnable(cached)).is_true()
+
+
+@pytest.mark.parametrize(
+    ("version", "cached_pass", "kept"),
+    [("2.6.4", True, True), ("2.5.0", True, False), ("2.6.4", False, False)],
+    ids=["agrees", "minimum-raised-since", "minimum-lowered-since"],
+)
+def test_cached_verdict_is_rechecked_against_the_minimum(
+    version: str,
+    cached_pass: bool,
+    kept: bool,
+) -> None:
+    """A cached pass or refusal that the current minimum (2.6.0) contradicts is dropped.
+
+    Dropped entries are probed again instead of being served from the cache.
+
+    Args:
+        version: The cached osv-scanner version.
+        cached_pass: The cached minimum verdict.
+        kept: Whether the cached entry is still served.
+    """
+    cached = ToolSnapshot(
+        name="osv_scanner",
+        available=True,
+        version=version,
+        version_check_passed=cached_pass,
+        min_version="2.6.0",
+    )
+
+    assert_that(snapshots._recheck_cached_verdict(cached)).is_equal_to(
+        cached if kept else None,
+    )
