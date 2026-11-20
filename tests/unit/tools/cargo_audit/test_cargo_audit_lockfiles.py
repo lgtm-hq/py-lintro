@@ -1469,95 +1469,6 @@ REPORT_MARKED_DENIED = (
 )
 
 
-@pytest.mark.parametrize(
-    "stderr",
-    ["", "error: could not complete audit"],
-    ids=["real-stderr", "error"],
-)
-@pytest.mark.parametrize("marked", [False, True], ids=["unmarked", "marked"])
-def test_denied_warnings_read_as_audited_unless_cargo_audit_reports_an_error(
-    tmp_path: Path,
-    repo: Path,
-    fake: _FakeCargoAudit,
-    monkeypatch: pytest.MonkeyPatch,
-    stderr: str,
-    marked: bool,
-) -> None:
-    """An error on stderr makes a denied-warning run incomplete and uncached.
-
-    The recorded reports, with the empty stderr cargo-audit really prints in
-    --json mode, stay "audited but failing" and are cached.
-
-    Args:
-        tmp_path: Pytest temporary directory, holding the cache.
-        repo: Repository root.
-        fake: The fake cargo-audit.
-        monkeypatch: Points the incremental cache at ``tmp_path``.
-        stderr: What cargo-audit prints on standard error.
-        marked: Whether the report marks the warning denied (0.23) or not (0.22).
-    """
-    monkeypatch.setattr("lintro.utils.file_cache.CACHE_DIR", tmp_path / "cache")
-    lock = _crate(repo, "app")
-    report = REPORT_MARKED_DENIED if marked else REPORT_0_22_UNMAINTAINED
-    fake.reports[lock] = (1, report)
-    fake.stderr[lock] = stderr
-    incremental: dict[str, object] = {"incremental": True}
-
-    first = _check(fake, ["."], options=incremental)
-    fake.commands.clear()
-    _check(fake, ["."], options=incremental)
-
-    assert_that(first.success).is_false()
-    assert_that(first.execution_failed).is_equal_to(bool(stderr))
-    if stderr:
-        assert_that(first.output).contains(
-            "not audited (1): app/Cargo.lock "
-            "(cargo-audit reported 'error: could not complete audit')",
-        )
-        assert_that(first.output).does_not_contain("denied warnings")
-    else:
-        assert_that(first.output).contains("denied warnings, audited but failing")
-    assert_that(fake.audited()).is_equal_to([lock] if stderr else [])
-
-
-@pytest.mark.parametrize(
-    ("stderr", "complete"),
-    [
-        ("", True),
-        ("error: 1 vulnerability found!", True),
-        ("    Scanning Cargo.lock for vulnerabilities\nerror: could not complete audit", False),
-        ("error[E0001]: failed", False),
-    ],
-    ids=["none", "verdict-line", "error", "error-code"],
-)  # fmt: skip
-def test_an_error_on_stderr_makes_a_run_with_findings_incomplete(
-    repo: Path,
-    fake: _FakeCargoAudit,
-    stderr: str,
-    complete: bool,
-) -> None:
-    """Exit 1 with findings is complete only without an error on stderr.
-
-    Findings are kept either way; cargo-audit's own verdict line is not an
-    error.
-
-    Args:
-        repo: Repository root.
-        fake: The fake cargo-audit.
-        stderr: What cargo-audit prints on standard error.
-        complete: Whether the audit counts as complete.
-    """
-    lock = _crate(repo, "app")
-    fake.reports[lock] = (1, VULNERABLE_REPORT)
-    fake.stderr[lock] = stderr
-
-    result = _check(fake, ["."])
-
-    assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.execution_failed).is_equal_to(not complete)
-    assert_that(result.inspected_files).is_equal_to(True if complete else None)
-
-
 @pytest.mark.parametrize("source", ["tool-options", "pyproject"])
 @pytest.mark.parametrize("value", ["1", "true", "True"])
 def test_incremental_given_as_any_truthy_value_restores_the_cache(
@@ -1626,3 +1537,144 @@ def test_incremental_given_as_any_truthy_value_restores_the_cache(
             plugin.check(["."], {})
 
     assert_that(fake.audited()[-1:]).is_equal_to([copy])
+
+
+# The exact stderr cargo-audit printed in the tools image (CI run 44809175522)
+# after a complete audit, when its yanked-crate lookup found no crates.io index.
+YANK_LOOKUP_FAILED = (
+    "error: couldn't check if the package is yanked: not found: No such crate "
+    "in crates.io index: smallvec\n"
+)
+
+# stderr text a check must not interpret: it decides by exit status and report.
+STDERR_NOISE = [
+    "error: could not complete audit\n",
+    "Error: something failed\n",
+    "\x1b[1;31merror\x1b[0m: coloured\n",
+    "error : spaced\n",
+    YANK_LOOKUP_FAILED,
+]
+
+
+@pytest.fixture
+def cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the incremental cache at a temporary directory.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Used to patch the cache directory.
+
+    Returns:
+        The cache directory.
+    """
+    directory = tmp_path / "cache"
+    monkeypatch.setattr("lintro.utils.file_cache.CACHE_DIR", directory)
+    return directory
+
+
+def _twice(fake: _FakeCargoAudit, lock: Path) -> tuple[ToolResult, ToolResult, bool]:
+    """Run two incremental checks with nothing changed in between.
+
+    Args:
+        fake: The fake cargo-audit.
+        lock: The lockfile under test.
+
+    Returns:
+        Both results and whether the second run audited ``lock`` again.
+    """
+    incremental: dict[str, object] = {"incremental": True}
+    first = _check(fake, ["."], options=incremental)
+    fake.commands.clear()
+    second = _check(fake, ["."], options=incremental)
+    return first, second, lock in fake.audited()
+
+
+@pytest.mark.parametrize("stderr", STDERR_NOISE)
+@pytest.mark.parametrize("marked", [False, True], ids=["unmarked", "marked"])
+def test_denied_warnings_fail_and_are_audited_again_whatever_stderr_says(
+    repo: Path,
+    fake: _FakeCargoAudit,
+    cache: Path,
+    stderr: str,
+    marked: bool,
+) -> None:
+    """Exit 1 with unmarked warnings fails and never becomes a green rerun.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+        cache: Temporary incremental cache.
+        stderr: What cargo-audit prints on standard error.
+        marked: Whether the report marks the warning denied (0.23) or not (0.22).
+    """
+    lock = _crate(repo, "app")
+    report = REPORT_MARKED_DENIED if marked else REPORT_0_22_UNMAINTAINED
+    fake.reports[lock] = (1, report)
+    fake.stderr[lock] = stderr
+
+    first, second, again = _twice(fake, lock)
+
+    assert_that(first.success).is_false()
+    assert_that(second.success).is_false()
+    assert_that(again).is_true()
+
+
+@pytest.mark.parametrize("stderr", ["error: 1 vulnerability found!\n", *STDERR_NOISE])
+def test_a_clean_report_at_exit_zero_is_cached_whatever_stderr_says(
+    repo: Path,
+    fake: _FakeCargoAudit,
+    cache: Path,
+    stderr: str,
+) -> None:
+    """Exit 0 with a clean report is a clean audit, recorded and not repeated.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+        cache: Temporary incremental cache.
+        stderr: What cargo-audit prints on standard error.
+    """
+    lock = _crate(repo, "app")
+    fake.reports[lock] = (0, CLEAN_REPORT)
+    fake.stderr[lock] = stderr
+
+    first, second, again = _twice(fake, lock)
+
+    assert_that(first.success).is_true()
+    assert_that(first.execution_failed).is_false()
+    assert_that(second.no_files).is_true()
+    assert_that(again).is_false()
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    ["", YANK_LOOKUP_FAILED],
+    ids=["none", "yank-lookup"],
+)
+def test_findings_are_reported_on_every_incremental_run(
+    repo: Path,
+    fake: _FakeCargoAudit,
+    cache: Path,
+    stderr: str,
+) -> None:
+    """A lockfile with findings is a complete audit, never recorded as checked.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+        cache: Temporary incremental cache.
+        stderr: What cargo-audit prints on standard error.
+    """
+    lock = _crate(repo, "app", vulnerable=True)
+    fake.reports[lock] = (1, VULNERABLE_REPORT)
+    fake.stderr[lock] = stderr
+
+    first, second, again = _twice(fake, lock)
+
+    for result in (first, second):
+        assert_that(result.execution_failed).is_false()
+        assert_that(result.inspected_files).is_true()
+        assert_that([i.get_code() for i in result.issues or []]).is_equal_to(
+            ["RUSTSEC-2021-0003"],
+        )
+    assert_that(again).is_true()

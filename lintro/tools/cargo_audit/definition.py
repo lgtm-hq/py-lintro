@@ -8,10 +8,9 @@ advisory database.
 from __future__ import annotations
 
 import os
-import re
 import subprocess  # nosec B404 - used safely with shell disabled
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -188,38 +187,12 @@ def _denied_warnings(payload: dict[str, Any] | None, returncode: int) -> list[st
     return labels
 
 
-# cargo-audit's verdict line in text mode; it starts with "error:" but is not
-# an error. In --json mode (what lintro runs) stderr is empty on a normal
-# audit, whether it found vulnerabilities or denied warnings.
-_VERDICT_LINE = re.compile(
-    r"error: \d+ (?:vulnerability|vulnerabilities|denied warnings?) found!",
-)
-
-
-def _stderr_error(stderr: str) -> str | None:
-    """Return the first error cargo-audit printed, if any.
-
-    Args:
-        stderr: cargo-audit's standard error.
-
-    Returns:
-        The first line starting with ``error:`` or ``error[`` that is not
-        cargo-audit's verdict line, or None.
-    """
-    for line in stderr.splitlines():
-        text = line.strip()
-        if text.startswith(("error:", "error[")) and not _VERDICT_LINE.fullmatch(text):
-            return text
-    return None
-
-
 def _report_problem(
     payload: dict[str, Any] | None,
     issues: list[CargoAuditIssue],
     returncode: int,
     *,
     denied: bool,
-    stderr: str,
 ) -> str | None:
     """Say why a cargo-audit report does not establish a complete audit.
 
@@ -233,17 +206,12 @@ def _report_problem(
         issues: Findings parsed from it.
         returncode: cargo-audit's exit status.
         denied: Whether the report marks a warning as denied.
-        stderr: cargo-audit's standard error; an error printed there means
-            the audit did not complete, whatever the report says.
 
     Returns:
         The reason the audit is incomplete, or None when it is complete.
     """
     if payload is None:
         return "no usable JSON report"
-    error = _stderr_error(stderr)
-    if error:
-        return f"cargo-audit reported {error!r}"
     vulnerabilities = payload["vulnerabilities"]
     records = len(vulnerabilities["list"])
     if len(issues) != records:
@@ -430,6 +398,20 @@ class _AuditSummary:
         return "\n\n".join(shown) if shown else None
 
 
+@dataclass
+class _Ledger:
+    """Which lockfiles one check audited, for the incremental cache.
+
+    Attributes:
+        attempted: Lockfiles whose audit started.
+        clean: Lockfiles whose audit completed with no findings and no
+            denied warnings; only these may stay recorded as checked.
+    """
+
+    attempted: set[Path] = field(default_factory=set)
+    clean: set[Path] = field(default_factory=set)
+
+
 @dataclass(frozen=True)
 class _Scan:
     """Every entry named Cargo.lock below the requested paths.
@@ -570,7 +552,6 @@ class CargoAuditPlugin(BaseToolPlugin):
             issues,
             proc.returncode,
             denied=bool(denied),
-            stderr=proc.stderr,
         )
         # An incomplete audit did not run to a verdict, so its warnings are
         # not reported as denied by an audit that ran.
@@ -707,7 +688,7 @@ class CargoAuditPlugin(BaseToolPlugin):
         scan: _Scan,
         anchors: tuple[str, ...],
         vendored: list[Path],
-        audited: set[Path],
+        ledger: _Ledger,
     ) -> _AuditSummary:
         """Audit each lockfile within one timeout budget for the whole check.
 
@@ -718,8 +699,8 @@ class CargoAuditPlugin(BaseToolPlugin):
             anchors: Project directories; a symlinked lockfile whose target
                 lies outside all of them is named in the output.
             vendored: Lockfiles skipped as vendored or build-tree copies.
-            audited: Receives each lockfile as soon as its audit is complete,
-                so an interrupted check still knows what it audited.
+            ledger: Receives each lockfile as its audit starts, and again
+                when it ends clean, so an interrupted check still knows.
 
         Returns:
             Every audit that finished, and the lockfiles the budget did not
@@ -733,14 +714,16 @@ class CargoAuditPlugin(BaseToolPlugin):
                 break
             # A parsed report proves the advisory database is in place.
             fetch = not any(audit.parsed for audit in audits)
+            ledger.attempted.add(lockfile)
             try:
                 audits.append(
                     self._audit_lockfile(lockfile, timeout=remaining, fetch=fetch),
                 )
             except subprocess.TimeoutExpired:
                 break
-            if audits[-1].complete:
-                audited.add(lockfile)
+            last = audits[-1]
+            if last.complete and not last.issues and not last.denied:
+                ledger.clean.add(lockfile)
         return _AuditSummary(
             audits=audits,
             not_audited=lockfiles[len(audits) :],
@@ -764,22 +747,23 @@ class CargoAuditPlugin(BaseToolPlugin):
         self,
         paths: list[str],
         before: dict[str, FileFingerprint],
-        audited: set[Path],
+        ledger: _Ledger,
     ) -> None:
-        """Undo what incremental discovery recorded for unaudited lockfiles.
+        """Keep only clean audits recorded as checked in the incremental cache.
 
         Discovery records every lockfile it finds as checked before
-        cargo-audit runs, whatever happens next: a skipped copy, an
-        unavailable tool, a failed audit, an exception or an interrupt. Every
-        Cargo.lock under the requested paths that did not get a complete audit
-        goes back to its entry from before this run, or is removed if it had
-        none, so the next incremental run audits it if it changed or was
-        never audited, and an audited, unchanged lockfile stays checked.
+        cargo-audit runs, whatever happens next. Under the requested paths,
+        a lockfile whose audit ended clean stays recorded; one whose audit
+        started but did not end clean (findings, denied warnings, incomplete,
+        failed, interrupted) is removed, so every incremental run audits it
+        until it is clean; any other lockfile (skipped, unreadable, not
+        reached, or the tool never ran) goes back to its entry from before
+        this run, or is removed if it had none.
 
         Args:
             paths: Paths passed to ``check``.
             before: The cache's entries before this run.
-            audited: Lockfiles that got a complete audit in this run.
+            ledger: Which lockfiles this run attempted and found clean.
         """
         roots = [Path(os.path.abspath(p)) for p in paths]
         cache = ToolCache.load(self.definition.name)
@@ -787,11 +771,11 @@ class CargoAuditPlugin(BaseToolPlugin):
             lockfile = Path(key)
             if (
                 lockfile.name != CARGO_AUDIT_LOCKFILE
-                or lockfile in audited
+                or lockfile in ledger.clean
                 or not any(lockfile.is_relative_to(root) for root in roots)
             ):
                 continue
-            if key in before:
+            if key in before and lockfile not in ledger.attempted:
                 cache.fingerprints[key] = before[key]
             else:
                 del cache.fingerprints[key]
@@ -820,31 +804,31 @@ class CargoAuditPlugin(BaseToolPlugin):
         Returns:
             ToolResult with security scan results.
         """
-        audited: set[Path] = set()
+        ledger = _Ledger()
         # The same rule shared discovery uses to run incrementally
-        # (``prepare_execution``), so the cache is restored whenever it ran.
+        # (``prepare_execution``), so the cache is fixed whenever it ran.
         if not bool({**self.options, **options}.get("incremental", False)):
-            return self._check(paths, options, audited)
+            return self._check(paths, options, ledger)
         before = dict(ToolCache.load(self.definition.name).fingerprints)
         # Whatever ends the check (an early result from prepare, an exception,
-        # an interrupt), unaudited lockfiles must not stay recorded as checked.
+        # an interrupt), only clean audits stay recorded as checked.
         try:
-            return self._check(paths, options, audited)
+            return self._check(paths, options, ledger)
         finally:
-            self._restore_unaudited(paths, before, audited)
+            self._restore_unaudited(paths, before, ledger)
 
     def _check(
         self,
         paths: list[str],
         options: dict[str, object],
-        audited: set[Path],
+        ledger: _Ledger,
     ) -> ToolResult:
-        """Run the check, recording each lockfile that gets a complete audit.
+        """Run the check, recording which lockfiles were audited and clean.
 
         Args:
             paths: List of paths to check.
             options: Additional options for the check.
-            audited: Receives each lockfile whose audit completed.
+            ledger: Receives the lockfiles attempted and found clean.
 
         Returns:
             ToolResult with security scan results.
@@ -878,7 +862,7 @@ class CargoAuditPlugin(BaseToolPlugin):
             scan=scan,
             anchors=resolve_exclude_anchors(paths),
             vendored=vendored,
-            audited=audited,
+            ledger=ledger,
         )
         issues = summary.issues
         failure = summary.failure_note()

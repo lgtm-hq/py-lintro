@@ -4035,24 +4035,22 @@ In a `--diff` or `--incremental` run the scope is the changed lockfiles; a `--di
 in which no lockfile changed reports "no files matched" without the lists. In a `--diff`
 run the same scope applies to excluded, skipped and unreadable entries: only those in
 the diff are named. Under `--incremental`, lockfiles under `vendor/` or `target/` are
-named on every run, not only when they change, because a lockfile that was not audited
-is never recorded as checked. `--incremental` only re-audits changed lockfiles, so a
-green incremental run does not mean there are no known vulnerabilities: an unchanged
-lockfile with earlier findings, or one affected by an advisory published since its last
-audit, is not checked again; run a full check for that. lintro's changed set holds only
-paths that resolve to a file, so in a `--diff` run an unreadable entry is caught when it
-is a changed `Cargo.lock` that cannot be read, but a dangling symlink, symlink loop or
-directory named `Cargo.lock` is only caught by a full run. Lists of lockfiles name the
-first ten and give a count of the rest.
+named on every run, not only when they change. `--incremental` records a lockfile as
+checked only after a complete audit that found nothing: no vulnerabilities and no denied
+warnings. A lockfile with findings, denied warnings, or an audit that failed, was
+incomplete or was interrupted is audited again, and its findings reported again, on
+every incremental run until it is clean. An unchanged clean lockfile is not re-audited,
+so an advisory published since its last audit is only caught by a full check. lintro's
+changed set holds only paths that resolve to a file, so in a `--diff` run an unreadable
+entry is caught when it is a changed `Cargo.lock` that cannot be read, but a dangling
+symlink, symlink loop or directory named `Cargo.lock` is only caught by a full run.
+Lists of lockfiles name the first ten and give a count of the rest.
 
 **Fail closed.** A lockfile that was not audited fails the check and is named, whatever
 the other lockfiles found. Findings from a failed audit are still shown. A lockfile
 counts as not audited when:
 
 - cargo-audit printed no usable JSON report;
-- cargo-audit printed an error on stderr (a line starting with `error:` or `error[`,
-  other than its own `error: N vulnerabilities found!` verdict), whatever the report
-  says;
 - a vulnerability record in the report could not be read or lacks the advisory id,
   package name or package version, or the report's `found` and `count` disagree with the
   records it lists (findings that could be read are still shown);
