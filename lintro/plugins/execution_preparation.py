@@ -154,6 +154,10 @@ def verify_tool_version(
     still skip. This matches the CI image gate's ``--allow-version-lag``
     policy for Renovate tool bumps against a digest-pinned base image.
 
+    A security scanner whose version output lintro cannot read is refused
+    like a known-bad one, and the override does not apply: an unknown version
+    cannot be shown to be merely lagging (#3568). Any other tool still runs.
+
     The check must resolve the same binary the run will use. Verifying a
     different installation can skip the run even though the target project has
     a valid pinned binary, or pass on a binary that never executes (#1727).
@@ -187,13 +191,19 @@ def verify_tool_version(
     if resolved_commands is not None and cwd is not None and snapshot.command:
         resolved_commands[(definition.name, str(cwd))] = snapshot.command
 
-    if not snapshot.available:
+    # Checked before availability: a scanner launched as ``python -m X`` has
+    # no resolved path, so its snapshot is unavailable, yet its probe ran and
+    # printed no readable version. It is refused like the PATH case (#3568).
+    unknown_scanner = snapshot.version_unreadable and bool(
+        definition.tool_type & ToolType.SECURITY,
+    )
+    if not snapshot.available and not unknown_scanner:
         return snapshot_to_unavailable_result(
             snapshot,
             strict=is_strict_missing_tools(),
         )
 
-    if snapshot_is_runnable(snapshot):
+    if not unknown_scanner and snapshot_is_runnable(snapshot):
         if not snapshot.version_check_passed:
             logger.warning(
                 "{} {} is below minimum {} but allowed via {}; proceeding",
@@ -226,6 +236,12 @@ def verify_tool_version(
         # (#3567), and the install hint's range ("v2.6.0+") can include it, so
         # the hint names only the version lintro tests.
         hint = known_bad_install_hint(snapshot.recommended_version)
+    elif unknown_scanner:
+        hint = (
+            "Lintro cannot check an unknown version against its minimum or "
+            f"known-bad list, and {_ALLOW_VERSION_LAG_ENV} does not apply. "
+            f"{known_bad_install_hint(snapshot.recommended_version)}"
+        )
     else:
         upgrade = f"To upgrade, run: {upgrade_command(definition.name)}."
         hint = f"{upgrade} {snapshot.remediation_hint or ''}".strip()

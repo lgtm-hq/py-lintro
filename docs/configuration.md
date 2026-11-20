@@ -892,7 +892,13 @@ The installed version falls into one of three cases:
    the CSV `notes` column print it, JSON carries `status: unavailable` with
    `unavailable_reason`, and SARIF adds an invocation with `executionSuccessful: false`
    and a `toolExecutionNotifications` entry instead of a finding. The same applies to
-   any tool reported `UNAVAIL`, and to a tool that ran without a complete result.
+   any tool reported `UNAVAIL`, and to a tool that ran without a complete result. A
+   security scanner whose version lintro cannot read (it runs, but prints no version
+   lintro can parse, such as a source build that reports `dev`) is refused the same way,
+   because neither the minimum nor the known-bad list can be checked: the run fails, and
+   the reason quotes what the tool printed, on one line, trimmed and escaped. Install
+   the pinned version to proceed. Any other tool whose version cannot be read still
+   runs.
 2. **Older than the pin**: the tool runs as usual, and lintro prints one suggestion per
    tool per run, saying the installed version works, which version lintro tests, and the
    upgrade command (`lintro install --upgrade <tool>`). This is not a failure and does
@@ -928,6 +934,7 @@ for a run when the config enables it.
 | Binary not found, or the version probe failed              | `UNAVAIL`, exit 0 | `UNAVAIL`, **exit 1** |
 | Installed but below the minimum version, or known-bad      | `SKIP`, exit 0    | `UNAVAIL`, **exit 1** |
 | Same, for a security scanner                               | `UNAVAIL`, exit 1 | `UNAVAIL`, **exit 1** |
+| Security scanner whose version cannot be read              | `UNAVAIL`, exit 1 | `UNAVAIL`, **exit 1** |
 | No files matched the tool's patterns                       | not a failure     | not a failure         |
 | `disabled in config`, `not in enabled_tools`, `deferred`   | `SKIP`, exit 0    | `SKIP`, exit 0        |
 | Missing project config or `node_modules` (e.g. `vale`)     | `SKIP`, exit 0    | `SKIP`, exit 0        |
@@ -947,11 +954,12 @@ language detection). Narrow the set with `--tools` or `execution.enabled_tools` 
 strict mode cover only the tools you expect to have installed.
 `LINTRO_ALLOW_VERSION_LAG` still lets a listed tool that is below its minimum run (for
 CI images that lag a pin bump), but never a version on the tool's known-bad list: that
-stays refused. A tool the override let run is marked in the results, not only in the
-log: its summary row's Notes column reads `below minimum, allowed by override`, and its
-JSON `metadata` has a `version_lag` object (`version`, `minimum`, `allowed_by`) next to
-the matching note. `--auto-install` only installs Node.js project dependencies, so it
-does not install a missing tool.
+stays refused. Nor does it let a security scanner with an unreadable version run: an
+unknown version cannot be shown to be merely lagging. A tool the override let run is
+marked in the results, not only in the log: its summary row's Notes column reads
+`below minimum, allowed by override`, and its JSON `metadata` has a `version_lag` object
+(`version`, `minimum`, `allowed_by`) next to the matching note. `--auto-install` only
+installs Node.js project dependencies, so it does not install a missing tool.
 
 "No files matched" covers Black too when it runs next to Ruff. Lintro decides whether
 Black or Ruff formats Python before it discovers files, but a Black that is missing or
