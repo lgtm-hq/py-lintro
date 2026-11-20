@@ -2246,7 +2246,7 @@ The suppression probe uses the same flags with `--config /dev/null`.
   grouped with its GHSA alias) and a failed check both with call analysis on, as earlier
   lintro releases ran it, and with it off.
 
-Both flags exist from osv-scanner 2.4.0, the minimum lintro enforces. lintro passes no
+Both flags exist in osv-scanner 2.6.0, the minimum lintro enforces. lintro passes no
 tool option to osv-scanner, so `verbosity`, `call_analysis` and `no_call_analysis` are
 refused as tool options rather than silently ignored.
 
@@ -2335,11 +2335,19 @@ again: add the fixture directory to `.lintro-ignore` (for example `testdata/`) o
 it on the command line with `--exclude testdata`. Their errors are then dropped, and so
 are any findings in them.
 
+**Minimum version.** lintro requires osv-scanner 2.6.0 or later. osv-scanner 2.4.0 to
+2.5.1 read only the first document of a two-document `pnpm-lock.yaml` (15 of 651
+packages in vuejs/core, where 2.6.0 reads all 651 and reports 34 vulnerabilities), exit
+0 and print nothing on standard error, so the scan reads as complete and clean. lintro
+cannot detect that under-read, so it refuses those versions instead: an older binary is
+reported as below the minimum, with the installed and required versions and where to get
+a newer one. The tool is skipped by default and the run fails with
+`--strict-missing-tools`.
+
 **Known limit.** osv-scanner does not report every source it under-reads. A lockfile in
 a format version it does not support (for example `"lockfileVersion": 99`) is logged as
-"found 0 packages" with no error, and osv-scanner 2.4.0 to 2.5.1 read only the first
-document of a two-document `pnpm-lock.yaml` (15 of 651 packages in vuejs/core) without
-an error. Such a scan reads as complete; lintro cannot detect it.
+"found 0 packages" with no error. Such a scan reads as complete; lintro cannot detect
+it.
 
 **Usage Examples:**
 

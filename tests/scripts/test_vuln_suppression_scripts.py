@@ -12,6 +12,10 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
+from lintro._tool_versions import get_min_version
+from lintro.enums.tool_name import ToolName
+from lintro.tools.core.version_parsing import compare_versions
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _INSTALL_SCRIPT = _REPO_ROOT / "scripts/ci/security/install-osv-scanner.sh"
 _CHECK_SCRIPT = _REPO_ROOT / "scripts/ci/security/check-vuln-suppressions.sh"
@@ -241,3 +245,21 @@ def test_vuln_suppression_workflow_uses_local_scripts() -> None:
     assert uses_match is not None  # narrow type for mypy
     assert tooling_match is not None  # narrow type for mypy
     assert_that(uses_match.group(1)).is_equal_to(tooling_match.group(1))
+
+
+def test_install_script_default_meets_lintro_minimum() -> None:
+    """The CI installer's default osv-scanner is not below lintro's floor (#3557).
+
+    The suppression-check workflow passes no version, so this default is the
+    osv-scanner CI runs. Below the manifest ``min_version`` it would be a
+    release lintro itself refuses.
+    """
+    match = re.search(
+        r'^OSV_VERSION="\$\{1:-\$\{OSV_VERSION:-([0-9.]+)\}\}"$',
+        _INSTALL_SCRIPT.read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    assert match is not None  # narrow type for mypy
+    floor = get_min_version(ToolName.OSV_SCANNER)
+
+    assert_that(compare_versions(match.group(1), floor)).is_greater_than_or_equal_to(0)

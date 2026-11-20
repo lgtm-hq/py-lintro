@@ -10,7 +10,7 @@
 #   install-osv-scanner.sh [version]
 #
 # Environment:
-#   OSV_VERSION            Release version (default: 2.3.5)
+#   OSV_VERSION            Release version (default: 2.7.0)
 #   INSTALL_DIR            Install directory (default: /usr/local/bin or ~/.local/bin)
 #   DOWNLOAD_MAX_ATTEMPTS  Retry count for downloads (default: 3)
 
@@ -22,7 +22,7 @@ Usage: install-osv-scanner.sh [version]
 
 Download and verify the osv-scanner release binary with retries.
 
-Version: $1 > $OSV_VERSION > 2.3.5
+Version: $1 > $OSV_VERSION > 2.7.0
 Install dir: $INSTALL_DIR > /usr/local/bin > ~/.local/bin
 EOF
 	exit 0
@@ -45,7 +45,7 @@ source "${TOOLING_LIB}/fs.sh"
 # shellcheck source=/dev/null
 source "${TOOLING_LIB}/network/download.sh"
 
-OSV_VERSION="${1:-${OSV_VERSION:-2.3.5}}"
+OSV_VERSION="${1:-${OSV_VERSION:-2.7.0}}"
 DOWNLOAD_MAX_ATTEMPTS="${DOWNLOAD_MAX_ATTEMPTS:-3}"
 
 _explain_download_failure() {
