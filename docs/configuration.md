@@ -2364,6 +2364,50 @@ semantics as file discovery and yield identical results. Directory patterns (`.c
 `vendor/`) drop every finding from that tree — useful when nested checkouts multiply the
 same finding — and file patterns (`bun.lock`, `*.lock`) suppress individual lockfiles.
 
+##### The allow-list and its limit
+
+lintro allow-lists one kind of osv-scanner error message. Every other message makes the
+run incomplete. That one kind is a transitive-dependency enricher reporting that the
+registry answered and the manifest's indirect dependencies cannot be resolved: the
+registry has no such package or version (a private package), or no version satisfies the
+requirements. The exact endings are listed under "The one allow-listed message" above.
+For example:
+
+```text
+Error during extraction: (extracting as transitivedependency/requirements) failed resolution for app/requirements.txt: package System(7):internal-pkg: not found
+```
+
+This message is harmless for three reasons. It comes from the project's own manifest and
+stays the same on every run. The packages listed directly in that manifest were scanned;
+only their indirect dependencies were not. And osv-scanner cannot print this text after
+a transport failure: a lookup that failed on the network comes back as its own error
+(`rpc error`, `max retries exhausted`), not as `not found`.
+
+**The rule for the list.** A message shape belongs on the list only when it is provably
+a property of the project's own files and a network or registry failure cannot produce
+it. A message lintro does not recognise stays an incomplete run that quotes it. Adding a
+shape takes an explicit maintainer decision recorded in an issue, with source evidence
+that the text cannot come from a transport failure. A unit test pins the number of
+allow-listed endings, so a new one also changes that test.
+
+**Examined and rejected: Maven `invalid empty constraint`.** square/okhttp's
+`maven-tests/pom.xml` imports a BOM by a SNAPSHOT version range. osv-scanner 2.7.1
+prints, at exit 127:
+
+```text
+Error during extraction: (extracting as transitivedependency/pomxml) failed resolution for maven-tests/pom.xml: failed resolving {Maven:com.squareup.okhttp3:maven-tests[Concrete:1.0.0-SNAPSHOT] {}}: failed parsing version constraint 'Maven:com.squareup.okhttp3:okhttp-jvm[Requirement:]': invalid empty constraint
+```
+
+It looks like a property of the file, but it is not one. deps.dev's Maven resolver
+ignores any error from fetching an imported BOM (`util/maven/dependency.go`,
+`ProcessDependencies`: `if err != nil { continue }`). A dependency whose version should
+come from that BOM keeps an empty version, and resolution then fails with this text.
+With osv-scanner 2.7.1 and a minimal pom that imports a BOM, an online run exits 0 with
+nothing on standard error; the same run with only Maven Central blocked exits 127 and
+prints this same line. lintro cannot tell the two apart, so such a project gets an
+incomplete run that quotes the line. For a complete scan, exclude that manifest (for
+example `--exclude maven-tests`) or make the BOM resolvable.
+
 #### pip-audit Configuration
 
 pip-audit is the Python Packaging Authority (PyPA) scanner for Python dependencies with
