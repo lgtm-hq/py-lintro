@@ -15,7 +15,7 @@
 # Built from docker/tools.Dockerfile and published by docker-tools-publish.yml
 # (cosign-signed, SBOM + provenance). Renovate manages the digest bump (#1360).
 # yamllint / hadolint: pin is immutable by digest; tag is informational.
-FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:7c7b62a393ac9f7dd806b20e0d9f269966a0a3360969217b8d2b1cf7e60e1ff7 AS tools
+FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:932e8b9a5dcdfe1e0a1101ecae7ee993b4130e5a7549bbc3429a50af61361f4f AS tools
 
 # -----------------------------------------------------------------------------
 # Stage: full — lintro application (default target)
@@ -208,7 +208,7 @@ CMD ["--help"]
 # manages the digest bump. Only the `ai` target below depends on this stage, so
 # `--target base` / `--target full` builds never pull it.
 # yamllint / hadolint: pin is immutable by digest; tag is informational.
-FROM ghcr.io/lgtm-hq/lintro-ai-tools:latest@sha256:af5fc6e568dd7e93d6fd902fcb53b5d5c8620df22f54952b29042e46bfd2ce30 AS aitools
+FROM ghcr.io/lgtm-hq/lintro-ai-tools:latest@sha256:b518cbda1dbbcce1dd4bd5c83cb4ac44d6d9c29b088f7ea0ef0f5a48035690de AS aitools
 
 # -----------------------------------------------------------------------------
 # Stage: ai — full image plus the agent CLIs `--transport cli` drives
