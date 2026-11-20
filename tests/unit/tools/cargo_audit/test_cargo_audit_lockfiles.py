@@ -1018,9 +1018,10 @@ def test_diff_run_names_only_changed_excluded_lockfiles(
     assert_that(result.output or "").does_not_contain("vendor/dep/Cargo.lock")
 
 
-# cargo-audit 0.22.0's report for ansi_term 0.12.1 under ``[output] deny =
-# ["unmaintained"]``, recorded from the tools image (CI run 44762771950). It
-# exits 1 and, unlike 0.23, does not mark the warning ``"denied": true``.
+# The report cargo-audit prints for ansi_term 0.12.1 under ``[output] deny =
+# ["unmaintained"]`` in the release the tools image ships (recorded from CI run
+# 44762771950). It exits 1 and, unlike 0.23, does not mark the warning
+# ``"denied": true``.
 REPORT_0_22_UNMAINTAINED = (
     Path(__file__).with_name("cargo_audit_0_22_0_unmaintained_warning.json").read_text()
 )
