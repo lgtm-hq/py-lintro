@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.183.1] - 2026-11-20
+
+### Fixed
+
+- **osv_scanner**: name an unexpected report key and tighten the excluded-path error
+  check (#3571) (a9950d8)
+
 ## [0.183.0] - 2026-11-20
 
 ### Added
