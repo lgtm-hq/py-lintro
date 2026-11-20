@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.183.2] - 2026-11-20
+
+### Fixed
+
+- **tools**: fail closed when a security scanner's version cannot be read (#3576)
+  (3834d45)
+
 ## [0.183.1] - 2026-11-20
 
 ### Fixed
