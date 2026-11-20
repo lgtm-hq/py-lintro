@@ -3897,11 +3897,19 @@ Cargo-audit checks each `Cargo.lock` against the RustSec advisory database. It r
 `.cargo/audit.toml` from the directory of the lockfile it audits.
 
 **Which lockfiles are audited (#3549):** every `Cargo.lock` that lintro's file discovery
-finds under the paths you pass, with one cargo-audit run per lockfile. Lintro has no
-built-in exclusion for `vendor/`, `target/` or any other directory, so a vendored or
-packaged copy is audited unless you exclude it. Leave lockfiles out with the normal
-exclude options, which every tool and every entry point (`lintro check`, `lintro watch`,
-AI review, the MCP server) apply the same way:
+finds under the paths you pass, with one cargo-audit run per lockfile. cargo-audit adds
+no exclusions of its own, so a vendored (`vendor/`) or packaged (`target/package/`) copy
+is audited unless you exclude it. The exclusions shared by every tool still apply:
+
+- the built-in defaults (`DEFAULT_EXCLUDE_PATTERNS` in
+  `lintro/utils/path_filtering.py`): `.git`, `.hg`, `.svn`, `dist`, `build`, `htmlcov`,
+  `.terraform`, `*.egg-info`, cache directories such as `.cache/` and
+  `.terragrunt-cache/`, and lintro's own run directories;
+- virtual-environment directories (`venv`, `.venv`, `env`, `site-packages`,
+  `node_modules` and similar), unless `--include-venv` is set.
+
+Discovery does **not** read `.gitignore`: a gitignored `target/` is still audited. To
+leave vendored and build copies out, add them to `.lintro-ignore`:
 
 ```text
 # .lintro-ignore
@@ -3909,13 +3917,43 @@ vendor/
 target/
 ```
 
-Each finding names its own lockfile. Lockfiles that an exclude pattern removed are named
-in the output (`Not audited, excluded by lintro's exclude patterns: ...`). If every
-lockfile was excluded, cargo-audit is reported as skipped with the same list, not as "no
-files matched".
+The same patterns work as `--exclude "vendor/,target/"` on the command line, or as a
+tool option in `pyproject.toml`:
 
-A lockfile whose audit failed or produced no usable report fails the check and is named
-in the output. The other lockfiles' results do not hide it.
+```toml
+[tool.lintro.cargo_audit]
+exclude_patterns = ["vendor/", "target/"]
+```
+
+A top-level `[tool.lintro] exclude` key is not read; use one of the three forms above.
+
+Each finding names its own lockfile. A lockfile reached through a symlink is reported
+under the symlink's path, and the output says when the link points outside the project.
+Lockfiles that an exclude pattern removed are named in the output
+(`Not audited, excluded by lintro's exclude patterns (N): ...`). If every lockfile in
+scope was excluded, nothing is in scope by your configuration: cargo-audit reports "no
+files matched", as any tool does whose inputs your exclude patterns remove, and its
+output names the excluded lockfiles
+(`No Cargo.lock in scope: every one found is excluded ...`). In a `--diff` run the scope
+is the changed lockfiles; a run in which no lockfile changed reports "no files matched"
+without that list. Lists of lockfiles name the first ten and give a count of the rest.
+
+**Fail closed.** A lockfile that was not audited fails the check and is named, whatever
+the other lockfiles found. Findings from a failed audit are still shown. A lockfile
+counts as not audited when:
+
+- cargo-audit printed no usable JSON report;
+- a vulnerability record in the report could not be read, or the report's `found` and
+  `count` disagree with the records it lists;
+- the exit status does not match the report: cargo-audit exits 0 when clean, 1 when it
+  found vulnerabilities and 2 on an error, so exit 2 is a failure even with findings;
+- the lockfile lists no packages (for example a zero-byte file). Cargo always records
+  the root package, even for a crate without dependencies, so such a file is not a
+  lockfile cargo wrote;
+- the entry named `Cargo.lock` is not a readable file: a directory, a dangling symlink
+  or a symlink loop.
+
+A failed audit leaves file inspection unknown, so it never updates a baseline.
 
 **Available Options via `--tool-options`:**
 

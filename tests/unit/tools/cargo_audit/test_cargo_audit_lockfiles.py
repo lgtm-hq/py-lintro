@@ -22,10 +22,14 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
+from lintro.config.config_loader import load_config
+from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.cargo_audit.definition import CargoAuditPlugin
+from lintro.utils.execution.tool_configuration import configure_tool_for_execution
 from lintro.utils.fingerprint_baseline import fingerprint
+from lintro.utils.unified_config import UnifiedConfigManager
 
 VULNERABLE_LOCK = """version = 3
 
@@ -634,6 +638,78 @@ def test_empty_lockfile_is_not_audited(repo: Path, fake: _FakeCargoAudit) -> Non
     )
 
 
+def _broken_entries(repo: Path) -> list[str]:
+    """Create entries named Cargo.lock that no tool can read as a lockfile.
+
+    Args:
+        repo: Repository root.
+
+    Returns:
+        Their paths relative to ``repo``, sorted.
+    """
+    (repo / "dir" / "Cargo.lock").mkdir(parents=True)
+    (repo / "dangling").mkdir()
+    (repo / "dangling" / "Cargo.lock").symlink_to(repo / "missing.lock")
+    (repo / "loop").mkdir()
+    (repo / "loop" / "Cargo.lock").symlink_to(repo / "loop" / "Cargo.lock")
+    return ["dangling/Cargo.lock", "dir/Cargo.lock", "loop/Cargo.lock"]
+
+
+@pytest.mark.parametrize("beside_clean", [True, False], ids=["beside-clean", "alone"])
+def test_unreadable_lockfile_entries_fail_the_check_and_are_named(
+    repo: Path,
+    fake: _FakeCargoAudit,
+    beside_clean: bool,
+) -> None:
+    """A directory, dangling link or link loop named Cargo.lock is not audited.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+        beside_clean: Whether a readable, clean lockfile is also present.
+    """
+    clean = [_crate(repo, "app")] if beside_clean else []
+    names = _broken_entries(repo)
+
+    result = _check(fake, ["."])
+
+    assert_that(fake.audited()).is_equal_to(clean)
+    assert_that(result.success).is_false()
+    assert_that(result.no_files).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.inspected_files).is_none()
+    assert_that(result.output).contains(
+        f"named Cargo.lock but not a readable file (3): {', '.join(names)}.",
+    )
+
+
+def test_symlink_outside_the_project_is_audited_under_its_own_name(
+    tmp_path: Path,
+    repo: Path,
+    fake: _FakeCargoAudit,
+) -> None:
+    """A linked lockfile is reported where the user sees it, and flagged.
+
+    Args:
+        tmp_path: Pytest temporary directory, holding the outside target.
+        repo: Repository root.
+        fake: The fake cargo-audit.
+    """
+    target = _crate(tmp_path, "elsewhere", vulnerable=True)
+    (repo / "linked").mkdir()
+    link = repo / "linked" / "Cargo.lock"
+    link.symlink_to(target)
+
+    result = _check(fake, ["."])
+
+    assert_that(fake.audited()).is_equal_to([link])
+    assert_that([i.file for i in result.issues or []]).is_equal_to([str(link)])
+    assert_that(result.output).contains(
+        f"linked/Cargo.lock is a symlink to {target}, outside the project; "
+        "audited and reported as linked/Cargo.lock.",
+    )
+
+
 def test_long_lists_of_lockfiles_are_capped(repo: Path, fake: _FakeCargoAudit) -> None:
     """Thousands of excluded lockfiles give a count and ten names, not all.
 
@@ -652,3 +728,139 @@ def test_long_lists_of_lockfiles_are_capped(repo: Path, fake: _FakeCargoAudit) -
         f"exclude patterns (25): {shown} and 15 more.",
     )
     assert_that(result.output).does_not_contain("vendor/dep10/Cargo.lock")
+
+
+def _git(repo: Path, *args: str) -> None:
+    """Run git in a scratch repository with a throwaway identity.
+
+    Args:
+        repo: The scratch repository.
+        *args: Git arguments.
+    """
+    subprocess.run(  # nosec B603 B607 - fixed git command in a test repository
+        [
+            "git",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.invalid",
+            *args,
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+
+@pytest.fixture
+def git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Create a committed repository with app and an excluded vendored crate.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Used to change directory and isolate the incremental cache.
+
+    Returns:
+        The repository root, resolved.
+    """
+    root = (tmp_path / "repo").resolve()
+    root.mkdir()
+    monkeypatch.chdir(root)
+    monkeypatch.setattr("lintro.utils.file_cache.CACHE_DIR", tmp_path / "cache")
+    _git(root, "init", "-q")
+    _crate(root, "app")
+    _crate(root, "vendor/dep")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    return root
+
+
+@pytest.mark.parametrize("mode", ["diff", "incremental"])
+def test_scope_without_changed_lockfiles_is_not_blamed_on_exclusion(
+    git_repo: Path,
+    fake: _FakeCargoAudit,
+    mode: str,
+) -> None:
+    """An unchanged app lockfile next to an excluded one stays "no files".
+
+    Args:
+        git_repo: Committed repository.
+        fake: The fake cargo-audit.
+        mode: Which changed-files scope the run uses.
+    """
+    options: dict[str, object] = (
+        {"diff_base": "HEAD"} if mode == "diff" else {"incremental": True}
+    )
+    if mode == "incremental":
+        _check(fake, ["."], exclude=["vendor/"], options=options)
+        fake.commands.clear()
+
+    result = _check(fake, ["."], exclude=["vendor/"], options=options)
+
+    assert_that(fake.commands).is_empty()
+    assert_that(result.no_files).is_true()
+    assert_that(result.output).does_not_contain("excluded")
+
+
+def test_diff_with_only_an_excluded_lockfile_changed_names_it(
+    git_repo: Path,
+    fake: _FakeCargoAudit,
+) -> None:
+    """When every changed lockfile is excluded, the result names them.
+
+    Args:
+        git_repo: Committed repository.
+        fake: The fake cargo-audit.
+    """
+    (git_repo / "vendor" / "dep" / "Cargo.lock").write_text("version = 4\n")
+
+    result = _check(fake, ["."], exclude=["vendor/"], options={"diff_base": "HEAD"})
+
+    assert_that(fake.commands).is_empty()
+    assert_that(result.no_files).is_true()
+    assert_that(result.output).contains("not audited (1): vendor/dep/Cargo.lock.")
+
+
+def test_pyproject_exclude_patterns_leave_a_lockfile_out(
+    repo: Path,
+    fake: _FakeCargoAudit,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The documented ``[tool.lintro.cargo_audit]`` exclusion takes effect.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+        monkeypatch: Keeps the enclosing checkout's config out of discovery.
+    """
+    _crate(repo, "app")
+    _crate(repo, "vendor/dep", vulnerable=True)
+    (repo / "pyproject.toml").write_text(
+        '[tool.lintro.cargo_audit]\nexclude_patterns = ["vendor/"]\n',
+    )
+    monkeypatch.setattr("lintro.config.config_loader._find_config_file", lambda: None)
+    plugin = configure_tool_for_execution(
+        tool=CargoAuditPlugin(),
+        tool_name="cargo_audit",
+        config_manager=UnifiedConfigManager(),
+        tool_option_dict={},
+        exclude=None,
+        include_venv=False,
+        incremental=False,
+        action=Action.CHECK,
+        selected_tools={"cargo_audit"},
+        lintro_config=load_config(None),
+    )
+
+    with patch.object(plugin, "_run_subprocess_result", side_effect=fake):
+        result = plugin.check(["."], {})
+
+    assert_that(fake.audited()).is_equal_to([repo / "app" / "Cargo.lock"])
+    assert_that(result.success).is_true()
+    assert_that(result.output).contains(
+        "excluded by lintro's exclude patterns (1): vendor/dep/Cargo.lock.",
+    )

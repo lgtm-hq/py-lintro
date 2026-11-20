@@ -7,6 +7,7 @@ advisory database.
 
 from __future__ import annotations
 
+import os
 import subprocess  # nosec B404 - used safely with shell disabled
 import time
 from dataclasses import dataclass
@@ -33,11 +34,12 @@ from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_positive_int,
 )
+from lintro.utils.git_diff import filter_files_by_diff_for_paths
 from lintro.utils.path_filtering import (
     resolve_exclude_anchors,
     should_exclude_path,
-    walk_files_with_excludes,
 )
+from lintro.utils.tool_utils import VENV_PATTERNS
 
 # Constants for cargo-audit configuration
 CARGO_AUDIT_DEFAULT_TIMEOUT: int = 120  # Network operations can be slow
@@ -61,11 +63,15 @@ def _lockfiles(files: list[str]) -> list[Path]:
         files: Files handed over by lintro's file discovery.
 
     Returns:
-        Resolved lockfile paths, de-duplicated and sorted for a deterministic
-        run order.
+        Absolute lockfile paths, as the user sees them (symlinks are not
+        resolved), de-duplicated and sorted for a deterministic run order.
     """
     return sorted(
-        {Path(f).resolve() for f in files if Path(f).name == CARGO_AUDIT_LOCKFILE},
+        {
+            Path(os.path.abspath(f))
+            for f in files
+            if Path(f).name == CARGO_AUDIT_LOCKFILE
+        },
     )
 
 
@@ -73,14 +79,14 @@ def _shown(lockfile: Path | str) -> str:
     """Name a lockfile in output, relative to the process directory if below it.
 
     Args:
-        lockfile: Resolved lockfile path.
+        lockfile: Absolute lockfile path.
 
     Returns:
         The relative path when the lockfile lies below the working directory,
         otherwise the absolute path.
     """
     try:
-        return str(Path(lockfile).relative_to(Path.cwd().resolve()))
+        return str(Path(lockfile).relative_to(Path.cwd()))
     except ValueError:
         return str(lockfile)
 
@@ -155,7 +161,7 @@ class _LockfileAudit:
     """The interpreted result of auditing one Cargo.lock.
 
     Attributes:
-        lockfile: The audited lockfile, resolved.
+        lockfile: The audited lockfile, as the user sees it.
         issues: Vulnerabilities parsed from its report, each naming it.
         problem: Why the report does not establish a complete audit, or None.
         parsed: Whether cargo-audit printed a report, which proves the
@@ -189,12 +195,17 @@ class _AuditSummary:
         audits: Audits that ran to completion of the subprocess, in run order.
         not_audited: Lockfiles the timeout budget did not reach.
         excluded: Lockfiles removed by lintro's exclude patterns.
+        unreadable: Entries named ``Cargo.lock`` that are not readable files.
+        outside: Audited symlinks whose target lies outside the project,
+            with that target.
         timeout: The whole check's timeout budget in seconds.
     """
 
     audits: list[_LockfileAudit]
     not_audited: list[Path]
     excluded: list[Path]
+    unreadable: list[Path]
+    outside: list[tuple[Path, Path]]
     timeout: float
 
     @property
@@ -222,6 +233,12 @@ class _AuditSummary:
                 "cargo-audit did not produce a complete report, not audited "
                 f"{_names(failed)}."
                 if failed
+                else None
+            ),
+            (
+                "Not audited, named Cargo.lock but not a readable file "
+                f"{_lockfile_names(self.unreadable)}."
+                if self.unreadable
                 else None
             ),
         ]
@@ -256,9 +273,30 @@ class _AuditSummary:
                 if self.excluded
                 else None
             ),
+            *(
+                f"{_shown(link)} is a symlink to {target}, outside the project; "
+                f"audited and reported as {_shown(link)}."
+                for link, target in self.outside
+            ),
         ]
         shown = blocks + [note for note in notes if note]
         return "\n\n".join(shown) if shown else None
+
+
+@dataclass(frozen=True)
+class _Scan:
+    """Every entry named Cargo.lock below the requested paths.
+
+    Attributes:
+        excluded: Entries an exclude pattern removes.
+        unreadable: Other entries that are not readable regular files after
+            resolving symlinks: directories, dangling links, link loops.
+        readable: The other entries, readable lockfiles.
+    """
+
+    excluded: list[Path]
+    unreadable: list[Path]
+    readable: list[Path]
 
 
 @register_tool
@@ -382,48 +420,77 @@ class CargoAuditPlugin(BaseToolPlugin):
             output=proc.output,
         )
 
-    def _excluded_lockfiles(self, paths: list[str]) -> list[Path]:
-        """Return the lockfiles below ``paths`` that the exclude patterns drop.
+    def _scan(self, paths: list[str]) -> _Scan:
+        """Find every entry named Cargo.lock below ``paths``.
 
-        Applies the same patterns and anchors as lintro's file discovery, so
-        it names exactly the lockfiles discovery left out.
+        Shared discovery silently drops entries it cannot read (directories,
+        dangling links, link loops). A security scanner must name those, so
+        this walk keeps them. Excludes use discovery's patterns and anchors.
 
         Args:
             paths: Paths passed to ``check``.
 
         Returns:
-            Resolved, sorted lockfiles removed by an exclude pattern.
+            The entries, sorted, split into excluded, unreadable and readable.
         """
-        if not self.exclude_patterns:
-            return []
+        candidates: set[str] = set()
+        for path in paths:
+            if not os.path.isdir(path):
+                if os.path.basename(path) == CARGO_AUDIT_LOCKFILE:
+                    candidates.add(os.path.abspath(path))
+                continue
+            for root, dirs, files in os.walk(path):
+                if not self.include_venv:
+                    dirs[:] = [d for d in dirs if d not in VENV_PATTERNS]
+                candidates.update(
+                    os.path.abspath(os.path.join(root, name))
+                    for name in (*dirs, *files)
+                    if name == CARGO_AUDIT_LOCKFILE
+                )
         anchors = resolve_exclude_anchors(paths)
-        candidates = walk_files_with_excludes(
-            paths=paths,
-            file_patterns=CARGO_AUDIT_FILE_PATTERNS,
-            exclude_patterns=[],
-            include_venv=self.include_venv,
-        )
-        return sorted(
-            {
-                Path(candidate).resolve()
-                for candidate in candidates
-                if should_exclude_path(candidate, self.exclude_patterns, anchors)
-            },
-        )
+        excluded: list[Path] = []
+        unreadable: list[Path] = []
+        readable: list[Path] = []
+        for candidate in sorted(candidates):
+            if should_exclude_path(candidate, self.exclude_patterns, anchors):
+                excluded.append(Path(candidate))
+            elif os.path.isfile(candidate) and os.access(candidate, os.R_OK):
+                readable.append(Path(candidate))
+            else:
+                unreadable.append(Path(candidate))
+        return _Scan(excluded=excluded, unreadable=unreadable, readable=readable)
 
-    def _no_files_result(self, ctx: ToolResult, paths: list[str]) -> ToolResult:
+    def _no_files_result(
+        self,
+        ctx: ToolResult,
+        scan: _Scan,
+        paths: list[str],
+        options: dict[str, object],
+    ) -> ToolResult:
         """Explain a check in which discovery handed over no lockfile.
 
         Args:
             ctx: The no-files result from ``prepare``.
+            scan: Every Cargo.lock entry below ``paths``.
             paths: Paths passed to ``check``.
+            options: Options passed to ``check``.
 
         Returns:
-            A no-files result naming the excluded lockfiles when an exclude
-            pattern removed any, else ``ctx``.
+            A no-files result naming the excluded lockfiles when the requested
+            scope held lockfiles and an exclude pattern removed every one, else
+            ``ctx``.
         """
-        excluded = self._excluded_lockfiles(paths)
-        if not excluded:
+        excluded = [str(lockfile) for lockfile in scan.excluded]
+        readable = [str(lockfile) for lockfile in scan.readable]
+        diff_base = options.get("diff_base", self.options.get("diff_base"))
+        if isinstance(diff_base, str):
+            excluded = filter_files_by_diff_for_paths(excluded, diff_base, paths)
+            readable = filter_files_by_diff_for_paths(readable, diff_base, paths)
+        # A readable lockfile in scope that was not excluded means the diff or
+        # incremental filter left it out, not an exclusion (#3572). Excluded
+        # lockfiles are not in the incremental cache, so an incremental run
+        # without a diff base compares against the whole tree.
+        if readable or not excluded:
             return ctx
         # Nothing is in scope by the user's own configuration, which is what
         # "no files" means for every tool (and what the no-silent-skip gate
@@ -442,14 +509,17 @@ class CargoAuditPlugin(BaseToolPlugin):
         lockfiles: list[Path],
         *,
         timeout: float,
-        excluded: list[Path],
+        scan: _Scan,
+        anchors: tuple[str, ...],
     ) -> _AuditSummary:
         """Audit each lockfile within one timeout budget for the whole check.
 
         Args:
             lockfiles: Lockfiles to audit, in run order.
             timeout: The check's timeout budget in seconds.
-            excluded: Lockfiles removed by lintro's exclude patterns.
+            scan: Every Cargo.lock entry below the requested paths.
+            anchors: Project directories; a symlinked lockfile whose target
+                lies outside all of them is named in the output.
 
         Returns:
             Every audit that finished, and the lockfiles the budget did not
@@ -472,7 +542,18 @@ class CargoAuditPlugin(BaseToolPlugin):
         return _AuditSummary(
             audits=audits,
             not_audited=lockfiles[len(audits) :],
-            excluded=excluded,
+            excluded=scan.excluded,
+            unreadable=scan.unreadable,
+            outside=[
+                (lockfile, Path(os.path.realpath(lockfile)))
+                for lockfile in lockfiles
+                if not any(
+                    Path(os.path.realpath(lockfile)).is_relative_to(
+                        os.path.realpath(anchor),
+                    )
+                    for anchor in anchors
+                )
+            ],
             timeout=timeout,
         )
 
@@ -500,12 +581,19 @@ class CargoAuditPlugin(BaseToolPlugin):
             ToolResult with security scan results.
         """
         ctx = self.prepare(paths, options)
-        if isinstance(ctx, ToolResult):
-            return self._no_files_result(ctx, paths) if ctx.no_files else ctx
+        if isinstance(ctx, ToolResult) and not ctx.no_files:
+            return ctx
+        scan = self._scan(paths)
+        if isinstance(ctx, ToolResult) and not scan.unreadable:
+            return self._no_files_result(ctx, scan, paths, options)
+        # Unreadable entries fail the check even when nothing else is in
+        # scope, and each is reported once, as unreadable, not as a failed run.
+        files = [] if isinstance(ctx, ToolResult) else ctx.files
         summary = self._audit_all(
-            _lockfiles(ctx.files),
-            timeout=ctx.timeout,
-            excluded=self._excluded_lockfiles(paths),
+            [f for f in _lockfiles(files) if f not in set(scan.unreadable)],
+            timeout=0 if isinstance(ctx, ToolResult) else ctx.timeout,
+            scan=scan,
+            anchors=resolve_exclude_anchors(paths),
         )
         issues = summary.issues
         failure = summary.failure_note()
