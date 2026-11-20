@@ -8,6 +8,7 @@ advisory database.
 from __future__ import annotations
 
 import os
+import re
 import subprocess  # nosec B404 - used safely with shell disabled
 import time
 from dataclasses import dataclass, replace
@@ -187,12 +188,38 @@ def _denied_warnings(payload: dict[str, Any] | None, returncode: int) -> list[st
     return labels
 
 
+# cargo-audit's verdict line in text mode; it starts with "error:" but is not
+# an error. In --json mode (what lintro runs) stderr is empty on a normal
+# audit, whether it found vulnerabilities or denied warnings.
+_VERDICT_LINE = re.compile(
+    r"error: \d+ (?:vulnerability|vulnerabilities|denied warnings?) found!",
+)
+
+
+def _stderr_error(stderr: str) -> str | None:
+    """Return the first error cargo-audit printed, if any.
+
+    Args:
+        stderr: cargo-audit's standard error.
+
+    Returns:
+        The first line starting with ``error:`` or ``error[`` that is not
+        cargo-audit's verdict line, or None.
+    """
+    for line in stderr.splitlines():
+        text = line.strip()
+        if text.startswith(("error:", "error[")) and not _VERDICT_LINE.fullmatch(text):
+            return text
+    return None
+
+
 def _report_problem(
     payload: dict[str, Any] | None,
     issues: list[CargoAuditIssue],
     returncode: int,
     *,
     denied: bool,
+    stderr: str,
 ) -> str | None:
     """Say why a cargo-audit report does not establish a complete audit.
 
@@ -206,12 +233,17 @@ def _report_problem(
         issues: Findings parsed from it.
         returncode: cargo-audit's exit status.
         denied: Whether the report marks a warning as denied.
+        stderr: cargo-audit's standard error; an error printed there means
+            the audit did not complete, whatever the report says.
 
     Returns:
         The reason the audit is incomplete, or None when it is complete.
     """
     if payload is None:
         return "no usable JSON report"
+    error = _stderr_error(stderr)
+    if error:
+        return f"cargo-audit reported {error!r}"
     vulnerabilities = payload["vulnerabilities"]
     records = len(vulnerabilities["list"])
     if len(issues) != records:
@@ -538,7 +570,11 @@ class CargoAuditPlugin(BaseToolPlugin):
             issues,
             proc.returncode,
             denied=bool(denied),
+            stderr=proc.stderr,
         )
+        # An incomplete audit did not run to a verdict, so its warnings are
+        # not reported as denied by an audit that ran.
+        denied = [] if problem else denied
         records = len(payload["vulnerabilities"]["list"]) if payload else 0
         return _LockfileAudit(
             lockfile=lockfile,
@@ -785,7 +821,9 @@ class CargoAuditPlugin(BaseToolPlugin):
             ToolResult with security scan results.
         """
         audited: set[Path] = set()
-        if options.get("incremental", self.options.get("incremental")) is not True:
+        # The same rule shared discovery uses to run incrementally
+        # (``prepare_execution``), so the cache is restored whenever it ran.
+        if not bool({**self.options, **options}.get("incremental", False)):
             return self._check(paths, options, audited)
         before = dict(ToolCache.load(self.definition.name).fingerprints)
         # Whatever ends the check (an early result from prepare, an exception,

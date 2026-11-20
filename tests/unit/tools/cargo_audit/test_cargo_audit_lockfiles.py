@@ -23,12 +23,13 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.config.config_loader import load_config
+from lintro.config.config_loader import clear_config_cache, load_config
 from lintro.enums.action import Action
 from lintro.models.core.tool_outcome import ToolOutcome, Unavailable
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.cargo_audit.definition import CargoAuditPlugin
+from lintro.utils.config import clear_pyproject_cache
 from lintro.utils.execution.tool_configuration import configure_tool_for_execution
 from lintro.utils.file_cache import ToolCache
 from lintro.utils.fingerprint_baseline import fingerprint
@@ -102,6 +103,7 @@ class _FakeCargoAudit:
         seconds_per_run: Seconds each run takes on the fake clock.
         hang_on: Lockfile whose audit raises ``TimeoutExpired``.
         reports: Lockfiles answered with a fixed exit status and stdout.
+        stderr: Standard error printed with a fixed report, empty if unset.
     """
 
     commands: list[list[str]] = field(default_factory=list)
@@ -112,6 +114,7 @@ class _FakeCargoAudit:
     seconds_per_run: float = 0.0
     hang_on: Path | None = None
     reports: dict[Path, tuple[int, str]] = field(default_factory=dict)
+    stderr: dict[Path, str] = field(default_factory=dict)
 
     def monotonic(self) -> float:
         """Return the fake clock.
@@ -161,8 +164,8 @@ class _FakeCargoAudit:
             return SubprocessResult(
                 returncode=returncode,
                 stdout=stdout,
-                stderr="error: boom" if returncode == 2 else "",
-                output=stdout,
+                stderr=self.stderr.get(lock, ""),
+                output=stdout + self.stderr.get(lock, ""),
             )
         content = lock.read_text()
         vulnerable = "smallvec" in content
@@ -1456,3 +1459,170 @@ def test_an_interrupted_audit_records_only_completed_audits(
     assert_that(_cached(repo)).is_equal_to(["app/Cargo.lock"])
     _check(fake, ["."], options=incremental)
     assert_that(fake.audited()).is_equal_to([lib])
+
+
+# cargo-audit 0.23.0's --json report for the same ansi_term lockfile under
+# ``-D warnings``, recorded locally: exit 1, the warning marked denied, and
+# nothing on stderr.
+REPORT_MARKED_DENIED = (
+    Path(__file__).with_name("cargo_audit_marked_denied_warning.json").read_text()
+)
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    ["", "error: could not complete audit"],
+    ids=["real-stderr", "error"],
+)
+@pytest.mark.parametrize("marked", [False, True], ids=["unmarked", "marked"])
+def test_denied_warnings_read_as_audited_unless_cargo_audit_reports_an_error(
+    tmp_path: Path,
+    repo: Path,
+    fake: _FakeCargoAudit,
+    monkeypatch: pytest.MonkeyPatch,
+    stderr: str,
+    marked: bool,
+) -> None:
+    """An error on stderr makes a denied-warning run incomplete and uncached.
+
+    The recorded reports, with the empty stderr cargo-audit really prints in
+    --json mode, stay "audited but failing" and are cached.
+
+    Args:
+        tmp_path: Pytest temporary directory, holding the cache.
+        repo: Repository root.
+        fake: The fake cargo-audit.
+        monkeypatch: Points the incremental cache at ``tmp_path``.
+        stderr: What cargo-audit prints on standard error.
+        marked: Whether the report marks the warning denied (0.23) or not (0.22).
+    """
+    monkeypatch.setattr("lintro.utils.file_cache.CACHE_DIR", tmp_path / "cache")
+    lock = _crate(repo, "app")
+    report = REPORT_MARKED_DENIED if marked else REPORT_0_22_UNMAINTAINED
+    fake.reports[lock] = (1, report)
+    fake.stderr[lock] = stderr
+    incremental: dict[str, object] = {"incremental": True}
+
+    first = _check(fake, ["."], options=incremental)
+    fake.commands.clear()
+    _check(fake, ["."], options=incremental)
+
+    assert_that(first.success).is_false()
+    assert_that(first.execution_failed).is_equal_to(bool(stderr))
+    if stderr:
+        assert_that(first.output).contains(
+            "not audited (1): app/Cargo.lock "
+            "(cargo-audit reported 'error: could not complete audit')",
+        )
+        assert_that(first.output).does_not_contain("denied warnings")
+    else:
+        assert_that(first.output).contains("denied warnings, audited but failing")
+    assert_that(fake.audited()).is_equal_to([lock] if stderr else [])
+
+
+@pytest.mark.parametrize(
+    ("stderr", "complete"),
+    [
+        ("", True),
+        ("error: 1 vulnerability found!", True),
+        ("    Scanning Cargo.lock for vulnerabilities\nerror: could not complete audit", False),
+        ("error[E0001]: failed", False),
+    ],
+    ids=["none", "verdict-line", "error", "error-code"],
+)  # fmt: skip
+def test_an_error_on_stderr_makes_a_run_with_findings_incomplete(
+    repo: Path,
+    fake: _FakeCargoAudit,
+    stderr: str,
+    complete: bool,
+) -> None:
+    """Exit 1 with findings is complete only without an error on stderr.
+
+    Findings are kept either way; cargo-audit's own verdict line is not an
+    error.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+        stderr: What cargo-audit prints on standard error.
+        complete: Whether the audit counts as complete.
+    """
+    lock = _crate(repo, "app")
+    fake.reports[lock] = (1, VULNERABLE_REPORT)
+    fake.stderr[lock] = stderr
+
+    result = _check(fake, ["."])
+
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.execution_failed).is_equal_to(not complete)
+    assert_that(result.inspected_files).is_equal_to(True if complete else None)
+
+
+@pytest.mark.parametrize("source", ["tool-options", "pyproject"])
+@pytest.mark.parametrize("value", ["1", "true", "True"])
+def test_incremental_given_as_any_truthy_value_restores_the_cache(
+    tmp_path: Path,
+    repo: Path,
+    fake: _FakeCargoAudit,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    value: str,
+) -> None:
+    """``incremental`` set to 1, "true" or True as a tool option restores too.
+
+    Shared discovery runs incrementally for any truthy value, so the cache
+    must be restored by the same rule: a copy skipped in the first run is
+    audited once include_vendored is set.
+
+    Args:
+        tmp_path: Pytest temporary directory, holding the cache.
+        repo: Repository root.
+        fake: The fake cargo-audit.
+        monkeypatch: Points the cache and config discovery at the test.
+        source: Where the option comes from.
+        value: The option's spelling.
+    """
+    monkeypatch.setattr("lintro.utils.file_cache.CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr("lintro.config.config_loader._find_config_file", lambda: None)
+    _crate(repo, "app")
+    copy = _crate(repo, "vendor/dep")
+    toml = {"1": "1", "true": '"true"', "True": "true"}[value]
+
+    def configured(include: bool) -> CargoAuditPlugin:
+        """Configure the plugin as the CLI would.
+
+        Args:
+            include: Whether include_vendored is set.
+
+        Returns:
+            The configured plugin.
+        """
+        clear_config_cache()
+        clear_pyproject_cache()
+        extra = ",cargo_audit:include_vendored=True" if include else ""
+        cli = parse_tool_options(f"cargo_audit:incremental={value}{extra}")
+        (repo / "pyproject.toml").write_text(
+            f"[tool.lintro.cargo_audit]\nincremental = {toml}\n"
+            + ("include_vendored = true\n" if include else ""),
+        )
+        plugin = configure_tool_for_execution(
+            tool=CargoAuditPlugin(),
+            tool_name="cargo_audit",
+            config_manager=UnifiedConfigManager(),
+            tool_option_dict=cli if source == "tool-options" else {},
+            exclude=None,
+            include_venv=False,
+            incremental=False,
+            action=Action.CHECK,
+            selected_tools={"cargo_audit"},
+            lintro_config=load_config(None),
+        )
+        assert isinstance(plugin, CargoAuditPlugin)
+        return plugin
+
+    for include in (False, True):
+        plugin = configured(include)
+        with patch.object(plugin, "_run_subprocess_result", side_effect=fake):
+            plugin.check(["."], {})
+
+    assert_that(fake.audited()[-1:]).is_equal_to([copy])

@@ -4042,6 +4042,9 @@ the other lockfiles found. Findings from a failed audit are still shown. A lockf
 counts as not audited when:
 
 - cargo-audit printed no usable JSON report;
+- cargo-audit printed an error on stderr (a line starting with `error:` or `error[`,
+  other than its own `error: N vulnerabilities found!` verdict), whatever the report
+  says;
 - a vulnerability record in the report could not be read or lacks the advisory id,
   package name or package version, or the report's `found` and `count` disagree with the
   records it lists (findings that could be read are still shown);
