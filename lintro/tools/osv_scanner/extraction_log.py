@@ -240,14 +240,47 @@ def source_of(text: str, scan_root: Path) -> tuple[str, str, str] | None:
 #: Stands for the excluded file's own path in an error about it.
 _SELF = "\x00"
 
-#: The parser errors osv-scanner's extractors print after a file's path, as
-#: captured from osv-scanner 2.7.1. Go's ``encoding/json`` names the bad
-#: character and where it was found; the YAML, TOML and XML parsers name a
-#: line. None of these names a second file.
+# Every pattern below was derived from messages osv-scanner 2.7.1 printed for
+# deliberately broken fixtures (#3553); the comments quote them, with <file>
+# for the file's own path. The text after a parser prefix must itself be a
+# parser message of that family. Any other text keeps the error, so the run
+# is incomplete.
+
+#: One word of a parser message: a plain word or number, or a short quoted
+#: token (``','``, ``'\n'``, ``"toml"``), with its trailing punctuation. A path
+#: or a dotted file name is not a word.
+_QUOTED = (
+    r"(?:'(?:[^'\s/\\]|\\(?:[abfnrtv\\']|x[0-9a-f]{2}|u[0-9a-f]{4}"
+    r"|U[0-9a-f]{8})){1,40}'"
+    r'|"[^"\s/\\]{1,40}")'
+)
+_WORD = rf"(?:[A-Za-z][A-Za-z0-9_-]*|\d+|{_QUOTED})[.,;:]?"
+#: A whole message: up to 25 words, the last not ending in ``:``, because a
+#: message that ends there (``yaml: unmarshal errors:``) goes on below.
+_PHRASE = rf"(?:{_WORD} ){{0,24}}(?:[A-Za-z][A-Za-z0-9_-]*|\d+|{_QUOTED})[.,;]?"
+#: An XML message may also name an element (``<project>``, ``</foo>``), an
+#: entity (``&bogus;``) or a bare ``<`` or ``=``.
+_XML_WORD = rf"(?:{_WORD}|</?[A-Za-z_][\w.:-]{{0,60}}>|&[A-Za-z0-9#]{{1,40}};|[<=])"
+
+#: Go's ``encoding/json`` (package-lock.json, composer.lock, Pipfile.lock,
+#: bun.lock). Captured: ``invalid character '}' looking for beginning of
+#: value``, ``invalid character '/' looking for beginning of object key
+#: string``, ``invalid character '1' after object key``, ``invalid character
+#: '"' after object key:value pair``, ``invalid character '2' after array
+#: element``, ``invalid character 'x' after top-level value``, ``invalid
+#: character '}' in numeric literal``, ``invalid character '}' in literal true
+#: (expecting 'e')``, ``invalid character '\x01' in string``, ``invalid escape
+#: sequence `\q` in string``, ``unexpected end of JSON input``, ``json: cannot
+#: unmarshal number into Go struct field .packages.node_modules~1x.version of
+#: type string``, ``json: cannot unmarshal string into Go value of type
+#: packagelockjson.LockFile``, ``json: cannot unmarshal number into Go struct
+#: field pipenvLockFile.default of type map[string]pipfilelock.pipenvPackage``
+#: and ``... of type []interface {}``.
 _JSON_CONTEXT = (
     r"(?:looking for beginning of (?:value|object key string)"
     r"|after (?:object key(?::value pair)?|array element|top-level value)"
-    r"|in (?:string literal|string escape code|\\u hexadecimal character escape"
+    r"|in (?:string(?: literal)?|string escape code"
+    r"|\\u hexadecimal character escape"
     r"|numeric literal|exponent of numeric literal"
     r"|literal (?:true|false|null) \(expecting '[a-z]'\))"
     r"|after decimal point in numeric literal)"
@@ -255,29 +288,174 @@ _JSON_CONTEXT = (
 _JSON_CHAR = (
     r"'(?:\\'|[^'\\]|\\[abfnrtv\\]|\\x[0-9a-f]{2}|\\u[0-9a-f]{4}|\\U[0-9a-f]{8})'"
 )
-_PARSER_ERROR = (
+_GO_TYPE = (
+    r"(?:\[\d*\]|map\[[A-Za-z_][\w.]{0,80}\]|\*){0,4}"
+    r"(?:interface \{\}|[A-Za-z_][\w.]{0,120})"
+)
+_JSON_ERROR = (
     rf"(?:invalid character {_JSON_CHAR} {_JSON_CONTEXT}"
     r"|unexpected end of JSON input"
-    r"|invalid escape sequence `\\[^`\n]{1,10}` in string"
-    r"|json: cannot unmarshal \S+ into Go (?:struct field [^\n]+ |value )"
-    r"of type \S+"
-    r"|yaml: line \d+: [^\n]+"
-    r'|toml: line \d+(?: \(last key "[^"\n]*"\))?: [^\n]+'
-    r"|XML syntax error on line \d+: [^\n]+"
-    r"|(?:unexpected )?EOF)"
+    r"|invalid escape sequence `\\[^`\s/]{1,10}` in string"
+    r"|json: cannot unmarshal [a-z]+ into Go "
+    rf"(?:struct field [^\s/\\:]{{1,200}} |value )of type {_GO_TYPE})"
+)
+#: go-yaml (pnpm-lock.yaml, pubspec.lock). Captured: ``yaml: line 1: did not
+#: find expected ',' or ']'``, ``... ',' or '}'``, ``yaml: line 1: did not find
+#: expected '-' indicator``, ``yaml: line 2: mapping values are not allowed in
+#: this context`` (also without ``line <n>:``), ``yaml: line 2: found character
+#: that cannot start any token``, ``yaml: line 2: found unexpected end of
+#: stream``, ``yaml: unknown anchor 'y' referenced``. ``yaml: unmarshal
+#: errors:`` continues on an indented line, which is read as a separate error
+#: and keeps the run incomplete (a documented limit).
+_YAML_ERROR = rf"yaml: (?:line \d+: )?{_PHRASE}"
+#: BurntSushi/toml (poetry.lock, uv.lock, Cargo.lock). Captured: ``toml: line 1
+#: (last key "a"): strings cannot contain newlines``, ``toml: line 2 (last key
+#: "a"): Key 'a' has already been defined.``, ``toml: line 1: expected '.' or
+#: '=', but got 't' instead``, ``toml: line 2 (last key "package.name"):
+#: incompatible types: TOML value has type int64; destination has type
+#: string``, ``toml: line 1: expected a top-level item to end with a newline,
+#: comment, or EOF, but got 'X' instead``, ``toml: line 1 (last key "a"):
+#: unexpected EOF; expected value``, ``toml: line 2: expected '.' or ']' to end
+#: table name, but got '\n' instead``, ``toml: line 1: unexpected '=': key name
+#: appears blank``, ``toml: line 1 (last key "a.b"): expected a comma or an
+#: inline table terminator '}', but got end of file instead``.
+_TOML_ERROR = rf'toml: line \d+(?: \(last key "[^"\s/\\]{{1,200}}"\))?: {_PHRASE}'
+#: Go's ``encoding/xml`` (pom.xml, packages.config). Captured: ``XML syntax
+#: error on line 1: unexpected EOF``, ``... element <project> closed by
+#: </foo>``, ``... invalid character entity &bogus;``, ``... expected element
+#: name after <``, ``... attribute name without = in element``, ``... invalid
+#: UTF-8``.
+_XML_ERROR = rf"XML syntax error on line \d+: {_XML_WORD}(?: {_XML_WORD}){{0,24}}"
+#: A bare ``EOF`` (an empty or non-XML pom.xml) or ``unexpected EOF``
+#: (conan.lock, renv.lock, packages.lock.json).
+_EOF_ERROR = r"(?:unexpected )?EOF"
+_PARSER_ERROR = (
+    rf"(?:{_JSON_ERROR}|{_YAML_ERROR}|{_TOML_ERROR}|{_XML_ERROR}|{_EOF_ERROR})"
+)
+#: golang.org/x/mod ``modfile`` (go.mod), always after ``<file>:<line>:``.
+#: Captured: ``unknown directive: foo``, ``repeated module statement``,
+#: ``unexpected newline in string`` (at ``<file>:1:10``), ``usage: module
+#: module/path``, ``usage: require module/path v1.2.3``, ``usage: exclude
+#: module/path v1.2.3``, ``invalid go version 'abc': must match format
+#: 1.23.0``, ``syntax error (unterminated block started at <file>:3:1)``. The
+#: ``replace`` usage spans two lines, so it is kept (read as two errors).
+_GOMOD_ERROR = (
+    r"(?:usage: (?:module module/path|(?:require|exclude) module/path v1\.2\.3)"
+    r"|syntax error \(unterminated block started at \x00:\d+:\d+\)"
+    rf"|invalid go version {_QUOTED}: must match format 1\.23\.0"
+    rf"|{_PHRASE})"
 )
 #: The whole text after an excluded file's path that drops its error, with
-#: :data:`_SELF` for that path. ``could not extract`` wraps a parser error
-#: (``bun.lock`` without the colon), ``pom.xml`` and ``go.mod`` errors repeat
-#: the path, and an unreadable file is reported twice by the same path.
+#: :data:`_SELF` for that path. The wrappers are ``could not extract:`` (most
+#: extractors), ``could not extract`` without the colon (``bun.lock``),
+#: ``could not extract pom from <file>:`` (``pom.xml``) and ``failed to decode
+#: <name> file:`` (``packages.lock.json``); ``packages.config`` prints the XML
+#: error bare. An unreadable file prints ``Open(<file>): open <file>:
+#: permission denied``.
 EXCLUDED_FILE_ERRORS: tuple[re.Pattern[str], ...] = (
     re.compile(
         r"(?:could not extract:? |could not extract pom from \x00: "
         rf"|failed to decode {_NAME} file: )?{_PARSER_ERROR}",
     ),
-    re.compile(r"could not extract: \x00:\d+(?::\d+)?: [^\n]+"),
+    re.compile(rf"could not extract: \x00:\d+(?::\d+)?: {_GOMOD_ERROR}"),
     re.compile(r"Open\(\x00\): open \x00: permission denied"),
 )
+
+#: File names osv-scanner reads, for :func:`_names_another_path`.
+_MANIFEST_NAMES: frozenset[str] = frozenset(
+    {
+        "package-lock.json",
+        "npm-shrinkwrap.json",
+        "package.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "bun.lock",
+        "composer.lock",
+        "Gemfile.lock",
+        "gems.locked",
+        "Cargo.lock",
+        "go.mod",
+        "go.sum",
+        "poetry.lock",
+        "Pipfile.lock",
+        "pdm.lock",
+        "uv.lock",
+        "pylock.toml",
+        "requirements.txt",
+        "pom.xml",
+        "gradle.lockfile",
+        "buildscript-gradle.lockfile",
+        "verification-metadata.xml",
+        "packages.lock.json",
+        "packages.config",
+        "deps.json",
+        "mix.lock",
+        "pubspec.lock",
+        "renv.lock",
+        "conan.lock",
+        "Package.resolved",
+        "cabal.project.freeze",
+        "stack.yaml.lock",
+    },
+)
+#: Extensions of the files osv-scanner reads, compared case-sensitively.
+_MANIFEST_SUFFIXES: tuple[str, ...] = (
+    ".json",
+    ".lock",
+    ".lockfile",
+    ".locked",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".xml",
+    ".txt",
+    ".mod",
+    ".sum",
+    ".config",
+    ".resolved",
+    ".freeze",
+)
+#: ``modfile``'s usage placeholder, which is not a path.
+_GOMOD_PLACEHOLDER: str = "module/path"
+#: Go-quoted characters (``'/'``, ``'\\x01'``) and back-quoted escape
+#: sequences, which may hold a separator or backslash without naming a path.
+_ESCAPED_CHAR_RE = re.compile(
+    r"'(?:[^'\\\s]|\\(?:[abfnrtv\\']|x[0-9a-f]{2}|u[0-9a-f]{4}|U[0-9a-f]{8}))'"
+    r"|`[^`\n]*`",
+)
+_CANDIDATE_RE = re.compile(r"[^\s'\"()<>\[\]{},;`]+")
+_SELF_RE = re.compile(r"\x00(?::\d+)*:?")
+
+
+def _names_another_path(own: str, printed_path: str) -> bool:
+    """Return whether an error names any path besides the excluded file.
+
+    A second guard, independent of :data:`EXCLUDED_FILE_ERRORS`: a word that
+    contains a path separator, or is a manifest or lockfile name or ends in
+    such an extension, names another path unless it is the file itself
+    (written as :data:`_SELF`) or that file's own base name.
+
+    Args:
+        own: The error with the file's path written as :data:`_SELF`.
+        printed_path: The file's path as osv-scanner printed it.
+
+    Returns:
+        True when the error names any other path.
+    """
+    basename = os.path.basename(printed_path)
+    text = _ESCAPED_CHAR_RE.sub(" ", own).replace("</", "<")
+    for candidate in _CANDIDATE_RE.findall(text):
+        word = _SELF_RE.sub("", candidate).rstrip(".:")
+        if not word or word in (basename, _GOMOD_PLACEHOLDER):
+            continue
+        if (
+            "/" in word
+            or os.sep in word
+            or os.path.basename(word) in _MANIFEST_NAMES
+            or word.endswith(_MANIFEST_SUFFIXES)
+        ):
+            return True
+    return False
 
 
 def is_excluded_file_error(error: str, printed_path: str) -> bool:
@@ -289,11 +467,14 @@ def is_excluded_file_error(error: str, printed_path: str) -> bool:
 
     Returns:
         True only when the whole text, with that path written as
-        :data:`_SELF`, is one of :data:`EXCLUDED_FILE_ERRORS`.
+        :data:`_SELF`, is one of :data:`EXCLUDED_FILE_ERRORS` and names no
+        other path.
     """
     if _SELF in error:
         return False
     own = re.sub(rf"/?{re.escape(printed_path.lstrip('/'))}", _SELF, error)
+    if _names_another_path(own, printed_path):
+        return False
     return any(pattern.fullmatch(own) for pattern in EXCLUDED_FILE_ERRORS)
 
 
@@ -440,6 +621,10 @@ def display_path(source: str, scan_root: Path) -> str:
         return source
 
 
+#: The most manifests a resolution note quotes; the rest are counted.
+MAX_NOTE_MANIFESTS: int = 5
+
+
 def resolution_note(notes: tuple[ResolutionNote, ...], scan_root: Path) -> str:
     """Name the manifests whose indirect dependencies were not resolved.
 
@@ -448,12 +633,15 @@ def resolution_note(notes: tuple[ResolutionNote, ...], scan_root: Path) -> str:
         scan_root: Directory osv-scanner ran in.
 
     Returns:
-        The note, naming every manifest, or an empty string when there is
-        none. Each manifest's message is quoted up to its first lines.
+        The note, or an empty string when there is none. Each manifest's
+        message is quoted up to its first lines (joined by `` | ``). With more
+        than one manifest each quote is numbered ``[1]``, ``[2]`` and the
+        quotes are joined by ``; ``; at most :data:`MAX_NOTE_MANIFESTS` are
+        quoted and the rest counted as ``and N more``.
     """
     if not notes:
         return ""
-    shown = " | ".join(
+    quotes = [
         tool_message_excerpt(
             note.text.replace(
                 note.printed_path,
@@ -461,8 +649,16 @@ def resolution_note(notes: tuple[ResolutionNote, ...], scan_root: Path) -> str:
                 1,
             ),
         )
-        for note in notes
-    )
+        for note in notes[:MAX_NOTE_MANIFESTS]
+    ]
+    if len(notes) == 1:
+        shown = quotes[0]
+    else:
+        shown = "; ".join(
+            f"[{number}] {quote}" for number, quote in enumerate(quotes, start=1)
+        )
+        if len(notes) > MAX_NOTE_MANIFESTS:
+            shown += f"; and {len(notes) - MAX_NOTE_MANIFESTS} more"
     return (
         "OSV-Scanner scanned the packages listed in these manifests but "
         "could not resolve their indirect dependencies, so those were not "

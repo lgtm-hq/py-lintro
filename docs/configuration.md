@@ -2371,7 +2371,9 @@ after the blank line nothing else continues the message. A transport failure
 (`rpc error`, `max retries exhausted`, a timeout) or any other text is an error. The
 listed packages were scanned, so the run is complete and carries a note in
 `metadata.notes` (see
-[Tool Timeouts in the JSON Report](#tool-timeouts-in-the-json-report)).
+[Tool Timeouts in the JSON Report](#tool-timeouts-in-the-json-report)). The note quotes
+each manifest's message up to its first lines. With several manifests the quotes are
+numbered (`[1] ...; [2] ...`), and after five the rest are counted (`; and 3 more`).
 
 **Excluded paths.** An error in an `Error during extraction` message is dropped only
 when it starts with one existing regular file under a path lintro excludes
@@ -2379,28 +2381,60 @@ when it starts with one existing regular file under a path lintro excludes
 whole text after that file is a shape lintro recognises:
 
 - a parser error osv-scanner's extractors print for that file, as captured from
-  osv-scanner 2.7.1: Go JSON errors
+  osv-scanner 2.7.1 over deliberately broken fixtures: a Go JSON error
   (`invalid character '/' looking for beginning of object key string`,
-  `unexpected end of JSON input`, `json: cannot unmarshal ...`), `yaml: line <n>: ...`,
-  `toml: line <n>: ...`, `XML syntax error on line <n>: ...` or `EOF`, optionally after
-  `could not extract:`, and the `pom.xml` and `go.mod` forms that repeat the same file's
-  path;
+  `unexpected end of JSON input`,
+  `json: cannot unmarshal <kind> into Go ... of type <type>`),
+  `yaml: line <n>: <message>`, `toml: line <n>: <message>`,
+  `XML syntax error on line <n>: <message>`, `EOF` or `unexpected EOF`. The text after
+  `yaml:`, `toml:` or `XML syntax error` must itself be a parser message: plain words
+  and short quoted tokens such as `','`, with no path or dotted file name in it. The
+  error may follow one of four wrappers: `could not extract:`, `could not extract`
+  without a colon (`bun.lock`), `could not extract pom from <file>:` (`pom.xml`), or
+  `failed to decode <name> file:` (`packages.lock.json`);
+- a `go.mod` error `could not extract: <file>:<line>: <message>`, where the message is a
+  plain-word parser message (`unknown directive: foo`) or one of the captured
+  `usage: ...`, `invalid go version ...` and `syntax error (unterminated block ...)`
+  forms;
 - `Open(<file>): open <file>: permission denied` for the same file;
 - for a `failed resolution for` error, one of the allow-listed endings above.
 
+As a second, independent check, the error is kept whenever its text names any path other
+than that file: a word with a path separator, or a manifest or lockfile name or
+extension (`package-lock.json`, `*.lock`), other than the file itself or its own base
+name.
+
 Any other text keeps the error, whatever entries the scan root holds, so
-`vendor/package-lock.json: failed reading app/package-lock.json: ...` is quoted and the
-run is incomplete, and so is a transport failure resolving an excluded manifest. A
-message that names no file, or a path that cannot be told apart from another file, is
-never dropped.
+`vendor/a.lock: could not extract: yaml: line 1: failed reading app/package-lock.json: ...`
+is quoted and the run is incomplete. A message that names no file, or a path that cannot
+be told apart from another file, is never dropped.
+
+Known limits of excluding a path. Each case below stays an incomplete run:
+
+- **Errors that run over several lines.** lintro reads a message line by line and does
+  not join an indented continuation line to the line above it. A `pnpm-lock.yaml` with
+  the wrong value types prints `yaml: unmarshal errors:` followed by an indented
+  `line 3: cannot unmarshal ...` line. That second line is read as a separate error that
+  names no file, so the run stays incomplete even when the file is excluded. The same
+  holds for a `go.mod` with a malformed `replace` line, whose usage text runs over two
+  lines.
+- **Resolution failures that are not on the allow-list.** Excluding a manifest drops a
+  `failed resolution for` error only when its ending is one of the allow-listed endings
+  above. A transport failure while resolving an excluded manifest (`rpc error`,
+  `max retries exhausted`, a timeout) keeps the run incomplete, and so does any other
+  resolution error, such as the Maven `invalid empty constraint` below.
+- **Messages lintro has not seen.** An extractor message of another form (for example
+  `failed to parse Package.resolved: ...`) is kept.
 
 **Repositories with broken test fixtures.** A repository that keeps deliberately broken
 lockfiles or manifests as test fixtures (trivy, ossf/scorecard and osv-scanner's own
 repository do) gets an incomplete run that quotes each of them, because osv-scanner
-cannot tell a fixture from a real lockfile. Exclude those paths and the run is complete
-again: add the fixture directory to `.lintro-ignore` (for example `testdata/`) or pass
-it on the command line with `--exclude testdata`. Their errors are then dropped, and so
-are any findings in them.
+cannot tell a fixture from a real lockfile. Exclude those paths: add the fixture
+directory to `.lintro-ignore` (for example `testdata/`) or pass it on the command line
+with `--exclude testdata`. Errors of the recognised shapes above are then dropped, and
+so are any findings in them. The run is complete again only when every remaining error
+was dropped; the known limits above (a multi-line error, a resolution failure) still
+make it incomplete.
 
 **Minimum version.** lintro requires osv-scanner 2.6.0 or newer (`min_version` in the
 tool manifest). osv-scanner 2.4.0 to 2.5.1 read only the first document of a
@@ -2493,8 +2527,10 @@ come from that BOM keeps an empty version, and resolution then fails with this t
 With osv-scanner 2.7.1 and a minimal pom that imports a BOM, an online run exits 0 with
 nothing on standard error; the same run with only Maven Central blocked exits 127 and
 prints this same line. lintro cannot tell the two apart, so such a project gets an
-incomplete run that quotes the line. For a complete scan, exclude that manifest (for
-example `--exclude maven-tests`) or make the BOM resolvable.
+incomplete run that quotes the line. Excluding that manifest (for example
+`--exclude maven-tests`) does not change this: the error is not on the allow-list, so
+lintro keeps it for an excluded manifest too. For a complete scan, make the BOM
+resolvable.
 
 #### pip-audit Configuration
 

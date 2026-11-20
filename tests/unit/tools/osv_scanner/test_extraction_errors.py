@@ -802,11 +802,41 @@ def test_note_names_every_unsatisfiable_manifest(
 
     _assert_complete(result)
     assert_that(_note(result)).contains(
-        "a/requirements.txt",
-        "b/requirements.txt",
-        "c/requirements.txt",
+        "[1] a/requirements.txt",
+        "; [2] b/requirements.txt",
+        "; [3] c/requirements.txt",
         '"==99992"',
+    ).does_not_contain("more")
+
+
+def test_note_quotes_five_manifests_and_counts_the_rest(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """A long list of private-package manifests does not grow the note unbounded."""
+    names = [f"m{index}" for index in range(8)]
+    stderr = (
+        "Error during extraction: (extracting as transitivedependency/requirements) "
+        + "".join(
+            f"failed resolution for {{root}}/{name}/requirements.txt: package "
+            f"System(7):zz-{name}: not found\n"
+            for name in names
+        )
     )
+
+    result = _check(
+        osv_scanner_plugin,
+        tmp_path,
+        files={f"{name}/requirements.txt": "zz\n" for name in names},
+        returncode=127,
+        stderr=stderr,
+    )
+
+    _assert_complete(result)
+    assert_that(_note(result)).contains(
+        "[5] m4/requirements.txt",
+        "; and 3 more",
+    ).does_not_contain("m5/requirements.txt", "[6]")
 
 
 @pytest.mark.parametrize(
@@ -842,3 +872,262 @@ def test_unknown_report_key_is_named_in_the_incomplete_run(
     assert_that(result.output).starts_with(
         "OSV-Scanner's report could not be read",
     ).contains(f"key(s) lintro does not know {named}")
+
+
+#: Further messages osv-scanner 2.7.1 printed for deliberately broken fixtures
+#: (#3553): the extractor, the file name and the text after the file's path,
+#: with ``{file}`` for that path as printed and braces doubled for ``format``.
+_CAPTURED_2_7_1: dict[str, tuple[str, str, str]] = {
+    "json-end": (
+        "javascript/packagelockjson",
+        "package-lock.json",
+        "could not extract: unexpected end of JSON input",
+    ),
+    "json-number": (
+        "javascript/packagelockjson",
+        "package-lock.json",
+        "could not extract: invalid character '}}' in numeric literal",
+    ),
+    "json-literal": (
+        "javascript/packagelockjson",
+        "package-lock.json",
+        "could not extract: invalid character '}}' in literal null (expecting 'l')",
+    ),
+    "json-key": (
+        "javascript/packagelockjson",
+        "package-lock.json",
+        "could not extract: invalid character '1' after object key",
+    ),
+    "json-pair": (
+        "javascript/packagelockjson",
+        "package-lock.json",
+        "could not extract: invalid character '\"' after object key:value pair",
+    ),
+    "json-array": (
+        "javascript/packagelockjson",
+        "package-lock.json",
+        "could not extract: invalid character '2' after array element",
+    ),
+    "json-top": (
+        "javascript/packagelockjson",
+        "package-lock.json",
+        "could not extract: invalid character 'x' after top-level value",
+    ),
+    "json-control": (
+        "javascript/packagelockjson",
+        "package-lock.json",
+        "could not extract: invalid character '\\x01' in string",
+    ),
+    "json-escape": (
+        "javascript/packagelockjson",
+        "package-lock.json",
+        "could not extract: invalid escape sequence `\\u12z4` in string",
+    ),
+    "json-value-type": (
+        "javascript/packagelockjson",
+        "package-lock.json",
+        "could not extract: json: cannot unmarshal string into Go value of type "
+        "packagelockjson.LockFile",
+    ),
+    "json-map-type": (
+        "python/pipfilelock",
+        "Pipfile.lock",
+        "could not extract: json: cannot unmarshal number into Go struct field "
+        "pipenvLockFile.default of type map[string]pipfilelock.pipenvPackage",
+    ),
+    "bun-no-colon": (
+        "javascript/bunlock",
+        "bun.lock",
+        "could not extract json: cannot unmarshal number into Go struct field "
+        ".packages.a of type []interface {{}}",
+    ),
+    "yaml-mapping": (
+        "javascript/pnpmlock",
+        "pnpm-lock.yaml",
+        "could not extract: yaml: line 2: mapping values are not allowed in this "
+        "context",
+    ),
+    "yaml-indicator": (
+        "javascript/pnpmlock",
+        "pnpm-lock.yaml",
+        "could not extract: yaml: line 1: did not find expected '-' indicator",
+    ),
+    "yaml-anchor": (
+        "javascript/pnpmlock",
+        "pnpm-lock.yaml",
+        "could not extract: yaml: unknown anchor 'y' referenced",
+    ),
+    "toml-defined": (
+        "python/poetrylock",
+        "poetry.lock",
+        "could not extract: toml: line 2 (last key \"a\"): Key 'a' has already "
+        "been defined.",
+    ),
+    "toml-types": (
+        "python/poetrylock",
+        "poetry.lock",
+        'could not extract: toml: line 2 (last key "package.name"): incompatible '
+        "types: TOML value has type int64; destination has type string",
+    ),
+    "toml-newline": (
+        "python/poetrylock",
+        "poetry.lock",
+        "could not extract: toml: line 2: expected '.' or ']' to end table name, "
+        "but got '\\n' instead",
+    ),
+    "toml-blank": (
+        "python/uvlock",
+        "uv.lock",
+        "could not extract: toml: line 1: unexpected '=': key name appears blank",
+    ),
+    "xml-closed": (
+        "java/pomxml",
+        "pom.xml",
+        "could not extract pom from {file}: XML syntax error on line 1: element "
+        "<project> closed by </foo>",
+    ),
+    "xml-entity": (
+        "java/pomxml",
+        "pom.xml",
+        "could not extract pom from {file}: XML syntax error on line 1: invalid "
+        "character entity &bogus;",
+    ),
+    "xml-name": (
+        "java/pomxml",
+        "pom.xml",
+        "could not extract pom from {file}: XML syntax error on line 1: expected "
+        "element name after <",
+    ),
+    "xml-eof": ("java/pomxml", "pom.xml", "could not extract pom from {file}: EOF"),
+    "xml-bare": (
+        "dotnet/packagesconfig",
+        "packages.config",
+        "XML syntax error on line 1: unexpected EOF",
+    ),
+    "decode": (
+        "dotnet/packageslockjson",
+        "packages.lock.json",
+        "failed to decode packages.lock.json file: unexpected EOF",
+    ),
+    "gomod-usage": (
+        "go/gomod",
+        "go.mod",
+        "could not extract: {file}:2: usage: require module/path v1.2.3",
+    ),
+    "gomod-version": (
+        "go/gomod",
+        "go.mod",
+        "could not extract: {file}:2: invalid go version 'abc': must match format "
+        "1.23.0",
+    ),
+    "gomod-block": (
+        "go/gomod",
+        "go.mod",
+        "could not extract: {file}:4: syntax error (unterminated block started at "
+        "{file}:3:1)",
+    ),
+    "gomod-string": (
+        "go/gomod",
+        "go.mod",
+        "could not extract: {file}:1:10: unexpected newline in string",
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_CAPTURED_2_7_1))
+def test_captured_error_for_an_excluded_file_is_dropped(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+    shape: str,
+) -> None:
+    """Every real 2.7.1 parser message for an excluded file is dropped."""
+    plugin_name, file_name, error = _CAPTURED_2_7_1[shape]
+    name = f"testdata/{file_name}"
+    osv_scanner_plugin.set_options(exclude_patterns=["testdata"])
+    stderr = (
+        f"Error during extraction: (extracting as {plugin_name}) "
+        f"{{root}}/{name}: {error.replace('{file}', '{root}/' + name)}\n"
+    )
+
+    result = _check(
+        osv_scanner_plugin,
+        tmp_path,
+        files={name: "broken", "requirements.txt": "six==1.16.0\n"},
+        returncode=127,
+        stderr=stderr,
+    )
+
+    _assert_complete(result)
+    assert_that(result.success).is_true()
+
+
+#: The reviewer's message (#3571) and its variants: a recognised parser prefix
+#: whose text is not a parser message and names a second, scanned file.
+_SECOND_FILE = "failed reading app/package-lock.json: permission denied"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        f"could not extract: yaml: line 1: {_SECOND_FILE}",
+        f"could not extract: toml: line 1: {_SECOND_FILE}",
+        f'could not extract: toml: line 1 (last key "a"): {_SECOND_FILE}',
+        f"could not extract pom from {{file}}: XML syntax error on line 1: "
+        f"{_SECOND_FILE}",
+        f"XML syntax error on line 1: {_SECOND_FILE}",
+        "could not extract: json: cannot unmarshal number into Go struct field "
+        f"{_SECOND_FILE} of type string",
+        f"could not extract: {{file}}:1: {_SECOND_FILE}",
+        f"could not extract: {{file}}:1:2: {_SECOND_FILE}",
+        "could not extract: yaml: line 1: cannot read package-lock.json",
+        'could not extract: toml: line 1 (last key "package-lock.json"): '
+        "expected value",
+        "could not extract: yaml: unknown anchor 'app.lock' referenced",
+    ],
+    ids=[
+        "yaml",
+        "toml",
+        "toml-key",
+        "pom",
+        "xml",
+        "struct-field",
+        "repeated-path",
+        "repeated-path-column",
+        "bare-name",
+        "guard-toml-key",
+        "guard-yaml-anchor",
+    ],
+)
+def test_parser_prefix_with_text_naming_another_file_is_kept(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+    error: str,
+) -> None:
+    """Only a recognised parser message follows a parser prefix (#3571).
+
+    The excluded ``vendor/a.lock`` reports an error that names the scanned
+    ``app/package-lock.json``; the run stays incomplete, as on ``main``.
+    """
+    osv_scanner_plugin.set_options(exclude_patterns=["vendor"])
+    name = "vendor/a.lock"
+    stderr = (
+        "Error during extraction: (extracting as javascript/pnpmlock) "
+        f"{{root}}/{name}: {error.replace('{file}', '{root}/' + name)}\n"
+    )
+
+    result = _check(
+        osv_scanner_plugin,
+        tmp_path,
+        files={name: "broken", "app/package-lock.json": "{}", "app.lock": ""},
+        returncode=127,
+        stderr=stderr,
+    )
+
+    _assert_incomplete(result)
+    assert_that(
+        baseline_is_eligible(
+            action=Action.CHECK,
+            dry_run_preview=False,
+            tool_results=[result],
+        ),
+    ).is_false()
