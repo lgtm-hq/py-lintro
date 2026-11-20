@@ -96,6 +96,16 @@ _CAUSE = (
     rf"{_SPECIFIERS}"
 )
 
+# Rule for this list (#3559): an ending belongs here only when it is provably a
+# property of the project's own files and osv-scanner cannot print it after a
+# network or registry failure. Any other error stays an incomplete run. Adding
+# an ending takes an explicit maintainer decision recorded in an issue, with
+# source evidence that a transport failure cannot produce it. See "The
+# allow-list and its limit" in docs/configuration.md. Examined and rejected:
+# Maven's ``failed parsing version constraint '...[Requirement:]': invalid
+# empty constraint``. deps.dev drops a failed BOM import
+# (util/maven/dependency.go), so osv-scanner prints the same text when Maven
+# Central is unreachable.
 #: The only endings after ``failed resolution for <path>: `` that are
 #: harmless, each matched against the whole remaining message:
 #:

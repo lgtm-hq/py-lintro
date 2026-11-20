@@ -21,6 +21,7 @@ from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.subprocess_executor import run_subprocess
 from lintro.tools.osv_scanner.definition import OsvScannerPlugin
+from lintro.tools.osv_scanner.extraction_log import HARMLESS_RESOLUTION_ENDINGS
 from lintro.utils.meaningful_run import baseline_is_eligible
 from lintro.utils.tool_metadata import tool_notes
 
@@ -78,6 +79,20 @@ _CAPTURE_FILES: dict[str, tuple[str, ...]] = {
 _CONFLICT_STDERR = (
     f"{_HEADER}failed resolution for {{root}}/requirements.txt: resolution "
     'impossible:\nrequirements conflict: werkzeug: "==1.0.0,>=2.0"\n\n'
+)
+
+
+#: What osv-scanner 2.7.1 printed for square/okhttp's ``maven-tests/pom.xml``,
+#: which imports ``okhttp-bom`` by a SNAPSHOT range, at ``--verbosity error``
+#: (exit 127). deps.dev drops a failed BOM import, so the same line follows
+#: an unreachable Maven Central (#3559).
+_EMPTY_CONSTRAINT_LINE = (
+    "Error during extraction: (extracting as transitivedependency/pomxml) "
+    "failed resolution for {root}/maven-tests/pom.xml: failed resolving "
+    "{Maven:com.squareup.okhttp3:maven-tests[Concrete:1.0.0-SNAPSHOT] {}}: "
+    "failed parsing version constraint "
+    "'Maven:com.squareup.okhttp3:okhttp-jvm[Requirement:]': "
+    "invalid empty constraint"
 )
 
 
@@ -302,3 +317,39 @@ def test_other_tools_keep_strict_decoding(tmp_path: Path) -> None:
 
     assert_that(replaced.stderr).contains("calf�.lock")
     assert_that(replaced.returncode).is_equal_to(127)
+
+
+def test_allow_list_holds_exactly_the_reviewed_endings() -> None:
+    """The allow-list changes only by a recorded maintainer decision (#3559).
+
+    An ending belongs on it only when it is provably a property of the
+    project's own files and osv-scanner cannot print it after a network or
+    registry failure; any other error stays an incomplete run. Adding one
+    takes a maintainer decision recorded in an issue, with source evidence
+    that a transport failure cannot produce it, and changes this count in
+    the same pull request. See "The allow-list and its limit" in
+    docs/configuration.md.
+    """
+    assert_that(HARMLESS_RESOLUTION_ENDINGS).is_length(3)
+
+
+def test_maven_empty_constraint_is_incomplete_and_quoted(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """The rejected Maven shape stays an incomplete run that quotes it."""
+    (tmp_path / "maven-tests").mkdir()
+    (tmp_path / "maven-tests" / "pom.xml").write_text("<project/>\n")
+
+    result = _check(
+        osv_scanner_plugin,
+        tmp_path,
+        returncode=127,
+        stderr=f"{_EMPTY_CONSTRAINT_LINE}\n",
+    )
+
+    _assert_incomplete(result)
+    assert_that(tool_notes(result.metadata)).is_empty()
+    assert_that(result.output).contains(
+        _EMPTY_CONSTRAINT_LINE.replace("{root}", str(tmp_path).lstrip("/")),
+    )
