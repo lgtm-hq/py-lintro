@@ -10,7 +10,8 @@
 #   install-osv-scanner.sh [version]
 #
 # Environment:
-#   OSV_VERSION            Release version (default: 2.3.5)
+#   OSV_VERSION            Release version (default: the ToolName.OSV_SCANNER pin
+#                          in lintro/_tool_versions.py, the version lintro ships)
 #   INSTALL_DIR            Install directory (default: /usr/local/bin or ~/.local/bin)
 #   DOWNLOAD_MAX_ATTEMPTS  Retry count for downloads (default: 3)
 
@@ -22,14 +23,14 @@ Usage: install-osv-scanner.sh [version]
 
 Download and verify the osv-scanner release binary with retries.
 
-Version: $1 > $OSV_VERSION > 2.3.5
+Version: $1 > $OSV_VERSION > ToolName.OSV_SCANNER pin in lintro/_tool_versions.py
 Install dir: $INSTALL_DIR > /usr/local/bin > ~/.local/bin
 EOF
 	exit 0
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${GITHUB_WORKSPACE:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+REPO_ROOT="${GITHUB_WORKSPACE:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 TOOLING_LIB="${REPO_ROOT}/.lgtm-ci-tooling/scripts/ci/lib"
 
 if [[ ! -d "$TOOLING_LIB" ]]; then
@@ -45,7 +46,25 @@ source "${TOOLING_LIB}/fs.sh"
 # shellcheck source=/dev/null
 source "${TOOLING_LIB}/network/download.sh"
 
-OSV_VERSION="${1:-${OSV_VERSION:-2.3.5}}"
+# The default is the pin lintro itself ships (tools image, install-tools.sh),
+# read from the checkout so the two cannot drift (#3557). Renovate bumps only
+# that pin; there is no second copy here to forget.
+VERSIONS_FILE="${REPO_ROOT}/lintro/_tool_versions.py"
+
+_pinned_osv_version() {
+	[[ -f "$VERSIONS_FILE" ]] || return 0
+	sed -n -E 's/^[[:space:]]*ToolName\.OSV_SCANNER:[[:space:]]*"([0-9]+\.[0-9]+\.[0-9]+)",?[[:space:]]*$/\1/p' \
+		"$VERSIONS_FILE" | head -n 1
+}
+
+OSV_VERSION="${1:-${OSV_VERSION:-}}"
+if [[ -z "$OSV_VERSION" ]]; then
+	OSV_VERSION="$(_pinned_osv_version)"
+	if [[ -z "$OSV_VERSION" ]]; then
+		log_error "No osv-scanner version given and no ToolName.OSV_SCANNER pin found in ${VERSIONS_FILE}"
+		exit 1
+	fi
+fi
 DOWNLOAD_MAX_ATTEMPTS="${DOWNLOAD_MAX_ATTEMPTS:-3}"
 
 _explain_download_failure() {

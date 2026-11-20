@@ -2246,9 +2246,9 @@ The suppression probe uses the same flags with `--config /dev/null`.
   grouped with its GHSA alias) and a failed check both with call analysis on, as earlier
   lintro releases ran it, and with it off.
 
-Both flags exist from osv-scanner 2.4.0, the minimum lintro enforces. lintro passes no
-tool option to osv-scanner, so `verbosity`, `call_analysis` and `no_call_analysis` are
-refused as tool options rather than silently ignored.
+Both flags exist from osv-scanner 2.4.0, older than any release lintro accepts. lintro
+passes no tool option to osv-scanner, so `verbosity`, `call_analysis` and
+`no_call_analysis` are refused as tool options rather than silently ignored.
 
 **When a scan is complete.** A run is a complete scan only when stdout, without the
 whitespace around it, is exactly one JSON object that is a scan report: a `results` list
@@ -2335,11 +2335,28 @@ again: add the fixture directory to `.lintro-ignore` (for example `testdata/`) o
 it on the command line with `--exclude testdata`. Their errors are then dropped, and so
 are any findings in them.
 
+**Minimum version.** lintro requires osv-scanner 2.6.0 or newer (`min_version` in the
+tool manifest). osv-scanner 2.4.0 to 2.5.1 read only the first document of a
+two-document `pnpm-lock.yaml` (15 of 651 packages in vuejs/core, where 2.6.0 reads all
+651 and reports 34 vulnerabilities). They exit 0 and print nothing on standard error, so
+the scan reads as complete and clean, and lintro cannot detect it. An older binary is
+reported as below the minimum, with the installed and required versions and where to get
+a newer one. The tool is skipped by default and the run fails with
+`--strict-missing-tools`. Versions from 2.6.0 run. The minimum is not the pinned version
+in `lintro/_tool_versions.py`: the pin is the version lintro installs and tests, and a
+release between the minimum and the pin still runs.
+
+**Known limit.** osv-scanner 2.7.0 treats an npm package with no `resolved` field in
+`package-lock.json` as local and never checks it. npm writes such lockfiles with
+`omit-lockfile-registry-resolved=true`. A one-package lockfile for `body-parser` 2.3.0
+without `resolved` gives 0 vulnerabilities at 2.7.0 and 1 at 2.6.0 and 2.7.1. The bug is
+fixed in 2.7.1. lintro does not yet refuse a single known-bad version that sits between
+good ones (tracked in #3556), so it runs 2.7.0. If you use 2.7.0, upgrade to 2.7.1.
+
 **Known limit.** osv-scanner does not report every source it under-reads. A lockfile in
 a format version it does not support (for example `"lockfileVersion": 99`) is logged as
-"found 0 packages" with no error, and osv-scanner 2.4.0 to 2.5.1 read only the first
-document of a two-document `pnpm-lock.yaml` (15 of 651 packages in vuejs/core) without
-an error. Such a scan reads as complete; lintro cannot detect it.
+"found 0 packages" with no error. Such a scan reads as complete; lintro cannot detect
+it.
 
 **Usage Examples:**
 
