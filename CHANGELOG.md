@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.183.0] - 2026-11-20
+
+### Added
+
+- **tools**: refuse known-bad tool versions (#3565) (e6982ab)
+
 ## [0.182.6] - 2026-11-20
 
 ### Changed
