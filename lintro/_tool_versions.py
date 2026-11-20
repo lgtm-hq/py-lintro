@@ -120,9 +120,9 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.SHELLCHECK: "0.11.0",
     ToolName.SHFMT: "3.14.1",
     ToolName.TAPLO: "0.10.0",
-    ToolName.TRUFFLEHOG: "3.99.8",
+    ToolName.TRUFFLEHOG: "3.99.9",
     ToolName.TYPOS: "1.49.0",
-    ToolName.VALE: "3.26.0",
+    ToolName.VALE: "3.27.0",
 }
 
 _NPM_PACKAGE_TO_TOOL: dict[str, ToolName] = {
