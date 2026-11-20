@@ -125,7 +125,7 @@ dev = [
   # assertpy 2.x (Nov 2026) is the assertpy2 fork merged upstream: it ships
   # type stubs (440 new mypy errors across 149 test files) and raises
   # AssertionFailure. Held below 2 until that migration lands; see #2437.
-  "assertpy>=1.1,<2",
+  "assertpy>=2.36,<3",
   "pytest-mock>=3.15.1",
   "bandit>=1.9.4",
   "black>=26.10.1",
