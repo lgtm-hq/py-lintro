@@ -10,4 +10,13 @@
 # box is _TOOLING_CHECKOUT_EXPIRY in tests/unit/test_vuln_suppression_parity.py.
 
 ---
-ignore: []
+ignore:
+  # mcp 1.29.0: pinned exactly by Semgrep (requirements-semgrep.txt); lintro
+  # runs only `semgrep scan`, which never loads mcp.client.auth. Mirrors
+  # .osv-scanner.toml, review by 2026-12-06 (#2981). The other four mcp
+  # exceptions there match below the gate's `high` threshold and need no rule.
+  - vulnerability: GHSA-qx49-fqc8-xw99
+    package:
+      name: mcp
+      version: 1.29.0
+      type: python
