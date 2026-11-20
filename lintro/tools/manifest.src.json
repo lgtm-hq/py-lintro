@@ -303,6 +303,7 @@
     },
     {
       "name": "osv_scanner",
+      "min_version": "2.6.0",
       "install": {
         "type": "binary",
         "package": "osv-scanner"

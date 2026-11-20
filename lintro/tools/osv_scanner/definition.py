@@ -70,15 +70,14 @@ OSV_NO_SOURCES_MESSAGE: str = (
 #: default for Go only) is off: lintro does not read its result, and it fails
 #: when Go or govulncheck cannot run. Both flags exist from osv-scanner 2.4.0.
 #:
-#: lintro requires the osv-scanner version it pins: the manifest sets no
-#: ``min_version`` for osv_scanner, so the minimum falls back to the pinned
-#: ``version`` in ``lintro/_tool_versions.py`` and moves with it. Older
-#: releases under-read lockfiles with exit 0 and nothing on standard error,
-#: which lintro cannot detect (#3557): 2.4.0 to 2.5.1 read 15 of 651 packages
-#: from a two-document ``pnpm-lock.yaml``, and 2.7.0 skips npm packages that
-#: have no ``resolved`` field (fixed in 2.7.1). Known limit: while the pin is
-#: 2.7.0 the second gap remains, until the pin moves to 2.7.1 together with
-#: the tools-image digest.
+#: The minimum osv-scanner version is 2.6.0 (``min_version`` in the tool
+#: manifest), set on evidence rather than taken from the pin (#3557, #3556):
+#: 2.4.0 to 2.5.1 read 15 of 651 packages from a two-document
+#: ``pnpm-lock.yaml`` with exit 0 and nothing on standard error, which lintro
+#: cannot detect. Versions from 2.6.0 run. Known limit: 2.7.0 skips npm
+#: packages that have no ``resolved`` field (fixed in 2.7.1), and lintro does
+#: not yet refuse a single known-bad version between good ones (#3556), so
+#: users on 2.7.0 should upgrade to 2.7.1.
 _SCAN_FLAGS: tuple[str, ...] = (
     "--recursive",
     "--format",

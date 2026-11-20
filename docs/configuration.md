@@ -2335,29 +2335,23 @@ again: add the fixture directory to `.lintro-ignore` (for example `testdata/`) o
 it on the command line with `--exclude testdata`. Their errors are then dropped, and so
 are any findings in them.
 
-**Minimum version.** lintro requires the osv-scanner version it pins: the tool manifest
-sets no `min_version` for osv-scanner, so the minimum is the pinned version in
-`lintro/_tool_versions.py`, the one the tools image installs and the tests run against,
-and it moves whenever that pin moves. Older releases under-read without any error, exit
-0 and print nothing on standard error, so the scan reads as complete and clean:
+**Minimum version.** lintro requires osv-scanner 2.6.0 or newer (`min_version` in the
+tool manifest). osv-scanner 2.4.0 to 2.5.1 read only the first document of a
+two-document `pnpm-lock.yaml` (15 of 651 packages in vuejs/core, where 2.6.0 reads all
+651 and reports 34 vulnerabilities). They exit 0 and print nothing on standard error, so
+the scan reads as complete and clean, and lintro cannot detect it. An older binary is
+reported as below the minimum, with the installed and required versions and where to get
+a newer one. The tool is skipped by default and the run fails with
+`--strict-missing-tools`. Versions from 2.6.0 run. The minimum is not the pinned version
+in `lintro/_tool_versions.py`: the pin is the version lintro installs and tests, and a
+release between the minimum and the pin still runs.
 
-- osv-scanner 2.4.0 to 2.5.1 read only the first document of a two-document
-  `pnpm-lock.yaml` (15 of 651 packages in vuejs/core, where 2.6.0 and later read all 651
-  and report 34 vulnerabilities).
-- osv-scanner 2.7.0 treats an npm package with no `resolved` field in
-  `package-lock.json` as local and never checks it. npm writes such lockfiles with
-  `omit-lockfile-registry-resolved=true`. A one-package lockfile for `body-parser` 2.3.0
-  without `resolved` gives 0 vulnerabilities at 2.7.0 and 1 at 2.6.0 and 2.7.1.
-
-lintro cannot detect either under-read, so it refuses every release below its pin: an
-older binary is reported as below the minimum, with the installed and required versions
-and where to get a newer one. The tool is skipped by default and the run fails with
-`--strict-missing-tools`. A release newer than the pin is accepted.
-
-**Known limit.** The pinned osv-scanner is currently 2.7.0, so the second under-read
-(npm packages without `resolved`) still applies until the pin moves to 2.7.1. That move
-is a pending Renovate update, which changes the pin and the tools-image digest together;
-moving the pin alone would make lintro refuse the osv-scanner in the image it runs from.
+**Known limit.** osv-scanner 2.7.0 treats an npm package with no `resolved` field in
+`package-lock.json` as local and never checks it. npm writes such lockfiles with
+`omit-lockfile-registry-resolved=true`. A one-package lockfile for `body-parser` 2.3.0
+without `resolved` gives 0 vulnerabilities at 2.7.0 and 1 at 2.6.0 and 2.7.1. The bug is
+fixed in 2.7.1. lintro does not yet refuse a single known-bad version that sits between
+good ones (tracked in #3556), so it runs 2.7.0. If you use 2.7.0, upgrade to 2.7.1.
 
 **Known limit.** osv-scanner does not report every source it under-reads. A lockfile in
 a format version it does not support (for example `"lockfileVersion": 99`) is logged as
