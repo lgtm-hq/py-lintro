@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.182.6] - 2026-11-20
+
+### Changed
+
+- **osv_scanner**: document the allow-list rule and a rejected Maven shape (#3561)
+  (c4fbdc4)
+
+### Fixed
+
+- **security**: mirror the time-boxed mcp advisory in the Grype gate (#3564) (4735e07)
+- **osv_scanner**: raise the minimum version to 2.6.0 (#3560) (78479fb)
+
 ## [0.182.5] - 2026-11-20
 
 ### Fixed
