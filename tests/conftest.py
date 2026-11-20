@@ -467,6 +467,7 @@ def _clear_tool_snapshot_cache(
         None: Clears the snapshot caches after the test.
     """
     from lintro.tools.core import snapshots
+    from lintro.utils.tool_snapshots import reset_upgrade_suggestions
 
     # Resolved once here: tests that patch ``Path.resolve`` must not break the
     # cache clear in this fixture's teardown.
@@ -485,9 +486,11 @@ def _clear_tool_snapshot_cache(
     monkeypatch.setattr(snapshots, "_cache_file_path", _isolated_cache_file_path)
     snapshots.clear_snapshot_cache()
     snapshots.set_force_fresh_probes(False)
+    reset_upgrade_suggestions()
     yield
     snapshots.clear_snapshot_cache()
     snapshots.set_force_fresh_probes(False)
+    reset_upgrade_suggestions()
 
 
 """Shared fixtures used across tests in this repository."""

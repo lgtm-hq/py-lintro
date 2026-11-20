@@ -7,6 +7,7 @@ can share snapshots and invalidate caches without importing the tool layer.
 from __future__ import annotations
 
 import os
+import threading
 from collections.abc import Mapping
 from enum import Enum
 from pathlib import Path
@@ -318,6 +319,47 @@ def below_minimum_result(
         outcome = ToolOutcome(execution=Skipped(reason))
         output = f"Skipping {name}: {detail}"
     return ToolResult.from_outcome(outcome, name=name, output=output)
+
+
+def upgrade_command(name: str) -> str:
+    """Return the command that upgrades a tool to the version lintro pins.
+
+    Args:
+        name: Tool name as lintro reports it.
+
+    Returns:
+        The ``lintro install --upgrade`` command for the tool.
+    """
+    return f"lintro install --upgrade {name}"
+
+
+_upgrade_suggested: set[str] = set()
+_upgrade_suggested_lock = threading.Lock()
+
+
+def claim_upgrade_suggestion(name: str) -> bool:
+    """Record that a run is about to suggest upgrading ``name``.
+
+    Tools can be version-checked more than once per run (one check per
+    project root), and the suggestion is shown once per tool per run.
+
+    Args:
+        name: Tool name.
+
+    Returns:
+        True the first time per run for this tool, False afterwards.
+    """
+    with _upgrade_suggested_lock:
+        if name in _upgrade_suggested:
+            return False
+        _upgrade_suggested.add(name)
+        return True
+
+
+def reset_upgrade_suggestions() -> None:
+    """Start a new run: every tool may be suggested for upgrade once again."""
+    with _upgrade_suggested_lock:
+        _upgrade_suggested.clear()
 
 
 ALLOW_VERSION_LAG_ENV: str = "LINTRO_ALLOW_VERSION_LAG"

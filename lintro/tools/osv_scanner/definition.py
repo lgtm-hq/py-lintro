@@ -75,9 +75,9 @@ OSV_NO_SOURCES_MESSAGE: str = (
 #: 2.4.0 to 2.5.1 read 15 of 651 packages from a two-document
 #: ``pnpm-lock.yaml`` with exit 0 and nothing on standard error, which lintro
 #: cannot detect. Versions from 2.6.0 run. Known limit: 2.7.0 skips npm
-#: packages that have no ``resolved`` field (fixed in 2.7.1), and lintro does
-#: not yet refuse a single known-bad version between good ones (#3556), so
-#: users on 2.7.0 should upgrade to 2.7.1.
+#: packages that have no ``resolved`` field (fixed in 2.7.1). It is not yet on
+#: the manifest's ``known_bad_versions`` list because lintro still pins 2.7.0
+#: (#3556), so users on 2.7.0 should upgrade to 2.7.1.
 _SCAN_FLAGS: tuple[str, ...] = (
     "--recursive",
     "--format",

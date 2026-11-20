@@ -13,6 +13,7 @@ from pathlib import Path
 from loguru import logger
 
 from lintro.config.lintro_config import LintroConfig
+from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_outcome import NoFiles, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.file_discovery import (
@@ -170,9 +171,11 @@ def verify_tool_version(
     """
     from lintro.utils.tool_snapshots import (
         below_minimum_result,
+        claim_upgrade_suggestion,
         get_tool_snapshot,
         is_strict_missing_tools,
         snapshot_to_unavailable_result,
+        upgrade_command,
     )
 
     snapshot = get_tool_snapshot(
@@ -191,31 +194,43 @@ def verify_tool_version(
     if snapshot_is_runnable(snapshot):
         if not snapshot.version_check_passed:
             logger.warning(
-                "{} {} is below minimum {} but allowed via {}; proceeding",
+                "{} {} is refused ({}) but allowed via {}; proceeding",
                 definition.name,
                 snapshot.version,
-                snapshot.min_version,
+                snapshot.probe_error or f"minimum {snapshot.min_version}",
                 _ALLOW_VERSION_LAG_ENV,
             )
-        elif snapshot.below_recommended:
+        elif snapshot.below_recommended and claim_upgrade_suggestion(
+            definition.name,
+        ):
             logger.warning(
-                "{} {} is below recommended version {} (minimum {} met)",
+                "{} {} works but is older than {}, the version lintro tests. "
+                "To upgrade, run: {}",
                 definition.name,
                 snapshot.version,
                 snapshot.recommended_version,
-                snapshot.min_version,
+                upgrade_command(definition.name),
             )
         return None
 
     error = snapshot.probe_error or "version check failed"
     hint = snapshot.remediation_hint or ""
-    detail = f"{error}. Minimum required: {snapshot.min_version}. {hint}".strip()
+    upgrade = f"To upgrade, run: {upgrade_command(definition.name)}"
+    detail = f"{error}. {upgrade}. {hint}".strip()
+
+    # A refused security scanner fails the run: skipping it quietly would
+    # let a run without the scan read as a clean one (#3556).
+    is_security = bool(definition.tool_type & ToolType.SECURITY)
+    if is_security:
+        error = f"security scanner did not run: {error}"
+        detail = f"security scanner did not run, so nothing was scanned. {detail}"
 
     return below_minimum_result(
         name=definition.name,
         reason=error,
         detail=detail,
-        hint=hint,
+        hint=f"{upgrade}. {hint}".strip(),
+        strict=True if is_security else None,
     )
 
 

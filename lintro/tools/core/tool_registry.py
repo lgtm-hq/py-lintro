@@ -29,7 +29,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from lintro.tools.core.manifest_models import ManifestTool, ProfileDefinition
+from lintro.tools.core.manifest_models import (
+    KnownBadVersion,
+    ManifestTool,
+    ProfileDefinition,
+)
 
 # Re-export so existing ``from lintro.tools.core.tool_registry import ManifestTool``
 # continues to work.
@@ -52,6 +56,47 @@ CATEGORY_LABELS: dict[str, str] = {
     "npm": "npm tools",
     "external": "External tools",
 }
+
+_KNOWN_BAD_FIELDS: tuple[str, ...] = ("versions", "reason", "reference")
+
+
+def _parse_known_bad_versions(
+    name: str,
+    raw: object,
+) -> tuple[KnownBadVersion, ...]:
+    """Read a tool's ``known_bad_versions`` list from the manifest.
+
+    An entry needs a non-empty ``versions`` specifier, ``reason`` and
+    ``reference``; a malformed entry is logged and left out.
+
+    Args:
+        name: Tool name, for the warning.
+        raw: The manifest value, expected to be a list of objects.
+
+    Returns:
+        The well-formed entries, in manifest order.
+    """
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        _logger.warning("Tool %r has non-list known_bad_versions; ignoring", name)
+        return ()
+    entries: list[KnownBadVersion] = []
+    for item in raw:
+        values = item if isinstance(item, dict) else {}
+        fields = [values.get(key) for key in _KNOWN_BAD_FIELDS]
+        if not all(isinstance(value, str) and value.strip() for value in fields):
+            _logger.warning(
+                "Tool %r has malformed known_bad_versions entry %r; ignoring",
+                name,
+                item,
+            )
+            continue
+        versions, reason, reference = (str(value) for value in fields)
+        entries.append(
+            KnownBadVersion(versions=versions, reason=reason, reference=reference),
+        )
+    return tuple(entries)
 
 
 class ManifestRegistry:
@@ -252,6 +297,10 @@ class ManifestRegistry:
             version_command=tuple(version_command),
             languages=tuple(entry.get("languages", [])),
             tags=tuple(entry.get("tags", [])),
+            known_bad_versions=_parse_known_bad_versions(
+                str(name),
+                entry.get("known_bad_versions"),
+            ),
         )
 
     # ── Query methods ──────────────────────────────────────────────

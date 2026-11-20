@@ -10,10 +10,12 @@ from functools import lru_cache
 from pathlib import Path
 
 from loguru import logger
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 from lintro.enums.probe_failure import ProbeFailure
 from lintro.enums.tool_name import ToolName, normalize_tool_name
+from lintro.tools.core.manifest_models import KnownBadVersion
 
 # Import actual implementations from version_checking with aliases
 # to avoid name conflicts
@@ -293,6 +295,62 @@ class ToolVersionInfo:
     parse_failed: bool = field(default=False, kw_only=True)
     probe_failure: ProbeFailure | None = field(default=None, kw_only=True)
     probe_seconds: float | None = field(default=None, kw_only=True)
+    known_bad: KnownBadVersion | None = field(default=None, kw_only=True)
+
+
+def find_known_bad_version(
+    version: str,
+    known_bad: Sequence[KnownBadVersion],
+) -> KnownBadVersion | None:
+    """Return the known-bad entry that names ``version``, if any.
+
+    Args:
+        version: Installed version string as the tool reports it.
+        known_bad: The tool's known-bad entries from the manifest.
+
+    Returns:
+        The first matching entry, or None when the version is not listed or
+        cannot be parsed.
+    """
+    try:
+        parsed = parse_version(version)
+    except ValueError:
+        return None
+    for entry in known_bad:
+        try:
+            specifier = SpecifierSet(entry.versions)
+        except InvalidSpecifier:
+            logger.warning(
+                f"[VersionCheck] Ignoring unparseable known-bad specifier "
+                f"{entry.versions!r}",
+            )
+            continue
+        if specifier.contains(parsed, prereleases=True):
+            return entry
+    return None
+
+
+def _refuse_known_bad(
+    info: ToolVersionInfo,
+    known_bad: Sequence[KnownBadVersion],
+) -> None:
+    """Fail the version check when the installed release is known to be bad.
+
+    Args:
+        info: Version check result whose ``current_version`` met the minimum.
+        known_bad: The tool's known-bad entries from the manifest.
+    """
+    if info.current_version is None:
+        return
+    entry = find_known_bad_version(info.current_version, known_bad)
+    if entry is None:
+        return
+    info.known_bad = entry
+    info.version_check_passed = False
+    info.error_message = (
+        f"Version {info.current_version} is refused because it is known to "
+        f"give wrong results: {entry.reason} (see {entry.reference})"
+    )
 
 
 def parse_version(version_str: str) -> Version:
@@ -429,6 +487,7 @@ def check_tool_version(
     install_bin = None
     install_component = None
     channel_override = None
+    known_bad: tuple[KnownBadVersion, ...] = ()
     try:
         from lintro.tools.core.tool_registry import ManifestRegistry
 
@@ -441,6 +500,7 @@ def check_tool_version(
                 install_bin = manifest_tool.install_bin
                 install_component = manifest_tool.install_component
                 channel_override = manifest_tool.update_channel
+                known_bad = manifest_tool.known_bad_versions
                 break
     except (OSError, KeyError, RuntimeError, ValueError):
         pass
@@ -505,7 +565,14 @@ def check_tool_version(
             # If min_version is unknown, consider check passed since we got a version
             info.version_check_passed = True
 
-        if not info.version_check_passed:
+        if info.version_check_passed:
+            _refuse_known_bad(info, known_bad)
+        if info.known_bad is not None:
+            logger.debug(
+                f"[VersionCheck] Known-bad version for {tool_name}: "
+                f"{info.error_message}",
+            )
+        elif not info.version_check_passed:
             info.error_message = (
                 f"Version {info.current_version} is below minimum requirement "
                 f"{min_version}"

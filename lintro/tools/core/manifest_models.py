@@ -6,6 +6,25 @@ from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
+class KnownBadVersion:
+    """A tool release lintro refuses because it gives wrong results.
+
+    A bad release can sit between good ones, so a minimum alone cannot
+    exclude it (#3556).
+
+    Attributes:
+        versions: PEP 440 version specifier naming the bad release or range,
+            e.g. ``"==2.7.0"`` or ``">=2.4.0,<2.6.0"``.
+        reason: What the release gets wrong, in plain words.
+        reference: Where the defect is recorded (issue, PR or release URL).
+    """
+
+    versions: str
+    reason: str
+    reference: str
+
+
+@dataclass(frozen=True)
 class ManifestTool:
     """Single tool entry from manifest.json v2.
 
@@ -25,6 +44,8 @@ class ManifestTool:
         version_command: Command to check installed version.
         languages: Language/ecosystem tags for project detection.
         tags: Semantic tags (e.g., "formatter", "linter", "security").
+        known_bad_versions: Releases refused even when they meet
+            ``min_version``.
     """
 
     name: str
@@ -40,6 +61,7 @@ class ManifestTool:
     version_command: tuple[str, ...] = field(default_factory=tuple)
     languages: tuple[str, ...] = field(default_factory=tuple)
     tags: tuple[str, ...] = field(default_factory=tuple)
+    known_bad_versions: tuple[KnownBadVersion, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)

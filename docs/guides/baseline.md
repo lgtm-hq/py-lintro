@@ -318,11 +318,12 @@ These fail-closed checks also apply without a fingerprint baseline:
   (`"lockfileVersion": 99`) is logged as "found 0 packages" with no error and still
   reads as a complete scan. lintro requires osv-scanner 2.6.0 or newer because 2.4.0 to
   2.5.1 under-read the same way, with exit 0 and nothing on standard error: they read
-  only the first document of a two-document `pnpm-lock.yaml`. An older binary is
-  reported as below the minimum. Known limit: 2.7.0 skips npm packages that have no
-  `resolved` field in `package-lock.json` (fixed in 2.7.1), and lintro does not yet
-  refuse a single known-bad version between good ones (#3556); upgrade 2.7.0 to 2.7.1.
-  See [the configuration guide](../configuration.md#osv-scanner-configuration).
+  only the first document of a two-document `pnpm-lock.yaml`. An older binary is refused
+  as below the minimum and fails the run. Known limit: 2.7.0 skips npm packages that
+  have no `resolved` field in `package-lock.json` (fixed in 2.7.1); it is not yet on
+  osv-scanner's known-bad list because lintro still pins 2.7.0 (#3556), so upgrade 2.7.0
+  to 2.7.1. See
+  [the configuration guide](../configuration.md#osv-scanner-configuration).
 - commitlint reads commit messages, not files. A completed run (a clean exit or reported
   violations) counts as inspected. A failed exit with no violation (a broken
   `commitlint.config.js`) is an execution failure with unknown inspection, named with
