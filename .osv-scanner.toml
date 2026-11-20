@@ -47,6 +47,9 @@ reason = "Reverified 2026-11-06: mcp@1.29.0 in requirements-semgrep.txt (alias C
 # dependency contract. Lintro invokes only `semgrep scan`; its own MCP SDK
 # is already >=2.2 (locked at 2.3.0). Remove these exceptions when Semgrep
 # updates its pin.
+# GHSA-qx49-fqc8-xw99 (published 2026-11-19) joined on 2026-11-20 with the
+# same expiry so all five are reassessed together: Semgrep 1.184.0, 1.185.0
+# and 1.186.0 (latest) all still require mcp==1.29.0.
 
 [[IgnoredVulns]]
 id = "GHSA-5h93-6whr-6q8j"
@@ -62,3 +65,8 @@ reason = "Reverified 2026-11-06: CVE-2026-116686 affects MCP clients validating 
 id = "GHSA-w4fh-qvv9-3v23"
 ignoreUntil = 2026-12-06
 reason = "Reverified 2026-11-06: CVE-2026-116684 affects MCP HTTP servers using bearer-token authentication without audience validation. The only vulnerable SDK is mcp==1.29.0 in isolated requirements-semgrep.txt; pinned Semgrep 1.184.0, the latest published release (2026-11-05), requires that exact version. lintro/tools/semgrep/definition.py invokes semgrep scan, never an MCP client or the semgrep mcp server command. Those transports, tool calls and authentication paths are not used by this scan-only integration. Lintro's own MCP runtime is constrained and locked to >=2.2, guarded by test_mcp_exceptions_do_not_cover_a_vulnerable_lintro_runtime. This is an applicability exception for lintro scans, not clearance for running semgrep mcp or arbitrary MCP clients from the tools image. Remove or reassess before expiry; upstream: https://github.com/semgrep/semgrep/blob/develop/cli/pyproject.toml"
+
+[[IgnoredVulns]]
+id = "GHSA-qx49-fqc8-xw99"
+ignoreUntil = 2026-12-06
+reason = "Verified 2026-11-20: CVE-2026-115563 affects the SDK's OAuth client support (mcp.client.auth), which could send credentials to an authorization server chosen by the MCP server; fixed in 1.30.0 and 2.2.0. The only vulnerable SDK is mcp==1.29.0 in isolated requirements-semgrep.txt; pinned Semgrep 1.184.0 and every later release through 1.186.0, the latest, require that exact version. lintro/tools/semgrep/definition.py invokes only semgrep scan, never an MCP client or the semgrep mcp server command. semgrep scan does import the mcp package (osemgrep falls back to pysemgrep, whose semgrep/cli.py loads semgrep.commands.mcp), but a PYTHONPROFILEIMPORTTIME trace of a real semgrep scan --json with Semgrep 1.184.0 and mcp 1.29.0 loaded no mcp.client.auth module, and neither Semgrep nor the mcp modules it loads reference mcp.client.auth, so the OAuth client code never runs and no credentials exist to send. Lintro's own MCP runtime is constrained and locked to >=2.2, guarded by test_mcp_exceptions_do_not_cover_a_vulnerable_lintro_runtime. This is an applicability exception for lintro scans, not clearance for running semgrep mcp or arbitrary MCP clients from the tools image. Same expiry as the other four mcp exceptions; reassess together under https://github.com/lgtm-hq/py-lintro/issues/2981. Upstream pin: https://github.com/semgrep/semgrep/blob/develop/cli/pyproject.toml"
