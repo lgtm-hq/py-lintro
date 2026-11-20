@@ -31,10 +31,12 @@ error text too.
 
 A part is dropped as an error for an excluded file only when it starts with
 one existing regular file under an excluded path and the whole text after that
-file is a recognised shape: a parser or permission error for that same file
-(:data:`EXCLUDED_FILE_ERRORS`), or, for a ``failed resolution for`` part, one of
-:data:`HARMLESS_RESOLUTION_ENDINGS`. Any other text keeps the error, so one
-that names a second file is never dropped. Checked against osv-scanner 2.4.0
+file is known: one of a fixed list of parser and permission messages captured
+from osv-scanner for that same file (:data:`PARSER_MESSAGE_TEMPLATES`), or,
+for a ``failed resolution for`` part, one of
+:data:`HARMLESS_RESOLUTION_ENDINGS`. Any other text keeps the error, including
+a parser message not yet on the list, and one that names a second file is
+never dropped. Checked against osv-scanner 2.4.0
 and 2.7.1 (``pkg/osvscanner/scan.go``, ``logPluginStatus``; osv-scalibr
 ``enricher/transitivedependency``; deps.dev ``util/resolve``).
 """
@@ -240,126 +242,274 @@ def source_of(text: str, scan_root: Path) -> tuple[str, str, str] | None:
 #: Stands for the excluded file's own path in an error about it.
 _SELF = "\x00"
 
-# Every pattern below was derived from messages osv-scanner 2.7.1 printed for
-# deliberately broken fixtures (#3553); the comments quote them, with <file>
-# for the file's own path. The text after a parser prefix must itself be a
-# parser message of that family. Any other text keeps the error, so the run
-# is incomplete.
+# An error for an excluded file is dropped only when its whole text is one of
+# the known parser messages below (#3553). Each template is a message
+# osv-scanner 2.7.1 printed for a deliberately broken fixture; the comment
+# above it quotes that message, with <file> for the file's own path. Only the
+# slots vary: a line or column number, and a quoted or delimited token (a
+# character, key, anchor, element, version or type) under the tight character
+# class and length limit below. Every other word is matched literally. A
+# message that matches no template keeps the error, so the run is incomplete:
+# an unseen parser message stays an error until its template is added here,
+# with the captured message, and to the corpus in
+# tests/unit/tools/osv_scanner/captured_parser_messages.py.
 
-#: One word of a parser message: a plain word or number, or a short quoted
-#: token (``','``, ``'\n'``, ``"toml"``), with its trailing punctuation. A path
-#: or a dotted file name is not a word.
-_QUOTED = (
-    r"(?:'(?:[^'\s/\\]|\\(?:[abfnrtv\\']|x[0-9a-f]{2}|u[0-9a-f]{4}"
-    r"|U[0-9a-f]{8})){1,40}'"
-    r'|"[^"\s/\\]{1,40}")'
-)
-_WORD = rf"(?:[A-Za-z][A-Za-z0-9_-]*|\d+|{_QUOTED})[.,;:]?"
-#: A whole message: up to 25 words, the last not ending in ``:``, because a
-#: message that ends there (``yaml: unmarshal errors:``) goes on below.
-_PHRASE = rf"(?:{_WORD} ){{0,24}}(?:[A-Za-z][A-Za-z0-9_-]*|\d+|{_QUOTED})[.,;]?"
-#: An XML message may also name an element (``<project>``, ``</foo>``), an
-#: entity (``&bogus;``) or a bare ``<`` or ``=``.
-_XML_WORD = rf"(?:{_WORD}|</?[A-Za-z_][\w.:-]{{0,60}}>|&[A-Za-z0-9#]{{1,40}};|[<=])"
-
-#: Go's ``encoding/json`` (package-lock.json, composer.lock, Pipfile.lock,
-#: bun.lock). Captured: ``invalid character '}' looking for beginning of
-#: value``, ``invalid character '/' looking for beginning of object key
-#: string``, ``invalid character '1' after object key``, ``invalid character
-#: '"' after object key:value pair``, ``invalid character '2' after array
-#: element``, ``invalid character 'x' after top-level value``, ``invalid
-#: character '}' in numeric literal``, ``invalid character '}' in literal true
-#: (expecting 'e')``, ``invalid character '\x01' in string``, ``invalid escape
-#: sequence `\q` in string``, ``unexpected end of JSON input``, ``json: cannot
-#: unmarshal number into Go struct field .packages.node_modules~1x.version of
-#: type string``, ``json: cannot unmarshal string into Go value of type
-#: packagelockjson.LockFile``, ``json: cannot unmarshal number into Go struct
-#: field pipenvLockFile.default of type map[string]pipfilelock.pipenvPackage``
-#: and ``... of type []interface {}``.
-_JSON_CONTEXT = (
-    r"(?:looking for beginning of (?:value|object key string)"
-    r"|after (?:object key(?::value pair)?|array element|top-level value)"
-    r"|in (?:string(?: literal)?|string escape code"
-    r"|\\u hexadecimal character escape"
-    r"|numeric literal|exponent of numeric literal"
-    r"|literal (?:true|false|null) \(expecting '[a-z]'\))"
-    r"|after decimal point in numeric literal)"
-)
-_JSON_CHAR = (
-    r"'(?:\\'|[^'\\]|\\[abfnrtv\\]|\\x[0-9a-f]{2}|\\u[0-9a-f]{4}|\\U[0-9a-f]{8})'"
-)
+#: A line or column number.
+_N = r"\d{1,9}"
+#: One Go-quoted character (``'}'``, ``'"'``, ``'\n'``, ``'\x01'``).
+_CHAR = r"'(?:[^'\\\s]|\\(?:[abfnrtv\\']|x[0-9a-f]{2}|u[0-9a-f]{4}|U[0-9a-f]{8}))'"
+#: A bare word from the file: a key, anchor, directive or version.
+_BARE = r"[A-Za-z0-9_.+-]{1,64}"
+#: A Go type as ``encoding/json`` and BurntSushi/toml print it.
 _GO_TYPE = (
-    r"(?:\[\d*\]|map\[[A-Za-z_][\w.]{0,80}\]|\*){0,4}"
-    r"(?:interface \{\}|[A-Za-z_][\w.]{0,120})"
+    r"(?:\[\d{0,9}\]|map\[[A-Za-z0-9_.]{1,80}\]|\*){0,4}"
+    r"(?:interface \{\}|[A-Za-z_][A-Za-z0-9_.]{0,120})"
 )
-_JSON_ERROR = (
-    rf"(?:invalid character {_JSON_CHAR} {_JSON_CONTEXT}"
-    r"|unexpected end of JSON input"
-    r"|invalid escape sequence `\\[^`\s/]{1,10}` in string"
-    r"|json: cannot unmarshal [a-z]+ into Go "
-    rf"(?:struct field [^\s/\\:]{{1,200}} |value )of type {_GO_TYPE})"
-)
-#: go-yaml (pnpm-lock.yaml, pubspec.lock). Captured: ``yaml: line 1: did not
-#: find expected ',' or ']'``, ``... ',' or '}'``, ``yaml: line 1: did not find
-#: expected '-' indicator``, ``yaml: line 2: mapping values are not allowed in
-#: this context`` (also without ``line <n>:``), ``yaml: line 2: found character
-#: that cannot start any token``, ``yaml: line 2: found unexpected end of
-#: stream``, ``yaml: unknown anchor 'y' referenced``. ``yaml: unmarshal
-#: errors:`` continues on an indented line, which is read as a separate error
-#: and keeps the run incomplete (a documented limit).
-_YAML_ERROR = rf"yaml: (?:line \d+: )?{_PHRASE}"
-#: BurntSushi/toml (poetry.lock, uv.lock, Cargo.lock). Captured: ``toml: line 1
-#: (last key "a"): strings cannot contain newlines``, ``toml: line 2 (last key
-#: "a"): Key 'a' has already been defined.``, ``toml: line 1: expected '.' or
-#: '=', but got 't' instead``, ``toml: line 2 (last key "package.name"):
-#: incompatible types: TOML value has type int64; destination has type
-#: string``, ``toml: line 1: expected a top-level item to end with a newline,
-#: comment, or EOF, but got 'X' instead``, ``toml: line 1 (last key "a"):
-#: unexpected EOF; expected value``, ``toml: line 2: expected '.' or ']' to end
-#: table name, but got '\n' instead``, ``toml: line 1: unexpected '=': key name
-#: appears blank``, ``toml: line 1 (last key "a.b"): expected a comma or an
-#: inline table terminator '}', but got end of file instead``.
-_TOML_ERROR = rf'toml: line \d+(?: \(last key "[^"\s/\\]{{1,200}}"\))?: {_PHRASE}'
-#: Go's ``encoding/xml`` (pom.xml, packages.config). Captured: ``XML syntax
-#: error on line 1: unexpected EOF``, ``... element <project> closed by
-#: </foo>``, ``... invalid character entity &bogus;``, ``... expected element
-#: name after <``, ``... attribute name without = in element``, ``... invalid
-#: UTF-8``.
-_XML_ERROR = rf"XML syntax error on line \d+: {_XML_WORD}(?: {_XML_WORD}){{0,24}}"
-#: A bare ``EOF`` (an empty or non-XML pom.xml) or ``unexpected EOF``
-#: (conan.lock, renv.lock, packages.lock.json).
-_EOF_ERROR = r"(?:unexpected )?EOF"
-_PARSER_ERROR = (
-    rf"(?:{_JSON_ERROR}|{_YAML_ERROR}|{_TOML_ERROR}|{_XML_ERROR}|{_EOF_ERROR})"
-)
-#: golang.org/x/mod ``modfile`` (go.mod), always after ``<file>:<line>:``.
-#: Captured: ``unknown directive: foo``, ``repeated module statement``,
-#: ``unexpected newline in string`` (at ``<file>:1:10``), ``usage: module
-#: module/path``, ``usage: require module/path v1.2.3``, ``usage: exclude
-#: module/path v1.2.3``, ``invalid go version 'abc': must match format
-#: 1.23.0``, ``syntax error (unterminated block started at <file>:3:1)``. The
-#: ``replace`` usage spans two lines, so it is kept (read as two errors).
-_GOMOD_ERROR = (
-    r"(?:usage: (?:module module/path|(?:require|exclude) module/path v1\.2\.3)"
-    r"|syntax error \(unterminated block started at \x00:\d+:\d+\)"
-    rf"|invalid go version {_QUOTED}: must match format 1\.23\.0"
-    rf"|{_PHRASE})"
-)
-#: The whole text after an excluded file's path that drops its error, with
-#: :data:`_SELF` for that path. The wrappers are ``could not extract:`` (most
-#: extractors), ``could not extract`` without the colon (``bun.lock``),
-#: ``could not extract pom from <file>:`` (``pom.xml``) and ``failed to decode
-#: <name> file:`` (``packages.lock.json``); ``packages.config`` prints the XML
-#: error bare. An unreadable file prints ``Open(<file>): open <file>:
-#: permission denied``.
-EXCLUDED_FILE_ERRORS: tuple[re.Pattern[str], ...] = (
-    re.compile(
-        r"(?:could not extract:? |could not extract pom from \x00: "
-        rf"|failed to decode {_NAME} file: )?{_PARSER_ERROR}",
+#: A JSON struct-field path (``.packages.node_modules~1x.version``).
+_FIELD = r"[A-Za-z0-9_.~@+-]{1,200}"
+#: An XML element or attribute name.
+_XML_NAME = r"[A-Za-z0-9_][A-Za-z0-9_.:-]{0,60}"
+#: A Go module path in a ``require`` line; named so the second guard
+#: (:func:`_names_another_path`) does not read its slashes as a path.
+_MODULE = r"(?P<module>[A-Za-z0-9_.~+-]{1,100}(?:/[A-Za-z0-9_.~+-]{1,100}){0,10})"
+
+#: Go's ``encoding/json``, shared by most JSON lockfile extractors.
+_JSON_TEMPLATES: dict[str, str] = {
+    # could not extract: invalid character 'b' looking for beginning of value
+    "json/value": rf"invalid character {_CHAR} looking for beginning of value",
+    # could not extract: invalid character '/' looking for beginning of object
+    # key string
+    "json/key-string": (
+        rf"invalid character {_CHAR} looking for beginning of object key string"
     ),
-    re.compile(rf"could not extract: \x00:\d+(?::\d+)?: {_GOMOD_ERROR}"),
-    re.compile(r"Open\(\x00\): open \x00: permission denied"),
-)
+    # could not extract: invalid character '1' after object key
+    "json/after-key": rf"invalid character {_CHAR} after object key",
+    # could not extract: invalid character '"' after object key:value pair
+    "json/after-pair": rf"invalid character {_CHAR} after object key:value pair",
+    # could not extract: invalid character '2' after array element
+    "json/after-element": rf"invalid character {_CHAR} after array element",
+    # could not extract: invalid character 'x' after top-level value
+    "json/after-top": rf"invalid character {_CHAR} after top-level value",
+    # could not extract: invalid character '}' in numeric literal
+    "json/numeric": rf"invalid character {_CHAR} in numeric literal",
+    # could not extract: invalid character '}' in literal null (expecting 'l'),
+    # ... literal true (expecting 'e'), ... literal false (expecting 'e')
+    "json/literal": (
+        rf"invalid character {_CHAR} in literal (?:true|false|null) "
+        rf"\(expecting {_CHAR}\)"
+    ),
+    # could not extract: invalid character '\x01' in string
+    "json/string": rf"invalid character {_CHAR} in string",
+    # could not extract: invalid escape sequence `\u12z4` in string
+    "json/escape": r"invalid escape sequence `\\[^`\s/\\]{1,9}` in string",
+    # could not extract: unexpected end of JSON input
+    "json/end": r"unexpected end of JSON input",
+    # could not extract: json: cannot unmarshal number into Go struct field
+    # .packages.node_modules~1x.version of type string
+    "json/struct-field": (
+        r"json: cannot unmarshal (?:string|number|bool|array|object) into Go "
+        rf"struct field {_FIELD} of type {_GO_TYPE}"
+    ),
+    # could not extract: json: cannot unmarshal string into Go value of type
+    # packagelockjson.LockFile
+    "json/value-type": (
+        r"json: cannot unmarshal (?:string|number|bool|array|object) into Go "
+        rf"value of type {_GO_TYPE}"
+    ),
+}
+
+#: go-yaml (pnpm-lock.yaml, pubspec.lock), after ``yaml: `` and an optional
+#: ``line <n>: ``. ``yaml: unmarshal errors:`` continues on an indented line,
+#: which is read as a separate error and keeps the run incomplete.
+_YAML_TEMPLATES: dict[str, str] = {
+    # could not extract: yaml: line 1: did not find expected ',' or ']'
+    "yaml/expected-or": rf"did not find expected {_CHAR} or {_CHAR}",
+    # could not extract: yaml: line 1: did not find expected '-' indicator
+    "yaml/expected-indicator": rf"did not find expected {_CHAR} indicator",
+    # could not extract: yaml: line 2: did not find expected key
+    "yaml/expected-key": r"did not find expected key",
+    # could not extract: yaml: mapping values are not allowed in this context
+    "yaml/mapping": r"mapping values are not allowed in this context",
+    # could not extract: yaml: line 2: found character that cannot start any
+    # token
+    "yaml/character": r"found character that cannot start any token",
+    # could not extract: yaml: line 2: found unexpected end of stream
+    "yaml/end": r"found unexpected end of stream",
+    # could not extract: yaml: unknown anchor 'y' referenced
+    "yaml/anchor": rf"unknown anchor '{_BARE}' referenced",
+}
+
+#: BurntSushi/toml (poetry.lock, uv.lock, Cargo.lock), after
+#: ``toml: line <n>: `` or ``toml: line <n> (last key "<key>"): ``.
+_TOML_TEMPLATES: dict[str, str] = {
+    # could not extract: toml: line 1 (last key "a"): strings cannot contain
+    # newlines
+    "toml/newline": r"strings cannot contain newlines",
+    # could not extract: toml: line 2 (last key "a"): Key 'a' has already been
+    # defined.
+    "toml/defined": rf"Key '{_BARE}' has already been defined\.",
+    # could not extract: toml: line 1: expected '.' or '=', but got 'b' instead
+    "toml/expected-or": rf"expected {_CHAR} or {_CHAR}, but got {_CHAR} instead",
+    # could not extract: toml: line 2: expected '.' or ']' to end table name,
+    # but got '\n' instead
+    "toml/table-name": (
+        rf"expected {_CHAR} or {_CHAR} to end table name, but got {_CHAR} instead"
+    ),
+    # could not extract: toml: line 2 (last key "package.name"): incompatible
+    # types: TOML value has type int64; destination has type string
+    "toml/types": (
+        rf"incompatible types: TOML value has type {_GO_TYPE}; destination has "
+        rf"type {_GO_TYPE}"
+    ),
+    # could not extract: toml: line 1: expected a top-level item to end with a
+    # newline, comment, or EOF, but got 'X' instead
+    "toml/top-level": (
+        r"expected a top-level item to end with a newline, comment, or EOF, but "
+        rf"got {_CHAR} instead"
+    ),
+    # could not extract: toml: line 1 (last key "a"): unexpected EOF; expected
+    # value
+    "toml/eof-value": r"unexpected EOF; expected value",
+    # could not extract: toml: line 1 (last key "not"): expected value but
+    # found "toml" instead
+    "toml/expected-value": rf'expected value but found "{_BARE}" instead',
+    # could not extract: toml: line 1: unexpected '=': key name appears blank
+    "toml/blank-key": rf"unexpected {_CHAR}: key name appears blank",
+    # could not extract: toml: line 1 (last key "a.b"): expected a comma or an
+    # inline table terminator '}', but got end of file instead
+    "toml/inline-table": (
+        rf"expected a comma or an inline table terminator {_CHAR}, but got end "
+        r"of file instead"
+    ),
+    # could not extract: toml: line 1 (last key "a"): expected a comma (',') or
+    # array terminator (']'), but got end of file
+    "toml/array": (
+        rf"expected a comma \({_CHAR}\) or array terminator \({_CHAR}\), but got "
+        r"end of file"
+    ),
+    # could not extract: toml: line 1 (last key "a"): invalid escape in string
+    # '\q'
+    "toml/escape": r"invalid escape in string '\\[^\s'/\\]'",
+}
+
+#: Go's ``encoding/xml`` (pom.xml, packages.config), after
+#: ``XML syntax error on line <n>: ``.
+_XML_TEMPLATES: dict[str, str] = {
+    # could not extract pom from <file>: XML syntax error on line 1: unexpected
+    # EOF
+    "xml/eof": r"unexpected EOF",
+    # could not extract pom from <file>: XML syntax error on line 1: element
+    # <project> closed by </foo>
+    "xml/closed": rf"element <{_XML_NAME}> closed by </{_XML_NAME}>",
+    # could not extract pom from <file>: XML syntax error on line 1: invalid
+    # character entity &bogus;
+    "xml/entity": r"invalid character entity &[A-Za-z0-9#]{1,40};",
+    # could not extract pom from <file>: XML syntax error on line 1: invalid
+    # character entity &#x (no semicolon)
+    "xml/entity-semicolon": (
+        r"invalid character entity &[A-Za-z0-9#]{1,40} \(no semicolon\)"
+    ),
+    # could not extract pom from <file>: XML syntax error on line 1: expected
+    # element name after <  (and ... after </)
+    "xml/element-name": r"expected element name after </?",
+    # could not extract pom from <file>: XML syntax error on line 1: invalid
+    # XML name: 1
+    "xml/name": rf"invalid XML name: {_XML_NAME}",
+    # could not extract pom from <file>: XML syntax error on line 1: attribute
+    # name without = in element
+    "xml/attribute": r"attribute name without = in element",
+    # could not extract pom from <file>: XML syntax error on line 1: invalid
+    # UTF-8
+    "xml/utf8": r"invalid UTF-8",
+}
+
+#: golang.org/x/mod ``modfile`` (go.mod), after ``<file>:<line>:`` and an
+#: optional column. The ``replace`` usage spans two lines, so it is kept.
+_GOMOD_TEMPLATES: dict[str, str] = {
+    # could not extract: <file>:2: unknown directive: foo
+    "gomod/directive": rf"unknown directive: {_BARE}",
+    # could not extract: <file>:2: repeated module statement
+    "gomod/repeated": r"repeated module statement",
+    # could not extract: <file>:1:10: unexpected newline in string
+    "gomod/newline": r"unexpected newline in string",
+    # could not extract: <file>:1: usage: module module/path
+    "gomod/usage-module": r"usage: module module/path",
+    # could not extract: <file>:2: usage: require module/path v1.2.3 (and
+    # usage: exclude module/path v1.2.3)
+    "gomod/usage-version": r"usage: (?:require|exclude) module/path v1\.2\.3",
+    # could not extract: <file>:3: usage: godebug key=value
+    "gomod/usage-godebug": r"usage: godebug key=value",
+    # could not extract: <file>:2: invalid go version 'abc': must match format
+    # 1.23.0
+    "gomod/go-version": rf"invalid go version '{_BARE}': must match format 1\.23\.0",
+    # could not extract: <file>:2: invalid toolchain version 'bad': must match
+    # format go1.23.0 or default
+    "gomod/toolchain": (
+        rf"invalid toolchain version '{_BARE}': must match format go1\.23\.0 or "
+        r"default"
+    ),
+    # could not extract: <file>:2: require a/b: version "vX" invalid: must be
+    # of the form v1.2.3
+    "gomod/require-version": (
+        rf'require {_MODULE}: version "{_BARE}" invalid: must be of the form '
+        r"v1\.2\.3"
+    ),
+    # could not extract: <file>:3: syntax error (unterminated block started at
+    # <file>:2:1)
+    "gomod/block": rf"syntax error \(unterminated block started at \x00:{_N}:{_N}\)",
+}
+
+#: Messages that are a family on their own.
+_OTHER_TEMPLATES: dict[str, str] = {
+    # could not extract pom from <file>: EOF (an empty pom.xml)
+    "eof/pom": r"could not extract pom from \x00: EOF",
+    # could not extract: unexpected EOF (conan.lock, renv.lock) and
+    # failed to decode packages.lock.json file: unexpected EOF
+    "eof/unexpected": r"(?:could not extract: |failed to decode [\w.-]{1,64} file: )"
+    r"unexpected EOF",
+    # Open(<file>): open <file>: permission denied (an unreadable file)
+    "open/permission": r"Open\(\x00\): open \x00: permission denied",
+}
+
+#: How each family's messages are introduced. ``could not extract`` lacks its
+#: colon for bun.lock; ``failed to decode <name> file:`` is
+#: packages.lock.json; packages.config prints the XML error bare.
+_EXTRACT = r"(?:could not extract:? |failed to decode [\w.-]{1,64} file: )"
+_FAMILY_PREFIXES: dict[str, str] = {
+    "json": _EXTRACT,
+    "yaml": rf"could not extract: yaml: (?:line {_N}: )?",
+    "toml": rf'could not extract: toml: line {_N}(?: \(last key "{_BARE}"\))?: ',
+    "xml": rf"(?:could not extract pom from \x00: )?XML syntax error on line {_N}: ",
+    "gomod": rf"could not extract: \x00:{_N}(?::{_N})?: ",
+}
+
+
+def _compile_templates() -> tuple[tuple[str, re.Pattern[str]], ...]:
+    """Join each template to its family's prefix and compile it.
+
+    Returns:
+        Every template's name and whole-message pattern.
+    """
+    families = {
+        "json": _JSON_TEMPLATES,
+        "yaml": _YAML_TEMPLATES,
+        "toml": _TOML_TEMPLATES,
+        "xml": _XML_TEMPLATES,
+        "gomod": _GOMOD_TEMPLATES,
+    }
+    compiled = [
+        (name, re.compile(_FAMILY_PREFIXES[family] + template))
+        for family, templates in families.items()
+        for name, template in templates.items()
+    ]
+    compiled += [(name, re.compile(text)) for name, text in _OTHER_TEMPLATES.items()]
+    return tuple(compiled)
+
+
+#: Every known parser message for an excluded file, by name, with
+#: :data:`_SELF` for that file's path. Each is matched against the whole text
+#: after the path.
+PARSER_MESSAGE_TEMPLATES: tuple[tuple[str, re.Pattern[str]], ...] = _compile_templates()
 
 #: File names osv-scanner reads, for :func:`_names_another_path`.
 _MANIFEST_NAMES: frozenset[str] = frozenset(
@@ -430,9 +580,9 @@ _SELF_RE = re.compile(r"\x00(?::\d+)*:?")
 def _names_another_path(own: str, printed_path: str) -> bool:
     """Return whether an error names any path besides the excluded file.
 
-    A second guard, independent of :data:`EXCLUDED_FILE_ERRORS`: a word that
-    contains a path separator, or is a manifest or lockfile name or ends in
-    such an extension, names another path unless it is the file itself
+    A second guard, independent of :data:`PARSER_MESSAGE_TEMPLATES`: a word
+    that contains a path separator, or is a manifest or lockfile name or ends
+    in such an extension, names another path unless it is the file itself
     (written as :data:`_SELF`) or that file's own base name.
 
     Args:
@@ -458,24 +608,42 @@ def _names_another_path(own: str, printed_path: str) -> bool:
     return False
 
 
-def is_excluded_file_error(error: str, printed_path: str) -> bool:
-    """Return whether an error names only the file it was printed for.
+def excluded_file_template(error: str, printed_path: str) -> str | None:
+    """Return the known parser message an error for one file is, if any.
 
     Args:
         error: The text after the file's path, every line of it.
         printed_path: The file's path as osv-scanner printed it.
 
     Returns:
-        True only when the whole text, with that path written as
-        :data:`_SELF`, is one of :data:`EXCLUDED_FILE_ERRORS` and names no
-        other path.
+        The name of the template in :data:`PARSER_MESSAGE_TEMPLATES` that the
+        whole text, with that path written as :data:`_SELF`, matches, or None
+        when none does or the text names any other path.
     """
     if _SELF in error:
-        return False
+        return None
     own = re.sub(rf"/?{re.escape(printed_path.lstrip('/'))}", _SELF, error)
-    if _names_another_path(own, printed_path):
-        return False
-    return any(pattern.fullmatch(own) for pattern in EXCLUDED_FILE_ERRORS)
+    for name, pattern in PARSER_MESSAGE_TEMPLATES:
+        match = pattern.fullmatch(own)
+        if match is None:
+            continue
+        if "module" in pattern.groupindex:
+            own = own[: match.start("module")] + own[match.end("module") :]
+        return None if _names_another_path(own, printed_path) else name
+    return None
+
+
+def is_excluded_file_error(error: str, printed_path: str) -> bool:
+    """Return whether an error is a known parser message for that file alone.
+
+    Args:
+        error: The text after the file's path, every line of it.
+        printed_path: The file's path as osv-scanner printed it.
+
+    Returns:
+        True only when :func:`excluded_file_template` names a template.
+    """
+    return excluded_file_template(error, printed_path) is not None
 
 
 def is_harmless_ending(ending: str) -> bool:
