@@ -211,6 +211,7 @@ _SEMGREP_ONLY_ADVISORIES: dict[str, tuple[str, tuple[str, ...]]] = {
     "GHSA-5h93-6whr-6q8j": ("mcp", (">=1.8.0,<1.30.0", _MCP_V2_AFFECTED)),
     "GHSA-rwrf-2pqf-9j8j": ("mcp", (">=1.10.0,<1.30.0", _MCP_V2_AFFECTED)),
     "GHSA-w4fh-qvv9-3v23": ("mcp", ("<1.30.0", _MCP_V2_AFFECTED)),
+    "GHSA-qx49-fqc8-xw99": ("mcp", (">=1.9.1,<1.30.0", ">=2.0.0a1,<2.2.0")),
 }
 # Filenames the Python extractors of osv-scanner 2.7.1 (osv-scalibr 0.5.3)
 # accept. Its requirements extractor takes any ``.txt`` whose basename
@@ -646,6 +647,10 @@ def test_poetry_pdm_and_pipfile_locks_are_checked(tmp_path: Path) -> None:
         ("GHSA-w4fh-qvv9-3v23", "1.30.0", False),
         ("GHSA-w4fh-qvv9-3v23", "2.0.0", True),
         ("GHSA-rwrf-2pqf-9j8j", "2.2.0", False),
+        ("GHSA-qx49-fqc8-xw99", "1.9.0", False),
+        ("GHSA-qx49-fqc8-xw99", "1.29.0", True),
+        ("GHSA-qx49-fqc8-xw99", "2.1.1", True),
+        ("GHSA-qx49-fqc8-xw99", "2.2.0", False),
     ],
 )
 def test_mcp_ranges_follow_the_advisory_data(
