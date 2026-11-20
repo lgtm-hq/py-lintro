@@ -421,4 +421,10 @@ def test_check_invalid_report_is_not_clean(
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.parse_failures_count).is_equal_to(1)
-    assert_that(result.output).is_equal_to(output)
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.output).starts_with(
+        f"cargo-audit report for {cargo_lock.resolve()}:\n{output}",
+    )
+    assert_that(result.output).contains(
+        f"did not produce a complete report for {cargo_lock.resolve()}",
+    )

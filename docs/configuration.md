@@ -3891,6 +3891,42 @@ lintro format --tools golangci_lint
 lintro check --tools golangci_lint --tool-options golangci_lint:timeout=300
 ```
 
+#### Cargo-audit Configuration
+
+Cargo-audit checks each `Cargo.lock` against the RustSec advisory database. It reads
+`.cargo/audit.toml` from the directory of the lockfile it audits.
+
+**Which lockfiles are audited (#3549):** every `Cargo.lock` that lintro's file discovery
+finds under the paths you pass, with one cargo-audit run per lockfile. Lintro has no
+built-in exclusion for `vendor/`, `target/` or any other directory, so a vendored or
+packaged copy is audited unless you exclude it. Leave lockfiles out with the normal
+exclude options, which every tool and every entry point (`lintro check`, `lintro watch`,
+AI review, the MCP server) apply the same way:
+
+```text
+# .lintro-ignore
+vendor/
+target/
+```
+
+Each finding names its own lockfile. Lockfiles that an exclude pattern removed are named
+in the output (`Not audited, excluded by lintro's exclude patterns: ...`). If every
+lockfile was excluded, cargo-audit is reported as skipped with the same list, not as "no
+files matched".
+
+A lockfile whose audit failed or produced no usable report fails the check and is named
+in the output. The other lockfiles' results do not hide it.
+
+**Available Options via `--tool-options`:**
+
+| Option    | Type    | Description                                                         |
+| --------- | ------- | ------------------------------------------------------------------- |
+| `timeout` | integer | One budget in seconds for every lockfile in the check (default 120) |
+
+cargo-audit may fetch the advisory database until one lockfile has produced a report;
+after that, lockfiles run with `--no-fetch`. When the budget runs out, the result is
+timed out and names the lockfiles that were not audited.
+
 #### Cargo-deny Configuration
 
 Cargo-deny checks Rust dependencies for license compliance, security advisories, banned
