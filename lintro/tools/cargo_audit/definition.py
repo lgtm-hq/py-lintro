@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import subprocess  # nosec B404 - used safely with shell disabled
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +32,7 @@ from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.option_validators import (
     filter_none_options,
+    validate_bool,
     validate_positive_int,
 )
 from lintro.utils.git_diff import filter_files_by_diff_for_paths
@@ -49,6 +50,34 @@ CARGO_AUDIT_FILE_PATTERNS: list[str] = [CARGO_AUDIT_LOCKFILE]
 
 # Lists of lockfiles in notes name this many, then give a count of the rest.
 _NAMED_LIMIT: int = 10
+
+# A Cargo.lock below a directory with one of these names is a copy (a
+# vendored crate, a packaged crate under target/package/): cargo builds the
+# project from its top-level lockfile, not from these (#3549).
+_VENDORED_DIRS: frozenset[str] = frozenset({"vendor", "target"})
+
+
+def _vendored(lockfile: Path, roots: list[str]) -> bool:
+    """Return whether a lockfile is a vendored or build-tree copy.
+
+    Only directories below the requested root count, never the ones above
+    it, so a repository inside a folder named ``vendor`` is audited. A
+    requested file is its own root, so a lockfile asked for by name is
+    audited. With several requested roots holding the lockfile, it is a copy
+    only if it is one below each of them.
+
+    Args:
+        lockfile: Absolute lockfile path, symlinks unresolved.
+        roots: Absolute requested paths; empty when copies are included.
+
+    Returns:
+        True when a whole path component between every holding root and
+        the lockfile is ``vendor`` or ``target``.
+    """
+    holding = [Path(root) for root in roots if lockfile.is_relative_to(root)]
+    return bool(holding) and all(
+        _VENDORED_DIRS & set(lockfile.relative_to(root).parts[:-1]) for root in holding
+    )
 
 
 def _lockfiles(files: list[str]) -> list[Path]:
@@ -264,6 +293,7 @@ class _AuditSummary:
         outside: Audited symlinks whose target lies outside the project,
             with that target.
         timeout: The whole check's timeout budget in seconds.
+        vendored: Lockfiles skipped as vendored or build-tree copies.
     """
 
     audits: list[_LockfileAudit]
@@ -272,6 +302,7 @@ class _AuditSummary:
     unreadable: list[Path]
     outside: list[tuple[Path, Path]]
     timeout: float
+    vendored: list[Path]
 
     @property
     def issues(self) -> list[CargoAuditIssue]:
@@ -348,6 +379,14 @@ class _AuditSummary:
                 if self.excluded
                 else None
             ),
+            (
+                "Not audited, copies under a vendor/ or target/ directory "
+                f"{_lockfile_names(self.vendored)}; cargo builds from the "
+                "top-level Cargo.lock. To audit them, set the cargo_audit option "
+                "include_vendored=True."
+                if self.vendored
+                else None
+            ),
             *(
                 f"{_shown(link)} is a symlink to {target}, outside the project; "
                 f"audited and reported as {_shown(link)}."
@@ -409,6 +448,7 @@ class CargoAuditPlugin(BaseToolPlugin):
             min_version=get_min_version(ToolName.CARGO_AUDIT),
             default_options={
                 "timeout": CARGO_AUDIT_DEFAULT_TIMEOUT,
+                "include_vendored": False,
             },
             default_timeout=CARGO_AUDIT_DEFAULT_TIMEOUT,
         )
@@ -416,6 +456,7 @@ class CargoAuditPlugin(BaseToolPlugin):
     def set_options(
         self,
         timeout: int | None = None,
+        include_vendored: bool | None = None,
         **kwargs: Any,
     ) -> None:
         """Set tool-specific options.
@@ -423,11 +464,17 @@ class CargoAuditPlugin(BaseToolPlugin):
         Args:
             timeout: Timeout in seconds, one budget shared by every lockfile
                 audited in a check.
+            include_vendored: Audit lockfiles under ``vendor/`` and
+                ``target/`` too, which are skipped by default.
             **kwargs: Additional options.
         """
         validate_positive_int(timeout, "timeout")
+        validate_bool(include_vendored, "include_vendored")
 
-        options = filter_none_options(timeout=timeout)
+        options = filter_none_options(
+            timeout=timeout,
+            include_vendored=include_vendored,
+        )
         super().set_options(**options, **kwargs)
 
     def _build_command(self, lockfile: Path, *, fetch: bool = True) -> list[str]:
@@ -576,35 +623,43 @@ class CargoAuditPlugin(BaseToolPlugin):
             readable=[e for e in scan.readable if str(e) in changed],
         )
 
-    def _no_files_result(self, ctx: ToolResult, scan: _Scan) -> ToolResult:
-        """Explain a check in which discovery handed over no lockfile.
+    def _nothing_audited(
+        self,
+        ctx: ToolResult | None,
+        scan: _Scan,
+        vendored: list[Path],
+        roots: list[str],
+    ) -> ToolResult:
+        """Explain a check that leaves no lockfile to audit.
 
         Args:
-            ctx: The no-files result from ``prepare``.
+            ctx: The no-files result from ``prepare``, or None when discovery
+                found lockfiles and every one was skipped as a copy.
             scan: Every Cargo.lock entry in the requested scope.
+            vendored: Lockfiles skipped as vendored or build-tree copies.
+            roots: Requested roots for the copy rule; empty when included.
 
         Returns:
-            A no-files result naming the excluded lockfiles when the requested
-            scope held lockfiles and an exclude pattern removed every one, else
-            ``ctx``.
+            A no-files result naming what was left out, or ``ctx`` when the
+            diff or incremental filter, not a rule, left nothing in scope.
         """
-        excluded, readable = scan.excluded, scan.readable
-        # A readable lockfile in scope that was not excluded means the diff or
-        # incremental filter left it out, not an exclusion (#3572). Excluded
-        # lockfiles are not in the incremental cache, so an incremental run
-        # without a diff base compares against the whole tree.
-        if readable or not excluded:
+        # A lockfile in scope that is neither excluded nor a copy means the
+        # diff or incremental filter left it out, not an exclusion (#3572).
+        # Excluded lockfiles are not in the incremental cache, so an
+        # incremental run without a diff base compares the whole tree.
+        quiet = any(not _vendored(r, roots) for r in scan.readable)
+        excluded = [] if quiet else scan.excluded
+        if ctx is not None and not excluded and not vendored:
             return ctx
-        # Nothing is in scope by the user's own configuration, which is what
-        # "no files" means for every tool (and what the no-silent-skip gate
-        # accepts), but a security scanner names what it did not read (#3549).
+        # Nothing is in scope by configuration or by the copy rule, which is
+        # what "no files" means for every tool (and what the no-silent-skip
+        # gate accepts), but a security scanner names what it did not read.
+        notes = _AuditSummary([], [], excluded, [], [], 0, vendored).text()
         return ToolResult.from_outcome(
             ToolOutcome(execution=NoFiles()),
             name=self.definition.name,
-            output=(
-                "No Cargo.lock in scope: every one found is excluded by lintro's "
-                f"exclude patterns, not audited {_names(list(map(_shown, excluded)))}."
-            ),
+            output="No Cargo.lock in scope to audit."
+            + (f"\n\n{notes}" if notes else ""),
         )
 
     def _audit_all(
@@ -614,6 +669,7 @@ class CargoAuditPlugin(BaseToolPlugin):
         timeout: float,
         scan: _Scan,
         anchors: tuple[str, ...],
+        vendored: list[Path],
     ) -> _AuditSummary:
         """Audit each lockfile within one timeout budget for the whole check.
 
@@ -623,6 +679,7 @@ class CargoAuditPlugin(BaseToolPlugin):
             scan: Every Cargo.lock entry below the requested paths.
             anchors: Project directories; a symlinked lockfile whose target
                 lies outside all of them is named in the output.
+            vendored: Lockfiles skipped as vendored or build-tree copies.
 
         Returns:
             Every audit that finished, and the lockfiles the budget did not
@@ -658,6 +715,7 @@ class CargoAuditPlugin(BaseToolPlugin):
                 )
             ],
             timeout=timeout,
+            vendored=vendored,
         )
 
     def doc_url(self, code: str) -> str | None:
@@ -689,16 +747,29 @@ class CargoAuditPlugin(BaseToolPlugin):
         # In a --diff run every kind of entry is limited to the changed ones,
         # so unchanged entries neither fail the run nor fill its notes.
         scan = self._in_scope(self._scan(paths), paths, options)
-        if isinstance(ctx, ToolResult) and not scan.unreadable:
-            return self._no_files_result(ctx, scan)
+        include = options.get("include_vendored", self.options.get("include_vendored"))
+        roots = [] if include is True else [os.path.abspath(p) for p in paths]
         # Unreadable entries fail the check even when nothing else is in
         # scope, and each is reported once, as unreadable, not as a failed run.
         files = [] if isinstance(ctx, ToolResult) else ctx.files
+        found = [f for f in _lockfiles(files) if f not in set(scan.unreadable)]
+        vendored = sorted(
+            {f for f in (*found, *scan.unreadable) if _vendored(f, roots)},
+        )
+        scan = replace(
+            scan,
+            unreadable=[e for e in scan.unreadable if e not in vendored],
+        )
+        lockfiles = [f for f in found if f not in vendored]
+        if not lockfiles and not scan.unreadable:
+            plain = ctx if isinstance(ctx, ToolResult) else None
+            return self._nothing_audited(plain, scan, vendored, roots)
         summary = self._audit_all(
-            [f for f in _lockfiles(files) if f not in set(scan.unreadable)],
+            lockfiles,
             timeout=0 if isinstance(ctx, ToolResult) else ctx.timeout,
             scan=scan,
             anchors=resolve_exclude_anchors(paths),
+            vendored=vendored,
         )
         issues = summary.issues
         failure = summary.failure_note()

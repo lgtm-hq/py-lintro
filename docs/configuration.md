@@ -3960,9 +3960,42 @@ Cargo-audit checks each `Cargo.lock` against the RustSec advisory database. It r
 `.cargo/audit.toml` from the directory of the lockfile it audits.
 
 **Which lockfiles are audited (#3549):** every `Cargo.lock` that lintro's file discovery
-finds under the paths you pass, with one cargo-audit run per lockfile. cargo-audit adds
-no exclusions of its own, so a vendored (`vendor/`) or packaged (`target/package/`) copy
-is audited unless you exclude it. The exclusions shared by every tool still apply:
+finds under the paths you pass, with one cargo-audit run per lockfile, except copies: by
+default a `Cargo.lock` below a directory named `vendor` or `target` is not audited and
+is named in the output instead
+(`Not audited, copies under a vendor/ or target/ directory (N): ...`).
+
+Why: cargo resolves a build from the lockfile at the top of your project or workspace.
+The Cargo Book's workspace reference says "All packages share a common `Cargo.lock` file
+which resides in the _workspace root_", and its
+[FAQ](https://doc.rust-lang.org/cargo/faq.html#why-have-cargolock-in-version-control)
+says "`Cargo.lock` does not affect the consumers of your package, only `Cargo.toml` does
+that". A vendored crate's own `Cargo.lock`, or the one inside a packaged crate under
+`target/package/`, records that crate's own resolution, not the versions your project
+builds, which the top-level lockfile already lists.
+
+How the rule reads a path:
+
+- Only directories **below** the path you asked lintro to scan count. A repository that
+  itself lives inside a folder named `vendor` or `target` is audited normally.
+- The whole directory name must match: `app/vendor/dep/Cargo.lock` and
+  `target/package/x/Cargo.lock` are skipped; `vendored/Cargo.lock` and
+  `my-target/Cargo.lock` are audited.
+- A lockfile you name is audited: `lintro check vendor/dep/Cargo.lock` audits it, and so
+  does a file list that names it (as `lintro watch` passes changed files).
+- Passing the directory itself makes it the root: `lintro check vendor/` audits the
+  lockfiles inside it.
+
+To audit the copies too, set the `include_vendored` option:
+
+```toml
+[tool.lintro.cargo_audit]
+include_vendored = true
+```
+
+or on the command line, `--tool-options cargo_audit:include_vendored=True`.
+
+The exclusions shared by every tool also apply:
 
 - the built-in defaults (`DEFAULT_EXCLUDE_PATTERNS` in
   `lintro/utils/path_filtering.py`): `.git`, `.hg`, `.svn`, `dist`, `build`, `htmlcov`,
@@ -3971,40 +4004,24 @@ is audited unless you exclude it. The exclusions shared by every tool still appl
 - virtual-environment directories (`venv`, `.venv`, `env`, `site-packages`,
   `node_modules` and similar), unless `--include-venv` is set.
 
-Discovery does **not** read `.gitignore`: a gitignored `target/` is still audited. To
-leave vendored and build copies out, add them to `.lintro-ignore`:
-
-```text
-# .lintro-ignore
-vendor/
-target/
-```
-
-The same patterns work as `--exclude "vendor/,target/"` on the command line, or as a
-tool option in `pyproject.toml`:
-
-```toml
-[tool.lintro.cargo_audit]
-exclude_patterns = ["vendor/", "target/"]
-```
-
-A top-level `[tool.lintro] exclude` key is not read; use one of the three forms above.
+Discovery does **not** read `.gitignore`. To leave other lockfiles out, use
+`.lintro-ignore`, `--exclude`, or `exclude_patterns` in `[tool.lintro.cargo_audit]`; a
+top-level `[tool.lintro] exclude` key is not read.
 
 Each finding names its own lockfile. A lockfile reached through a symlink is reported
 under the symlink's path, and the output says when the link points outside the project.
 Lockfiles that an exclude pattern removed are named in the output
-(`Not audited, excluded by lintro's exclude patterns (N): ...`). If every lockfile in
-scope was excluded, nothing is in scope by your configuration: cargo-audit reports "no
-files matched", as any tool does whose inputs your exclude patterns remove, and its
-output names the excluded lockfiles
-(`No Cargo.lock in scope: every one found is excluded ...`). In a `--diff` run the scope
-is the changed lockfiles; a run in which no lockfile changed reports "no files matched"
-without that list. The same scope applies to excluded and unreadable entries: only those
-in the diff are named. lintro's changed set holds only paths that resolve to a file, so
-in a `--diff` run an unreadable entry is caught when it is a changed `Cargo.lock` that
-cannot be read, but a dangling symlink, symlink loop or directory named `Cargo.lock` is
-only caught by a full run. Lists of lockfiles name the first ten and give a count of the
-rest.
+(`Not audited, excluded by lintro's exclude patterns (N): ...`), separately from the
+skipped copies. If every lockfile in scope was excluded or skipped as a copy,
+cargo-audit reports "no files matched", as any tool does whose inputs are all left out,
+and its output names them (`No Cargo.lock in scope to audit.` followed by those notes).
+In a `--diff` or `--incremental` run the scope is the changed lockfiles; a run in which
+no lockfile changed reports "no files matched" without the lists. The same scope applies
+to excluded, skipped and unreadable entries: only those in the diff are named. lintro's
+changed set holds only paths that resolve to a file, so in a `--diff` run an unreadable
+entry is caught when it is a changed `Cargo.lock` that cannot be read, but a dangling
+symlink, symlink loop or directory named `Cargo.lock` is only caught by a full run.
+Lists of lockfiles name the first ten and give a count of the rest.
 
 **Fail closed.** A lockfile that was not audited fails the check and is named, whatever
 the other lockfiles found. Findings from a failed audit are still shown. A lockfile
@@ -4034,9 +4051,10 @@ and file inspection stays known.
 
 **Available Options via `--tool-options`:**
 
-| Option    | Type    | Description                                                         |
-| --------- | ------- | ------------------------------------------------------------------- |
-| `timeout` | integer | One budget in seconds for every lockfile in the check (default 120) |
+| Option             | Type    | Description                                                         |
+| ------------------ | ------- | ------------------------------------------------------------------- |
+| `timeout`          | integer | One budget in seconds for every lockfile in the check (default 120) |
+| `include_vendored` | boolean | Also audit lockfiles below `vendor/` and `target/` (default false)  |
 
 cargo-audit may fetch the advisory database until one lockfile has produced a report;
 after that, lockfiles run with `--no-fetch`. When the budget runs out, the result is

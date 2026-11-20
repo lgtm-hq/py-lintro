@@ -169,3 +169,29 @@ def test_denied_warning_fails_an_audit_that_ran(repo: Path) -> None:
     assert_that(result.output).contains(
         "app/Cargo.lock (unmaintained ansi_term (RUSTSEC-2021-0139))",
     )
+
+
+@pytest.mark.parametrize("include", [False, True], ids=["default", "included"])
+def test_vendored_copy_is_skipped_unless_included(repo: Path, include: bool) -> None:
+    """A vulnerable vendored lockfile is named, not audited, unless included.
+
+    Args:
+        repo: Repository root.
+        include: Whether include_vendored is set.
+    """
+    _crate(repo, "app", vulnerable=False)
+    dep = _crate(repo, "vendor/dep", vulnerable=True)
+    plugin = CargoAuditPlugin()
+    plugin.set_options(include_vendored=include)
+
+    result = plugin.check(["."], {})
+
+    assert_that(result.execution_failed).described_as(result.output).is_false()
+    assert_that([i.file for i in result.issues or []]).is_equal_to(
+        [str(dep)] if include else [],
+    )
+    assert_that(result.success).is_equal_to(not include)
+    if not include:
+        assert_that(result.output).contains(
+            "copies under a vendor/ or target/ directory (1): vendor/dep/Cargo.lock;",
+        )

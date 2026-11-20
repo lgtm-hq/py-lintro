@@ -17,6 +17,7 @@ import subprocess  # nosec B404 - only TimeoutExpired is used, nothing is run
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -29,6 +30,7 @@ from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.cargo_audit.definition import CargoAuditPlugin
 from lintro.utils.execution.tool_configuration import configure_tool_for_execution
 from lintro.utils.fingerprint_baseline import fingerprint
+from lintro.utils.tool_options import parse_tool_options
 from lintro.utils.unified_config import UnifiedConfigManager
 
 VULNERABLE_LOCK = """version = 3
@@ -229,6 +231,7 @@ def _check(
     exclude: list[str] | None = None,
     timeout: int | None = None,
     options: dict[str, object] | None = None,
+    include_vendored: bool | None = None,
 ) -> ToolResult:
     """Run the plugin's check with cargo-audit replaced by ``fake``.
 
@@ -238,6 +241,7 @@ def _check(
         exclude: Extra exclude patterns, as ``--exclude`` would add.
         timeout: Timeout budget for the check.
         options: Options passed to ``check``, such as ``diff_base``.
+        include_vendored: The cargo_audit option, when set.
 
     Returns:
         The check result.
@@ -247,6 +251,8 @@ def _check(
         plugin.set_options(exclude_patterns=exclude)
     if timeout is not None:
         plugin.set_options(timeout=timeout)
+    if include_vendored is not None:
+        plugin.set_options(include_vendored=include_vendored)
     with patch.object(plugin, "_run_subprocess_result", side_effect=fake):
         return plugin.check(paths, options or {})
 
@@ -308,25 +314,40 @@ def test_later_lockfiles_reuse_the_fetched_advisory_database(
     ["vendor/dep", "target/package/app-0.1.0"],
     ids=["vendor", "target"],
 )
-def test_vendored_and_build_tree_copies_are_audited_by_default(
+@pytest.mark.parametrize("include", [False, True], ids=["default", "included"])
+def test_vendored_and_build_tree_copies_are_skipped_unless_included(
     repo: Path,
     fake: _FakeCargoAudit,
     vendored: str,
+    include: bool,
 ) -> None:
-    """Without an exclude pattern nothing is left out: the rule fails closed.
+    """Copies are skipped and named by default; include_vendored audits them.
 
     Args:
         repo: Repository root.
         fake: The fake cargo-audit.
         vendored: Directory of the vendored or packaged copy.
+        include: Whether include_vendored is set.
     """
-    _crate(repo, "app")
+    app = _crate(repo, "app")
     copy = _crate(repo, vendored, vulnerable=True)
 
-    result = _check(fake, ["."])
+    result = _check(fake, ["."], include_vendored=include or None)
 
-    assert_that(result.success).is_false()
-    assert_that([i.file for i in result.issues or []]).is_equal_to([str(copy)])
+    assert_that(fake.audited()).is_equal_to([app, copy] if include else [app])
+    assert_that([i.file for i in result.issues or []]).is_equal_to(
+        [str(copy)] if include else [],
+    )
+    assert_that(result.success).is_equal_to(not include)
+    note = (
+        f"Not audited, copies under a vendor/ or target/ directory (1): "
+        f"{vendored}/Cargo.lock; cargo builds from the top-level Cargo.lock. To "
+        "audit them, set the cargo_audit option include_vendored=True."
+    )
+    if include:
+        assert_that(result.output).does_not_contain("Not audited, copies")
+    else:
+        assert_that(result.output).is_equal_to(note)
 
 
 def _layout(base: Path, kind: str) -> tuple[Path, list[str]]:
@@ -352,22 +373,24 @@ def _layout(base: Path, kind: str) -> tuple[Path, list[str]]:
         "watch-relative-files": ["vendor/dep/Cargo.lock", "app/Cargo.lock"],
         "absolute-files": [str(dep), str(app)],
         "absolute-directory": [str(root)],
+        "from-subdirectory": [".."],
     }.get(kind, ["."])
     return root, paths
 
 
-@pytest.mark.parametrize(
-    "kind",
-    [
-        "repo-root",
-        "watch-relative-files",
-        "absolute-files",
-        "absolute-directory",
-        "vendored-submodule",
-        "repo-under-unrelated-vendor",
-        "no-repository",
-    ],
-)
+LAYOUTS = [
+    "repo-root",
+    "watch-relative-files",
+    "absolute-files",
+    "absolute-directory",
+    "vendored-submodule",
+    "repo-under-unrelated-vendor",
+    "no-repository",
+    "from-subdirectory",
+]
+
+
+@pytest.mark.parametrize("kind", LAYOUTS)
 def test_excluded_lockfile_gets_the_same_answer_for_every_caller(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -383,15 +406,132 @@ def test_excluded_lockfile_gets_the_same_answer_for_every_caller(
         kind: Layout and caller under test.
     """
     root, paths = _layout(tmp_path, kind)
-    monkeypatch.chdir(root)
+    monkeypatch.chdir(root / "app" if kind == "from-subdirectory" else root)
 
     result = _check(fake, paths, exclude=["vendor/"])
 
     assert_that(fake.audited()).is_equal_to([root / "app" / "Cargo.lock"])
     assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.output).contains(
-        "excluded by lintro's exclude patterns (1): vendor/dep/Cargo.lock.",
+    assert_that(result.output).contains("excluded by lintro's exclude patterns (1): ")
+    assert_that(result.output).contains("vendor/dep/Cargo.lock.")
+
+
+@pytest.mark.parametrize("kind", LAYOUTS)
+def test_default_skip_reads_only_components_below_the_requested_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake: _FakeCargoAudit,
+    kind: str,
+) -> None:
+    """vendor/dep is skipped below a requested directory, whatever lies above.
+
+    A lockfile requested by name is its own root, so the file-list callers
+    audit it. A repository inside an unrelated ``vendor`` folder is audited.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Used to change the working directory.
+        fake: The fake cargo-audit.
+        kind: Layout and caller under test.
+    """
+    root, paths = _layout(tmp_path, kind)
+    monkeypatch.chdir(root / "app" if kind == "from-subdirectory" else root)
+    app, dep = root / "app" / "Cargo.lock", root / "vendor" / "dep" / "Cargo.lock"
+    named = kind in {"watch-relative-files", "absolute-files"}
+
+    result = _check(fake, paths)
+
+    assert_that(sorted(fake.audited())).is_equal_to(
+        sorted([app, dep] if named else [app]),
     )
+    assert_that(result.issues_count).is_equal_to(2 if named else 1)
+    if named:
+        assert_that(result.output).does_not_contain("Not audited, copies")
+    else:
+        assert_that(result.output).contains("copies under a vendor/ or target/ ")
+        assert_that(result.output).contains("vendor/dep/Cargo.lock;")
+
+
+@pytest.mark.parametrize(
+    ("requested", "audited"),
+    [
+        pytest.param(["."], ["my-target", "vendored"], id="whole-components"),
+        pytest.param(["app/vendor/dep/Cargo.lock"], ["app/vendor/dep"], id="file-by-name"),
+        pytest.param(["target"], ["target/package/x"], id="copy-dir-as-root"),
+        pytest.param([".", "app/vendor"], ["app/vendor/dep", "my-target", "vendored"], id="nested-root"),
+    ],
+)  # fmt: skip
+def test_copy_rule_matches_whole_components_below_the_root(
+    repo: Path,
+    fake: _FakeCargoAudit,
+    requested: list[str],
+    audited: list[str],
+) -> None:
+    """Only a whole ``vendor``/``target`` component below the root is a copy.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+        requested: Paths handed to ``check``.
+        audited: Crate directories whose lockfiles must be audited.
+    """
+    for crate in ("vendored", "my-target", "app/vendor/dep", "target/package/x"):
+        _crate(repo, crate)
+
+    _check(fake, requested)
+
+    assert_that(sorted(fake.audited())).is_equal_to(
+        sorted(repo / crate / "Cargo.lock" for crate in audited),
+    )
+
+
+def test_include_vendored_must_be_a_boolean() -> None:
+    """A non-boolean include_vendored is rejected like other options."""
+    options: dict[str, Any] = {"include_vendored": "yes"}
+    with pytest.raises(ValueError, match="include_vendored"):
+        CargoAuditPlugin().set_options(**options)
+
+
+@pytest.mark.parametrize("source", ["tool-options", "pyproject"])
+def test_include_vendored_reaches_the_plugin_from_config(
+    repo: Path,
+    fake: _FakeCargoAudit,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+) -> None:
+    """``--tool-options cargo_audit:include_vendored=True`` and pyproject work.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+        monkeypatch: Keeps the enclosing checkout's config out of discovery.
+        source: Where the option comes from.
+    """
+    app = _crate(repo, "app")
+    copy = _crate(repo, "vendor/dep")
+    if source == "pyproject":
+        (repo / "pyproject.toml").write_text(
+            "[tool.lintro.cargo_audit]\ninclude_vendored = true\n",
+        )
+    monkeypatch.setattr("lintro.config.config_loader._find_config_file", lambda: None)
+    cli = parse_tool_options("cargo_audit:include_vendored=True")
+    plugin = configure_tool_for_execution(
+        tool=CargoAuditPlugin(),
+        tool_name="cargo_audit",
+        config_manager=UnifiedConfigManager(),
+        tool_option_dict=cli if source == "tool-options" else {},
+        exclude=None,
+        include_venv=False,
+        incremental=False,
+        action=Action.CHECK,
+        selected_tools={"cargo_audit"},
+        lintro_config=load_config(None),
+    )
+
+    with patch.object(plugin, "_run_subprocess_result", side_effect=fake):
+        plugin.check(["."], {})
+
+    assert_that(fake.audited()).is_equal_to([app, copy])
 
 
 def test_every_lockfile_excluded_is_no_files_naming_them(
@@ -417,8 +557,8 @@ def test_every_lockfile_excluded_is_no_files_naming_them(
     assert_that(result.no_files).is_true()
     assert_that(result.success).is_true()
     assert_that(result.output).is_equal_to(
-        "No Cargo.lock in scope: every one found is excluded by lintro's exclude "
-        "patterns, not audited (2): vendor/a/Cargo.lock, vendor/b/Cargo.lock.",
+        "No Cargo.lock in scope to audit.\n\nNot audited, excluded by lintro's "
+        "exclude patterns (2): vendor/a/Cargo.lock, vendor/b/Cargo.lock.",
     )
 
 
@@ -826,7 +966,9 @@ def test_diff_with_only_an_excluded_lockfile_changed_names_it(
 
     assert_that(fake.commands).is_empty()
     assert_that(result.no_files).is_true()
-    assert_that(result.output).contains("not audited (1): vendor/dep/Cargo.lock.")
+    assert_that(result.output).contains(
+        "excluded by lintro's exclude patterns (1): vendor/dep/Cargo.lock.",
+    )
 
 
 def test_pyproject_exclude_patterns_leave_a_lockfile_out(
@@ -1055,3 +1197,77 @@ def test_unmarked_warnings_count_as_denied_only_at_exit_one(
         )
     else:
         assert_that(result.output).is_none()
+
+
+def test_only_copies_found_is_no_files_naming_them(
+    repo: Path,
+    fake: _FakeCargoAudit,
+) -> None:
+    """Every lockfile skipped as a copy is "no files", named, with the option.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+    """
+    _crate(repo, "vendor/a")
+    _crate(repo, "target/package/b")
+
+    result = _check(fake, ["."])
+
+    assert_that(fake.commands).is_empty()
+    assert_that(result.no_files).is_true()
+    assert_that(result.skipped).is_false()
+    assert_that(result.output).is_equal_to(
+        "No Cargo.lock in scope to audit.\n\nNot audited, copies under a vendor/ "
+        "or target/ directory (2): target/package/b/Cargo.lock, vendor/a/Cargo.lock; "
+        "cargo builds from the top-level Cargo.lock. To audit them, set the "
+        "cargo_audit option include_vendored=True.",
+    )
+
+
+@pytest.mark.parametrize("changed", ["app", "vendor/dep", "nothing"])
+def test_diff_run_names_only_copies_in_the_diff(
+    git_repo: Path,
+    fake: _FakeCargoAudit,
+    changed: str,
+) -> None:
+    """The copy note of a diff run lists only copies that changed.
+
+    Args:
+        git_repo: Committed repository with app and vendor/dep.
+        fake: The fake cargo-audit.
+        changed: Which crate's lockfile changed.
+    """
+    if changed != "nothing":
+        (git_repo / changed / "Cargo.lock").write_text("version = 4\n")
+
+    result = _check(fake, ["."], options={"diff_base": "HEAD"})
+
+    audited = [git_repo / "app" / "Cargo.lock"] if changed == "app" else []
+    assert_that(fake.audited()).is_equal_to(audited)
+    assert_that(result.no_files).is_equal_to(changed != "app")
+    if changed == "vendor/dep":
+        assert_that(result.output).contains("directory (1): vendor/dep/Cargo.lock;")
+    else:
+        assert_that(result.output or "").does_not_contain("vendor/dep")
+
+
+def test_incremental_rerun_does_not_name_unchanged_copies(
+    git_repo: Path,
+    fake: _FakeCargoAudit,
+) -> None:
+    """A second incremental run with no change is plain "no files".
+
+    Args:
+        git_repo: Committed repository with app and vendor/dep.
+        fake: The fake cargo-audit.
+    """
+    first = _check(fake, ["."], options={"incremental": True})
+    fake.commands.clear()
+
+    second = _check(fake, ["."], options={"incremental": True})
+
+    assert_that(first.output).contains("directory (1): vendor/dep/Cargo.lock;")
+    assert_that(fake.commands).is_empty()
+    assert_that(second.no_files).is_true()
+    assert_that(second.output or "").does_not_contain("vendor/dep")

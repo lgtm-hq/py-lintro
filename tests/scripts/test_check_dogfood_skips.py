@@ -292,15 +292,25 @@ def test_serialized_unavailable_is_an_image_failure(
     assert_that(mod.run(str(report), str(allow_path))).is_equal_to(1)
 
 
-def test_every_lockfile_excluded_by_config_passes_the_gate(
+@pytest.mark.parametrize(
+    ("excluded", "named"),
+    [
+        (True, "exclude patterns (1): vendor/dep/Cargo.lock."),
+        (False, "target/ directory (1): vendor/dep/Cargo.lock;"),
+    ],
+    ids=["excluded", "vendored-by-default"],
+)
+def test_every_lockfile_left_out_passes_the_gate(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    excluded: bool,
+    named: str,
 ) -> None:
-    """cargo_audit with every Cargo.lock excluded is not a silent skip.
+    """cargo_audit with every Cargo.lock left out is not a silent skip.
 
-    Like any tool whose inputs the user's exclude patterns remove, it reports
-    "no files", which the gate accepts by rule with the committed allowlist,
-    and the serialized row still names the lockfiles it did not audit.
+    Whether the user's exclude patterns or the default vendor/ rule leaves
+    them out, it reports "no files", which the gate accepts by rule with the
+    committed allowlist, and the serialized row names the lockfiles.
     """
     from unittest.mock import patch
 
@@ -312,7 +322,8 @@ def test_every_lockfile_excluded_by_config_passes_the_gate(
     (root / "vendor" / "dep" / "Cargo.lock").write_text("version = 3\n")
     monkeypatch.chdir(root)
     plugin = CargoAuditPlugin()
-    plugin.set_options(exclude_patterns=["vendor/"])
+    if excluded:
+        plugin.set_options(exclude_patterns=["vendor/"])
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
         return_value=None,
@@ -325,7 +336,7 @@ def test_every_lockfile_excluded_by_config_passes_the_gate(
     allowlist /= "dogfood-skip-allowlist.yaml"
 
     assert_that(wire["skipped"]).is_false()
-    assert_that(wire["output"]).contains("not audited (1): vendor/dep/Cargo.lock")
+    assert_that(wire["output"]).contains(named)
     assert_that(mod.evaluate_skips(_report(wire), mod.load_allowlist(None))).is_empty()
     assert_that(mod.run(str(report), str(allowlist))).is_equal_to(0)
 
