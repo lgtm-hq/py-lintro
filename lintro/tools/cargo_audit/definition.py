@@ -117,28 +117,43 @@ def _lockfile_names(lockfiles: list[Path]) -> str:
     return _names([_shown(lockfile) for lockfile in lockfiles])
 
 
-def _denied_warnings(payload: dict[str, Any] | None) -> list[str]:
+def _denied_warnings(payload: dict[str, Any] | None, returncode: int) -> list[str]:
     """Name the warnings cargo-audit denied (``-D`` or ``[output] deny``).
+
+    cargo-audit 0.23 marks each denied warning ``"denied": true``. 0.22.0,
+    the version lintro pins, marks none: it only exits 1 with a report that
+    lists no vulnerabilities. Unmarked warnings therefore count as denied
+    only in that case; at exit 0 they are informational.
 
     Args:
         payload: The parsed report, or None when there was none.
+        returncode: cargo-audit's exit status.
 
     Returns:
-        One label per warning marked ``"denied": true``, such as
+        One label per denied warning, such as
         ``unmaintained ansi_term (RUSTSEC-2021-0139)``.
     """
-    warnings = payload.get("warnings") if payload else None
+    if payload is None:
+        return []
+    warnings = payload.get("warnings")
     if not isinstance(warnings, dict):
         return []
+    found = [
+        (kind, entry)
+        for kind, entries in warnings.items()
+        for entry in (entries if isinstance(entries, list) else [])
+        if isinstance(entry, dict)
+    ]
+    if any("denied" in entry for _, entry in found):
+        found = [(kind, entry) for kind, entry in found if entry.get("denied") is True]
+    elif returncode != 1 or payload["vulnerabilities"]["list"]:
+        found = []
     labels: list[str] = []
-    for kind, entries in warnings.items():
-        for entry in entries if isinstance(entries, list) else []:
-            if not isinstance(entry, dict) or entry.get("denied") is not True:
-                continue
-            package, advisory = entry.get("package"), entry.get("advisory")
-            name = package.get("name") if isinstance(package, dict) else None
-            ident = advisory.get("id") if isinstance(advisory, dict) else None
-            labels.append(f"{kind} {name or '?'}" + (f" ({ident})" if ident else ""))
+    for kind, entry in found:
+        package, advisory = entry.get("package"), entry.get("advisory")
+        name = package.get("name") if isinstance(package, dict) else None
+        ident = advisory.get("id") if isinstance(advisory, dict) else None
+        labels.append(f"{kind} {name or '?'}" + (f" ({ident})" if ident else ""))
     return labels
 
 
@@ -151,10 +166,10 @@ def _report_problem(
 ) -> str | None:
     """Say why a cargo-audit report does not establish a complete audit.
 
-    cargo-audit 0.23 exits 0 for a clean audit, 1 when it found
-    vulnerabilities or denied a warning, and 2 on an error (an unreadable
-    lockfile, a bad argument). Only a valid report with the matching exit
-    status is complete.
+    cargo-audit exits 0 for a clean audit and 1 when it found vulnerabilities
+    or denied a warning (seen with 0.22.0 and 0.23.0); 0.23.0 exits 2 on an
+    error (an unreadable lockfile, a bad argument). Only a valid report with
+    the matching exit status is complete.
 
     Args:
         payload: The parsed report, or None when there was none.
@@ -469,7 +484,7 @@ class CargoAuditPlugin(BaseToolPlugin):
         # A missing, schema-invalid or inconsistent report, or an exit status
         # other than the one the report explains, cannot establish a clean
         # scan (see #1044 and #3003). Its valid findings are still kept.
-        denied = _denied_warnings(payload)
+        denied = _denied_warnings(payload, proc.returncode)
         problem = _report_problem(
             payload,
             issues,

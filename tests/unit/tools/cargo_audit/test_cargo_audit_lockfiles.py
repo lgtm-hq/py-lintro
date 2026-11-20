@@ -1016,3 +1016,41 @@ def test_diff_run_names_only_changed_excluded_lockfiles(
 
     assert_that(fake.audited()).is_equal_to([git_repo / "app" / "Cargo.lock"])
     assert_that(result.output or "").does_not_contain("vendor/dep/Cargo.lock")
+
+
+# cargo-audit 0.22.0's report for ansi_term 0.12.1 under ``[output] deny =
+# ["unmaintained"]``, recorded from the tools image (CI run 44762771950). It
+# exits 1 and, unlike 0.23, does not mark the warning ``"denied": true``.
+REPORT_0_22_UNMAINTAINED = (
+    Path(__file__).with_name("cargo_audit_0_22_0_unmaintained_warning.json").read_text()
+)
+
+
+@pytest.mark.parametrize("returncode", [1, 0], ids=["denied", "informational"])
+def test_unmarked_warnings_count_as_denied_only_at_exit_one(
+    repo: Path,
+    fake: _FakeCargoAudit,
+    returncode: int,
+) -> None:
+    """cargo-audit 0.22's denied warnings fail as denied; at exit 0 they pass.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+        returncode: cargo-audit's exit status with the recorded report.
+    """
+    lock = _crate(repo, "app")
+    fake.reports[lock] = (returncode, REPORT_0_22_UNMAINTAINED)
+
+    result = _check(fake, ["."])
+
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.inspected_files).is_true()
+    assert_that(result.success).is_equal_to(returncode == 0)
+    if returncode:
+        assert_that(result.output).contains(
+            "cargo-audit denied warnings, audited but failing (1): app/Cargo.lock "
+            "(unmaintained ansi_term (RUSTSEC-2021-0139)).",
+        )
+    else:
+        assert_that(result.output).is_none()
