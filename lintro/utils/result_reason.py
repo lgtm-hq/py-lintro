@@ -29,7 +29,7 @@ from __future__ import annotations
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.quoting import quote_first_line
 
-__all__ = ["incomplete_reason", "unavailable_reason"]
+__all__ = ["incomplete_reason", "unavailable_reason", "verdict_gap"]
 
 #: Longest piece of tool output quoted in a reason.
 _QUOTE_LIMIT: int = 160
@@ -104,3 +104,34 @@ def unavailable_reason(result: ToolResult) -> str | None:
         return None
     why = quote_first_line(result.unavailable_reason, limit=_QUOTE_LIMIT)
     return f"unavailable: {why or 'tool not found'}"
+
+
+#: Longest unavailable reason a report quotes; long enough for a refusal's
+#: reason, reference and the command that fixes it.
+_REPORT_QUOTE_LIMIT: int = 1000
+
+
+def verdict_gap(result: ToolResult) -> tuple[str, str] | None:
+    """Say that *result* is no clean verdict, for a report to print.
+
+    A report that printed "No issues found" for a tool that never ran, or ran
+    without a complete result, read as a clean pass (#3556). Every report
+    format prints this statement instead.
+
+    Args:
+        result: One tool's result.
+
+    Returns:
+        ``(headline, reason)``: the headline says the tool did not run or did
+        not complete; the reason is the unavailable reason in full, or
+        :func:`incomplete_reason`. None for a complete or skipped result.
+    """
+    if result.unavailable:
+        why = quote_first_line(result.unavailable_reason, limit=_REPORT_QUOTE_LIMIT)
+        headline = f"{result.name} did not run, so nothing was checked."
+        return headline, f"Reason: {why or 'tool not found'}"
+    reason = incomplete_reason(result)
+    if reason is None:
+        return None
+    headline = f"{result.name} could not complete its check; findings are incomplete."
+    return headline, f"Reason: {reason}"

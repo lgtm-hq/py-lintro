@@ -432,6 +432,7 @@ def _render_stdout_document(
     if fmt == "sarif":
         from lintro.utils.output.file_writer import build_doc_url_map
         from lintro.utils.output.sarif import (
+            execution_notifications,
             render_fixes_sarif,
             standard_issues_from_results,
         )
@@ -443,6 +444,7 @@ def _render_stdout_document(
                 doc_urls=build_doc_url_map(all_results) or None,
                 ai_suggestions=enrichment.suggestions,
                 ai_summary=enrichment.summary,
+                notifications=execution_notifications(all_results),
             ),
         )
         return
@@ -615,6 +617,7 @@ def _write_run_files(
 
                 from lintro.utils.output.file_writer import build_doc_url_map
                 from lintro.utils.output.sarif import (
+                    execution_notifications,
                     standard_issues_from_results,
                     write_sarif,
                 )
@@ -626,6 +629,7 @@ def _write_run_files(
                     doc_urls=build_doc_url_map(all_results) or None,
                     ai_suggestions=enrichment.suggestions,
                     ai_summary=enrichment.summary,
+                    notifications=execution_notifications(all_results),
                 )
             else:
                 file_profile = None

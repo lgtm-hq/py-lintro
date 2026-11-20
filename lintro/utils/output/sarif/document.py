@@ -203,6 +203,7 @@ def to_sarif(
     doc_urls: dict[str, str] | None = None,
     ai_suggestions: Sequence[AIFixSuggestion] | None = None,
     ai_summary: AISummary | None = None,
+    notifications: Sequence[dict[str, Any]] = (),
 ) -> dict[str, Any]:
     """Convert lint and AI findings to a SARIF v2.1.0 document.
 
@@ -219,6 +220,9 @@ def to_sarif(
             When provided, matching rules get a ``helpUri`` property.
         ai_suggestions: Optional AI fix suggestions to include as results.
         ai_summary: Optional AI summary to attach as run properties.
+        notifications: ``toolExecutionNotifications`` for tools without a
+            complete verdict (see ``execution_notifications``). Any of them
+            adds an invocation with ``executionSuccessful: false``.
 
     Returns:
         SARIF document as a dictionary.
@@ -326,6 +330,13 @@ def to_sarif(
         "tool": {"driver": driver},
         "results": results,
     }
+    if notifications:
+        run["invocations"] = [
+            {
+                "executionSuccessful": False,
+                "toolExecutionNotifications": list(notifications),
+            },
+        ]
 
     # Attach summary as run properties when any field is populated
     if ai_summary and (
@@ -360,6 +371,7 @@ def render_fixes_sarif(
     doc_urls: dict[str, str] | None = None,
     ai_suggestions: Sequence[AIFixSuggestion] | None = None,
     ai_summary: AISummary | None = None,
+    notifications: Sequence[dict[str, Any]] = (),
 ) -> str:
     """Render lint and AI findings as a SARIF JSON string.
 
@@ -370,6 +382,7 @@ def render_fixes_sarif(
         doc_urls: Optional mapping of rule codes to documentation URLs.
         ai_suggestions: Optional AI fix suggestions.
         ai_summary: Optional AI summary.
+        notifications: Tool execution notifications; see :func:`to_sarif`.
 
     Returns:
         Pretty-printed SARIF JSON string.
@@ -381,6 +394,7 @@ def render_fixes_sarif(
         doc_urls=doc_urls,
         ai_suggestions=ai_suggestions,
         ai_summary=ai_summary,
+        notifications=notifications,
     )
     return json.dumps(sarif, indent=2)
 
@@ -394,6 +408,7 @@ def write_sarif(
     doc_urls: dict[str, str] | None = None,
     ai_suggestions: Sequence[AIFixSuggestion] | None = None,
     ai_summary: AISummary | None = None,
+    notifications: Sequence[dict[str, Any]] = (),
 ) -> None:
     """Write lint and AI findings as a SARIF file.
 
@@ -405,6 +420,7 @@ def write_sarif(
         doc_urls: Optional mapping of rule codes to documentation URLs.
         ai_suggestions: Optional AI fix suggestions.
         ai_summary: Optional AI summary.
+        notifications: Tool execution notifications; see :func:`to_sarif`.
     """
     sarif = to_sarif(
         standard_issues,
@@ -413,6 +429,7 @@ def write_sarif(
         doc_urls=doc_urls,
         ai_suggestions=ai_suggestions,
         ai_summary=ai_summary,
+        notifications=notifications,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
