@@ -733,6 +733,7 @@ def _snapshot_from_version(
         recommended_version=version_info.recommended_version or "",
         below_recommended=version_info.below_recommended,
         known_bad=version_info.known_bad is not None,
+        version_unreadable=unparseable,
         probe_failure=probe_failure,
         probe_seconds=(
             version_info.probe_seconds
@@ -752,16 +753,24 @@ def _recheck_cached_verdict(snap: ToolSnapshot) -> ToolSnapshot | None:
     list on every read, so a release listed after the cache was written is
     refused without a probe.
 
+    An entry for a tool whose version could not be read must say so
+    (``version_unreadable``), because the gate refuses such a security
+    scanner (#3568); one written without that field is probed again.
+
     Args:
         snap: Snapshot read from the disk cache.
 
     Returns:
         The snapshot, refused when its version is now listed, or None when
         the entry must be probed again: it was refused as known-bad but is no
-        longer listed, or its verdict disagrees with the current minimum.
+        longer listed, its verdict disagrees with the current minimum, or it
+        has no version and does not record that the version was unreadable.
     """
-    if not snap.available or snap.version is None:
+    if not snap.available:
         return snap
+    if snap.version is None:
+        unflagged_unreadable = snap.probe_error is not None
+        return None if unflagged_unreadable and not snap.version_unreadable else snap
     tool = _manifest_tool(snap.name)
     if tool is None:
         return snap

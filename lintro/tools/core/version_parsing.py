@@ -1,5 +1,6 @@
 """Version parsing utilities for tool version checking and validation."""
 
+import json
 import re
 import shutil
 import subprocess  # nosec B404 - used safely with shell disabled
@@ -364,6 +365,28 @@ def known_bad_refusal(version: str, entry: KnownBadVersion) -> str:
     )
 
 
+def printed_output_excerpt(output: str, *, limit: int = 200) -> str:
+    """Quote what a tool printed as one short, escaped line for a message.
+
+    Whitespace runs, newlines included, become single spaces; the text is cut
+    at ``limit`` characters and quoted as a JSON string, so control and
+    non-ASCII characters print as escapes rather than reaching the terminal.
+
+    Args:
+        output: Raw stdout and stderr of the tool.
+        limit: Most characters of the output to keep.
+
+    Returns:
+        The quoted excerpt, or ``nothing`` when the tool printed nothing.
+    """
+    text = " ".join(output.split())
+    if not text:
+        return "nothing"
+    if len(text) > limit:
+        text = f"{text[:limit]}..."
+    return json.dumps(text)
+
+
 def parse_version(version_str: str) -> Version:
     """Parse a version string into a comparable Version object.
 
@@ -563,7 +586,9 @@ def check_tool_version(
         if not info.current_version:
             info.parse_failed = True
             info.error_message = (
-                f"Could not parse version from output: {output.strip()}"
+                f"Could not read a version from the output of "
+                f"`{' '.join(version_cmd)}`, which printed "
+                f"{printed_output_excerpt(output)}"
             )
             logger.debug(
                 f"[VersionCheck] Failed to parse version for {tool_name}: "

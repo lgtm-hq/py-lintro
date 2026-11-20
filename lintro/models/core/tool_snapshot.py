@@ -81,6 +81,9 @@ class ToolSnapshot:
         below_recommended: True when installed version is below recommended.
         known_bad: True when the installed version is on the tool's known-bad
             list; no override lets such a version run (#3556).
+        version_unreadable: True when the tool ran but printed no version
+            lintro could read, so neither the minimum nor the known-bad list
+            could be checked; the gate refuses a security scanner (#3568).
         command: Executable command resolved from the probe directory.
         probed_at: Original probe time, preserved across subset cache writes.
         probe_failure: Structured cause of a failed probe, when known.
@@ -100,6 +103,7 @@ class ToolSnapshot:
     recommended_version: str = ""
     below_recommended: bool = False
     known_bad: bool = False
+    version_unreadable: bool = False
     command: tuple[str, ...] = ()
     probed_at: float = 0.0
     probe_failure: ProbeFailure | None = None
@@ -125,6 +129,7 @@ class ToolSnapshot:
             "recommended_version": self.recommended_version,
             "below_recommended": self.below_recommended,
             "known_bad": self.known_bad,
+            "version_unreadable": self.version_unreadable,
             "command": list(self.command),
             "probed_at": self.probed_at,
             "probe_failure": (
@@ -153,6 +158,7 @@ class ToolSnapshot:
             "version_check_passed",
             "below_recommended",
             "known_bad",
+            "version_unreadable",
         ):
             if not isinstance(values[key], bool):
                 raise ValueError(f"{key} must be a boolean")
@@ -205,6 +211,7 @@ class ToolSnapshot:
             recommended_version=values["recommended_version"],
             below_recommended=values["below_recommended"],
             known_bad=values["known_bad"],
+            version_unreadable=values["version_unreadable"],
             command=tuple(command),
             probed_at=float(values["probed_at"]),
             probe_failure=(
