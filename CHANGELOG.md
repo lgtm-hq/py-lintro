@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.182.5] - 2026-11-20
+
+### Fixed
+
+- **security**: time-box mcp OAuth client advisory in semgrep lock (#3558) (d1a7b18)
+
 ## [0.182.4] - 2026-11-19
 
 ### Fixed

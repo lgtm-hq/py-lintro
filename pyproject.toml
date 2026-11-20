@@ -8,7 +8,7 @@ backend-path = ["."]
 
 [project]
 name = "lintro"
-version = "0.182.4"
+version = "0.182.5"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
@@ -414,6 +414,8 @@ exclude = [
 # see the osv entry. Drop both together once semgrep's pin moves.
 # Additional MCP client/server advisories are unreachable in Semgrep scan;
 # their individual OSV rows carry evidence and the 2026-12-06 expiry.
+# GHSA-qx49-fqc8-xw99 / CVE-2026-115563 (OAuth client, mcp.client.auth) joined
+# them on 2026-11-20 with the same expiry; pip-audit reports it as the CVE.
 # GHSA-xcq7-p3pf-p88h / CVE-2026-114603: only Semgrep's telemetry 1.37.0
 # remains blocked; uv.lock is patched to 1.45.2. The paired OSV row carries
 # the 2026-11-06 re-verification (Semgrep 1.184.0) and 2026-12-06 expiry
@@ -435,6 +437,8 @@ ignore_vulns = [
   "GHSA-rwrf-2pqf-9j8j",
   "CVE-2026-116684",
   "GHSA-w4fh-qvv9-3v23",
+  "CVE-2026-115563",
+  "GHSA-qx49-fqc8-xw99",
 ]
 
 # Duplicate-code ratchet gate (issue #2293). pylint's `duplicate-code` checker
