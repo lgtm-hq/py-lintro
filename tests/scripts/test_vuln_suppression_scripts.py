@@ -328,8 +328,9 @@ def test_install_script_defaults_to_the_shipped_pin(tmp_path: Path) -> None:
 
     The suppression-check workflow passes no version, so this default is the
     osv-scanner CI runs. It must be read from ``_tool_versions.py``, the pin
-    the tools image installs and lintro's minimum equals, so it cannot fall
-    behind the minimum when Renovate bumps the pin. The workspace's pin file
+    the tools image installs and CI tests, so it follows the pin when Renovate
+    bumps it. The pin is separate from lintro's minimum, which is the oldest
+    version that gives correct results. The workspace's pin file
     names a version different from the shipped pin, so a literal default kept
     in the script, even one equal to the shipped pin, fails this test.
     """
