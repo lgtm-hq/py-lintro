@@ -7,7 +7,9 @@ object that is a report. That object has a ``results`` list and no top-level
 key osv-scanner's report does not have (``VulnerabilityResults`` in
 ``pkg/models/results.go``, the same at every release from 2.4.0 to 2.7.1).
 Text before or after the object, a second object, or an ``error`` key beside
-``results`` is not a report.
+``results`` is not a report. A key that is not in :data:`REPORT_KEYS` is named
+in the reason: a later osv-scanner release may add one, and until lintro knows
+it every scan is incomplete. That is deliberate (fail closed).
 """
 
 from __future__ import annotations
@@ -17,6 +19,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from lintro.tools.core.incomplete_run import tool_message_excerpt
+
+#: How many unknown keys the reason names, and how much of each.
+_MAX_KEYS_NAMED: int = 5
+_MAX_KEY_LENGTH: int = 60
 
 #: Every top-level key osv-scanner's JSON report can have.
 REPORT_KEYS: frozenset[str] = frozenset(
@@ -59,6 +65,32 @@ def _parse_whole(stdout: str) -> object | None:
     return value
 
 
+def _unknown_keys_reason(keys: set[str]) -> str:
+    """Name the top-level keys lintro does not know.
+
+    Args:
+        keys: The unknown keys.
+
+    Returns:
+        The reason, quoting at most ``_MAX_KEYS_NAMED`` keys as JSON strings.
+    """
+    ordered = sorted(keys)
+    named = [
+        json.dumps(
+            key if len(key) <= _MAX_KEY_LENGTH else f"{key[:_MAX_KEY_LENGTH]}...",
+        )
+        for key in ordered[:_MAX_KEYS_NAMED]
+    ]
+    if len(ordered) > _MAX_KEYS_NAMED:
+        named.append(f"and {len(ordered) - _MAX_KEYS_NAMED} more")
+    return (
+        "OSV-Scanner's report could not be read: it has top-level key(s) "
+        f"lintro does not know ({', '.join(named)}), so its findings are "
+        "incomplete. A newer osv-scanner may have added them; lintro treats "
+        "every scan as incomplete until it is updated to know them."
+    )
+
+
 def check_report(stdout: str) -> ReportCheck:
     """Check that stdout is exactly one osv-scanner report.
 
@@ -82,8 +114,11 @@ def check_report(stdout: str) -> ReportCheck:
                     f"{tool_message_excerpt(error)}"
                 ),
             )
-        if isinstance(report.get("results"), list) and set(report) <= REPORT_KEYS:
-            return ReportCheck(ok=True)
+        if isinstance(report.get("results"), list):
+            unknown = set(report) - REPORT_KEYS
+            if not unknown:
+                return ReportCheck(ok=True)
+            return ReportCheck(ok=False, reason=_unknown_keys_reason(unknown))
     return ReportCheck(
         ok=False,
         reason=(

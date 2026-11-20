@@ -29,13 +29,16 @@ with any part that is neither a resolution note nor an error for a file lintro
 excludes is kept whole as error text. Every line outside such a message is
 error text too.
 
-A part is an error for an excluded file only when it names exactly one path:
-one existing regular file under an excluded path at its start, and no other
-path anywhere after it (no path separator, and no word that names an existing
-path in the scan root). Checked
-against osv-scanner 2.4.0 and 2.7.1 (``pkg/osvscanner/scan.go``,
-``logPluginStatus``; osv-scalibr ``enricher/transitivedependency``; deps.dev
-``util/resolve``).
+A part is dropped as an error for an excluded file only when it starts with
+one existing regular file under an excluded path and the whole text after that
+file is known: one of a fixed list of parser and permission messages captured
+from osv-scanner for that same file (:data:`PARSER_MESSAGE_TEMPLATES`), or,
+for a ``failed resolution for`` part, one of
+:data:`HARMLESS_RESOLUTION_ENDINGS`. Any other text keeps the error, including
+a parser message not yet on the list, and one that names a second file is
+never dropped. Checked against osv-scanner 2.4.0
+and 2.7.1 (``pkg/osvscanner/scan.go``, ``logPluginStatus``; osv-scalibr
+``enricher/transitivedependency``; deps.dev ``util/resolve``).
 """
 
 from __future__ import annotations
@@ -236,34 +239,412 @@ def source_of(text: str, scan_root: Path) -> tuple[str, str, str] | None:
     return next(iter(found.values()))
 
 
-#: Characters stripped from a word before it is looked up as a path.
-_WORD_PUNCTUATION: str = "\"'`()[]{}<>,;:"
+#: Stands for the excluded file's own path in an error about it.
+_SELF = "\x00"
+
+# An error for an excluded file is dropped only when its whole text is one of
+# the known parser messages below (#3553). Each template is a message
+# osv-scanner 2.7.1 printed for a deliberately broken fixture; the comment
+# above it quotes that message, with <file> for the file's own path. Only the
+# slots vary: a line or column number, and a quoted or delimited token (a
+# character, key, anchor, element, version or type) under the tight character
+# class and length limit below. Every other word is matched literally. A
+# message that matches no template keeps the error, so the run is incomplete:
+# an unseen parser message stays an error until its template is added here,
+# with the captured message, and to the corpus in
+# tests/unit/tools/osv_scanner/captured_parser_messages.py.
+
+#: A line or column number.
+_N = r"\d{1,9}"
+#: One Go-quoted character (``'}'``, ``'"'``, ``'\n'``, ``'\x01'``).
+_CHAR = r"'(?:[^'\\\s]|\\(?:[abfnrtv\\']|x[0-9a-f]{2}|u[0-9a-f]{4}|U[0-9a-f]{8}))'"
+#: A bare word from the file: a key, anchor, directive or version.
+_BARE = r"[A-Za-z0-9_.+-]{1,64}"
+#: A Go type as ``encoding/json`` and BurntSushi/toml print it.
+_GO_TYPE = (
+    r"(?:\[\d{0,9}\]|map\[[A-Za-z0-9_.]{1,80}\]|\*){0,4}"
+    r"(?:interface \{\}|[A-Za-z_][A-Za-z0-9_.]{0,120})"
+)
+#: A JSON struct-field path (``.packages.node_modules~1x.version``).
+_FIELD = r"[A-Za-z0-9_.~@+-]{1,200}"
+#: An XML element or attribute name.
+_XML_NAME = r"[A-Za-z0-9_][A-Za-z0-9_.:-]{0,60}"
+#: A Go module path in a ``require`` line; named so the second guard
+#: (:func:`_names_another_path`) does not read its slashes as a path.
+_MODULE = r"(?P<module>[A-Za-z0-9_.~+-]{1,100}(?:/[A-Za-z0-9_.~+-]{1,100}){0,10})"
+
+#: Go's ``encoding/json``, shared by most JSON lockfile extractors.
+_JSON_TEMPLATES: dict[str, str] = {
+    # could not extract: invalid character 'b' looking for beginning of value
+    "json/value": rf"invalid character {_CHAR} looking for beginning of value",
+    # could not extract: invalid character '/' looking for beginning of object
+    # key string
+    "json/key-string": (
+        rf"invalid character {_CHAR} looking for beginning of object key string"
+    ),
+    # could not extract: invalid character '1' after object key
+    "json/after-key": rf"invalid character {_CHAR} after object key",
+    # could not extract: invalid character '"' after object key:value pair
+    "json/after-pair": rf"invalid character {_CHAR} after object key:value pair",
+    # could not extract: invalid character '2' after array element
+    "json/after-element": rf"invalid character {_CHAR} after array element",
+    # could not extract: invalid character 'x' after top-level value
+    "json/after-top": rf"invalid character {_CHAR} after top-level value",
+    # could not extract: invalid character '}' in numeric literal
+    "json/numeric": rf"invalid character {_CHAR} in numeric literal",
+    # could not extract: invalid character '}' in literal null (expecting 'l'),
+    # ... literal true (expecting 'e'), ... literal false (expecting 'e')
+    "json/literal": (
+        rf"invalid character {_CHAR} in literal (?:true|false|null) "
+        rf"\(expecting {_CHAR}\)"
+    ),
+    # could not extract: invalid character '\x01' in string
+    "json/string": rf"invalid character {_CHAR} in string",
+    # could not extract: invalid escape sequence `\u12z4` in string
+    "json/escape": r"invalid escape sequence `\\[^`\s/\\]{1,9}` in string",
+    # could not extract: unexpected end of JSON input
+    "json/end": r"unexpected end of JSON input",
+    # could not extract: json: cannot unmarshal number into Go struct field
+    # .packages.node_modules~1x.version of type string
+    "json/struct-field": (
+        r"json: cannot unmarshal (?:string|number|bool|array|object) into Go "
+        rf"struct field {_FIELD} of type {_GO_TYPE}"
+    ),
+    # could not extract: json: cannot unmarshal string into Go value of type
+    # packagelockjson.LockFile
+    "json/value-type": (
+        r"json: cannot unmarshal (?:string|number|bool|array|object) into Go "
+        rf"value of type {_GO_TYPE}"
+    ),
+}
+
+#: go-yaml (pnpm-lock.yaml, pubspec.lock), after ``yaml: `` and an optional
+#: ``line <n>: ``. ``yaml: unmarshal errors:`` continues on an indented line,
+#: which is read as a separate error and keeps the run incomplete.
+_YAML_TEMPLATES: dict[str, str] = {
+    # could not extract: yaml: line 1: did not find expected ',' or ']'
+    "yaml/expected-or": rf"did not find expected {_CHAR} or {_CHAR}",
+    # could not extract: yaml: line 1: did not find expected '-' indicator
+    "yaml/expected-indicator": rf"did not find expected {_CHAR} indicator",
+    # could not extract: yaml: line 2: did not find expected key
+    "yaml/expected-key": r"did not find expected key",
+    # could not extract: yaml: mapping values are not allowed in this context
+    "yaml/mapping": r"mapping values are not allowed in this context",
+    # could not extract: yaml: line 2: found character that cannot start any
+    # token
+    "yaml/character": r"found character that cannot start any token",
+    # could not extract: yaml: line 2: found unexpected end of stream
+    "yaml/end": r"found unexpected end of stream",
+    # could not extract: yaml: unknown anchor 'y' referenced
+    "yaml/anchor": rf"unknown anchor '{_BARE}' referenced",
+}
+
+#: BurntSushi/toml (poetry.lock, uv.lock, Cargo.lock), after
+#: ``toml: line <n>: `` or ``toml: line <n> (last key "<key>"): ``.
+_TOML_TEMPLATES: dict[str, str] = {
+    # could not extract: toml: line 1 (last key "a"): strings cannot contain
+    # newlines
+    "toml/newline": r"strings cannot contain newlines",
+    # could not extract: toml: line 2 (last key "a"): Key 'a' has already been
+    # defined.
+    "toml/defined": rf"Key '{_BARE}' has already been defined\.",
+    # could not extract: toml: line 1: expected '.' or '=', but got 'b' instead
+    "toml/expected-or": rf"expected {_CHAR} or {_CHAR}, but got {_CHAR} instead",
+    # could not extract: toml: line 2: expected '.' or ']' to end table name,
+    # but got '\n' instead
+    "toml/table-name": (
+        rf"expected {_CHAR} or {_CHAR} to end table name, but got {_CHAR} instead"
+    ),
+    # could not extract: toml: line 2 (last key "package.name"): incompatible
+    # types: TOML value has type int64; destination has type string
+    "toml/types": (
+        rf"incompatible types: TOML value has type {_GO_TYPE}; destination has "
+        rf"type {_GO_TYPE}"
+    ),
+    # could not extract: toml: line 1: expected a top-level item to end with a
+    # newline, comment, or EOF, but got 'X' instead
+    "toml/top-level": (
+        r"expected a top-level item to end with a newline, comment, or EOF, but "
+        rf"got {_CHAR} instead"
+    ),
+    # could not extract: toml: line 1 (last key "a"): unexpected EOF; expected
+    # value
+    "toml/eof-value": r"unexpected EOF; expected value",
+    # could not extract: toml: line 1 (last key "not"): expected value but
+    # found "toml" instead
+    "toml/expected-value": rf'expected value but found "{_BARE}" instead',
+    # could not extract: toml: line 1: unexpected '=': key name appears blank
+    "toml/blank-key": rf"unexpected {_CHAR}: key name appears blank",
+    # could not extract: toml: line 1 (last key "a.b"): expected a comma or an
+    # inline table terminator '}', but got end of file instead
+    "toml/inline-table": (
+        rf"expected a comma or an inline table terminator {_CHAR}, but got end "
+        r"of file instead"
+    ),
+    # could not extract: toml: line 1 (last key "a"): expected a comma (',') or
+    # array terminator (']'), but got end of file
+    "toml/array": (
+        rf"expected a comma \({_CHAR}\) or array terminator \({_CHAR}\), but got "
+        r"end of file"
+    ),
+    # could not extract: toml: line 1 (last key "a"): invalid escape in string
+    # '\q'
+    "toml/escape": r"invalid escape in string '\\[^\s'/\\]'",
+}
+
+#: Go's ``encoding/xml`` (pom.xml, packages.config), after
+#: ``XML syntax error on line <n>: ``.
+_XML_TEMPLATES: dict[str, str] = {
+    # could not extract pom from <file>: XML syntax error on line 1: unexpected
+    # EOF
+    "xml/eof": r"unexpected EOF",
+    # could not extract pom from <file>: XML syntax error on line 1: element
+    # <project> closed by </foo>
+    "xml/closed": rf"element <{_XML_NAME}> closed by </{_XML_NAME}>",
+    # could not extract pom from <file>: XML syntax error on line 1: invalid
+    # character entity &bogus;
+    "xml/entity": r"invalid character entity &[A-Za-z0-9#]{1,40};",
+    # could not extract pom from <file>: XML syntax error on line 1: invalid
+    # character entity &#x (no semicolon)
+    "xml/entity-semicolon": (
+        r"invalid character entity &[A-Za-z0-9#]{1,40} \(no semicolon\)"
+    ),
+    # could not extract pom from <file>: XML syntax error on line 1: expected
+    # element name after <  (and ... after </)
+    "xml/element-name": r"expected element name after </?",
+    # could not extract pom from <file>: XML syntax error on line 1: invalid
+    # XML name: 1
+    "xml/name": rf"invalid XML name: {_XML_NAME}",
+    # could not extract pom from <file>: XML syntax error on line 1: attribute
+    # name without = in element
+    "xml/attribute": r"attribute name without = in element",
+    # could not extract pom from <file>: XML syntax error on line 1: invalid
+    # UTF-8
+    "xml/utf8": r"invalid UTF-8",
+}
+
+#: golang.org/x/mod ``modfile`` (go.mod), after ``<file>:<line>:`` and an
+#: optional column. The ``replace`` usage spans two lines, so it is kept.
+_GOMOD_TEMPLATES: dict[str, str] = {
+    # could not extract: <file>:2: unknown directive: foo
+    "gomod/directive": rf"unknown directive: {_BARE}",
+    # could not extract: <file>:2: repeated module statement
+    "gomod/repeated": r"repeated module statement",
+    # could not extract: <file>:1:10: unexpected newline in string
+    "gomod/newline": r"unexpected newline in string",
+    # could not extract: <file>:1: usage: module module/path
+    "gomod/usage-module": r"usage: module module/path",
+    # could not extract: <file>:2: usage: require module/path v1.2.3 (and
+    # usage: exclude module/path v1.2.3)
+    "gomod/usage-version": r"usage: (?:require|exclude) module/path v1\.2\.3",
+    # could not extract: <file>:3: usage: godebug key=value
+    "gomod/usage-godebug": r"usage: godebug key=value",
+    # could not extract: <file>:2: invalid go version 'abc': must match format
+    # 1.23.0
+    "gomod/go-version": rf"invalid go version '{_BARE}': must match format 1\.23\.0",
+    # could not extract: <file>:2: invalid toolchain version 'bad': must match
+    # format go1.23.0 or default
+    "gomod/toolchain": (
+        rf"invalid toolchain version '{_BARE}': must match format go1\.23\.0 or "
+        r"default"
+    ),
+    # could not extract: <file>:2: require a/b: version "vX" invalid: must be
+    # of the form v1.2.3
+    "gomod/require-version": (
+        rf'require {_MODULE}: version "{_BARE}" invalid: must be of the form '
+        r"v1\.2\.3"
+    ),
+    # could not extract: <file>:3: syntax error (unterminated block started at
+    # <file>:2:1)
+    "gomod/block": rf"syntax error \(unterminated block started at \x00:{_N}:{_N}\)",
+}
+
+#: Messages that are a family on their own.
+_OTHER_TEMPLATES: dict[str, str] = {
+    # could not extract pom from <file>: EOF (an empty pom.xml)
+    "eof/pom": r"could not extract pom from \x00: EOF",
+    # could not extract: unexpected EOF (conan.lock, renv.lock) and
+    # failed to decode packages.lock.json file: unexpected EOF
+    "eof/unexpected": r"(?:could not extract: |"
+    r"failed to decode packages\.lock\.json file: )"
+    r"unexpected EOF",
+    # Open(<file>): open <file>: permission denied (an unreadable file)
+    "open/permission": r"Open\(\x00\): open \x00: permission denied",
+}
+
+#: How each family's messages are introduced. ``could not extract`` lacks its
+#: colon for bun.lock; ``failed to decode <name> file:`` is
+#: packages.lock.json; packages.config prints the XML error bare.
+_EXTRACT = r"(?:could not extract:? |failed to decode packages\.lock\.json file: )"
+_FAMILY_PREFIXES: dict[str, str] = {
+    "json": _EXTRACT,
+    "yaml": rf"could not extract: yaml: (?:line {_N}: )?",
+    "toml": rf'could not extract: toml: line {_N}(?: \(last key "{_BARE}"\))?: ',
+    "xml": rf"(?:could not extract pom from \x00: )?XML syntax error on line {_N}: ",
+    "gomod": rf"could not extract: \x00:{_N}(?::{_N})?: ",
+}
 
 
-def names_another_path(error: str, scan_root: Path) -> bool:
-    """Return whether the error after a file's path names any further path.
+def _compile_templates() -> tuple[tuple[str, re.Pattern[str]], ...]:
+    """Join each template to its family's prefix and compile it.
 
-    An error for an excluded file is dropped only when the excluded file is
-    the one path in it; ``<excluded>: failed reading <included>: ...`` is
-    about the included file as well. Any path separator counts as a path, as
-    does any word that names an existing file or directory in the scan root.
+    Returns:
+        Every template's name and whole-message pattern.
+    """
+    families = {
+        "json": _JSON_TEMPLATES,
+        "yaml": _YAML_TEMPLATES,
+        "toml": _TOML_TEMPLATES,
+        "xml": _XML_TEMPLATES,
+        "gomod": _GOMOD_TEMPLATES,
+    }
+    compiled = [
+        (name, re.compile(_FAMILY_PREFIXES[family] + template))
+        for family, templates in families.items()
+        for name, template in templates.items()
+    ]
+    compiled += [(name, re.compile(text)) for name, text in _OTHER_TEMPLATES.items()]
+    return tuple(compiled)
+
+
+#: Every known parser message for an excluded file, by name, with
+#: :data:`_SELF` for that file's path. Each is matched against the whole text
+#: after the path.
+PARSER_MESSAGE_TEMPLATES: tuple[tuple[str, re.Pattern[str]], ...] = _compile_templates()
+
+#: File names osv-scanner reads, for :func:`_names_another_path`.
+_MANIFEST_NAMES: frozenset[str] = frozenset(
+    {
+        "package-lock.json",
+        "npm-shrinkwrap.json",
+        "package.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "bun.lock",
+        "composer.lock",
+        "Gemfile.lock",
+        "gems.locked",
+        "Cargo.lock",
+        "go.mod",
+        "go.sum",
+        "poetry.lock",
+        "Pipfile.lock",
+        "pdm.lock",
+        "uv.lock",
+        "pylock.toml",
+        "requirements.txt",
+        "pom.xml",
+        "gradle.lockfile",
+        "buildscript-gradle.lockfile",
+        "verification-metadata.xml",
+        "packages.lock.json",
+        "packages.config",
+        "deps.json",
+        "mix.lock",
+        "pubspec.lock",
+        "renv.lock",
+        "conan.lock",
+        "Package.resolved",
+        "cabal.project.freeze",
+        "stack.yaml.lock",
+    },
+)
+#: Extensions of the files osv-scanner reads, compared case-sensitively.
+_MANIFEST_SUFFIXES: tuple[str, ...] = (
+    ".json",
+    ".lock",
+    ".lockfile",
+    ".locked",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".xml",
+    ".txt",
+    ".mod",
+    ".sum",
+    ".config",
+    ".resolved",
+    ".freeze",
+)
+#: ``modfile``'s usage placeholder, which is not a path.
+_GOMOD_PLACEHOLDER: str = "module/path"
+#: Go-quoted characters (``'/'``, ``'\\x01'``) and back-quoted escape
+#: sequences, which may hold a separator or backslash without naming a path.
+_ESCAPED_CHAR_RE = re.compile(
+    r"'(?:[^'\\\s]|\\(?:[abfnrtv\\']|x[0-9a-f]{2}|u[0-9a-f]{4}|U[0-9a-f]{8}))'"
+    r"|`[^`\n]*`",
+)
+_CANDIDATE_RE = re.compile(r"[^\s'\"()<>\[\]{},;`]+")
+_SELF_RE = re.compile(r"\x00(?::\d+)*:?")
+
+
+def _names_another_path(own: str, printed_path: str) -> bool:
+    """Return whether an error names any path besides the excluded file.
+
+    A second guard, independent of :data:`PARSER_MESSAGE_TEMPLATES`: a word
+    that contains a path separator, or is a manifest or lockfile name or ends
+    in such an extension, names another path unless it is the file itself
+    (written as :data:`_SELF`) or that file's own base name.
+
+    Args:
+        own: The error with the file's path written as :data:`_SELF`.
+        printed_path: The file's path as osv-scanner printed it.
+
+    Returns:
+        True when the error names any other path.
+    """
+    basename = os.path.basename(printed_path)
+    text = _ESCAPED_CHAR_RE.sub(" ", own).replace("</", "<")
+    for candidate in _CANDIDATE_RE.findall(text):
+        word = _SELF_RE.sub("", candidate).rstrip(".:")
+        if not word or word in (basename, _GOMOD_PLACEHOLDER):
+            continue
+        if (
+            "/" in word
+            or os.sep in word
+            or os.path.basename(word) in _MANIFEST_NAMES
+            or word.endswith(_MANIFEST_SUFFIXES)
+        ):
+            return True
+    return False
+
+
+def excluded_file_template(error: str, printed_path: str) -> str | None:
+    """Return the known parser message an error for one file is, if any.
 
     Args:
         error: The text after the file's path, every line of it.
-        scan_root: Directory osv-scanner ran in.
+        printed_path: The file's path as osv-scanner printed it.
 
     Returns:
-        True when the text may name another path.
+        The name of the template in :data:`PARSER_MESSAGE_TEMPLATES` that the
+        whole text, with that path written as :data:`_SELF`, matches, or None
+        when none does or the text names any other path.
     """
-    if "/" in error or "\\" in error or os.sep in error:
-        return True
-    for word in error.split():
-        name = word.strip(_WORD_PUNCTUATION)
-        if name in ("", ".", "..") or set(name) == {"."}:
+    if _SELF in error:
+        return None
+    own = re.sub(rf"/?{re.escape(printed_path.lstrip('/'))}", _SELF, error)
+    for name, pattern in PARSER_MESSAGE_TEMPLATES:
+        match = pattern.fullmatch(own)
+        if match is None:
             continue
-        if os.path.lexists(scan_root / name):
-            return True
-    return False
+        if "module" in pattern.groupindex:
+            own = own[: match.start("module")] + own[match.end("module") :]
+        return None if _names_another_path(own, printed_path) else name
+    return None
+
+
+def is_excluded_file_error(error: str, printed_path: str) -> bool:
+    """Return whether an error is a known parser message for that file alone.
+
+    Args:
+        error: The text after the file's path, every line of it.
+        printed_path: The file's path as osv-scanner printed it.
+
+    Returns:
+        True only when :func:`excluded_file_template` names a template.
+    """
+    return excluded_file_template(error, printed_path) is not None
 
 
 def is_harmless_ending(ending: str) -> bool:
@@ -366,7 +747,11 @@ def read_stderr(
             if (
                 named is not None
                 and is_excluded(named[0])
-                and not names_another_path(named[2], scan_root)
+                and (
+                    is_harmless_ending(named[2])
+                    if resolution
+                    else is_excluded_file_error(named[2], named[1])
+                )
             ):
                 continue
             all_excluded = False
@@ -405,6 +790,10 @@ def display_path(source: str, scan_root: Path) -> str:
         return source
 
 
+#: The most manifests a resolution note quotes; the rest are counted.
+MAX_NOTE_MANIFESTS: int = 5
+
+
 def resolution_note(notes: tuple[ResolutionNote, ...], scan_root: Path) -> str:
     """Name the manifests whose indirect dependencies were not resolved.
 
@@ -413,17 +802,34 @@ def resolution_note(notes: tuple[ResolutionNote, ...], scan_root: Path) -> str:
         scan_root: Directory osv-scanner ran in.
 
     Returns:
-        The note, or an empty string when there is none.
+        The note, or an empty string when there is none. Each manifest's
+        message is quoted up to its first lines (joined by `` | ``). With more
+        than one manifest each quote is numbered ``[1]``, ``[2]`` and the
+        quotes are joined by ``; ``; at most :data:`MAX_NOTE_MANIFESTS` are
+        quoted and the rest counted as ``and N more``.
     """
     if not notes:
         return ""
-    shown = "\n".join(
-        note.text.replace(note.printed_path, display_path(note.source, scan_root), 1)
-        for note in notes
-    )
+    quotes = [
+        tool_message_excerpt(
+            note.text.replace(
+                note.printed_path,
+                display_path(note.source, scan_root),
+                1,
+            ),
+        )
+        for note in notes[:MAX_NOTE_MANIFESTS]
+    ]
+    if len(notes) == 1:
+        shown = quotes[0]
+    else:
+        shown = "; ".join(
+            f"[{number}] {quote}" for number, quote in enumerate(quotes, start=1)
+        )
+        if len(notes) > MAX_NOTE_MANIFESTS:
+            shown += f"; and {len(notes) - MAX_NOTE_MANIFESTS} more"
     return (
         "OSV-Scanner scanned the packages listed in these manifests but "
         "could not resolve their indirect dependencies, so those were not "
-        "checked: "
-        f"{tool_message_excerpt(shown)}"
+        f"checked: {shown}"
     )

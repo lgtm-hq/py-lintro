@@ -20,6 +20,7 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.tools.osv_scanner.definition import OsvScannerPlugin
 from lintro.utils.meaningful_run import baseline_is_eligible
 from lintro.utils.tool_metadata import tool_notes
+from tests.unit.tools.osv_scanner.captured_parser_messages import CAPTURED
 
 _PRIVATE = "zz-private-internal-pkg-xq"
 
@@ -639,3 +640,363 @@ def test_exclusion_matches_either_spelling_of_a_symlinked_root(
 
     _assert_complete(excluded)
     _assert_incomplete(unrelated)
+
+
+#: What osv-scanner 2.7.1 prints after a broken file's path (#3553), with
+#: ``{file}`` for that path as printed.
+_FIXTURE_ERRORS: dict[str, tuple[str, str]] = {
+    "json-comment": (
+        "javascript/packagelockjson",
+        "could not extract: invalid character '/' looking for beginning of "
+        "object key string",
+    ),
+    "json-value": (
+        "php/composerlock",
+        "could not extract: invalid character 'b' looking for beginning of value",
+    ),
+    "json-type": (
+        "javascript/packagelockjson",
+        "could not extract: json: cannot unmarshal number into Go struct field "
+        ".packages.node_modules~1x.version of type string",
+    ),
+    "yaml": (
+        "javascript/pnpmlock",
+        "could not extract: yaml: line 1: did not find expected ',' or ']'",
+    ),
+    "toml": (
+        "python/poetrylock",
+        'could not extract: toml: line 1 (last key "not"): expected value but '
+        'found "toml" instead',
+    ),
+    "pom": (
+        "java/pomxml",
+        "could not extract pom from {file}: XML syntax error on line 1: "
+        "unexpected EOF",
+    ),
+    "gomod": ("go/gomod", "could not extract: {file}:2: unknown directive: foo"),
+    "unreadable": (
+        "javascript/packagelockjson",
+        "Open({file}): open {file}: permission denied",
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_FIXTURE_ERRORS))
+@pytest.mark.parametrize("fixtures", ["testdata", "-testdata"])
+def test_excluded_broken_fixture_is_dropped_whatever_the_root_holds(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+    shape: str,
+    fixtures: str,
+) -> None:
+    """Root entries named like words in the error do not keep it (#3553).
+
+    The root holds ``value/`` and ``b``, words the parser errors
+    contain; the excluded directory may start with ``-``.
+    """
+    plugin_name, error = _FIXTURE_ERRORS[shape]
+    name = f"{fixtures}/broken.lock"
+    osv_scanner_plugin.set_options(exclude_patterns=[fixtures])
+    stderr = (
+        f"Error during extraction: (extracting as {plugin_name}) "
+        f"{{root}}/{name}: {error.replace('{file}', '{root}/' + name)}\n"
+    )
+
+    result = _check(
+        osv_scanner_plugin,
+        tmp_path,
+        files={name: "{\n// fixture\n}", "value/": "", "b": ""},
+        returncode=127,
+        stderr=stderr,
+    )
+
+    _assert_complete(result)
+    assert_that(result.success).is_true()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        "see package-lock.json:3: unexpected token",
+        "could not extract: open {root}/package-lock.json: permission denied",
+        "Open({root}/package-lock.json): open {root}/package-lock.json: "
+        "permission denied",
+        "could not extract: {root}/go.mod:2: unknown directive: foo",
+        "could not extract: rpc error: code = Unavailable desc = x",
+    ],
+    ids=["bare-name", "open-other", "unreadable-other", "gomod-other", "unseen"],
+)
+def test_excluded_file_error_that_is_not_about_it_alone_is_kept(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+    error: str,
+) -> None:
+    """Only a recognised error about the excluded file itself is dropped."""
+    osv_scanner_plugin.set_options(exclude_patterns=["testdata"])
+    stderr = (
+        "Error during extraction: (extracting as javascript/packagelockjson) "
+        f"{{root}}/testdata/package-lock.json: {error}\n"
+    )
+
+    result = _check(
+        osv_scanner_plugin,
+        tmp_path,
+        files={
+            "testdata/package-lock.json": "{",
+            "package-lock.json": "{}",
+            "go.mod": "module x\n",
+        },
+        returncode=127,
+        stderr=stderr,
+    )
+
+    _assert_incomplete(result)
+    assert_that(result.output).contains(error.split(" ", 1)[0].split("{", 1)[0])
+
+
+def test_harmless_resolution_for_an_excluded_manifest_leaves_no_note(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Root entries named like words in the ending do not turn it into a note."""
+    osv_scanner_plugin.set_options(exclude_patterns=["vendor"])
+    stderr = (
+        "Error during extraction: (extracting as transitivedependency/requirements) "
+        "failed resolution for {root}/vendor/requirements.txt: package "
+        "System(7):app: not found\n"
+    )
+
+    result = _check(
+        osv_scanner_plugin,
+        tmp_path,
+        files={"vendor/requirements.txt": "app==1.0\n", "package/": "", "found": ""},
+        returncode=127,
+        stderr=stderr,
+    )
+
+    _assert_complete(result)
+    assert_that(tool_notes(result.metadata)).is_empty()
+
+
+def test_note_names_every_unsatisfiable_manifest(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Each manifest's two-line message no longer crowds out the third."""
+    blocks = [
+        f"failed resolution for {{root}}/{name}/requirements.txt: resolution "
+        f'impossible:\nno candidates at all for: flask "==9999{index}"\n\n'
+        for index, name in enumerate(("a", "b", "c"))
+    ]
+    stderr = (
+        "Error during extraction: (extracting as transitivedependency/requirements) "
+        + "".join(blocks)
+    )
+
+    result = _check(
+        osv_scanner_plugin,
+        tmp_path,
+        files={f"{name}/requirements.txt": "flask\n" for name in ("a", "b", "c")},
+        returncode=127,
+        stderr=stderr,
+    )
+
+    _assert_complete(result)
+    assert_that(_note(result)).contains(
+        "[1] a/requirements.txt",
+        "; [2] b/requirements.txt",
+        "; [3] c/requirements.txt",
+        '"==99992"',
+    ).does_not_contain("more")
+
+
+def test_note_quotes_five_manifests_and_counts_the_rest(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """A long list of private-package manifests does not grow the note unbounded."""
+    names = [f"m{index}" for index in range(8)]
+    stderr = (
+        "Error during extraction: (extracting as transitivedependency/requirements) "
+        + "".join(
+            f"failed resolution for {{root}}/{name}/requirements.txt: package "
+            f"System(7):zz-{name}: not found\n"
+            for name in names
+        )
+    )
+
+    result = _check(
+        osv_scanner_plugin,
+        tmp_path,
+        files={f"{name}/requirements.txt": "zz\n" for name in names},
+        returncode=127,
+        stderr=stderr,
+    )
+
+    _assert_complete(result)
+    assert_that(_note(result)).contains(
+        "[5] m4/requirements.txt",
+        "; and 3 more",
+    ).does_not_contain("m5/requirements.txt", "[6]")
+
+
+@pytest.mark.parametrize(
+    ("keys", "named"),
+    [
+        (["image_layers"], '("image_layers")'),
+        (
+            [f"k{index}" for index in range(7)],
+            '("k0", "k1", "k2", "k3", "k4", and 2 more)',
+        ),
+    ],
+    ids=["one", "many"],
+)
+def test_unknown_report_key_is_named_in_the_incomplete_run(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+    keys: list[str],
+    named: str,
+) -> None:
+    """A key a newer osv-scanner added is named, and the run is incomplete."""
+    report: dict[str, list[str]] = {"results": [], **dict.fromkeys(keys, [])}
+
+    result = _check(
+        osv_scanner_plugin,
+        tmp_path,
+        files={"requirements.txt": "six==1.16.0\n"},
+        returncode=0,
+        stderr="",
+        stdout=json.dumps(report),
+    )
+
+    _assert_incomplete(result)
+    assert_that(result.output).starts_with(
+        "OSV-Scanner's report could not be read",
+    ).contains(f"key(s) lintro does not know {named}")
+
+
+@pytest.mark.parametrize("shape", sorted(CAPTURED))
+def test_captured_error_for_an_excluded_file_is_dropped(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+    shape: str,
+) -> None:
+    """Every real 2.7.1 parser message for an excluded file is dropped."""
+    captured = CAPTURED[shape]
+    name = f"testdata/{captured.file_name}"
+    osv_scanner_plugin.set_options(exclude_patterns=["testdata"])
+    error = captured.error.replace("{", "{{").replace("}", "}}")
+    stderr = (
+        f"Error during extraction: (extracting as {captured.plugin}) "
+        f"{{root}}/{name}: {error.replace('<file>', '{root}/' + name)}\n"
+    )
+
+    result = _check(
+        osv_scanner_plugin,
+        tmp_path,
+        files={name: "broken", "requirements.txt": "six==1.16.0\n"},
+        returncode=127,
+        stderr=stderr,
+    )
+
+    _assert_complete(result)
+    assert_that(result.success).is_true()
+
+
+#: The reviewer's message (#3571) and its variants: a recognised parser prefix
+#: whose text is not a parser message and names a second, scanned file.
+_SECOND_FILE = "failed reading app/package-lock.json: permission denied"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        f"could not extract: yaml: line 1: {_SECOND_FILE}",
+        f"could not extract: toml: line 1: {_SECOND_FILE}",
+        f'could not extract: toml: line 1 (last key "a"): {_SECOND_FILE}',
+        f"could not extract pom from {{file}}: XML syntax error on line 1: "
+        f"{_SECOND_FILE}",
+        f"XML syntax error on line 1: {_SECOND_FILE}",
+        "could not extract: json: cannot unmarshal number into Go struct field "
+        f"{_SECOND_FILE} of type string",
+        f"could not extract: {{file}}:1: {_SECOND_FILE}",
+        f"could not extract: {{file}}:1:2: {_SECOND_FILE}",
+        "could not extract: yaml: line 1: cannot read package-lock.json",
+        'could not extract: toml: line 1 (last key "package-lock.json"): '
+        "expected value",
+        "could not extract: yaml: unknown anchor 'app.lock' referenced",
+        "could not extract: yaml: line 1: failed reading config: permission denied",
+        "could not extract: yaml: line 1: failed reading Makefile",
+        "could not extract: yaml: line 1: cannot open Gemfile",
+        "could not extract: yaml: line 1: permission denied",
+        "could not extract: toml: line 1: connection reset by peer",
+        "could not extract: toml: line 1: network request timed out",
+        "XML syntax error on line 1: connection refused",
+        "XML syntax error on line 1: rpc error: unavailable",
+        "could not extract: {file}:1: network is unreachable",
+        'could not extract: strconv.ParseFloat: parsing "": invalid syntax',
+        "failed to decode Makefile file: unexpected EOF",
+        "failed to decode config file: unexpected EOF",
+        "failed to decode Makefile file: unexpected end of JSON input",
+    ],
+    ids=[
+        "yaml",
+        "toml",
+        "toml-key",
+        "pom",
+        "xml",
+        "struct-field",
+        "repeated-path",
+        "repeated-path-column",
+        "bare-name",
+        "guard-toml-key",
+        "guard-yaml-anchor",
+        "yaml-config",
+        "yaml-makefile",
+        "yaml-gemfile",
+        "yaml-permission",
+        "toml-reset",
+        "toml-timeout",
+        "xml-refused",
+        "xml-rpc",
+        "gomod-network",
+        "strconv",
+        "decode-makefile",
+        "decode-config",
+        "decode-makefile-json",
+    ],
+)
+def test_parser_prefix_with_text_naming_another_file_is_kept(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+    error: str,
+) -> None:
+    """Only a known parser message for an excluded file is dropped (#3571).
+
+    The excluded ``vendor/a.lock`` reports an error behind a parser prefix
+    that is no captured parser message, or that names the scanned
+    ``app/package-lock.json``; the run stays incomplete, as on ``main``.
+    """
+    osv_scanner_plugin.set_options(exclude_patterns=["vendor"])
+    name = "vendor/a.lock"
+    stderr = (
+        "Error during extraction: (extracting as javascript/pnpmlock) "
+        f"{{root}}/{name}: {error.replace('{file}', '{root}/' + name)}\n"
+    )
+
+    result = _check(
+        osv_scanner_plugin,
+        tmp_path,
+        files={name: "broken", "app/package-lock.json": "{}", "app.lock": ""},
+        returncode=127,
+        stderr=stderr,
+    )
+
+    _assert_incomplete(result)
+    assert_that(
+        baseline_is_eligible(
+            action=Action.CHECK,
+            dry_run_preview=False,
+            tool_results=[result],
+        ),
+    ).is_false()
