@@ -191,15 +191,18 @@ def verify_tool_version(
     if resolved_commands is not None and cwd is not None and snapshot.command:
         resolved_commands[(definition.name, str(cwd))] = snapshot.command
 
-    if not snapshot.available:
+    # Checked before availability: a scanner launched as ``python -m X`` has
+    # no resolved path, so its snapshot is unavailable, yet its probe ran and
+    # printed no readable version. It is refused like the PATH case (#3568).
+    unknown_scanner = snapshot.version_unreadable and bool(
+        definition.tool_type & ToolType.SECURITY,
+    )
+    if not snapshot.available and not unknown_scanner:
         return snapshot_to_unavailable_result(
             snapshot,
             strict=is_strict_missing_tools(),
         )
 
-    unknown_scanner = snapshot.version_unreadable and bool(
-        definition.tool_type & ToolType.SECURITY,
-    )
     if not unknown_scanner and snapshot_is_runnable(snapshot):
         if not snapshot.version_check_passed:
             logger.warning(

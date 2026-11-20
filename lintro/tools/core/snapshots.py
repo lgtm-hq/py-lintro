@@ -700,7 +700,12 @@ def _snapshot_from_version(
         Available, below-minimum or degraded snapshot without re-probing.
     """
     error = version_info.error_message or ""
-    unparseable = bool(snapshot.binary_path and version_info.parse_failed)
+    # The probe ran and exited 0 but printed no readable version. That holds
+    # whether or not an executable path was resolved: ``python -m bandit``
+    # without a console script has none, yet the gate must still refuse an
+    # unknown security scanner version (#3568).
+    version_unreadable = version_info.parse_failed
+    unparseable = bool(snapshot.binary_path and version_unreadable)
     passed = (
         version_info.version_check_passed
         and not version_info.probe_failed
@@ -718,6 +723,7 @@ def _snapshot_from_version(
     if (
         not available
         and not snapshot.binary_path
+        and not version_unreadable
         and probe_failure is not ProbeFailure.PROBE_TIMEOUT
     ):
         main_cmd = snapshot.command[0] if snapshot.command else snapshot.name
@@ -733,7 +739,7 @@ def _snapshot_from_version(
         recommended_version=version_info.recommended_version or "",
         below_recommended=version_info.below_recommended,
         known_bad=version_info.known_bad is not None,
-        version_unreadable=unparseable,
+        version_unreadable=version_unreadable,
         probe_failure=probe_failure,
         probe_seconds=(
             version_info.probe_seconds
