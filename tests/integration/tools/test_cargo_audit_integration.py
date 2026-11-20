@@ -193,5 +193,5 @@ def test_vendored_copy_is_skipped_unless_included(repo: Path, include: bool) -> 
     assert_that(result.success).is_equal_to(not include)
     if not include:
         assert_that(result.output).contains(
-            "copies under a vendor/ or target/ directory (1): vendor/dep/Cargo.lock;",
+            "lockfiles under a vendor/ or target/ directory (1): vendor/dep/Cargo.lock;",
         )

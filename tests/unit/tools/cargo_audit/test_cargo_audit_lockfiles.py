@@ -340,12 +340,12 @@ def test_vendored_and_build_tree_copies_are_skipped_unless_included(
     )
     assert_that(result.success).is_equal_to(not include)
     note = (
-        f"Not audited, copies under a vendor/ or target/ directory (1): "
+        f"Not audited, lockfiles under a vendor/ or target/ directory (1): "
         f"{vendored}/Cargo.lock; cargo builds from the top-level Cargo.lock. To "
         "audit them, set the cargo_audit option include_vendored=True."
     )
     if include:
-        assert_that(result.output).does_not_contain("Not audited, copies")
+        assert_that(result.output).does_not_contain("Not audited, lockfiles under")
     else:
         assert_that(result.output).is_equal_to(note)
 
@@ -446,9 +446,9 @@ def test_default_skip_reads_only_components_below_the_requested_root(
     )
     assert_that(result.issues_count).is_equal_to(2 if named else 1)
     if named:
-        assert_that(result.output).does_not_contain("Not audited, copies")
+        assert_that(result.output).does_not_contain("Not audited, lockfiles under")
     else:
-        assert_that(result.output).contains("copies under a vendor/ or target/ ")
+        assert_that(result.output).contains("lockfiles under a vendor/ or target/ ")
         assert_that(result.output).contains("vendor/dep/Cargo.lock;")
 
 
@@ -475,7 +475,13 @@ def test_copy_rule_matches_whole_components_below_the_root(
         requested: Paths handed to ``check``.
         audited: Crate directories whose lockfiles must be audited.
     """
-    for crate in ("vendored", "my-target", "app/vendor/dep", "target/package/x"):
+    for crate in (
+        "vendored",
+        "my-target",
+        "app/vendor/dep",
+        "target/package/x",
+        "target/package/x/vendor/y",
+    ):
         _crate(repo, crate)
 
     _check(fake, requested)
@@ -1218,7 +1224,7 @@ def test_only_copies_found_is_no_files_naming_them(
     assert_that(result.no_files).is_true()
     assert_that(result.skipped).is_false()
     assert_that(result.output).is_equal_to(
-        "No Cargo.lock in scope to audit.\n\nNot audited, copies under a vendor/ "
+        "No Cargo.lock in scope to audit.\n\nNot audited, lockfiles under a vendor/ "
         "or target/ directory (2): target/package/b/Cargo.lock, vendor/a/Cargo.lock; "
         "cargo builds from the top-level Cargo.lock. To audit them, set the "
         "cargo_audit option include_vendored=True.",
@@ -1252,11 +1258,13 @@ def test_diff_run_names_only_copies_in_the_diff(
         assert_that(result.output or "").does_not_contain("vendor/dep")
 
 
-def test_incremental_rerun_does_not_name_unchanged_copies(
+def test_incremental_rerun_still_names_unchanged_copies(
     git_repo: Path,
     fake: _FakeCargoAudit,
 ) -> None:
-    """A second incremental run with no change is plain "no files".
+    """A skipped copy was never audited, so every incremental run names it.
+
+    The audited app lockfile is unchanged and not audited again.
 
     Args:
         git_repo: Committed repository with app and vendor/dep.
@@ -1267,7 +1275,71 @@ def test_incremental_rerun_does_not_name_unchanged_copies(
 
     second = _check(fake, ["."], options={"incremental": True})
 
-    assert_that(first.output).contains("directory (1): vendor/dep/Cargo.lock;")
+    note = "directory (1): vendor/dep/Cargo.lock;"
+    assert_that(first.output).contains(note)
     assert_that(fake.commands).is_empty()
     assert_that(second.no_files).is_true()
-    assert_that(second.output or "").does_not_contain("vendor/dep")
+    assert_that(second.output).contains(note)
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "default-skip",
+        "named-later",
+        "excluded",
+        pytest.param(
+            "unreadable",
+            marks=pytest.mark.skipif(
+                hasattr(os, "geteuid") and os.geteuid() == 0,
+                reason="root reads a file whatever its mode",
+            ),
+        ),
+        "timeout",
+        "failed",
+    ],
+)
+def test_a_lockfile_left_unaudited_is_audited_by_the_next_incremental_run(
+    tmp_path: Path,
+    repo: Path,
+    fake: _FakeCargoAudit,
+    monkeypatch: pytest.MonkeyPatch,
+    reason: str,
+) -> None:
+    """No reason for leaving a lockfile unaudited records it as checked.
+
+    The second incremental run audits exactly the lockfile the first left
+    unaudited; the audited, unchanged app lockfile is not audited again.
+
+    Args:
+        tmp_path: Pytest temporary directory, holding the cache.
+        repo: Repository root.
+        fake: The fake cargo-audit.
+        monkeypatch: Points the incremental cache at ``tmp_path``.
+        reason: Why the first run left the lockfile unaudited.
+    """
+    monkeypatch.setattr("lintro.utils.file_cache.CACHE_DIR", tmp_path / "cache")
+    _crate(repo, "app")
+    copy = reason in {"default-skip", "named-later"}
+    lib = _crate(repo, "vendor/lib" if copy else "lib")
+    if reason == "unreadable":
+        lib.chmod(0)
+    fake.hang_on = lib if reason == "timeout" else None
+    if reason == "failed":
+        fake.broken.add(lib)
+    incremental: dict[str, object] = {"incremental": True}
+    exclude = ["lib/"] if reason == "excluded" else None
+    _check(fake, ["."], options=incremental, exclude=exclude)
+    lib.chmod(0o644)
+    fake.hang_on = None
+    fake.broken.clear()
+    fake.commands.clear()
+
+    _check(
+        fake,
+        ["vendor/lib/Cargo.lock"] if reason == "named-later" else ["."],
+        options=incremental,
+        include_vendored=True if reason == "default-skip" else None,
+    )
+
+    assert_that(fake.audited()).is_equal_to([lib])

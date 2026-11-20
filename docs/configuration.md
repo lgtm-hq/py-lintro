@@ -3963,7 +3963,7 @@ Cargo-audit checks each `Cargo.lock` against the RustSec advisory database. It r
 finds under the paths you pass, with one cargo-audit run per lockfile, except copies: by
 default a `Cargo.lock` below a directory named `vendor` or `target` is not audited and
 is named in the output instead
-(`Not audited, copies under a vendor/ or target/ directory (N): ...`).
+(`Not audited, lockfiles under a vendor/ or target/ directory (N): ...`).
 
 Why: cargo resolves a build from the lockfile at the top of your project or workspace.
 The Cargo Book's workspace reference says "All packages share a common `Cargo.lock` file
@@ -3981,10 +3981,18 @@ How the rule reads a path:
 - The whole directory name must match: `app/vendor/dep/Cargo.lock` and
   `target/package/x/Cargo.lock` are skipped; `vendored/Cargo.lock` and
   `my-target/Cargo.lock` are audited.
-- A lockfile you name is audited: `lintro check vendor/dep/Cargo.lock` audits it, and so
-  does a file list that names it (as `lintro watch` passes changed files).
-- Passing the directory itself makes it the root: `lintro check vendor/` audits the
-  lockfiles inside it.
+- A lockfile you name is audited: `lintro check vendor/dep/Cargo.lock` audits it.
+- Passing the directory itself makes it the root: `lintro check vendor/` audits
+  `vendor/dep/Cargo.lock`, but still skips a nested copy such as
+  `vendor/dep/vendor/x/Cargo.lock`, because `vendor` appears again below that root.
+- With several paths, a lockfile is skipped only if it is a copy below every path that
+  holds it: `lintro check . vendor` audits `vendor/dep/Cargo.lock`.
+- `lintro watch` passes the changed files themselves, so a changed vendored lockfile is
+  named and audited. `--diff` and `--incremental` keep the paths you passed as roots, so
+  a changed vendored lockfile is skipped and named.
+- A crate of your own in a directory named `vendor` or `target` below the scanned path
+  is skipped like a copy. For example, with `vendor/mytool/Cargo.lock`, run
+  `lintro check vendor/mytool` (or name the lockfile), or set `include_vendored`.
 
 To audit the copies too, set the `include_vendored` option:
 
