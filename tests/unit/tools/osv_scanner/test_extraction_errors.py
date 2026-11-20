@@ -935,6 +935,9 @@ _SECOND_FILE = "failed reading app/package-lock.json: permission denied"
         "XML syntax error on line 1: rpc error: unavailable",
         "could not extract: {file}:1: network is unreachable",
         'could not extract: strconv.ParseFloat: parsing "": invalid syntax',
+        "failed to decode Makefile file: unexpected EOF",
+        "failed to decode config file: unexpected EOF",
+        "failed to decode Makefile file: unexpected end of JSON input",
     ],
     ids=[
         "yaml",
@@ -958,6 +961,9 @@ _SECOND_FILE = "failed reading app/package-lock.json: permission denied"
         "xml-rpc",
         "gomod-network",
         "strconv",
+        "decode-makefile",
+        "decode-config",
+        "decode-makefile-json",
     ],
 )
 def test_parser_prefix_with_text_naming_another_file_is_kept(

@@ -465,7 +465,7 @@ _OTHER_TEMPLATES: dict[str, str] = {
     "eof/pom": r"could not extract pom from \x00: EOF",
     # could not extract: unexpected EOF (conan.lock, renv.lock) and
     # failed to decode packages.lock.json file: unexpected EOF
-    "eof/unexpected": r"(?:could not extract: |failed to decode [\w.-]{1,64} file: )"
+    "eof/unexpected": r"(?:could not extract: |failed to decode packages\.lock\.json file: )"
     r"unexpected EOF",
     # Open(<file>): open <file>: permission denied (an unreadable file)
     "open/permission": r"Open\(\x00\): open \x00: permission denied",
@@ -474,7 +474,7 @@ _OTHER_TEMPLATES: dict[str, str] = {
 #: How each family's messages are introduced. ``could not extract`` lacks its
 #: colon for bun.lock; ``failed to decode <name> file:`` is
 #: packages.lock.json; packages.config prints the XML error bare.
-_EXTRACT = r"(?:could not extract:? |failed to decode [\w.-]{1,64} file: )"
+_EXTRACT = r"(?:could not extract:? |failed to decode packages\.lock\.json file: )"
 _FAMILY_PREFIXES: dict[str, str] = {
     "json": _EXTRACT,
     "yaml": rf"could not extract: yaml: (?:line {_N}: )?",
