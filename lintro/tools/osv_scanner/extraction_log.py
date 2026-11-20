@@ -465,7 +465,8 @@ _OTHER_TEMPLATES: dict[str, str] = {
     "eof/pom": r"could not extract pom from \x00: EOF",
     # could not extract: unexpected EOF (conan.lock, renv.lock) and
     # failed to decode packages.lock.json file: unexpected EOF
-    "eof/unexpected": r"(?:could not extract: |failed to decode packages\.lock\.json file: )"
+    "eof/unexpected": r"(?:could not extract: |"
+    r"failed to decode packages\.lock\.json file: )"
     r"unexpected EOF",
     # Open(<file>): open <file>: permission denied (an unreadable file)
     "open/permission": r"Open\(\x00\): open \x00: permission denied",
