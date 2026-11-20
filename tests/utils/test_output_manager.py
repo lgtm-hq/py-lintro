@@ -7,12 +7,12 @@ import tempfile
 from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from assertpy import assert_that
 
+from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.output import OutputManager
 
@@ -44,8 +44,11 @@ def make_tool_result(
     name: str,
     issues_count: int = 0,
     issues: list[Any] | None = None,
-) -> SimpleNamespace:
-    """Factory for tool-like result objects used in report tests.
+) -> ToolResult:
+    """Build a real tool result for report tests.
+
+    The report writers read ``ToolResult`` fields such as ``unavailable``, so
+    a stand-in object would drift from what they need.
 
     Args:
         name: Tool name.
@@ -53,10 +56,11 @@ def make_tool_result(
         issues: Optional list of issues.
 
     Returns:
-        SimpleNamespace with name, issues_count, output, and issues.
+        A completed ``ToolResult`` with the given issues.
     """
-    return SimpleNamespace(
+    return ToolResult(
         name=name,
+        success=issues_count == 0,
         issues_count=issues_count,
         output=f"Output for {name}",
         issues=issues or [],
@@ -172,7 +176,7 @@ def test_write_reports_from_results(temp_output_dir: str) -> None:
     om = OutputManager(base_dir=temp_output_dir)
     issues = [make_issue("foo.py", 1, "E001", "Test error")]
     results = [make_tool_result("tool1", 1, issues), make_tool_result("tool2", 0, [])]
-    om.write_reports_from_results(results)  # type: ignore[arg-type]
+    om.write_reports_from_results(results)
     md = (om.get_run_dir() / "report.md").read_text()
     assert_that("tool1" in md and "foo.py" in md and ("E001" in md)).is_true()
     html = (om.get_run_dir() / "report.html").read_text()
@@ -197,7 +201,7 @@ def test_write_reports_from_results_with_none_code(temp_output_dir: str) -> None
     om = OutputManager(base_dir=temp_output_dir)
     issues = [_ReportIssue(file="bar.py", line=5, code=None, message="Some warning")]
     results = [make_tool_result("tool1", 1, issues)]
-    om.write_reports_from_results(results)  # type: ignore[arg-type]
+    om.write_reports_from_results(results)
     md = (om.get_run_dir() / "report.md").read_text()
     assert_that(md).contains("bar.py")
     assert_that(md).contains("Some warning")
