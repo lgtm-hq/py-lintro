@@ -1559,6 +1559,7 @@ def test_the_verify_baseline_reads_the_incremental_cache_without_writing_it(
     cache_file.write_text(
         json.dumps(
             {
+                "format_version": file_cache.CACHE_FORMAT_VERSION,
                 "tool_name": "black",
                 "fingerprints": {
                     str(unchanged): {

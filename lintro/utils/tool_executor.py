@@ -63,6 +63,7 @@ from lintro.utils.execution.tool_configuration import (
     resolve_run_formatting,
 )
 from lintro.utils.gates import execute_gates
+from lintro.utils.incremental_record import finish_incremental_run
 from lintro.utils.npx_integrity import NpxIntegrityError
 from lintro.utils.output import OutputManager
 from lintro.utils.refused_command import command_refusal, mark_refused_command
@@ -355,6 +356,9 @@ def _execute_tools_sequential(
                 result,
                 command=executed_command(tool, result),
             )
+            # Only now, with the whole result known, are files recorded as
+            # checked (#3578); a run that raises never gets here.
+            result = finish_incremental_run(tool, result)
             result = replace(result, duration_seconds=time.monotonic() - started)
 
             # Populate doc_url on each issue from the plugin

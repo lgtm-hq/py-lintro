@@ -6,9 +6,11 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.utils.file_cache import (
+    CACHE_FORMAT_VERSION,
     FileFingerprint,
     ToolCache,
     clear_all_caches,
@@ -131,18 +133,58 @@ def test_tool_cache_nonexistent_file_skipped() -> None:
     assert_that(changed).is_empty()
 
 
-def test_tool_cache_update_adds_fingerprints(tmp_path: Path) -> None:
-    """Update adds fingerprints for files.
+def test_tool_cache_record_keeps_checked_and_forgets_unchecked() -> None:
+    """Record adds the checked files and drops the handed, unproven ones."""
+    old = FileFingerprint(path="/p/a.py", mtime=1.5, size=1)
+    new = FileFingerprint(path="/p/b.py", mtime=2.5, size=2)
+    cache = ToolCache(tool_name="test", fingerprints={"/p/a.py": old})
+
+    cache.record({"/p/b.py": new}, unchecked=["/p/a.py", "/p/b.py"])
+
+    assert_that(cache.fingerprints).is_equal_to({"/p/b.py": new})
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"tool_name": "t", "fingerprints": {"/p/a.py": {}}},
+        {"format_version": 1, "tool_name": "t", "fingerprints": {}},
+        ["not", "an", "object"],
+    ],
+    ids=["unversioned", "version-1", "not-an-object"],
+)
+def test_tool_cache_load_discards_a_file_in_another_format(
+    tmp_path: Path,
+    payload: object,
+) -> None:
+    """A cache written by an earlier lintro is discarded, not trusted.
+
+    Args:
+        tmp_path: Pytest fixture for temporary directory.
+        payload: Cache file contents in a format this version does not write.
+    """
+    entry = {"path": "/p/a.py", "mtime": 1.5, "size": 1}
+    if isinstance(payload, dict) and "/p/a.py" in payload["fingerprints"]:
+        payload["fingerprints"]["/p/a.py"] = entry
+    (tmp_path / "t.json").write_text(json.dumps(payload))
+
+    with patch("lintro.utils.file_cache.CACHE_DIR", tmp_path):
+        loaded = ToolCache.load("t")
+
+    assert_that(loaded.fingerprints).is_empty()
+
+
+def test_tool_cache_save_writes_the_current_format(tmp_path: Path) -> None:
+    """A saved cache carries the format version that load accepts.
 
     Args:
         tmp_path: Pytest fixture for temporary directory.
     """
-    temp_file = tmp_path / "test.py"
-    temp_file.write_text("test content")
+    with patch("lintro.utils.file_cache.CACHE_DIR", tmp_path):
+        ToolCache(tool_name="t").save()
 
-    cache = ToolCache(tool_name="test")
-    cache.update([str(temp_file)])
-    assert_that(cache.fingerprints).contains_key(str(temp_file))
+    data = json.loads((tmp_path / "t.json").read_text())
+    assert_that(data["format_version"]).is_equal_to(CACHE_FORMAT_VERSION)
 
 
 def test_tool_cache_clear_removes_all_fingerprints() -> None:

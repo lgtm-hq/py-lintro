@@ -251,23 +251,24 @@ class MyToolPlugin(BaseToolPlugin):
 
 The `ToolDefinition` dataclass defines your tool's metadata:
 
-| Field             | Type           | Description                                          |
-| ----------------- | -------------- | ---------------------------------------------------- |
-| `name`            | `str`          | Unique tool identifier                               |
-| `description`     | `str`          | Brief description                                    |
-| `can_fix`         | `bool`         | Whether tool supports auto-fixing                    |
-| `supports_stdin`  | `bool \| None` | Keyword-only; stdin support, or unknown (`None`)     |
-| `in_process`      | `bool \| None` | Keyword-only; execution mode, unspecified by default |
-| `tool_type`       | `ToolType`     | LINTER, FORMATTER, or SECURITY                       |
-| `file_patterns`   | `list[str]`    | Glob patterns for target files                       |
-| `claims`          | `list[Claim]`  | Patterns plus the capabilities applied to them       |
-| `reads_tree`      | `bool`         | Reads the working tree, so runs after mutation       |
-| `partitionable`   | `bool`         | File set may be sharded without changing the verdict |
-| `native_configs`  | `list[str]`    | Config file names                                    |
-| `version_command` | `list[str]`    | Command to check version                             |
-| `min_version`     | `str`          | Minimum supported version                            |
-| `default_options` | `dict`         | Default tool options                                 |
-| `default_timeout` | `int`          | Default timeout in seconds                           |
+| Field                   | Type           | Description                                          |
+| ----------------------- | -------------- | ---------------------------------------------------- |
+| `name`                  | `str`          | Unique tool identifier                               |
+| `description`           | `str`          | Brief description                                    |
+| `can_fix`               | `bool`         | Whether tool supports auto-fixing                    |
+| `supports_stdin`        | `bool \| None` | Keyword-only; stdin support, or unknown (`None`)     |
+| `in_process`            | `bool \| None` | Keyword-only; execution mode, unspecified by default |
+| `tool_type`             | `ToolType`     | LINTER, FORMATTER, or SECURITY                       |
+| `file_patterns`         | `list[str]`    | Glob patterns for target files                       |
+| `claims`                | `list[Claim]`  | Patterns plus the capabilities applied to them       |
+| `reads_tree`            | `bool`         | Reads the working tree, so runs after mutation       |
+| `partitionable`         | `bool`         | File set may be sharded without changing the verdict |
+| `incremental_cacheable` | `bool`         | False: verdict depends on outside data, never cached |
+| `native_configs`        | `list[str]`    | Config file names                                    |
+| `version_command`       | `list[str]`    | Command to check version                             |
+| `min_version`           | `str`          | Minimum supported version                            |
+| `default_options`       | `dict`         | Default tool options                                 |
+| `default_timeout`       | `int`          | Default timeout in seconds                           |
 
 ### Execution mode and cached availability (API v2)
 

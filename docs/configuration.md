@@ -636,6 +636,45 @@ any confirmation prompts that would otherwise pause execution.
 pipelines, Docker containers, scripts with redirected output), so `--yes` is typically
 only needed when running interactively and you want to avoid prompts.
 
+#### Incremental Checks (`--incremental`)
+
+`lintro check --incremental` hands each tool only the files that tool has not already
+checked clean since they last changed. Each tool keeps its own record under
+`~/.lintro/cache/<tool>.json`; a file counts as changed when its modification time or
+size differs from the recorded one. `--no-cache` deletes every record.
+
+The rule for recording a file is fail closed:
+
+- **A file is recorded after the tool has run, never before.** Discovery only reads the
+  record. Nothing is written when the tool was not installed, its version was refused,
+  it was skipped, it timed out, its run failed or was incomplete, or the run was stopped
+  (Ctrl-C, an exception, a kill). The next incremental run checks those files again.
+- **Only files checked with no finding are recorded.** A file with a finding stays
+  unrecorded, so every incremental run reports it again until it is fixed: an unchanged
+  file with findings never turns a later incremental run green.
+- **A result with findings records the other files only when the tool's report was
+  parsed in full.** Several tools cannot certify that (shellcheck, hadolint and other
+  per-file runners); for them a single finding means no file of that run is recorded,
+  and the next run checks them all again.
+- The recorded fingerprint is the one taken before the tool read the file. A file the
+  tool rewrote (under `lintro format`) or that you edited during the run is checked
+  again next time.
+
+Tools whose result depends on data that changes independently of the files declare
+`incremental_cacheable=False` and are never narrowed: `cargo_audit`, `cargo_deny`,
+`osv_scanner` and `pip_audit` (advisory databases) and `semgrep` (its default
+`--config auto` fetches registry rules). Under `--incremental` they check every file in
+scope and their output says so. `--diff` still narrows them.
+
+Records written by lintro before this rule existed could list files no tool had checked.
+They carry no format version and are discarded the first time each tool runs, so the
+first incremental run after upgrading checks everything once.
+
+The rule lives in the executor that every run goes through, sequential or parallel, so
+it holds for the CLI and the Python API (`incremental=True`) alike. `lintro watch` and
+the MCP server use the same executor but never run incrementally. Calling a plugin's
+`check` directly, outside that executor, reads the record but never adds to it.
+
 #### Node.js Dependency Options
 
 ```bash
@@ -4036,15 +4075,17 @@ In a `--diff` run the scope is the changed lockfiles; a `--diff` run in which no
 lockfile changed reports "no files matched" without the lists, and the same scope
 applies to excluded, skipped and unreadable entries: only those in the diff are named.
 
-cargo_audit ignores lintro's incremental cache. Its verdict depends on the advisory
-database and on the deny settings as much as on the lockfile, so an unchanged lockfile
-can change verdict when a new advisory is published. With `--incremental`, cargo_audit
-therefore audits every `Cargo.lock` in scope, exactly as a full run does, and says so in
-its output; `--diff` still narrows the scope to the changed lockfiles. lintro's changed
-set holds only paths that resolve to a file, so in a `--diff` run an unreadable entry is
-caught when it is a changed `Cargo.lock` that cannot be read, but a dangling symlink,
-symlink loop or directory named `Cargo.lock` is only caught by a full run. Lists of
-lockfiles name the first ten and give a count of the rest.
+cargo_audit ignores lintro's incremental cache (its definition sets
+`incremental_cacheable=False`, see
+[Incremental Checks](#incremental-checks---incremental)). Its verdict depends on the
+advisory database and on the deny settings as much as on the lockfile, so an unchanged
+lockfile can change verdict when a new advisory is published. With `--incremental`,
+cargo_audit therefore audits every `Cargo.lock` in scope, exactly as a full run does,
+and says so in its output; `--diff` still narrows the scope to the changed lockfiles.
+lintro's changed set holds only paths that resolve to a file, so in a `--diff` run an
+unreadable entry is caught when it is a changed `Cargo.lock` that cannot be read, but a
+dangling symlink, symlink loop or directory named `Cargo.lock` is only caught by a full
+run. Lists of lockfiles name the first ten and give a count of the rest.
 
 **Fail closed.** A lockfile that was not audited fails the check and is named, whatever
 the other lockfiles found. Findings from a failed audit are still shown. A lockfile

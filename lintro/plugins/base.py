@@ -67,6 +67,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from lintro.plugins.file_processor import AggregatedResult, FileProcessingResult
+    from lintro.utils.incremental_record import PendingCheck
 
 
 @dataclass
@@ -142,6 +143,8 @@ class BaseToolPlugin(ABC):
         exclude_patterns: Patterns to exclude from file discovery.
         include_venv: Whether to include virtual environment files.
         command_refusal: First command this instance refused to spawn, or None.
+        incremental_pending: Files ``--incremental`` handed this instance,
+            not yet recorded as checked.
     """
 
     options: dict[str, object] = field(default_factory=dict, init=False)
@@ -152,6 +155,14 @@ class BaseToolPlugin(ABC):
     #: execution failure however the plugin handled the ``ValueError``.
     command_refusal: UnsafeCommandError | None = field(
         default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    #: Files ``--incremental`` discovery handed this instance. The executor
+    #: records the ones the run proved clean once the result is known (#3578).
+    incremental_pending: list[PendingCheck] = field(
+        default_factory=list,
         init=False,
         repr=False,
         compare=False,
@@ -250,6 +261,7 @@ class BaseToolPlugin(ABC):
         clone.exclude_patterns = list(self.exclude_patterns)
         clone.include_venv = self.include_venv
         clone.command_refusal = None
+        clone.incremental_pending = []
         clone._isolate_execution_state()
         return clone
 
@@ -657,6 +669,8 @@ class BaseToolPlugin(ABC):
         if isinstance(result, ToolResult):
             logger.debug(f"[{self.name}] Early exit: {result.output}")
             return ExecutionContext(early_result=result)
+        if result.incremental is not None:
+            self.incremental_pending.append(result.incremental)
 
         logger.debug(
             f"[{self.name}] Ready: {len(result.files)} files, "

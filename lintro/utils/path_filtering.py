@@ -373,7 +373,8 @@ def walk_files_with_excludes(
         file_patterns: Glob patterns to include (fnmatch-style).
         exclude_patterns: Gitignore-style patterns to exclude.
         include_venv: Include virtual environment directories when True.
-        incremental: If True, only return files changed since last run.
+        incremental: If True, only return files not recorded as checked in
+            the tool's cache. The cache is read here and never written.
         tool_name: Tool name for incremental cache (required if incremental=True).
         diff_base: Resolved git base ref. When set, the result is restricted to
             files changed relative to this ref (``git diff <base>...HEAD`` plus
@@ -452,18 +453,12 @@ def walk_files_with_excludes(
             paths,
         )
 
-    # Apply incremental filtering if enabled
+    # Apply incremental filtering if enabled. Discovery only reads the cache:
+    # files are recorded as checked after the tool has run (#3578).
     if incremental and tool_name:
         from lintro.utils.file_cache import ToolCache
 
-        cache = ToolCache.load(tool_name)
-        changed_files = cache.get_changed_files(all_files)
-
-        # Update cache with all discovered files for next run
-        cache.update(all_files)
-        cache.save()
-
-        return sorted(changed_files)
+        return sorted(ToolCache.load(tool_name).get_changed_files(all_files))
 
     return sorted(all_files)
 

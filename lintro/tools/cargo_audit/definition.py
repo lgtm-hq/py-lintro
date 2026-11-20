@@ -294,7 +294,6 @@ class _AuditSummary:
             with that target.
         timeout: The whole check's timeout budget in seconds.
         vendored: Lockfiles skipped as vendored or build-tree copies.
-        incremental: Whether the run asked for ``--incremental``.
     """
 
     audits: list[_LockfileAudit]
@@ -304,7 +303,6 @@ class _AuditSummary:
     outside: list[tuple[Path, Path]]
     timeout: float
     vendored: list[Path]
-    incremental: bool = False
 
     @property
     def issues(self) -> list[CargoAuditIssue]:
@@ -394,13 +392,6 @@ class _AuditSummary:
                 f"audited and reported as {_shown(link)}."
                 for link, target in self.outside
             ),
-            (
-                "--incremental does not apply to cargo-audit: it checks every "
-                "Cargo.lock in scope on each run, because advisories change "
-                "independently of the lockfile."
-                if self.incremental
-                else None
-            ),
         ]
         shown = blocks + [note for note in notes if note]
         return "\n\n".join(shown) if shown else None
@@ -452,6 +443,8 @@ class CargoAuditPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
+            # The verdict follows the RustSec advisory database, not only the lockfile.
+            incremental_cacheable=False,
             native_configs=[".cargo/audit.toml"],
             version_command=["cargo", "audit", "--version"],
             min_version=get_min_version(ToolName.CARGO_AUDIT),
@@ -641,7 +634,6 @@ class CargoAuditPlugin(BaseToolPlugin):
         scan: _Scan,
         vendored: list[Path],
         roots: list[str],
-        incremental: bool,
     ) -> ToolResult:
         """Explain a check that leaves no lockfile to audit.
 
@@ -651,7 +643,6 @@ class CargoAuditPlugin(BaseToolPlugin):
             scan: Every Cargo.lock entry in the requested scope.
             vendored: Lockfiles skipped as vendored or build-tree copies.
             roots: Requested roots for the copy rule; empty when included.
-            incremental: Whether the run asked for ``--incremental``.
 
         Returns:
             A no-files result naming what was left out, or ``ctx`` when the
@@ -674,7 +665,6 @@ class CargoAuditPlugin(BaseToolPlugin):
             [],
             0,
             vendored,
-            incremental,
         ).text()
         return ToolResult.from_outcome(
             ToolOutcome(execution=NoFiles()),
@@ -691,7 +681,6 @@ class CargoAuditPlugin(BaseToolPlugin):
         scan: _Scan,
         anchors: tuple[str, ...],
         vendored: list[Path],
-        incremental: bool,
     ) -> _AuditSummary:
         """Audit each lockfile within one timeout budget for the whole check.
 
@@ -702,7 +691,6 @@ class CargoAuditPlugin(BaseToolPlugin):
             anchors: Project directories; a symlinked lockfile whose target
                 lies outside all of them is named in the output.
             vendored: Lockfiles skipped as vendored or build-tree copies.
-            incremental: Whether the run asked for ``--incremental``.
 
         Returns:
             Every audit that finished, and the lockfiles the budget did not
@@ -739,7 +727,6 @@ class CargoAuditPlugin(BaseToolPlugin):
             ],
             timeout=timeout,
             vendored=vendored,
-            incremental=incremental,
         )
 
     def doc_url(self, code: str) -> str | None:
@@ -760,9 +747,9 @@ class CargoAuditPlugin(BaseToolPlugin):
 
         cargo-audit's verdict depends on the advisory database and the deny
         settings as much as on the lockfile, so an unchanged lockfile can
-        change verdict. The incremental cache is therefore never used:
-        discovery runs as in a full check, and every lockfile in scope is
-        audited on every run. ``--diff`` still narrows the scope.
+        change verdict. The definition therefore sets
+        ``incremental_cacheable=False``: every lockfile in scope is audited on
+        every run. ``--diff`` still narrows the scope.
 
         Args:
             paths: List of paths to check.
@@ -771,8 +758,7 @@ class CargoAuditPlugin(BaseToolPlugin):
         Returns:
             ToolResult with security scan results.
         """
-        incremental = bool({**self.options, **options}.get("incremental", False))
-        ctx = self.prepare(paths, {**options, "incremental": False})
+        ctx = self.prepare(paths, options)
         # In a --diff run every kind of entry is limited to the changed ones,
         # so unchanged entries neither fail the run nor fill its notes.
         scan = self._in_scope(self._scan(paths), paths, options)
@@ -799,7 +785,7 @@ class CargoAuditPlugin(BaseToolPlugin):
         # Nothing left in scope wins over a refused or missing cargo-audit.
         if not lockfiles and not scan.unreadable:
             plain = ctx if isinstance(ctx, ToolResult) and ctx.no_files else None
-            return self._nothing_audited(plain, scan, vendored, roots, incremental)
+            return self._nothing_audited(plain, scan, vendored, roots)
         if isinstance(ctx, ToolResult) and not ctx.no_files:
             return ctx
         summary = self._audit_all(
@@ -808,7 +794,6 @@ class CargoAuditPlugin(BaseToolPlugin):
             scan=scan,
             anchors=resolve_exclude_anchors(paths),
             vendored=vendored,
-            incremental=incremental,
         )
         issues = summary.issues
         failure = summary.failure_note()

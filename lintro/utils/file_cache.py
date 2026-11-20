@@ -2,6 +2,10 @@
 
 This module provides functionality to cache file metadata (mtime, size) to enable
 incremental linting - only checking files that have changed since the last run.
+
+A tool's cache holds only files that tool checked to completion with no
+findings. It is written after the tool has run
+(:mod:`lintro.utils.incremental_record`), never during discovery (#3578).
 """
 
 from __future__ import annotations
@@ -15,10 +19,15 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
 # Cache directory location
 CACHE_DIR = Path.home() / ".lintro" / "cache"
+
+#: Format of a tool's cache file. Version 2 holds only files that were checked
+#: to completion. Earlier files could also hold files no tool had checked
+#: (#3578), so a file in any other format is discarded on load.
+CACHE_FORMAT_VERSION: int = 2
 
 
 @dataclass
@@ -112,28 +121,23 @@ class ToolCache:
 
         return changed
 
-    def update(self, files: list[str]) -> None:
-        """Update cache with current file states.
+    def record(
+        self,
+        checked: Mapping[str, FileFingerprint],
+        unchecked: Iterable[str] = (),
+    ) -> None:
+        """Record the files a run checked, and forget the ones it did not.
 
         Args:
-            files: List of file paths to update in cache.
+            checked: Fingerprints taken before the tool read each file, for
+                the files it checked to completion with no findings. A file
+                that changed while the tool ran no longer matches its
+                fingerprint, so the next run checks it again.
+            unchecked: Files the run was handed but did not prove clean.
         """
-        for file_path in files:
-            path = Path(file_path)
-            if not path.exists():
-                # Remove from cache if file no longer exists
-                self.fingerprints.pop(file_path, None)
-                continue
-
-            try:
-                stat = path.stat()
-                self.fingerprints[file_path] = FileFingerprint(
-                    path=file_path,
-                    mtime=stat.st_mtime,
-                    size=stat.st_size,
-                )
-            except OSError as e:
-                logger.debug(f"Could not update cache for {file_path}: {e}")
+        for file_path in unchecked:
+            self.fingerprints.pop(file_path, None)
+        self.fingerprints.update(checked)
 
     def save(self) -> None:
         """Persist cache to disk using atomic write.
@@ -141,10 +145,11 @@ class ToolCache:
         Uses temp file + rename pattern to prevent corruption if write fails.
         """
         cache_file = CACHE_DIR / f"{self.tool_name}.json"
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
 
         try:
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
             data = {
+                "format_version": CACHE_FORMAT_VERSION,
                 "tool_name": self.tool_name,
                 "fingerprints": {
                     path: fp.to_dict() for path, fp in self.fingerprints.items()
@@ -182,7 +187,8 @@ class ToolCache:
             tool_name: Name of the tool to load cache for.
 
         Returns:
-            Loaded cache, or empty cache if file doesn't exist.
+            Loaded cache, or an empty cache when the file does not exist,
+            cannot be read, or was written in another format.
         """
         cache_file = CACHE_DIR / f"{tool_name}.json"
 
@@ -193,6 +199,10 @@ class ToolCache:
             with cache_file.open("r", encoding="utf-8") as f:
                 data = json.load(f)
 
+            if data.get("format_version") != CACHE_FORMAT_VERSION:
+                logger.debug(f"Discarding {tool_name} cache in another format")
+                return cls(tool_name=tool_name)
+
             fingerprints = {
                 path: FileFingerprint.from_dict(fp_data)
                 for path, fp_data in data.get("fingerprints", {}).items()
@@ -201,7 +211,13 @@ class ToolCache:
             cache = cls(tool_name=tool_name, fingerprints=fingerprints)
             logger.debug(f"Loaded cache for {tool_name} ({len(fingerprints)} files)")
             return cache
-        except (OSError, json.JSONDecodeError, KeyError, TypeError) as e:
+        except (
+            OSError,
+            json.JSONDecodeError,
+            AttributeError,
+            KeyError,
+            TypeError,
+        ) as e:
             logger.debug(f"Could not load cache for {tool_name}: {e}")
             return cls(tool_name=tool_name)
 

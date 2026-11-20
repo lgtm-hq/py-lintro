@@ -327,6 +327,8 @@ class SemgrepPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
+            # The default ``--config auto`` fetches registry rules that change upstream.
+            incremental_cacheable=False,
             native_configs=[".semgrep.yaml", ".semgrep.yml", ".semgrep/"],
             version_command=["semgrep", "--version"],
             min_version=get_min_version(ToolName.SEMGREP),

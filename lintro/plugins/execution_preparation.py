@@ -22,6 +22,8 @@ from lintro.plugins.file_discovery import (
     validate_paths,
 )
 from lintro.plugins.protocol import ToolDefinition
+from lintro.utils.file_cache import snapshot_fingerprints
+from lintro.utils.incremental_record import PendingCheck
 from lintro.utils.tool_snapshots import (
     ALLOW_VERSION_LAG_ENV,
     snapshot_is_runnable,
@@ -50,6 +52,8 @@ class PreparedExecution:
         timeout: Resolved subprocess timeout in seconds.
         resolved_commands: Command prefixes the version gate resolved for
             this execution directory, keyed ``(tool, cwd)`` (#2043).
+        incremental: Under ``--incremental``, the handed files and their
+            fingerprints, recorded only after the tool has run (#3578).
     """
 
     files: list[str]
@@ -58,6 +62,11 @@ class PreparedExecution:
     timeout: float
     resolved_commands: ResolvedCommands = field(
         default_factory=dict,
+        compare=False,
+        hash=False,
+    )
+    incremental: PendingCheck | None = field(
+        default=None,
         compare=False,
         hash=False,
     )
@@ -310,14 +319,18 @@ def prepare_execution(
 
     # Discover files matching tool patterns, restricting to the git-diff
     # changed set when a base ref was resolved for this run.
+    # A tool whose verdict depends on outside data is never narrowed (#3578).
     diff_base = merged_options.get("diff_base")
+    incremental = definition.incremental_cacheable and bool(
+        merged_options.get("incremental", False),
+    )
     files = discover_files(
         paths=paths,
         definition=definition,
         exclude_patterns=exclude_patterns,
         include_venv=include_venv,
         diff_base=diff_base if isinstance(diff_base, str) else None,
-        incremental=bool(merged_options.get("incremental", False)),
+        incremental=incremental,
     )
 
     if not files:
@@ -378,6 +391,11 @@ def prepare_execution(
         cwd=cwd,
         timeout=timeout,
         resolved_commands=resolved_commands,
+        incremental=(
+            PendingCheck(definition.name, cwd, snapshot_fingerprints(files))
+            if incremental
+            else None
+        ),
     )
 
 
