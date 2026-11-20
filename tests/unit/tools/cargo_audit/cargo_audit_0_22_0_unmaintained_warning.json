@@ -1,0 +1,51 @@
+{
+  "database": {
+    "advisory-count": 1555,
+    "last-commit": "f291af9b1cc0d21dfcea1709d6b037963cef262b",
+    "last-updated": "2026-11-20T13:47:55+01:00"
+  },
+  "lockfile": { "dependency-count": 2 },
+  "settings": {
+    "target_arch": [],
+    "target_os": [],
+    "severity": null,
+    "ignore": [],
+    "informational_warnings": ["unmaintained", "unsound", "notice"]
+  },
+  "vulnerabilities": { "found": false, "count": 0, "list": [] },
+  "warnings": {
+    "unmaintained": [
+      {
+        "kind": "unmaintained",
+        "package": {
+          "name": "ansi_term",
+          "version": "0.12.1",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": null,
+          "replace": null
+        },
+        "advisory": {
+          "id": "RUSTSEC-2021-0139",
+          "package": "ansi_term",
+          "title": "ansi_term is Unmaintained",
+          "description": "The maintainer has advised that this crate is deprecated and will not receive any maintenance.\n\nThe crate does not seem to have much dependencies and may or may not be ok to use as-is.\n\nLast release seems to have been three years ago.\n\n## Possible Alternative(s)\n\n The below list has not been vetted in any way and may or may not contain alternatives;\n\n - [ansiterm](https://crates.io/crates/ansiterm)\n - [anstyle](https://github.com/epage/anstyle)\n - [console](https://crates.io/crates/console)\n - [nu-ansi-term](https://crates.io/crates/nu-ansi-term)\n - [owo-colors](https://crates.io/crates/owo-colors)\n - [stylish](https://crates.io/crates/stylish)\n - [yansi](https://crates.io/crates/yansi)\n\n## Dependency Specific Migration(s)\n\n - [structopt, clap2](https://github.com/clap-rs/clap/discussions/4172)",
+          "date": "2021-08-18",
+          "aliases": [],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [],
+          "cvss": null,
+          "informational": "unmaintained",
+          "references": [],
+          "source": null,
+          "url": "https://github.com/ogham/rust-ansi-term/issues/72",
+          "withdrawn": null,
+          "license": "CC0-1.0"
+        },
+        "affected": null,
+        "versions": { "patched": [], "unaffected": [] }
+      }
+    ]
+  }
+}
