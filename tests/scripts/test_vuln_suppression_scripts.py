@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
-from lintro._tool_versions import get_tool_version
+from lintro._tool_versions import TOOL_VERSIONS
 from lintro.enums.tool_name import ToolName
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -264,7 +264,7 @@ def test_install_script_retries_transient_curl_exit_23(tmp_path: Path) -> None:
 def _run_install_without_version(
     tmp_path: Path,
     *,
-    with_pin_file: bool,
+    pinned_version: str | None,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Run the installer with no version argument and no ``OSV_VERSION``.
 
@@ -272,18 +272,22 @@ def _run_install_without_version(
 
     Args:
         tmp_path: Pytest temporary directory.
-        with_pin_file: Copy the real ``lintro/_tool_versions.py`` into the
-            workspace, as the CI checkout has it.
+        pinned_version: Write the real ``lintro/_tool_versions.py`` into the
+            workspace with the osv-scanner pin set to this version, or write
+            no pin file when ``None``.
 
     Returns:
         The finished process and the file holding the requested URLs.
     """
     workspace = tmp_path / "repo"
     _install_fake_tooling(workspace)
-    if with_pin_file:
+    if pinned_version is not None:
+        real = (_REPO_ROOT / "lintro/_tool_versions.py").read_text(encoding="utf-8")
+        shipped = f'ToolName.OSV_SCANNER: "{TOOL_VERSIONS[ToolName.OSV_SCANNER]}",'
+        assert_that(real).contains(shipped)
         (workspace / "lintro").mkdir()
         (workspace / "lintro/_tool_versions.py").write_text(
-            (_REPO_ROOT / "lintro/_tool_versions.py").read_text(encoding="utf-8"),
+            real.replace(shipped, f'ToolName.OSV_SCANNER: "{pinned_version}",'),
             encoding="utf-8",
         )
     urls_file = tmp_path / "curl-urls"
@@ -323,12 +327,16 @@ def test_install_script_defaults_to_the_shipped_pin(tmp_path: Path) -> None:
     """With no version given, CI installs the osv-scanner lintro pins (#3557).
 
     The suppression-check workflow passes no version, so this default is the
-    osv-scanner CI runs. It is read from ``_tool_versions.py``, the pin the
-    tools image installs and lintro's ``min_version`` equals, so it cannot
-    fall behind the floor when Renovate bumps the pin.
+    osv-scanner CI runs. It must be read from ``_tool_versions.py``, the pin
+    the tools image installs and lintro's minimum equals, so it cannot fall
+    behind the minimum when Renovate bumps the pin. The workspace's pin file
+    names a version different from the shipped pin, so a literal default kept
+    in the script, even one equal to the shipped pin, fails this test.
     """
-    result, urls_file = _run_install_without_version(tmp_path, with_pin_file=True)
-    pin = get_tool_version(ToolName.OSV_SCANNER)
+    shipped = TOOL_VERSIONS[ToolName.OSV_SCANNER]
+    major, minor, patch = (int(part) for part in shipped.split("."))
+    pin = f"{major}.{minor + 1}.{patch + 3}"
+    result, urls_file = _run_install_without_version(tmp_path, pinned_version=pin)
 
     assert_that(result.stderr).contains(f"Installing osv-scanner v{pin} ")
     assert_that(urls_file.read_text().splitlines()[0]).ends_with(
@@ -340,7 +348,7 @@ def test_install_script_without_pin_fails_before_downloading(
     tmp_path: Path,
 ) -> None:
     """A checkout without the pin file stops with a named error, no download."""
-    result, urls_file = _run_install_without_version(tmp_path, with_pin_file=False)
+    result, urls_file = _run_install_without_version(tmp_path, pinned_version=None)
 
     assert_that(result.returncode).is_equal_to(1)
     assert_that(result.stderr).contains(

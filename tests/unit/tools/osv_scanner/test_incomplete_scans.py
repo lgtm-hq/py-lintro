@@ -1,8 +1,7 @@
 """OSV-Scanner runs without a complete scan report (#3352).
 
-Each process below is what osv-scanner 2.4.0 or 2.7.1  # meta-guard: allow
-prints for the case at ``--verbosity error``, where a scan that went well
-prints nothing.
+Each process below is what osv-scanner 2.4.0 or 2.7.1 prints for the case at
+``--verbosity error``, where a scan that went well prints nothing.
 """
 
 from __future__ import annotations
@@ -25,7 +24,7 @@ _NO_SOURCES_STDERR = "No package sources found, --help for usage information.\n"
 
 _LOCKFILE: dict[str, str] = {"requirements.txt": "flask==3.0.0\n"}
 
-#: What osv-scanner 2.7.1 logs when its vulnerability queries fail.  # meta-guard: allow
+#: What osv-scanner 2.7.1 logs when its vulnerability queries fail.
 _QUERY_FAILED_STDERR = (
     "Error during extraction: (extracting as vulnmatch/osvdev) max retries "
     "exceeded: attempt 4: request failed: Post "

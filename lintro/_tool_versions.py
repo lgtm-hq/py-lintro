@@ -113,7 +113,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.GITLEAKS: "8.30.1",
     ToolName.GOLANGCI_LINT: "2.15.0",
     ToolName.HADOLINT: "2.15.1",
-    ToolName.OSV_SCANNER: "2.7.1",
+    ToolName.OSV_SCANNER: "2.7.0",
     ToolName.RUSTC: "1.99.1",
     # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
     ToolName.RUSTFMT: "1.10.0",

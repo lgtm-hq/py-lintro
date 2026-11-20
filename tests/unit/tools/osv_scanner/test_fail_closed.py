@@ -5,9 +5,9 @@ prints nothing. A run is complete only when everything printed is an
 allow-listed resolution note or an error for an excluded file that names no
 other path, stdout is exactly one JSON report, and "No package sources found"
 is no files only as the exact whole line. These tests mix the notes
-osv-scanner 2.4.0 and 2.7.1  # meta-guard: allow
-really print with other errors and with arbitrary text, in every order and at
-every exit status, and check that nothing else can leave a run complete. The oracle is the lists below, written out here rather
+osv-scanner 2.4.0 and 2.7.1 really print with other errors and with arbitrary
+text, in every order and at every exit status, and check that nothing else can
+leave a run complete. The oracle is the lists below, written out here rather
 than taken from the reader.
 """
 
@@ -50,8 +50,7 @@ _EXCLUDED_DIR = "excluded"
 
 _TRANSITIVE = "Error during extraction: (extracting as transitivedependency/"
 
-#: The harmless messages, as osv-scanner 2.4.0 and 2.7.1  # meta-guard: allow
-#: print them at
+#: The harmless messages, as osv-scanner 2.4.0 and 2.7.1 print them at
 #: ``--verbosity error``, with ``{root}`` for the scanned directory.
 _ALLOWED: tuple[str, ...] = (
     f"{_TRANSITIVE}requirements) failed resolution for "
@@ -67,7 +66,7 @@ _ALLOWED: tuple[str, ...] = (
     "{root}/impossible/requirements.txt: resolution impossible:\n"
     'no candidates at all for: flask "====="',
     # Two unsatisfiable manifests: the resolver's error ends in a newline, so
-    # a blank line separates the parts (2.4.0 and 2.7.1 alike).  # meta-guard: allow
+    # a blank line separates the parts (2.4.0 and 2.7.1 alike).
     f"{_TRANSITIVE}requirements) failed resolution for "
     "{root}/two/a/requirements.txt: resolution impossible:\n"
     'no candidates at all for: flask "==99999.0.0"\n'
@@ -114,13 +113,12 @@ _NOT_REPORTS: tuple[str, ...] = (
     '{"results": [}',
 )
 
-#: The whole line osv-scanner 2.4.0 to 2.7.1 prints  # meta-guard: allow
-#: when it found nothing.
+#: The whole line osv-scanner 2.4.0 to 2.7.1 prints when it found nothing.
 _NO_SOURCES = "No package sources found, --help for usage information."
 
 #: Errors osv-scanner prints, or could print, none of them harmless.
 _ERRORS: tuple[str, ...] = (
-    # Real messages, 2.4.0 and 2.7.1.  # meta-guard: allow
+    # Real messages, 2.4.0 and 2.7.1.
     "Error during extraction: (extracting as javascript/packagelockjson) "
     "{root}/broken/package-lock.json: could not extract: invalid character "
     "'o' in literal null (expecting 'u')",

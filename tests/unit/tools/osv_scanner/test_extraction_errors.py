@@ -1,8 +1,7 @@
 """How OSV-Scanner's ``Error during extraction`` lines are read (#3352).
 
-Every standard error below is what osv-scanner 2.4.0 or 2.7.1  # meta-guard: allow
-prints for the case at ``--verbosity error``, with the scanned directory
-written as ``{root}``
+Every standard error below is what osv-scanner 2.4.0 or 2.7.1 prints for the
+case at ``--verbosity error``, with the scanned directory written as ``{root}``
 (relative to ``/``, as osv-scanner prints it).
 """
 
@@ -25,15 +24,14 @@ from lintro.utils.tool_metadata import tool_notes
 _PRIVATE = "zz-private-internal-pkg-xq"
 
 #: A requirements.txt naming a package public PyPI does not have, healthy
-#: network. 2.4.0 and 2.7.1 print the same line.  # meta-guard: allow
+#: network. 2.4.0 and 2.7.1 print the same line.
 _PRIVATE_PACKAGE_STDERR = (
     "Error during extraction: (extracting as transitivedependency/requirements) "
     f"failed resolution for {{root}}/requirements.txt: package System(7):{_PRIVATE}: "
     "not found\n"
 )
 
-#: Two manifests with private packages; 2.7.1 order,  # meta-guard: allow
-#: joined by a newline.
+#: Two manifests with private packages; 2.7.1 order, joined by a newline.
 _TWO_PRIVATE_STDERR_2_7 = (
     "Error during extraction: (extracting as transitivedependency/requirements) "
     "failed resolution for {root}/a/requirements.txt: package System(7):zz-a: "
@@ -59,8 +57,7 @@ _MULTILINE_RESOLUTION_STDERR = (
     "\n"
 )
 
-#: A pom.xml depending on an artifact no registry has
-#: (2.4.0 and 2.7.1).  # meta-guard: allow
+#: A pom.xml depending on an artifact no registry has (2.4.0 and 2.7.1).
 _MAVEN_STDERR = (
     "Error during extraction: (extracting as transitivedependency/pomxml) "
     "failed resolution for {root}/pom.xml: failed resolving "
@@ -73,8 +70,7 @@ _CONNECTION_REFUSED = (
     '127.0.0.1:9: connect: connection refused"'
 )
 
-#: The private-package manifest with the network down,
-#: osv-scanner 2.7.1.  # meta-guard: allow
+#: The private-package manifest with the network down, osv-scanner 2.7.1.
 _DEAD_NETWORK_STDERR_2_7 = (
     "Error during extraction: (extracting as transitivedependency/requirements) "
     "failed resolution for {root}/requirements.txt: max retries exhausted: "
@@ -96,7 +92,7 @@ _DEAD_NETWORK_STDERR_2_4 = (
     "max retries exceeded: attempt 4: request failed\n"
 )
 
-#: Two malformed lockfiles read by one extractor (2.4.0 and 2.7.1).  # meta-guard: allow
+#: Two malformed lockfiles read by one extractor (2.4.0 and 2.7.1).
 _TWO_MALFORMED_STDERR = (
     "Error during extraction: (extracting as javascript/packagelockjson) \n"
     "\t{root}/a/package-lock.json: could not extract: invalid character 'o' "
@@ -366,7 +362,7 @@ def test_failed_resolution_alone_is_a_clean_complete_scan(
             ],
         ),
     ],
-    ids=["2.7.1", "2.4.0"],  # meta-guard: allow
+    ids=["2.7.1", "2.4.0"],
 )
 def test_failed_resolution_with_the_network_down_is_incomplete(
     osv_scanner_plugin: OsvScannerPlugin,
