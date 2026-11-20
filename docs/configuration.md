@@ -854,7 +854,54 @@ and a note explaining the reason. Common skip reasons:
 | Version check messages   | Tool version below minimum required                                                                                                                     |
 
 Skipped tools do not affect exit codes — only tools that run and find issues contribute
-to a non-zero exit. The exception is strict mode, below.
+to a non-zero exit. The exceptions are a refused security scanner and strict mode,
+below.
+
+### Tool Versions: Refused, Older, Current
+
+For each tool lintro knows two versions: the **minimum**, the oldest release lintro's
+adapter works with (`min_version` in `lintro/tools/manifest.src.json`), and the
+**pinned** version, the one lintro installs and tests. A tool can also have a list of
+**known-bad versions** (`known_bad_versions`): releases that meet the minimum but give
+wrong results. Each entry has a version or range (`versions`), the reason and a
+reference. `versions` uses a deliberately small grammar, checked the same way when the
+manifest is generated and when lintro loads it: comma-separated clauses, each one of
+`==`, `!=`, `<`, `<=`, `>` or `>=` followed by a plain numeric release such as `2.7.0`,
+with a trailing `.*` allowed only after `==` and `!=` (`"==2.7.0"`, `">=2.4.0,<2.6.0"`,
+`"==2.7.*"`). Nothing else is accepted: no `~=`, no pre-release, post-release, epoch or
+local parts.
+
+The installed version falls into one of three cases:
+
+1. **Refused**: below the minimum, or on the known-bad list. Lintro does not run the
+   tool and says why. Below the minimum, the message names the installed version and the
+   command to upgrade (`lintro install --upgrade <tool>`). For a known-bad version it
+   names the installed version, that it is refused, the reason and reference, and ends
+   with `Install <pinned version>, the version lintro tests.`; `lintro versions`,
+   `lintro doctor` (which marks the tool `[XX]`) and the MCP `lintro_versions` tool give
+   the same hint. Lintro does not yet replace a known-bad version for you:
+   `lintro install` treats it like any other installed version, so a known-bad release
+   at or above the pin is reported as installed (#3567). Install the pinned version by
+   hand. A refused security scanner (bandit, cargo-audit, cargo-deny, checkov, cppcheck,
+   gitleaks, osv-scanner, pip-audit, semgrep, trufflehog: the tools whose `tool_type`
+   includes `SECURITY`) **fails the run**: its row is `UNAVAIL`, the reason starts with
+   `security scanner did not run`, and the exit code is 1, so a run without the scan
+   never reads as a clean one. Any other refused tool is skipped, or fails the run under
+   [strict mode](#strict-mode-for-missing-tools). Every report says the scanner did not
+   run and why, never "No issues found": the Markdown, HTML and plain-text reports and
+   the CSV `notes` column print it, JSON carries `status: unavailable` with
+   `unavailable_reason`, and SARIF adds an invocation with `executionSuccessful: false`
+   and a `toolExecutionNotifications` entry instead of a finding. The same applies to
+   any tool reported `UNAVAIL`, and to a tool that ran without a complete result.
+2. **Older than the pin**: the tool runs as usual, and lintro prints one suggestion per
+   tool per run, saying the installed version works, which version lintro tests, and the
+   upgrade command (`lintro install --upgrade <tool>`). This is not a failure and does
+   not change the exit code.
+3. **The pinned version or newer**: the tool runs, with no message.
+
+A tool that sets no `min_version` uses its pinned version as the minimum, so for those
+tools only the pinned version or newer runs. A test fails if a tool's pinned version is
+below its minimum or on its own known-bad list.
 
 ### Strict Mode for Missing Tools
 
@@ -879,7 +926,8 @@ for a run when the config enables it.
 | Why the tool did not run                                   | Default           | Strict                |
 | ---------------------------------------------------------- | ----------------- | --------------------- |
 | Binary not found, or the version probe failed              | `UNAVAIL`, exit 0 | `UNAVAIL`, **exit 1** |
-| Installed but below the minimum version                    | `SKIP`, exit 0    | `UNAVAIL`, **exit 1** |
+| Installed but below the minimum version, or known-bad      | `SKIP`, exit 0    | `UNAVAIL`, **exit 1** |
+| Same, for a security scanner                               | `UNAVAIL`, exit 1 | `UNAVAIL`, **exit 1** |
 | No files matched the tool's patterns                       | not a failure     | not a failure         |
 | `disabled in config`, `not in enabled_tools`, `deferred`   | `SKIP`, exit 0    | `SKIP`, exit 0        |
 | Missing project config or `node_modules` (e.g. `vale`)     | `SKIP`, exit 0    | `SKIP`, exit 0        |
@@ -890,15 +938,20 @@ upgrade hint, in the summary row and in JSON `unavailable_reason`. It is an exec
 failure, not a finding: `issues_count` stays `0`, `status` is `unavailable`,
 `unavailable` is `true` and `success` is `false`. Findings from the tools that did run
 are reported as usual. Without strict mode the JSON is unchanged, so a below-minimum
-tool still reports `status: skipped` with its `skip_reason`.
+tool still reports `status: skipped` with its `skip_reason`, except a security scanner:
+a refused scanner reports `status: unavailable` and fails the run in either mode.
 
 Strict mode applies to every tool the run selected: the tools named with `--tools`, or
 otherwise the tools the config enables (or, without a config, the tools picked by
 language detection). Narrow the set with `--tools` or `execution.enabled_tools` to make
 strict mode cover only the tools you expect to have installed.
-`LINTRO_ALLOW_VERSION_LAG` still lets a listed below-minimum tool run, and
-`--auto-install` only installs Node.js project dependencies, so it does not install a
-missing tool.
+`LINTRO_ALLOW_VERSION_LAG` still lets a listed tool that is below its minimum run (for
+CI images that lag a pin bump), but never a version on the tool's known-bad list: that
+stays refused. A tool the override let run is marked in the results, not only in the
+log: its summary row's Notes column reads `below minimum, allowed by override`, and its
+JSON `metadata` has a `version_lag` object (`version`, `minimum`, `allowed_by`) next to
+the matching note. `--auto-install` only installs Node.js project dependencies, so it
+does not install a missing tool.
 
 "No files matched" covers Black too when it runs next to Ruff. Lintro decides whether
 Black or Ruff formats Python before it discovers files, but a Black that is missing or
@@ -2340,18 +2393,22 @@ tool manifest). osv-scanner 2.4.0 to 2.5.1 read only the first document of a
 two-document `pnpm-lock.yaml` (15 of 651 packages in vuejs/core, where 2.6.0 reads all
 651 and reports 34 vulnerabilities). They exit 0 and print nothing on standard error, so
 the scan reads as complete and clean, and lintro cannot detect it. An older binary is
-reported as below the minimum, with the installed and required versions and where to get
-a newer one. The tool is skipped by default and the run fails with
-`--strict-missing-tools`. Versions from 2.6.0 run. The minimum is not the pinned version
-in `lintro/_tool_versions.py`: the pin is the version lintro installs and tests, and a
+refused as below the minimum, with the installed and required versions and the upgrade
+command. osv-scanner is a security scanner, so a refused binary fails the run instead of
+being skipped (see
+[Tool Versions: Refused, Older, Current](#tool-versions-refused-older-current)).
+Versions from 2.6.0 run. The minimum is not the pinned version in
+`lintro/_tool_versions.py`: the pin is the version lintro installs and tests, and a
 release between the minimum and the pin still runs.
 
 **Known limit.** osv-scanner 2.7.0 treats an npm package with no `resolved` field in
 `package-lock.json` as local and never checks it. npm writes such lockfiles with
 `omit-lockfile-registry-resolved=true`. A one-package lockfile for `body-parser` 2.3.0
 without `resolved` gives 0 vulnerabilities at 2.7.0 and 1 at 2.6.0 and 2.7.1. The bug is
-fixed in 2.7.1. lintro does not yet refuse a single known-bad version that sits between
-good ones (tracked in #3556), so it runs 2.7.0. If you use 2.7.0, upgrade to 2.7.1.
+fixed in 2.7.1. lintro can refuse a known-bad version by name, but 2.7.0 is not on
+osv-scanner's list yet: lintro itself still pins and tests 2.7.0, and the entry is added
+when the pin moves to 2.7.1 (#3556). Until then lintro runs 2.7.0. If you use 2.7.0,
+upgrade to 2.7.1.
 
 **Known limit.** osv-scanner does not report every source it under-reads. A lockfile in
 a format version it does not support (for example `"lockfileVersion": 99`) is logged as

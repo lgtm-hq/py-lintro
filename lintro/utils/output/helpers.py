@@ -9,6 +9,7 @@ from __future__ import annotations
 import html
 from typing import TYPE_CHECKING
 
+from lintro.utils.result_reason import verdict_gap
 from lintro.utils.tool_metadata import tool_notes
 
 if TYPE_CHECKING:
@@ -68,16 +69,55 @@ def note_messages(result: ToolResult) -> list[str]:
     return [note["message"] for note in tool_notes(getattr(result, "metadata", None))]
 
 
-def render_markdown_notes(result: ToolResult) -> list[str]:
-    """Render the notes a tool attached to its result as Markdown.
+#: Shown in place of an issue count for a tool that did not run.
+NOT_RUN: str = "did not run"
+
+
+def says_no_issues(result: ToolResult) -> bool:
+    """Whether a report may say "No issues found" for a result without issues.
 
     Args:
         result: The tool result.
 
     Returns:
-        A quoted line and a blank line per note; none without notes.
+        False when the tool did not run or did not complete: its silence is
+        no clean verdict (:func:`verdict_gap`).
+    """
+    return verdict_gap(result) is None
+
+
+def _gap_lines(result: ToolResult) -> list[str]:
+    """Return the verdict-gap statement as one plain line, if there is one.
+
+    Args:
+        result: The tool result.
+
+    Returns:
+        ``["<headline> <reason>"]`` for a result that is no clean verdict,
+        otherwise an empty list.
+    """
+    gap = verdict_gap(result)
+    return [] if gap is None else [" ".join(gap)]
+
+
+def render_markdown_notes(result: ToolResult) -> list[str]:
+    """Render the notes a tool attached to its result as Markdown.
+
+    Every report renders notes, so the statement that a result is no clean
+    verdict (:func:`verdict_gap`) leads them: a tool that did not run or did
+    not complete is never left to read as a pass (#3556).
+
+    Args:
+        result: The tool result.
+
+    Returns:
+        The verdict gap in bold, then a quoted line per note, each followed
+        by a blank line; none for a complete result without notes.
     """
     lines: list[str] = []
+    gap = verdict_gap(result)
+    if gap is not None:
+        lines.extend((f"**{gap[0]}** {markdown_escape(gap[1])}", ""))
     for message in note_messages(result):
         lines.extend((f"> **Note:** {markdown_escape(message)}", ""))
     return lines
@@ -90,9 +130,16 @@ def render_html_notes(result: ToolResult) -> list[str]:
         result: The tool result.
 
     Returns:
-        One escaped paragraph per note; none without notes.
+        The verdict gap (see :func:`render_markdown_notes`), then one escaped
+        paragraph per note.
     """
-    return [
+    gap = verdict_gap(result)
+    lead = (
+        []
+        if gap is None
+        else [f"<p><strong>{html_escape(gap[0])}</strong> {html_escape(gap[1])}</p>"]
+    )
+    return lead + [
         f"<p><strong>Note:</strong> {html_escape(message)}</p>"
         for message in note_messages(result)
     ]
@@ -105,9 +152,12 @@ def render_plain_notes(result: ToolResult) -> list[str]:
         result: The tool result.
 
     Returns:
-        One line per note; none without notes.
+        The verdict gap (see :func:`render_markdown_notes`), then one line
+        per note.
     """
-    return [f"Note: {message}" for message in note_messages(result)]
+    return _gap_lines(result) + [
+        f"Note: {message}" for message in note_messages(result)
+    ]
 
 
 def csv_notes(result: ToolResult) -> str:
@@ -117,6 +167,8 @@ def csv_notes(result: ToolResult) -> str:
         result: The tool result.
 
     Returns:
-        The note messages joined by newlines, sanitised; empty without notes.
+        The verdict gap (see :func:`render_markdown_notes`) and the note
+        messages joined by newlines, sanitised; empty for a complete result
+        without notes.
     """
-    return sanitize_csv_value("\n".join(note_messages(result)))
+    return sanitize_csv_value("\n".join(_gap_lines(result) + note_messages(result)))

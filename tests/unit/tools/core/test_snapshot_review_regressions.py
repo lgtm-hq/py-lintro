@@ -49,8 +49,10 @@ def test_subset_lookup_preserves_peers_and_original_expiry(
     counts = {"ruff": 0, "black": 0}
 
     def probe(name: str, *, search_root: Path) -> snapshots.ToolSnapshot:
+        # Versions above every real minimum: a cached pass is re-checked
+        # against the manifest's minimum when the cache is read (#3556).
         counts[name] += 1
-        return _binary_snapshot(search_root, name, str(counts[name]))
+        return _binary_snapshot(search_root, name, f"999.{counts[name]}")
 
     monkeypatch.setattr(time, "time", lambda: clock[0])
     monkeypatch.setattr(snapshots, "get_snapshot_ttl", lambda: 10)
@@ -76,7 +78,7 @@ def test_subset_lookup_preserves_peers_and_original_expiry(
         cache_root=tmp_path,
     )
     assert counts == {"ruff": 2, "black": 1}
-    assert expired["ruff"].version == "2"
+    assert expired["ruff"].version == "999.2"
     assert expired["black"].probed_at == 1005
 
 

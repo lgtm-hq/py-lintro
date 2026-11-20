@@ -79,6 +79,8 @@ class ToolSnapshot:
         min_version: Minimum required version used during the probe.
         recommended_version: Recommended version from requirements, if any.
         below_recommended: True when installed version is below recommended.
+        known_bad: True when the installed version is on the tool's known-bad
+            list; no override lets such a version run (#3556).
         command: Executable command resolved from the probe directory.
         probed_at: Original probe time, preserved across subset cache writes.
         probe_failure: Structured cause of a failed probe, when known.
@@ -97,6 +99,7 @@ class ToolSnapshot:
     min_version: str = ""
     recommended_version: str = ""
     below_recommended: bool = False
+    known_bad: bool = False
     command: tuple[str, ...] = ()
     probed_at: float = 0.0
     probe_failure: ProbeFailure | None = None
@@ -121,6 +124,7 @@ class ToolSnapshot:
             "min_version": self.min_version,
             "recommended_version": self.recommended_version,
             "below_recommended": self.below_recommended,
+            "known_bad": self.known_bad,
             "command": list(self.command),
             "probed_at": self.probed_at,
             "probe_failure": (
@@ -144,7 +148,12 @@ class ToolSnapshot:
         """
         defaults = cls(name="").to_dict()
         values = {key: data.get(key, default) for key, default in defaults.items()}
-        for key in ("available", "version_check_passed", "below_recommended"):
+        for key in (
+            "available",
+            "version_check_passed",
+            "below_recommended",
+            "known_bad",
+        ):
             if not isinstance(values[key], bool):
                 raise ValueError(f"{key} must be a boolean")
         for key in ("version", "probe_error", "remediation_hint"):
@@ -195,6 +204,7 @@ class ToolSnapshot:
             min_version=values["min_version"],
             recommended_version=values["recommended_version"],
             below_recommended=values["below_recommended"],
+            known_bad=values["known_bad"],
             command=tuple(command),
             probed_at=float(values["probed_at"]),
             probe_failure=(

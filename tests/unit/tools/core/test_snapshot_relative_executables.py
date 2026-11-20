@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,6 +13,7 @@ import pytest
 from lintro.plugins.protocol import ToolDefinition
 from lintro.tools.core import snapshots
 from lintro.tools.core.command_builders import CommandBuilderRegistry
+from lintro.tools.core.tool_registry import ManifestRegistry
 
 _COMMAND = "./bin/custom-linter"
 
@@ -52,10 +54,11 @@ def local_command(
         "lintro.tools.tool_manager.get_tool",
         lambda name: SimpleNamespace(definition=definition),
     )
+    ruff = ManifestRegistry.load().get("ruff")
     monkeypatch.setattr(
         snapshots,
         "_manifest_tool",
-        lambda name: SimpleNamespace(version_command=[executable, "--version"]),
+        lambda name: replace(ruff, version_command=(executable, "--version")),
     )
     monkeypatch.setattr(
         CommandBuilderRegistry,

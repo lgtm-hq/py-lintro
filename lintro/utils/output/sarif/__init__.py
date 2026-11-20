@@ -8,7 +8,10 @@ callers that want enrichment obtain them from :mod:`lintro.ai.sarif_bridge`
 and pass them down as data (issues #724, #1823).
 """
 
-from lintro.utils.output.sarif.bridge import standard_issues_from_results
+from lintro.utils.output.sarif.bridge import (
+    execution_notifications,
+    standard_issues_from_results,
+)
 from lintro.utils.output.sarif.document import (
     StandardIssue,
     render_fixes_sarif,
@@ -18,6 +21,7 @@ from lintro.utils.output.sarif.document import (
 
 __all__ = [
     "StandardIssue",
+    "execution_notifications",
     "render_fixes_sarif",
     "standard_issues_from_results",
     "to_sarif",

@@ -24,6 +24,11 @@ if TYPE_CHECKING:
 #: ``summary`` (a few words, for a summary table) and ``message``.
 NOTES_KEY: str = "notes"
 
+#: ``ToolResult.metadata`` key naming a below-minimum version that
+#: ``LINTRO_ALLOW_VERSION_LAG`` let run (#3556): ``version``, ``minimum`` and
+#: ``allowed_by``, so a JSON reader need not parse the note text.
+VERSION_LAG_KEY: str = "version_lag"
+
 
 @dataclass(frozen=True)
 class ToolNote:
@@ -164,5 +169,9 @@ def normalize_tool_metadata(raw: dict[str, Any]) -> dict[str, Any]:
     notes = tool_notes(raw)
     if notes:
         normalized[NOTES_KEY] = notes
+
+    version_lag = raw.get(VERSION_LAG_KEY)
+    if isinstance(version_lag, dict):
+        normalized[VERSION_LAG_KEY] = dict(version_lag)
 
     return normalized

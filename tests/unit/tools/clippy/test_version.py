@@ -49,7 +49,10 @@ def test_check_skips_when_rustc_banner_is_below_pin(tmp_path: Path) -> None:
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.output).contains("Skipping clippy")
     assert_that(result.output).contains("1.0.0")
-    assert_that(result.output).contains("Minimum required")
+    assert_that(result.output).contains(
+        "is below minimum requirement",
+        "To upgrade, run: lintro install --upgrade clippy",
+    )
 
 
 def test_pinned_toolchain_clippy_banner_meets_the_clippy_minimum() -> None:

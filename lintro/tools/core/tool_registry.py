@@ -29,12 +29,18 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from lintro.tools.core.manifest_models import ManifestTool, ProfileDefinition
+from lintro.tools.core.manifest_models import (
+    KnownBadVersion,
+    ManifestError,
+    ManifestTool,
+    ProfileDefinition,
+)
 
 # Re-export so existing ``from lintro.tools.core.tool_registry import ManifestTool``
 # continues to work.
 __all__ = [
     "CATEGORY_LABELS",
+    "KnownBadVersion",
     "ManifestRegistry",
     "ManifestTool",
     "ProfileDefinition",
@@ -52,6 +58,48 @@ CATEGORY_LABELS: dict[str, str] = {
     "npm": "npm tools",
     "external": "External tools",
 }
+
+_KNOWN_BAD_FIELDS: tuple[str, ...] = ("versions", "reason", "reference")
+
+
+def _parse_known_bad_versions(
+    name: str,
+    raw: object,
+) -> tuple[KnownBadVersion, ...]:
+    """Read a tool's ``known_bad_versions`` list from the manifest.
+
+    Each entry must have exactly a ``versions`` PEP 440 specifier, a
+    ``reason`` and a ``reference``. A malformed entry fails the load: left
+    out, it would let the release it names run as if it were good.
+
+    Args:
+        name: Tool name, for the error.
+        raw: The manifest value, expected to be a list of objects.
+
+    Returns:
+        The entries, in manifest order.
+
+    Raises:
+        ManifestError: If the value or any entry is malformed.
+    """
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ManifestError(f"Tool {name!r}: known_bad_versions must be a list")
+    entries: list[KnownBadVersion] = []
+    for item in raw:
+        if not isinstance(item, dict) or set(item) != set(_KNOWN_BAD_FIELDS):
+            raise ManifestError(
+                f"Tool {name!r}: known_bad_versions entry {item!r} must have "
+                f"exactly the keys {list(_KNOWN_BAD_FIELDS)}",
+            )
+        try:
+            entries.append(KnownBadVersion(**item))
+        except (TypeError, ValueError) as exc:
+            raise ManifestError(
+                f"Tool {name!r}: known_bad_versions entry {item!r}: {exc}",
+            ) from exc
+    return tuple(entries)
 
 
 class ManifestRegistry:
@@ -252,6 +300,10 @@ class ManifestRegistry:
             version_command=tuple(version_command),
             languages=tuple(entry.get("languages", [])),
             tags=tuple(entry.get("tags", [])),
+            known_bad_versions=_parse_known_bad_versions(
+                str(name),
+                entry.get("known_bad_versions"),
+            ),
         )
 
     # ── Query methods ──────────────────────────────────────────────

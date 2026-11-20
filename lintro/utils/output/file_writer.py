@@ -37,11 +37,13 @@ from lintro.models.core.severity_counts import SeverityCounts, SeverityDelta
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.json_output import serialize_tool_result, timed_out_tool_names
 from lintro.utils.output.helpers import (
+    NOT_RUN,
     csv_notes,
     render_html_notes,
     render_markdown_notes,
     render_plain_notes,
     sanitize_csv_value,
+    says_no_issues,
 )
 from lintro.utils.output.parser_registration import ParserError
 from lintro.utils.output.parser_registry import ParserRegistry
@@ -269,11 +271,10 @@ def render_markdown_report(
     lines.append("| Tool | Issues |")
     lines.append("|------|--------|")
     for result in all_results:
-        lines.append(f"| {result.name} | {_merged_issue_count(result)} |")
+        lines.append(f"| {result.name} | {_issue_cell(result)} |")
     lines.append("")
     for result in all_results:
-        issues_count = _merged_issue_count(result)
-        lines.append(f"### {result.name} ({issues_count} issues)")
+        lines.append(f"### {result.name} ({_issue_heading(result)})")
         if _result_has_fix_split(result, action):
             initial = list(result.initial_issues)
             lines.append(f"#### Detected issues ({len(initial)})")
@@ -298,34 +299,58 @@ def render_markdown_report(
                 lines.append(_MARKDOWN_ISSUES_HEADER)
                 lines.extend(_render_markdown_issue_rows(result.issues))
                 lines.append("")
-            elif not result.execution_failed:
+            elif says_no_issues(result):
                 lines.append("No issues found.\n")
-            if result.execution_failed:
-                lines.extend(_render_markdown_execution_failure(result))
+        # The notes lead with the statement that the tool did not run or did
+        # not complete, so they come before the tool's diagnostic.
         lines.extend(render_markdown_notes(result))
+        if result.execution_failed and not _result_has_fix_split(result, action):
+            lines.extend(_render_markdown_execution_failure(result))
     return "\n".join(lines)
 
 
-def _render_markdown_execution_failure(result: ToolResult) -> list[str]:
-    """Render the Markdown block for a tool that could not produce a verdict.
+def _issue_cell(result: ToolResult) -> str:
+    """Return a summary table's Issues cell for a result.
 
-    Without it, an execution failure with no parsed findings rendered as
-    "No issues found." and the tool's diagnostic was lost (#2371).
+    Args:
+        result: Tool result to summarize.
+
+    Returns:
+        The issue count, or ``did not run`` for a tool that never ran, whose
+        zero would read as a clean pass.
+    """
+    return NOT_RUN if result.unavailable else str(_merged_issue_count(result))
+
+
+def _issue_heading(result: ToolResult) -> str:
+    """Return the parenthesised part of a result's section heading.
+
+    Args:
+        result: Tool result to summarize.
+
+    Returns:
+        ``N issues``, or ``did not run`` for a tool that never ran.
+    """
+    return NOT_RUN if result.unavailable else f"{_merged_issue_count(result)} issues"
+
+
+def _render_markdown_execution_failure(result: ToolResult) -> list[str]:
+    """Quote the diagnostic of a tool that could not produce a verdict.
+
+    The notes before it say that the findings are incomplete and why; without
+    both, an execution failure with no parsed findings rendered as "No issues
+    found." and the tool's diagnostic was lost (#2371).
 
     Args:
         result: A result with ``execution_failed`` set.
 
     Returns:
-        Markdown lines naming the failure and quoting the tool output.
+        Markdown lines quoting the tool output; none without output.
     """
-    lines = [
-        f"**{result.name} could not complete its check; findings are incomplete.**",
-        "",
-    ]
     tool_output = (result.output or "").strip()
-    if tool_output:
-        lines.extend(markdown_code_block(bound_diagnostic(tool_output)))
-    return lines
+    if not tool_output:
+        return []
+    return markdown_code_block(bound_diagnostic(tool_output))
 
 
 @dataclass(frozen=True)
@@ -451,13 +476,12 @@ def write_output_file(
         for result in all_results:
             safe_name = html.escape(result.name)
             html_lines.append(
-                f"<tr><td>{safe_name}</td><td>{_merged_issue_count(result)}</td></tr>",
+                f"<tr><td>{safe_name}</td><td>{_issue_cell(result)}</td></tr>",
             )
         html_lines.append("</table>")
         for result in all_results:
-            issues_count = _merged_issue_count(result)
             html_lines.append(
-                f"<h3>{html.escape(result.name)} ({issues_count} issues)</h3>",
+                f"<h3>{html.escape(result.name)} ({_issue_heading(result)})</h3>",
             )
             if _result_has_fix_split(result, action):
                 initial = list(result.initial_issues)
@@ -483,7 +507,7 @@ def write_output_file(
                 html_lines.append(_HTML_ISSUES_HEADER)
                 html_lines.extend(_render_html_issue_rows(result.issues))
                 html_lines.append("</table>")
-            else:
+            elif says_no_issues(result):
                 html_lines.append("<p>No issues found.</p>")
             html_lines.extend(render_html_notes(result))
         html_lines.append("</body></html>")
@@ -491,6 +515,7 @@ def write_output_file(
 
     elif output_format == OutputFormat.SARIF:
         from lintro.utils.output.sarif import (
+            execution_notifications,
             standard_issues_from_results,
             write_sarif,
         )
@@ -502,6 +527,7 @@ def write_output_file(
             doc_urls=build_doc_url_map(all_results) or None,
             ai_suggestions=enrichment.suggestions,
             ai_summary=enrichment.summary,
+            notifications=execution_notifications(all_results),
         )
 
     else:
@@ -510,8 +536,7 @@ def write_output_file(
 
         lines = [f"Lintro {action.value.capitalize()} Report", "=" * 40, ""]
         for result in all_results:
-            issues_count = _merged_issue_count(result)
-            lines.append(f"{result.name}: {issues_count} issues")
+            lines.append(f"{result.name}: {_issue_heading(result)}")
             if _result_has_fix_split(result, action):
                 split_output = format_fix_results(
                     detected_issues=list(result.initial_issues),

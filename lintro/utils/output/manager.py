@@ -26,11 +26,13 @@ from lintro.utils.output.constants import (
     DEFAULT_TIMESTAMP_FORMAT,
 )
 from lintro.utils.output.helpers import (
+    NOT_RUN,
     csv_notes,
     html_escape,
     markdown_escape,
     render_html_notes,
     render_markdown_notes,
+    says_no_issues,
 )
 
 if TYPE_CHECKING:
@@ -117,16 +119,32 @@ def _format_issue_line(line: object) -> str:
     return str(line)
 
 
-def _issues_suffix(count: int) -> str:
-    """Return the ``issue``/``issues`` suffix for a count.
+def _issue_cell(result: ToolResult) -> str:
+    """Return a summary table's Issues cell for a result.
 
     Args:
-        count: Issue count.
+        result: Tool result to summarize.
 
     Returns:
-        Singular or plural suffix.
+        The issue count, or ``did not run`` for a tool that never ran, whose
+        zero would read as a clean pass.
     """
-    return "issue" if count == 1 else "issues"
+    return NOT_RUN if result.unavailable else str(result.issues_count)
+
+
+def _issue_heading(result: ToolResult) -> str:
+    """Return the parenthesised part of a result's section heading.
+
+    Args:
+        result: Tool result to summarize.
+
+    Returns:
+        ``N issue(s)``, or ``did not run`` for a tool that never ran.
+    """
+    if result.unavailable:
+        return NOT_RUN
+    count = result.issues_count
+    return f"{count} {'issue' if count == 1 else 'issues'}"
 
 
 class OutputManager:
@@ -418,12 +436,10 @@ class OutputManager:
         lines.append("| Tool | Issues |")
         lines.append("|------|--------|")
         for r in results:
-            lines.append(f"| {r.name} | {r.issues_count} |")
+            lines.append(f"| {r.name} | {_issue_cell(r)} |")
         lines.append("")
         for r in results:
-            lines.append(
-                f"### {r.name} ({r.issues_count} {_issues_suffix(r.issues_count)})",
-            )
+            lines.append(f"### {r.name} ({_issue_heading(r)})")
             if hasattr(r, "issues") and r.issues:
                 lines.append("| File | Line | Code | Message |")
                 lines.append("|------|------|------|---------|")
@@ -439,7 +455,7 @@ class OutputManager:
                     )
                     lines.append(f"| {file} | {line} | {code} | {msg} |")
                 lines.append("")
-            else:
+            elif says_no_issues(r):
                 lines.append("No issues found.\n")
             lines.extend(render_markdown_notes(r))
         return "\n".join(lines)
@@ -462,14 +478,11 @@ class OutputManager:
         html_content.append("<table border='1'><tr><th>Tool</th><th>Issues</th></tr>")
         for r in results:
             html_content.append(
-                f"<tr><td>{html_escape(r.name)}</td><td>{r.issues_count}</td></tr>",
+                f"<tr><td>{html_escape(r.name)}</td><td>{_issue_cell(r)}</td></tr>",
             )
         html_content.append("</table>")
         for r in results:
-            html_content.append(
-                f"<h3>{html_escape(r.name)} "
-                f"({r.issues_count} {_issues_suffix(r.issues_count)})</h3>",
-            )
+            html_content.append(f"<h3>{html_escape(r.name)} ({_issue_heading(r)})</h3>")
             if hasattr(r, "issues") and r.issues:
                 html_content.append(
                     "<table border='1'><tr><th>File</th><th>Line</th><th>Code</th>"
@@ -490,7 +503,7 @@ class OutputManager:
                         f"<td>{msg}</td></tr>",
                     )
                 html_content.append("</table>")
-            else:
+            elif says_no_issues(r):
                 html_content.append("<p>No issues found.</p>")
             html_content.extend(render_html_notes(r))
         html_content.append("</body></html>")

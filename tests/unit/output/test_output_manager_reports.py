@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
+from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.output import OutputManager
 
@@ -31,27 +32,6 @@ class DummyIssue(BaseIssue):
         self.message = message
 
 
-class DummyResult:
-    """Simple result container used to exercise report writing."""
-
-    def __init__(
-        self,
-        name: str,
-        issues_count: int,
-        issues: list[DummyIssue] | None = None,
-    ) -> None:
-        """Initialize a result wrapper.
-
-        Args:
-            name: Tool name associated with the result.
-            issues_count: Total number of issues.
-            issues: Optional list of issue objects.
-        """
-        self.name = name
-        self.issues_count = issues_count
-        self.issues = issues or []
-
-
 def test_output_manager_writes_reports(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -65,8 +45,8 @@ def test_output_manager_writes_reports(
     monkeypatch.setenv("LINTRO_LOG_DIR", str(tmp_path))
     om = OutputManager()
     issues = [DummyIssue(file="a.py", line=1, code="X", message="m")]
-    results = [DummyResult(name="ruff", issues_count=1, issues=issues)]
-    om.write_reports_from_results(results=results)  # type: ignore[arg-type]
+    results = [ToolResult(name="ruff", success=False, issues_count=1, issues=issues)]
+    om.write_reports_from_results(results=results)
     assert_that((om.run_dir / "report.md").exists()).is_true()
     assert_that((om.run_dir / "report.html").exists()).is_true()
     assert_that((om.run_dir / "summary.csv").exists()).is_true()

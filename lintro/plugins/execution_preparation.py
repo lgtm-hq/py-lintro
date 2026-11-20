@@ -13,6 +13,7 @@ from pathlib import Path
 from loguru import logger
 
 from lintro.config.lintro_config import LintroConfig
+from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_outcome import NoFiles, ToolOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.file_discovery import (
@@ -170,9 +171,13 @@ def verify_tool_version(
     """
     from lintro.utils.tool_snapshots import (
         below_minimum_result,
+        claim_upgrade_suggestion,
         get_tool_snapshot,
         is_strict_missing_tools,
+        known_bad_install_hint,
+        record_version_lag,
         snapshot_to_unavailable_result,
+        upgrade_command,
     )
 
     snapshot = get_tool_snapshot(
@@ -197,25 +202,48 @@ def verify_tool_version(
                 snapshot.min_version,
                 _ALLOW_VERSION_LAG_ENV,
             )
-        elif snapshot.below_recommended:
+            record_version_lag(
+                definition.name,
+                version=str(snapshot.version),
+                minimum=snapshot.min_version,
+            )
+        elif snapshot.below_recommended and claim_upgrade_suggestion(
+            definition.name,
+        ):
             logger.warning(
-                "{} {} is below recommended version {} (minimum {} met)",
+                "{} {} works but is older than {}, the version lintro tests. "
+                "To upgrade, run: {}",
                 definition.name,
                 snapshot.version,
                 snapshot.recommended_version,
-                snapshot.min_version,
+                upgrade_command(definition.name),
             )
         return None
 
     error = snapshot.probe_error or "version check failed"
-    hint = snapshot.remediation_hint or ""
-    detail = f"{error}. Minimum required: {snapshot.min_version}. {hint}".strip()
+    if snapshot.known_bad:
+        # ``lintro install --upgrade`` cannot replace a known-bad release yet
+        # (#3567), and the install hint's range ("v2.6.0+") can include it, so
+        # the hint names only the version lintro tests.
+        hint = known_bad_install_hint(snapshot.recommended_version)
+    else:
+        upgrade = f"To upgrade, run: {upgrade_command(definition.name)}."
+        hint = f"{upgrade} {snapshot.remediation_hint or ''}".strip()
+    detail = f"{error}. {hint}"
+
+    # A refused security scanner fails the run: skipping it quietly would
+    # let a run without the scan read as a clean one (#3556).
+    is_security = bool(definition.tool_type & ToolType.SECURITY)
+    if is_security:
+        error = f"security scanner did not run: {error}"
+        detail = f"security scanner did not run, so nothing was scanned. {detail}"
 
     return below_minimum_result(
         name=definition.name,
         reason=error,
         detail=detail,
         hint=hint,
+        strict=True if is_security else None,
     )
 
 

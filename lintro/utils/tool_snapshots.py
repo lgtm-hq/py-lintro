@@ -7,7 +7,9 @@ can share snapshots and invalidate caches without importing the tool layer.
 from __future__ import annotations
 
 import os
+import threading
 from collections.abc import Mapping
+from dataclasses import replace
 from enum import Enum
 from pathlib import Path
 from typing import Protocol
@@ -15,6 +17,7 @@ from typing import Protocol
 from lintro.models.core.tool_outcome import Skipped, ToolOutcome, Unavailable
 from lintro.models.core.tool_result import ToolResult
 from lintro.models.core.tool_snapshot import ToolSnapshot
+from lintro.utils.tool_metadata import VERSION_LAG_KEY, ToolNote, with_tool_notes
 
 
 class SnapshotProvider(Protocol):
@@ -320,6 +323,118 @@ def below_minimum_result(
     return ToolResult.from_outcome(outcome, name=name, output=output)
 
 
+def upgrade_command(name: str) -> str:
+    """Return the command that upgrades a tool to the version lintro pins.
+
+    Args:
+        name: Tool name as lintro reports it.
+
+    Returns:
+        The ``lintro install --upgrade`` command for the tool.
+    """
+    return f"lintro install --upgrade {name}"
+
+
+def known_bad_install_hint(pinned: str) -> str:
+    """Say what to install instead of a known-bad release.
+
+    ``lintro install --upgrade`` cannot replace a known-bad release yet
+    (#3567), and an install hint's range ("v2.6.0+") can include the refused
+    release, so the hint names only the version lintro tests.
+
+    Args:
+        pinned: The version lintro pins and tests, or empty when unknown.
+
+    Returns:
+        The hint, a sentence ending in a full stop.
+    """
+    if not pinned:
+        return "Install the version lintro tests."
+    return f"Install {pinned}, the version lintro tests."
+
+
+_upgrade_suggested: set[str] = set()
+_upgrade_suggested_lock = threading.Lock()
+
+
+def claim_upgrade_suggestion(name: str) -> bool:
+    """Record that a run is about to suggest upgrading ``name``.
+
+    Tools can be version-checked more than once per run (one check per
+    project root), and the suggestion is shown once per tool per run.
+
+    Args:
+        name: Tool name.
+
+    Returns:
+        True the first time per run for this tool, False afterwards.
+    """
+    with _upgrade_suggested_lock:
+        if name in _upgrade_suggested:
+            return False
+        _upgrade_suggested.add(name)
+        return True
+
+
+_version_lag_used: dict[str, dict[str, str]] = {}
+
+
+def record_version_lag(name: str, *, version: str, minimum: str) -> None:
+    """Remember that the override let ``name`` run below its minimum this run.
+
+    Args:
+        name: Tool name.
+        version: The installed version that ran.
+        minimum: The minimum it is below.
+    """
+    with _upgrade_suggested_lock:
+        _version_lag_used.setdefault(
+            name,
+            {
+                "version": version,
+                "minimum": minimum,
+                "allowed_by": ALLOW_VERSION_LAG_ENV,
+            },
+        )
+
+
+def with_version_lag_note(result: ToolResult) -> ToolResult:
+    """Mark a result whose tool ran below its minimum under the override.
+
+    A log line alone let such a run read as an ordinary pass; the note shows
+    in the summary table and reports, and ``metadata.version_lag`` in JSON.
+
+    Args:
+        result: One tool's result from this run.
+
+    Returns:
+        The result with the note and ``version_lag`` metadata, or unchanged
+        when the override did not apply to the tool.
+    """
+    with _upgrade_suggested_lock:
+        lag = _version_lag_used.get(result.name)
+    if lag is None or result.skipped or result.unavailable:
+        return result
+    note = ToolNote(
+        summary="below minimum, allowed by override",
+        message=(
+            f"{result.name} {lag['version']} is below the minimum "
+            f"{lag['minimum']} and ran only because {ALLOW_VERSION_LAG_ENV} "
+            "allows it"
+        ),
+    )
+    metadata = with_tool_notes(result.metadata, [note])
+    metadata[VERSION_LAG_KEY] = dict(lag)
+    return replace(result, metadata=metadata)
+
+
+def reset_upgrade_suggestions() -> None:
+    """Start a new run: forget the last run's upgrade suggestions and lag notes."""
+    with _upgrade_suggested_lock:
+        _upgrade_suggested.clear()
+        _version_lag_used.clear()
+
+
 ALLOW_VERSION_LAG_ENV: str = "LINTRO_ALLOW_VERSION_LAG"
 
 
@@ -374,7 +489,13 @@ def snapshot_is_runnable(snapshot: ToolSnapshot) -> bool:
     Returns:
         Whether execution should proceed with this snapshot.
     """
+    # The override tolerates a tool older than the minimum while images lag;
+    # it never lets a known-bad release run (#3556).
     return snapshot.available and (
         snapshot.version_check_passed
-        or (snapshot.version is not None and _version_lag_allowed(snapshot.name))
+        or (
+            snapshot.version is not None
+            and not snapshot.known_bad
+            and _version_lag_allowed(snapshot.name)
+        )
     )

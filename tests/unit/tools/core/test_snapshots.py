@@ -376,7 +376,9 @@ def test_verify_tool_version_warns_when_below_recommended() -> None:
 
     assert_that(result).is_none()
     mock_logger.warning.assert_called_once()
-    assert_that(str(mock_logger.warning.call_args)).contains("below recommended")
+    assert_that(str(mock_logger.warning.call_args)).contains(
+        "works but is older than",
+    )
 
 
 def test_serialize_tool_result_emits_unavailable_status() -> None:

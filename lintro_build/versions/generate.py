@@ -33,6 +33,7 @@ from .inputs import (
     read_pyproject_versions,
     read_requirements_pin,
 )
+from .known_bad import validate_known_bad_versions
 from .outputs import (
     build_target_versions,
     render_generated_module,
@@ -114,6 +115,7 @@ def collect_outputs(seed: Seed, paths: GeneratorPaths) -> tuple[str, str]:
         raise GenerationError(
             f"manifest.src.json is not valid JSON: {exc}",
         ) from exc
+    validate_known_bad_versions(manifest_src_data)
     target_versions = build_target_versions(
         manifest_data=manifest_src_data,
         npm_versions=npm_versions,
