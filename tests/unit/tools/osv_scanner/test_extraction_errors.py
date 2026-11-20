@@ -639,3 +639,206 @@ def test_exclusion_matches_either_spelling_of_a_symlinked_root(
 
     _assert_complete(excluded)
     _assert_incomplete(unrelated)
+
+
+#: What osv-scanner 2.7.1 prints after a broken file's path (#3553), with
+#: ``{file}`` for that path as printed.
+_FIXTURE_ERRORS: dict[str, tuple[str, str]] = {
+    "json-comment": (
+        "javascript/packagelockjson",
+        "could not extract: invalid character '/' looking for beginning of "
+        "object key string",
+    ),
+    "json-value": (
+        "php/composerlock",
+        "could not extract: invalid character 'b' looking for beginning of value",
+    ),
+    "json-type": (
+        "javascript/packagelockjson",
+        "could not extract: json: cannot unmarshal number into Go struct field "
+        ".packages.node_modules~1x.version of type string",
+    ),
+    "yaml": (
+        "javascript/pnpmlock",
+        "could not extract: yaml: line 1: did not find expected ',' or ']'",
+    ),
+    "toml": (
+        "python/poetrylock",
+        'could not extract: toml: line 1 (last key "not"): expected value but '
+        'found "toml" instead',
+    ),
+    "pom": (
+        "java/pomxml",
+        "could not extract pom from {file}: XML syntax error on line 1: "
+        "unexpected EOF",
+    ),
+    "gomod": ("go/gomod", "could not extract: {file}:2: unknown directive: foo"),
+    "unreadable": (
+        "javascript/packagelockjson",
+        "Open({file}): open {file}: permission denied",
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_FIXTURE_ERRORS))
+@pytest.mark.parametrize("fixtures", ["testdata", "-testdata"])
+def test_excluded_broken_fixture_is_dropped_whatever_the_root_holds(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+    shape: str,
+    fixtures: str,
+) -> None:
+    """Root entries named like words in the error do not keep it (#3553).
+
+    The root holds ``value/`` and ``b``, words the parser errors
+    contain; the excluded directory may start with ``-``.
+    """
+    plugin_name, error = _FIXTURE_ERRORS[shape]
+    name = f"{fixtures}/broken.lock"
+    osv_scanner_plugin.set_options(exclude_patterns=[fixtures])
+    stderr = (
+        f"Error during extraction: (extracting as {plugin_name}) "
+        f"{{root}}/{name}: {error.replace('{file}', '{root}/' + name)}\n"
+    )
+
+    result = _check(
+        osv_scanner_plugin,
+        tmp_path,
+        files={name: "{\n// fixture\n}", "value/": "", "b": ""},
+        returncode=127,
+        stderr=stderr,
+    )
+
+    _assert_complete(result)
+    assert_that(result.success).is_true()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        "see package-lock.json:3: unexpected token",
+        "could not extract: open {root}/package-lock.json: permission denied",
+        "Open({root}/package-lock.json): open {root}/package-lock.json: "
+        "permission denied",
+        "could not extract: {root}/go.mod:2: unknown directive: foo",
+        "could not extract: rpc error: code = Unavailable desc = x",
+    ],
+    ids=["bare-name", "open-other", "unreadable-other", "gomod-other", "unseen"],
+)
+def test_excluded_file_error_that_is_not_about_it_alone_is_kept(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+    error: str,
+) -> None:
+    """Only a recognised error about the excluded file itself is dropped."""
+    osv_scanner_plugin.set_options(exclude_patterns=["testdata"])
+    stderr = (
+        "Error during extraction: (extracting as javascript/packagelockjson) "
+        f"{{root}}/testdata/package-lock.json: {error}\n"
+    )
+
+    result = _check(
+        osv_scanner_plugin,
+        tmp_path,
+        files={
+            "testdata/package-lock.json": "{",
+            "package-lock.json": "{}",
+            "go.mod": "module x\n",
+        },
+        returncode=127,
+        stderr=stderr,
+    )
+
+    _assert_incomplete(result)
+    assert_that(result.output).contains(error.split(" ", 1)[0].split("{", 1)[0])
+
+
+def test_harmless_resolution_for_an_excluded_manifest_leaves_no_note(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Root entries named like words in the ending do not turn it into a note."""
+    osv_scanner_plugin.set_options(exclude_patterns=["vendor"])
+    stderr = (
+        "Error during extraction: (extracting as transitivedependency/requirements) "
+        "failed resolution for {root}/vendor/requirements.txt: package "
+        "System(7):app: not found\n"
+    )
+
+    result = _check(
+        osv_scanner_plugin,
+        tmp_path,
+        files={"vendor/requirements.txt": "app==1.0\n", "package/": "", "found": ""},
+        returncode=127,
+        stderr=stderr,
+    )
+
+    _assert_complete(result)
+    assert_that(tool_notes(result.metadata)).is_empty()
+
+
+def test_note_names_every_unsatisfiable_manifest(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Each manifest's two-line message no longer crowds out the third."""
+    blocks = [
+        f"failed resolution for {{root}}/{name}/requirements.txt: resolution "
+        f'impossible:\nno candidates at all for: flask "==9999{index}"\n\n'
+        for index, name in enumerate(("a", "b", "c"))
+    ]
+    stderr = (
+        "Error during extraction: (extracting as transitivedependency/requirements) "
+        + "".join(blocks)
+    )
+
+    result = _check(
+        osv_scanner_plugin,
+        tmp_path,
+        files={f"{name}/requirements.txt": "flask\n" for name in ("a", "b", "c")},
+        returncode=127,
+        stderr=stderr,
+    )
+
+    _assert_complete(result)
+    assert_that(_note(result)).contains(
+        "a/requirements.txt",
+        "b/requirements.txt",
+        "c/requirements.txt",
+        '"==99992"',
+    )
+
+
+@pytest.mark.parametrize(
+    ("keys", "named"),
+    [
+        (["image_layers"], '("image_layers")'),
+        (
+            [f"k{index}" for index in range(7)],
+            '("k0", "k1", "k2", "k3", "k4", and 2 more)',
+        ),
+    ],
+    ids=["one", "many"],
+)
+def test_unknown_report_key_is_named_in_the_incomplete_run(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+    keys: list[str],
+    named: str,
+) -> None:
+    """A key a newer osv-scanner added is named, and the run is incomplete."""
+    report: dict[str, list[str]] = {"results": [], **dict.fromkeys(keys, [])}
+
+    result = _check(
+        osv_scanner_plugin,
+        tmp_path,
+        files={"requirements.txt": "six==1.16.0\n"},
+        returncode=0,
+        stderr="",
+        stdout=json.dumps(report),
+    )
+
+    _assert_incomplete(result)
+    assert_that(result.output).starts_with(
+        "OSV-Scanner's report could not be read",
+    ).contains(f"key(s) lintro does not know {named}")

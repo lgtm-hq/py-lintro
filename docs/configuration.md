@@ -2309,8 +2309,10 @@ and no top-level key other than those osv-scanner's report has (`results`,
 `experimental_config`, `experimental_generic_findings`, `image_metadata`,
 `license_summary`, the same from 2.4.0 to 2.7.1). Text before or after the object, a
 second object, or an `error` key beside `results` is an incomplete run whose reason says
-the report could not be read. Findings are still read from such output and kept. One of
-these must also hold:
+the report could not be read. A top-level key outside that list is named in the reason.
+This is deliberate: if a later osv-scanner release adds a key to its report, every scan
+with that release is incomplete until lintro is updated to know the key. Findings are
+still read from such output and kept. One of these must also hold:
 
 - standard error is empty and osv-scanner exited 0, or exited 1 with vulnerabilities in
   the report;
@@ -2372,13 +2374,25 @@ listed packages were scanned, so the run is complete and carries a note in
 [Tool Timeouts in the JSON Report](#tool-timeouts-in-the-json-report)).
 
 **Excluded paths.** An error in an `Error during extraction` message is dropped only
-when it names exactly one path: one existing regular file under a path lintro excludes
-(`.lintro-ignore` or `--exclude`), matched as a finding for that file would be, and no
-other path anywhere in the error after it. Text after the file that contains a path
-separator, or a word naming an existing file or directory in the scan root, keeps the
-error, so `vendor/package-lock.json: failed reading app/package-lock.json: ...` is
-quoted and the run is incomplete. A message that names no file, or a path that cannot be
-told apart from another file, is never dropped.
+when it starts with one existing regular file under a path lintro excludes
+(`.lintro-ignore` or `--exclude`), matched as a finding for that file would be, and the
+whole text after that file is a shape lintro recognises:
+
+- a parser error osv-scanner's extractors print for that file, as captured from
+  osv-scanner 2.7.1: Go JSON errors
+  (`invalid character '/' looking for beginning of object key string`,
+  `unexpected end of JSON input`, `json: cannot unmarshal ...`), `yaml: line <n>: ...`,
+  `toml: line <n>: ...`, `XML syntax error on line <n>: ...` or `EOF`, optionally after
+  `could not extract:`, and the `pom.xml` and `go.mod` forms that repeat the same file's
+  path;
+- `Open(<file>): open <file>: permission denied` for the same file;
+- for a `failed resolution for` error, one of the allow-listed endings above.
+
+Any other text keeps the error, whatever entries the scan root holds, so
+`vendor/package-lock.json: failed reading app/package-lock.json: ...` is quoted and the
+run is incomplete, and so is a transport failure resolving an excluded manifest. A
+message that names no file, or a path that cannot be told apart from another file, is
+never dropped.
 
 **Repositories with broken test fixtures.** A repository that keeps deliberately broken
 lockfiles or manifests as test fixtures (trivy, ossf/scorecard and osv-scanner's own

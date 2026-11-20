@@ -29,13 +29,14 @@ with any part that is neither a resolution note nor an error for a file lintro
 excludes is kept whole as error text. Every line outside such a message is
 error text too.
 
-A part is an error for an excluded file only when it names exactly one path:
-one existing regular file under an excluded path at its start, and no other
-path anywhere after it (no path separator, and no word that names an existing
-path in the scan root). Checked
-against osv-scanner 2.4.0 and 2.7.1 (``pkg/osvscanner/scan.go``,
-``logPluginStatus``; osv-scalibr ``enricher/transitivedependency``; deps.dev
-``util/resolve``).
+A part is dropped as an error for an excluded file only when it starts with
+one existing regular file under an excluded path and the whole text after that
+file is a recognised shape: a parser or permission error for that same file
+(:data:`EXCLUDED_FILE_ERRORS`), or, for a ``failed resolution for`` part, one of
+:data:`HARMLESS_RESOLUTION_ENDINGS`. Any other text keeps the error, so one
+that names a second file is never dropped. Checked against osv-scanner 2.4.0
+and 2.7.1 (``pkg/osvscanner/scan.go``, ``logPluginStatus``; osv-scalibr
+``enricher/transitivedependency``; deps.dev ``util/resolve``).
 """
 
 from __future__ import annotations
@@ -236,34 +237,64 @@ def source_of(text: str, scan_root: Path) -> tuple[str, str, str] | None:
     return next(iter(found.values()))
 
 
-#: Characters stripped from a word before it is looked up as a path.
-_WORD_PUNCTUATION: str = "\"'`()[]{}<>,;:"
+#: Stands for the excluded file's own path in an error about it.
+_SELF = "\x00"
+
+#: The parser errors osv-scanner's extractors print after a file's path, as
+#: captured from osv-scanner 2.7.1. Go's ``encoding/json`` names the bad
+#: character and where it was found; the YAML, TOML and XML parsers name a
+#: line. None of these names a second file.
+_JSON_CONTEXT = (
+    r"(?:looking for beginning of (?:value|object key string)"
+    r"|after (?:object key(?::value pair)?|array element|top-level value)"
+    r"|in (?:string literal|string escape code|\\u hexadecimal character escape"
+    r"|numeric literal|exponent of numeric literal"
+    r"|literal (?:true|false|null) \(expecting '[a-z]'\))"
+    r"|after decimal point in numeric literal)"
+)
+_JSON_CHAR = (
+    r"'(?:\\'|[^'\\]|\\[abfnrtv\\]|\\x[0-9a-f]{2}|\\u[0-9a-f]{4}|\\U[0-9a-f]{8})'"
+)
+_PARSER_ERROR = (
+    rf"(?:invalid character {_JSON_CHAR} {_JSON_CONTEXT}"
+    r"|unexpected end of JSON input"
+    r"|invalid escape sequence `\\[^`\n]{1,10}` in string"
+    r"|json: cannot unmarshal \S+ into Go (?:struct field [^\n]+ |value )"
+    r"of type \S+"
+    r"|yaml: line \d+: [^\n]+"
+    r'|toml: line \d+(?: \(last key "[^"\n]*"\))?: [^\n]+'
+    r"|XML syntax error on line \d+: [^\n]+"
+    r"|(?:unexpected )?EOF)"
+)
+#: The whole text after an excluded file's path that drops its error, with
+#: :data:`_SELF` for that path. ``could not extract`` wraps a parser error
+#: (``bun.lock`` without the colon), ``pom.xml`` and ``go.mod`` errors repeat
+#: the path, and an unreadable file is reported twice by the same path.
+EXCLUDED_FILE_ERRORS: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"(?:could not extract:? |could not extract pom from \x00: "
+        rf"|failed to decode {_NAME} file: )?{_PARSER_ERROR}",
+    ),
+    re.compile(r"could not extract: \x00:\d+(?::\d+)?: [^\n]+"),
+    re.compile(r"Open\(\x00\): open \x00: permission denied"),
+)
 
 
-def names_another_path(error: str, scan_root: Path) -> bool:
-    """Return whether the error after a file's path names any further path.
-
-    An error for an excluded file is dropped only when the excluded file is
-    the one path in it; ``<excluded>: failed reading <included>: ...`` is
-    about the included file as well. Any path separator counts as a path, as
-    does any word that names an existing file or directory in the scan root.
+def is_excluded_file_error(error: str, printed_path: str) -> bool:
+    """Return whether an error names only the file it was printed for.
 
     Args:
         error: The text after the file's path, every line of it.
-        scan_root: Directory osv-scanner ran in.
+        printed_path: The file's path as osv-scanner printed it.
 
     Returns:
-        True when the text may name another path.
+        True only when the whole text, with that path written as
+        :data:`_SELF`, is one of :data:`EXCLUDED_FILE_ERRORS`.
     """
-    if "/" in error or "\\" in error or os.sep in error:
-        return True
-    for word in error.split():
-        name = word.strip(_WORD_PUNCTUATION)
-        if name in ("", ".", "..") or set(name) == {"."}:
-            continue
-        if os.path.lexists(scan_root / name):
-            return True
-    return False
+    if _SELF in error:
+        return False
+    own = re.sub(rf"/?{re.escape(printed_path.lstrip('/'))}", _SELF, error)
+    return any(pattern.fullmatch(own) for pattern in EXCLUDED_FILE_ERRORS)
 
 
 def is_harmless_ending(ending: str) -> bool:
@@ -366,7 +397,11 @@ def read_stderr(
             if (
                 named is not None
                 and is_excluded(named[0])
-                and not names_another_path(named[2], scan_root)
+                and (
+                    is_harmless_ending(named[2])
+                    if resolution
+                    else is_excluded_file_error(named[2], named[1])
+                )
             ):
                 continue
             all_excluded = False
@@ -413,17 +448,23 @@ def resolution_note(notes: tuple[ResolutionNote, ...], scan_root: Path) -> str:
         scan_root: Directory osv-scanner ran in.
 
     Returns:
-        The note, or an empty string when there is none.
+        The note, naming every manifest, or an empty string when there is
+        none. Each manifest's message is quoted up to its first lines.
     """
     if not notes:
         return ""
-    shown = "\n".join(
-        note.text.replace(note.printed_path, display_path(note.source, scan_root), 1)
+    shown = " | ".join(
+        tool_message_excerpt(
+            note.text.replace(
+                note.printed_path,
+                display_path(note.source, scan_root),
+                1,
+            ),
+        )
         for note in notes
     )
     return (
         "OSV-Scanner scanned the packages listed in these manifests but "
         "could not resolve their indirect dependencies, so those were not "
-        "checked: "
-        f"{tool_message_excerpt(shown)}"
+        f"checked: {shown}"
     )

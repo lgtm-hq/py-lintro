@@ -2,8 +2,8 @@
 
 lintro runs osv-scanner at ``--verbosity error``, where a scan that went well
 prints nothing. A run is complete only when everything printed is an
-allow-listed resolution note or an error for an excluded file that names no
-other path, stdout is exactly one JSON report, and "No package sources found"
+allow-listed resolution note or a recognised error for an excluded file alone,
+stdout is exactly one JSON report, and "No package sources found"
 is no files only as the exact whole line. These tests mix the notes
 osv-scanner 2.4.0 and 2.7.1 really print with other errors and with arbitrary
 text, in every order and at every exit status, and check that nothing else can
