@@ -1651,8 +1651,9 @@ def test_the_incremental_note_appears_only_in_incremental_runs(
     result = _check(fake, ["."], options={"incremental": incremental})
 
     note = (
-        "cargo-audit audited every Cargo.lock in scope: --incremental does not "
-        "apply to it, because advisories change independently of the lockfile."
+        "--incremental does not apply to cargo-audit: it checks every Cargo.lock "
+        "in scope on each run, because advisories change independently of the "
+        "lockfile."
     )
     assert_that(result.success).is_true()
     assert_that(result.output).is_equal_to(note if incremental else None)

@@ -3996,8 +3996,9 @@ How the rule reads a path:
 - With several paths, a lockfile is skipped only if it is a copy below every path that
   holds it: `lintro check . vendor` audits `vendor/dep/Cargo.lock`.
 - `lintro watch` passes the changed files themselves, so a changed vendored lockfile is
-  named and audited. `--diff` and `--incremental` keep the paths you passed as roots, so
-  a changed vendored lockfile is skipped and named.
+  named and audited. `--diff` keeps the paths you passed as roots, so a changed vendored
+  lockfile is skipped and named. `--incremental` does not apply to cargo-audit, so there
+  every vendored lockfile below the paths you passed is skipped and named on each run.
 - A crate of your own in a directory named `vendor` or `target` below the scanned path
   is skipped like a copy. For example, with `vendor/mytool/Cargo.lock`, run
   `lintro check vendor/mytool` (or name the lockfile), or set `include_vendored`.

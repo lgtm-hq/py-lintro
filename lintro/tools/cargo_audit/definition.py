@@ -395,9 +395,9 @@ class _AuditSummary:
                 for link, target in self.outside
             ),
             (
-                "cargo-audit audited every Cargo.lock in scope: --incremental does "
-                "not apply to it, because advisories change independently of the "
-                "lockfile."
+                "--incremental does not apply to cargo-audit: it checks every "
+                "Cargo.lock in scope on each run, because advisories change "
+                "independently of the lockfile."
                 if self.incremental
                 else None
             ),
