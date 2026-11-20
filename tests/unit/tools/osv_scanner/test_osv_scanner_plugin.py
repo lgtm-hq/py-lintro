@@ -159,8 +159,9 @@ def test_check_empty_results_with_log_prefix_and_nonzero_exit_is_incomplete(
 ) -> None:
     """A failed exit with an empty ``results`` list is no clean scan (#3352).
 
-    osv-scanner 2.7.1 prints exactly this report when its vulnerability
-    queries fail, so an empty list proves nothing was checked.
+    osv-scanner 2.7.1 prints exactly this report  # meta-guard: allow
+    when its vulnerability queries fail, so an empty list proves nothing was
+    checked.
     """
     lockfile = tmp_path / "requirements.txt"
     copy_sample(
@@ -206,8 +207,8 @@ def test_check_no_package_sources_sets_parse_failures_count(
         dest_name=lockfile.name,
     )
 
-    # What osv-scanner 2.4.0 and 2.7.1 print at --verbosity error for a
-    # directory with nothing to scan (exit 128).
+    # What osv-scanner 2.4.0 and 2.7.1 print  # meta-guard: allow
+    # at --verbosity error for a directory with nothing to scan (exit 128).
     osv_output = "No package sources found, --help for usage information.\n"
     proc = SubprocessResult(
         returncode=128,

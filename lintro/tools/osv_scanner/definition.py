@@ -68,7 +68,7 @@ OSV_NO_SOURCES_MESSAGE: str = (
 #: well prints nothing on standard error, so anything printed is an error
 #: (see :mod:`lintro.tools.osv_scanner.extraction_log`). Call analysis (on by
 #: default for Go only) is off: lintro does not read its result, and it fails
-#: when Go or govulncheck cannot run. Both flags exist in osv-scanner 2.6.0,
+#: when Go or govulncheck cannot run. Both flags exist in osv-scanner 2.7.1,
 #: the minimum lintro enforces.
 _SCAN_FLAGS: tuple[str, ...] = (
     "--recursive",

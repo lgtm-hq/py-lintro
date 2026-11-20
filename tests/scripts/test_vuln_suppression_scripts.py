@@ -12,9 +12,8 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
-from lintro._tool_versions import get_min_version
+from lintro._tool_versions import get_tool_version
 from lintro.enums.tool_name import ToolName
-from lintro.tools.core.version_parsing import compare_versions
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _INSTALL_SCRIPT = _REPO_ROOT / "scripts/ci/security/install-osv-scanner.sh"
@@ -115,9 +114,12 @@ def test_check_script_reports_missing_tooling(tmp_path: Path) -> None:
     assert_that(result.stderr).contains("Missing lgtm-ci tooling script")
 
 
-def test_install_script_retries_transient_curl_exit_23(tmp_path: Path) -> None:
-    """Transient curl exit 23 should be retried before surfacing diagnostics."""
-    workspace = tmp_path / "repo"
+def _install_fake_tooling(workspace: Path) -> None:
+    """Write minimal lgtm-ci log/fs/download libraries into a workspace.
+
+    Args:
+        workspace: Directory standing in for ``GITHUB_WORKSPACE``.
+    """
     tooling_lib = workspace / ".lgtm-ci-tooling/scripts/ci/lib"
     network_lib = tooling_lib / "network"
     network_lib.mkdir(parents=True)
@@ -166,9 +168,19 @@ def test_install_script_retries_transient_curl_exit_23(tmp_path: Path) -> None:
         ),
     )
 
+
+def _mock_linux_bin(tmp_path: Path, curl_script: str) -> Path:
+    """Create a bin directory with ``uname`` reporting Linux and a fake ``curl``.
+
+    Args:
+        tmp_path: Directory to create ``bin`` in.
+        curl_script: Body of the fake ``curl`` executable.
+
+    Returns:
+        The bin directory, to put first on ``PATH``.
+    """
     mock_bin = tmp_path / "bin"
     mock_bin.mkdir()
-    attempts_file = tmp_path / "curl-attempts"
     uname_mock = mock_bin / "uname"
     uname_mock.write_text(
         textwrap.dedent(
@@ -188,7 +200,33 @@ def test_install_script_retries_transient_curl_exit_23(tmp_path: Path) -> None:
     )
     uname_mock.chmod(uname_mock.stat().st_mode | stat.S_IXUSR)
     curl_mock = mock_bin / "curl"
-    curl_mock.write_text(
+    curl_mock.write_text(curl_script)
+    curl_mock.chmod(curl_mock.stat().st_mode | stat.S_IXUSR)
+    return mock_bin
+
+
+def _copy_install_script(workspace: Path) -> Path:
+    """Copy the installer into a workspace and make it executable.
+
+    Args:
+        workspace: Directory standing in for ``GITHUB_WORKSPACE``.
+
+    Returns:
+        Path to the copied script.
+    """
+    script_copy = workspace / "install-osv-scanner.sh"
+    script_copy.write_text(_INSTALL_SCRIPT.read_text())
+    script_copy.chmod(script_copy.stat().st_mode | stat.S_IXUSR)
+    return script_copy
+
+
+def test_install_script_retries_transient_curl_exit_23(tmp_path: Path) -> None:
+    """Transient curl exit 23 should be retried before surfacing diagnostics."""
+    workspace = tmp_path / "repo"
+    _install_fake_tooling(workspace)
+    attempts_file = tmp_path / "curl-attempts"
+    mock_bin = _mock_linux_bin(
+        tmp_path,
         textwrap.dedent(
             f"""\
             #!/usr/bin/env bash
@@ -203,11 +241,7 @@ def test_install_script_retries_transient_curl_exit_23(tmp_path: Path) -> None:
             """,
         ),
     )
-    curl_mock.chmod(curl_mock.stat().st_mode | stat.S_IXUSR)
-
-    script_copy = workspace / "install-osv-scanner.sh"
-    script_copy.write_text(_INSTALL_SCRIPT.read_text())
-    script_copy.chmod(script_copy.stat().st_mode | stat.S_IXUSR)
+    script_copy = _copy_install_script(workspace)
 
     env = os.environ.copy()
     env["GITHUB_WORKSPACE"] = str(workspace)
@@ -225,6 +259,94 @@ def test_install_script_retries_transient_curl_exit_23(tmp_path: Path) -> None:
     assert_that(result.returncode).is_equal_to(1)
     assert_that(int(attempts_file.read_text().strip())).is_greater_than_or_equal_to(3)
     assert_that(result.stderr).contains("curl exit 23")
+
+
+def _run_install_without_version(
+    tmp_path: Path,
+    *,
+    with_pin_file: bool,
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    """Run the installer with no version argument and no ``OSV_VERSION``.
+
+    The fake ``curl`` records each URL and fails, so nothing is installed.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        with_pin_file: Copy the real ``lintro/_tool_versions.py`` into the
+            workspace, as the CI checkout has it.
+
+    Returns:
+        The finished process and the file holding the requested URLs.
+    """
+    workspace = tmp_path / "repo"
+    _install_fake_tooling(workspace)
+    if with_pin_file:
+        (workspace / "lintro").mkdir()
+        (workspace / "lintro/_tool_versions.py").write_text(
+            (_REPO_ROOT / "lintro/_tool_versions.py").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+    urls_file = tmp_path / "curl-urls"
+    urls_file.touch()
+    mock_bin = _mock_linux_bin(
+        tmp_path,
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/env bash
+            for arg in "$@"; do
+              case "$arg" in https://*) echo "$arg" >> "{urls_file}" ;; esac
+            done
+            exit 22
+            """,
+        ),
+    )
+    script_copy = _copy_install_script(workspace)
+
+    env = os.environ.copy()
+    env.pop("OSV_VERSION", None)
+    env["GITHUB_WORKSPACE"] = str(workspace)
+    env["PATH"] = f"{mock_bin}:{env['PATH']}"
+    env["DOWNLOAD_MAX_ATTEMPTS"] = "1"
+
+    # The reusable workflow passes its empty ``osv-version`` input as $1.
+    result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; bash resolved from PATH in controlled env; shell=False, no user shell input
+        ["bash", str(script_copy), ""],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+    return result, urls_file
+
+
+def test_install_script_defaults_to_the_shipped_pin(tmp_path: Path) -> None:
+    """With no version given, CI installs the osv-scanner lintro pins (#3557).
+
+    The suppression-check workflow passes no version, so this default is the
+    osv-scanner CI runs. It is read from ``_tool_versions.py``, the pin the
+    tools image installs and lintro's ``min_version`` equals, so it cannot
+    fall behind the floor when Renovate bumps the pin.
+    """
+    result, urls_file = _run_install_without_version(tmp_path, with_pin_file=True)
+    pin = get_tool_version(ToolName.OSV_SCANNER)
+
+    assert_that(result.stderr).contains(f"Installing osv-scanner v{pin} ")
+    assert_that(urls_file.read_text().splitlines()[0]).ends_with(
+        f"/releases/download/v{pin}/osv-scanner_linux_amd64",
+    )
+
+
+def test_install_script_without_pin_fails_before_downloading(
+    tmp_path: Path,
+) -> None:
+    """A checkout without the pin file stops with a named error, no download."""
+    result, urls_file = _run_install_without_version(tmp_path, with_pin_file=False)
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stderr).contains(
+        "no ToolName.OSV_SCANNER pin found in",
+    )
+    assert_that(urls_file.read_text()).is_empty()
 
 
 def test_vuln_suppression_workflow_uses_local_scripts() -> None:
@@ -245,21 +367,3 @@ def test_vuln_suppression_workflow_uses_local_scripts() -> None:
     assert uses_match is not None  # narrow type for mypy
     assert tooling_match is not None  # narrow type for mypy
     assert_that(uses_match.group(1)).is_equal_to(tooling_match.group(1))
-
-
-def test_install_script_default_meets_lintro_minimum() -> None:
-    """The CI installer's default osv-scanner is not below lintro's floor (#3557).
-
-    The suppression-check workflow passes no version, so this default is the
-    osv-scanner CI runs. Below the manifest ``min_version`` it would be a
-    release lintro itself refuses.
-    """
-    match = re.search(
-        r'^OSV_VERSION="\$\{1:-\$\{OSV_VERSION:-([0-9.]+)\}\}"$',
-        _INSTALL_SCRIPT.read_text(encoding="utf-8"),
-        re.MULTILINE,
-    )
-    assert match is not None  # narrow type for mypy
-    floor = get_min_version(ToolName.OSV_SCANNER)
-
-    assert_that(compare_versions(match.group(1), floor)).is_greater_than_or_equal_to(0)

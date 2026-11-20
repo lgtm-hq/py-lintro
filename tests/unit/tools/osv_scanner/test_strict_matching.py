@@ -1,7 +1,8 @@
 """Each osv-scanner rule matches exactly and completely (#3352).
 
 Reproductions of runs that used to read as complete, and standard error
-captured from osv-scanner 2.4.0 and 2.7.1 for several unsatisfiable or
+captured from osv-scanner 2.4.0 and 2.7.1  # meta-guard: allow
+for several unsatisfiable or
 private manifests, written with ``{root}`` for the scanned directory
 (relative to ``/``, as osv-scanner prints it).
 """
@@ -55,15 +56,17 @@ _PRIVATE = (
 #: package public PyPI does not have.
 _CAPTURES: dict[str, str] = {
     "two-2.4.0": _HEADER + _impossible("a") + _impossible("b"),
-    "two-2.7.1": _HEADER + _impossible("a") + _impossible("b"),
+    "two-2.7.1": _HEADER + _impossible("a") + _impossible("b"),  # meta-guard: allow
     "three-2.4.0": (
         _HEADER + _impossible("a") + _impossible("c") + _impossible("b", "requests")
     ),
-    "three-2.7.1": (
+    "three-2.7.1": (  # meta-guard: allow
         _HEADER + _impossible("a") + _impossible("b", "requests") + _impossible("c")
     ),
     "mix-2.4.0": _HEADER + _impossible("a") + _impossible("c", "django") + _PRIVATE,
-    "mix-2.7.1": _HEADER + _impossible("a") + _impossible("c", "django") + _PRIVATE,
+    "mix-2.7.1": (  # meta-guard: allow
+        _HEADER + _impossible("a") + _impossible("c", "django") + _PRIVATE
+    ),
 }
 
 #: The manifests each case names.
@@ -74,7 +77,8 @@ _CAPTURE_FILES: dict[str, tuple[str, ...]] = {
 }
 
 #: Two pins no version satisfies together (``flask==2.0.0`` and
-#: ``werkzeug==1.0.0``), 2.4.0 and 2.7.1 alike, at exit 1 with findings.
+#: ``werkzeug==1.0.0``), 2.4.0 and 2.7.1 alike,  # meta-guard: allow
+#: at exit 1 with findings.
 _CONFLICT_STDERR = (
     f"{_HEADER}failed resolution for {{root}}/requirements.txt: resolution "
     'impossible:\nrequirements conflict: werkzeug: "==1.0.0,>=2.0"\n\n'

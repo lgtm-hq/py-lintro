@@ -1,9 +1,16 @@
-"""lintro refuses osv-scanner releases that under-read pnpm lockfiles (#3557).
+"""lintro refuses osv-scanner releases that under-read lockfiles (#3557).
 
-osv-scanner 2.4.0 to 2.5.1 read only the first document of a two-document
-``pnpm-lock.yaml`` (15 of 651 packages in vuejs/core) and exit 0 with nothing
-on standard error, so the scan reads as complete. lintro cannot detect that,
-so the floor sits at 2.6.0, the first release that reads the whole file.
+Two ranges under-read silently, exiting 0 with nothing on standard error, so
+the scan reads as complete:
+
+- 2.4.0 to 2.5.1 read only the first document of a two-document
+  ``pnpm-lock.yaml`` (15 of 651 packages in vuejs/core).
+- 2.7.0 treats npm packages with no ``resolved`` field in
+  ``package-lock.json`` as local and never checks them.
+
+lintro cannot detect either, so the floor is the version lintro pins and
+tests (#3556), which is above both ranges. The manifest gives osv_scanner no
+``min_version`` of its own, so the floor is read from the pin.
 """
 
 from __future__ import annotations
@@ -15,11 +22,13 @@ import pytest
 from assertpy import assert_that
 
 import lintro.tools
+from lintro._tool_versions import TOOL_VERSIONS
+from lintro.enums.tool_name import ToolName
 from lintro.tools.core.version_parsing import check_tool_version
 from lintro.tools.osv_scanner.definition import OsvScannerPlugin
 
-#: The floor this module pins.
-_FLOOR = "2.6.0"
+#: The osv-scanner version lintro pins, installs and tests.
+_PIN = TOOL_VERSIONS[ToolName.OSV_SCANNER]
 
 
 def _version_output(version: str) -> str:
@@ -29,7 +38,7 @@ def _version_output(version: str) -> str:
         version: Release version the fake binary reports.
 
     Returns:
-        The four-line banner 2.5.1 and 2.6.0 print.
+        The four-line banner current releases print.
     """
     return (
         f"osv-scanner version: {version}\n"
@@ -58,22 +67,30 @@ def _fake_osv_scanner(directory: Path, version: str) -> Path:
     return binary
 
 
-def test_manifest_floor_is_2_6_0() -> None:
-    """The manifest source and the plugin both declare 2.6.0 as the floor."""
+def test_floor_is_the_pinned_version() -> None:
+    """The floor is the pin itself, with no separate value to fall behind.
+
+    The manifest source sets no ``min_version`` for osv_scanner, so the floor
+    falls back to the pinned ``version`` and a Renovate bump of the pin
+    raises it too.
+    """
     source = Path(lintro.tools.__file__).parent / "manifest.src.json"
     tools = json.loads(source.read_text(encoding="utf-8"))["tools"]
     entry = next(tool for tool in tools if tool["name"] == "osv_scanner")
 
-    assert_that(entry["min_version"]).is_equal_to(_FLOOR)
-    assert_that(OsvScannerPlugin().definition.min_version).is_equal_to(_FLOOR)
+    assert_that(entry).does_not_contain_key("min_version")
+    assert_that(OsvScannerPlugin().definition.min_version).is_equal_to(_PIN)
 
 
-@pytest.mark.parametrize("version", ["2.4.0", "2.5.1"])
-def test_release_that_under_reads_pnpm_is_below_minimum(
+@pytest.mark.parametrize("version", ["2.4.0", "2.5.1", "2.6.0", "2.7.0"])
+def test_release_that_under_reads_lockfiles_is_below_minimum(
     tmp_path: Path,
     version: str,
 ) -> None:
-    """2.4.0 to 2.5.1 fail the version check with an actionable message.
+    """Releases with a known silent under-read fail the version check.
+
+    2.6.0 reads pnpm lockfiles correctly but sits below the pin, so it is
+    refused too.
 
     Args:
         tmp_path: Pytest fixture providing a temporary directory.
@@ -86,26 +103,21 @@ def test_release_that_under_reads_pnpm_is_below_minimum(
     assert_that(info.current_version).is_equal_to(version)
     assert_that(info.version_check_passed).is_false()
     assert_that(info.error_message).is_equal_to(
-        f"Version {version} is below minimum requirement {_FLOOR}",
+        f"Version {version} is below minimum requirement {_PIN}",
     )
-    assert_that(info.install_hint).contains(f"v{_FLOOR}+")
+    assert_that(info.install_hint).contains(f"v{_PIN}+")
 
 
-@pytest.mark.parametrize("version", ["2.6.0", "2.7.1"])
-def test_release_that_reads_whole_pnpm_lockfile_passes(
-    tmp_path: Path,
-    version: str,
-) -> None:
-    """2.6.0 and later pass the version check.
+def test_pinned_release_passes(tmp_path: Path) -> None:
+    """The pinned release passes the version check.
 
     Args:
         tmp_path: Pytest fixture providing a temporary directory.
-        version: An osv-scanner release at or above the floor.
     """
-    binary = _fake_osv_scanner(tmp_path, version)
+    binary = _fake_osv_scanner(tmp_path, _PIN)
 
     info = check_tool_version("osv_scanner", [str(binary)])
 
-    assert_that(info.current_version).is_equal_to(version)
+    assert_that(info.current_version).is_equal_to(_PIN)
     assert_that(info.version_check_passed).is_true()
     assert_that(info.error_message).is_none()
