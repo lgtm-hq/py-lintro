@@ -555,6 +555,10 @@ def _report(records: list[object], *, count: int, found: bool) -> str:
         pytest.param(0, [], 0, True, "report says found=True, count=0 but lists 0", 0, id="found-disagrees"),
         pytest.param(2, [SMALLVEC_RECORD], 1, True, "exit status 2, expected 1", 1, id="exit-2-with-findings"),
         pytest.param(0, [SMALLVEC_RECORD], 1, True, "exit status 0, expected 1", 1, id="exit-0-with-findings"),
+        pytest.param(1, [{**SMALLVEC_RECORD, "package": {"version": "1.6.0"}}], 1, True, "1 of 1 vulnerability records without package name", 1, id="no-package-name"),
+        pytest.param(1, [{**SMALLVEC_RECORD, "package": {"name": "smallvec"}}], 1, True, "1 of 1 vulnerability records without package version", 1, id="no-package-version"),
+        pytest.param(1, [{"advisory": {"id": "RUSTSEC-2021-0003"}}], 1, True, "1 of 1 vulnerability records without package name or package version", 1, id="no-package"),
+        pytest.param(1, [{**SMALLVEC_RECORD, "advisory": {"title": "t"}}], 1, True, "1 of 1 vulnerability records unreadable", 0, id="no-advisory-id"),
     ],
 )  # fmt: skip
 def test_incomplete_report_fails_and_keeps_its_valid_findings(
@@ -864,3 +868,151 @@ def test_pyproject_exclude_patterns_leave_a_lockfile_out(
     assert_that(result.output).contains(
         "excluded by lintro's exclude patterns (1): vendor/dep/Cargo.lock.",
     )
+
+
+def test_unknown_record_fields_are_tolerated(repo: Path, fake: _FakeCargoAudit) -> None:
+    """A complete record with fields lintro does not read is still complete.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+    """
+    lock = _crate(repo, "app")
+    record = {**SMALLVEC_RECORD, "affected": {"functions": {}}, "extra": 1}
+    fake.reports[lock] = (1, _report([record], count=1, found=True))
+
+    result = _check(fake, ["."])
+
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.inspected_files).is_true()
+
+
+def test_denied_warnings_fail_a_complete_audit(
+    repo: Path,
+    fake: _FakeCargoAudit,
+) -> None:
+    """Exit 1 with denied warnings is an audit that ran, not a missing report.
+
+    The report is what cargo-audit 0.23 prints with ``-D warnings`` or
+    ``[output] deny`` for an unmaintained crate: no vulnerabilities, exit 1,
+    and the warning marked ``"denied": true``.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+    """
+    lock = _crate(repo, "app")
+    warning = {
+        "kind": "unmaintained",
+        "package": {"name": "ansi_term", "version": "0.12.1"},
+        "advisory": {"id": "RUSTSEC-2021-0139"},
+        "denied": True,
+    }
+    report = json.loads(_report([], count=0, found=False))
+    report["warnings"] = {"unmaintained": [warning]}
+    fake.reports[lock] = (1, json.dumps(report))
+
+    result = _check(fake, ["."])
+
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.inspected_files).is_true()
+    assert_that(result.output).contains(
+        "cargo-audit denied warnings, audited but failing (1): app/Cargo.lock "
+        "(unmaintained ansi_term (RUSTSEC-2021-0139)).",
+    )
+    assert_that(result.output).does_not_contain("did not produce a complete report")
+
+
+@pytest.mark.parametrize("requested", ["app/Cargo.lock/", "app"])
+def test_requested_directory_named_cargo_lock_fails(
+    repo: Path,
+    fake: _FakeCargoAudit,
+    requested: str,
+) -> None:
+    """A directory named Cargo.lock fails whether it or its parent is passed.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+        requested: The path handed to ``check``.
+    """
+    (repo / "app" / "Cargo.lock").mkdir(parents=True)
+
+    result = _check(fake, [requested])
+
+    assert_that(fake.commands).is_empty()
+    assert_that(result.success).is_false()
+    assert_that(result.no_files).is_false()
+    assert_that(result.output).contains(
+        "named Cargo.lock but not a readable file (1): app/Cargo.lock.",
+    )
+
+
+def test_diff_run_leaves_out_an_unchanged_unreadable_entry(
+    git_repo: Path,
+    fake: _FakeCargoAudit,
+) -> None:
+    """A committed dangling Cargo.lock link does not fail a diff run.
+
+    Args:
+        git_repo: Committed repository.
+        fake: The fake cargo-audit.
+    """
+    (git_repo / "broken").mkdir()
+    (git_repo / "broken" / "Cargo.lock").symlink_to(git_repo / "missing.lock")
+    _git(git_repo, "add", "-A")
+    _git(git_repo, "commit", "-q", "-m", "broken link")
+
+    result = _check(fake, ["."], options={"diff_base": "HEAD"})
+
+    assert_that(fake.commands).is_empty()
+    assert_that(result.no_files).is_true()
+    assert_that(result.success).is_true()
+    assert_that(result.output or "").does_not_contain("broken/Cargo.lock")
+
+
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root reads a file whatever its mode",
+)
+def test_diff_run_names_a_changed_unreadable_lockfile(
+    git_repo: Path,
+    fake: _FakeCargoAudit,
+) -> None:
+    """A changed Cargo.lock that cannot be read fails the diff run, named.
+
+    Args:
+        git_repo: Committed repository.
+        fake: The fake cargo-audit.
+    """
+    lock = _crate(git_repo, "locked")
+    lock.chmod(0)
+
+    result = _check(fake, ["."], options={"diff_base": "HEAD"})
+
+    assert_that(fake.commands).is_empty()
+    assert_that(result.success).is_false()
+    assert_that(result.execution_failed).is_true()
+    assert_that(result.output).contains(
+        "named Cargo.lock but not a readable file (1): locked/Cargo.lock.",
+    )
+
+
+def test_diff_run_names_only_changed_excluded_lockfiles(
+    git_repo: Path,
+    fake: _FakeCargoAudit,
+) -> None:
+    """The excluded note of a diff run lists only excluded lockfiles that changed.
+
+    Args:
+        git_repo: Committed repository.
+        fake: The fake cargo-audit.
+    """
+    (git_repo / "app" / "Cargo.lock").write_text("version = 4\n")
+
+    result = _check(fake, ["."], exclude=["vendor/"], options={"diff_base": "HEAD"})
+
+    assert_that(fake.audited()).is_equal_to([git_repo / "app" / "Cargo.lock"])
+    assert_that(result.output or "").does_not_contain("vendor/dep/Cargo.lock")

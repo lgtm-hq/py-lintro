@@ -3936,17 +3936,24 @@ files matched", as any tool does whose inputs your exclude patterns remove, and 
 output names the excluded lockfiles
 (`No Cargo.lock in scope: every one found is excluded ...`). In a `--diff` run the scope
 is the changed lockfiles; a run in which no lockfile changed reports "no files matched"
-without that list. Lists of lockfiles name the first ten and give a count of the rest.
+without that list. The same scope applies to excluded and unreadable entries: only those
+in the diff are named. lintro's changed set holds only paths that resolve to a file, so
+in a `--diff` run an unreadable entry is caught when it is a changed `Cargo.lock` that
+cannot be read, but a dangling symlink, symlink loop or directory named `Cargo.lock` is
+only caught by a full run. Lists of lockfiles name the first ten and give a count of the
+rest.
 
 **Fail closed.** A lockfile that was not audited fails the check and is named, whatever
 the other lockfiles found. Findings from a failed audit are still shown. A lockfile
 counts as not audited when:
 
 - cargo-audit printed no usable JSON report;
-- a vulnerability record in the report could not be read, or the report's `found` and
-  `count` disagree with the records it lists;
+- a vulnerability record in the report could not be read or lacks the advisory id,
+  package name or package version, or the report's `found` and `count` disagree with the
+  records it lists (findings that could be read are still shown);
 - the exit status does not match the report: cargo-audit exits 0 when clean, 1 when it
-  found vulnerabilities and 2 on an error, so exit 2 is a failure even with findings;
+  found vulnerabilities or denied a warning, and 2 on an error, so exit 2 is a failure
+  even with findings;
 - the lockfile lists no packages (for example a zero-byte file). Cargo always records
   the root package, even for a crate without dependencies, so such a file is not a
   lockfile cargo wrote;
@@ -3954,6 +3961,13 @@ counts as not audited when:
   or a symlink loop.
 
 A failed audit leaves file inspection unknown, so it never updates a baseline.
+
+**Denied warnings.** When `.cargo/audit.toml` (`[output] deny = [...]`) or `-D warnings`
+denies a warning such as an unmaintained crate, cargo-audit exits 1 without
+vulnerabilities. That lockfile was audited, so it is not reported as missing a report:
+the check fails with
+`cargo-audit denied warnings, audited but failing (N): <lockfile> (<kind> <crate> (<advisory>))`,
+and file inspection stays known.
 
 **Available Options via `--tool-options`:**
 

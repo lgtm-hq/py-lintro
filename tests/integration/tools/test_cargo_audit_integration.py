@@ -137,3 +137,35 @@ def test_empty_lockfile_is_not_audited(repo: Path) -> None:
     assert_that(result.success).is_false()
     assert_that(result.execution_failed).is_true()
     assert_that(result.output).contains("app/Cargo.lock (lockfile lists no packages)")
+
+
+def test_denied_warning_fails_an_audit_that_ran(repo: Path) -> None:
+    """``[output] deny`` makes cargo-audit exit 1 with no vulnerabilities.
+
+    ansi_term 0.12.1 is unmaintained (RUSTSEC-2021-0139). The audit ran, so
+    the lockfile fails as denied, not as a missing report.
+
+    Args:
+        repo: Repository root.
+    """
+    crate = repo / "app"
+    crate.mkdir()
+    (crate / "Cargo.toml").write_text('[package]\nname = "app"\nversion = "0.1.0"\n')
+    (crate / "Cargo.lock").write_text(
+        'version = 3\n\n[[package]]\nname = "ansi_term"\nversion = "0.12.1"\n'
+        'source = "registry+https://github.com/rust-lang/crates.io-index"\n\n'
+        '[[package]]\nname = "app"\nversion = "0.1.0"\ndependencies = ["ansi_term"]\n',
+    )
+    (crate / ".cargo").mkdir()
+    (crate / ".cargo" / "audit.toml").write_text(
+        '[output]\ndeny = ["unmaintained"]\nquiet = false\n',
+    )
+
+    result = CargoAuditPlugin().check(["."], {})
+
+    assert_that(result.success).described_as(result.output).is_false()
+    assert_that(result.execution_failed).is_false()
+    assert_that(result.inspected_files).is_true()
+    assert_that(result.output).contains(
+        "app/Cargo.lock (unmaintained ansi_term (RUSTSEC-2021-0139))",
+    )

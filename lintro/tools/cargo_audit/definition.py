@@ -117,21 +117,50 @@ def _lockfile_names(lockfiles: list[Path]) -> str:
     return _names([_shown(lockfile) for lockfile in lockfiles])
 
 
+def _denied_warnings(payload: dict[str, Any] | None) -> list[str]:
+    """Name the warnings cargo-audit denied (``-D`` or ``[output] deny``).
+
+    Args:
+        payload: The parsed report, or None when there was none.
+
+    Returns:
+        One label per warning marked ``"denied": true``, such as
+        ``unmaintained ansi_term (RUSTSEC-2021-0139)``.
+    """
+    warnings = payload.get("warnings") if payload else None
+    if not isinstance(warnings, dict):
+        return []
+    labels: list[str] = []
+    for kind, entries in warnings.items():
+        for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, dict) or entry.get("denied") is not True:
+                continue
+            package, advisory = entry.get("package"), entry.get("advisory")
+            name = package.get("name") if isinstance(package, dict) else None
+            ident = advisory.get("id") if isinstance(advisory, dict) else None
+            labels.append(f"{kind} {name or '?'}" + (f" ({ident})" if ident else ""))
+    return labels
+
+
 def _report_problem(
     payload: dict[str, Any] | None,
     issues: list[CargoAuditIssue],
     returncode: int,
+    *,
+    denied: bool,
 ) -> str | None:
     """Say why a cargo-audit report does not establish a complete audit.
 
     cargo-audit 0.23 exits 0 for a clean audit, 1 when it found
-    vulnerabilities and 2 on an error (an unreadable lockfile, a bad
-    argument). Only a valid report with the matching exit status is complete.
+    vulnerabilities or denied a warning, and 2 on an error (an unreadable
+    lockfile, a bad argument). Only a valid report with the matching exit
+    status is complete.
 
     Args:
         payload: The parsed report, or None when there was none.
         issues: Findings parsed from it.
         returncode: cargo-audit's exit status.
+        denied: Whether the report marks a warning as denied.
 
     Returns:
         The reason the audit is incomplete, or None when it is complete.
@@ -145,12 +174,31 @@ def _report_problem(
     count, found = vulnerabilities.get("count"), vulnerabilities.get("found")
     if type(count) is not int or count != records or found is not (records > 0):
         return f"report says found={found}, count={count} but lists {records}"
+    # Every finding is displayed and fingerprinted by advisory, package and
+    # version; a record without them cannot be told apart from another.
+    missing = sorted(
+        {
+            field
+            for issue in issues
+            for field, value in (
+                ("package name", issue.package_name),
+                ("package version", issue.package_version),
+            )
+            if not value
+        },
+    )
+    if missing:
+        partial = sum(not (i.package_name and i.package_version) for i in issues)
+        return (
+            f"{partial} of {records} vulnerability records without "
+            f"{' or '.join(missing)}"
+        )
     lockfile = payload.get("lockfile")
     if isinstance(lockfile, dict) and lockfile.get("dependency-count") == 0:
         # Cargo always records at least the root package, even for a crate
         # with no dependencies, so a lockfile with none is not a real one.
         return "lockfile lists no packages"
-    expected = 1 if issues else 0
+    expected = 1 if issues or denied else 0
     if returncode != expected:
         return f"exit status {returncode}, expected {expected}"
     return None
@@ -167,6 +215,7 @@ class _LockfileAudit:
         parsed: Whether cargo-audit printed a report, which proves the
             advisory database is in place.
         parse_failures: 1 for a missing report, else its unreadable records.
+        denied: Warnings cargo-audit denied, which fail a complete audit.
         output: Combined command output, kept for display.
     """
 
@@ -175,6 +224,7 @@ class _LockfileAudit:
     problem: str | None
     parsed: bool
     parse_failures: int
+    denied: list[str]
     output: str
 
     @property
@@ -257,10 +307,20 @@ class _AuditSummary:
         blocks = [
             f"cargo-audit report for {_shown(audit.lockfile)}:\n{audit.output}"
             for audit in self.audits
-            if audit.issues or not audit.complete
+            if audit.issues or audit.denied or not audit.complete
+        ]
+        denied = [
+            f"{_shown(audit.lockfile)} ({', '.join(audit.denied)})"
+            for audit in self.audits
+            if audit.denied
         ]
         notes = [
             self.failure_note(),
+            (
+                f"cargo-audit denied warnings, audited but failing {_names(denied)}."
+                if denied
+                else None
+            ),
             (
                 f"cargo-audit timed out after {self.timeout:g}s; not audited "
                 f"{_lockfile_names(self.not_audited)}."
@@ -409,7 +469,13 @@ class CargoAuditPlugin(BaseToolPlugin):
         # A missing, schema-invalid or inconsistent report, or an exit status
         # other than the one the report explains, cannot establish a clean
         # scan (see #1044 and #3003). Its valid findings are still kept.
-        problem = _report_problem(payload, issues, proc.returncode)
+        denied = _denied_warnings(payload)
+        problem = _report_problem(
+            payload,
+            issues,
+            proc.returncode,
+            denied=bool(denied),
+        )
         records = len(payload["vulnerabilities"]["list"]) if payload else 0
         return _LockfileAudit(
             lockfile=lockfile,
@@ -417,6 +483,7 @@ class CargoAuditPlugin(BaseToolPlugin):
             problem=problem,
             parsed=payload is not None,
             parse_failures=1 if payload is None else records - len(issues),
+            denied=denied,
             output=proc.output,
         )
 
@@ -435,9 +502,11 @@ class CargoAuditPlugin(BaseToolPlugin):
         """
         candidates: set[str] = set()
         for path in paths:
+            # A requested directory named Cargo.lock is an entry too, not
+            # only its children (``abspath`` drops a trailing slash).
+            if os.path.basename(os.path.abspath(path)) == CARGO_AUDIT_LOCKFILE:
+                candidates.add(os.path.abspath(path))
             if not os.path.isdir(path):
-                if os.path.basename(path) == CARGO_AUDIT_LOCKFILE:
-                    candidates.add(os.path.abspath(path))
                 continue
             for root, dirs, files in os.walk(path):
                 if not self.include_venv:
@@ -460,32 +529,51 @@ class CargoAuditPlugin(BaseToolPlugin):
                 unreadable.append(Path(candidate))
         return _Scan(excluded=excluded, unreadable=unreadable, readable=readable)
 
-    def _no_files_result(
+    def _in_scope(
         self,
-        ctx: ToolResult,
         scan: _Scan,
         paths: list[str],
         options: dict[str, object],
-    ) -> ToolResult:
+    ) -> _Scan:
+        """Keep the entries a ``--diff`` run covers, of every kind.
+
+        Args:
+            scan: Every Cargo.lock entry below ``paths``.
+            paths: Paths passed to ``check``.
+            options: Options passed to ``check``.
+
+        Returns:
+            ``scan`` unchanged without a diff base, else only changed entries.
+        """
+        base = options.get("diff_base", self.options.get("diff_base"))
+        if not isinstance(base, str):
+            return scan
+        changed = set(
+            filter_files_by_diff_for_paths(
+                [str(e) for e in (*scan.excluded, *scan.unreadable, *scan.readable)],
+                base,
+                paths,
+            ),
+        )
+        return _Scan(
+            excluded=[e for e in scan.excluded if str(e) in changed],
+            unreadable=[e for e in scan.unreadable if str(e) in changed],
+            readable=[e for e in scan.readable if str(e) in changed],
+        )
+
+    def _no_files_result(self, ctx: ToolResult, scan: _Scan) -> ToolResult:
         """Explain a check in which discovery handed over no lockfile.
 
         Args:
             ctx: The no-files result from ``prepare``.
-            scan: Every Cargo.lock entry below ``paths``.
-            paths: Paths passed to ``check``.
-            options: Options passed to ``check``.
+            scan: Every Cargo.lock entry in the requested scope.
 
         Returns:
             A no-files result naming the excluded lockfiles when the requested
             scope held lockfiles and an exclude pattern removed every one, else
             ``ctx``.
         """
-        excluded = [str(lockfile) for lockfile in scan.excluded]
-        readable = [str(lockfile) for lockfile in scan.readable]
-        diff_base = options.get("diff_base", self.options.get("diff_base"))
-        if isinstance(diff_base, str):
-            excluded = filter_files_by_diff_for_paths(excluded, diff_base, paths)
-            readable = filter_files_by_diff_for_paths(readable, diff_base, paths)
+        excluded, readable = scan.excluded, scan.readable
         # A readable lockfile in scope that was not excluded means the diff or
         # incremental filter left it out, not an exclusion (#3572). Excluded
         # lockfiles are not in the incremental cache, so an incremental run
@@ -583,9 +671,11 @@ class CargoAuditPlugin(BaseToolPlugin):
         ctx = self.prepare(paths, options)
         if isinstance(ctx, ToolResult) and not ctx.no_files:
             return ctx
-        scan = self._scan(paths)
+        # In a --diff run every kind of entry is limited to the changed ones,
+        # so unchanged entries neither fail the run nor fill its notes.
+        scan = self._in_scope(self._scan(paths), paths, options)
         if isinstance(ctx, ToolResult) and not scan.unreadable:
-            return self._no_files_result(ctx, scan, paths, options)
+            return self._no_files_result(ctx, scan)
         # Unreadable entries fail the check even when nothing else is in
         # scope, and each is reported once, as unreadable, not as a failed run.
         files = [] if isinstance(ctx, ToolResult) else ctx.files
@@ -597,6 +687,7 @@ class CargoAuditPlugin(BaseToolPlugin):
         )
         issues = summary.issues
         failure = summary.failure_note()
+        denied = any(audit.denied for audit in summary.audits)
         payload: dict[str, Any] = {
             "name": self.definition.name,
             "issues": issues,
@@ -617,7 +708,7 @@ class CargoAuditPlugin(BaseToolPlugin):
         return ToolResult.from_outcome(
             ToolOutcome(
                 execution=Checked(
-                    success=not issues and failure is None,
+                    success=not issues and not denied and failure is None,
                     # A lockfile that was not audited leaves inspection
                     # unknown, as for every fail-closed check.
                     inspected_files=None if failure else True,
