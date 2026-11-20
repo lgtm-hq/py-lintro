@@ -25,10 +25,12 @@ from assertpy import assert_that
 
 from lintro.config.config_loader import load_config
 from lintro.enums.action import Action
+from lintro.models.core.tool_outcome import ToolOutcome, Unavailable
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.cargo_audit.definition import CargoAuditPlugin
 from lintro.utils.execution.tool_configuration import configure_tool_for_execution
+from lintro.utils.file_cache import ToolCache
 from lintro.utils.fingerprint_baseline import fingerprint
 from lintro.utils.tool_options import parse_tool_options
 from lintro.utils.unified_config import UnifiedConfigManager
@@ -1342,4 +1344,115 @@ def test_a_lockfile_left_unaudited_is_audited_by_the_next_incremental_run(
         include_vendored=True if reason == "default-skip" else None,
     )
 
+    assert_that(fake.audited()).is_equal_to([lib])
+
+
+def _cached(repo: Path) -> list[str]:
+    """Return the lockfiles cargo_audit's incremental cache records as checked.
+
+    Args:
+        repo: Repository root the entries are shown relative to.
+
+    Returns:
+        Cached Cargo.lock paths relative to ``repo``, sorted.
+    """
+    keys = ToolCache.load("cargo_audit").fingerprints
+    return sorted(
+        str(Path(k).relative_to(repo)) for k in keys if k.endswith("Cargo.lock")
+    )
+
+
+@pytest.fixture
+def three_crates(
+    tmp_path: Path,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, Path]:
+    """Create app, lib and a vendored copy, with the cache in ``tmp_path``.
+
+    Args:
+        tmp_path: Pytest temporary directory, holding the cache.
+        repo: Repository root.
+        monkeypatch: Points the incremental cache at ``tmp_path``.
+
+    Returns:
+        The app and lib lockfiles.
+    """
+    monkeypatch.setattr("lintro.utils.file_cache.CACHE_DIR", tmp_path / "cache")
+    _crate(repo, "vendor/dep")
+    return _crate(repo, "app"), _crate(repo, "lib")
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        Unavailable("cargo-audit is not installed"),
+        Unavailable("security scanner did not run: below minimum", strict=True),
+    ],
+    ids=["unavailable", "refused-version"],
+)
+def test_an_early_result_from_prepare_records_nothing_as_checked(
+    repo: Path,
+    fake: _FakeCargoAudit,
+    three_crates: tuple[Path, Path],
+    refusal: Unavailable,
+) -> None:
+    """A run stopped by the version gate leaves every lockfile due.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+        three_crates: The app and lib lockfiles.
+        refusal: What the version gate reports.
+    """
+    early = ToolResult.from_outcome(ToolOutcome(refusal), name="cargo_audit")
+    incremental: dict[str, object] = {"incremental": True}
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=early,
+    ):
+        first = _check(fake, ["."], options=incremental)
+
+    assert_that(first.unavailable_reason).is_equal_to(refusal.reason)
+    assert_that(_cached(repo)).is_empty()
+    _check(fake, ["."], options=incremental)
+    assert_that(fake.audited()).is_equal_to(list(three_crates))
+
+
+@pytest.mark.parametrize(
+    "error",
+    [RuntimeError("boom"), KeyboardInterrupt()],
+    ids=["exception", "keyboard-interrupt"],
+)
+def test_an_interrupted_audit_records_only_completed_audits(
+    repo: Path,
+    fake: _FakeCargoAudit,
+    three_crates: tuple[Path, Path],
+    error: BaseException,
+) -> None:
+    """Stopping mid-audit keeps app checked and leaves lib due.
+
+    Args:
+        repo: Repository root.
+        fake: The fake cargo-audit.
+        three_crates: The app and lib lockfiles.
+        error: What the audit of lib raises.
+    """
+    _, lib = three_crates
+    incremental: dict[str, object] = {"incremental": True}
+    clean = SubprocessResult(
+        returncode=0,
+        stdout=CLEAN_REPORT,
+        stderr="",
+        output=CLEAN_REPORT,
+    )
+    plugin = CargoAuditPlugin()
+    with (
+        patch.object(plugin, "_run_subprocess_result", side_effect=[clean, error]),
+        pytest.raises(type(error)),
+    ):
+        plugin.check(["."], incremental)
+
+    assert_that(_cached(repo)).is_equal_to(["app/Cargo.lock"])
+    _check(fake, ["."], options=incremental)
     assert_that(fake.audited()).is_equal_to([lib])

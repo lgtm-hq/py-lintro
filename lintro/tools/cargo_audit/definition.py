@@ -35,7 +35,7 @@ from lintro.tools.core.option_validators import (
     validate_bool,
     validate_positive_int,
 )
-from lintro.utils.file_cache import ToolCache
+from lintro.utils.file_cache import FileFingerprint, ToolCache
 from lintro.utils.git_diff import filter_files_by_diff_for_paths
 from lintro.utils.path_filtering import (
     resolve_exclude_anchors,
@@ -671,6 +671,7 @@ class CargoAuditPlugin(BaseToolPlugin):
         scan: _Scan,
         anchors: tuple[str, ...],
         vendored: list[Path],
+        audited: set[Path],
     ) -> _AuditSummary:
         """Audit each lockfile within one timeout budget for the whole check.
 
@@ -681,6 +682,8 @@ class CargoAuditPlugin(BaseToolPlugin):
             anchors: Project directories; a symlinked lockfile whose target
                 lies outside all of them is named in the output.
             vendored: Lockfiles skipped as vendored or build-tree copies.
+            audited: Receives each lockfile as soon as its audit is complete,
+                so an interrupted check still knows what it audited.
 
         Returns:
             Every audit that finished, and the lockfiles the budget did not
@@ -700,6 +703,8 @@ class CargoAuditPlugin(BaseToolPlugin):
                 )
             except subprocess.TimeoutExpired:
                 break
+            if audits[-1].complete:
+                audited.add(lockfile)
         return _AuditSummary(
             audits=audits,
             not_audited=lockfiles[len(audits) :],
@@ -719,24 +724,41 @@ class CargoAuditPlugin(BaseToolPlugin):
             vendored=vendored,
         )
 
-    def _forget(self, lockfiles: list[Path], options: dict[str, object]) -> None:
-        """Keep lockfiles that were not audited out of the incremental cache.
+    def _restore_unaudited(
+        self,
+        paths: list[str],
+        before: dict[str, FileFingerprint],
+        audited: set[Path],
+    ) -> None:
+        """Undo what incremental discovery recorded for unaudited lockfiles.
 
-        Incremental discovery records every lockfile it hands over as checked
-        before cargo-audit runs. One that was skipped, unreadable, not reached
-        before the timeout, or whose audit failed was not audited, so it must
-        count as changed on the next incremental run.
+        Discovery records every lockfile it finds as checked before
+        cargo-audit runs, whatever happens next: a skipped copy, an
+        unavailable tool, a failed audit, an exception or an interrupt. Every
+        Cargo.lock under the requested paths that did not get a complete audit
+        goes back to its entry from before this run, or is removed if it had
+        none, so the next incremental run audits it if it changed or was
+        never audited, and an audited, unchanged lockfile stays checked.
 
         Args:
-            lockfiles: Lockfiles this check did not audit.
-            options: Options passed to ``check``.
+            paths: Paths passed to ``check``.
+            before: The cache's entries before this run.
+            audited: Lockfiles that got a complete audit in this run.
         """
-        incremental = options.get("incremental", self.options.get("incremental"))
-        if incremental is not True or not lockfiles:
-            return
+        roots = [Path(os.path.abspath(p)) for p in paths]
         cache = ToolCache.load(self.definition.name)
-        for lockfile in lockfiles:
-            cache.fingerprints.pop(str(lockfile), None)
+        for key in list(cache.fingerprints):
+            lockfile = Path(key)
+            if (
+                lockfile.name != CARGO_AUDIT_LOCKFILE
+                or lockfile in audited
+                or not any(lockfile.is_relative_to(root) for root in roots)
+            ):
+                continue
+            if key in before:
+                cache.fingerprints[key] = before[key]
+            else:
+                del cache.fingerprints[key]
         cache.save()
 
     def doc_url(self, code: str) -> str | None:
@@ -762,6 +784,33 @@ class CargoAuditPlugin(BaseToolPlugin):
         Returns:
             ToolResult with security scan results.
         """
+        audited: set[Path] = set()
+        if options.get("incremental", self.options.get("incremental")) is not True:
+            return self._check(paths, options, audited)
+        before = dict(ToolCache.load(self.definition.name).fingerprints)
+        # Whatever ends the check (an early result from prepare, an exception,
+        # an interrupt), unaudited lockfiles must not stay recorded as checked.
+        try:
+            return self._check(paths, options, audited)
+        finally:
+            self._restore_unaudited(paths, before, audited)
+
+    def _check(
+        self,
+        paths: list[str],
+        options: dict[str, object],
+        audited: set[Path],
+    ) -> ToolResult:
+        """Run the check, recording each lockfile that gets a complete audit.
+
+        Args:
+            paths: List of paths to check.
+            options: Additional options for the check.
+            audited: Receives each lockfile whose audit completed.
+
+        Returns:
+            ToolResult with security scan results.
+        """
         ctx = self.prepare(paths, options)
         if isinstance(ctx, ToolResult) and not ctx.no_files:
             return ctx
@@ -783,7 +832,6 @@ class CargoAuditPlugin(BaseToolPlugin):
         )
         lockfiles = [f for f in found if f not in vendored]
         if not lockfiles and not scan.unreadable:
-            self._forget(vendored, options)
             plain = ctx if isinstance(ctx, ToolResult) else None
             return self._nothing_audited(plain, scan, vendored, roots)
         summary = self._audit_all(
@@ -792,15 +840,7 @@ class CargoAuditPlugin(BaseToolPlugin):
             scan=scan,
             anchors=resolve_exclude_anchors(paths),
             vendored=vendored,
-        )
-        self._forget(
-            [
-                *vendored,
-                *scan.unreadable,
-                *summary.not_audited,
-                *(audit.lockfile for audit in summary.audits if not audit.complete),
-            ],
-            options,
+            audited=audited,
         )
         issues = summary.issues
         failure = summary.failure_note()
