@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,6 +49,7 @@ from lintro.utils.file_cache import (
 )
 from lintro.utils.incremental_record import (
     PendingCheck,
+    _can_open,
     _merged,
     checked_files,
     finish_incremental_run,
@@ -695,3 +697,34 @@ def test_incremental_cacheable_does_not_shift_positional_definition_fields() -> 
 
     assert_that(definition.native_configs).is_equal_to(["ext.toml"])
     assert_that(definition.incremental_cacheable).is_true()
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="named pipes need POSIX")
+def test_a_named_pipe_is_refused_without_waiting_for_a_writer(
+    tmp_path: Path,
+) -> None:
+    """A path replaced by a FIFO is not a checked file, and never blocks.
+
+    Opening a FIFO for reading waits for a writer; the readability test must
+    answer at once, and answer no.
+
+    Args:
+        tmp_path: Directory for the pipe and a regular file.
+    """
+    pipe = tmp_path / "script.sh"
+    os.mkfifo(pipe)
+    regular = tmp_path / "other.sh"
+    regular.write_text("echo ok\n")
+    answers: list[bool] = []
+    worker = threading.Thread(
+        target=lambda: answers.append(_can_open(str(pipe))),
+        daemon=True,
+    )
+
+    worker.start()
+    worker.join(timeout=5)
+
+    assert_that(worker.is_alive()).is_false()
+    assert_that(answers).is_equal_to([False])
+    assert_that(_can_open(str(regular))).is_true()
+    assert_that(_can_open(str(tmp_path))).is_false()

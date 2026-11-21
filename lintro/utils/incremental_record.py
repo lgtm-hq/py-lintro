@@ -27,6 +27,7 @@ records nothing either.
 from __future__ import annotations
 
 import os
+import stat
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -149,23 +150,33 @@ def checked_files(
 
 
 def _can_open(path: str) -> bool:
-    """Report whether lintro can open a file for reading right now.
+    """Report whether lintro can open a regular file for reading right now.
 
     A tool may exit 0 without reading a file it could not open; lintro
     never records such a file as checked. One open, no read: ``stat`` and
-    ``access`` miss cases an open does not (ACLs, sandboxes, a FIFO).
+    ``access`` miss cases an open does not (ACLs, sandboxes).
+
+    Only a regular file is opened, and the open never blocks: a path that
+    was replaced by a FIFO, a device or a socket while the tool ran is not
+    a file the tool checked, and opening a FIFO without ``O_NONBLOCK`` would
+    wait for a writer forever.
 
     Args:
         path: The discovered path.
 
     Returns:
-        True when the open succeeded.
+        True when the path is a regular file and the open succeeded.
     """
     try:
-        with open(path, "rb"):
-            return True
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
     except OSError:
         return False
+    try:
+        return stat.S_ISREG(os.fstat(descriptor).st_mode)
+    except OSError:
+        return False
+    finally:
+        os.close(descriptor)
 
 
 def _merged(pending: list[PendingCheck]) -> PendingCheck | None:
