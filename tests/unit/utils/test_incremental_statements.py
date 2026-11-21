@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import suppress
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,8 +26,10 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools import tool_manager
+from lintro.tools.black.definition import BlackPlugin
+from lintro.tools.core.batch_runner import record_handed
 from lintro.tools.spectral.definition import SpectralPlugin
-from lintro.utils.file_cache import ToolCache
+from lintro.utils.file_cache import FileFingerprint, ToolCache
 from lintro.utils.incremental_record import finish_incremental_run
 
 #: Sample files with names no subcommand or option value could produce.
@@ -56,8 +58,13 @@ class _Stub:
     """Stand-in for the subprocess layer that remembers what it was given."""
 
     def __init__(self) -> None:
-        """Start with no recorded commands."""
+        """Start with no recorded commands and the default answer."""
         self.calls: list[tuple[list[str], str]] = []
+        #: A test may answer a command itself: (returncode, stdout, stderr),
+        #: or None for the default.
+        self.answer: Callable[[list[str]], tuple[int, str, str] | None] = (
+            lambda _cmd: None
+        )
 
     def __call__(self, cmd: list[str], *args: Any, **kwargs: Any) -> SubprocessResult:
         """Record one spawn and answer with a clean, empty run.
@@ -73,6 +80,15 @@ class _Stub:
         """
         cwd = kwargs.get("cwd", args[1] if len(args) > 1 else None)
         self.calls.append((list(cmd), cwd or os.getcwd()))
+        custom = self.answer(list(cmd))
+        if custom is not None:
+            code, stdout, stderr = custom
+            return SubprocessResult(
+                returncode=code,
+                stdout=stdout,
+                stderr=stderr,
+                output="\n".join(filter(None, (stdout, stderr))),
+            )
         # Decided from the whole argv, not a position in it: how a tool is
         # launched (a PATH binary, ``python -m``, ``bunx``, ``npx --yes ...``)
         # depends on the machine.
@@ -350,3 +366,158 @@ def test_bandit_records_the_files_its_report_says_it_scanned(stub: _Stub) -> Non
         recorded = _record_clean(_run("bandit"))
 
     assert_that(recorded).is_equal_to(["scanned.py"])
+
+
+def test_sqlfluff_never_states_a_file_it_skipped(stub: _Stub) -> None:
+    """A file over SQLFluff's size limit is named, not recorded.
+
+    Args:
+        stub: Records every argv and answers like SQLFluff.
+    """
+    _write(Path.cwd(), {"big.sql": "select 1;\n" * 3000, "small.sql": "select 1;\n"})
+
+    def sqlfluff(cmd: list[str]) -> tuple[int, str, str] | None:
+        if "lint" not in cmd:
+            return None
+        if cmd[-1].endswith("big.sql"):
+            warning = f"WARNING Skipped file {cmd[-1]} because it is 30000 bytes"
+            return 0, "[]", warning
+        return 0, json.dumps([{"filepath": cmd[-1], "violations": []}]), ""
+
+    stub.answer = sqlfluff
+    tool = _run("sqlfluff")
+    stated = sorted(os.path.relpath(path) for path in tool.incremental_checked)
+
+    assert_that(stated).is_equal_to(["small.sql"])
+
+
+def test_ruff_states_nothing_when_it_failed_to_lint_a_file(stub: _Stub) -> None:
+    """Ruff exiting 0 after "Failed to lint" did not inspect every file.
+
+    Args:
+        stub: Records every argv and answers like Ruff.
+    """
+    _write(Path.cwd(), {"zq_alpha.py": "X = 1\n", "zq_beta.py": "Y = 2\n"})
+
+    def ruff(cmd: list[str]) -> tuple[int, str, str] | None:
+        if "check" not in cmd or not any("ruff" in token for token in cmd):
+            return None
+        return 0, "[]", "warning: Failed to lint zq_beta.py: Permission denied"
+
+    stub.answer = ruff
+
+    recorded = _record_clean(_run("ruff", select=["F"]))
+
+    assert_that(recorded).is_empty()
+
+
+def test_black_states_every_file_once_both_checks_completed(stub: _Stub) -> None:
+    """Black states its files only with the E501 supplement measured.
+
+    The supplement is replaced, so no real Ruff runs.
+
+    Args:
+        stub: Records every argv.
+    """
+    _write(Path.cwd(), {"zq_alpha.py": "X = 1\n"})
+
+    with patch.object(BlackPlugin, "_check_line_length_violations", return_value=[]):
+        measured = sorted(_run("black").incremental_checked)
+
+    assert_that([os.path.relpath(path) for path in measured]).is_equal_to(
+        ["zq_alpha.py"],
+    )
+
+
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root reads a file whatever its mode",
+)
+def test_a_file_lintro_cannot_open_is_never_recorded(stub: _Stub) -> None:
+    """A tool exiting 0 on an unreadable file does not get it recorded.
+
+    Args:
+        stub: Records every argv.
+    """
+    root = Path.cwd()
+    _write(root, {"ok/.env": "A=1\n", "locked/.env": "B=1\n"})
+    (root / "locked" / ".env").chmod(0)
+    try:
+        recorded = _record_clean(_run("dotenv_linter"))
+    finally:
+        (root / "locked" / ".env").chmod(0o644)
+
+    assert_that(recorded).is_equal_to([os.path.join("ok", ".env")])
+
+
+@pytest.mark.parametrize("name", ["shellcheck", "prettier"])
+def test_a_chmod_round_trip_makes_a_recorded_file_change(
+    stub: _Stub,
+    name: str,
+) -> None:
+    """``chmod 000`` then ``chmod 644`` leaves mtime and size, not the record.
+
+    Args:
+        stub: Records every argv.
+        name: A per-file tool and a batch tool.
+    """
+    target = {"shellcheck": "zq_beta.sh", "prettier": "zq_zeta.md"}[name]
+    _write(Path.cwd(), {target: SAMPLES[target]})
+    assert_that(_record_clean(_run(name))).is_equal_to([target])
+    path = Path.cwd() / target
+
+    path.chmod(0)
+    path.chmod(0o644)
+
+    changed = ToolCache.load(name).get_changed_files([str(path)])
+    assert_that(changed).is_equal_to([str(path)])
+
+
+def test_a_same_size_same_mtime_swap_is_a_change(tmp_path: Path) -> None:
+    """Replacing a file with same-size content and the same mtime is seen.
+
+    Args:
+        tmp_path: Directory holding the file and its replacement.
+    """
+    path = tmp_path / "a.txt"
+    path.write_text("aaaa\n")
+    before = path.stat()
+    cache = ToolCache(tool_name="t")
+    cache.record({str(path): FileFingerprint.of(str(path), before)})
+
+    swap = tmp_path / "swap.txt"
+    swap.write_text("bbbb\n")
+    os.utime(swap, ns=(before.st_atime_ns, before.st_mtime_ns))
+    os.replace(swap, path)
+
+    assert_that(path.stat().st_mtime_ns).is_equal_to(before.st_mtime_ns)
+    assert_that(cache.get_changed_files([str(path)])).is_equal_to([str(path)])
+
+
+@pytest.mark.parametrize(
+    ("execution_failed", "parse_failures"),
+    [(True, None), (False, 1)],
+    ids=["execution-failed", "parse-failures"],
+)
+def test_a_failed_or_partly_parsed_batch_states_nothing(
+    execution_failed: bool,
+    parse_failures: int | None,
+) -> None:
+    """``record_handed`` refuses a batch that crashed after partial output.
+
+    Args:
+        execution_failed: Whether the batch failed to execute.
+        parse_failures: Records the batch's report lost, if any.
+    """
+    tool = tool_manager.get_tool("prettier").copy_for_execution()
+    result = ToolResult(
+        name="prettier",
+        success=False,
+        inspected_files=True,
+        execution_failed=execution_failed,
+        parse_failures_count=parse_failures,
+    )
+
+    record_handed(tool, result, ["/p/a.md"])
+
+    assert_that(tool.incremental_checked).is_empty()

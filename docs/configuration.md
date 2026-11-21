@@ -640,8 +640,10 @@ only needed when running interactively and you want to avoid prompts.
 
 `lintro check --incremental` hands each tool only the files that tool has not already
 checked clean since they last changed. Each tool keeps its own record under
-`~/.lintro/cache/<tool>.json`; a file counts as changed when its modification time or
-size differs from the recorded one. `--no-cache` deletes every record.
+`~/.lintro/cache/<tool>.json`; a file counts as changed when its modification time,
+size, inode change time (`ctime`) or permission bits differ from the recorded ones, so a
+`chmod`, a restored mtime or a same-size replacement is checked again. `--no-cache`
+deletes every record.
 
 The rule for recording a file is fail closed:
 
@@ -674,6 +676,8 @@ The rule for recording a file is fail closed:
   and the next run checks them all again.
 - The recorded fingerprint is the one taken before the tool read the file. A file you
   edited during the run is checked again next time.
+- **A file lintro itself cannot open for reading is never recorded**, whatever the tool
+  reported, because a tool may exit 0 without reading a file it could not open.
 - A record that cannot be read (invalid bytes, malformed JSON) is discarded and every
   file is checked.
 - **Known gap: configuration is not part of the record.** A file lintro handed to a tool

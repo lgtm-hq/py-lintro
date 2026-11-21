@@ -28,13 +28,21 @@ def test_file_fingerprint_to_dict() -> None:
             "path": "/test/file.py",
             "mtime": 1234567890.0,
             "size": 1024,
+            "ctime_ns": 0,
+            "mode": 0,
         },
     )
 
 
 def test_file_fingerprint_from_dict() -> None:
     """Create fingerprint from dictionary."""
-    data = {"path": "/test/file.py", "mtime": 1234567890.0, "size": 1024}
+    data = {
+        "path": "/test/file.py",
+        "mtime": 1234567890.0,
+        "size": 1024,
+        "ctime_ns": 7,
+        "mode": 0o100644,
+    }
     fp = FileFingerprint.from_dict(data)
 
     assert_that(fp.path).is_equal_to("/test/file.py")
@@ -67,7 +75,7 @@ def test_tool_cache_empty_returns_all_files_as_changed(tmp_path: Path) -> None:
 
 
 def test_tool_cache_unchanged_file_not_returned(tmp_path: Path) -> None:
-    """File in cache with same mtime/size not returned as changed.
+    """File in cache with the same fingerprint not returned as changed.
 
     Args:
         tmp_path: Pytest fixture for temporary directory.
@@ -75,12 +83,10 @@ def test_tool_cache_unchanged_file_not_returned(tmp_path: Path) -> None:
     temp_file = tmp_path / "test.py"
     temp_file.write_text("test content")
 
-    stat = temp_file.stat()
     cache = ToolCache(tool_name="test")
-    cache.fingerprints[str(temp_file)] = FileFingerprint(
-        path=str(temp_file),
-        mtime=stat.st_mtime,
-        size=stat.st_size,
+    cache.fingerprints[str(temp_file)] = FileFingerprint.of(
+        str(temp_file),
+        temp_file.stat(),
     )
     changed = cache.get_changed_files([str(temp_file)])
     assert_that(changed).does_not_contain(str(temp_file))

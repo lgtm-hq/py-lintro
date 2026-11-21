@@ -126,6 +126,23 @@ def _parse_report(output: str, failures: list[int]) -> list[SqlfluffIssue]:
     return issues
 
 
+def _with_skip_note(output: str | None, skipped: dict[str, str]) -> str | None:
+    """Name the files SQLFluff skipped in a run that linted others.
+
+    Args:
+        output: The run's output.
+        skipped: Skipped path to SQLFluff's reason (may be empty).
+
+    Returns:
+        The output with one line naming the skipped files, if any.
+    """
+    if not skipped:
+        return output
+    names = ", ".join(sorted(PurePath(path).name for path in skipped))
+    note = f"Not linted, skipped by SQLFluff ({len(skipped)}): {names}"
+    return f"{output}\n\n{note}" if output else note
+
+
 @register_tool
 @dataclass
 class SqlfluffPlugin(BaseToolPlugin):
@@ -518,11 +535,15 @@ class SqlfluffPlugin(BaseToolPlugin):
         skipped = self._all_skipped_result(result=result, files=ctx.files, fixing=False)
         if skipped is not None:
             return skipped
+        # A file SQLFluff skipped was not linted, so it is never stated as
+        # checked, and the output names it (#3578).
+        self.incremental_checked.difference_update(self._lint_skipped)
         return self._with_lint_diagnostics(
             replace(
                 result,
                 success=result.success and not any(failures),
                 parse_failures_count=sum(failures),
+                output=_with_skip_note(result.output, self._lint_skipped),
             ),
         )
 

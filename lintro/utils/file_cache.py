@@ -11,6 +11,7 @@ findings. It is written after the tool has run
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -25,9 +26,11 @@ if TYPE_CHECKING:
 CACHE_DIR = Path.home() / ".lintro" / "cache"
 
 #: Format of a tool's cache file. Version 2 holds only files that were checked
-#: to completion. Earlier files could also hold files no tool had checked
-#: (#3578), so a file in any other format is discarded on load.
-CACHE_FORMAT_VERSION: int = 2
+#: to completion; version 3 adds ``ctime_ns`` and ``mode`` to each fingerprint.
+#: Earlier files could hold files no tool had checked, or fingerprints a
+#: ``chmod`` or same-size copy would still match (#3578), so a file in any
+#: other format is discarded on load.
+CACHE_FORMAT_VERSION: int = 3
 
 
 @dataclass
@@ -38,11 +41,36 @@ class FileFingerprint:
         path: Absolute path to the file.
         mtime: Last modification time (seconds since epoch).
         size: File size in bytes.
+        ctime_ns: Inode change time. A chmod, a rename over the file or a
+            restored mtime all move it while leaving mtime and size alone.
+        mode: Permission and type bits, so a file made unreadable and
+            readable again is never taken as unchanged.
     """
 
     path: str
     mtime: float
     size: int
+    ctime_ns: int = 0
+    mode: int = 0
+
+    @classmethod
+    def of(cls, path: str, stat: os.stat_result) -> FileFingerprint:
+        """Fingerprint a file from its ``stat`` result.
+
+        Args:
+            path: The path the fingerprint is kept under.
+            stat: That path's ``os.stat`` result.
+
+        Returns:
+            The fingerprint.
+        """
+        return cls(
+            path=path,
+            mtime=stat.st_mtime,
+            size=stat.st_size,
+            ctime_ns=stat.st_ctime_ns,
+            mode=stat.st_mode,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization.
@@ -66,6 +94,8 @@ class FileFingerprint:
             path=data["path"],
             mtime=data["mtime"],
             size=data["size"],
+            ctime_ns=data["ctime_ns"],
+            mode=data["mode"],
         )
 
 
@@ -114,7 +144,7 @@ class ToolCache:
             if cached is None:
                 # New file not in cache
                 changed.append(file_path)
-            elif cached.mtime != stat.st_mtime or cached.size != stat.st_size:
+            elif cached != FileFingerprint.of(file_path, stat):
                 # File has been modified
                 changed.append(file_path)
             # else: file unchanged, skip it
@@ -363,11 +393,7 @@ def snapshot_fingerprints(files: Sequence[str]) -> FingerprintSnapshot:
             logger.debug(f"Could not fingerprint {file_path}: {exc}")
             unreadable.append(file_path)
             continue
-        fingerprints[file_path] = FileFingerprint(
-            path=file_path,
-            mtime=stat.st_mtime,
-            size=stat.st_size,
-        )
+        fingerprints[file_path] = FileFingerprint.of(file_path, stat)
     return FingerprintSnapshot(
         fingerprints=fingerprints,
         unreadable=tuple(sorted(unreadable)),

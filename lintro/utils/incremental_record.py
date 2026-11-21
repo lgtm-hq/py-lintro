@@ -17,7 +17,8 @@ then are files recorded, and only the ones the run proved clean:
   (``findings_complete``);
 * a file with a finding is not recorded, so the next incremental run checks it
   again and reports the finding again;
-* a finding that cannot be tied to a handed file records nothing.
+* a finding that cannot be tied to a handed file records nothing;
+* a file lintro itself cannot open for reading is never recorded.
 
 A run that raises, is interrupted or is killed never reaches this point, so it
 records nothing either.
@@ -143,7 +144,28 @@ def checked_files(
         if path in stated
         and path not in flagged
         and (inspected is None or path in inspected)
+        and _can_open(path)
     }
+
+
+def _can_open(path: str) -> bool:
+    """Report whether lintro can open a file for reading right now.
+
+    A tool may exit 0 without reading a file it could not open; lintro
+    never records such a file as checked. One open, no read: ``stat`` and
+    ``access`` miss cases an open does not (ACLs, sandboxes, a FIFO).
+
+    Args:
+        path: The discovered path.
+
+    Returns:
+        True when the open succeeded.
+    """
+    try:
+        with open(path, "rb"):
+            return True
+    except OSError:
+        return False
 
 
 def _merged(pending: list[PendingCheck]) -> PendingCheck | None:

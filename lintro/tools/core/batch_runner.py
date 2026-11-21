@@ -406,9 +406,14 @@ def record_handed(
 
     Returns:
         ``result`` unchanged. The files are stated only when the result
-        shows the invocation completed and inspected them.
+        shows the invocation completed and inspected them, without an
+        execution failure or a record it could not parse.
     """
-    if result.inspected_files is True:
+    if (
+        result.inspected_files is True
+        and not result.execution_failed
+        and not result.parse_failures_count
+    ):
         plugin._record_checked(files)
     return result
 
