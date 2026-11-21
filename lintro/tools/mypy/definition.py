@@ -32,6 +32,7 @@ from lintro.tools.core.option_validators import (
     validate_option_types,
 )
 from lintro.utils.config import load_mypy_config
+from lintro.utils.option_paths import option_safe_paths
 
 # Constants for Mypy configuration
 MYPY_DEFAULT_TIMEOUT: int = 60
@@ -476,7 +477,8 @@ class MypyPlugin(BaseToolPlugin):
                 mypy_targets = target_paths
 
         cmd = self._build_command(
-            files=mypy_targets,
+            # A path starting with ``-`` would be read as an option (#3584).
+            files=option_safe_paths(mypy_targets),
             excludes=mypy_excludes,
             exclude_regexes=mypy_exclude_regexes,
         )

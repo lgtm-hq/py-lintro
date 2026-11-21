@@ -369,8 +369,9 @@ def test_a_dash_name_is_passed_as_a_path(tmp_path: Path) -> None:
     assert_that([call.cmd[3:] for call in fake.calls]).is_equal_to(
         [["./-x.html", "ok.html"]],
     )
+    # The guard is lintro's, so the finding keeps the name the user sees.
     assert_that([str(issue.file) for issue in result.issues]).is_equal_to(
-        ["./-x.html"],
+        ["-x.html"],
     )
 
 

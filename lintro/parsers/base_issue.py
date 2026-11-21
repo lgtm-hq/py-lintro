@@ -16,6 +16,25 @@ from typing import ClassVar
 
 from lintro.enums.severity_level import SeverityLevel, normalize_severity_level
 
+#: Prefixes ``lintro.utils.option_paths.option_safe_path`` adds before a
+#: relative path starting with ``-`` (``.\\`` when a tool prints Windows paths).
+_OPTION_GUARDS: tuple[str, ...] = ("./", ".\\")
+
+
+def strip_option_guard(path: str) -> str:
+    """Undo lintro's ``./`` guard on a path a tool reported back (#3584).
+
+    Args:
+        path: A path as a tool printed it.
+
+    Returns:
+        ``path`` without a leading ``./`` that only guards a ``-`` name.
+    """
+    for guard in _OPTION_GUARDS:
+        if path.startswith(guard) and path[len(guard) :].startswith("-"):
+            return path[len(guard) :]
+    return path
+
 
 @dataclass
 class BaseIssue:
@@ -66,6 +85,21 @@ class BaseIssue:
     doc_url: str = field(default="", repr=False)
     category: str = field(default="")
     fixable: bool = field(default=False)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        """Record ``file`` without the guard lintro added for the tool (#3584).
+
+        Lintro hands a file named like an option to the tool as ``./-name``,
+        and tools report that path back. Every issue, whether built by a
+        parser or rewritten later, keeps the name the user sees: ``-name``.
+
+        Args:
+            name: Attribute being set.
+            value: New value.
+        """
+        if name == "file" and isinstance(value, str):
+            value = strip_option_guard(value)
+        super().__setattr__(name, value)
 
     def get_severity(self) -> SeverityLevel:
         """Return the normalized severity for this issue.

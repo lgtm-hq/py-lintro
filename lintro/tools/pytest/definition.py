@@ -39,6 +39,7 @@ from lintro.tools.pytest.pytest_output_processor import (
 from lintro.tools.pytest.pytest_result_processor import (
     PytestResultProcessor,
 )
+from lintro.utils.option_paths import option_safe_paths
 from lintro.utils.path_utils import load_lintro_ignore
 
 # Constants for pytest configuration
@@ -307,6 +308,8 @@ class PytestPlugin(BaseToolPlugin):
         ):
             # If just "." is provided, also default to "tests" directory
             target_files = ["tests"]
+        # A path starting with ``-`` would be read as an option (#3584).
+        target_files = option_safe_paths(list(target_files))
 
         # Handle special modes first (these don't run tests)
         from lintro.enums.pytest_enums import PytestSpecialMode
