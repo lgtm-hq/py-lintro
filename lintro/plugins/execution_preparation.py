@@ -391,9 +391,16 @@ def prepare_execution(
         cwd=cwd,
         timeout=timeout,
         resolved_commands=resolved_commands,
+        # Every run of a cacheable tool is tracked, narrowed or not: a full
+        # check must be able to remove a stale clean entry (#3578).
         incremental=(
-            PendingCheck(definition.name, cwd, snapshot_fingerprints(files))
-            if incremental
+            PendingCheck(
+                definition.name,
+                cwd,
+                snapshot_fingerprints(files),
+                narrowed=incremental,
+            )
+            if definition.incremental_cacheable
             else None
         ),
     )

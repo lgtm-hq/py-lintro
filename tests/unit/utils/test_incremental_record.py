@@ -202,38 +202,31 @@ def _run(
     monkeypatch: pytest.MonkeyPatch,
     project: Path,
     *,
-    behaviour: Behaviour,
     parallel: bool,
-    handed: list[list[str]],
-    cacheable: bool = True,
-    passes: Callable[[list[str]], list[str]] | None = list,
     action: Action = Action.CHECK,
+    incremental: bool = True,
+    **fake: Any,
 ) -> RunArtifact:
-    """Run the fake tool once through ``execute_run`` with ``--incremental``.
+    """Run the fake tool once through ``execute_run``.
 
     Args:
         monkeypatch: Isolates the executor's tool boundaries.
         project: Project directory to check.
-        behaviour: What the tool does once handed its files.
         parallel: Whether to use the parallel dispatcher.
-        handed: Collects the files each run was handed.
-        cacheable: The fake definition's ``incremental_cacheable``.
-        passes: Which prepared files the plugin passes to its command.
         action: ``CHECK`` or ``FIX``.
+        incremental: False for a full (non-incremental) check.
+        **fake: ``_FakeTool`` fields: ``behaviour`` (what the tool does once
+            handed its files), ``handed`` (collects the files each run was
+            handed), ``cacheable`` and ``passes``.
 
     Returns:
         The run artifact.
     """
-    tool = _FakeTool(
-        behaviour=behaviour,
-        handed=handed,
-        cacheable=cacheable,
-        passes=passes,
-    )
+    tool = _FakeTool(**fake)
 
     def configure(*, tool: Any, **_kwargs: Any) -> Any:
         clone = tool.copy_for_execution()
-        clone.set_options(incremental=True)
+        clone.set_options(incremental=incremental)
         return clone
 
     monkeypatch.setattr(tool_manager, "get_tool", lambda _name: tool)
@@ -273,7 +266,7 @@ def _run(
         output_format="json",
         verbose=False,
         run_gates=False,
-        incremental=True,
+        incremental=incremental,
     )
 
 
@@ -728,3 +721,181 @@ def test_a_named_pipe_is_refused_without_waiting_for_a_writer(
     assert_that(answers).is_equal_to([False])
     assert_that(_can_open(str(regular))).is_true()
     assert_that(_can_open(str(tmp_path))).is_false()
+
+
+def _finding_in_named(name: str) -> Behaviour:
+    """Report one fully parsed finding against ``name``.
+
+    Args:
+        name: The file the finding names, relative to the project.
+
+    Returns:
+        The behaviour.
+    """
+
+    def behave(_ctx: PreparedExecution) -> ToolResult:
+        return ToolResult.from_outcome(
+            ToolOutcome(
+                execution=Checked(success=False, inspected_files=True),
+                issues_count=1,
+            ),
+            name="fake",
+            issues=[BaseIssue(file=name, line=1, message="finding")],
+            findings_complete=True,
+        )
+
+    return behave
+
+
+@PARALLEL
+def test_a_full_check_removes_the_clean_entry_of_a_file_it_flags(
+    monkeypatch: pytest.MonkeyPatch,
+    project: Path,
+    parallel: bool,
+) -> None:
+    """Clean incremental, full run with a finding, then incremental reports it.
+
+    Args:
+        monkeypatch: Isolates the executor.
+        project: Project directory.
+        parallel: Whether to use the parallel dispatcher.
+    """
+    handed: list[list[str]] = []
+    finding = _finding_in_named("good.txt")
+    _run(monkeypatch, project, behaviour=_clean, parallel=parallel, handed=handed)
+    full = _run(
+        monkeypatch,
+        project,
+        behaviour=finding,
+        parallel=parallel,
+        handed=handed,
+        incremental=False,
+    )
+    last = _run(
+        monkeypatch,
+        project,
+        behaviour=finding,
+        parallel=parallel,
+        handed=handed,
+    )
+
+    assert_that(full.exit_code).is_equal_to(1)
+    assert_that(handed).is_equal_to([BOTH, BOTH, ["good.txt"]])
+    assert_that(last.exit_code).is_equal_to(1)
+
+
+@PARALLEL
+def test_a_finding_in_a_file_not_handed_removes_its_entry(
+    monkeypatch: pytest.MonkeyPatch,
+    project: Path,
+    parallel: bool,
+) -> None:
+    """A cross-file finding drops the clean entry of the file it names.
+
+    Args:
+        monkeypatch: Isolates the executor.
+        project: Project directory.
+        parallel: Whether to use the parallel dispatcher.
+    """
+    handed: list[list[str]] = []
+    _run(monkeypatch, project, behaviour=_clean, parallel=parallel, handed=handed)
+    (project / "good.txt").write_text("good, edited\n")
+    _run(
+        monkeypatch,
+        project,
+        behaviour=_finding_in_named("bad.txt"),
+        parallel=parallel,
+        handed=handed,
+    )
+    _run(monkeypatch, project, behaviour=_clean, parallel=parallel, handed=handed)
+
+    assert_that(handed).is_equal_to([BOTH, ["good.txt"], BOTH])
+
+
+def test_a_clean_full_check_writes_no_cache(
+    monkeypatch: pytest.MonkeyPatch,
+    project: Path,
+) -> None:
+    """A non-incremental run never creates a cache: it only removes entries.
+
+    Args:
+        monkeypatch: Isolates the executor.
+        project: Project directory.
+    """
+    handed: list[list[str]] = []
+    _run(
+        monkeypatch,
+        project,
+        behaviour=_clean,
+        parallel=False,
+        handed=handed,
+        incremental=False,
+    )
+
+    assert_that(list((project.parent / "cache").glob("*.json"))).is_empty()
+
+
+@PARALLEL
+@pytest.mark.parametrize(
+    "outcome",
+    ["unavailable", "failed", "interrupted"],
+)
+def test_a_full_check_that_proved_nothing_keeps_existing_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    project: Path,
+    parallel: bool,
+    outcome: str,
+) -> None:
+    """An entry claims a completed clean check of that content; it still holds.
+
+    Args:
+        monkeypatch: Isolates the executor.
+        project: Project directory.
+        parallel: Whether to use the parallel dispatcher.
+        outcome: How the full run ended without proving anything.
+    """
+    handed: list[list[str]] = []
+    _run(monkeypatch, project, behaviour=_clean, parallel=parallel, handed=handed)
+    if outcome == "unavailable":
+        early = ToolResult.from_outcome(
+            ToolOutcome(Unavailable("fake is not installed")),
+            name="fake",
+        )
+        with patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=early,
+        ):
+            _run(
+                monkeypatch,
+                project,
+                behaviour=_clean,
+                parallel=parallel,
+                handed=handed,
+                incremental=False,
+            )
+    elif outcome == "failed":
+        _run(
+            monkeypatch,
+            project,
+            behaviour=_failed,
+            parallel=parallel,
+            handed=handed,
+            incremental=False,
+        )
+    elif not parallel:
+        with pytest.raises(KeyboardInterrupt):
+            _run(
+                monkeypatch,
+                project,
+                behaviour=_raises(KeyboardInterrupt()),
+                parallel=False,
+                handed=handed,
+                incremental=False,
+            )
+    else:
+        pytest.skip("KeyboardInterrupt is exercised on the sequential path")
+    before = len(handed)
+
+    _run(monkeypatch, project, behaviour=_clean, parallel=parallel, handed=handed)
+
+    assert_that(len(handed)).is_equal_to(before)

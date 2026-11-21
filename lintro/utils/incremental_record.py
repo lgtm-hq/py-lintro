@@ -7,6 +7,11 @@ then are files recorded, and only the ones the run proved clean:
 
 * only a ``check`` run records; a ``format`` run's verdict is settled later by
   the verify pass, so it records nothing;
+* every check run of a cacheable tool goes through this path: an incremental
+  run writes and removes entries, a full run only removes them (a file with
+  a finding, or one a completed run did not prove clean);
+* a finding in any file removes that file's entry, even a file the run was
+  not handed;
 * only discovered paths that the code which ran the tool stated it handed
   to a completed invocation (``BaseToolPlugin._record_checked``) can be
   recorded, under their exact discovery key: a plugin that states nothing
@@ -41,17 +46,20 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class PendingCheck:
-    """Files one discovery handed a tool under ``--incremental``.
+    """Files one discovery handed a cacheable tool.
 
     Attributes:
         tool_name: Name the tool's cache is kept under.
         cwd: Directory the tool runs in; relative finding paths resolve here.
         snapshot: Fingerprints of the handed files, taken at discovery.
+        narrowed: Whether ``--incremental`` chose the files. A full check
+            only removes entries; an incremental one also writes them.
     """
 
     tool_name: str
     cwd: str
     snapshot: FingerprintSnapshot
+    narrowed: bool = True
 
 
 def incremental_note(tool_name: str) -> str:
@@ -206,6 +214,7 @@ def _merged(pending: list[PendingCheck]) -> PendingCheck | None:
         tool_name=pending[0].tool_name,
         cwd=pending[0].cwd,
         snapshot=FingerprintSnapshot(fingerprints, tuple(sorted(unreadable))),
+        narrowed=any(check.narrowed for check in pending),
     )
 
 
@@ -243,24 +252,63 @@ def _stated(tool: object) -> set[str]:
     return taken
 
 
-def _record(pending: list[PendingCheck], checked: dict[str, FileFingerprint]) -> None:
-    """Save the files a run proved clean and forget the rest it was handed.
+def _flagged(pending: list[PendingCheck], result: ToolResult) -> set[str]:
+    """Return every path a finding names, handed to the tool or not.
+
+    A cross-file finding (pylint reporting ``a.py`` when only ``b.py`` was
+    handed) is still lintro seeing a finding in ``a.py``.
 
     Args:
         pending: Every discovery of the run.
-        checked: Discovery-time fingerprints of the files to record.
+        result: The tool's result, complete or not.
+
+    Returns:
+        The finding paths made absolute against each possible base directory.
     """
+    bases = {check.cwd for check in pending} | ({result.cwd} if result.cwd else set())
+    return {
+        os.path.normpath(os.path.join(base, issue.file))
+        for issue in result.issues
+        if issue.file
+        for base in bases
+    }
+
+
+def _record(
+    pending: list[PendingCheck],
+    result: ToolResult,
+    checked: dict[str, FileFingerprint] | None,
+) -> None:
+    """Write what a check run proved and remove what it did not.
+
+    Any file a finding names loses its entry. Of the files the run was
+    handed, an incremental run writes the ones it proved clean and removes
+    the rest. A full run writes nothing new: it removes the entries of the
+    handed files it did not prove clean, and only when it completed
+    (``checked`` is None otherwise), since an incomplete run proved nothing
+    either way. The cache file is written only when an entry changed.
+
+    Args:
+        pending: Every discovery of the run.
+        result: The tool's result.
+        checked: Fingerprints of the files the run proved clean, or None
+            when it did not complete.
+    """
+    handed = [
+        path
+        for check in pending
+        for path in (*check.snapshot.fingerprints, *check.snapshot.unreadable)
+    ]
+    proven = checked or {}
+    narrowed = any(check.narrowed for check in pending)
+    forget = _flagged(pending, result)
+    if narrowed or checked is not None:
+        forget.update(path for path in handed if path not in proven)
     cache = ToolCache.load(pending[0].tool_name)
-    cache.record(
-        checked,
-        unchecked=[
-            path
-            for check in pending
-            for path in (*check.snapshot.fingerprints, *check.snapshot.unreadable)
-            if path not in checked
-        ],
-    )
-    cache.save()
+    before = dict(cache.fingerprints)
+    cache.record(proven if narrowed else {}, unchecked=forget)
+    if cache.fingerprints != before:
+        cache.save()
 
 
 def finish_incremental_run(
@@ -289,13 +337,11 @@ def finish_incremental_run(
     if pending and record:
         merged = _merged(pending)
         refused = command_refusal(tool) is not None
+        completed = merged is not None and not refused and _complete(result)
         _record(
             pending,
-            (
-                {}
-                if merged is None or refused
-                else checked_files(merged, result, stated)
-            ),
+            result,
+            checked_files(merged, result, stated) if completed and merged else None,
         )
     definition = getattr(tool, "definition", None)
     options = getattr(tool, "options", None)

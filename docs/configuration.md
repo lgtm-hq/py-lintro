@@ -649,6 +649,13 @@ The rule for recording a file is fail closed:
 
 - **Only `lintro check` records.** A `lintro format` run never writes the record: its
   final verdict comes from the verify pass, after every formatter has run.
+- **Every `lintro check` keeps the record honest, `--incremental` or not.** A finding in
+  any file removes that file's entry, even a file the run was not handed (pylint
+  reporting `a.py` after only `b.py` changed), and a full check that completed removes
+  the entries of files it did not prove clean. Only an `--incremental` run adds entries,
+  so a user who never passes `--incremental` gets no cache file; a full check whose tool
+  was unavailable, failed or was interrupted proved nothing and leaves the record as it
+  was.
 - **A file is recorded after the tool has run, never before.** Discovery only reads the
   record. Nothing is written when the tool was not installed, its version was refused,
   it was skipped, it timed out, its run failed or was incomplete, or the run was stopped
