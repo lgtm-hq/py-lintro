@@ -1,0 +1,18 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import ConfigurationForwarding from '../../../components/docs/ConfigurationForwarding.astro';
+const hub = `${import.meta.env.BASE_URL}docs/guides/configuration/`;
+---
+<BaseLayout
+  title="Configuration has moved"
+  description="Follow your saved configuration section to the focused Lintro reference."
+  canonicalPath={hub}
+  noindex
+>
+  <article class="reference-shell">
+    <p class="eyebrow">Configuration reference</p>
+    <h1>Find your setting.</h1>
+    <p><a href={hub}>Open the configuration hub →</a></p>
+    <ConfigurationForwarding />
+  </article>
+</BaseLayout>

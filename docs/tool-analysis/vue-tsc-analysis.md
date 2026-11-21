@@ -36,7 +36,7 @@ types. This analysis compares Lintro's wrapper with core vue-tsc behavior.
 
 **Watch Mode:**
 
-- No `--watch` mode (continuous type checking)
+- No native `--watch` pass-through; use `lintro watch` for repeated Lintro checks
 
 **Build Features:**
 
@@ -51,7 +51,8 @@ types. This analysis compares Lintro's wrapper with core vue-tsc behavior.
 ### Enhancements
 
 - Safe timeout handling (default 120s) with structured timeout result
-- Targeted file checking via temporary tsconfig extending base config
+- Targeted temporary configs where applicable; explicit projects and native
+  include/files/exclude scoping retain project file selection
 - Normalized `ToolResult` with parsed issues from `vue_tsc_parser`
 - Priority 83, tool type `LINTER | TYPE_CHECKER`
 - Graceful handling when vue-tsc is not installed with helpful install hints
@@ -86,8 +87,8 @@ lintro check src/ --tools vue-tsc --auto-install
   - `vue-tsc:project` (string) - path to tsconfig.json file
   - `vue-tsc:strict` (bool) - enable strict type checking mode
   - `vue-tsc:skip_lib_check` (bool) - skip checking declaration files (default: true)
-  - `vue-tsc:use_project_files` (bool) - use tsconfig's include patterns (default:
-    false)
+  - `vue-tsc:use_project_files` (bool) - request native project file selection (default:
+    false); false does not override an explicit project or native scoping
   - `vue-tsc:timeout` (int) - execution timeout in seconds (default: 120)
 - **Config display:** `lintro config -v` shows detected tsconfig.json file
 

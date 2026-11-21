@@ -1,0 +1,82 @@
+<script>
+  const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const active = new Set<Animation>();
+  const counters = new Map<HTMLElement, { frame: number; value: string }>();
+  const introduce = (element: HTMLElement): void => {
+    if (preference.matches || !element.animate) return;
+    const animation = element.animate(
+      [
+        { opacity: 0, transform: 'translateY(24px)' },
+        { opacity: 1, transform: 'translateY(0)' },
+      ],
+      {
+        duration: 780,
+        easing: 'cubic-bezier(.22,1,.36,1)',
+        delay: Number(element.dataset.revealDelay ?? 0),
+      }
+    );
+    active.add(animation);
+    animation.finished.then(() => active.delete(animation)).catch(() => active.delete(animation));
+  };
+  const count = (element: HTMLElement): void => {
+    const value = element.textContent ?? '';
+    const target = Number(element.dataset.count);
+    if (preference.matches || !Number.isFinite(target)) return;
+    const start = performance.now();
+    const tick = (time: number): void => {
+      const progress = Math.max(0, Math.min((time - start) / 850, 1));
+      element.textContent = Math.round(target * (1 - Math.pow(1 - progress, 3))).toString();
+      if (progress < 1) counters.set(element, { frame: requestAnimationFrame(tick), value });
+      else {
+        element.textContent = value;
+        counters.delete(element);
+      }
+    };
+    counters.set(element, { frame: requestAnimationFrame(tick), value });
+  };
+  if ('IntersectionObserver' in window) {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting || !(entry.target instanceof HTMLElement)) continue;
+          observer.unobserve(entry.target);
+          if (entry.target.hasAttribute('data-count')) count(entry.target);
+          else introduce(entry.target);
+        }
+      },
+      { threshold: 0.08 }
+    );
+    document
+      .querySelectorAll<HTMLElement>('[data-reveal], [data-count]')
+      .forEach((element) => observer.observe(element));
+  }
+  document.addEventListener('focusin', (event) => {
+    if (!(event.target instanceof HTMLElement)) return;
+    let element: HTMLElement | null = event.target;
+    while (element) {
+      element.getAnimations().forEach((animation) => animation.cancel());
+      element = element.parentElement;
+    }
+  });
+  preference.addEventListener('change', () => {
+    if (!preference.matches) return;
+    active.forEach((animation) => animation.cancel());
+    document.getAnimations().forEach((animation) => animation.cancel());
+    counters.forEach(({ frame, value }, element) => {
+      cancelAnimationFrame(frame);
+      element.textContent = value;
+    });
+    counters.clear();
+  });
+  const strip = document.getElementById('tool-strip');
+  const pause = document.querySelector<HTMLButtonElement>('#tool-strip-pause');
+  if (strip && pause) {
+    strip.dataset.running = 'true';
+    pause.addEventListener('click', () => {
+      const paused = strip.dataset.running === 'true';
+      strip.dataset.running = String(!paused);
+      pause.setAttribute('aria-pressed', String(paused));
+      pause.textContent = paused ? 'Resume movement' : 'Pause movement';
+    });
+  }
+</script>

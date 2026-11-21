@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://lgtm-hq.github.io/py-lintro/sitemap-index.xml

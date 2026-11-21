@@ -41,11 +41,8 @@ actionlint -no-color -format oneline .github/workflows/
 
 ### Lintro Wrapper
 
-```python
-from lintro.tools.implementations.tool_actionlint import ActionlintTool
-
-tool = ActionlintTool()
-result = tool.check(["."])
+```bash
+lintro check .github/workflows/ --tools actionlint
 ```
 
 ## ⚠️ Limited/Missing Features
@@ -55,7 +52,10 @@ result = tool.check(["."])
 - ⚠️ Rule enable/disable flags not exposed
 - ⚠️ Output formatting flags (`-format`, `-oneline`, color) not exposed
 
-### 🔧 Proposed runtime pass-throughs
+### Unimplemented option ideas {#-proposed-runtime-pass-throughs}
+
+The following spellings are proposals, **not working commands in this release**. Use
+native configuration or the native CLI for the corresponding behavior.
 
 - `--tool-options actionlint:shellcheck=False`
 - `--tool-options actionlint:config=.actionlint.yaml`
@@ -64,5 +64,5 @@ result = tool.check(["."])
 
 ## Recommendations
 
-- Keep defaults minimal; add pass-throughs where CI or local workflows need parity with
-  upstream CLI settings.
+- Use the supported wrapper for workflow checks; run native Actionlint directly when you
+  need the unavailable flags above.

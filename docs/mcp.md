@@ -315,7 +315,8 @@ failing a `lintro_check`.
 ### `lintro_versions`
 
 Takes no arguments. The compatibility view of the same data: what is installed against
-what lintro requires.
+what lintro requires. The illustrative excerpt below shows one below-minimum tool; its
+summary counts only that displayed row. A live response includes every discovered tool.
 
 ```json
 {
@@ -327,7 +328,7 @@ what lintro requires.
       "recommended_version": "0.15.9",
       "satisfies_minimum": false,
       "below_recommended": false,
-      "status": "outdated",
+      "status": "incompatible",
       "error": "Version 0.9.0 is below minimum requirement 0.15.9",
       "install_hint": "uv pip install 'ruff>=0.15.9'",
       "binary_path": "/proj/.venv/bin/ruff",
@@ -340,7 +341,7 @@ what lintro requires.
       }
     }
   ],
-  "summary": { "ok": 28, "outdated": 7, "missing": 2, "total": 37 }
+  "summary": { "incompatible": 1, "total": 1 }
 }
 ```
 

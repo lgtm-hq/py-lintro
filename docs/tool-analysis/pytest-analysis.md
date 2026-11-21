@@ -39,14 +39,23 @@ Pytest provides extensive testing capabilities including:
 
 **Command Execution:**
 
-```python
-# From tool_pytest.py
-cmd = self._get_executable_command("pytest") + ["-v", "--tb", "short", "--maxfail", "1"]
-# For JSON output:
-cmd = self._get_executable_command("pytest") + ["--json-report", "--json-report-file=pytest-report.json"]
-# For JUnit XML output:
-cmd = self._get_executable_command("pytest") + ["--junitxml", "report.xml"]
+```bash
+# Run tests with the configured pytest options; no failure limit by default
+lintro test
+
+# Opt into stopping after the first failure
+lintro test --tool-options maxfail=1,verbose=True,tb=short
+
+# Write a pytest JSON report (requires pytest-json-report)
+lintro test --tool-options json_report=True
+
+# Write a JUnit XML report
+lintro test --tool-options junitxml=report.xml
 ```
+
+`maxfail` defaults to `None`; Lintro adds pytest's `--maxfail` only when a limit is
+configured. Without one, pytest continues through the suite. The report options above
+configure pytest's reports; they are separate from Lintro's own output format.
 
 **Configuration Options:**
 
@@ -106,12 +115,12 @@ Features** are recently added capabilities that extend the baseline functionalit
 - ✅ Header and warnings control (`no_header`, `disable_warnings`)
 - ✅ JSON report output (`json_report`)
 - ✅ JUnit XML output (`junitxml`)
-- ✅ Docker test control (`run_docker_tests`)
+- ✅ Project-configured marker selection through pytest
 
 **Integration:**
 
 - ✅ CI/CD pipeline integration
-- ✅ Docker test isolation
+- Docker prerequisites and isolation are supplied by the project
 - ✅ Error handling and reporting
 - ✅ Performance tracking
 
@@ -124,7 +133,8 @@ Features** are recently added capabilities that extend the baseline functionalit
   flag
 - ✅ **Plugin configuration** - Configure plugin-specific settings via `--tool-options`
 - **Usage:** `lintro test --list-plugins` or
-  `lintro test --check-plugins --tool-options pytest:required_plugins=pytest-cov,pytest-xdist`
+  `lintro test --check-plugins --tool-options required_plugins=pytest-cov`. Check one
+  plugin name per invocation; run a separate check for each additional name.
 
 **Advanced Pytest Features:**
 
@@ -289,9 +299,14 @@ lintro test --tool-options reruns=2,reruns_delay=1
 # List all installed pytest plugins
 lintro test --list-plugins
 
-# Check if required plugins are installed
-lintro test --check-plugins --tool-options pytest:required_plugins=pytest-cov,pytest-xdist
+# Check one required plugin
+lintro test --check-plugins --tool-options required_plugins=pytest-cov
 ```
+
+`required_plugins` takes a string. To check an additional plugin such as `pytest-xdist`,
+run a separate invocation with `--tool-options required_plugins=pytest-xdist`. A
+comma-separated demo loses the second name in this release, and a pipe-delimited list
+has the wrong type; neither checks both plugins.
 
 ### Coverage Reports
 
@@ -415,113 +430,93 @@ lintro fmt, chk, tst
 
 ## Docker Test Support
 
-Lintro's pytest integration includes built-in support for Docker-only tests through
-environment variable control and pytest markers.
+Docker-dependent test selection belongs to your project's pytest configuration. Lintro
+runs pytest; it does not provide an `--enable-docker` option, define a universal
+`docker_only` marker, or implement `LINTRO_RUN_DOCKER_TESTS`.
 
 ### Docker Test Markers
 
-Tests that require Docker or Docker-specific dependencies should be marked with the
-`@pytest.mark.docker_only` marker:
+A project can mark tests that require Docker with its own registered marker:
 
 ```python
+import docker
 import pytest
 
 @pytest.mark.docker_only
 def test_docker_feature():
-    """Test that requires Docker."""
-    # Your Docker-specific test code here
-    pass
+    """Check the Docker daemon supplied by the project's test environment."""
+    client = docker.from_env()
+    try:
+        assert client.ping()
+    finally:
+        client.close()
 ```
 
 ### Environment Variable Control
 
-Docker tests are controlled via the `LINTRO_RUN_DOCKER_TESTS` environment variable:
-
-- **Default Behavior**: Docker tests are **disabled** by default (skipped)
-- **Enable Docker Tests**: Set `LINTRO_RUN_DOCKER_TESTS=1` to include Docker tests
-- **Disable Docker Tests**: Unset the variable or set it to any value other than `"1"`
+Pytest supports `PYTEST_ADDOPTS` for test selection. For example, select or exclude this
+project's `docker_only` marker using `-m`. An environment variable such as
+`LINTRO_RUN_DOCKER_TESTS` only has an effect if the project supplies a pytest hook or
+plugin that reads it; Lintro does not add that behavior.
 
 ### CLI Integration
 
-Use the `--enable-docker` flag to enable Docker tests via the CLI:
-
 ```bash
-# Docker tests disabled (default)
-lintro test
+# Run this project's tests except those marked docker_only
+PYTEST_ADDOPTS="-m 'not docker_only'" lintro test
 
-# Docker tests enabled
-lintro test --enable-docker
+# Run only this project's Docker-marked tests; provide their prerequisites first
+PYTEST_ADDOPTS="-m docker_only" lintro test
 
-# Docker tests enabled with custom options
-lintro test --enable-docker --tool-options verbose=True,tb=short
+# Include ordinary Lintro pytest options
+PYTEST_ADDOPTS="-m docker_only" lintro test --tool-options verbose=True,tb=short
 ```
 
 ### Configuration in pytest.ini
 
-The `docker_only` marker should be registered in your `pytest.ini`:
+Register the custom marker in your project's pytest configuration:
 
 ```ini
 [pytest]
 markers =
-    docker_only: mark test as requiring Docker or Docker-specific dependencies
-    # ... other markers
+    docker_only: mark this project's tests that require Docker
 ```
 
 ### How It Works
 
-1. **Test Collection**: When collecting tests, lintro identifies tests marked with
-   `@pytest.mark.docker_only`
-2. **Environment Control**: Based on `LINTRO_RUN_DOCKER_TESTS`:
-   - If set to `"1"`: All tests (including Docker tests) are collected and run
-   - If not set or set to other value: Docker tests are skipped during collection
-3. **Reporting**: Skipped Docker tests are reported in the test summary output
+1. The project defines and registers its marker.
+2. Pytest reads `PYTEST_ADDOPTS` and applies the marker expression during selection.
+3. Lintro runs pytest and reports the resulting test outcome. Selecting a marker does
+   not start Docker or install Docker-specific dependencies.
 
 ### Example Usage
 
 ```python
-# tests/integration/test_docker_feature.py
 import pytest
 
 @pytest.mark.docker_only
 def test_docker_connection():
-    """Test Docker connection."""
+    """Check a Docker daemon provided by the project's test environment."""
     import docker
     client = docker.from_env()
     assert client.ping()
 
 def test_regular_feature():
-    """Regular test that doesn't require Docker."""
-    assert True
+    """Run without requiring a Docker daemon."""
+    assert 1 + 1 == 2
 ```
 
 ```bash
-# Run without Docker tests
-$ lintro test
-[LINTRO] Docker tests disabled (1 tests not collected). Use --enable-docker to include them.
-
-# Run with Docker tests
-$ lintro test --enable-docker
-[LINTRO] Docker tests enabled (1 tests) - this may take longer than usual.
+PYTEST_ADDOPTS="-m 'not docker_only'" lintro test
+PYTEST_ADDOPTS="-m docker_only" lintro test
 ```
 
 ### CI/CD Integration
 
-In CI/CD environments, Docker tests are typically enabled:
-
-```yaml
-# .github/workflows/test.yml
-- name: Run tests with Docker
-  env:
-    LINTRO_RUN_DOCKER_TESTS: 1
-  run: lintro test --enable-docker
-```
-
-Or use the Docker test script which automatically enables Docker tests:
-
-```bash
-# scripts/docker/docker-test.sh automatically sets LINTRO_RUN_DOCKER_TESTS=1
-./scripts/docker/docker-test.sh
-```
+Set `PYTEST_ADDOPTS` in the CI test environment, provide the Docker daemon and project
+dependencies when selecting Docker tests, then run `lintro test`. Projects with their
+own gating hooks should document that policy alongside their tests. Lintro does not
+supply a Docker-test enablement flag or a universal Docker-test script.
 
 ## Best Practices
 
@@ -531,7 +526,7 @@ Or use the Docker test script which automatically enables Docker tests:
 4. **Timeout**: Set appropriate timeout for your test suite
 5. **Max Failures**: Use `maxfail=1` for fast feedback in development
 6. **Docker Tests**: Mark Docker-requiring tests with `@pytest.mark.docker_only` and use
-   `--enable-docker` when needed
+   project marker selection when needed
 
 ## Implemented Features
 
@@ -551,8 +546,8 @@ The following features have been implemented:
 7. ✅ **Custom Markers**: List all markers via `--markers` flag
 8. ✅ **Performance Metrics**: Test execution time tracking and slow test detection
 9. ✅ **Test Results**: Test result summary and statistics with flaky test detection
-10. ✅ **CI Integration**: CI-specific configurations with auto-junitxml and docker test
-    support
+10. ✅ **CI Integration**: CI-friendly test reporting, including JUnit XML. Docker
+    daemon setup and test-selection policy remain the project's responsibility.
 11. ✅ **Plugin Integrations**: Support for pytest-html, pytest-timeout, and
     pytest-rerunfailures
 

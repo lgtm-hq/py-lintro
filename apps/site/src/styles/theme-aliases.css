@@ -1,0 +1,45 @@
+/* Semantic site aliases only. The selected exported TurboThemes stylesheet
+   supplies every palette value; no library color is replaced here. */
+:root {
+  --wb-font-display: 'Sora Variable', system-ui, sans-serif;
+  --wb-font-body: 'Sora Variable', system-ui, sans-serif;
+  --wb-font-mono: 'JetBrains Mono Variable', monospace;
+  --wb-radius: 16px;
+  --wb-radius-sm: 12px;
+}
+[data-theme] {
+  --wb-ground: var(--turbo-bg-base);
+  --wb-surface: var(--turbo-bg-surface);
+  --wb-surface-2: var(--turbo-bg-overlay);
+  --wb-ink: var(--turbo-text-primary);
+  --wb-muted: var(--turbo-text-secondary);
+  --wb-hair: var(--turbo-border-default);
+  --wb-accent: var(--turbo-brand-primary);
+  --wb-accent-text: var(--turbo-link-default);
+  --wb-accent-ink: var(--turbo-brand-primary-text);
+  --wb-accent-soft: var(--turbo-bg-overlay);
+  /* Non-text roles. The package certifies link ink and secondary ink at 4.5:1 or more
+     on base, surface and overlay in every exported theme, so both clear the 3:1 needed
+     for state indicators, focus rings and text-entry boundaries. The brand fill and
+     the default border do not: they stay decorative. */
+  --wb-indicator: var(--turbo-link-default);
+  --wb-control-edge: var(--turbo-text-secondary);
+  --wb-navy: var(--turbo-text-primary);
+  --wb-chrome: var(--turbo-bg-surface);
+  --wb-chrome-ink: var(--turbo-text-primary);
+  --wb-chrome-muted: var(--turbo-text-secondary);
+  --wb-chrome-hair: var(--turbo-border-default);
+  --wb-terminal: var(--turbo-code-block-bg);
+  --wb-pass: var(--turbo-state-success);
+  --wb-warn: var(--turbo-state-warning);
+  --wb-fail: var(--turbo-state-danger);
+  --wb-pass-soft: var(--turbo-bg-overlay);
+  --wb-warn-soft: var(--turbo-bg-overlay);
+  --wb-fail-soft: var(--turbo-bg-overlay);
+  --wb-pass-text: var(--turbo-text-primary);
+  --wb-warn-text: var(--turbo-text-primary);
+  --wb-fail-text: var(--turbo-text-primary);
+  --wb-shadow: 0 12px 48px color-mix(in srgb, var(--turbo-text-primary) 6%, transparent);
+  --turbo-font-sans: var(--wb-font-body);
+  --turbo-font-mono: var(--wb-font-mono);
+}

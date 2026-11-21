@@ -1,0 +1,24 @@
+---
+import {
+  ROADMAP_BACKLOG,
+  ROADMAP_HEADINGS,
+  ROADMAP_PARKED,
+  ROADMAP_PLANNED,
+  ROADMAP_VERIFIED,
+  formatRoadmapDate,
+  roadmapIssueUrl,
+} from '../../data/roadmap';
+const [available, planned, parked] = ROADMAP_HEADINGS;
+const base = import.meta.env.BASE_URL;
+---
+<div class="prose">
+  <p>Lintro’s next work focuses on correctness, code health and the experience of using the CLI. The GitHub backlog is the current planning source; plans can change and carry no release-date promise.</p>
+  <h2 id={available.slug}>{available.text}</h2>
+  <ul><li>Local linting and formatting, native tool configuration and machine-readable output.</li><li><a href={`${base}docs/guides/baseline/`}>Fingerprint baselines</a>, with certification limits documented in the guide.</li><li><a href={`${base}docs/ai/ai-features/`}>Optional AI review</a> and a <a href={`${base}docs/ai/mcp/`}>stdio MCP server</a>.</li></ul>
+  <h2 id={planned.slug}>{planned.text}</h2>
+  <p>Selected open epics, read back from GitHub as open on <time datetime={ROADMAP_VERIFIED.date}>{formatRoadmapDate(ROADMAP_VERIFIED.date)}</time>, when this page described Lintro {ROADMAP_VERIFIED.lintroVersion}. Issues can close after that date; GitHub is the live record. An open epic describes work still being improved; it does not mean the whole capability is absent.</p>
+  <ul>{ROADMAP_PLANNED.map(({ label, issue }) => <li><a href={roadmapIssueUrl(issue)}>{label} · #{issue}</a></li>)}</ul>
+  <h2 id={parked.slug}>{parked.text}</h2>
+  <p><a href={roadmapIssueUrl(ROADMAP_PARKED.tools)}>New tool proposals (#{ROADMAP_PARKED.tools})</a> and <a href={roadmapIssueUrl(ROADMAP_PARKED.features)}>larger feature proposals (#{ROADMAP_PARKED.features})</a> are parked. Treat these as ideas for future consideration.</p>
+  <p><a href={roadmapIssueUrl(ROADMAP_BACKLOG)}>Read the full ordered backlog →</a></p>
+</div>

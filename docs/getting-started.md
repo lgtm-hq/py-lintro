@@ -1,8 +1,45 @@
 # Getting Started with Lintro
 
-This guide will help you get up and running with Lintro quickly. Whether you're a new
-user or looking to integrate Lintro into your project, this guide covers everything you
-need to know.
+Install the CLI, initialize your project, inspect availability, install the recommended
+tools and check your code. The website presents these steps first and keeps the full
+recipes in focused pages.
+
+## First check in four steps
+
+Start in your project directory. PyPI installs need [Python 3.11+](#python-version); see
+[platform options](#installation) if you use Homebrew or a prebuilt binary.
+
+1. **Install the CLI** in your Python environment:
+
+   ```bash
+   pip install lintro
+   ```
+
+2. **Initialize project configuration** after stack detection:
+
+   ```bash
+   lintro init
+   ```
+
+3. **Install the recommended tools** for that project:
+
+   ```bash
+   lintro install --profile recommended
+   ```
+
+4. **Run a check** from the project root:
+
+   ```bash
+   lintro check .
+   ```
+
+Review findings before using `lintro format .` to apply supported fixes. If a tool is
+missing, run `lintro doctor`; a skipped tool has not checked your code.
+
+Keep [native tool configuration](#using-tool-configuration-files) in the project. Read
+[tool dependencies](#tool-dependencies), [external tools](#optional-external-tools) and
+[Node package manager policy](configuration.md#node-package-manager-policy) for
+installation details. The sections below are the full workflow reference.
 
 ## What is Lintro?
 
@@ -66,8 +103,10 @@ whichever manager happens to be on `PATH`. Use `--global` for a machine-wide ins
 
 ### Python Version
 
-Lintro requires **Python 3.11+**. This is a strict requirement - Lintro will not run on
-older Python versions.
+PyPI/source installations require **Python 3.11+**. Prebuilt npm binaries bundle their
+own runtime: macOS arm64, Linux arm64 and Linux x64. There is no current Intel macOS or
+Windows npm binary; use a supported Python installation where applicable. External
+wrapped tools are separate dependencies.
 
 ### Tool Dependencies
 
@@ -122,12 +161,13 @@ order and for what changed.
   `packaging<24` and cannot share lintro's environment.
 - `gitleaks` - Secret detection in git repos (`brew install gitleaks` or GitHub
   releases)
-- `trufflehog` - Secret detection with 800+ credential detectors, verification disabled
-  by default (`brew install trufflehog` or GitHub releases)
+- `trufflehog` - Secret detection for many credential types, verification disabled by
+  default (`brew install trufflehog` or GitHub releases)
 - `cppcheck` - C/C++ static analyzer (`brew install cppcheck` or
   `apt-get install cppcheck`)
-- `golangci-lint` - Go meta-linter running 100+ linters (`brew install golangci-lint` or
-  <https://golangci-lint.run/welcome/install/>; requires the Go toolchain)
+- `golangci-lint` - Go meta-linter that runs many Go linters
+  (`brew install golangci-lint` or <https://golangci-lint.run/welcome/install/>;
+  requires the Go toolchain)
 - `shellcheck` - Shell script analyzer (`brew install shellcheck` or GitHub releases)
 - `shfmt` - Shell script formatter (`brew install shfmt` or GitHub releases)
 - `dotenv-linter` - `.env` file linter and fixer (`brew install dotenv-linter`,
@@ -235,22 +275,21 @@ Lintro provides clear, structured output:
 
 ## Output System: Auto-Generated Reports
 
-Every time you run a Lintro command (check or fmt), Lintro automatically generates all
-output formats for you in a timestamped directory under `.lintro/` (e.g.,
-`.lintro/run-20240722-153000/`).
+During a logged check or format run, Lintro writes `report.md`, `report.html` and
+`summary.csv` under a timestamped `.lintro/run-…/` directory. `console.log` is written
+when there is captured console output.
 
-**You do not need to specify output format or file options.**
+JSON is available, but is not a default local run report. For an explicit JSON file:
 
-Each run produces:
+```bash
+lintro check --output-format json --output lintro-results.json
+```
 
-- `console.log`: The full console output you saw during the run
-- `results.json`: Machine-readable results for scripting or CI
-- `report.md`: Human-readable Markdown report (great for sharing or documentation)
-- `report.html`: Web-viewable HTML report (open in your browser)
-- `summary.csv`: Spreadsheet-friendly summary of all issues
-
-This means you always have every format available for your workflow, CI, or reporting
-needs.
+For an additional JSON artifact, configure `execution.artifacts: [json]` in the Lintro
+configuration. It is written to `.lintro/artifacts/json/results.json`. When
+`GITHUB_ACTIONS=true`, JSON and SARIF artifacts are emitted automatically; this does not
+change the console output format. Other configured artifacts are written alongside them.
+An artifact is separate from the timestamped run reports.
 
 ## Supported Languages and Tools
 
@@ -263,8 +302,8 @@ lintro check src/ tests/ --tools ruff,pydoclint
 # Format Python code
 lintro format src/ --tools ruff
 
-# Run Black as a post-check (configured via pyproject)
-lintro check src/
+# Check formatting with Black explicitly
+lintro check src/ --tools black
 
 # Override Black on the fly
 lintro check src/ --tool-options "black:line_length=100,black:target_version=py313"
@@ -273,7 +312,8 @@ lintro check src/ --tool-options "black:line_length=100,black:target_version=py3
 **Tools:**
 
 - **Ruff** - Fast Python linter and formatter
-- **Black** - Python formatter (runs as a post-check by default)
+- **Black** - Python formatter; selection and Ruff cooperation follow tool-ordering
+  configuration
 - **pydoclint** - Docstring validation
 
 ### JavaScript/TypeScript Projects
@@ -498,9 +538,13 @@ rules:
 
 ### Lintro-Specific Options
 
+Prettier formatting width belongs in native configuration as `printWidth`. The
+`prettier:print_width` spelling is accepted by the generic parser but is not consumed by
+this wrapper in 0.180.34.
+
 ```bash
 # Tool options use key=value (lists with |, booleans True/False)
-lintro check --tool-options "ruff:line_length=88,prettier:print_width=80"
+lintro check --tool-options "ruff:line_length=88,prettier:timeout=60"
 
 # Exclude patterns
 lintro check --exclude "migrations,node_modules,dist"
@@ -654,7 +698,7 @@ Add to `.vscode/tasks.json`:
       "label": "Lintro Check",
       "type": "shell",
       "command": "lintro",
-      "args": ["check", "--output-format grid"],
+      "args": ["check", "--output-format", "grid"],
       "group": "test",
       "presentation": {
         "echo": true,
@@ -707,8 +751,7 @@ lintro check --exclude "legacy,migrations"
 # Check file permissions
 ls -la
 
-# Use sudo if needed (not recommended)
-sudo lintro check
+# Run as the project owner; correct file ownership rather than running checks as root.
 ```
 
 ### Getting Help
@@ -720,27 +763,38 @@ sudo lintro check
 
 ## AI-Powered Features
 
-Lintro can optionally use AI to provide actionable summaries and interactive fix
-suggestions. Supports [Anthropic](https://docs.anthropic.com/) and
-[OpenAI](https://platform.openai.com/docs/) as providers.
+AI is optional and off by default, with no default provider. Choose a provider and
+transport explicitly. Anthropic and OpenAI support API and CLI transports; Cursor
+supports CLI and the optional beta SDK/API via `lintro[cursor]`. Credentials and billing
+depend on the selected transport and effective key/session.
 
 ```bash
-# Install AI dependencies (from local repo)
-pip install -e '.[ai]'
+# Install SDK dependencies for Anthropic or OpenAI
+pip install 'lintro[ai]'
+# For Cursor SDK/API instead: pip install 'lintro[cursor]'
+```
 
-# Set your provider's API key
-export ANTHROPIC_API_KEY=sk-ant-...   # for Anthropic
-# or
-export OPENAI_API_KEY=sk-...          # for OpenAI
+For an Anthropic API summary, set `ANTHROPIC_API_KEY` and opt in explicitly:
 
-# AI summary is automatic when enabled in config
+```yaml
+# .lintro-config.yaml
+ai:
+  enabled: true
+  lint: true
+  provider: anthropic
+  transport: api
+```
+
+```bash
 lintro check
-
-# Add interactive AI fix suggestions
+# Request interactive fix suggestions in addition to enabled AI summaries
 lintro check --fix
 ```
 
-See the [AI Features Guide](ai-features.md) for full setup and configuration.
+Diff review has its own `ai.review` opt-in. Request counts can vary with retries and fix
+attempts; neither CLI transport nor subscription metadata guarantees free usage. Follow
+the [AI Features Guide](ai-features.md) and [transport guide](ai-review-transports.md)
+for credentials, dependencies and budgets.
 
 ## Next Steps
 
@@ -751,7 +805,7 @@ Now that you're familiar with the basics:
 3. **Set up CI/CD** - See the [GitHub Integration Guide](github-integration.md)
 4. **Use Docker** - Read the [Docker Usage Guide](docker.md)
 5. **Contribute** - Check the [Contributing Guide](contributing.md)
-6. **Analyze tools** - Dive into [Tool Analysis](tool-analysis/) for detailed
-   comparisons
+6. **Look up a tool** - Open the [tool reference](tool-analysis/) for each integration's
+   options, limits and comparison with the native tool
 
 Welcome to the Lintro community! 🚀

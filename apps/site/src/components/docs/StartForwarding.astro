@@ -1,0 +1,74 @@
+---
+import destinations from '../../generated/start-anchors.json';
+import headings from '../../generated/start-headings.json';
+import { articleSections } from '../../lib/article-sections';
+import ArticleSectionLinks from './ArticleSectionLinks.astro';
+const sections = articleSections(headings);
+const aliases = Object.entries(destinations).filter(
+  ([id]) => !headings.some((heading) => heading.slug === id)
+);
+---
+
+<details class="ai-saved-sections" data-pagefind-ignore>
+  <summary>Saved section links</summary>
+  <p>
+    Older bookmarks open their focused reference page automatically. Without JavaScript, follow the
+    named section below.
+  </p>
+  <nav aria-label="Original getting started sections">
+    <ArticleSectionLinks sections={sections} destinations={destinations} />
+    {aliases.length > 0 && (
+      <ul>
+        {aliases.map(([id, href]) => (
+          <li id={id}>
+            <a href={`${import.meta.env.BASE_URL}${href.replace(/^\//, '')}`}>
+              Getting started section
+            </a>
+          </li>
+        ))}
+      </ul>
+    )}
+  </nav>
+</details>
+<script>
+  import destinations from '../../generated/start-anchors.json';
+  const targets: Record<string, string> = destinations;
+  function forwardStartFragment(): void {
+    let fragment: string;
+    try {
+      fragment = decodeURIComponent(location.hash.slice(1));
+    } catch {
+      return;
+    }
+    const destination = targets[fragment];
+    if (destination) {
+      const target = new URL(`${import.meta.env.BASE_URL}${destination.replace(/^\//, '')}`, location.origin);
+      target.search = location.search;
+      location.replace(target.href);
+    }
+  }
+  forwardStartFragment();
+  window.addEventListener('hashchange', forwardStartFragment);
+</script>
+<style>
+  details {
+    margin-block: 2rem;
+  }
+  summary {
+    cursor: pointer;
+    padding-block: 1rem;
+    font-weight: 600;
+  }
+  nav {
+    max-height: 32rem;
+    overflow-y: auto;
+  }
+  nav :global(a) {
+    display: inline-block;
+    padding-block: 0.35rem;
+    overflow-wrap: anywhere;
+  }
+  nav :global(ul) {
+    padding-inline-start: 1.25rem;
+  }
+</style>

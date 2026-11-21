@@ -8,9 +8,9 @@
     "node": ">=26.0.0"
   },
   "scripts": {
-    "migrate": "python3 ../../scripts/ci/site/migrate-docs-content.py",
+    "migrate": "uv run --project ../.. --no-sync python ../../scripts/ci/site/product-snapshot.py && uv run --no-project python ../../scripts/ci/site/migrate-docs-content.py && node scripts/split-ai.mjs",
     "dev": "bun run migrate && astro dev",
-    "build": "bun run migrate && node scripts/copy-assets.mjs && astro build && bun x pagefind --site dist --glob '**/*.html' --exclude-selectors '[data-pagefind-ignore]' --exclude-selectors 'nav' --exclude-selectors 'footer'",
+    "build": "bun run migrate && node scripts/copy-assets.mjs && astro build --force && bun x pagefind --site dist --glob '**/*.html' --exclude-selectors '[data-pagefind-ignore]' --exclude-selectors 'nav' --exclude-selectors 'footer'",
     "preview": "bash ../../scripts/ci/site/preview-serve.sh",
     "test": "bun run migrate && vitest run --coverage",
     "check": "bun run migrate && astro check",
@@ -19,10 +19,13 @@
   "dependencies": {
     "@astrojs/markdown-remark": "^7.2.2",
     "@astrojs/sitemap": "^3.7.3",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/sora": "^5.3.0",
     "@lgtm-hq/turbo-themes": "0.44.81",
     "astro": "7.4.7",
     "rehype-parse": "^9.0.1",
-    "sanitize-html": "^2.18.1"
+    "sanitize-html": "^2.18.1",
+    "unist-util-visit": "^5.2.0"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.12",

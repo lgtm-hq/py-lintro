@@ -396,7 +396,7 @@ We use the Lintro tool for code formatting and linting:
 4. Format with custom options:
 
    ```bash
-   lintro format --tools ruff --core-options "ruff:--line-length=100" [PATH]
+   lintro format --tools ruff --tool-options "ruff:line_length=100" [PATH]
    ```
 
 ### Style Guide Project Structure

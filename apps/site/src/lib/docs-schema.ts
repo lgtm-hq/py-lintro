@@ -5,6 +5,8 @@ export { DOC_CATEGORIES };
 
 export const docsFrontmatterSchema = z.object({
   title: z.string().min(1),
+  titleAnchor: z.string().optional(),
+  sourceAnchor: z.string().optional(),
   description: z.string().default(''),
   category: z.enum(DOC_CATEGORIES),
   order: z.number().default(100),

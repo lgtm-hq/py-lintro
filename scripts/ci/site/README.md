@@ -45,3 +45,15 @@ via [`.github/workflows/deploy-pages.yml`](../../../.github/workflows/deploy-pag
 
 **Settings → Pages → Build and deployment → Source: GitHub Actions** (not “Deploy from a
 branch”).
+
+## Product reference generation
+
+Run `uv sync --dev --extra full` and `bun install` in `apps/site` before building. The
+site generates tool, CLI and AI reference metadata from this repository. It copies the
+product packages into a temporary directory, generates their built-in index, and
+inspects Click help without invoking command callbacks. No external study folder or
+candidate worktree is required. `LINTRO_PRODUCT_SOURCE` may select an explicit release
+fixture for verification; normal development and CI leave it unset.
+
+Generated docs, product data, theme CSS and Pagefind output remain untracked. The `dev`,
+`build`, `check` and `test` scripts regenerate their prerequisites.

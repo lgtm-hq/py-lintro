@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { rehype } from 'rehype';
 import rehypeStringify from 'rehype-stringify';
-import { rehypeDocLinks, rehypeUnwrapHeadingLinks } from './rehype-doc-links.mjs';
+import {
+  rehypeDocLinks,
+  rehypeUnwrapHeadingLinks,
+  rehypeAccessibleTaskLists,
+} from './rehype-doc-links.mjs';
 
 const BASE = '/Rustume/';
 
@@ -20,6 +24,22 @@ async function transform(html) {
 }
 
 describe('rehypeDocLinks', () => {
+  it('names static task checkboxes with their adjacent checklist text', async () => {
+    const file = await rehype()
+      .data('settings', { fragment: true })
+      .use(rehypeAccessibleTaskLists)
+      .use(rehypeStringify)
+      .process('<ul><li><input type="checkbox" disabled> Run <code>tests</code></li></ul>');
+    expect(String(file)).toContain('aria-label="Run tests"');
+  });
+  it('preserves authored heading anchors without exposing the attribute syntax', async () => {
+    const file = await rehype()
+      .data('settings', { fragment: true })
+      .use(rehypeUnwrapHeadingLinks)
+      .use(rehypeStringify)
+      .process('<h3 id="generated-long-name">Node.js <code>tools</code> {#node-tools}</h3>');
+    expect(String(file)).toBe('<h3 id="node-tools">Node.js <code>tools</code></h3>');
+  });
   it('keeps external links readable and opens them safely', async () => {
     const output = await transform('<p><a href="https://www.rust-lang.org/">Rust</a></p>');
 
@@ -98,5 +118,50 @@ describe('rehypeDocLinks', () => {
     expect(output).not.toContain('smart-link');
     expect(output).toContain('LinkedIn data export');
     expect(output).not.toContain('<a');
+  });
+});
+
+describe('rehypeDocLinks cross-page resolution', () => {
+  /**
+   * @param {string} html
+   * @param {string} docPath
+   * @returns {Promise<string>}
+   */
+  async function transformAs(html, docPath) {
+    const file = await rehype()
+      .data('settings', { fragment: true })
+      .use(rehypeDocLinks, BASE)
+      .use(rehypeStringify)
+      .process({ value: html, path: docPath });
+
+    return String(file);
+  }
+
+  it('resolves authored .md cross-links to their migrated routes', async () => {
+    const output = await transformAs(
+      '<p><a href="../configuration.md#ruff-configuration">Ruff config</a></p>',
+      '/repo/apps/site/src/content/docs/tools/ruff.md'
+    );
+
+    expect(output).toContain('href="/Rustume/docs/guides/configuration/#ruff-configuration"');
+    expect(output).toContain('Ruff config');
+  });
+
+  it('resolves directory links to the section landing page', async () => {
+    const output = await transformAs(
+      '<p><a href="tool-analysis/">Tool analysis</a></p>',
+      '/repo/apps/site/src/content/docs/start/overview.md'
+    );
+
+    expect(output).toContain('href="/Rustume/docs/tools/"');
+  });
+
+  it('unwraps links whose target was not migrated', async () => {
+    const output = await transformAs(
+      '<p><a href="does-not-exist.md">Missing</a> page</p>',
+      '/repo/apps/site/src/content/docs/start/overview.md'
+    );
+
+    expect(output).toBe('<p>Missing page</p>');
   });
 });

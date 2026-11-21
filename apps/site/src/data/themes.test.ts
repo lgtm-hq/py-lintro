@@ -1,35 +1,36 @@
 import { describe, expect, it } from 'vitest';
+import { flavors } from '@lgtm-hq/turbo-themes/tokens';
+import { existsSync, readFileSync } from 'node:fs';
 import {
+  DEFAULT_DARK_THEME,
   DEFAULT_THEME,
-  NATIVE_THEME,
+  themeAppearances,
+  themeMenuGroups,
   themeOptions,
-  turboThemeOptions,
   validThemeIds,
 } from './themes';
-
-describe('themeOptions', () => {
-  it('includes the default theme', () => {
+describe('exported TurboThemes integration', () => {
+  it('preserves every installed flavor and its real identity', () => {
+    expect(themeOptions).toEqual(flavors.map(({ id, label }) => ({ id, label })));
+    expect(new Set(validThemeIds).size).toBe(flavors.length);
+    expect(
+      themeMenuGroups
+        .flatMap((group) => group.themes)
+        .map((theme) => theme.id)
+        .sort()
+    ).toEqual(flavors.map((theme) => theme.id).sort());
+  });
+  it('resolves system preferences to exported light and dark themes', () => {
+    expect(themeAppearances[DEFAULT_THEME]).toBe('light');
+    expect(themeAppearances[DEFAULT_DARK_THEME]).toBe('dark');
     expect(validThemeIds).toContain(DEFAULT_THEME);
+    expect(validThemeIds).toContain(DEFAULT_DARK_THEME);
   });
-
-  it('exposes at least 24 turbo-themes flavors plus the native terminal theme', () => {
-    expect(turboThemeOptions.length).toBeGreaterThanOrEqual(24);
-    expect(themeOptions.length).toBe(turboThemeOptions.length + 1);
-  });
-
-  it('defaults to the native terminal theme', () => {
-    expect(DEFAULT_THEME).toBe(NATIVE_THEME);
-    expect(DEFAULT_THEME).toBe('terminal');
-  });
-
-  it('uses unique theme ids', () => {
-    const ids = themeOptions.map((theme) => theme.id);
-    expect(new Set(ids).size).toBe(ids.length);
-  });
-
-  it('provides a non-empty label for every theme', () => {
-    for (const theme of themeOptions) {
-      expect(theme.label.trim().length).toBeGreaterThan(0);
+  it('uses stylesheets actually shipped by the installed package', () => {
+    for (const id of validThemeIds) {
+      const path = `node_modules/@lgtm-hq/turbo-themes/packages/css/dist/themes/${id}.css`;
+      expect(existsSync(path)).toBe(true);
+      expect(readFileSync(path, 'utf8')).toContain(`[data-theme="${id}"]`);
     }
   });
 });

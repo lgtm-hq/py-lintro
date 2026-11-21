@@ -1,0 +1,29 @@
+---
+import configuration from '../../generated/configuration-pages.json';
+const base = import.meta.env.BASE_URL;
+const entries = Object.entries(configuration.anchors);
+const labels: Record<string, string> = configuration.labels;
+const target = (path: string) => `${base}${path.replace(/^\//, '')}`;
+---
+<details class="configuration-legacy" data-pagefind-ignore>
+  <summary>Following an older configuration link?</summary>
+  <p>Every original section has a focused home. With JavaScript enabled, old bookmarks open it automatically. Otherwise, follow the section link below.</p>
+  <ul>{entries.map(([anchor, href]) => <li id={anchor}><a href={target(href)}>{labels[anchor]}</a></li>)}</ul>
+</details>
+<script>
+  import configuration from '../../generated/configuration-pages.json';
+  const destinations: Record<string, string> = configuration.anchors;
+  function forwardConfigurationFragment() {
+    let fragment: string;
+    try { fragment = decodeURIComponent(location.hash.slice(1)); }
+    catch { return; }
+    const destination = destinations[fragment] ?? (!fragment && location.pathname.endsWith('/docs/usage/configuration/') ? '/docs/guides/configuration/' : undefined);
+    if (destination) {
+      const target = new URL(`${import.meta.env.BASE_URL}${destination.replace(/^\//, '')}`, location.origin);
+      target.search = location.search;
+      location.replace(target.href);
+    }
+  }
+  forwardConfigurationFragment();
+  window.addEventListener('hashchange', forwardConfigurationFragment);
+</script>

@@ -108,7 +108,8 @@ result = tool.fix(["path/to/go/module"], {})
 
 ## Included Linters (selection)
 
-golangci-lint bundles 100+ linters. A representative subset:
+golangci-lint bundles many linters; the set depends on the installed release. A
+representative subset:
 
 - **errcheck** — unchecked error return values
 - **govet** — `go vet` correctness checks

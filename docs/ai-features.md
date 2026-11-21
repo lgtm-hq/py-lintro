@@ -3,10 +3,13 @@
 Lintro includes optional AI-powered features that provide actionable insights and
 interactive fix suggestions on top of standard linting results.
 
-> **Requirements:** Python package extra + an API key.
+> **Requirements:** Optional provider dependencies plus a credential for the selected
+> transport. API keys and CLI sessions have different billing and authentication rules;
+> see [AI review transports](ai-review-transports.md).
 >
 > ```bash
-> pip install -e '.[ai]'
+> uv pip install 'lintro[ai]'
+> # Cursor SDK transport additionally needs: uv pip install 'lintro[cursor]'
 > # Set the API-key variable your chosen provider declares — see "Providers".
 > export ANTHROPIC_API_KEY=sk-ant-...   # anthropic
 > export CURSOR_API_KEY=...            # cursor
@@ -20,10 +23,11 @@ interactive fix suggestions on top of standard linting results.
 # .lintro-config.yaml
 # ai:
 #   enabled: true
+#   lint: true
 #   provider: anthropic | cursor | openai   # required, no default
-#   transport: api | cli                    # no default; doctor flags it unset
+#   transport: api | cli                    # set explicitly; omitted transport falls back by provider
 
-# Run check — AI summary is generated automatically (1 API call)
+# With ai.enabled and ai.lint enabled, request an AI summary after deterministic checks
 lintro check
 
 # Add interactive fix suggestions
@@ -35,17 +39,19 @@ lintro format
 
 ## Features Overview
 
-### AI Summary (default with `check` / `chk`)
+### AI Summary (opt-in with `check` / `chk`)
 
-When AI is enabled, every `lintro check` run generates a single-call AI summary that
-provides:
+With `ai.enabled` and `ai.lint` enabled and a configured provider/transport, the check
+pipeline can request an AI summary that provides:
 
 - **Overview** — high-level assessment of code quality
 - **Key patterns** — systemic issues, not individual occurrences
 - **Priority actions** — ordered by impact (fixes that resolve the most issues first)
 - **Estimated effort** — rough time estimate to address all issues
 
-This costs one API call regardless of how many issues exist.
+The summary is one logical provider request; retries, failures and optional fix requests
+can change the number of calls. Provider availability, credentials and budgets still
+apply. The CLI transport is also supported.
 
 ```text
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -257,15 +263,21 @@ degrades gracefully to a skipped result rather than failing the run.
 ai:
   enabled: true
   provider: anthropic # or cursor / openai — required, no default
-  transport: api # or cli — no default; doctor flags it unset
-tools:
-  idiom-review:
-    options:
-      enabled: true # opt-in gate (default: false)
-      mode: per-file # per-file | duplication | both
-      min_confidence: medium # drop findings below this confidence
-      max_files: 25 # cap files reviewed per run (cost bound)
+  transport: api # or cli; omitted: api for Anthropic/OpenAI, cli for Cursor
 ```
+
+```toml
+# pyproject.toml — persisted options for this tool
+[tool.lintro.idiom-review]
+enabled = true # opt-in gate (default: false)
+mode = "per-file" # per-file | duplication | both
+min_confidence = "medium" # drop findings below this confidence
+max_files = 25 # cap files reviewed per run (cost bound)
+```
+
+In 0.180.34 a `tools.idiom-review.options` mapping in `.lintro-config.yaml` is reported
+by `lintro config validate` as an unknown option and never reaches the tool, so the
+opt-in gate stays closed. Persist these options in the `pyproject.toml` table above.
 
 Or enable it ad hoc from the CLI:
 
@@ -451,7 +463,7 @@ inline. Questions stay in the notes block regardless of the floor — set
 `review_post_questions_inline: true` to open threads for them too. The keys are
 independent; making every entry eligible for a thread again takes all three (an empty
 `review_note_categories`), and even then P3 findings stay in the sticky comment under
-the posting tiers described below.
+the [posting tiers](#posting-tiers-p1p2-inline-p3-in-the-sticky).
 
 `review_note_categories` routes a category's P3 findings to the notes block; a P1 or P2
 in a routed category still goes through the confidence floor and opens a thread, so the
@@ -758,7 +770,8 @@ What it adds to the surfaces:
 - The `Summary` and verdict-reasoning sections of the terminal output, the GitHub review
   body and the sticky comment, and the `summary`, `pr_summary` and `verdict_reasoning`
   keys of `--output json` (null when the pass did not run or failed).
-- A `synthesis` phase span in the timings block (see _Review phase timings_ below).
+- A `synthesis` phase span in the timings block (see
+  [Review phase timings](#review-phase-timings)).
 - One shared note on the terminal, the GitHub review body's run-stats block, and the
   sticky's `This run` table, rendered only when the pass ran:
   `Cross-chunk synthesis added 1 cross-file finding.` (plural, empty and failed forms as
@@ -799,8 +812,8 @@ What it adds to the surfaces:
 
 - `"origin": "synthesis"` on each cross-file finding the pass contributed.
 - A `synthesis_truncated` or `synthesis_failed` entry in `coverage_degradations` (see
-  _Review coverage completeness_ above) when the input was cut or the pass did not
-  complete.
+  [Review coverage completeness](#review-coverage-completeness)) when the input was cut
+  or the pass did not complete.
 
 ### The verification pass (refute before you block)
 
@@ -1063,8 +1076,9 @@ resolve; it never narrows what it may report.**
   use it; nothing reads it today.
 
   Wherever a finding was moved to, an absence there never resolves it on its own: it
-  resolves only when the moved-finding check says it is fixed (see _Verify before
-  resolve (moved findings)_ above, #3466).
+  resolves only when the moved-finding check says it is fixed (see
+  [Verify before resolve (moved findings)](#verify-before-resolve-moved-findings),
+  #3466).
 
   Holding can leave a duplicate thread; it never resolves a live one. When no rename
   names the finding's own path, it is held where it was stored (`line_sha` `"unmapped"`
@@ -1391,10 +1405,12 @@ Reading the block:
   provider work happened", `total_seconds` answers "how long did the user wait". The
   summary line lists nested phases inside the provider parenthetical for the same
   reason, e.g. `provider 4m10s (7 chunks, max parallel 5, questions 30.2s)`.
-- `synthesis` is the round's synthesis pass (see _The synthesis pass_ above). It is on
-  by default and runs after every completed round with at least one chunk, so the phase
-  is present on a normal run; it is absent only when `review.synthesis.enabled` is
-  `false` or no chunk completed, and then the round made no extra call.
+- `synthesis` is the round's synthesis pass (see
+  [the synthesis pass](#the-synthesis-pass-summary-verdict-reasoning-duplicates-cross-file-findings)).
+  It is on by default and runs after every completed round with at least one chunk, so
+  the phase is present on a normal run; it is absent only when
+  `review.synthesis.enabled` is `false` or no chunk completed, and then the round made
+  no extra call.
 - `validation` is the post-merge tail of the run: provider session teardown and progress
   callbacks, then the pass that decides what survives (context-finding rejection,
   coverage and resume bookkeeping, flag reconciliation). A slow session close therefore
@@ -1441,7 +1457,7 @@ ai:
   lint: true # AI lint summaries during chk/fmt
   review: true # the `lintro review` AI diff review
   provider: anthropic # "anthropic" | "cursor" | "openai"; no default
-  transport: api # "api" (SDK) or "cli" (local agent binary); no default
+  transport: api # "api" or "cli"; omitted transport falls back by provider
   # Omit `model` and `api_key_env` to take the chosen provider's defaults
   # (`lintro doctor` prints the API-key variable in effect, `lintro status` the
   # model); set them only to override.
@@ -1473,13 +1489,17 @@ emits a deprecation warning. Set `ai.lint` and/or `ai.review` explicitly to sile
 
 ### Full Configuration Reference
 
-Every key below maps 1:1 to a field on `AIConfig` in `lintro/ai/config.py`, which is the
-source of truth. All fields are optional; each is shown with its type, default, and
-accepted range. Unknown keys under `ai:` are dropped with a warning rather than
-rejected, so a stale key never breaks a run — but a typo never takes effect either.
+The complete example covers every field on `AIConfig` in `lintro/ai/config.py`,
+including its nested transport profiles and registered provider settings. These frozen
+models are the source of truth. All fields are optional; annotations explain defaults
+and accepted ranges. Unknown top-level keys under `ai:` are dropped with a warning
+rather than rejected, so a stale key never breaks a run — but a typo never takes effect
+either. Unknown settings inside a transport profile or provider block are rejected by
+that nested model.
 
-The grouping below (provider, budget, safety, output, cache, advanced) is for
-readability only; the loader expects the flat key layout shown.
+The visual groups below are for readability. Shared scalar settings sit directly under
+`ai:`, while `transports.api`, `transports.cli` and `providers.<name>` are nested
+mappings; preserve the indentation shown.
 
 ```yaml
 ai:
@@ -1498,7 +1518,8 @@ ai:
   provider: anthropic
 
   # How to invoke the provider: "api" (SDK) or "cli" (local agent binary).
-  # No default — set it explicitly whenever ai.lint or ai.review is enabled.
+  # Set explicitly. Omitted transport falls back to api for Anthropic/OpenAI,
+  # or cli for Cursor; doctor flags the omitted setting.
   # "cursor" defaults to "cli"; its "api" needs lintro[cursor]. See "Transports".
   transport: api
 
@@ -1545,18 +1566,45 @@ ai:
   retry_max_delay: 30.0 # max delay, seconds (float >= 1.0, must be >= base)
   retry_backoff_factor: 2.0 # multiplier per retry (float >= 1.0)
 
+  # ── Transport profiles ────────────────────────────────────────
+  # An omitted or null profile value falls back to the shared scalar, then
+  # the built-in default; CLI timeout instead uses its own 1800-second default.
+  transports:
+    api:
+      # Seconds per call. (float >= 1 | null, default: null; resolves to 60)
+      timeout: 60.0
+      # USD review cap; null falls back to ai.max_cost_usd.
+      # Config caps enforce on billed/estimated/unknown cost bases, but are
+      # display-only on subscription shadow/unpriceable bases.
+      # (float >= 0 | null, default: null)
+      max_cost_usd: null
+    cli:
+      # Seconds per chunk. (float >= 1 | null, default: null; resolves to 1800)
+      timeout: 1800.0
+      # Review cap follows the same cost-basis rules as the API profile;
+      # its advisory name does not exempt metered CLI credentials.
+      # (float >= 0 | null, default: null)
+      max_cost_usd_advisory: null
+      # Unset: 12 turns for review calls, 1 for summaries/fixes. A value here
+      # overrides every call kind; binaries without a turn flag ignore it.
+      # (int >= 1 | null, default: null)
+      max_turns: null
+
   # ── Budget & cost caps ────────────────────────────────────────
-  # Max issues to attempt fixing per run. Counts API calls made, not
-  # suggestions returned. (int >= 1, default: 20)
+  # Maximum fix attempts per run. Summaries, retries and other provider requests
+  # can add calls beyond this count. (int >= 1, default: 20)
   max_fix_attempts: 20
 
-  # Concurrent AI provider calls (fixes and review chunk fan-out).
-  # Honored even when max_cost_usd is set. (int 1–20, default: 5)
+  # Concurrent AI provider calls for fixes and eligible review fan-out.
+  # An enforced diff-review cost cap serializes chunk reviews.
+  # (int 1–20, default: 5)
   max_parallel_calls: 5 # CLI transport: effective 3 unless set explicitly
 
-  # Spend ceiling per AI session, in USD; the run stops
-  # scheduling new calls once spent+reserved reaches the cap. null disables
-  # it. A cost cap serializes chunk reviews (one provider call at a time,
+  # USD budget. Review config caps enforce only on billed/estimated/unknown
+  # bases; subscription shadow bases are display-only. Invocation flag/env
+  # caps enforce on every basis. AI lint sessions use this scalar directly.
+  # Null clears this scalar; a transport-profile cap can still apply.
+  # An enforced cost cap serializes chunk reviews (one provider call at a time,
   # #2154) so the resume queue cannot invert; the call already in flight
   # when the ceiling is hit still finishes, so the final total may
   # overshoot by up to one call's cost.
@@ -1566,7 +1614,7 @@ ai:
   # Total review spend in USD across every AI review round of one pull
   # request (#2796). Unset disables the check and the sticky line.
   # Enforced like max_cost_usd: always from LINTRO_AI_REVIEW_PR_BUDGET_USD,
-  # from config only when spend is billed or estimated.
+  # from config on billed, estimated or unknown bases.
   # (float > 0 | null, default: null)
   review_pr_budget_usd: null
 
@@ -1647,6 +1695,12 @@ ai:
   # blocks a merge under a zero-unresolved-threads rule. (bool, default: false)
   review_post_questions_inline: false
 
+  # Categories whose P3 findings become notes, whatever their confidence.
+  # P1/P2 findings still open threads. [] routes by confidence alone.
+  # Category names are validated; spaces/underscores normalize to hyphens.
+  # (list[str], default: [code-smell])
+  review_note_categories: [code-smell]
+
   # Restrict AI processing to matching paths / rules (glob patterns).
   # Empty means "no filter". (list[str], default: [])
   include_paths: []
@@ -1702,6 +1756,16 @@ ai:
   # Max lines above/below target for line-targeted fix search.
   # (int 1–50, default: 5)
   fix_search_radius: 5
+
+  # ── Transcript logging ────────────────────────────────────────
+  # Write secret-redacted raw provider requests/responses as NDJSON under
+  # .lintro-cache/ai/transcripts/. Auth headers/API keys are never logged.
+  # Also enabled by LINTRO_AI_TRANSCRIPT=1. (bool, default: false)
+  transcript_logging: false
+
+  # Maximum transcript files retained; older files are pruned when a new
+  # transcript writer starts. (int >= 1, default: 10)
+  transcript_retention: 10
 
   # ── Git checkpoints ───────────────────────────────────────────
   # Refs kept under refs/lintro/checkpoints/, this run included.
@@ -1865,14 +1929,12 @@ CLI flags always override config: passing `--fix` on the CLI turns it on even if
 
 ### Providers
 
-Every provider fact below — defaults, transports, the API-key variable, the CLI binary
-and the per-model prices — is declared once, in that provider's plugin metadata
-(`lintro/ai/providers/<name>/metadata.py`), and read everywhere else through
-`lintro.ai.registry`. The two tables below are snapshots of that metadata, asserted cell
-by cell by `tests/unit/ai/providers/test_docs_provider_table.py`, so they cannot drift
-from the code. There is no code generator, so updating them is two steps: change the
-metadata, then run that test and paste the SNAPSHOT block it prints between the markers.
-CI runs the same test, so a metadata change without the paste-back fails the build.
+Choose `anthropic`, `cursor` or `openai` explicitly; then choose API or CLI transport.
+For API calls, use the key variable in the table. CLI transport can use a supported
+logged-in session or key: [check transport authentication](#transport-authentication)
+and [the Anthropic --bare exception](#provider-specific-settings) before relying on a
+session. The provider sections show credentials and configuration; prices, retired model
+rules and source provenance follow them.
 
 <!-- BEGIN SNAPSHOT: provider-table -->
 
@@ -2006,22 +2068,24 @@ which defaults to 60 s). The SDK has no output-token limit, so `max_tokens` is s
 the model in the prompt, as on the CLI path, and `ai.api_base_url` is rejected: Cursor
 has no endpoint override.
 
-On both transports Cursor bills against a subscription rather than per token, so its
-models are priced at zero above and the run's cost basis is `unpriceable`
-(`lintro/ai/transport.py`). What that means for `ai.max_cost_usd` depends on where the
-cap was set (`cap_is_enforced` in `lintro/ai/review/cost_cap.py`, #2154):
+Cursor model prices are zero in the metadata; the provider describes subscription
+billing. The recorded cost basis is resolved separately: this release resolves a
+first-party SDK profile as `billed`, while a subscription CLI profile starts as
+`unpriceable` and may finish as `list_price_shadow`. These labels are run provenance,
+not a guarantee about your invoice. Review caps depend on the cap source and resolved
+basis (`lintro/ai/review/cost_cap.py`, #2154):
 
 - `--max-cost-usd` or `LINTRO_AI_MAX_COST_USD` — **enforced**. Operator intent for this
   run enforces on every cost basis, and `estimate_cost_with_floor` is what gives the
   budget a non-zero number to count against.
-- `ai.max_cost_usd` in committed YAML — **display-only for `lintro review`**. Committed
-  policy is transport-unaware and enforces only where real money is at stake (`billed`
-  or `estimated`), so `run_planning.py` builds the review's `CostBudget` with
-  `max_cost_usd=None` and the reported `$` figure is a shadow estimate, not a ceiling.
-  This is the review path only: the AI lint sessions behind `lintro chk` / `fmt` build
-  `CostBudget(max_cost_usd=ai_config.max_cost_usd)` unconditionally
-  (`lintro/ai/orchestrator.py`), so a YAML cap does stop those, priced off the same
-  fallback estimate.
+- `ai.max_cost_usd` in committed YAML — **display-only for review on `unpriceable` or
+  `list_price_shadow` bases**; enforced on `billed`, `estimated` or `unknown` bases. A
+  first-party Cursor SDK profile therefore takes the enforced branch in this frozen
+  release. On the display-only branch, the review budget is uncapped and the figure is a
+  shadow estimate, not a ceiling. This is the review path only: the AI lint sessions
+  behind `lintro chk` / `fmt` build `CostBudget(max_cost_usd=ai_config.max_cost_usd)`
+  unconditionally (`lintro/ai/orchestrator.py`), so a YAML cap does stop those, priced
+  off the same fallback estimate.
 
 #### [OpenAI](https://platform.openai.com/docs/)
 
@@ -2038,6 +2102,72 @@ ai:
 
 See the [OpenAI API docs](https://platform.openai.com/docs/api-reference/) for model
 options and pricing.
+
+Model prices and retired IDs follow the provider setup examples.
+
+Prices are USD per million tokens, as lintro uses them for `ai.max_cost_usd` and the
+reported `$` figures. A model priced at zero is billed elsewhere (the Cursor
+subscription); `estimate_cost_with_floor` gives those calls a non-zero estimate so a
+_flag or env_ cap can still stop the run. It does not make a committed YAML cap
+enforceable on an `unpriceable` transport — see the [Cursor cost-basis policy](#cursor).
+
+<!-- BEGIN SNAPSHOT: model-pricing-table -->
+
+| Provider  | Model                       | Input  | Output |
+| --------- | --------------------------- | ------ | ------ |
+| Anthropic | `claude-sonnet-4-6`         | $3.00  | $15.00 |
+| Anthropic | `claude-sonnet-5-5`         | $2.00  | $10.00 |
+| Anthropic | `claude-haiku-4-5-20251001` | $0.80  | $4.00  |
+| Anthropic | `claude-opus-4-8`           | $5.00  | $25.00 |
+| Cursor    | `auto`                      | $0.00  | $0.00  |
+| Cursor    | `gpt-5.3-codex-fast`        | $0.00  | $0.00  |
+| OpenAI    | `gpt-4o`                    | $2.50  | $10.00 |
+| OpenAI    | `gpt-4o-mini`               | $0.15  | $0.60  |
+| OpenAI    | `gpt-4-turbo`               | $10.00 | $30.00 |
+| OpenAI    | `o1`                        | $15.00 | $60.00 |
+| OpenAI    | `o1-mini`                   | $1.10  | $4.40  |
+
+<!-- END SNAPSHOT: model-pricing-table -->
+
+A model its vendor has retired is refused rather than priced. Each provider's metadata
+keeps the ids it once registered and the vendor has since retired, with the retirement
+date and the replacement the vendor's deprecations page lists. The refusal applies only
+when that provider is the one selected: the same string sent through `openai` to an
+OpenAI-compatible endpoint is not refused.
+
+Naming a retired id in `ai.model` or `ai.fallback_models`, `LINTRO_AI_MODEL`, or
+`--model` fails validation before any request. `lintro check` and `lintro review` stop
+with the error. `lintro config` prints it in place of the AI section, and
+`lintro doctor` reports it as a failed `ai.config` check, prints the rest of its report,
+and exits non-zero:
+
+```text
+invalid AI configuration: ai.model: 'claude-opus-4-20250514' was retired by Anthropic on 2026-06-15 and requests to it fail; use 'claude-opus-4-8' instead
+```
+
+A custom review agent whose `model:` is retired stops `lintro review` while it prepares,
+before any review call. Code that calls lintro's Python API with a model or fallback
+chain that skipped validation is refused at the provider factory and before the first
+attempt of the fallback chain, with the same replacement named.
+
+<!-- BEGIN SNAPSHOT: retired-models-table -->
+
+| Provider  | Retired model              | Retired on | Replacement         |
+| --------- | -------------------------- | ---------- | ------------------- |
+| Anthropic | `claude-sonnet-4-20250514` | 2026-06-15 | `claude-sonnet-5-5` |
+| Anthropic | `claude-opus-4-20250514`   | 2026-06-15 | `claude-opus-4-8`   |
+
+<!-- END SNAPSHOT: retired-models-table -->
+
+Every provider fact on this page — defaults, transports, the API-key variable, the CLI
+binary and the per-model prices — is declared once, in that provider's plugin metadata
+(`lintro/ai/providers/<name>/metadata.py`), and read everywhere else through
+`lintro.ai.registry`. The default and pricing tables are snapshots of that metadata,
+asserted cell by cell by `tests/unit/ai/providers/test_docs_provider_table.py`, so they
+cannot drift from the code. There is no code generator, so updating them is two steps:
+change the metadata, then run that test and paste the SNAPSHOT block it prints between
+the markers. CI runs the same test, so a metadata change without the paste-back fails
+the build. The same test also asserts the retired-model table against the metadata.
 
 #### Measuring a provider choice
 
@@ -2062,13 +2192,13 @@ Timeouts, cost caps, failure vocabulary, and the meaning of reported `$` figures
 **transport-scoped** — see [AI review transports](ai-review-transports.md) for the
 decision table and `ai.transports.*` profiles (#1923).
 
-`ai.transport` has **no default**, so set it explicitly whenever `ai.lint` or
-`ai.review` is enabled. Omitting it is always a `lintro doctor` incompatibility, but the
-run still works: each provider plugin falls back to the transport it documents — `api`
-for `anthropic` and `openai`, `cli` for `cursor` (#2449). That fallback exists for
-backward compatibility — legacy configs that set only `ai.enabled: true` (which
-implicitly switches `lint` and `review` on) rely on it — and is not something to depend
-on in new config.
+`ai.transport` is unset by default in configuration. Set it explicitly whenever
+`ai.lint` or `ai.review` is enabled. Omitting it is always a `lintro doctor`
+incompatibility, but the run still works: each provider plugin falls back to the
+transport it documents — `api` for `anthropic` and `openai`, `cli` for `cursor` (#2449).
+That fallback exists for backward compatibility — legacy configs that set only
+`ai.enabled: true` (which implicitly switches `lint` and `review` on) rely on it — and
+is not something to depend on in new config.
 
 All three providers support both transports. Cursor's `api` transport needs the
 `lintro[cursor]` extra rather than `lintro[ai]`.
@@ -2374,9 +2504,10 @@ developer's login.
   (`npm install -g @anthropic-ai/claude-code@<pin>`) authenticated by a
   `CLAUDE_CODE_OAUTH_TOKEN` secret — no API key involved. Two things make that work:
   keep `ANTHROPIC_API_KEY` **out** of the step env, and set `LINTRO_CLI_BARE: never`,
-  because `--bare` disables OAuth session login (see the `--bare` note above). Set
-  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and `DISABLE_AUTOUPDATER=1` to keep the
-  binary's egress and version predictable under an egress allowlist.
+  because `--bare` disables OAuth session login (see
+  [authentication and `--bare` guidance](/docs/ai/ai-features/transport-authentication/)).
+  Set `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and `DISABLE_AUTOUPDATER=1` to keep
+  the binary's egress and version predictable under an egress allowlist.
 - **Lanes, selected by one variable (ADR-0011).** Where the review goes is a named row
   in the committed manifest `scripts/ci/ai_review_lanes.json`. The repository variable
   `LINTRO_AI_PROVIDER` picks the row by id and `LINTRO_AI_MODEL` overrides its default
@@ -2388,13 +2519,16 @@ developer's login.
   resolves the chain, the review job's egress and credentials follow from it, and the
   wrapper refuses a competing credential or an override that names another host. See
   `docs/ai-review-transports.md` for the binding rules.
-- **`ai.max_cost_usd` is API-path accounting.** Lintro prices the tokens it billed
-  itself, so under the `cli` transport the cap is advisory — the call bills the
-  subscription (or, in bare mode with a reachable API key, that key — see the billing
-  note above). Setting a cap serializes chunk reviews to one provider call at a time
-  (#2154), so the session can overshoot by at most the call in flight when the ceiling
-  is hit. Review metadata records per-phase timings (see "Review phase timings" above)
-  so wall-clock regressions are visible in JSON / MCP output.
+- **Diff-review caps depend on source and cost basis.** Flag and environment caps
+  enforce on every recorded basis. Committed configuration caps enforce on `billed`,
+  `estimated` and `unknown`; they are advisory/display-only on `unpriceable` and
+  `list_price_shadow`. Transport-profile caps resolve through the same source/basis
+  policy; CLI transport alone does not make a cap advisory. Effective credentials and
+  provider metadata determine accounting provenance; neither a subscription estimate nor
+  the `billed` label proves an invoice. A cap serializes chunk reviews, but an in-flight
+  call can overshoot it. Local orchestration does not impose a provider-side billing
+  ceiling. MCP requests can only lower the server's resolved cap. AI lint sessions use
+  their own budget construction; do not apply this diff-review policy universally.
 - **Two tiers of contract testing.** The flag-surface tier runs `--version` / `--help`
   only — no credential, no quota — on every PR, alongside the recorded-output replay
   fixtures that catch CLI parser drift for free. The real-invocation tier spends quota
@@ -2464,18 +2598,15 @@ configuration needed — Lintro auto-detects `GITHUB_ACTIONS=true`.
 
 ### Estimated Costs
 
-AI features use minimal API calls:
-
-| Feature          | API Calls                 | Typical Cost |
-| ---------------- | ------------------------- | ------------ |
-| AI Summary       | 1 per run                 | ~$0.01       |
-| Fix suggestions  | 1 per issue (up to limit) | ~$0.01 each  |
-| Post-fix summary | 1 after fix review        | ~$0.01       |
+No fixed call count or price is guaranteed. Provider, model, input size, retries,
+caching and optional fix requests affect usage. Local estimates are not provider
+invoices; inspect the recorded cost basis and your provider account.
 
 ### Reducing Costs
 
-1. **Limits** — `max_fix_attempts` (default 20) caps API calls
-2. **Opt-in flags** — `--fix` is opt-in; only the summary runs by default (1 call)
+1. **Limits** — `max_fix_attempts` bounds fix attempts, not every provider request.
+2. **Opt-in flags** — `--fix` is opt-in; a configured AI lint session requests a
+   summary; retries can add calls
 3. **Cost display** — `show_cost_estimate: true` shows token usage and estimated cost.
    Fix displays and interactive review label these as **Suggestion estimates**: they sum
    only the suggestions shown, rather than complete session spend. Charges from
@@ -2491,11 +2622,12 @@ ai:
   enabled: false # disables all AI features
 ```
 
-Or simply don't install the extra:
+Use `ai.enabled: false` to disable all AI features. The `ai.lint` and `ai.review`
+switches control individual features when AI is enabled.
 
-```bash
-uv pip install lintro  # no AI support
-```
+Installing the base package does not disable AI or remove dependencies already
+installed. Extras supply SDK dependencies; CLI transports can use installed,
+authenticated agent binaries without those SDK extras.
 
 ## Retry and Error Handling
 
@@ -2589,7 +2721,7 @@ docker run --rm \
   ghcr.io/lgtm-hq/py-lintro-ai:latest check . --transport api
 
 # CLI transport — the agent binaries are already on PATH in this image.
-# The credential is still required (see "Transport authentication" above).
+# The credential is still required; consult the Transport authentication reference.
 docker run --rm \
   -e ANTHROPIC_API_KEY \
   -v $(pwd):/code \
@@ -2600,7 +2732,8 @@ The agent CLIs live in `/opt/ai-tools`, installed from the digest-pinned
 `ghcr.io/lgtm-hq/lintro-ai-tools` base image and refreshed weekly. Only
 `/opt/ai-tools/bin` goes on `PATH`, so the lint toolchain's own runtimes are untouched.
 Because the bundled CLIs are rebuilt on a weekly cadence while the vendors release far
-more often, the capability guard above is what absorbs the lag.
+more often, the [CLI compatibility guard](#cli-compatibility-floors) is what absorbs the
+lag.
 
 Building locally, the base image adds the AI _extras_ (SDKs, not CLIs) with
 `WITH_AI=true`, and the full `ai` variant is its own build target:
@@ -2660,17 +2793,34 @@ persistent rate limiting:
 
 ## Data & Privacy
 
+AI summaries use issue metadata. Fixes and reviews can send source code, including whole
+files when their respective context rules allow it.
+
 ### What is sent to the AI provider
 
 - **Summary mode** (`lintro check`): An issue digest containing error codes, counts,
-  issue messages, and workspace-relative file paths. No source code is sent.
+  issue messages, and workspace-relative file paths. Lintro does not add source-file
+  contents to this digest; native issue messages can themselves quote source text.
 - **Fix mode** (`--fix` or `lintro format`): The source of the file carrying the issue,
   plus the issue message and error code. **How much of that file is sent depends on its
   size — often all of it.** See below.
 - **Review mode** (`lintro review`): The unified diff under review — changed lines with
   their surrounding hunk context — the workspace-relative paths of the changed files,
-  and, when lint results are available, a digest of them. The diff passes through
-  lintro's secret-redaction step first.
+  and, when lint results are available, a digest of them. By default, the prompt also
+  includes post-change repository context from eligible changed text files: source,
+  configuration, workflows and documentation. A file is included whole when it fits its
+  share of the context budget; larger files use hunk-related definition or line windows.
+  Importer and sibling-test neighbours are limited to the PR's changed-file set. Files
+  identified as dotenv (such as `.env`), CSV, image, audio or binary, and files under a
+  `__snapshots__` directory, are not eligible for this assembled context. That rule
+  covers the context section only; it says nothing about what the diff contains. The
+  diff and assembled context pass through secret redaction.
+
+`ai.review_context_tokens` is the per-chunk repository-context budget, default 6000. Set
+it to `0` to disable this assembled context section. This does not disable the review
+diff or a CLI provider's separately permitted read tools. See
+[Repository context in the prompt](#repository-context-in-the-prompt) and
+[Bounded CLI calls](#bounded-cli-calls) for those distinct controls.
 
 > **Warning — `ai.review_allow_unredacted_git_native` sends unredacted diffs.**
 >
@@ -2691,9 +2841,8 @@ persistent rate limiting:
 
 ### How much source code fix mode sends
 
-Fix mode is the one path that can send a whole source file. The amount is
-size-dependent, governed by `FULL_FILE_THRESHOLD` (500 lines) in
-`lintro/ai/fix_context.py`:
+Fix mode's source context is size-dependent, governed by `FULL_FILE_THRESHOLD` (500
+lines) in `lintro/ai/fix_context.py`:
 
 - **Files at or under 500 lines** — the **entire file** is attempted first, so the model
   can reason about the whole file when generating a fix. It is sent in full only if the
@@ -2714,14 +2863,18 @@ Secret redaction and prompt-injection scanning are applied to every prompt lintr
 assembles, regardless of context size. The one documented exception is
 `ai.review_allow_unredacted_git_native`, which delegates diff retrieval to the provider
 and so bypasses redaction entirely (see the warning above). If sending whole files is
-unacceptable in your environment, keep fix mode off — `max_prompt_tokens` alone is not a
-guarantee.
+unacceptable, keep fix mode off and disable assembled review context with
+`ai.review_context_tokens: 0`. Review diffs still contain source, and permitted CLI read
+tools or delegated diff retrieval have their own controls. Neither the fix prompt budget
+nor the review context setting is a blanket limit on provider input.
 
 ### What is NOT sent
 
 - **Absolute paths** — all paths are made relative to the workspace root before sending
-- **Other project files** — in summary and fix modes, only files with reported issues
-  are read; in review mode, only files that the diff under review touches
+- **Unrelated files in Lintro-assembled context** — summary prompts use issue metadata;
+  fix prompts use the issue's file; assembled review context is bounded to eligible
+  changed files and their changed importer/test neighbours. Provider CLI read-tool
+  access is a separate surface, as described under Bounded CLI calls.
 - **Detected secrets** — recognized secret patterns are redacted from the file content,
   the issue message, and any context window before the prompt leaves lintro
 

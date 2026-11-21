@@ -1,0 +1,45 @@
+<!-- Progressive enhancement: the native setting index and disclosures remain usable without JS. -->
+<script>
+  const filter = document.querySelector<HTMLElement>('.reference-filter');
+  const query = document.querySelector<HTMLInputElement>('#setting-query');
+  const status = document.getElementById('setting-status');
+  const entries = [...document.querySelectorAll<HTMLElement>('[data-setting-index]')];
+  if (filter && query && status) {
+    filter.hidden = false;
+    query.addEventListener('input', () => {
+      const words = query.value.trim().toLowerCase().split(/\s+/);
+      let count = 0;
+      entries.forEach((entry) => {
+        const text = entry.textContent?.toLowerCase() ?? '';
+        entry.hidden = !words.every((word) => text.includes(word));
+        if (!entry.hidden) count++;
+        const names = entry.querySelector('details');
+        if (names) names.open = Boolean(query.value.trim()) && !entry.hidden;
+      });
+      status.textContent = count
+        ? `${count} of ${entries.length} groups. Choose a setting to open its example.`
+        : 'No matching settings. Try a shorter name or clear the search.';
+    });
+  }
+  function revealSetting(): void {
+    const id = location.hash.slice(1);
+    const target = document.getElementById(id);
+    const example = target?.nextElementSibling;
+    if (example instanceof HTMLDetailsElement && example.matches('[data-setting-example]')) {
+      example.open = true;
+    }
+    if (id === 'complete-configuration') {
+      const complete = document.querySelector<HTMLDetailsElement>('.complete-configuration');
+      if (complete) complete.open = true;
+    }
+  }
+  document.querySelectorAll<HTMLAnchorElement>('#setting-index a').forEach((link) => {
+    link.addEventListener('click', () => {
+      const target = document.getElementById(link.hash.slice(1));
+      const example = target?.nextElementSibling;
+      if (example instanceof HTMLDetailsElement) example.open = true;
+    });
+  });
+  addEventListener('hashchange', revealSetting);
+  revealSetting();
+</script>

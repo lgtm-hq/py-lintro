@@ -45,10 +45,11 @@ cargo clippy --fix --allow-dirty --allow-staged
 
 ### Lintro Wrapper
 
-```python
-tool = ClippyTool()
-result = tool.check([\"path/to/project\"])
-result = tool.fix([\"path/to/project\"])
+```bash
+lintro check . --tools clippy
+
+# Apply supported fixes
+lintro format . --tools clippy
 ```
 
 ## Configuration Strategy

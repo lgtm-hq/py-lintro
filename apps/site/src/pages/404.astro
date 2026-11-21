@@ -1,0 +1,7 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+const base = import.meta.env.BASE_URL;
+---
+<BaseLayout title="Page not found" description="This Lintro page could not be found. Find installation, configuration and tool references in the documentation.">
+  <section class="reference-shell"><p class="eyebrow">404 / Lost the signal</p><h1>Let’s find your way.</h1><p class="lede">That page is missing or has moved. Browse the documentation, search by task, or return to the workbench.</p><nav class="reference-jump" aria-label="Recovery links"><a href={`${base}docs/`}>Documentation</a><a href={`${base}docs/start/getting-started/`}>Getting started</a><a href={`${base}docs/tools/`}>Tools</a><a href={base}>Home</a></nav></section>
+</BaseLayout>

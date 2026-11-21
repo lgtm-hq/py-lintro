@@ -2,61 +2,121 @@
 import { getCollection } from 'astro:content';
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import DocsSectionTabs from '../../components/docs/DocsSectionTabs.astro';
-import PageHeader from '../../components/ui/PageHeader.astro';
-import Card from '../../components/ui/Card.astro';
-import { stripHtml } from '../../data/landing';
-import { CATEGORY_LABELS, CORE_DOC_CATEGORIES } from '../../data/docs-nav';
+import {
+  CATEGORY_BLURBS,
+  CATEGORY_LABELS,
+  DOC_CATEGORIES,
+  categoryLandingHref,
+  docRoute,
+  isSectionOverview,
+  navLabel,
+  sectionDocCount,
+} from '../../data/docs-nav';
+import configurationPages from '../../generated/configuration-pages.json';
+import { flattenSectionDocs } from '../../data/sidebar-nav';
+import { docHref, docs as docLinks } from '../../data/site-links';
+import '../../styles/docs.css';
 
 const base = import.meta.env.BASE_URL;
-const docs = await getCollection('docs', ({ data }) => !data.draft);
+const allDocs = await getCollection('docs', ({ data }) => !data.draft);
 
-const coreGrouped = CORE_DOC_CATEGORIES.map((key) => ({
-  key,
-  label: CATEGORY_LABELS[key],
-  docs: docs.filter((d) => d.data.category === key).sort((a, b) => a.data.order - b.data.order),
-})).filter((g) => g.docs.length > 0);
+const sections = DOC_CATEGORIES.map((key) => {
+  const inSection = allDocs.filter((d) => d.data.category === key && d.data.sidebar !== false);
+  const top = flattenSectionDocs(key, inSection)
+    .filter((d) => !isSectionOverview(d.id, key))
+    .slice(0, 4);
+  return {
+    key,
+    label: CATEGORY_LABELS[key],
+    blurb: CATEGORY_BLURBS[key],
+    href: categoryLandingHref(allDocs, key, base),
+    count: sectionDocCount(allDocs, key),
+    links: top.map((d) => ({ label: navLabel(d), href: docRoute(base, d.id) })),
+  };
+}).filter((s) => s.count > 0);
+
+const popular = [
+  { label: 'Getting started', href: docHref(base, docLinks.gettingStarted) },
+  { label: 'Configuration', href: docHref(base, docLinks.configuration) },
+  { label: 'AI features', href: docHref(base, docLinks.aiFeatures) },
+  { label: 'MCP server', href: docHref(base, docLinks.mcp) },
+  { label: 'Tool catalog', href: docHref(base, docLinks.toolsIndex) },
+  { label: 'CLI reference', href: `${base}docs/reference/cli/` },
+  { label: 'Roadmap', href: `${base}docs/project/roadmap/` },
+  { label: 'Comparison', href: `${base}#comparison` },
+];
 ---
 
 <BaseLayout
   title="Documentation"
-  description="Lintro documentation — installation, configuration, supported tools, and contributing guides."
+  description="Lintro documentation: install, configure, run in CI, AI review, the tool catalog, and how the project is built."
 >
-  <div class="docs-shell docs-shell--hub">
+  <div class="docs-shell">
     <DocsSectionTabs />
-    <div class="container content docs-hub">
-      <PageHeader
-        kicker="// guides · reference"
-        title="documentation"
-        description="Unified linting, formatting, and testing for polyglot projects."
-      />
+    <div class="docs-hub">
+      <header class="docs-hub-header" data-reveal>
+        <span class="eyebrow">Documentation</span>
+        <h1>What do you want to do?</h1>
+        <p class="lede">
+          Start with an install and a first check, then configure tools, wire up CI, and switch on
+          the AI features when you want them.
+        </p>
+      </header>
 
-      <div class="doc-categories">
-      {
-        coreGrouped.map(({ label, docs: catDocs }, i) => (
-          <Card feature number={String(i + 1).padStart(2, '0')} class="doc-category">
-            <h2>{label}</h2>
+      <nav class="docs-hub-popular" aria-label="Popular pages">
+        <span class="docs-hub-popular-label">Start here</span>
+        {popular.map((p) => (
+          <a href={p.href} class="docs-hub-chip">
+            {p.label}
+          </a>
+        ))}
+      </nav>
+
+      <div class="docs-hub-grid">
+        {sections.map((section) => (
+          <article class="docs-hub-card" data-reveal>
+            <div class="docs-hub-card-head">
+              <h2>
+                <a href={section.href}>{section.label}</a>
+              </h2>
+              <span class="docs-hub-card-count">
+                {section.count} {section.count === 1 ? 'page' : 'pages'}
+              </span>
+            </div>
+            <p>{section.blurb}</p>
             <ul>
-              {
-                catDocs.map((doc) => (
-                  <li>
-                    <a href={`${base}docs/${doc.id}/`}>{doc.data.title}</a>
-                    {doc.data.description && <span> — {stripHtml(doc.data.description)}</span>}
-                  </li>
-                ))
-              }
+              {section.links.map((link) => (
+                <li>
+                  <a href={link.href}>{link.label}</a>
+                </li>
+              ))}
             </ul>
-          </Card>
-        ))
-      }
+            <a class="docs-hub-card-more" href={section.href}>
+              Open {section.label} →
+            </a>
+          </article>
+        ))}
       </div>
+
+      <section class="docs-config-topics" data-reveal aria-labelledby="configuration-topics-title">
+        <h2 id="configuration-topics-title">Configuration topics</h2>
+        <p>
+          Find the setting you need, or{' '}
+          <a href={docHref(base, docLinks.configuration)}>open the complete configuration guide</a>.
+        </p>
+        <div class="docs-config-topic-grid">
+          {configurationPages.pages.slice(0, 12).map((page) => (
+            <a href={base + page.href.replace(/^\//, '')}>{page.title}</a>
+          ))}
+        </div>
+        <a class="config-builder-link" href={base + 'config-builder/'}>
+          Build a configuration →
+        </a>
+      </section>
+      <p class="docs-hub-foot">
+        Need a command flag? Open the <a href={`${base}docs/reference/cli/`}>CLI reference</a>. For
+        priorities and proposals, see the <a href={`${base}docs/project/roadmap/`}>roadmap</a>.
+      </p>
     </div>
   </div>
 </BaseLayout>
-
-<style>
-  .docs-hub {
-    max-width: var(--max-width);
-    margin: 0 auto;
-    padding: 2rem 1.5rem 4rem;
-  }
-</style>

@@ -189,11 +189,11 @@ See [Configuration](configuration.md) for detailed configuration options.
 **Solution**: Adjust output settings:
 
 ```bash
-# Disable colors
-lintro check --no-color
+# Use plain text output
+lintro check --output-format plain
 
-# Use simple output format
-lintro check --output-format simple
+# Use structured data for scripts and CI
+lintro check --output-format json
 
 # Force UTF-8 encoding
 export PYTHONIOENCODING=utf-8

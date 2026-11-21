@@ -2,15 +2,15 @@
 
 ## Overview
 
-[Stylelint](https://stylelint.io/) is a mighty, configurable linter for CSS, SCSS, Sass,
-and Less stylesheets. It ships 100+ built-in rules, understands modern CSS syntax, and
-can auto-fix many violations via `--fix`. This analysis compares Lintro's wrapper with
-the upstream `stylelint` CLI behavior.
+[Stylelint](https://stylelint.io/) is a configurable linter for CSS, SCSS, Sass, and
+Less stylesheets. It ships built-in rules, understands modern CSS syntax, and can
+auto-fix many violations via `--fix`. This analysis compares Lintro's wrapper with the
+upstream `stylelint` CLI behavior.
 
 ## Core Tool Capabilities
 
 - Rule enforcement for CSS/SCSS/Sass/Less (invalid values, duplicate properties, empty
-  blocks, hex-color length, and 100+ more)
+  blocks, hex-color length, and more)
 - Auto-fix for many rules via `--fix`
 - Config discovery: `.stylelintrc`, `.stylelintrc.{json,yaml,yml,js,cjs,mjs}`,
   `stylelint.config.{js,cjs,mjs}`, or a `stylelint` key in `package.json`

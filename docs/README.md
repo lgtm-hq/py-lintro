@@ -26,7 +26,7 @@ configuring, and contributing to Lintro.
 
 - **[GitHub Integration](github-integration.md)** - CI/CD setup with GitHub Actions
 - **[Pre-commit Integration](pre-commit.md)** - Run lintro as a pre-commit hook
-- **[Tool Analysis](tool-analysis/)** - Detailed tool comparisons and capabilities
+- **[Tool reference](tool-analysis/)** - Detailed tool comparisons and capabilities
 
 ### For Developers
 
@@ -143,7 +143,7 @@ lintro check --fix
 
 1. [GitHub Integration](github-integration.md) - Set up automated quality checks
 2. [Configuration](configuration.md) - Project-wide configuration
-3. [Tool Analysis](tool-analysis/) - Understand tool capabilities
+3. [Tool reference](tool-analysis/) - Understand tool capabilities
 4. [Docker Usage](docker.md) - Standardized environments
 
 **Goal: Contribute to or extend Lintro**
@@ -152,24 +152,24 @@ lintro check --fix
 
 1. [Contributing Guide](contributing.md) - Development setup and guidelines
 2. [Style Guide](style-guide.md) - Code quality standards
-3. [Tool Analysis](tool-analysis/) - Understanding tool integration patterns
+3. [Tool reference](tool-analysis/) - Understanding tool integration patterns
 4. [Self-Use Documentation](lintro-self-use.md) - How we use our own tool
 
 ## 🛠️ Supported Tools
 
-| Tool                  | Language/Format  | Purpose                 | Documentation                                                    |
-| --------------------- | ---------------- | ----------------------- | ---------------------------------------------------------------- |
-| **Ruff**              | Python           | Linting & Formatting    | [Config Guide](configuration.md#ruff-configuration)              |
-| **Black**             | Python           | Formatting (Post-check) | [Config Guide](configuration.md#post-checks-configuration)       |
-| **pydoclint**         | Python           | Docstring Validation    | [Analysis](tool-analysis/pydoclint-analysis.md)                  |
-| **Bandit**            | Python           | Security Linting        | [Analysis](tool-analysis/bandit-analysis.md)                     |
-| **Pytest**            | Python           | Test Runner             | [Analysis](tool-analysis/pytest-analysis.md)                     |
-| **Prettier**          | JS/TS/JSON/CSS   | Code Formatting         | [Analysis](tool-analysis/prettier-analysis.md)                   |
-| **Yamllint**          | YAML             | Syntax & Style          | [Config Guide](configuration.md#yamllint-configuration)          |
-| **Markdownlint-cli2** | Markdown         | Style Checking          | [Config Guide](configuration.md#markdownlint-cli2-configuration) |
-| **Actionlint**        | GitHub Workflows | Workflow Linting        | [Analysis](tool-analysis/actionlint-analysis.md)                 |
-| **Hadolint**          | Dockerfile       | Best Practices          | [Config Guide](configuration.md#hadolint-configuration)          |
-| **buf**               | Protobuf         | Lint & Format           | [Analysis](tool-analysis/buf-analysis.md)                        |
+| Tool                  | Language/Format  | Purpose              | Documentation                                                    |
+| --------------------- | ---------------- | -------------------- | ---------------------------------------------------------------- |
+| **Ruff**              | Python           | Linting & Formatting | [Config Guide](configuration.md#ruff-configuration)              |
+| **Black**             | Python           | Formatting           | [Config Guide](configuration.md#tool-ordering-configuration)     |
+| **pydoclint**         | Python           | Docstring Validation | [Analysis](tool-analysis/pydoclint-analysis.md)                  |
+| **Bandit**            | Python           | Security Linting     | [Analysis](tool-analysis/bandit-analysis.md)                     |
+| **Pytest**            | Python           | Test Runner          | [Analysis](tool-analysis/pytest-analysis.md)                     |
+| **Prettier**          | JS/TS/JSON/CSS   | Code Formatting      | [Analysis](tool-analysis/prettier-analysis.md)                   |
+| **Yamllint**          | YAML             | Syntax & Style       | [Config Guide](configuration.md#yamllint-configuration)          |
+| **Markdownlint-cli2** | Markdown         | Style Checking       | [Config Guide](configuration.md#markdownlint-cli2-configuration) |
+| **Actionlint**        | GitHub Workflows | Workflow Linting     | [Analysis](tool-analysis/actionlint-analysis.md)                 |
+| **Hadolint**          | Dockerfile       | Best Practices       | [Config Guide](configuration.md#hadolint-configuration)          |
+| **buf**               | Protobuf         | Lint & Format        | [Analysis](tool-analysis/buf-analysis.md)                        |
 
 ## 📋 Command Reference
 
@@ -233,7 +233,7 @@ docker run --rm -v "$(pwd):/code" lintro:latest check
 - **CI/CD:** [GitHub Integration](github-integration.md)
 - **Contributing:** [Contributing Guide](contributing.md),
   [Adding a New Tool](contributing/adding-a-new-tool.md)
-- **Tool Comparison:** [Tool Analysis](tool-analysis/)
+- **Tool Comparison:** [Tool reference](tool-analysis/)
 
 ### Search by Error/Issue
 

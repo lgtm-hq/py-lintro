@@ -1,0 +1,12 @@
+---
+import { LINTRO_VERSION } from '../../data/lintro-version';
+import { TOOL_COUNT } from '../../data/tools-catalog';
+const base = import.meta.env.BASE_URL;
+---
+<div class="hero-intro">
+  <a class="release-tag" href={`${base}docs/start/getting-started/`}><span class="status-dot" aria-hidden="true"></span> Open source · v{LINTRO_VERSION} <span aria-hidden="true">↗</span></a>
+  <h1>Many tools. <br />One clear <em>signal.</em></h1>
+  <p class="lede">Your linters already know what to look for. Lintro brings their findings together, so you can focus on what to fix.</p>
+  <div class="hero-actions"><a class="btn btn-primary" href={`${base}docs/start/getting-started/`}>Run your first check <span class="orb" aria-hidden="true">↗</span></a><a class="text-link" href="#workbench">Explore the workbench <span aria-hidden="true">↓</span></a></div>
+  <p class="hero-foot">{TOOL_COUNT} built-in tools. Native tool configs. Optional AI review.</p>
+</div>

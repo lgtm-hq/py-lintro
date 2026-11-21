@@ -1,0 +1,48 @@
+---
+/**
+ * Publishes the real height of the pinned header and section tabs as the two layout
+ * variables that every sticky offset and the in-page anchor offset derive from
+ * (see "Pinned chrome" in highend.css).
+ *
+ * The first measurement waits for DOMContentLoaded. Measuring as soon as the header
+ * is parsed forces a layout while the parser is blocked. That split the first paint in
+ * two and moved Lighthouse's simulated mobile largest paint from about 1.1s to about
+ * 2.0s on three pages. Until the script runs, and whenever it cannot, the stylesheets'
+ * rem fallbacks apply.
+ */
+---
+
+<script is:inline>
+  (function () {
+    var root = document.documentElement;
+    var bars = [];
+
+    function track(selector, property) {
+      var bar = document.querySelector(selector);
+      if (bar) bars.push([bar, property]);
+    }
+
+    function measure() {
+      for (var i = 0; i < bars.length; i += 1) {
+        var height = bars[i][0].getBoundingClientRect().height;
+        // A hidden bar reports 0; keep the stylesheet value rather than collapse it.
+        if (height > 0) root.style.setProperty(bars[i][1], Math.ceil(height) + 'px');
+      }
+    }
+
+    function watch() {
+      track('.site-header', '--site-header-height');
+      track('.docs-section-tabs', '--docs-tabs-height');
+      measure();
+      if ('ResizeObserver' in window) {
+        var observer = new ResizeObserver(measure);
+        for (var i = 0; i < bars.length; i += 1) observer.observe(bars[i][0]);
+      } else {
+        window.addEventListener('resize', measure);
+      }
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watch);
+    else watch();
+  })();
+</script>

@@ -3,7 +3,7 @@
 ## Overview
 
 [TruffleHog](https://github.com/trufflesecurity/trufflehog) is a secrets scanner that
-detects credentials — API keys, tokens, private keys, and 800+ other credential types —
+detects credentials — API keys, tokens, private keys, and many other credential types —
 using provider-specific regex detectors and entropy analysis. Its signature capability
 is optional live **verification**: it can call the corresponding provider API to confirm
 whether a detected credential is active.
@@ -13,7 +13,8 @@ This analysis describes Lintro's TruffleHog wrapper and how it complements the e
 
 ## Core Tool Capabilities
 
-- **800+ detectors**: provider-specific patterns (GitHub, AWS, GCP, Slack, ...)
+- **Detectors**: provider-specific patterns (GitHub, AWS, GCP, Slack, ...); the count
+  depends on the installed release
 - **Verification**: `--no-verification` toggles live credential checking
 - **Scan sources**: `filesystem`, `git`, `GitHub`, `s3`, `gcs`, Docker images
 - **Result filtering**: `--results verified,unverified,unknown`
@@ -98,7 +99,7 @@ TruffleHog and gitleaks are **complementary**, not redundant:
 
 | Aspect       | gitleaks                            | trufflehog                                        |
 | ------------ | ----------------------------------- | ------------------------------------------------- |
-| Detection    | Configurable regex rules + entropy  | 800+ provider-specific detectors + entropy        |
+| Detection    | Configurable regex rules + entropy  | Provider-specific detectors + entropy             |
 | Verification | None                                | Live credential verification (disabled by lintro) |
 | Config model | `.gitleaks.toml` rules              | Command-line + custom detector `--config`         |
 | Output       | JSON array                          | Newline-delimited JSON (JSONL)                    |

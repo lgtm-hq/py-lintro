@@ -1,54 +1,69 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
-import HomeFeatureCards from '../components/HomeFeatureCards.astro';
-import DocLink from '../components/DocLink.astro';
-import { docs, docHref, external } from '../data/site-links';
-
-const base = import.meta.env.BASE_URL;
+import Workbench from '../components/home/Workbench.astro';
+import InstallPicker from '../components/home/InstallPicker.astro';
+import ToolCatalog from '../components/home/ToolCatalog.astro';
+import HealthScore from '../components/home/HealthScore.astro';
+import AiFeatures from '../components/home/AiFeatures.astro';
+import Comparison from '../components/home/Comparison.astro';
+import ShowcasePreferences from '../components/ShowcasePreferences.astro';
+import ToolStrip from '../components/home/ToolStrip.astro';
+import { TOOL_COUNT, FIXER_COUNT } from '../data/tools-catalog';
+import { MCP_TOOLS } from '../data/home-content';
+import { LINTRO_VERSION } from '../data/lintro-version';
 ---
 
-<BaseLayout title="Lintro" description="Unified linting, formatting, and testing for modern projects.">
-  <div class="container">
-    <section class="term-hero">
-      <p class="term-prompt">
-        <span class="user">dev@repo</span>:<span class="path">~/project</span>$ lintro --help
-      </p>
-      <h1>ONE CLI.<br />MANY TOOLS.<br />ZERO CEREMONY.</h1>
-      <p class="term-lead">
-        Unified linting, formatting, and testing. Native configs. Grid output. No migration
-        theatre.
-      </p>
-      <div class="term-actions">
-        <a href={docHref(base, docs.gettingStarted)} class="btn btn-primary">$ lintro check .</a>
-        <a href={docHref(base, docs.hub)} class="btn btn-secondary">man lintro</a>
+<BaseLayout
+  title="Lintro · explore the CLI"
+  description="Try interactive examples of Lintro checks, formatting, watch mode and AI review. Browse the tools and build your configuration."
+>
+  <div class="synthesis-home container">
+    <header class="compact-intro" data-reveal>
+      <div class="compact-intro-main">
+        <h1>Try it out.</h1>
+        <p class="compact-lede">
+          One CLI for {TOOL_COUNT} linters, formatters, type checkers and security scanners — using
+          your native tool configs.
+        </p>
       </div>
-      <pre class="term-output" aria-hidden="true"><code>✓ ruff      0 issues
-✓ prettier  0 issues
-✓ yamllint  0 issues
-────────────────────
-PASS  3 tools  0 issues</code></pre>
+      <p class="release-meta">
+        <span>v{LINTRO_VERSION}</span>
+        <span>MIT licensed</span>
+        <span>Python 3.11+</span>
+      </p>
+    </header>
+    <ShowcasePreferences />
+    <section aria-label="Explore Lintro" class="synthesis-surface" id="demo" data-reveal>
+      <Workbench />
+      <InstallPicker />
     </section>
-
-    <HomeFeatureCards />
-
-    <section class="term-cta">
-      <h2>// ready?</h2>
-      <p>
-        Install from PyPI, run <code>lintro check</code>, and explore the{' '}
-        <DocLink href={docs.hub}>documentation hub</DocLink> for configuration and CI setup.
-      </p>
-      <div class="term-actions">
-        <a href={docHref(base, docs.gettingStarted)} class="btn btn-primary">read the docs</a>
-        <a href={docHref(base, docs.coverage)} class="btn btn-secondary">view coverage</a>
-        <a
-          href={external.github.href}
-          class="btn btn-secondary"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          github
-        </a>
-      </div>
+    <ToolStrip />
+    <section class="instrument-facts" aria-label="Lintro capabilities" data-reveal>
+      {[
+        { value: TOOL_COUNT, label: 'built-in integrations' },
+        { value: FIXER_COUNT, label: 'declare fix support' },
+        { value: MCP_TOOLS.length, label: 'MCP tools over stdio' },
+      ].map(({ value, label }) => (
+        <p>
+          <strong data-count={value} aria-hidden="true">
+            {value}
+          </strong>
+          <span class="sr-only">{value}</span>
+          <span>{label}</span>
+        </p>
+      ))}
+    </section>
+    <div class="synthesis-section" data-reveal>
+      <HealthScore />
+    </div>
+    <section class="synthesis-section" id="tools" aria-label="Tool catalog">
+      <ToolCatalog />
+    </section>
+    <section class="synthesis-section" id="ai" aria-label="AI features" data-reveal>
+      <AiFeatures />
+    </section>
+    <section class="synthesis-section" id="comparison" aria-label="Honest comparison" data-reveal>
+      <Comparison />
     </section>
   </div>
 </BaseLayout>

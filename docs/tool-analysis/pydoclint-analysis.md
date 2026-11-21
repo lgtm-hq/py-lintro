@@ -223,7 +223,8 @@ lintro chk --tools pydoclint --tool-options pydoclint:style=numpy
 
 ## Integration Notes
 
-- Priority: 45 (runs before formatters)
+- Execution order is derived from capability claims and explicit tool-ordering
+  configuration.
 - Does not support auto-fix (documentation must be fixed manually)
 - Works well with ruff's D (pydocstyle) rules for complementary coverage
 
@@ -272,8 +273,8 @@ Ruff provides two docstring-related rule sets:
 # Check with default settings
 lintro chk --tools pydoclint .
 
-# Check with NumPy style
-lintro chk --tools pydoclint --tool-options pydoclint:style=numpy .
+# Check with NumPy style configured in [tool.pydoclint] style = "numpy"
+lintro chk --tools pydoclint .
 
 # Check specific files
 lintro chk --tools pydoclint src/module.py

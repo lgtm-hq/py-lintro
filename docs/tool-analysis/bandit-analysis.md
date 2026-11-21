@@ -46,10 +46,8 @@ bandit -r src -lll -iii -t B101,B102 -s B301
 
 ### Lintro Wrapper
 
-```python
-tool = BanditTool()
-tool.set_options(severity="HIGH", confidence="HIGH", tests="B101|B102")
-result = tool.check(["src/"])
+```bash
+lintro check src/ --tools bandit
 ```
 
 ## Configuration Strategy
@@ -64,7 +62,10 @@ result = tool.check(["src/"])
 - ⚠️ `--exit-zero` not exposed (can be useful in CI)
 - ⚠️ Disable recursion (always `-r`) not exposed
 
-### 🔧 Proposed runtime pass-throughs
+### Unimplemented option ideas {#-proposed-runtime-pass-throughs}
+
+The following spellings are proposals, **not working commands in this release**. Use
+native configuration or the native CLI for the corresponding behavior.
 
 - `--tool-options bandit:exclude=tests|migrations`
 - `--tool-options bandit:exit_zero=True`
@@ -72,5 +73,5 @@ result = tool.check(["src/"])
 
 ## Recommendations
 
-- Use Lintro defaults for stable CI JSON; add proposed pass-throughs where needed for
-  selective scanning and CI gating behavior.
+- Use Lintro for normalized findings. For excludes or exit handling outside the
+  supported option table, use native configuration or invoke Bandit directly.

@@ -1,24 +1,30 @@
 # Lintro Vision and Mission
 
-This document defines the long-term vision, mission, and guiding principles for the
-Lintro project. It serves as the north star for all development decisions.
+This document states what Lintro is for, the principles its code is held to, and how far
+the project has come against its original goals.
+
+Statements about what exists were checked against Lintro 0.180.34. Anything under
+[Not yet built](#not-yet-built) is an intention with no release date; do not read it as
+a shipped feature.
 
 ## Mission Statement
 
-**Lintro aims to be the universal, all-in-one CLI for code quality** - a single tool
-that provides linting, formatting, and testing capabilities for ANY modern programming
-language, with the highest standards of code quality, usability, and performance.
+**Lintro aims to be one CLI for code quality across the languages in a project.** It
+runs linters, formatters, type checkers, security scanners and tests behind the same
+commands, the same configuration approach and the same output formats.
+
+Lintro orchestrates native tools; it does not reimplement them. Each tool keeps its own
+rules, and its own configuration file when it has one.
 
 ## Vision
 
 ### The Problem We Solve
 
-Modern software development requires numerous code quality tools:
+A project of any size needs several code quality tools:
 
-- Python developers need Ruff, Black, Mypy, Bandit, pytest
-- JavaScript developers need ESLint, Prettier, Oxlint, Oxfmt
-- DevOps engineers need Hadolint, Actionlint, Yamllint
-- And the list grows with every language and framework
+- Python code is checked with Ruff, Black, mypy, Bandit and pytest
+- JavaScript and TypeScript code is checked with Prettier, Oxlint, Oxfmt and tsc
+- Infrastructure files are checked with Hadolint, Actionlint and Yamllint
 
 Each tool has its own:
 
@@ -27,112 +33,117 @@ Each tool has its own:
 - Output format
 - CLI interface
 
-**Lintro unifies this fragmented landscape** into a single, consistent experience.
+Lintro puts one interface in front of them: `lintro check`, `lintro format` and
+`lintro test`, with one way to select tools, one configuration model and one set of
+output formats.
 
 ### The Future We're Building
 
-```text
-Today (12 tools):          Future (50+ tools):
-┌─────────────────┐        ┌─────────────────────────────────┐
-│ Python          │        │ Python, JavaScript, TypeScript, │
-│ JavaScript      │        │ Go, Rust, Java, C/C++, Ruby,    │
-│ YAML, Docker    │        │ PHP, Swift, Kotlin, Scala,      │
-│ Markdown        │   →    │ Elixir, Haskell, YAML, Docker,  │
-│ GitHub Actions  │        │ Terraform, Kubernetes, SQL,     │
-│                 │        │ GraphQL, Protobuf, and more...  │
-└─────────────────┘        └─────────────────────────────────┘
-```
+The first version of this document compared 12 tools "today" with "50+" in the future.
+That picture is out of date, so this section now records where the project stands.
+
+**Today, in 0.180.34:** 44 built-in tool integrations. They cover Python, JavaScript and
+TypeScript (including Vue, Svelte and Astro type checking), Rust, Go, C and C++, shell,
+SQL, CSS, HTML, Markdown, YAML, TOML, Dockerfiles, GitHub Actions workflows, Terraform,
+Protobuf and OpenAPI documents, plus prose and spelling checks, secret detection and
+dependency audits. The [tool catalog](../tool-analysis/README.md) lists every
+integration.
+
+**Not integrated:** there is no dedicated tool for Java, Ruby, PHP, Swift, Kotlin,
+Scala, Elixir, Haskell or Kubernetes manifests. The original "50+ tools" figure was an
+ambition, not a schedule.
 
 ### Success Criteria
 
-Lintro will be successful when:
+The original criteria, with their status in 0.180.34:
 
-1. **Any developer** can install a single tool and get code quality checks for their
-   stack
-2. **No Python required** - distributed as standalone binaries for all platforms
-3. **Consistent experience** - same CLI, same output formats, same configuration
-   approach
-4. **Exemplary quality** - Lintro itself is the gold standard for code quality
-5. **Community-driven** - easy for contributors to add new tool integrations
+1. **One install for a whole stack: partly met.** One Lintro install provides the CLI.
+   The native tools are separate programs: `lintro install` installs the ones Lintro
+   knows how to install, and `lintro doctor` reports what is missing. A tool that is not
+   installed is skipped, and a skipped tool has not checked anything.
+2. **No Python required: met on three platforms.** Self-contained binaries are published
+   through npm for macOS on Apple Silicon and for Linux on x86-64 and ARM64. Intel Macs
+   install through Homebrew or PyPI, which do need Python. See
+   [npm distribution](../npm-distribution.md).
+3. **Consistent experience: met.** Every tool is reached through the same commands,
+   tool-selection options and output formats.
+4. **Lintro holds itself to its own rules: ongoing.** The project runs Lintro on its own
+   source. The enforced gates are listed under [Quality Standards](#quality-standards).
+5. **Open to community tools: met, opt-in.** A third-party package can register a tool
+   through the `lintro.tools` entry-point group. Loading external plugins is off until
+   the user enables it. See [plugins](../plugins.md).
 
 ## Core Principles
 
-These principles are non-negotiable and guide every decision.
+These principles guide design and review. Where a principle is enforced by a gate, the
+gate is named; where it is a convention, it says so.
 
 ### 1. DRY (Don't Repeat Yourself)
 
-Every piece of knowledge must have a single, authoritative representation.
+Every piece of knowledge should have one authoritative home.
 
 **Applied to Lintro:**
 
-- Tool definitions should be data, not duplicated code
-- Parsers should be generic and reusable
-- Configuration patterns should be centralized
+- A tool's metadata lives in one `ToolDefinition`: its file patterns, native config
+  files, minimum version and default options
+- Parsers share helpers in `lintro/parsers/base_parser.py`
+- `tsc` and `vue-tsc` share one checker base in `lintro/tools/ts_checker/`
+- Duplicate code in the per-tool packages is gated: pylint's `duplicate-code` check may
+  not report more clone sets than the recorded baseline, which is zero in this release
 
-```python
-# BAD: Duplicated logic in every tool
-class RuffTool:
-    def parse_json_output(self, output): ...
-
-class OxlintTool:
-    def parse_json_output(self, output): ...  # Same logic!
-
-# GOOD: Single generic parser
-json_parser = create_parser(format="json_lines", field_mapping={...})
-```
+Each tool still has its own parser. That is a recorded decision, not an oversight: see
+[ADR-0001](../adr/0001-native-parser-per-tool.md).
 
 ### 2. SOLID Principles
 
 #### Single Responsibility
 
-Each module, class, and function has one reason to change.
+Each module, class and function has one reason to change.
 
-- `parsers/` - only parsing logic
-- `formatters/` - only output formatting
-- `tools/` - only tool orchestration
+- `parsers/` turns native tool output into issues
+- `formatters/` renders issues for people and machines
+- `tools/` holds one package per integration
 
 #### Open/Closed
 
-Open for extension, closed for modification.
-
-- Adding a new tool should NOT require modifying core code
-- Plugin architecture enables this
+Adding a tool should not require editing the orchestration code. A new integration is a
+package with a `definition.py` that registers itself with `@register_tool`.
 
 #### Liskov Substitution
 
-All tools are interchangeable through the `BaseToolPlugin` interface.
+Every tool is used through the `BaseToolPlugin` interface, so the executor treats them
+alike.
 
 #### Interface Segregation
 
-Clients depend only on interfaces they use.
-
-- `ToolResult` provides a minimal, focused interface
-- `BaseIssue` defines only what formatters need
+Formatters depend on `BaseIssue`, not on any tool's own issue class. A tool maps its
+extra fields to display columns through `DISPLAY_FIELD_MAP`.
 
 #### Dependency Inversion
 
-High-level modules don't depend on low-level modules.
-
-- Core orchestration depends on abstractions (`ToolDefinition`)
-- Concrete tools implement those abstractions
+Orchestration depends on `ToolDefinition` and `BaseToolPlugin`, not on concrete tools.
+The direction of imports between packages is enforced by `import-linter` contracts,
+described in the
+[architecture document](./ARCHITECTURE.md#decision-7-enforced-import-layers).
 
 ### 3. Maintainability Over Cleverness
 
-Code should be readable by developers unfamiliar with the codebase.
+Code should be readable by a developer who has not seen the codebase before. This is a
+review convention.
 
 **Guidelines:**
 
 - Prefer explicit over implicit
-- Avoid overly clever one-liners
+- Avoid clever one-liners
 - Use descriptive variable and function names
-- Write self-documenting code, add comments for "why" not "what"
+- Comment the reason, not the mechanics
 
 ```python
-# BAD: Clever but unclear
+# Harder to follow: two lookups hidden in one condition
 if cmd := self._get_cmd() or self._fallback():
     return cmd
 
-# GOOD: Explicit and clear
+# Easier to follow: each step is named
 command = self._get_primary_command()
 if command is None:
     command = self._get_fallback_command()
@@ -141,115 +152,125 @@ return command
 
 ### 4. File Size Discipline
 
-Large files are hard to maintain. Break them into logical units.
+Large files are hard to maintain, so they are split by responsibility.
 
-**Guidelines:**
+**What is enforced in 0.180.34:** a module-size gate warns when a Python module passes
+800 lines. Modules already over the limit sit in a baseline list that is meant to
+shrink, and the gate reports without failing the run. The settings are in
+`[tool.lintro.module_size]`.
 
-- Target: < 300 lines per file (soft limit)
-- Maximum: 500 lines per file (hard limit)
-- If a file grows too large, split by responsibility
-
-```text
-# BAD: Monolithic file
-tool_executor.py (800 lines)
-
-# GOOD: Split by responsibility
-tool_executor/
-├── __init__.py
-├── executor.py        (execution logic)
-├── discovery.py       (file discovery)
-├── parallel.py        (parallel execution)
-└── result_collector.py (result aggregation)
-```
+**What is still an aim:** the original goal was 300 lines, with 500 as a ceiling. The
+gate is not that strict yet. The stated plan is to lower the threshold in steps once the
+baseline list is empty.
 
 ### 5. No Issue Obfuscation
 
-Lintro must pass its own strict linting rules.
+Lintro should pass its own rules without hiding findings.
 
 **Guidelines:**
 
-- Never disable linter rules without documented justification
-- Fix issues properly, don't suppress them
-- If a rule seems wrong, discuss removing it project-wide
-- The codebase IS the example of good code quality
+- Do not disable a rule without a documented reason
+- Fix the issue instead of suppressing it
+- If a rule is wrong for the project, change it for the whole project
+- Unused suppressions are themselves reported: Ruff's `RUF100` is enabled
 
 ### 6. Test Everything
 
-Quality without testing is wishful thinking.
-
 **Guidelines:**
 
-- Minimum 70% code coverage (target: 90%)
-- Every new feature requires tests
-- Every bug fix requires a regression test
-- Integration tests for tool workflows
+- Every new feature needs tests
+- Every bug fix needs a regression test
+- Tool integrations have integration tests that run the real tool
+- The coverage gate fails the run below 81%
+
+See [testing](../testing.md) for how the suite is organised.
 
 ## Quality Standards
 
 ### Code Quality Metrics
 
-| Metric                   | Threshold | Target    |
-| ------------------------ | --------- | --------- |
-| Test Coverage            | ≥ 70%     | 90%       |
-| Type Annotation Coverage | ≥ 95%     | 100%      |
-| Docstring Coverage       | ≥ 90%     | 100%      |
-| File Length              | ≤ 500     | 300 lines |
-| Function Length          | ≤ 50      | 25 lines  |
-| Cyclomatic Complexity    | ≤ 15      | 10        |
+These gates are configured in `pyproject.toml` in 0.180.34. Each is a limit the build
+enforces, not a target.
+
+| Metric                      | Enforced limit                        |
+| --------------------------- | ------------------------------------- |
+| Test coverage               | At least 81% (`fail_under`)           |
+| Cyclomatic complexity       | At most 15 per function (Ruff `C90`)  |
+| Function arguments          | At most 8 (Ruff `PLR0913`)            |
+| Branches per function       | At most 12 (Ruff `PLR0912`)           |
+| Statements per function     | At most 50 (Ruff `PLR0915`)           |
+| Module length               | Warning above 800 lines               |
+| Duplicate code in tool code | No clone sets above the baseline of 0 |
+| Import direction            | Two `import-linter` contracts         |
+| Docstrings                  | Google style, checked by pydoclint    |
+
+Functions that exceeded a structural limit when the rule was switched on are recorded as
+per-file exceptions. That list is meant to shrink. The recorded plan for complexity is
+to tighten the limit from 15 to 12, then to 10.
+
+The first version of this table also listed type-annotation and docstring coverage
+percentages and a 25-line function target. No gate in 0.180.34 measures those figures,
+so they are no longer stated here.
 
 ### Self-Validation
 
-Lintro runs on itself. The CI pipeline includes:
+Lintro runs on its own source:
 
 ```bash
-lintro check .       # Must pass with zero issues
-lintro format .      # Must result in no changes
-lintro test .        # Must pass with coverage threshold
+lintro check .       # Report issues
+lintro format .      # Apply supported fixes
+lintro test          # Run the test suite
 ```
 
 ### Error Handling Standards
 
+Failures should be specific and visible. Catch the exception you expect, log what
+happened, and raise an error from Lintro's own hierarchy (`LintroError` and its
+subclasses, such as `ToolTimeoutError` and `ToolExecutionError`).
+
 ```python
-# REQUIRED: Specific exception handling
+# Expected: a specific exception, logged and re-raised as a Lintro error
 try:
     result = execute_tool(command)
 except subprocess.TimeoutExpired:
     logger.warning(f"Tool {name} timed out after {timeout}s")
-    raise ToolTimeoutError(name, timeout) from None
-except FileNotFoundError:
-    logger.error(f"Tool {name} not found in PATH")
-    raise ToolNotFoundError(name) from None
+    raise ToolTimeoutError(f"{name} timed out after {timeout}s") from None
 
-# FORBIDDEN: Silent failures
+# Not acceptable: a silent failure
 try:
     result = parse_output(output)
 except Exception:
-    return None  # Never do this!
+    return None
 ```
+
+The snippet illustrates the convention. It is not copied from the source tree.
 
 ## Success Metrics
 
-### Short-term (Current → 6 months)
+The first version of this document set time-boxed goals. They are regrouped here by what
+has happened.
 
-- [ ] Test coverage reaches 70%
-- [ ] Error handling audit complete (no silent failures)
-- [ ] All 12 current tools have comprehensive documentation
-- [ ] Binary distribution via Nuitka or PyOxidizer
+### Reached
 
-### Medium-term (6 months → 1 year)
+- Test coverage passed the original 70% goal; the gate is now 81%
+- Tool integrations passed the original goal of 25; there are 44
+- Standalone binaries ship, built with Nuitka
+- Community tools can register through plugin entry points
+- Independent tools run in parallel by default
 
-- [ ] 25+ tool integrations
-- [ ] Test coverage reaches 80%
-- [ ] Performance benchmarks established
-- [ ] Plugin ecosystem for community tools
+### Not yet built
 
-### Long-term (1+ years)
+Nothing in this list exists in 0.180.34, and none of it has a committed date:
 
-- [ ] 50+ tool integrations covering all major languages
-- [ ] Optional GUI/TUI interface
-- [ ] Language server protocol (LSP) integration
-- [ ] IDE plugins (VS Code, JetBrains)
-- [ ] Test coverage at 90%
+- 50 or more tool integrations
+- A GUI or terminal UI
+- Language Server Protocol integration
+- Editor plugins for VS Code or JetBrains
+- Test coverage at 90%
+
+Current priorities are tracked in the
+[ordered GitHub backlog](https://github.com/lgtm-hq/py-lintro/issues/2288), not in this
+document.
 
 ## Decision Framework
 
@@ -259,13 +280,13 @@ When making architectural decisions, use this priority order:
 2. **Maintainability** - Can future developers understand and modify it?
 3. **Extensibility** - Does it support future growth without major changes?
 4. **Performance** - Is it fast enough for the use case?
-5. **Elegance** - Is it simple and beautiful?
+5. **Elegance** - Is it simple?
 
-If two approaches are equal in higher priorities, optimize for lower ones.
+If two approaches are equal on a higher priority, decide on the next one.
 
 ## Related Documents
 
-- [ARCHITECTURE.md](./ARCHITECTURE.md) - Technical architecture and design decisions
-- [ROADMAP.md](./ROADMAP.md) - Prioritized list of improvements and features
+- [ARCHITECTURE.md](./ARCHITECTURE.md) - How the code is organised today
+- [ROADMAP.md](./ROADMAP.md) - The original roadmap, kept as a historical record
 - [../style-guide.md](../style-guide.md) - Coding standards and conventions
 - [../contributing.md](../contributing.md) - How to contribute to the project

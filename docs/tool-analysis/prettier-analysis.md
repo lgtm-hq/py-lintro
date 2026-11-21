@@ -3,20 +3,21 @@
 ## Overview
 
 Prettier is a code formatter that supports CSS, HTML, JSON, YAML, Markdown, GraphQL, and
-many other languages. In Lintro, Prettier handles file types that oxfmt doesn't support,
-while **oxfmt handles JavaScript/TypeScript/Vue formatting** for better performance.
+many other languages. Lintro assigns CSS, HTML, JSON, YAML, Markdown and GraphQL
+patterns to Prettier, and **JavaScript/TypeScript/Vue formatting to Oxfmt**. These are
+wrapper responsibilities, not a claim about every native formatter's capabilities.
 
 ## File Type Responsibilities
 
-| File Types            | Formatter    | Why                      |
-| --------------------- | ------------ | ------------------------ |
-| JS, TS, JSX, TSX, Vue | **oxfmt**    | 30x faster than Prettier |
-| CSS, SCSS, Less       | **Prettier** | Not supported by oxfmt   |
-| HTML                  | **Prettier** | Not supported by oxfmt   |
-| JSON                  | **Prettier** | Not supported by oxfmt   |
-| YAML                  | **Prettier** | Not supported by oxfmt   |
-| Markdown              | **Prettier** | Not supported by oxfmt   |
-| GraphQL               | **Prettier** | Not supported by oxfmt   |
+| File Types            | Formatter    | Why                          |
+| --------------------- | ------------ | ---------------------------- |
+| JS, TS, JSX, TSX, Vue | **oxfmt**    | Assigned by wrapper patterns |
+| CSS, SCSS, Less       | **Prettier** | Assigned by wrapper patterns |
+| HTML                  | **Prettier** | Assigned by wrapper patterns |
+| JSON                  | **Prettier** | Assigned by wrapper patterns |
+| YAML                  | **Prettier** | Assigned by wrapper patterns |
+| Markdown              | **Prettier** | Assigned by wrapper patterns |
+| GraphQL               | **Prettier** | Assigned by wrapper patterns |
 
 ## Core Tool Capabilities
 
@@ -59,6 +60,7 @@ PRETTIER_FILE_PATTERNS = [
     "*.yaml", "*.yml",              # YAML
     "*.md",                         # Markdown
     "*.graphql",                    # GraphQL
+    "*.astro",                      # Astro (native plugin may be needed)
 ]
 ```
 
@@ -66,7 +68,7 @@ PRETTIER_FILE_PATTERNS = [
 
 **Intentionally Excluded:**
 
-- ❌ **JavaScript/TypeScript**: Use oxfmt instead (30x faster)
+- ❌ **JavaScript/TypeScript**: Use oxfmt instead (assigned to oxfmt by the wrapper)
 - ❌ **Vue files**: Use oxfmt instead
 
 **Not Implemented:**
@@ -114,7 +116,7 @@ lintro check --tools oxfmt,prettier
 - Need specific formatting options at runtime
 - Require debug output or syntax validation
 - Working with non-standard file patterns
-- Need to format JS/TS (though oxfmt is faster)
+- Need to format JS/TS directly with native Prettier outside Lintro's pattern assignment
 
 ### When to Use Lintro Wrapper
 
@@ -125,15 +127,16 @@ lintro check --tools oxfmt,prettier
 
 ## Configuration Strategy
 
-The Lintro wrapper relies entirely on Prettier's configuration files:
+The Lintro wrapper reads native formatting policy and supports a central line-length
+override and verbose fix output. Native configuration includes:
 
 - `.prettierrc`
 - `.prettierrc.json`
 - `prettier.config.js`
 - `package.json` "prettier" field
 
-For runtime customization, users should modify these config files rather than passing
-CLI options.
+Use native files for detailed style options; the generated option table above lists the
+wrapper’s exposed options.
 
 ## Migration Notes
 
@@ -141,4 +144,5 @@ If you were previously using Prettier for JavaScript/TypeScript formatting throu
 Lintro, those files are now handled by oxfmt. To maintain Prettier for JS/TS:
 
 1. Use `prettier` directly (not through Lintro)
-2. Or configure Lintro to skip oxfmt: `lintro format --tools prettier`
+2. Selecting only `prettier` skips oxfmt, but does not expand Prettier’s wrapper
+   patterns to JS/TS. Run native Prettier for those files.
