@@ -26,6 +26,7 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools import tool_manager
+from lintro.tools.spectral.definition import SpectralPlugin
 from lintro.utils.file_cache import ToolCache
 from lintro.utils.incremental_record import finish_incremental_run
 
@@ -72,8 +73,11 @@ class _Stub:
         """
         cwd = kwargs.get("cwd", args[1] if len(args) > 1 else None)
         self.calls.append((list(cmd), cwd or os.getcwd()))
-        json_report = ("ruff" in " ".join(cmd[:3]) and "check" in cmd) or any(
-            "spectral" in token for token in cmd[:4]
+        # Decided from the whole argv, not a position in it: how a tool is
+        # launched (a PATH binary, ``python -m``, ``bunx``, ``npx --yes ...``)
+        # depends on the machine.
+        json_report = ("check" in cmd and any("ruff" in t for t in cmd)) or any(
+            "spectral" in token for token in cmd
         )
         out = "[]" if json_report else ""
         return SubprocessResult(returncode=0, stdout=out, stderr="", output=out)
@@ -314,7 +318,14 @@ def test_spectral_never_records_the_target_of_a_checked_link(stub: _Stub) -> Non
     )
     (root / "a_with_rs" / "link.yaml").symlink_to(root / "z_no_rs" / "target.yaml")
 
-    recorded = _record_clean(_run("spectral"))
+    # Pin the launcher so the run does not depend on which Node.js runner
+    # (bunx, npx) the machine has.
+    with patch.object(
+        SpectralPlugin,
+        "_get_spectral_command",
+        return_value=["spectral"],
+    ):
+        recorded = _record_clean(_run("spectral"))
 
     assert_that(recorded).contains(os.path.join("a_with_rs", "link.yaml"))
     assert_that(recorded).does_not_contain(os.path.join("z_no_rs", "target.yaml"))
