@@ -12,7 +12,7 @@ This analysis compares Lintro's wrapper with core tsc behavior.
 - Build modes: `--build` for composite projects, `--watch` for development
 - Output: JavaScript emission, declaration files, sourcemaps
 - Flags: `--strict`, `--noEmit`, `--skipLibCheck`, `--project`, `--target`, `--module`,
-  `--moduleResolution`, `--paths`, `--baseUrl`, and 100+ compiler options
+  `--moduleResolution`, `--paths`, `--baseUrl`, and many more compiler options
 - Incremental compilation with `--incremental` and `--tsBuildInfoFile`
 - Project references for monorepo support
 
@@ -23,7 +23,7 @@ This analysis compares Lintro's wrapper with core tsc behavior.
 - ✅ Invokes tsc with `--noEmit --pretty false` for type checking without output
 - ✅ Respects native `tsconfig.json` compiler options (auto-discovered or via
   `--project`)
-- ✅ **File targeting works even with tsconfig.json** (see below)
+- ✅ Conditional file targeting with `tsconfig.json`; explicit project scoping wins
 - ✅ Respects tsconfig.json `include`/`exclude`/`files` scoping (#851)
 - ✅ TypeScript project references (`references`) support (#803)
 - ✅ Multi-project monorepo discovery and per-project type checking (#805)
@@ -36,29 +36,28 @@ This analysis compares Lintro's wrapper with core tsc behavior.
 
 ### File Targeting Behavior
 
-**The Problem:** Native tsc ignores CLI file arguments when `tsconfig.json` exists,
-instead checking all files defined in the config's `include`/`files` patterns.
+Lintro chooses the checker configuration before constructing the native command:
 
-**Lintro's Solution:** By default, lintro respects your file selection even when
-`tsconfig.json` exists. This is achieved by creating a temporary tsconfig that:
+1. An explicit `tsc:project`, or `tsc:use_project_files=True`, uses native project file
+   selection.
+2. An auto-discovered `tsconfig.json` with explicit `include`, `files` or `exclude`
+   scoping also uses the native project configuration. This scoping can come through an
+   `extends` chain. Supplying a smaller set of paths does not narrow that project.
+3. Otherwise, a discovered config is extended by a temporary config targeting the
+   selected files. With no config, file arguments are passed directly to the checker.
 
-1. Extends your project's `tsconfig.json` (preserving all compiler options)
-2. Overrides `include` to target only the files you specified
+The temporary-config branch retains compiler options while narrowing file selection; it
+is not a guarantee that every invocation checks only the supplied files.
 
 ```bash
-# Check only specific files (default behavior - lintro respects file targeting)
+# Supply files; a native config with explicit scoping can still select a wider project
 lintro check src/utils.ts src/helpers.ts --tools tsc
-# → Creates temp config extending tsconfig.json but only checking these 2 files
+# A temporary narrowed config is used only in the applicable branch described above
 
 # Check all files defined in tsconfig.json (native behavior)
 lintro check . --tools tsc --tool-options "tsc:use_project_files=True"
 # → Uses tsconfig.json as-is, checks all files in include/files patterns
 ```
-
-This gives you the best of both worlds:
-
-- **Default:** Lintro-style file targeting with tsconfig.json compiler options
-- **Opt-in:** Native tsconfig.json file selection when needed
 
 **Respecting tsconfig scoping (#851):** When your `tsconfig.json` has an explicit
 `include`, `files`, or `exclude` field, lintro now respects it — running
@@ -90,7 +89,7 @@ lintro check . --tools tsc
 
 **Build & Watch Modes:**
 
-- ❌ No `--watch` mode (continuous compilation)
+- ❌ No native `--watch` pass-through; use `lintro watch` for repeated Lintro checks
 - ❌ No `--build` mode (composite project building)
 - ❌ No `--incremental` caching (each run is fresh)
 
@@ -122,9 +121,9 @@ lintro check . --tools tsc
 
 - ✅ Safe timeout handling (default 60s) with structured timeout result
 - ✅ Auto config discovery prioritizes `tsconfig.json` in working directory
-- ✅ **Smart file targeting** via temp tsconfig (preserves compiler options)
+- ✅ Temporary-config targeting when native project scoping does not take precedence
 - ✅ Normalized `ToolResult` with parsed issues from `tsc_parser`
-- ✅ Priority 82, tool type `LINTER | TYPE_CHECKER`, same as mypy
+- ✅ Tool type `LINTER | TYPE_CHECKER`, same as mypy
 - ✅ Windows path normalization in parser output
 - ✅ Graceful handling when tsc is not installed with helpful install hints
 - ✅ **Dependency error categorization** - separates missing module errors from type
@@ -198,7 +197,7 @@ tsc --noEmit
 # Core tsc - with specific config
 tsc --project tsconfig.app.json --noEmit
 
-# Lintro wrapper - check specific files (respects file targeting)
+# Lintro wrapper - supply files; native project scoping can take precedence
 lintro check src/utils.ts --tools tsc
 
 # Lintro wrapper - check directory (finds all .ts/.tsx files)
@@ -216,7 +215,8 @@ lintro check src/ --tools tsc --tool-options "tsc:project=tsconfig.build.json"
 
 ## Configuration Strategy
 
-- **File targeting preserved:** Lintro respects your file selection by default
+- **File selection:** Explicit projects and native config scoping take precedence; other
+  applicable branches narrow to the supplied files
 - **Compiler options inherited:** All settings from `tsconfig.json` are preserved
 - **No config injection:** Lintro cannot modify tsconfig.json settings; tool is "Native
   only"
@@ -224,14 +224,14 @@ lintro check src/ --tools tsc --tool-options "tsc:project=tsconfig.build.json"
   - `tsc:project` (string) - path to tsconfig.json file
   - `tsc:strict` (bool) - enable `--strict` flag
   - `tsc:skip_lib_check` (bool) - enable `--skipLibCheck` (default: true)
-  - `tsc:use_project_files` (bool) - use tsconfig.json's include/files patterns instead
-    of lintro's file targeting (default: false)
+  - `tsc:use_project_files` (bool) - request native project file selection (default:
+    false); false does not override an explicit project or native config scoping
   - `tsc:timeout` (int) - execution timeout in seconds (default: 60)
 - **Config display:** `lintro config -v` shows parsed tsconfig.json compilerOptions
 
 ## Priority and Conflicts
 
-- **Priority:** 82 (runs after formatters/linters, before tests)
+- **Ordering:** Derived from capability claims and tool-ordering configuration.
 - **Tool Type:** LINTER | TYPE_CHECKER
 - **Conflicts:** None
 - **Complements:** oxlint, oxfmt, prettier (formatting/linting)

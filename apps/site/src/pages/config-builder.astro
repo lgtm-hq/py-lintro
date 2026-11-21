@@ -1,0 +1,28 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import ConfigBuilder from '../components/home/ConfigBuilder.astro';
+import ShowcasePreferences from '../components/ShowcasePreferences.astro';
+---
+
+<BaseLayout
+  title="Configuration builder"
+  description="Choose a tool stack and optional AI settings, then copy a supported Lintro YAML starter."
+>
+  <div class="container synthesis-page">
+    <header class="page-intro">
+      <a href={import.meta.env.BASE_URL}>← Back to Lintro</a>
+      <span class="eyebrow">Configuration builder</span>
+      <h1>
+        Your stack.
+        <br />
+        Your starting point.
+      </h1>
+      <p class="lede">
+        Choose the tools you use and preview the configuration. Keep native rules in each tool’s own
+        config file.
+      </p>
+    </header>
+    <ShowcasePreferences />
+    <ConfigBuilder />
+  </div>
+</BaseLayout>

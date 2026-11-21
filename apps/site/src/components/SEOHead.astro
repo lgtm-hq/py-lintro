@@ -1,34 +1,98 @@
 ---
+import { LINTRO_VERSION } from '../data/lintro-version';
+
 interface Props {
   title: string;
   description?: string;
+  image?: string;
+  canonicalPath?: string;
+  noindex?: boolean;
 }
 
 const {
   title,
-  description = 'Unified linting, formatting, and testing for modern projects.',
+  description = 'Unified CLI for code quality: orchestrate 44 linters, formatters, type checkers, and security scanners with one command.',
+  image,
+  canonicalPath,
+  noindex = false,
 } = Astro.props;
 
-const fullTitle = title === 'Lintro' ? title : `${title} — Lintro`;
-const siteUrl = new URL(import.meta.env.BASE_URL, Astro.site).href;
-const canonicalUrl = new URL(Astro.url.pathname, siteUrl).href;
-const ogImage = new URL(`${import.meta.env.BASE_URL}assets/lintro.png`, siteUrl).href;
+const base = import.meta.env.BASE_URL;
+const siteUrl = Astro.site ?? new URL('https://lgtm-hq.github.io/py-lintro/');
+const resolvedPath = canonicalPath ?? Astro.url.pathname;
+const canonicalUrl = new URL(resolvedPath, siteUrl).href;
+const fullTitle = title.startsWith('Lintro') ? title : `${title} — Lintro`;
+const ogImage = image ?? new URL(`${base}assets/og-card.png`, siteUrl).href;
+const normalizedBase = base.endsWith('/') ? base : `${base}/`;
+const isHome = Astro.url.pathname === normalizedBase || Astro.url.pathname === '/';
+const homeUrl = new URL(normalizedBase, siteUrl).href;
+
+const structuredData = isHome
+  ? {
+      '@context': 'https://schema.org',
+      '@graph': [
+        {
+          '@type': 'SoftwareApplication',
+          name: 'Lintro',
+          applicationCategory: 'DeveloperApplication',
+          operatingSystem: 'Linux, macOS, Windows',
+          softwareVersion: LINTRO_VERSION,
+          license: 'https://opensource.org/licenses/MIT',
+          url: homeUrl,
+          downloadUrl: 'https://pypi.org/project/lintro/',
+          description,
+          offers: {
+            '@type': 'Offer',
+            price: '0',
+            priceCurrency: 'USD',
+          },
+        },
+        {
+          '@type': 'WebSite',
+          name: 'Lintro',
+          url: homeUrl,
+          description,
+        },
+      ],
+    }
+  : {
+      '@context': 'https://schema.org',
+      '@type': 'WebPage',
+      name: fullTitle,
+      url: canonicalUrl,
+      description,
+      isPartOf: {
+        '@type': 'WebSite',
+        name: 'Lintro',
+        url: homeUrl,
+      },
+    };
 ---
 
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>{fullTitle}</title>
 <meta name="description" content={description} />
+{noindex && <meta name="robots" content="noindex, nofollow" />}
 <link rel="canonical" href={canonicalUrl} />
-<link rel="icon" type="image/svg+xml" href={`${import.meta.env.BASE_URL}favicon.svg`} />
+<link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
 
+<!-- Open Graph -->
 <meta property="og:type" content="website" />
+<meta property="og:url" content={canonicalUrl} />
 <meta property="og:title" content={fullTitle} />
 <meta property="og:description" content={description} />
-<meta property="og:url" content={canonicalUrl} />
 <meta property="og:image" content={ogImage} />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="Lintro — One CLI for 44 linters, formatters, and type checkers" />
+<meta property="og:site_name" content="Lintro" />
 
+<!-- Twitter -->
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content={fullTitle} />
 <meta name="twitter:description" content={description} />
 <meta name="twitter:image" content={ogImage} />
+
+<!-- Structured Data -->
+<script type="application/ld+json" set:html={JSON.stringify(structuredData)} />

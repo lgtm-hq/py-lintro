@@ -1,0 +1,15 @@
+<div class="sample-preferences" id="sample-preferences">
+  <span>Interactive examples · no files read or API calls made</span>
+</div>
+<script>
+  import { createCodeViewControl } from '../lib/code-view.mjs';
+  const toolbar = document.getElementById('sample-preferences');
+  const blocks = [...document.querySelectorAll<HTMLPreElement>('.synthesis-surface pre')];
+  const first = blocks[0];
+  if (toolbar && first) {
+    const control = createCodeViewControl({ pre: first, example: 1 });
+    control.setAttribute('aria-label', 'Use plain code in interactive examples');
+    for (const block of blocks) block.dataset.codeView = first.dataset.codeView;
+    toolbar.append(control);
+  }
+</script>

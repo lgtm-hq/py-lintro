@@ -1,7 +1,13 @@
 ---
 import { getCollection, render } from 'astro:content';
+import ConfigurationForwarding from '../../components/docs/ConfigurationForwarding.astro';
+import StartForwarding from '../../components/docs/StartForwarding.astro';
+import AiForwarding from '../../components/docs/AiForwarding.astro';
+import SettingLookup from '../../components/docs/SettingLookup.astro';
+import RoadmapStatus from '../../components/docs/RoadmapStatus.astro';
 import DocsLayout from '../../layouts/DocsLayout.astro';
 import { collectDocResources } from '../../lib/doc-resources';
+import { ROADMAP_HEADINGS } from '../../data/roadmap';
 
 export async function getStaticPaths() {
   const docs = await getCollection('docs', ({ data }) => !data.draft);
@@ -12,21 +18,69 @@ export async function getStaticPaths() {
 }
 
 const { doc } = Astro.props;
-const { Content } = await render(doc);
+const { Content, headings } = await render(doc);
+/** Reader-facing metadata for pages whose source is a repository README or a dated plan. */
+const PAGE_METADATA: Record<string, { title: string; description: string }> = {
+  project: {
+    title: 'Project documentation',
+    description:
+      'Why Lintro is built the way it is: vision, architecture, roadmap status, decision records, design notes and security documentation.',
+  },
+  'project/roadmap': {
+    title: 'Roadmap: available and planned',
+    description:
+      'Available Lintro capabilities, planned work and parked proposals from the dated project backlog.',
+  },
+};
+const title = PAGE_METADATA[doc.id]?.title ?? doc.data.title;
+const description = PAGE_METADATA[doc.id]?.description ?? doc.data.description;
 const resources = collectDocResources({
-  description: doc.data.description,
+  description,
   markdown: doc.body ? [doc.body] : [],
   currentDocId: doc.id,
 });
 ---
 
 <DocsLayout
-  title={doc.data.title}
-  description={doc.data.description}
+  title={title}
+  titleAnchor={doc.data.titleAnchor}
+  sourceAnchor={doc.data.sourceAnchor}
+  description={description}
   slug={doc.id}
   category={doc.data.category}
   toc={doc.data.toc}
+  headings={doc.id === 'project/roadmap' ? ROADMAP_HEADINGS.map((heading) => ({ ...heading })) : headings}
   resources={resources}
 >
-  <Content />
+  {doc.id === 'project/roadmap' ? (
+    <>
+      <RoadmapStatus />
+      <details data-pagefind-ignore>
+        <summary>Historical roadmap document (outdated)</summary>
+        <p class="doc-notice">
+          The original roadmap below predates current releases. Its tool counts, coverage figures,
+          distribution status and unchecked tasks are historical, not current product claims.
+        </p>
+        <Content />
+      </details>
+    </>
+  ) : doc.id === 'start/comparison' ? (
+    <>
+      <aside class="doc-notice">
+        Historical comparison: competitor capabilities and product counts in this document have not
+        been reverified. For current Lintro behavior, use the tool catalog and generated CLI
+        reference.
+      </aside>
+      <details data-pagefind-ignore>
+        <summary>Read the historical comparison</summary>
+        <Content />
+      </details>
+    </>
+  ) : (
+    <Content />
+  )}
+  {doc.id === 'guides/configuration' && <ConfigurationForwarding />}
+  {doc.id === 'start/getting-started' && <StartForwarding />}
+  {doc.id === 'ai/ai-features' && <AiForwarding />}
+  {doc.id === 'ai/ai-features/configuration-reference' && <SettingLookup />}
 </DocsLayout>

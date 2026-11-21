@@ -1,34 +1,57 @@
 ---
 import SEOHead from '../components/SEOHead.astro';
 import Header from '../components/Header.astro';
+import StickyChrome from '../components/StickyChrome.astro';
 import Footer from '../components/Footer.astro';
-import ExternalLinks from '../components/ExternalLinks.astro';
-import {
-  DEFAULT_THEME,
-  NATIVE_THEME,
-  themeAppearances,
-  turboThemeIds,
-  validThemeIds,
-} from '../data/themes';
+import CopyControls from '../components/CopyControls.astro';
+import InstrumentMotion from '../components/InstrumentMotion.astro';
+import soraFont from '@fontsource-variable/sora/files/sora-latin-wght-normal.woff2?url';
+import { DEFAULT_DARK_THEME, DEFAULT_THEME, themeAppearances, validThemeIds } from '../data/themes';
 import '../styles/global.css';
+import '../styles/highend.css';
+import '../styles/synthesis.css';
+import '../styles/instrument.css';
 
 interface Props {
   title?: string;
+  /** Document title when it should say more than the visible heading. */
+  headTitle?: string;
   description?: string;
+  canonicalPath?: string;
+  noindex?: boolean;
 }
 
 const {
   title = 'Lintro',
-  description = 'Unified linting, formatting, and testing for modern projects.',
+  headTitle,
+  description = 'One CLI for every linter, formatter, type checker and security scanner in your stack, with optional AI review.',
+  canonicalPath,
+  noindex = false,
 } = Astro.props;
 
 const baseUrl = import.meta.env.BASE_URL.replace(/\/$/, '');
 ---
 
 <!doctype html>
-<html lang="en" data-theme={DEFAULT_THEME} data-baseurl={baseUrl}>
+<html
+  lang="en"
+  class="synthesis-site"
+  data-theme={DEFAULT_THEME}
+  data-appearance="light"
+  data-baseurl={baseUrl}
+  data-pagefind-ignore={noindex ? 'all' : undefined}
+>
   <head>
-    <SEOHead title={title} description={description} />
+    <script is:inline>
+      document.documentElement.classList.add('js');
+    </script>
+    <SEOHead
+      title={headTitle ?? title}
+      description={description}
+      canonicalPath={canonicalPath}
+      noindex={noindex}
+    />
+    <link rel="preload" href={soraFont} as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href={`${baseUrl}/assets/css/turbo-core.css`} />
     <link rel="stylesheet" href={`${baseUrl}/assets/css/turbo-base.css`} />
     <link rel="stylesheet" href={`${baseUrl}/assets/css/turbo-syntax.css`} />
@@ -37,92 +60,149 @@ const baseUrl = import.meta.env.BASE_URL.replace(/\/$/, '');
       id="turbo-theme-css"
       rel="stylesheet"
       href={`${baseUrl}/assets/css/themes/${DEFAULT_THEME}.css`}
-      disabled
     />
     <script
       is:inline
-      define:vars={{ validThemeIds, turboThemeIds, NATIVE_THEME, DEFAULT_THEME, themeAppearances, baseUrl }}
+      define:vars={{
+        validThemeIds,
+        DEFAULT_THEME,
+        DEFAULT_DARK_THEME,
+        themeAppearances,
+        baseUrl,
+      }}
     >
       (function () {
         var STORAGE_KEY = 'turbo-theme';
 
-        function applyTheme(id) {
-          var themeId = validThemeIds.indexOf(id) !== -1 ? id : DEFAULT_THEME;
-          var isNative = themeId === NATIVE_THEME;
-          var root = document.documentElement;
-          var appearance = themeAppearances[themeId] || 'dark';
-
-          root.setAttribute('data-theme', themeId);
-          root.setAttribute('data-appearance', appearance);
-
-          var link = document.getElementById('turbo-theme-css');
-          if (link) {
-            if (isNative) {
-              link.setAttribute('disabled', 'true');
-            } else {
-              link.removeAttribute('disabled');
-              link.href = baseUrl + '/assets/css/themes/' + themeId + '.css';
-            }
-          }
-
+        function systemDefault() {
           try {
-            localStorage.setItem(STORAGE_KEY, themeId);
+            return window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? DEFAULT_DARK_THEME
+              : DEFAULT_THEME;
+          } catch (_) {
+            return DEFAULT_THEME;
+          }
+        }
+
+        var themeRequest = 0;
+        function applyTheme(id, preference) {
+          var request = ++themeRequest;
+          var themeId = validThemeIds.indexOf(id) !== -1 ? id : systemDefault();
+          var root = document.documentElement;
+          var href = baseUrl + '/assets/css/themes/' + themeId + '.css';
+          var current = document.getElementById('turbo-theme-css');
+          function commit() {
+            root.setAttribute('data-theme', themeId);
+            root.setAttribute('data-theme-preference', preference || 'explicit');
+            root.setAttribute('data-appearance', themeAppearances[themeId] || 'light');
+            document.dispatchEvent(
+              new CustomEvent('turbo-theme-applied', { detail: { themeId: themeId } })
+            );
+          }
+          if (current && current.getAttribute('href') === href) {
+            commit();
+            return;
+          }
+          var candidate = document.createElement('link');
+          candidate.rel = 'stylesheet';
+          candidate.media = 'not all';
+          candidate.href = href;
+          candidate.onload = function () {
+            if (request !== themeRequest) {
+              candidate.remove();
+              return;
+            }
+            candidate.media = 'all';
+            if (current) current.remove();
+            candidate.id = 'turbo-theme-css';
+            commit();
+          };
+          candidate.onerror = function () {
+            candidate.remove();
+            document.dispatchEvent(new CustomEvent('turbo-theme-failed'));
+          };
+          document.head.appendChild(candidate);
+        }
+
+        function saveTheme(id) {
+          try {
+            localStorage.setItem(STORAGE_KEY, id);
           } catch (_) {}
-
-          document.dispatchEvent(
-            new CustomEvent('turbo-theme-applied', { detail: { themeId: themeId } })
-          );
         }
 
-        window.__applyTheme = applyTheme;
-
-        try {
-          var saved = localStorage.getItem(STORAGE_KEY) || DEFAULT_THEME;
-          applyTheme(saved);
-        } catch (e) {
-          applyTheme(DEFAULT_THEME);
+        function savedTheme() {
+          try {
+            var id = localStorage.getItem(STORAGE_KEY);
+            if (id && validThemeIds.indexOf(id) !== -1) return id;
+            if (id) localStorage.removeItem(STORAGE_KEY);
+            return null;
+          } catch (_) {
+            return null;
+          }
         }
+
+        window.__applyTheme = function (id) {
+          saveTheme(id);
+          applyTheme(id, 'explicit');
+        };
+
+        window.__useSystemTheme = function () {
+          try {
+            localStorage.removeItem(STORAGE_KEY);
+          } catch (_) {}
+          applyTheme(systemDefault(), 'system');
+        };
+        var initialTheme = savedTheme();
+        applyTheme(initialTheme || systemDefault(), initialTheme ? 'explicit' : 'system');
 
         document.addEventListener('astro:page-load', function () {
-          try {
-            var saved = localStorage.getItem(STORAGE_KEY) || DEFAULT_THEME;
-            applyTheme(saved);
-          } catch (_) {
-            applyTheme(DEFAULT_THEME);
-          }
+          var saved = savedTheme();
+          applyTheme(saved || systemDefault(), saved ? 'explicit' : 'system');
         });
+
+        try {
+          window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
+            if (!savedTheme()) applyTheme(systemDefault(), 'system');
+          });
+        } catch (_) {}
       })();
     </script>
   </head>
   <body>
+    <a class="skip-link" href="#main">
+      Skip to content
+    </a>
     <Header />
-    <main class="main">
+    <StickyChrome />
+    <main class="main" id="main">
       <slot />
     </main>
     <Footer />
-    <ExternalLinks />
-    <script is:inline>
-      function initCodeBlockCursors() {
-        document.querySelectorAll('pre.astro-code code').forEach(function (codeEl) {
-          var lines = codeEl.querySelectorAll(':scope > .line');
-          var lastLine = lines.length > 0 ? lines[lines.length - 1] : codeEl;
-          if (lastLine.querySelector('.code-block-cursor')) {
-            return;
-          }
-          var cursor = document.createElement('span');
-          cursor.className = 'code-block-cursor';
-          cursor.setAttribute('aria-hidden', 'true');
-          lastLine.appendChild(cursor);
-        });
-      }
-
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initCodeBlockCursors);
-      } else {
-        initCodeBlockCursors();
-      }
-
-      document.addEventListener('astro:page-load', initCodeBlockCursors);
-    </script>
+    <CopyControls />
+    <InstrumentMotion />
   </body>
 </html>
+
+<style is:global>
+  .skip-link {
+    position: absolute;
+    left: 1rem;
+    top: 0.75rem;
+    z-index: 1000;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    border-radius: 999px;
+    background: var(--wb-accent);
+    color: var(--wb-accent-ink);
+    font-weight: 600;
+    transform: translateY(-200%);
+    transition: transform 220ms var(--motion, ease);
+  }
+
+  .skip-link:focus {
+    transform: translateY(0);
+    text-decoration: none;
+  }
+</style>

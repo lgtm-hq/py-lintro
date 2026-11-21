@@ -1,0 +1,128 @@
+---
+import { TOOL_COUNT } from '../../data/tools-catalog';
+interface Props {
+  showHeader?: boolean;
+  showHealthNote?: boolean;
+}
+const { showHeader = true, showHealthNote = true } = Astro.props;
+const alternatives = [
+  { name: 'Trunk', href: 'https://docs.trunk.io/code-quality' },
+  { name: 'MegaLinter', href: 'https://megalinter.io/latest/' },
+  { name: 'pre-commit', href: 'https://pre-commit.com/' },
+  { name: 'Qlty', href: 'https://docs.qlty.sh/' },
+];
+const rows = [
+  {
+    label: 'Main role',
+    values: [
+      'Local code-quality orchestration',
+      'Developer quality platform',
+      'CI-focused multi-tool runner',
+      'Git hook management',
+      'Code quality and maintainability',
+    ],
+  },
+  {
+    label: 'Fix + check workflow',
+    values: [
+      'lintro fmt / chk',
+      'trunk fmt / check',
+      'APPLY_FIXES',
+      'Depends on each hook',
+      'qlty fmt / check',
+    ],
+  },
+  {
+    label: 'Tool selection',
+    values: [
+      `${TOOL_COUNT} built-in integrations`,
+      'Managed tool catalog',
+      'Linter descriptors and flavors',
+      'Hook repositories',
+      'Plugin catalog',
+    ],
+  },
+  {
+    label: 'AI diff review',
+    values: [
+      'Optional · bring a provider',
+      'Not assessed',
+      'Not assessed',
+      'Not assessed',
+      'Not assessed',
+    ],
+  },
+  {
+    label: 'MCP interface',
+    values: [
+      'Seven tools over stdio',
+      'Not assessed',
+      'Not assessed',
+      'Not assessed',
+      'Not assessed',
+    ],
+  },
+];
+---
+
+{showHeader && (
+<header class="section-header">
+  <span class="eyebrow">Where it sits</span>
+  <h2>Honest comparison.</h2>
+  <p class="lede">
+    Lintro connects your tools behind one local CLI, with optional AI review. Other projects solve
+    different jobs. Choose the workflow that fits your project.
+  </p>
+</header>
+)}
+<div
+  class="comparison-table scroll-x"
+  tabindex="0"
+  role="region"
+  aria-label="Compare code quality workflows"
+>
+  <table>
+    <thead>
+      <tr>
+        <th scope="col">Capability</th>
+        <th scope="col">Lintro</th>
+        {alternatives.map((alternative) => (
+          <th scope="col">
+            <a href={alternative.href}>{alternative.name} ↗</a>
+          </th>
+        ))}
+      </tr>
+    </thead>
+    <tbody>
+      {rows.map((row) => (
+        <tr>
+          <th scope="row">{row.label}</th>
+          {row.values.map((value, index) => (
+            <td>
+              <span
+                class:list={{
+                  'comparison-supported': index === 0 && row.label !== 'Main role',
+                  'comparison-unassessed': value === 'Not assessed',
+                }}
+              >
+                {value}
+              </span>
+            </td>
+          ))}
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>
+<p class="comparison-note">
+  This is a workflow overview, not an exhaustive feature audit. “Not assessed” does not mean
+  unsupported. Check each linked project’s current documentation for capabilities, tool coverage and
+  licensing.
+</p>
+{showHealthNote && (
+<p class="comparison-note">
+  Need a defensible health score today? The dial above is a concept; its methodology is still to be
+  defined. Lintro’s supported features and limits are documented in the{' '}
+  <a href={import.meta.env.BASE_URL + 'docs/start/getting-started/'}>getting-started guide</a>.
+</p>
+)}

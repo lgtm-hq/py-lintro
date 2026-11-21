@@ -1,0 +1,25 @@
+---
+import type { ArticleSection } from '../../lib/article-sections';
+interface Props {
+  sections: ArticleSection[];
+  destinations?: Record<string, string>;
+}
+const { sections, destinations } = Astro.props;
+const base = import.meta.env.BASE_URL;
+function hrefFor(section: ArticleSection): string {
+  const destination = destinations?.[section.slug];
+  if (destinations && !destination) throw new Error(`Missing section: ${section.slug}`);
+  return destination ? `${base}${destination.replace(/^\//, '')}` : `#${section.slug}`;
+}
+---
+
+<ul>
+  {sections.map((section) => (
+    <li id={destinations ? section.slug : undefined}>
+      <a href={hrefFor(section)}>{section.text}</a>
+      {section.children.length > 0 && (
+        <Astro.self sections={section.children} destinations={destinations} />
+      )}
+    </li>
+  ))}
+</ul>

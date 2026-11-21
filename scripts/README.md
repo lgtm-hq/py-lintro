@@ -234,6 +234,10 @@ Scripts for building, testing, and deploying the Astro documentation site at
 | `prepare-lychee-action-args.sh` | Prepare lychee-action args for post-build link checking    | `./scripts/ci/site/prepare-lychee-action-args.sh --help` |
 | `migrate-docs-content.py`       | Copy `docs/` into `apps/site/src/content/docs/`            | `uv run python scripts/ci/site/migrate-docs-content.py`  |
 
+The reference pipeline also uses `product-snapshot.py` (tool, command and AI schema
+metadata), `public_cli_reference.py` (isolated help inspection) and
+`configuration_pages.py` (configuration topic and bookmark generation).
+
 #### Homebrew Scripts (`ci/homebrew/`)
 
 Release-support helpers for the Homebrew tap dispatch. Formula generation itself lives

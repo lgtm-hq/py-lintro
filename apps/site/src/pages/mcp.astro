@@ -1,0 +1,26 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import McpConsole from '../components/home/McpConsole.astro';
+import ShowcasePreferences from '../components/ShowcasePreferences.astro';
+---
+
+<BaseLayout
+  title="MCP server · explore the interface"
+  description="Explore Lintro’s seven MCP tools, example structured responses and client configuration."
+>
+  <div class="container synthesis-page">
+    <header class="page-intro">
+      <a href={import.meta.env.BASE_URL}>← Back to Lintro</a>
+      <span class="eyebrow">For coding agents</span>
+      <h1>Connect through MCP.</h1>
+      <p class="lede">
+        Explore the interface before connecting your client. These illustrative responses run
+        entirely in the browser.
+      </p>
+    </header>
+    <ShowcasePreferences />
+    <section class="synthesis-surface mcp-page">
+      <McpConsole showHeader={false} />
+    </section>
+  </div>
+</BaseLayout>

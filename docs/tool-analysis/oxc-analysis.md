@@ -2,11 +2,11 @@
 
 ## Overview
 
-The Oxc (Oxidation Compiler) project provides extremely fast JavaScript/TypeScript
-tooling written in Rust. Lintro integrates two Oxc tools:
+The Oxc (Oxidation Compiler) project provides JavaScript/TypeScript tooling written in
+Rust. Lintro integrates two Oxc tools:
 
-- **oxlint**: Linter (50-100x faster than ESLint, 661+ built-in rules)
-- **oxfmt**: Formatter (30x faster than Prettier)
+- **oxlint**: Linter (JavaScript/TypeScript linting)
+- **oxfmt**: Formatter (Assigned by wrapper patterns)
 
 This analysis compares Lintro's wrapper implementations with the core tools.
 
@@ -16,9 +16,10 @@ This analysis compares Lintro's wrapper implementations with the core tools.
 
 ### Core Capabilities
 
-- **Linting**: 661+ rules covering ESLint, TypeScript, React, JSX-a11y, Unicorn, and
-  more
-- **Performance**: Extremely fast execution (50-100x faster than ESLint)
+- **Linting**: Built-in rules covering ESLint, TypeScript, React, JSX-a11y, Unicorn, and
+  more; the count depends on the installed release
+- **Implementation**: Rust-based linter; no comparative timing is established by this
+  guide
 - **Auto-fixing**: Many rules support automatic fixes via `--fix`
 - **JSON output**: Machine-readable output with `--format json`
 - **Configuration**: `.oxlintrc.json` or command-line options
@@ -50,7 +51,7 @@ This analysis compares Lintro's wrapper implementations with the core tools.
 **Limited/Missing Features:**
 
 - No plugin enabling flags (`--react-perf-plugin`, `--nextjs-plugin`)
-- No watch mode (`--watch`)
+- No native watch-flag pass-through; repeated checks use `lintro watch`
 - No cache control
 
 ### Usage Comparison
@@ -148,7 +149,7 @@ configure them natively:
 ### Oxfmt Core Capabilities
 
 - **Formatting**: JS, TS, JSX, TSX, Vue
-- **Performance**: Approximately 30x faster than Prettier
+- **Performance**: Approximately Assigned by wrapper patterns
 - **Check mode**: Verify formatting via `--check --list-different`
 - **Write mode**: Format in place via `--write`
 - **Prettier compatibility**: Aims for Prettier-compatible output
@@ -318,11 +319,11 @@ invocation in a linting/formatting workflow.
 
 ### Oxlint Limitations
 
-| Limitation               | Workaround                            |
-| ------------------------ | ------------------------------------- |
-| No plugin enabling flags | Configure plugins in `.oxlintrc.json` |
-| No watch mode via Lintro | Use `oxlint --watch` directly         |
-| No cache control         | Use native oxlint cache options       |
+| Limitation                         | Workaround                            |
+| ---------------------------------- | ------------------------------------- |
+| No plugin enabling flags           | Configure plugins in `.oxlintrc.json` |
+| Native watch flag is not forwarded | Use `lintro watch --tools oxlint`     |
+| No cache control                   | Use native oxlint cache options       |
 
 ### Oxfmt Limitations
 
@@ -428,13 +429,11 @@ echo 'const x=1' | oxfmt --stdin-filepath test.js
 
 ### Watch Mode (Both Tools)
 
-**Why excluded:** Watch mode is a development workflow feature. Lintro is designed for
-batch processing in CI/CD and pre-commit hooks, not continuous development monitoring.
-
-**Workaround:** Run the native tools with watch mode:
+Lintro ships repeated checks through its own watch orchestration. Native watch flags are
+not forwarded by these plugins.
 
 ```bash
-oxlint --watch src/
+lintro watch --tools oxlint,oxfmt
 ```
 
 ---
@@ -444,7 +443,7 @@ oxlint --watch src/
 ### Oxlint Enhancements
 
 1. Plugin enable/disable flags at runtime (`--react-perf-plugin`, etc.)
-2. Watch mode integration
+2. Native watch-flag pass-through (Lintro watch orchestration is already available)
 3. Cache control options
 
 ### Oxfmt Enhancements

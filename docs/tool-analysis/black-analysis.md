@@ -54,9 +54,12 @@ diff = false
 
 ### 🧩 Cooperation with Ruff
 
-When Black is configured as a post-check in Lintro, Ruff focuses on linting by default
-to avoid double-formatting. See the Ruff analysis for details on the Ruff↔Black policy
-and how to override with `--tool-options`.
+When Ruff and Black are both selected and Black is runnable, Ruff focuses on linting by
+default while Black owns Python formatting. If Black is unavailable or fails its version
+gate, Ruff's formatting stages stay enabled by default when Ruff is runnable. Explicit
+Ruff `format` and `format_check` overrides still apply. Use
+`lintro check --explain-order` to inspect resolved ownership. Legacy
+`[tool.lintro.post_checks]` configuration is ignored.
 
 Black also uses an optional Ruff E501 check to report long lines it cannot wrap. Missing
 Ruff adds a visible skip note while preserving Black's own verdict. An E501 execution or
@@ -103,14 +106,11 @@ black --line-length 100 --target-version py313 src/
 
 ### Lintro Wrapper
 
-```python
-from lintro.tools.implementations.tool_black import BlackTool
+```bash
+lintro check src/ --tools black
 
-tool = BlackTool()
-tool.set_options(line_length=100, target_version="py313")
-result = tool.check(["src/"])
-# or
-result = tool.fix(["src/"])
+# Apply supported fixes
+lintro format src/ --tools black
 ```
 
 With CLI overrides:
@@ -127,12 +127,13 @@ lintro check src/ --tool-options "black:line_length=100,black:target_version=py3
 
 ## ⚠️ Limited/Missing Features
 
-- No JSON output; Black output is parsed from text
+- Black native diagnostics are parsed from text. Lintro can serialize the resulting
+  findings as JSON.
 - Only a curated subset of Black options are passed through at runtime
 - No stdin-based formatting via wrapper (run core Black for advanced usage)
 
 ## Recommendations
 
-- Use Black post-checks to ensure final formatting consistency when combining tools
-  (Ruff for lint; Black for formatting)
+- Select Black alongside Ruff for Python formatting; ownership depends on runnable tools
+  and explicit Ruff overrides, not a separate post-check configuration
 - Prefer `pyproject.toml` for defaults; use `--tool-options` for ad-hoc runs

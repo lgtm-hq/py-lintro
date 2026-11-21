@@ -1,16 +1,11 @@
 ---
-import {
-  DEFAULT_THEME,
-  themeMenuGroups,
-  themeSwatches,
-  themeTriggerLabels,
-} from '../data/themes';
+import { DEFAULT_THEME, themeMenuGroups, themeSwatches, themeTriggerLabels } from '../data/themes';
 
-const defaultSwatch = themeSwatches[DEFAULT_THEME] ?? '#39ff14';
-const defaultLabel = themeTriggerLabels[DEFAULT_THEME] ?? 'Terminal';
+const defaultSwatch = themeSwatches[DEFAULT_THEME] ?? '#e9a21b';
+const defaultLabel = themeTriggerLabels[DEFAULT_THEME] ?? 'Workbench';
 ---
 
-<div class="theme-picker" id="theme-picker" data-pagefind-ignore>
+<div class="theme-picker js-only" id="theme-picker" data-pagefind-ignore>
   <button
     type="button"
     class="theme-picker-trigger"
@@ -18,59 +13,92 @@ const defaultLabel = themeTriggerLabels[DEFAULT_THEME] ?? 'Terminal';
     aria-haspopup="listbox"
     aria-expanded="false"
     aria-controls="theme-picker-panel"
-    aria-label="Select theme"
+    aria-labelledby="theme-picker-action theme-picker-label"
   >
+    <span class="sr-only" id="theme-picker-action">
+      Select theme:
+    </span>
     <span
       class="theme-swatch theme-swatch-current"
       id="theme-picker-swatch"
       style={`background: ${defaultSwatch}`}
       aria-hidden="true"
     ></span>
-    <span class="theme-picker-label" id="theme-picker-label">{defaultLabel}</span>
+    <span class="theme-picker-label" id="theme-picker-label">
+      {defaultLabel}
+    </span>
     <svg class="theme-picker-chevron" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-      <path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+      <path
+        d="M2.5 4.5 6 8l3.5-3.5"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+      />
     </svg>
   </button>
 
   <div class="theme-picker-panel" id="theme-picker-panel" role="listbox" aria-label="Themes" hidden>
-    {
-      themeMenuGroups.map((group) => (
-        <div class="theme-picker-group" role="presentation">
-          <p class="theme-picker-group-label">{group.label}</p>
-          <div class="theme-picker-options">
-            {
-              group.themes.map((theme) => (
-                <button
-                  type="button"
-                  class="theme-picker-option"
-                  role="option"
-                  data-theme-id={theme.id}
-                  data-theme-label={theme.label}
-                  data-theme-swatch={theme.swatch}
-                  aria-selected={theme.id === DEFAULT_THEME ? 'true' : 'false'}
-                >
-                  <span class="theme-swatch" style={`background: ${theme.swatch}`} aria-hidden="true"></span>
-                  <span class="theme-picker-option-label">{theme.label}</span>
-                  <span class="theme-picker-mode" aria-hidden="true">{theme.appearance === 'light' ? 'Light' : 'Dark'}</span>
-                  <svg class="theme-picker-check" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M20 6 9 17l-5-5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
-                  </svg>
-                </button>
-              ))
-            }
-          </div>
+    <button
+      type="button"
+      class="theme-picker-option"
+      role="option"
+      data-theme-preference="system"
+      aria-selected="true"
+    >
+      <span class="theme-swatch" aria-hidden="true"></span>
+      <span class="theme-picker-option-label">Follow system</span>
+    </button>
+    {themeMenuGroups.map((group) => (
+      <div class="theme-picker-group" role="presentation">
+        <p class="theme-picker-group-label">{group.label}</p>
+        <div class="theme-picker-options">
+          {group.themes.map((theme) => (
+            <button
+              type="button"
+              class="theme-picker-option"
+              role="option"
+              data-theme-id={theme.id}
+              data-theme-label={theme.label}
+              data-theme-swatch={theme.swatch}
+              aria-selected={theme.id === DEFAULT_THEME ? 'true' : 'false'}
+            >
+              <span
+                class="theme-swatch"
+                style={`background: ${theme.swatch}`}
+                aria-hidden="true"
+              ></span>
+              <span class="theme-picker-option-label">{theme.label}</span>
+              <span class="theme-picker-mode" aria-hidden="true">
+                {theme.appearance === 'light' ? 'Light' : 'Dark'}
+              </span>
+              <svg
+                class="theme-picker-check"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  d="M20 6 9 17l-5-5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+          ))}
         </div>
-      ))
-    }
+      </div>
+    ))}
   </div>
 </div>
 
 <script>
   let themePickerDocumentListenersBound = false;
-  const themePickerControllers = new WeakMap<
-    Element,
-    { close: () => void }
-  >();
+  const themePickerControllers = new WeakMap<Element, { close: () => void }>();
 
   function onThemePickerDocumentClick(event: MouseEvent): void {
     const picker = document.getElementById('theme-picker');
@@ -148,8 +176,7 @@ const defaultLabel = themeTriggerLabels[DEFAULT_THEME] ?? 'Terminal';
       const active = options[activeIndex];
       if (!active) return;
       event.preventDefault();
-      const themeId = active.dataset.themeId;
-      if (themeId) active.click();
+      active.click();
     }
   }
 
@@ -163,9 +190,13 @@ const defaultLabel = themeTriggerLabels[DEFAULT_THEME] ?? 'Terminal';
     const options = Array.from(picker.querySelectorAll<HTMLButtonElement>('.theme-picker-option'));
     const active = options.find((option) => option.dataset.themeId === themeId);
     for (const option of picker.querySelectorAll<HTMLButtonElement>('.theme-picker-option')) {
-      const isSelected = option.dataset.themeId === themeId;
+      const isSelected =
+        document.documentElement.dataset.themePreference === 'system'
+          ? option.dataset.themePreference === 'system'
+          : option.dataset.themeId === themeId;
       option.setAttribute('aria-selected', isSelected ? 'true' : 'false');
       option.classList.toggle('is-active', isSelected);
+      option.tabIndex = isSelected ? 0 : -1;
     }
     if (active && label && swatch) {
       label.textContent = active.dataset.themeLabel ?? themeId;
@@ -180,7 +211,8 @@ const defaultLabel = themeTriggerLabels[DEFAULT_THEME] ?? 'Terminal';
     const swatch = document.getElementById('theme-picker-swatch');
     const label = document.getElementById('theme-picker-label');
 
-    if (!picker || !trigger || !panel || !swatch || !label || picker.dataset.bound === 'true') return;
+    if (!picker || !trigger || !panel || !swatch || !label || picker.dataset.bound === 'true')
+      return;
     picker.dataset.bound = 'true';
 
     const options = Array.from(picker.querySelectorAll<HTMLButtonElement>('.theme-picker-option'));
@@ -216,7 +248,10 @@ const defaultLabel = themeTriggerLabels[DEFAULT_THEME] ?? 'Terminal';
     const setActive = (themeId: string): void => {
       const active = options.find((option) => option.dataset.themeId === themeId);
       for (const option of options) {
-        const isSelected = option.dataset.themeId === themeId;
+        const isSelected =
+          document.documentElement.dataset.themePreference === 'system'
+            ? option.dataset.themePreference === 'system'
+            : option.dataset.themeId === themeId;
         option.setAttribute('aria-selected', isSelected ? 'true' : 'false');
         option.classList.toggle('is-active', isSelected);
         option.classList.remove('is-keyboard-active');
@@ -234,8 +269,8 @@ const defaultLabel = themeTriggerLabels[DEFAULT_THEME] ?? 'Terminal';
       if (typeof applyTheme === 'function') {
         applyTheme(themeId);
       }
-      setActive(themeId);
       setOpen(false);
+      trigger.focus();
     };
 
     trigger.addEventListener('click', (event) => {
@@ -245,6 +280,12 @@ const defaultLabel = themeTriggerLabels[DEFAULT_THEME] ?? 'Terminal';
 
     for (const option of options) {
       option.addEventListener('click', () => {
+        if (option.dataset.themePreference === 'system') {
+          (window as Window & { __useSystemTheme?: () => void }).__useSystemTheme?.();
+          setOpen(false);
+          trigger.focus();
+          return;
+        }
         const themeId = option.dataset.themeId;
         if (themeId) applyFromPicker(themeId);
       });

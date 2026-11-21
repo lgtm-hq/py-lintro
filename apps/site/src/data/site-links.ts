@@ -1,14 +1,25 @@
 /** Canonical internal paths (relative to site base, trailing slash). */
 export const docs = {
-  hub: 'docs/getting-started/hub/',
-  gettingStarted: 'docs/getting-started/getting-started/',
-  configuration: 'docs/usage/configuration/',
-  docker: 'docs/usage/docker/',
-  githubIntegration: 'docs/usage/github-integration/',
-  aiFeatures: 'docs/usage/ai-features/',
-  contributing: 'docs/contributing/contributing/',
-  architectureOverview: 'docs/architecture/overview/',
+  hub: 'docs/',
+  overview: 'docs/start/overview/',
+  gettingStarted: 'docs/start/getting-started/',
+  comparison: 'docs/start/comparison/',
+  configuration: 'docs/guides/configuration/',
+  watchMode: 'docs/guides/watch-mode/',
+  docker: 'docs/guides/docker/',
+  preCommit: 'docs/guides/pre-commit/',
+  githubIntegration: 'docs/guides/github-integration/',
+  npmDistribution: 'docs/guides/npm-distribution/',
+  aiIndex: 'docs/ai/',
+  aiFeatures: 'docs/ai/ai-features/',
+  aiReviewTransports: 'docs/ai/review-transports/',
+  aiReviewReport: 'docs/ai/review-report/',
+  mcp: 'docs/ai/mcp/',
   toolsIndex: 'docs/tools/',
+  contributing: 'docs/contribute/',
+  plugins: 'docs/contribute/plugins/',
+  architectureOverview: 'docs/project/',
+  security: 'docs/project/security/',
   coverage: 'coverage/',
 } as const;
 
@@ -18,6 +29,26 @@ export const home = {
 } as const;
 
 export const external = {
+  homebrew: {
+    label: 'Homebrew tap',
+    href: 'https://github.com/lgtm-hq/homebrew-tap',
+  },
+  scorecard: {
+    label: 'OpenSSF Scorecard',
+    href: 'https://scorecard.dev/viewer/?uri=github.com/lgtm-hq/py-lintro',
+  },
+  bestPractices: {
+    label: 'OpenSSF Best Practices',
+    href: 'https://www.bestpractices.dev/projects/11142',
+  },
+  codeql: {
+    label: 'CodeQL',
+    href: 'https://github.com/lgtm-hq/py-lintro/actions/workflows/codeql.yml',
+  },
+  sbom: {
+    label: 'CycloneDX SBOM',
+    href: 'https://github.com/lgtm-hq/py-lintro/actions/workflows/sbom-on-main.yml',
+  },
   github: {
     label: 'GitHub',
     href: 'https://github.com/lgtm-hq/py-lintro',
@@ -25,6 +56,14 @@ export const external = {
   pypi: {
     label: 'PyPI',
     href: 'https://pypi.org/project/lintro/',
+  },
+  npm: {
+    label: 'npm',
+    href: 'https://www.npmjs.com/package/@lgtm-hq/lintro',
+  },
+  docker: {
+    label: 'Docker',
+    href: 'https://github.com/lgtm-hq/py-lintro/pkgs/container/py-lintro',
   },
   codecov: {
     label: 'Codecov',

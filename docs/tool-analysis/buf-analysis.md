@@ -2,8 +2,8 @@
 
 ## Overview
 
-[buf](https://buf.build/) is a modern toolkit for Protocol Buffers. Lintro integrates
-two of its capabilities:
+[buf](https://buf.build/) is a toolkit for Protocol Buffers. Lintro wraps `buf lint` for
+protobuf lint rules and `buf format` to detect and rewrite unformatted files. In detail:
 
 - **`buf lint`** — an extensive catalog of protobuf lint rules covering naming
   conventions, package layout, and RPC/enum best practices.

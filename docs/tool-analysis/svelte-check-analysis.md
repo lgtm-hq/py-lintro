@@ -34,7 +34,7 @@ files. This analysis compares Lintro's wrapper with core svelte-check behavior.
 
 **Watch Mode:**
 
-- No `--watch` mode (continuous type checking)
+- No native `--watch` pass-through; use `lintro watch` for repeated Lintro checks
 
 **Output Formats:**
 

@@ -1,0 +1,778 @@
+/* Instrument's machined frames and movement, using genuine selected-theme roles. */
+html.synthesis-site {
+  --instrument-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+html.synthesis-site .synthesis-home {
+  max-width: 1160px;
+  padding-top: 1.5rem;
+}
+html.synthesis-site .synthesis-home .section-header {
+  max-width: 48rem;
+  gap: 0.9rem;
+  margin-bottom: 2.4rem;
+}
+html.synthesis-site .synthesis-home .section-header h2 {
+  font-size: clamp(2rem, 3.8vw, 3.25rem);
+  line-height: 1.12;
+  font-weight: 600;
+  letter-spacing: -0.055em;
+}
+html.synthesis-site .compact-intro {
+  margin-bottom: 0.5rem;
+}
+html.synthesis-site .synthesis-home .eyebrow {
+  font-size: 0.66rem;
+  letter-spacing: 0.13em;
+}
+html.synthesis-site .synthesis-section {
+  margin-top: clamp(4rem, 8vw, 7rem);
+}
+html.synthesis-site .site-header {
+  backdrop-filter: blur(18px);
+  background: color-mix(in srgb, var(--turbo-panel-bg) 92%, transparent);
+}
+html.synthesis-site .header-inner {
+  gap: 1.2rem;
+}
+html.synthesis-site .header-nav {
+  gap: 1rem;
+}
+html.synthesis-site .nav-link {
+  font-size: 0.76rem;
+  padding-inline: 0;
+}
+html.synthesis-site .header-install {
+  min-height: 2.75rem;
+  padding: 0.4rem 0.5rem 0.4rem 1rem;
+  font-size: 0.75rem;
+}
+html.synthesis-site .header-controls {
+  gap: 0.4rem;
+}
+html.synthesis-site .nav-link:hover {
+  transform: translateY(-2px);
+}
+html.synthesis-site .showcase.bench {
+  padding: 0.5rem;
+  background: var(--turbo-panel-block-bg);
+  border-radius: 1.8rem;
+  box-shadow: 0 1rem 3rem color-mix(in srgb, var(--turbo-text-primary) 5%, transparent);
+}
+html.synthesis-site .showcase .bench-tabs {
+  padding: 0.4rem;
+  gap: 0.4rem;
+  border: 0;
+  border-radius: 1.2rem;
+  background: var(--turbo-panel-block-bg);
+}
+html.synthesis-site .showcase .bench-tab {
+  font-size: 0.8rem;
+  flex: 0 1 auto;
+  min-width: 6rem;
+  padding-inline: 1.25rem;
+  border-radius: 0.8rem;
+}
+html.synthesis-site .showcase .bench-tab[aria-selected='true'] {
+  background: var(--turbo-tabs-link-active-bg);
+  color: var(--turbo-text-primary);
+  box-shadow: inset 0 -2px var(--turbo-link-default);
+  text-decoration: none;
+}
+html.synthesis-site .showcase .bench-panel {
+  margin-top: 0.4rem;
+  gap: 0.5rem;
+  min-height: 26rem;
+}
+html.synthesis-site .showcase .bench-cmd {
+  border: 0;
+  background: var(--turbo-panel-bg);
+  border-radius: 1.3rem;
+  padding: 1.5rem;
+  gap: 1rem;
+}
+html.synthesis-site .showcase .bench-out {
+  margin: 0;
+  border-radius: 1.3rem;
+  padding: 1.5rem;
+}
+html.synthesis-site .showcase .filetree {
+  gap: 0.35rem;
+}
+html.synthesis-site .showcase .filetree label {
+  border: 1px solid var(--turbo-card-border);
+  background: var(--turbo-card-bg);
+  border-radius: 0.65rem;
+  padding: 0.55rem 0.6rem;
+  transition:
+    transform 220ms var(--instrument-ease),
+    box-shadow 220ms var(--instrument-ease);
+}
+html.synthesis-site .showcase .filetree label:hover {
+  transform: translateX(3px);
+  box-shadow: inset 2px 0 var(--turbo-link-default);
+  background: var(--turbo-panel-block-hover-bg);
+}
+html.synthesis-site .showcase .filetree label.on {
+  box-shadow: inset 2px 0 var(--turbo-link-default);
+}
+html.synthesis-site .showcase .filetree .dir {
+  margin-top: 0.2rem;
+  font-size: 0.65rem;
+}
+html.synthesis-site .showcase .ctl button {
+  transition:
+    transform 200ms var(--instrument-ease),
+    box-shadow 200ms var(--instrument-ease);
+}
+html.synthesis-site .showcase .ctl button:hover {
+  transform: translateY(-2px);
+}
+html.synthesis-site .showcase .ctl button:active {
+  transform: translateY(1px);
+}
+html.synthesis-site #install {
+  margin-top: 1.2rem;
+  padding: 0.9rem;
+  border-radius: 1.3rem;
+  box-shadow: 0 0.6rem 2rem color-mix(in srgb, var(--turbo-text-primary) 4%, transparent);
+}
+html.synthesis-site #install .seg {
+  padding: 0.2rem;
+  border-radius: 0.8rem;
+}
+.tool-strip-shell {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 2rem;
+}
+.tool-strip {
+  overflow: hidden;
+  border-block: 1px solid var(--turbo-panel-border);
+  padding-block: 1rem;
+  mask-image: linear-gradient(90deg, transparent, black 4%, black 96%, transparent);
+}
+.tool-strip-track {
+  display: flex;
+  width: max-content;
+}
+.tool-strip-run {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.tool-strip-run > span {
+  display: flex;
+  align-items: center;
+  gap: 1.6rem;
+  padding-right: 1.6rem;
+  font: 0.85rem var(--wb-font-mono);
+  color: var(--turbo-text-secondary);
+}
+.tool-strip-run i {
+  font-style: normal;
+  color: var(--turbo-link-default);
+}
+.tool-strip[data-running] .tool-strip-track {
+  animation: instrument-strip 36s linear infinite;
+}
+.tool-strip[data-running='false'] .tool-strip-track,
+.tool-strip:hover .tool-strip-track {
+  animation-play-state: paused;
+}
+html.synthesis-site .strip-pause {
+  border: 1px solid var(--turbo-panel-border);
+  border-radius: 0.7rem;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.65rem;
+  min-height: 2.75rem;
+  background: var(--turbo-panel-block-bg);
+  color: var(--turbo-text-primary);
+}
+@keyframes instrument-strip {
+  to {
+    transform: translateX(-50%);
+  }
+}
+.instrument-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 2rem;
+}
+.instrument-facts p {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 1.4rem 1.6rem;
+  border: 1px solid var(--turbo-card-border);
+  border-radius: 1.3rem;
+  background: var(--turbo-card-bg);
+}
+.instrument-facts strong {
+  font-size: 2.4rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+  color: var(--turbo-text-primary);
+}
+.instrument-facts p > span:not(.sr-only) {
+  color: var(--turbo-text-secondary);
+  font-size: 0.75rem;
+}
+html.synthesis-site .health-concept {
+  border-radius: 1.6rem;
+  padding: 1.5rem 2rem;
+  background: var(--turbo-panel-bg);
+}
+html.synthesis-site .catalog .chips {
+  margin-bottom: 0;
+}
+html.synthesis-site .catalog .chip {
+  padding: 0.5rem 1rem;
+  min-height: 2.65rem;
+  font: 0.72rem var(--wb-font-mono);
+}
+html.synthesis-site .catalog-controls {
+  margin: 1.25rem 0 0.8rem;
+  gap: 1rem;
+  align-items: end;
+}
+html.synthesis-site .catalog-search {
+  flex-basis: 18rem;
+  max-width: 28rem;
+}
+.catalog-view {
+  margin-left: auto;
+  display: flex;
+  gap: 0.2rem;
+  padding: 0.25rem;
+  border: 1px solid var(--turbo-tabs-border);
+  border-radius: 0.8rem;
+  background: var(--turbo-panel-block-bg);
+}
+.catalog-view button {
+  padding: 0.5rem 0.85rem;
+  min-height: 2.4rem;
+  font-size: 0.75rem;
+  background: var(--turbo-tabs-link-bg);
+  color: var(--turbo-text-primary);
+  border: 0;
+  border-radius: 0.55rem;
+}
+.catalog-view button:hover {
+  background: var(--turbo-tabs-link-hover-bg);
+}
+.catalog-view button[aria-pressed='true'] {
+  background: var(--turbo-tabs-link-active-bg);
+  box-shadow: inset 0 -2px var(--turbo-link-default);
+}
+html.synthesis-site .catalog .tool-count {
+  font-size: 0.72rem;
+  margin-bottom: 1rem;
+}
+.catalog-browser {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border: 1px solid var(--turbo-panel-border);
+  border-radius: 1.7rem;
+  background: var(--turbo-panel-block-bg);
+  box-shadow: 0 1rem 3rem color-mix(in srgb, var(--turbo-text-primary) 5%, transparent);
+}
+.catalog-list-shell {
+  min-width: 0;
+  border-radius: 1.2rem;
+  background: var(--turbo-panel-bg);
+  overflow: clip;
+}
+.catalog-list-heading {
+  font: 0.65rem var(--wb-font-mono);
+  color: var(--turbo-text-secondary);
+  padding: 1.25rem 1rem;
+  border-bottom: 1px solid var(--turbo-panel-border);
+  margin: 0;
+}
+.catalog-list {
+  overflow: auto;
+  max-height: 30rem;
+  padding: 0.5rem;
+  scroll-padding: 0.5rem;
+}
+.catalog-choice {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.15rem 0.7rem;
+  border: 0;
+  border-radius: 0.7rem;
+  padding: 0.75rem 1rem;
+  min-height: 3.7rem;
+  background: var(--turbo-panel-bg);
+  color: var(--turbo-text-primary);
+  text-align: left;
+  transition: transform 230ms var(--instrument-ease);
+}
+.catalog-choice:hover {
+  background: var(--turbo-panel-block-hover-bg);
+  transform: translateX(3px);
+}
+.catalog-choice[aria-selected='true'] {
+  background: var(--turbo-panel-block-active-bg);
+  box-shadow: inset 3px 0 var(--turbo-link-default);
+}
+.catalog-choice:focus-visible {
+  outline-offset: -5px;
+}
+.choice-name {
+  font: 500 0.84rem var(--wb-font-mono);
+  overflow-wrap: anywhere;
+}
+.choice-purpose {
+  grid-column: 1;
+  grid-row: 2;
+  font-size: 0.65rem;
+  color: var(--turbo-text-secondary);
+}
+html.synthesis-site .catalog-choice .fix {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  color: var(--turbo-state-success-text);
+  background: var(--turbo-state-success);
+  font: 600 0.6rem var(--wb-font-mono);
+  letter-spacing: 0.08em;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.3rem;
+}
+.catalog-detail {
+  min-width: 0;
+  background: var(--turbo-card-bg);
+  border-radius: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.6rem;
+  padding: 1.75rem;
+}
+.catalog-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+.roster-family {
+  align-self: start;
+  color: var(--turbo-state-info-text);
+  background: var(--turbo-state-info);
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  font: 500 0.62rem var(--wb-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.detail-capability {
+  font-size: 0.65rem;
+  color: var(--turbo-text-primary);
+}
+.detail-capability[data-fixes='true'] {
+  color: var(--turbo-state-success-text);
+  background: var(--turbo-state-success);
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+}
+html.synthesis-site .catalog-detail h3 {
+  font: 600 1.7rem/1.3 var(--wb-font-mono);
+  letter-spacing: -0.04em;
+  margin: 1.1rem 0 0.5rem;
+  overflow-wrap: anywhere;
+}
+#detail-description {
+  font-size: 0.86rem;
+  color: var(--turbo-text-secondary);
+}
+.catalog-metadata {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.3rem 1.5rem;
+  margin: 1.5rem 0 1rem;
+}
+.catalog-metadata div {
+  min-width: 0;
+}
+.catalog-metadata dt {
+  font: 0.6rem var(--wb-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--turbo-text-secondary);
+  margin-bottom: 0.5rem;
+}
+.catalog-metadata dd {
+  margin: 0;
+  font: 0.73rem/1.7 var(--wb-font-mono);
+  color: var(--turbo-text-primary);
+  overflow-wrap: anywhere;
+}
+.catalog-scope-note {
+  font-size: 0.7rem;
+  color: var(--turbo-text-secondary);
+}
+.catalog-command {
+  margin-top: auto;
+  min-width: 0;
+}
+.catalog-command-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  justify-content: space-between;
+  font: 0.65rem var(--wb-font-mono);
+  color: var(--turbo-text-secondary);
+}
+.catalog-command-top button {
+  min-height: 2.3rem;
+  border: 1px solid var(--turbo-panel-border);
+  border-radius: 0.5rem;
+  padding: 0.4rem 0.65rem;
+  background: var(--turbo-tabs-link-bg);
+  color: var(--turbo-text-primary);
+  font-size: 0.7rem;
+}
+.catalog-command-top button[aria-pressed='true'] {
+  box-shadow: inset 0 -2px var(--turbo-link-default);
+  background: var(--turbo-tabs-link-active-bg);
+}
+.catalog-command pre {
+  border: 1px solid var(--turbo-panel-border);
+  padding: 1rem;
+  margin: 0.65rem 0 1rem;
+  border-radius: 0.75rem;
+  background: var(--turbo-syntax-bg);
+  color: var(--turbo-syntax-fg);
+  font: 0.75rem/1.8 var(--wb-font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.catalog-detail-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.catalog-detail-actions a {
+  font-size: 0.75rem;
+}
+html.synthesis-site .catalog-detail-actions button {
+  min-height: 2.4rem;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.7rem;
+}
+#detail-copy-status {
+  font-size: 0.7rem;
+  color: var(--turbo-text-secondary);
+  margin-top: 0.5rem;
+}
+html.synthesis-site .catalog .catalog-roster {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+html.synthesis-site .catalog .catalog-roster .tool {
+  min-height: 9rem;
+  border-radius: 1.1rem;
+  padding: 1.25rem;
+  gap: 0.8rem;
+}
+.roster-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+html.synthesis-site .catalog-roster .tool .name {
+  font-size: 0.9rem;
+}
+html.synthesis-site .catalog-roster .tool-category {
+  padding: 0;
+  background: none;
+  color: var(--turbo-text-secondary);
+  font: 0.75rem var(--wb-font-body);
+}
+.roster-family[data-family='docs'] {
+  background: var(--turbo-state-success);
+  color: var(--turbo-state-success-text);
+}
+.roster-family[data-family='project'],
+.roster-family[data-family='shell'] {
+  background: var(--turbo-state-warning);
+  color: var(--turbo-state-warning-text);
+}
+.roster-family[data-family='security'],
+.roster-family[data-family='rust'] {
+  background: var(--turbo-state-danger);
+  color: var(--turbo-state-danger-text);
+}
+html.synthesis-site .ai-showcase {
+  padding: 0.5rem;
+  background: var(--turbo-panel-block-bg);
+  border-radius: 1.8rem;
+}
+.ai-showcase .ai-tabs {
+  border: 0;
+  background: transparent;
+  padding: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+.ai-showcase .ai-tabs button {
+  border-radius: 0.8rem;
+  font-size: 0.8rem;
+}
+.ai-showcase .ai-tabs button[aria-selected='true'] {
+  background: var(--turbo-tabs-link-active-bg);
+  color: var(--turbo-text-primary);
+  text-decoration: none;
+  box-shadow: inset 0 -2px var(--turbo-link-default);
+}
+.ai-showcase .ai-panel {
+  gap: 0.5rem;
+  min-height: 26rem;
+}
+.ai-showcase .ai-copy {
+  background: var(--turbo-card-bg);
+  border-radius: 1.2rem;
+  padding: 1.75rem;
+}
+.ai-showcase .ai-output {
+  margin: 0;
+  border-radius: 1.2rem;
+}
+.instrument-destinations {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 2rem;
+}
+.instrument-destinations a {
+  display: grid;
+  gap: 0.65rem;
+  padding: 1.5rem;
+  border-radius: 1.3rem;
+  border: 1px solid var(--turbo-card-border);
+  background: var(--turbo-card-bg);
+  color: var(--turbo-text-primary);
+  text-decoration: none;
+  transition: transform 280ms var(--instrument-ease);
+}
+.instrument-destinations a > span:first-child {
+  color: var(--turbo-text-secondary);
+  font-size: 0.7rem;
+}
+.instrument-destinations a > span:last-child {
+  justify-self: end;
+  color: var(--turbo-link-default);
+}
+.instrument-destinations a:hover {
+  transform: translateY(-4px);
+  background: var(--turbo-panel-block-hover-bg);
+}
+html.synthesis-site .comparison-table {
+  box-shadow: 0 0.8rem 3rem color-mix(in srgb, var(--turbo-text-primary) 4%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  html.synthesis-site {
+    scroll-behavior: smooth;
+  }
+}
+@media (max-width: 85rem) {
+  html.synthesis-site .site-header .search-word,
+  html.synthesis-site .site-header .search-trigger kbd {
+    display: none;
+  }
+  html.synthesis-site .site-header .search-trigger {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+}
+@media (max-width: 75rem) {
+  html.synthesis-site .header-nav,
+  html.synthesis-site .header-install {
+    display: none !important;
+  }
+  html.synthesis-site .mobile-menu {
+    display: block;
+  }
+}
+@media (max-width: 56rem) {
+  .catalog-browser {
+    grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
+  }
+  .catalog-detail {
+    padding: 1.25rem;
+  }
+  .catalog-metadata {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  html.synthesis-site .catalog .catalog-roster {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  html.synthesis-site .showcase .bench-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  html.synthesis-site .showcase .bench-tab {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+}
+@media (max-width: 40rem) {
+  .catalog-browser {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .catalog-list {
+    max-height: 15rem;
+  }
+  .catalog-choice {
+    min-height: 3.4rem;
+  }
+  .catalog-detail {
+    padding: 1.1rem;
+  }
+  .catalog-metadata {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.1rem;
+  }
+  .catalog-view {
+    margin-left: 0;
+  }
+  html.synthesis-site .catalog .catalog-roster {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .instrument-facts {
+    gap: 0.5rem;
+  }
+  .instrument-facts p {
+    padding: 1rem 0.7rem;
+    border-radius: 0.9rem;
+  }
+  .instrument-facts strong {
+    font-size: 1.8rem;
+  }
+  .tool-strip-shell {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.25rem;
+  }
+  .strip-pause {
+    justify-self: end;
+  }
+  html.synthesis-site .showcase .bench-cmd,
+  html.synthesis-site .showcase .bench-out {
+    padding: 1.1rem;
+  }
+  .ai-showcase .ai-copy {
+    padding: 1.3rem;
+  }
+  .instrument-destinations {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 24rem) {
+  html.synthesis-site .catalog .catalog-roster,
+  .catalog-metadata {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .instrument-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .instrument-facts p {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 1rem;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html.synthesis-site .tool-strip-track {
+    animation: none;
+    transform: none;
+  }
+  html.synthesis-site #tool-strip-pause {
+    display: none !important;
+  }
+  html.synthesis-site *,
+  html.synthesis-site *::before,
+  html.synthesis-site *::after {
+    transition: none !important;
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+@media print {
+  .tool-strip-shell {
+    display: none;
+  }
+}
+
+/* Inset content planes stay distinct even when a theme shares its panel/card roles. */
+html.synthesis-site .catalog-detail,
+html.synthesis-site .catalog-list-shell,
+html.synthesis-site .showcase .bench-cmd,
+html.synthesis-site .ai-showcase .ai-copy {
+  background: var(--turbo-bg-base);
+}
+html.synthesis-site .catalog-choice {
+  background: transparent;
+}
+html.synthesis-site .catalog-choice:hover {
+  background: var(--turbo-panel-block-hover-bg);
+}
+html.synthesis-site .catalog-choice[aria-selected='true'] {
+  background: var(--turbo-panel-block-active-bg);
+}
+.instrument-facts p > span:not(.sr-only) {
+  overflow-wrap: anywhere;
+}
+
+/* Let enlarged text reflow within the inset frames and control groups. */
+html.synthesis-site .catalog-search {
+  min-width: 0;
+  max-width: 100%;
+}
+html.synthesis-site .catalog-search input {
+  min-width: 0;
+}
+html.synthesis-site :is(.catalog-choice, .catalog-detail, .health-concept) {
+  overflow-wrap: anywhere;
+}
+html.synthesis-site .catalog-view {
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+html.synthesis-site .catalog-view button {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+html.synthesis-site .synthesis-home .section-header h2 {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 40rem) {
+  html.synthesis-site .health-concept {
+    padding: 1rem;
+  }
+  html.synthesis-site .catalog-choice {
+    padding-inline: 0.6rem;
+  }
+  html.synthesis-site .catalog-command-top > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+}
+/* One entry-animation owner: the observer replaces inherited view-timeline lifts. */
+html.synthesis-site [data-reveal],
+html.synthesis-site [data-reveal] .section-header {
+  animation: none;
+}

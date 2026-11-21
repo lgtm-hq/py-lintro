@@ -1,0 +1,29 @@
+---
+import snapshot from '../../generated/product-snapshot.json';
+interface Props { command: typeof snapshot.commands[number] }
+const { command } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const route = (name: string) => `${base}docs/reference/cli/${name.replaceAll(' ', '-')}/`;
+---
+<section class="command">
+  <p>{command.summary.split('\n')[0]}</p>
+  <p class="command-usage"><code>{command.usage}</code></p>
+  {command.aliases.length > 0 && <p>Aliases: {command.aliases.map(alias => <code>{alias} </code>)}</p>}
+  <a href={`https://github.com/lgtm-hq/py-lintro/blob/${snapshot.ref}/${command.source}#L${command.line}`}>Command definition ↗</a>
+  {command.children.length > 0 && <nav class="reference-jump" aria-label="Subcommands">{command.children.map(name => <a href={route(name)}>lintro {name} →</a>)}</nav>}
+  <div class="table-scroll" tabindex="0" role="region" aria-label={`${command.name || 'Root'} parameters`}>
+    <table><thead><tr><th scope="col">Parameter</th><th scope="col">Purpose and choices</th><th scope="col">Declared default</th></tr></thead>
+      <tbody>{command.options.map(option => <tr>
+        <td><code>{option.flags.join(' / ')}</code><small>{option.kind} · {option.type}{option.required ? ' · required' : ''}{option.multiple ? ' · repeatable' : ''}</small></td>
+        <td>{option.help}{option.choices.length > 0 && <p>Choices: {option.choices.map(choice => <code>{choice} </code>)}</p>}</td>
+        <td>{String(option.default).startsWith('Not set')
+          ? <span class="unset-default">{option.default}</span>
+          : <code>{option.default}</code>}</td>
+      </tr>)}</tbody>
+    </table>
+  </div>
+  <details class="command-help"><summary>Complete public command help</summary><pre tabindex="0"><code>{command.help}</code></pre></details>
+  {command.name === 'check' && <aside class="doc-notice"><code>check --fix</code> requests optional AI fix suggestions; it does not run the deterministic format pipeline. Use <code>lintro format</code> for supported tool fixes and verification. AI needs its own opt-in configuration.</aside>}
+  {command.name === 'format' && <aside class="doc-notice">The frozen CLI publicly exposes <code>--no-log</code> and <code>--stream/--no-stream</code>. Its pipeline documents those parameters as not yet implemented; their presence in help is not a functionality guarantee.</aside>}
+  {command.name.startsWith('baseline') && <aside class="doc-notice">Certified check findings are limited to Ruff and Black in this release. Failed unsupported or incomplete results remain visible and failing; format also requires a certified mutation result. <a href={`${base}docs/guides/baseline/`}>Baseline limits and failure behavior →</a></aside>}
+</section>

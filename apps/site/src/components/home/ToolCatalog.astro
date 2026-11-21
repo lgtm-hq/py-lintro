@@ -1,0 +1,368 @@
+---
+import {
+  FIXER_COUNT,
+  TOOL_CATEGORIES,
+  TOOL_CATEGORY_LABELS,
+  TOOL_COUNT,
+  TOOL_PURPOSE_LABELS,
+} from '../../data/tools-catalog';
+import { catalogTools } from '../../lib/catalog-filter';
+import { toolFamily, toolCommand } from '../../lib/catalog-detail';
+import { colorShell } from '../../lib/demo-syntax';
+const base = import.meta.env.BASE_URL;
+const initial = catalogTools[0]!;
+---
+
+<header class="section-header" data-reveal>
+  <span class="eyebrow">The catalog</span>
+  <h2>
+    Pick a specialist.
+    <br />
+    See where it fits.
+  </h2>
+  <p class="lede">
+    {TOOL_COUNT} built-in integrations. {FIXER_COUNT} declare fix support. Explore a tool’s scope
+    and native configuration, or scan the roster.
+  </p>
+</header>
+<div class="catalog" id="tool-catalog" data-view="explore" data-base={base}>
+  <div class="chips" role="group" aria-label="Filter tools by category" data-reveal>
+    <button type="button" class="chip" data-cat="all" aria-pressed="true">
+      All
+    </button>
+    {TOOL_CATEGORIES.map((category) => (
+      <button type="button" class="chip" data-cat={category} aria-pressed="false">
+        {TOOL_CATEGORY_LABELS[category]}
+      </button>
+    ))}
+  </div>
+  <div class="catalog-controls" data-reveal>
+    <label class="catalog-search">
+      <span>Search tools</span>
+      <input
+        id="tool-search"
+        type="search"
+        placeholder="Name, language or purpose…"
+        autocomplete="off"
+      />
+    </label>
+    <label class="check-row">
+      <input type="checkbox" id="fix-only" /> Auto-fix only
+    </label>
+    <div class="catalog-view" role="group" aria-label="Catalog view">
+      <button type="button" data-view="explore" aria-pressed="true">
+        Explore
+      </button>
+      <button type="button" data-view="roster" aria-pressed="false">
+        Roster
+      </button>
+    </div>
+  </div>
+  <p class="tool-count tabular" id="tool-count" role="status">
+    Showing 12 of {TOOL_COUNT} tools
+  </p>
+  <div class="catalog-browser" id="catalog-browser" data-reveal>
+    <div class="catalog-list-shell">
+      <p class="catalog-list-heading" id="catalog-instructions">
+        Select a tool · ↑ ↓ to explore
+      </p>
+      <div
+        class="catalog-list"
+        role="listbox"
+        aria-label="Tool explorer"
+        aria-describedby="catalog-instructions"
+      >
+        {catalogTools.map((tool, index) => (
+          <button
+            type="button"
+            class="catalog-choice"
+            role="option"
+            aria-selected={index === 0}
+            tabindex={index === 0 ? 0 : -1}
+            data-tool={tool.name}
+            hidden={index >= 12}
+          >
+            <span class="choice-name">{tool.name}</span>
+            <span class="choice-purpose">{TOOL_PURPOSE_LABELS[tool.category]}</span>
+            {tool.fixes && <span class="fix">FIX</span>}
+          </button>
+        ))}
+      </div>
+    </div>
+    <section class="catalog-detail synthesis-surface" aria-labelledby="selected-tool-name">
+      <div class="catalog-detail-content" id="catalog-detail-content">
+        <div class="catalog-detail-head">
+          <span class="roster-family" id="detail-family">
+            {toolFamily(initial)}
+          </span>
+          <span class="detail-capability" id="detail-capability" data-fixes={String(initial.fixes)}>
+            {initial.fixes ? 'Fix support declared' : 'Report only'}
+          </span>
+        </div>
+        <h3 id="selected-tool-name">{initial.name}</h3>
+        <p id="detail-description">{initial.target}</p>
+        <dl class="catalog-metadata">
+          <div>
+            <dt>Purpose</dt>
+            <dd id="detail-purpose">{TOOL_PURPOSE_LABELS[initial.category]}</dd>
+          </div>
+          <div>
+            <dt>Origin</dt>
+            <dd>Built-in integration</dd>
+          </div>
+          <div>
+            <dt>Declared file patterns</dt>
+            <dd id="detail-patterns">{initial.patterns.join(' · ') || 'Project-level analysis'}</dd>
+          </div>
+          <div>
+            <dt>Native configuration files</dt>
+            <dd id="detail-config">
+              {initial.nativeConfigs.join(' · ') || 'See the tool reference'}
+            </dd>
+          </div>
+        </dl>
+        <p class="catalog-scope-note">
+          Project-based checkers can expand the scope beyond matched files. The reference explains
+          each integration’s behavior.
+        </p>
+      </div>
+      <div class="catalog-command">
+        <div class="catalog-command-top">
+          <span>Example command</span>
+          <div role="group" aria-label="Tool command mode">
+            <button type="button" data-command="check" aria-pressed="true" id="detail-check">
+              Check
+            </button>
+            <button type="button" data-command="format" aria-pressed="false" id="detail-format">
+              Format
+            </button>
+          </div>
+        </div>
+        <pre tabindex="0"><code id="detail-command" set:html={colorShell(toolCommand(initial))} /></pre>
+        <div class="catalog-detail-actions">
+          <a id="detail-reference" href={`${base}docs/tools/${initial.name}/`}>
+            Read the full reference <span aria-hidden="true">↗</span>
+          </a>
+          <button class="btn btn-secondary" type="button" id="detail-copy">
+            Copy command
+          </button>
+        </div>
+        <p id="detail-copy-status" role="status"></p>
+      </div>
+    </section>
+  </div>
+  <div class="tool-grid catalog-roster" id="tool-grid" hidden data-reveal>
+    {catalogTools.map((tool, index) => (
+      <a
+        href={`${base}docs/tools/${tool.name}/`}
+        class="tool"
+        data-name={tool.name}
+        hidden={index >= 12}
+      >
+        <span class="roster-top">
+          <span class="roster-family" data-family={toolFamily(tool).toLowerCase()}>
+            {toolFamily(tool)}
+          </span>
+          {tool.fixes && <span class="fix">FIX</span>}
+        </span>
+        <span class="name">{tool.name}</span>
+        <span class="tool-category" data-category={tool.category}>
+          {TOOL_PURPOSE_LABELS[tool.category]}
+        </span>
+      </a>
+    ))}
+  </div>
+  <p id="catalog-empty" hidden>
+    No tools match these filters. Try another search or clear the filters.
+  </p>
+  <span class="sr-only" id="catalog-selection" role="status"></span>
+  <button
+    type="button"
+    class="btn btn-secondary catalog-expand"
+    id="catalog-expand"
+    aria-expanded="false"
+    aria-controls="tool-grid catalog-browser"
+  >
+    Show all {TOOL_COUNT} tools
+  </button>
+  <aside class="plugin-callout" data-reveal>
+    <div>
+      <span class="eyebrow">Bring your own tool</span>
+      <h3>Make room for your own specialist.</h3>
+      <p>
+        Integrate another checker through the plugin interface. Plugins execute code: install only
+        those you trust.
+      </p>
+    </div>
+    <a class="btn btn-secondary" href={`${base}docs/contribute/plugins/`}>
+      Explore plugins <span aria-hidden="true">↗</span>
+    </a>
+  </aside>
+  <p class="catalog-note">
+    Availability depends on installed binaries and configuration.{' '}
+    <a href={`${base}docs/tools/`}>Browse all {TOOL_COUNT} tool references →</a>
+  </p>
+  <noscript>
+    <p>
+      <a href={`${base}docs/tools/`}>Open the complete tool catalog</a> for individual tool
+      references.
+    </p>
+  </noscript>
+  <script type="application/json" id="tool-catalog-data" set:html={JSON.stringify(catalogTools)} />
+</div>
+<script>
+  import {
+    TOOL_PURPOSE_LABELS,
+    type CatalogTool,
+    type ToolCategory,
+  } from '../../data/tool-categories';
+  import { matchesCatalog } from '../../lib/catalog-matcher';
+  const catalogDataEl = document.getElementById('tool-catalog-data');
+  const catalogTools: readonly CatalogTool[] = catalogDataEl?.textContent
+    ? (JSON.parse(catalogDataEl.textContent) as CatalogTool[])
+    : [];
+  import { toolFamily, toolCommand } from '../../lib/catalog-detail';
+  import { colorShell } from '../../lib/demo-syntax';
+  import { animatePanel } from '../../lib/panel-motion';
+  import { copyWithRecovery } from '../../lib/copy-feedback';
+  const root = document.getElementById('tool-catalog');
+  const search = document.querySelector<HTMLInputElement>('#tool-search');
+  const fix = document.querySelector<HTMLInputElement>('#fix-only');
+  const expand = document.querySelector<HTMLButtonElement>('#catalog-expand');
+  const count = document.getElementById('tool-count');
+  const empty = document.getElementById('catalog-empty');
+  const browser = document.getElementById('catalog-browser');
+  const roster = document.getElementById('tool-grid');
+  const command = document.getElementById('detail-command');
+  const chips = [...(root?.querySelectorAll<HTMLButtonElement>('[data-cat]') ?? [])];
+  const choices = [...(root?.querySelectorAll<HTMLButtonElement>('.catalog-choice') ?? [])];
+  const cards = [...(root?.querySelectorAll<HTMLAnchorElement>('.tool') ?? [])];
+  let category: ToolCategory | 'all' = 'all';
+  let expanded = false;
+  let selected = catalogTools[0]?.name ?? '';
+  let format = false;
+  let view = 'explore';
+  function showDetail(name: string, animate = true): void {
+    const tool = catalogTools.find((item) => item.name === name);
+    if (!tool || !root || !command) return;
+    selected = name;
+    const text = (id: string, value: string): void => {
+      const node = document.getElementById(id);
+      if (node) node.textContent = value;
+    };
+    text('selected-tool-name', tool.name);
+    text('detail-family', toolFamily(tool));
+    text('detail-description', tool.target);
+    text('detail-purpose', TOOL_PURPOSE_LABELS[tool.category]);
+    text('detail-check', tool.category === 'ai' ? 'Review' : 'Check');
+    text('detail-patterns', tool.patterns.join(' · ') || 'Project-level analysis');
+    text('detail-config', tool.nativeConfigs.join(' · ') || 'See the tool reference');
+    text('detail-copy-status', '');
+    text('catalog-selection', `Selected ${tool.name}. ${TOOL_PURPOSE_LABELS[tool.category]}.`);
+    const capability = document.getElementById('detail-capability');
+    if (capability) {
+      capability.textContent = tool.fixes ? 'Fix support declared' : 'Report only';
+      capability.dataset.fixes = String(tool.fixes);
+    }
+    const reference = document.querySelector<HTMLAnchorElement>('#detail-reference');
+    if (reference) reference.href = (root.dataset.base ?? '/') + 'docs/tools/' + tool.name + '/';
+    const formatButton = document.querySelector<HTMLButtonElement>('#detail-format');
+    if (formatButton) formatButton.disabled = !tool.fixes;
+    if (!tool.fixes) format = false;
+    command.innerHTML = colorShell(toolCommand(tool, format));
+    root
+      .querySelectorAll<HTMLButtonElement>('[data-command]')
+      .forEach((button) =>
+        button.setAttribute(
+          'aria-pressed',
+          String((button.dataset.command === 'format') === format)
+        )
+      );
+    choices.forEach((choice) => {
+      const on = choice.dataset.tool === name;
+      choice.setAttribute('aria-selected', String(on));
+      choice.tabIndex = on ? 0 : -1;
+    });
+    if (animate) animatePanel(document.getElementById('catalog-detail-content'));
+  }
+  function render(): void {
+    if (!search || !fix || !expand || !count || !empty || !browser || !roster) return;
+    const filtered = category !== 'all' || fix.checked || search.value.trim().length > 0;
+    const visible: string[] = [];
+    for (const [index, tool] of catalogTools.entries()) {
+      const match = matchesCatalog(tool, { category, fixOnly: fix.checked, query: search.value });
+      const show = match && (filtered || expanded || visible.length < 12);
+      if (cards[index]) cards[index].hidden = !show;
+      if (choices[index]) choices[index].hidden = !show;
+      if (show) visible.push(tool.name);
+    }
+    count.textContent = `Showing ${visible.length} of ${catalogTools.length} tools${filtered ? ' · filtered' : ''}`;
+    empty.hidden = visible.length > 0;
+    browser.hidden = view !== 'explore' || visible.length === 0;
+    roster.hidden = view !== 'roster' || visible.length === 0;
+    expand.hidden = filtered;
+    expand.textContent = expanded ? 'Show fewer tools' : `Show all ${catalogTools.length} tools`;
+    expand.setAttribute('aria-expanded', String(expanded));
+    if (visible.length && !visible.includes(selected)) showDetail(visible[0]!);
+  }
+  chips.forEach((chip) =>
+    chip.addEventListener('click', () => {
+      const candidate = chip.dataset.cat;
+      if (candidate === 'all' || catalogTools.some((tool) => tool.category === candidate))
+        category = candidate as ToolCategory | 'all';
+      chips.forEach((item) => item.setAttribute('aria-pressed', String(item === chip)));
+      render();
+    })
+  );
+  choices.forEach((choice) => {
+    choice.addEventListener('click', () => showDetail(choice.dataset.tool ?? ''));
+    choice.addEventListener('keydown', (event) => {
+      const visible = choices.filter((item) => !item.hidden);
+      const index = visible.indexOf(choice);
+      const next =
+        event.key === 'Home'
+          ? visible[0]
+          : event.key === 'End'
+            ? visible.at(-1)
+            : event.key === 'ArrowDown'
+              ? visible[(index + 1) % visible.length]
+              : event.key === 'ArrowUp'
+                ? visible[(index - 1 + visible.length) % visible.length]
+                : undefined;
+      if (next) {
+        event.preventDefault();
+        showDetail(next.dataset.tool ?? '');
+        next.focus({ preventScroll: true });
+        next.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  });
+  root?.querySelectorAll<HTMLButtonElement>('.catalog-view [data-view]').forEach((button) =>
+    button.addEventListener('click', () => {
+      view = button.dataset.view ?? 'explore';
+      if (root) root.dataset.view = view;
+      root
+        ?.querySelectorAll<HTMLButtonElement>('.catalog-view [data-view]')
+        .forEach((item) => item.setAttribute('aria-pressed', String(item === button)));
+      render();
+      animatePanel(view === 'explore' ? browser : roster);
+    })
+  );
+  root?.querySelectorAll<HTMLButtonElement>('[data-command]').forEach((button) =>
+    button.addEventListener('click', () => {
+      format = button.dataset.command === 'format';
+      showDetail(selected, false);
+    })
+  );
+  search?.addEventListener('input', render);
+  fix?.addEventListener('change', render);
+  expand?.addEventListener('click', () => {
+    expanded = !expanded;
+    render();
+  });
+  document.getElementById('detail-copy')?.addEventListener('click', () => {
+    if (command) void copyWithRecovery(command, document.getElementById('detail-copy-status'));
+  });
+  showDetail(selected, false);
+  render();
+</script>

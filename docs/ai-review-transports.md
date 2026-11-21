@@ -6,48 +6,65 @@ and reported numbers mean different things. Configure them under `ai.transports.
 
 ## Decision table
 
-| Dimension           | `api`                                       | `cli`                                                                                                                                                  |
-| ------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Credential          | the provider's API-key variable             | the provider's CLI login or CLI key (see the matrix below)                                                                                             |
-| Billing             | Metered API spend                           | Subscription / OAuth session                                                                                                                           |
-| Default timeout     | 60s (stream-sized per call)                 | 1800s (per CLI chunk)                                                                                                                                  |
-| Cost cap field      | `ai.transports.api.max_cost_usd` (enforced) | `ai.transports.cli.max_cost_usd_advisory` (advisory)                                                                                                   |
-| Legacy fallback     | `ai.api_timeout`, `ai.max_cost_usd`         | `ai.max_cost_usd` for the advisory only                                                                                                                |
-| Auth mode recorded  | `api_key`                                   | `subscription`                                                                                                                                         |
-| Cost basis recorded | `billed`                                    | `unpriceable`                                                                                                                                          |
-| Typical CI failures | `insufficient_credits`, `auth_failed:key`   | `auth_failed:oauth_session` (or `:codex_session` / `:gateway_token` by the bound credential), `cli_version_drift`, `turn_timeout`, `killed_externally` |
+| Dimension          | `api`                                                               | `cli`                                                                           |
+| ------------------ | ------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Invocation         | Provider SDK; inference-only                                        | Installed provider agent binary                                                 |
+| Providers          | Anthropic, OpenAI; Cursor with the separate `lintro[cursor]` extra  | Anthropic (`claude`), OpenAI (`codex`), Cursor (`agent`)                        |
+| Credential         | Provider API-key variable                                           | Provider CLI login/session or CLI-supported key                                 |
+| Default timeout    | 60 s profile; Cursor SDK has a 180 s floor                          | 1800 s per CLI chunk                                                            |
+| Profile cap        | `ai.transports.api.max_cost_usd`                                    | `ai.transports.cli.max_cost_usd_advisory`                                       |
+| Billing/provenance | First-party SDK profiles resolve as `billed`; gateways as `unknown` | Depends on actual credential and endpoint: metered key, subscription or gateway |
 
-The credential row is deliberately generic: each provider declares its own variables,
-and lintro has no default provider. The full `(provider, transport)` matrix is below.
-`docs/ai-features.md` also covers Claude's settings-file `apiKeyHelper` as a reachable
-API credential.
-
-**Bare-billing exception:** under `cli` with Anthropic, when
-`ai.providers.anthropic.cli_bare` resolves to sending `--bare` (`auto` with a reachable
-`ANTHROPIC_API_KEY`, or `always`, #1859), the call bills the API key — the run records
-`auth_mode=api_key` and `cost_basis=estimated` instead of the subscription column above.
-
-**Advisory means estimate-based, not unenforced:** the CLI advisory cap still stops the
-run (finalizing a partial review) when _locally estimated_ cost reaches it. It is
-"advisory" because subscription usage has no billed price — the estimate bounds work
-done, not spend.
+The profile field's name alone does not determine whether a review stops. Keys passed
+through a CLI can still bill an API account. Subscription list-price estimates are not
+invoices. Cursor's subscription pricing metadata uses zero rates; this release
+nevertheless resolves its first-party SDK profile as `billed`. Use the recorded run
+basis, not a transport-wide billing promise.
 
 ## Resolution
 
-Effective settings = **transport profile → legacy scalar → built-in default**.
+Timeout and cost settings resolve separately:
 
-`lintro review` logs the resolved profile at start, for example:
+- API timeout: active API profile → `ai.api_timeout` → 60 seconds.
+- CLI timeout: active CLI profile → 1800 seconds; it ignores `ai.api_timeout`.
+- Cost bound: active transport profile → `ai.max_cost_usd` → unset.
 
-```text
-transport=cli auth=subscription timeout=1800 cap=advisory:$0.50 cost_basis=unpriceable
-```
+`lintro review --timeout` overrides the resolved timeout. Cursor SDK requests retain
+their 180-second minimum. See the
+[operational profile reference](/docs/ai/ai-features/configuration-reference/#find-a-setting)
+for profile fields and null fallbacks.
+
+AI provider has no default; explicitly configure the transport too (doctor reports it
+unset).
+
+For `lintro review`, cap enforcement is **cap source × resolved cost basis**:
+
+- A flag or environment cap (`--max-cost-usd` / `LINTRO_AI_MAX_COST_USD`) enforces on
+  every basis, including subscription estimates.
+- A committed configuration cap enforces on `billed`, `estimated` and `unknown`; it is
+  display-only on `unpriceable` and `list_price_shadow` subscription bases.
+- No cap means uncapped. `uncapped` explicitly clears an invocation overlay; overlay `0`
+  is rejected, while YAML `0` is a real zero-dollar cap on enforced bases.
+- A cap is checked against accounted/estimated usage and can overshoot by an in-flight
+  call. It is not a provider billing limit.
+
+The AI lint sessions behind check/format build their budget from `ai.max_cost_usd`
+directly, so a YAML cap also stops those sessions on subscription estimates. Do not
+infer review behavior from the lint session.
+
+These rules come from
+[cost_cap.py](https://github.com/lgtm-hq/py-lintro/blob/b9fd8c1740c1cfc209224d8257b51bcfed6ee778/lintro/ai/review/cost_cap.py),
+[transport.py](https://github.com/lgtm-hq/py-lintro/blob/b9fd8c1740c1cfc209224d8257b51bcfed6ee778/lintro/ai/transport.py)
+and
+[orchestrator.py](https://github.com/lgtm-hq/py-lintro/blob/b9fd8c1740c1cfc209224d8257b51bcfed6ee778/lintro/ai/orchestrator.py).
 
 ## Example config
 
 ```yaml
 ai:
-  # provider is required and has no default: anthropic | cursor | openai
   enabled: true
+  lint: false
+  review: true
   provider: anthropic
   transport: cli
   transports:
@@ -59,12 +76,17 @@ ai:
       max_cost_usd_advisory: 0.50
 ```
 
+On a subscription CLI basis, that committed review cap is display-only. To enforce an
+estimate-based work ceiling for an individual review, use an invocation cap, for example
+`lintro review --uncommitted --max-cost-usd 0.50` with an already configured provider
+and credentials. This example can make paid calls; it is not a browser demo.
+
 ## When to use which
 
-- Prefer **`cli`** when you have a subscription session for the provider's agent binary
-  and want CI without burning a metered API key. `cursor` serves `cli` only.
-- Prefer **`api`** when you need enforced spend caps or streaming, on a provider that
-  serves an API transport (`anthropic`, `openai`).
+Use `cli` with an authenticated local agent binary, or `api` for an SDK request without
+that binary. API transport is inference-only. Cursor SDK is optional and beta, accepts
+no endpoint override, and has no hard output-token limit; `max_tokens` is a prompt
+instruction there. Neither transport is credential-free or guaranteed free of charge.
 
 ## Credentials and `LINTRO_CLI_BARE`
 
@@ -74,15 +96,15 @@ Providers are listed alphabetically; the order carries no recommendation.
 | ----------- | --------- | -------------------------------------------------------------------------------------------------------- |
 | `anthropic` | `api`     | `ANTHROPIC_API_KEY`                                                                                      |
 | `anthropic` | `cli`     | `CLAUDE_CODE_OAUTH_TOKEN`, a `claude` login session, `ANTHROPIC_API_KEY`, or a configured `apiKeyHelper` |
+| `cursor`    | `api`     | `CURSOR_API_KEY` with `lintro[cursor]`                                                                   |
 | `cursor`    | `cli`     | `CURSOR_API_KEY` or an `agent login` session                                                             |
 | `openai`    | `api`     | `OPENAI_API_KEY`                                                                                         |
 | `openai`    | `cli`     | `CODEX_API_KEY` or a `codex login` session                                                               |
 
-`cursor` serves no `api` transport, so it has no API row. `ai.api_key_env` renames the
-variable for the `api` transport. On the `cli` transport the binary reads whatever
-variable it is built to read, and `honors_api_key_env` on the provider's auth probe
-records only whether `lintro doctor` accepts the renamed variable as proof of a
-credential:
+`ai.api_key_env` renames the variable for the `api` transport. On the `cli` transport
+the binary reads whatever variable it is built to read, and `honors_api_key_env` on the
+provider's auth probe records only whether `lintro doctor` accepts the renamed variable
+as proof of a credential:
 
 - `cursor` declares `True` and means it — the `agent` CLI reads `CURSOR_API_KEY` itself.
 - `openai` declares `False`: the `codex` CLI always reads `CODEX_API_KEY`, never
@@ -234,11 +256,12 @@ own route is one no API smoke can reach, so the row proves only that the provide
 answers (`openai`: the Codex session calls the ChatGPT backend, while `openai-api` calls
 `api.openai.com`). An expired session is reported by the dogfood's own `auth_failed`
 verdict on the next review, never by the smoke. A lane no smoke can reach at all
-(`cursor`, no API protocol lintro implements) carries `smoke_row: null` and a
-`smoke_gap` saying why. `tests/scripts/ci/test_smoke_rows_match_lanes.py` pins the
-metered key and the level each session lane may claim, and fails when the two files
-drift apart. Parking retains those bindings and validates their contracts, but suspends
-live coverage: `smoke_covers` describes what an active probe proves, not a parked row.
+(`cursor`, whose optional SDK is not one of this raw API smoke matrix’s protocols)
+carries `smoke_row: null` and a `smoke_gap` saying why.
+`tests/scripts/ci/test_smoke_rows_match_lanes.py` pins the metered key and the level
+each session lane may claim, and fails when the two files drift apart. Parking retains
+those bindings and validates their contracts, but suspends live coverage: `smoke_covers`
+describes what an active probe proves, not a parked row.
 
 **Parser drift is caught for free.**
 `tests/fixtures/ai/cli_replay/<cli>/<version>.jsonl` holds one stdout capture per agent
@@ -258,11 +281,13 @@ reported a list-price figure for a first-party endpoint, and as `unpriceable` wh
 reported none. A run pointed at a non-first-party endpoint records `unknown`: the
 envelope's figure is priced on the wrong table and is never shown as dollars. On both
 shadow bases the record's `cost` is zero and the figure lives in `cost_shadow`, which
-still settles `ai.max_cost_usd` and the PR budget (ADR-0011, decision B). Live `api`
-runs always record `billed` (usage is provider-reported); `estimated` appears only for
-CLI runs on a metered key (bare-billed, `CODEX_API_KEY`, a codex session with an
-embedded key, or `ANTHROPIC_API_KEY` under `cli_bare: never`) and for legacy records
-whose basis is derived from `auth_mode` + locally estimated token usage.
+still settles enforced invocation caps and the PR budget according to the source/basis
+policy above (ADR-0011, decision B). First-party `api` profiles resolve as `billed`;
+off-provider endpoints resolve as `unknown`. This is a provenance classification, not
+proof of an invoice; `estimated` appears only for CLI runs on a metered key
+(bare-billed, `CODEX_API_KEY`, a codex session with an embedded key, or
+`ANTHROPIC_API_KEY` under `cli_bare: never`) and for legacy records whose basis is
+derived from `auth_mode` + locally estimated token usage.
 
 Every surface that names the model names the endpoint beside it (#2868): the sticky's
 `This run` row, the badges, the run-by-run history, the review body footer and the

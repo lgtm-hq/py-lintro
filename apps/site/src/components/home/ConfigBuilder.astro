@@ -1,0 +1,177 @@
+---
+import { AVAILABLE_TOOL_NAMES, CONFIG_GROUPS, DEFAULT_BUILDER, buildConfiguration } from '../../data/config-builder';
+import { colorYaml } from '../../lib/demo-syntax';
+const initial = buildConfiguration(DEFAULT_BUILDER);
+---
+
+<div class="configuration-builder synthesis-surface" id="config-builder" data-tools={JSON.stringify(AVAILABLE_TOOL_NAMES)}>
+  <form id="configuration-form" aria-label="Configuration builder">
+    <fieldset>
+      <legend>Tool groups to enable</legend>
+      <div class="builder-groups">
+        {CONFIG_GROUPS.map((group) => (
+          <label class="check-row">
+            <input type="checkbox" name="groups" value={group.id} checked={group.selected} />
+            {group.label}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+    <fieldset class="builder-single">
+      <label>
+        Shared line length
+        <input name="lineLength" type="number" value="88" min="1" max="500" step="1" required />
+      </label>
+      <p class="field-note">
+        Shared width applies to Ruff and Black. Other formatters keep their native rules, such as
+        Prettier’s <code>printWidth</code>.
+      </p>
+    </fieldset>
+    <fieldset class="ai-fieldset">
+      <legend>Optional AI features</legend>
+      <label class="check-row">
+        <input type="checkbox" name="aiEnabled" /> Enable AI · off by default
+      </label>
+      <div class="ai-dependent" data-ai-dependent aria-disabled="true">
+        <div class="builder-columns">
+          <label>
+            Provider
+            <select name="provider" disabled>
+              <option value="anthropic">Anthropic</option>
+              <option value="openai">OpenAI</option>
+              <option value="cursor">Cursor</option>
+            </select>
+          </label>
+          <label>
+            Transport
+            <select name="transport" disabled>
+              <option value="api">API · provider SDK</option>
+              <option value="cli">CLI · local agent</option>
+            </select>
+          </label>
+        </div>
+        <label class="check-row">
+          <input type="checkbox" name="summary" checked disabled /> Summaries on check and format
+        </label>
+        <label class="check-row">
+          <input type="checkbox" name="review" checked disabled /> Diff review
+        </label>
+        <label class="builder-cost-label">
+          API cost cap, USD
+          <input
+            name="maxCost"
+            type="number"
+            value="2"
+            min="0.01"
+            step="0.01"
+            required
+            disabled
+          />
+        </label>
+      </div>
+      <p class="field-note">
+        Choose provider credentials separately. Secrets never belong in this file.
+      </p>
+    </fieldset>
+    <div class="builder-actions">
+      <button type="reset" class="btn btn-secondary">
+        Reset choices
+      </button>
+      <span id="builder-status" role="status">
+        AI stays off until you enable it.
+      </span>
+    </div>
+  </form>
+  <div class="builder-preview">
+    <div class="code-caption">
+      <span>.lintro-config.yaml</span>
+      <button type="button" class="btn btn-secondary" id="builder-copy">
+        Copy YAML
+      </button>
+    </div>
+    <pre
+      tabindex="0"
+      aria-label="Generated YAML"
+    ><code id="builder-code" set:html={colorYaml(initial)} /></pre>
+    <p>
+      Save in your project root, then run <code>lintro config validate</code>.
+    </p>
+    <p id="builder-copy-status" role="status"></p>
+    <a href={import.meta.env.BASE_URL + 'docs/guides/configuration/'}>
+      Configuration, precedence and native tool rules →
+    </a>
+  </div>
+</div>
+<script>
+  import { buildConfigurationWithTools, type BuilderOptions } from '../../lib/config-builder-core';
+  import { colorYaml } from '../../lib/demo-syntax';
+  import { copyWithRecovery } from '../../lib/copy-feedback';
+  const form = document.querySelector<HTMLFormElement>('#configuration-form');
+  const output = document.getElementById('builder-code');
+  const status = document.getElementById('builder-status');
+  const copy = document.querySelector<HTMLButtonElement>('#builder-copy');
+  const builderRoot = document.getElementById('config-builder');
+  const availableTools: readonly string[] = builderRoot?.dataset.tools ? (JSON.parse(builderRoot.dataset.tools) as string[]) : [];
+  const aiDependent = form?.querySelector<HTMLElement>('[data-ai-dependent]');
+
+  function syncAiControls(aiEnabled: boolean): void {
+    if (!aiDependent) return;
+    aiDependent.setAttribute('aria-disabled', String(!aiEnabled));
+    for (const control of aiDependent.querySelectorAll<HTMLInputElement | HTMLSelectElement>(
+      'input, select'
+    )) {
+      control.disabled = !aiEnabled;
+    }
+  }
+
+  function update(): void {
+    if (!form || !output || !status || !copy) return;
+    const aiToggle = form.elements.namedItem('aiEnabled') as HTMLInputElement | null;
+    const aiEnabled = aiToggle?.checked ?? false;
+    syncAiControls(aiEnabled);
+
+    const groups = [...form.querySelectorAll<HTMLInputElement>('input[name="groups"]:checked')].map(
+      (input) => input.value
+    );
+    const lineLengthEl = form.elements.namedItem('lineLength') as HTMLInputElement | null;
+    const maxCostEl = form.elements.namedItem('maxCost') as HTMLInputElement | null;
+    const summaryEl = form.elements.namedItem('summary') as HTMLInputElement | null;
+    const reviewEl = form.elements.namedItem('review') as HTMLInputElement | null;
+    const providerEl = form.elements.namedItem('provider') as HTMLSelectElement | null;
+    const transportEl = form.elements.namedItem('transport') as HTMLSelectElement | null;
+
+    const options: BuilderOptions = {
+      groups,
+      lineLength: Number(lineLengthEl?.value ?? 88),
+      maxCost: Number(maxCostEl?.value ?? 2),
+      aiEnabled,
+      summary: summaryEl?.checked ?? true,
+      review: reviewEl?.checked ?? true,
+      provider:
+        providerEl?.value === 'openai'
+          ? 'openai'
+          : providerEl?.value === 'cursor'
+            ? 'cursor'
+            : 'anthropic',
+      transport: transportEl?.value === 'cli' ? 'cli' : 'api',
+    };
+    try {
+      const yaml = buildConfigurationWithTools(options, availableTools);
+      output.innerHTML = colorYaml(yaml);
+      copy.disabled = false;
+      status.textContent = options.aiEnabled
+        ? 'Preview updated. Provider credentials and the appropriate optional extra are required.'
+        : 'Preview updated. AI is disabled.';
+    } catch (error: unknown) {
+      copy.disabled = true;
+      status.textContent = error instanceof Error ? error.message : 'Check the selected values.';
+    }
+  }
+  form?.addEventListener('input', update);
+  form?.addEventListener('change', update);
+  form?.addEventListener('submit', (event) => event.preventDefault());
+  form?.addEventListener('reset', () => requestAnimationFrame(update));
+  copy?.addEventListener('click', () => {
+    if (output) void copyWithRecovery(output, document.getElementById('builder-copy-status'));
+  });
+</script>

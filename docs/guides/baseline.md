@@ -5,13 +5,52 @@ checks on new findings. Filtering is opt-in; without a CLI option or config entr
 findings remain unfiltered. The stricter execution checks described below apply to all
 runs.
 
+## Create, update, prune and show
+
+### Create a reviewed baseline
+
 ```bash
 lintro baseline create . --tools ruff,black
+```
+
+Creation refuses to overwrite an existing file. Review and commit the baseline with your
+code; use the [certified producers](#supported-tools-and-scope).
+
+### Check new findings
+
+```bash
 lintro chk . --tools ruff,black --baseline .lintro-baseline.json
+```
+
+### Update acknowledgements
+
+```bash
 lintro baseline update . --tools ruff
+```
+
+Update can accept new findings. Review the diff; do not use it automatically to make CI
+pass. See [the update and prune rules](#update-and-prune-coverage-rules).
+
+### Prune fixed acknowledgements
+
+```bash
 lintro baseline prune . --tools ruff
+```
+
+Prune never accepts new findings. Removal requires affirmative exact coverage; see
+[pruning coverage](#update-and-prune-coverage-rules),
+[rule changes](#rule-configuration-and-removal) and
+[producer inspection limits](#exact-file-coverage-and-producer-limits).
+
+### Show statistics without a scan
+
+```bash
 lintro baseline show
 ```
+
+Show reads statistics without executing tools and can run from any directory.
+
+## Invocation roots and baseline paths
 
 Use `--baseline PATH` on these commands to choose a different file. Alternatively, set
 `baseline: .lintro-baseline.json` in `.lintro-config.yaml` (or
@@ -23,10 +62,14 @@ global config directory. A `baseline` value must be a non-empty string; an empty
 `baseline:` (null) means no baseline, and any other value fails configuration loading
 with a one-line error.
 
+### Global configuration and opt-out
+
 A `baseline` key in the global user config opts every project into filtering. A project
 without that file fails `lintro check` with an error that names the global config file;
 set `baseline` in the project config, remove it from the global config, or pass
 `baseline=False` (Python API) or `--no-baseline` (watch).
+
+### Required invocation root
 
 Filtering and `create`, `update`, and `prune` require running from the project config
 directory. Without a project config, a `baseline` value from the global config resolves
@@ -43,6 +86,8 @@ Commit the baseline alongside the code. Use one baseline per project root: versi
 does not record its root, so sharing a baseline between different project configurations
 can alias relative file identities. Creation refuses to overwrite a file. `show` reads
 statistics without executing tools and can run from any directory.
+
+### Review policy
 
 Treat the baseline as a reviewed suppression policy. Review additions, changed
 fingerprints, and increased occurrence counts alongside code changes: `update` can
@@ -61,6 +106,8 @@ findings not complete) that names the dropped records, keeps the findings it cou
 and cannot be baselined. The same holds for a Bandit report naming files it could not
 scan.
 
+### Unsupported producers and incomplete reports
+
 Other producers, including `shellcheck`, `hadolint`, `shfmt`, `dotenv-linter`,
 `pydoclint`, `sqlfluff`, `mypy`, and `pylint`, do not yet certify failed findings for
 baselining. Their findings stay visible and failing under `check --baseline`, even if
@@ -74,6 +121,8 @@ zero report-level failure count cannot prove that no records were lost. These fi
 remain unsuppressed until a complete-report statistics contract is available. Rejected
 ShellCheck reports retain their full native output for diagnosis; the additional error
 explanation includes only a bounded excerpt.
+
+### Tool selection and transaction limits
 
 Without `--tools`, management commands use the normal configured/default selection. If
 **any active result** is incomplete or cannot certify its findings, `create`, `update`,
@@ -92,6 +141,8 @@ results; unfixable residual findings may stay failing even for the check tools l
 above. The list is not a promise that every formatter can acknowledge residual findings.
 
 ## Design for #438
+
+### Severity history and public quality counts
 
 The existing `.lintro/severity-baseline.json` is an automatic, scoped record of severity
 **counts** used for comparison with the previous check. It does not acknowledge
@@ -115,6 +166,8 @@ validates the baseline once at startup and exits with an error, before watching,
 the file is missing or invalid; `--no-baseline` watches without it. Each run then
 re-reads the file, so edits apply on the next batch.
 
+### Fingerprint format and identity limits
+
 Version 1 matches the tuple `(tool, relative file, rule code, SHA-256(message))`. Line
 and column are excluded from identity; the stored line is only a hint. Messages
 normalize CRLF to LF but preserve all other content, including numbers: removing
@@ -127,6 +180,8 @@ Paths outside the invocation root and findings exceeding the schema limits (incl
 paths longer than 4096 characters and rule codes longer than 1024 characters) cannot be
 acknowledged and remain visible. File moves and changed messages or rule codes are new
 findings.
+
+### Filtering order and failure states
 
 Filtering runs after execution, AI enhancement, and the format verify pass, before final
 display or serialization. The order is deliberate: AI fixes can change files, so the
@@ -152,11 +207,15 @@ The run fails. A clean result from a producer that does not certify failed findi
 still complete: it has nothing to filter, so it passes with no warning and a baselined
 count of zero.
 
+### Output formats and baselined counts
+
 Baselined counts appear in the JSON output (`baselined_count` per tool and
 `summary.total_baselined`, in both `--output-format json` and JSON report files) and in
 the console summary line `N issues (M baselined)`, which every stdout format except
 JSON, SARIF, CSV, and Markdown prints. SARIF, CSV, and Markdown output, and report files
 other than JSON, list only the retained findings and carry no baselined count.
+
+### Source-parse diagnostics
 
 **Source-parse diagnostics.** A finding that says the producer could not parse the
 source file (Ruff's `invalid-syntax`; older Ruff releases used a null code or `E999`) is
@@ -165,6 +224,8 @@ visible even if a matching entry exists. Ruff skips other rules for a file it ca
 parse while still listing that file as inspected, so such a file also supplies no exact
 coverage: `update` and `prune` keep every entry for it until it parses again. An
 existing `invalid-syntax` entry in a baseline no longer acknowledges anything.
+
+### Format accounting limits
 
 Format accounting matches fingerprint occurrences across the filtered initial and
 residual lists, so line shifts do not cancel fix credit. If formatting introduces a new
@@ -175,6 +236,8 @@ uses explicit unknown accounting: `fixed` and `remaining` are null, both finding
 are retained, the reason records matched fixes and introduced occurrences, and the run
 fails. Unrepresentable identities also leave accounting unknown. Partial or already
 unknown producer accounting is preserved without baseline suppression.
+
+### Update and prune coverage rules
 
 `update` adds currently observed findings and removes fixed entries only where there is
 affirmative complete, exact file coverage. Unseen tools and files, unknown coverage,
@@ -187,6 +250,8 @@ entries or reduces occurrence budgets. Other tools retain their coverage claims.
 Management scans ignore the configured fingerprint baseline and do not invoke AI or
 install dependencies.
 
+### Rule configuration and removal
+
 Native project configuration and configured tool options (including
 `[tool.lintro.<tool>]`) still determine which rules are observed. Rule coverage is not
 compared with previous scans. Disabling a rule there can let `update` or `prune` remove
@@ -195,6 +260,8 @@ again. This is a decided limit of version one, not an oversight: recording the a
 rule set needs a schema change and a per-producer rule listing that no certified
 producer supplies yet. Review removals in the baseline diff after changing rule
 configuration.
+
+### Exact file coverage and producer limits
 
 The boolean `inspected_files` proves that some work happened, not which files were
 examined. Until #2609 supplies coverage throughout the tool registry, pruning must not
@@ -214,6 +281,8 @@ execution records and matching completion counts. Coverage is the intersection o
 lint and formatter file sets. Disabled format checks, formatter exclusions, unknown
 trace formats, and incomplete reports cannot remove `FORMAT` acknowledgements.
 
+### Black coverage and deleted files
+
 Black management scans request verbose output and use only affirmative per-file native
 verdicts: would reformat, already formatted, or unchanged according to Black's cache.
 Requested inputs, discovery messages, exclusion messages, and summary counts alone do
@@ -224,6 +293,8 @@ coverage claim. After a completed inspection proves a formatting finding fixed, 
 and `prune` remove its acknowledgement; a later regression fails the check. An execution
 failure cannot remove entries. Occurrence budgets shrink only over the same coverage.
 Deleted files are retained because their absence alone is not a successful inspection.
+
+### File validation, locking and recovery
 
 Baseline JSON is untrusted input. Unknown schema versions, unexpected or duplicate JSON
 members, repeated entries, non-canonical paths, parent traversal, absolute paths,

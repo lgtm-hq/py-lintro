@@ -1,0 +1,235 @@
+---
+import { colorDiff, colorShell, colorYaml } from '../../lib/demo-syntax';
+interface Props {
+  showHeader?: boolean;
+}
+const { showHeader = true } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const modes = [
+  {
+    id: 'summary',
+    label: 'Summary',
+    title: 'Turn a findings list into a next step.',
+    description:
+      'Optional AI summaries explain patterns in the deterministic results and suggest where to start.',
+    points: [
+      'Understand repeated findings across tools.',
+      'See suggested priorities and follow-up work.',
+      'Review the output; model suggestions are not a correctness guarantee.',
+    ],
+    caption: 'Illustrative summary',
+    language: 'shell',
+    output:
+      '# AI SUMMARY — example output\n\n12 annotation findings share one cause:\npublic utility functions lack return types.\n\nNext steps\n  1. Add return types in src/utils/.\n  2. Remove unused imports in the CLI.\n  3. Rerun the deterministic checks.\n\n# Provider, token usage and cost depend on configuration.',
+  },
+  {
+    id: 'fixes',
+    label: 'Fixes',
+    title: 'See the change before you accept it.',
+    description:
+      'Review proposed changes in groups, inspect their risk and decide what to apply. The example on the right stays entirely in your browser.',
+    points: [
+      'Inspect a unified diff and its changed files.',
+      'Review safe-style and behavioral-risk labels.',
+      'Keep the final decision with the person reviewing the patch.',
+    ],
+    caption: 'Proposed change · safe-style · 1 file',
+    language: 'diff',
+    output:
+      '--- a/src/utils/paths.py\n+++ b/src/utils/paths.py\n@@ -1,4 +1,3 @@\n import sys\n-import os\n from pathlib import Path\n\n# Unused import removed. No source file is changed here.',
+  },
+  {
+    id: 'review',
+    label: 'Review',
+    title: 'A review that lives with the diff.',
+    description:
+      'Choose review depth and strictness, then inspect findings with locations, severity and context. Posting to a PR is an explicit action.',
+    points: [
+      'Use a branch, working tree or pull-request diff.',
+      'Findings include severity and the reasoning behind the concern.',
+      'Review context can include whole changed files or bounded windows; read the privacy guide.',
+    ],
+    caption: 'Illustrative pull-request review',
+    language: 'shell',
+    output:
+      '# PR #214 · depth 2 · balanced\n\nP1  src/api/client.py:88\n    Mutable default argument is shared across calls.\n\nP2  src/db/orders.py:41\n    Handle the empty result before indexing.\n\nP3  docs/usage.md:12\n    Update the retired command flag.\n\n# Example findings, not a live provider response.',
+  },
+  {
+    id: 'agents',
+    label: 'Agents',
+    title: 'Bring your project’s review rules.',
+    description:
+      'Use scoped review agents for conventions that matter in your repository, alongside the built-in review checklist.',
+    points: [
+      'Keep project-specific review instructions with the project.',
+      'Apply scope and policy deliberately.',
+      'Read the agent guide before enabling a custom reviewer.',
+    ],
+    caption: 'Example local review command',
+    language: 'shell',
+    output:
+      'lintro review --uncommitted --depth 2\n\n# Project review agents can add scoped instructions.\n# Credentials and AI configuration are required.\n# Nothing is submitted from this page.',
+  },
+  {
+    id: 'finders',
+    label: 'Finders',
+    title: 'Look for patterns beyond a linter rule.',
+    description:
+      'The opt-in idiom-review integration can look for idiomatic improvements and duplicated utility logic.',
+    points: [
+      'Run advisory analysis explicitly under review.',
+      'Inspect suggestions before changing code.',
+      'Keep deterministic checks and advisory findings distinct.',
+    ],
+    caption: 'Opt-in advisory example',
+    language: 'shell',
+    output:
+      'lintro review --advisory-only \\\n  --tool-options idiom-review:enabled=true\n\n# Example suggestion\n# Replace a manual flag loop with any(...).\n# Provider access is required for a real run.',
+  },
+  {
+    id: 'safety',
+    label: 'Safety',
+    title: 'Know what runs and what leaves your machine.',
+    description:
+      'AI starts disabled. Enable only the features you want, choose a provider and understand the transport before running it.',
+    points: [
+      'Source, diffs and diagnostic messages can be included in provider requests.',
+      'Keep credentials out of checked-in configuration.',
+      'Cost behavior depends on transport, credentials and the recorded cost basis.',
+    ],
+    caption: 'AI is off by default',
+    language: 'yaml',
+    output:
+      'ai:\n  enabled: false\n\n# Enabling AI requires a deliberate provider choice.\n# See the privacy and transport guides first.',
+  },
+] as const;
+---
+
+{showHeader && (
+<header class="section-header">
+  <span class="eyebrow">AI, bring your own key</span>
+  <h2>
+    A second opinion.
+    <br />
+    You keep the final say.
+  </h2>
+  <p class="lede">
+    Summaries, fixes and diff review, off by default. Explore the examples, then choose what belongs
+    in your workflow. <a href={base + 'docs/ai/ai-features/'}>Read the AI guide →</a>
+  </p>
+</header>
+)}
+<div class="ai-showcase synthesis-surface" id="ai-features">
+  <div class="ai-tabs" role="tablist" aria-label="AI features">
+    {modes.map((mode, index) => (
+      <button
+        type="button"
+        role="tab"
+        id={'ai-tab-' + mode.id}
+        aria-controls={'ai-panel-' + mode.id}
+        aria-selected={index === 0}
+        tabindex={index === 0 ? 0 : -1}
+      >
+        {mode.label}
+      </button>
+    ))}
+  </div>
+  {modes.map((mode, index) => (
+    <section
+      class="ai-panel"
+      role="tabpanel"
+      id={'ai-panel-' + mode.id}
+      aria-labelledby={'ai-tab-' + mode.id}
+      hidden={index !== 0}
+    >
+      <div class="ai-copy">
+        {showHeader ? <h3>{mode.title}</h3> : <h2>{mode.title}</h2>}
+        <p>{mode.description}</p>
+        <ul>
+          {mode.points.map((point) => (
+            <li>{point}</li>
+          ))}
+        </ul>
+        {mode.id === 'safety' && (
+          <a href={base + 'docs/ai/ai-features/data--privacy/'}>
+            Data, privacy and provider access →
+          </a>
+        )}
+        {mode.id === 'fixes' && (
+          <button class="btn btn-primary" id="ai-apply-example" type="button" aria-pressed="false">
+            Apply example fix
+          </button>
+        )}
+      </div>
+      <div class="ai-output">
+        <div class="code-caption">
+          {mode.caption}
+          <span class="example-label">Example</span>
+        </div>
+        <pre tabindex="0"><code id={mode.id === 'fixes' ? 'ai-fix-output' : undefined}
+        set:html={mode.language === 'diff' ? colorDiff(mode.output) : mode.language === 'yaml' ? colorYaml(mode.output) : colorShell(mode.output)} /></pre>
+        {mode.id === 'fixes' && (
+          <p class="example-status" id="ai-fix-status" role="status">
+            Preview the patch, then try accepting it.
+          </p>
+        )}
+      </div>
+    </section>
+  ))}
+</div>
+<script>
+  import { animatePanel } from '../../lib/panel-motion';
+  import { colorDiff } from '../../lib/demo-syntax';
+  const root = document.getElementById('ai-features');
+  const tabs = [...(root?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [])];
+  function select(tab: HTMLButtonElement): void {
+    for (const item of tabs) {
+      const on = item === tab;
+      item.setAttribute('aria-selected', String(on));
+      item.tabIndex = on ? 0 : -1;
+      const panel = document.getElementById(item.getAttribute('aria-controls') ?? '');
+      if (panel) {
+        panel.hidden = !on;
+        if (on) animatePanel(panel);
+      }
+    }
+  }
+  tabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => select(tab));
+    tab.addEventListener('keydown', (event) => {
+      const next =
+        event.key === 'Home'
+          ? tabs[0]
+          : event.key === 'End'
+            ? tabs.at(-1)
+            : event.key === 'ArrowRight'
+              ? tabs[(index + 1) % tabs.length]
+              : event.key === 'ArrowLeft'
+                ? tabs[(index - 1 + tabs.length) % tabs.length]
+                : undefined;
+      if (next) {
+        event.preventDefault();
+        select(next);
+        next.focus();
+      }
+    });
+  });
+  const apply = document.getElementById('ai-apply-example');
+  const output = document.getElementById('ai-fix-output');
+  const status = document.getElementById('ai-fix-status');
+  const original = output?.innerHTML;
+  apply?.addEventListener('click', () => {
+    if (!output || !status || original === undefined) return;
+    const applied = apply.getAttribute('aria-pressed') !== 'true';
+    apply.setAttribute('aria-pressed', String(applied));
+    apply.textContent = applied ? 'Reset example' : 'Apply example fix';
+    output.innerHTML = applied
+      ? colorDiff(
+          '# Example applied · no real files changed\n\nimport sys\nfrom pathlib import Path\n\n# Deterministic recheck: unused import resolved.'
+        )
+      : original;
+    status.textContent = applied
+      ? 'Example fix accepted. Your files have not been read or changed.'
+      : 'Preview the patch, then try accepting it.';
+  });
+</script>

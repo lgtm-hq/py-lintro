@@ -1,0 +1,24 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import AiForwarding from '../../../components/docs/AiForwarding.astro';
+const hub = `${import.meta.env.BASE_URL}docs/ai/ai-features/`;
+---
+
+<BaseLayout
+  title="AI reference has moved"
+  description="Follow a saved AI section to its focused Lintro reference."
+  canonicalPath={hub}
+  noindex
+>
+  <article class="reference-shell">
+    <p class="eyebrow">AI reference</p>
+    <h1>Find your AI task.</h1>
+    <p>
+      <a href={hub}>Open the AI task hub →</a>
+    </p>
+    <AiForwarding />
+  </article>
+</BaseLayout>
+<script>
+  if (!location.hash) location.replace(`${import.meta.env.BASE_URL}docs/ai/ai-features/`);
+</script>

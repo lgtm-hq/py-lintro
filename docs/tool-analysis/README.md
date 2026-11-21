@@ -1,7 +1,8 @@
 # Tool Analysis Documentation
 
-This directory contains comprehensive analyses comparing Lintro's wrapper
-implementations with the core tools themselves.
+Each page here covers one Lintro integration and how the Lintro wrapper differs from the
+native tool it runs. The summaries below note what each wrapper preserves, limits and
+adds.
 
 ## Available Analyses
 
@@ -13,7 +14,8 @@ implementations with the core tools themselves.
 
 - ✅ **Preserved**: Linting, formatting, auto-fixing, rule selection, configuration
   files
-- ⚠️ **Limited**: Runtime rule customization, watch mode, cache control, statistics
+- ⚠️ **Limited**: Some native flags for cache/statistics; repeated checks are available
+  with Lintro watch
 - 🚀 **Enhanced**: Combined linting/formatting, smart fix handling, unified API
 
 ### [pydoclint Analysis](./pydoclint-analysis.md)
@@ -21,7 +23,8 @@ implementations with the core tools themselves.
 **Python Docstring Linter**
 
 - ✅ **Preserved**: Docstring validation, style enforcement, error codes
-- ⚠️ **Limited**: Runtime configuration, JSON output, parallel processing
+- ⚠️ **Limited**: Detailed docstring settings belong in native configuration; native
+  parser input is text, while Lintro can serialize findings as JSON
 - 🚀 **Enhanced**: Issue normalization, Python integration, error parsing
 
 ### [Prettier Analysis](./prettier-analysis.md)
@@ -38,7 +41,8 @@ implementations with the core tools themselves.
 
 - ✅ **Preserved**: Linting, formatting, auto-fix, native config discovery, JSON output
 - ⚠️ **Limited**: Plugin control, stdin piping
-- 🚀 **Enhanced**: Normalized issues, unified API, much faster than traditional tools
+- 🚀 **Enhanced**: Normalized issues, unified API, separate linter and formatter
+  integrations
 
 ### [Yamllint Analysis](./yamllint-analysis.md)
 
@@ -77,22 +81,6 @@ implementations with the core tools themselves.
 
 ### [Hadolint Analysis](./hadolint-analysis.md)
 
-### [Bandit Analysis](./bandit-analysis.md)
-
-**Python Security Linter**
-
-- ✅ **Preserved**: Recursive scanning, severity/confidence gates, config/baseline
-- ⚠️ **Defaults**: JSON output and quiet logs for stable parsing
-- 🚀 **Notes**: Robust JSON extraction; normalized reporting
-
-### [Actionlint Analysis](./actionlint-analysis.md)
-
-**GitHub Actions Workflow Linter**
-
-- ✅ **Preserved**: Default output, rule detection, workflow path targeting
-- ⚠️ **Defaults**: No flags; filtered to `/.github/workflows/`
-- 🚀 **Notes**: Normalized parsing and formatting
-
 **Dockerfile Linter for Best Practices**
 
 - ✅ **Preserved**: Dockerfile analysis, shell script linting, best practices, security
@@ -102,13 +90,29 @@ implementations with the core tools themselves.
 
 <!-- markdownlint-enable MD036 -->
 
+### [Bandit Analysis](./bandit-analysis.md)
+
+Python security linter.
+
+- ✅ **Preserved**: Recursive scanning, severity/confidence gates, config/baseline
+- ⚠️ **Defaults**: JSON output and quiet logs for stable parsing
+- 🚀 **Notes**: Robust JSON extraction; normalized reporting
+
+### [Actionlint Analysis](./actionlint-analysis.md)
+
+GitHub Actions workflow linter.
+
+- ✅ **Preserved**: Default output, rule detection, workflow path targeting
+- ⚠️ **Defaults**: No flags; filtered to `/.github/workflows/`
+- 🚀 **Notes**: Normalized parsing and formatting
+
 ### [Black Analysis](./black-analysis.md)
 
 ### Python Code Formatter
 
 - ✅ **Preserved**: Core formatting, pyproject config, check and write flows
 - ⚙️ **Pass-throughs**: `line_length`, `target_version`, `fast`, `preview`, `diff`
-- 🚀 **Notes**: Cooperates with Ruff via Lintro post-check policy
+- 🚀 **Notes**: Cooperates with Ruff through selected-tool formatting ownership
 
 ### [Mypy Analysis](./mypy-analysis.md)
 
@@ -201,13 +205,13 @@ Each analysis follows a consistent structure:
 
 ### Trade-offs Summary
 
-| Aspect          | Core Tools                    | Lintro Wrappers                     |
-| --------------- | ----------------------------- | ----------------------------------- |
-| **Flexibility** | High (all CLI options)        | Limited (config files only)         |
-| **Performance** | Optimized (parallel, caching) | Sequential processing (no parallel) |
-| **Integration** | CLI-based                     | Python-native                       |
-| **Consistency** | Tool-specific APIs            | Unified interface                   |
-| **Output**      | Various formats               | Standardized objects                |
+| Aspect          | Core Tools                    | Lintro Wrappers                                        |
+| --------------- | ----------------------------- | ------------------------------------------------------ |
+| **Flexibility** | High (all CLI options)        | Exposed tool options plus native configuration         |
+| **Performance** | Optimized (parallel, caching) | Configurable orchestration; native work varies by tool |
+| **Integration** | CLI-based                     | Python-native                                          |
+| **Consistency** | Tool-specific APIs            | Unified interface                                      |
+| **Output**      | Various formats               | Standardized objects                                   |
 
 ## Use Case Recommendations
 
@@ -233,10 +237,12 @@ Each analysis follows a consistent structure:
 
 ## Future Enhancement Opportunities
 
-1. **Configuration Pass-through**: Runtime option support for all tools
-2. **Performance**: Parallel processing capabilities (currently sequential)
-3. **Output Formats**: JSON and custom formatter support
-4. **Plugin Systems**: Custom checker integration
+1. **Configuration Pass-through**: Additional native options beyond the current
+   supported option tables
+2. **Performance**: Further tuning beyond shipped execution orchestration
+3. **Output Formats**: Additional serializers beyond shipped JSON, SARIF and table/text
+   serializers
+4. **Plugin Systems**: Extensions beyond the shipped external plugin trust model
 5. **Metrics**: Code quality scoring and reporting
 6. **Auto-fixing**: Enhanced auto-fixing for tools that support it
 7. **Schema Validation**: Built-in schema validation for YAML and other formats

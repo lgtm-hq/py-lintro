@@ -1,0 +1,24 @@
+---
+import { catalogTools } from '../../lib/catalog-filter';
+const names = catalogTools.slice(0, 12).map((tool) => tool.name);
+---
+
+<div class="tool-strip-shell" data-reveal>
+  <div class="tool-strip" id="tool-strip" aria-hidden="true">
+    <div class="tool-strip-track">
+      {[0, 1].map(() => (
+        <div class="tool-strip-run">
+          {names.map((name) => (
+            <span>
+              {name}
+              <i>·</i>
+            </span>
+          ))}
+        </div>
+      ))}
+    </div>
+  </div>
+  <button type="button" class="strip-pause js-only" id="tool-strip-pause" aria-pressed="false">
+    Pause movement
+  </button>
+</div>

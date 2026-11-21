@@ -1,0 +1,44 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import AiFeatures from '../components/home/AiFeatures.astro';
+import ShowcasePreferences from '../components/ShowcasePreferences.astro';
+const base = import.meta.env.BASE_URL;
+---
+
+<BaseLayout
+  title="AI · examples and guides"
+  description="Explore optional AI summaries, fixes and diff review, with links to complete setup, privacy and transport documentation."
+>
+  <div class="container synthesis-page">
+    <header class="page-intro" data-reveal>
+      <a href={base}>← Back to Lintro</a>
+      <span class="eyebrow">Optional AI</span>
+      <h1>Explore before you enable.</h1>
+      <p class="lede">
+        These examples stay in your browser. A real run requires your chosen provider, credentials
+        and the appropriate optional extra.
+      </p>
+    </header>
+    <ShowcasePreferences />
+    <section data-reveal>
+      <AiFeatures showHeader={false} />
+    </section>
+    <nav class="instrument-destinations" aria-label="AI documentation" data-reveal>
+      <a href={base + 'docs/ai/ai-features/'}>
+        <span>Start here</span>
+        <strong>All AI tasks and guides</strong>
+        <span aria-hidden="true">↗</span>
+      </a>
+      <a href={base + 'docs/ai/ai-features/data--privacy/'}>
+        <span>Understand access</span>
+        <strong>Data and privacy</strong>
+        <span aria-hidden="true">↗</span>
+      </a>
+      <a href={base + 'docs/ai/review-transports/'}>
+        <span>Choose deliberately</span>
+        <strong>Providers, transport and cost</strong>
+        <span aria-hidden="true">↗</span>
+      </a>
+    </nav>
+  </div>
+</BaseLayout>

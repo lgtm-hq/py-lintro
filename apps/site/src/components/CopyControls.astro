@@ -1,0 +1,32 @@
+<span id="copy-status" role="status" class="sr-only" data-pagefind-ignore></span>
+<script>
+  import { copyWithRecovery } from '../lib/copy-feedback';
+  import { createCodeViewControl } from '../lib/code-view.mjs';
+  const status = document.getElementById('copy-status');
+  function bindCopy(button: HTMLButtonElement, source: HTMLElement): void {
+    button.addEventListener('click', () => {
+      void copyWithRecovery(source, status);
+    });
+  }
+  document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((button) => {
+    const source = document.getElementById(button.dataset.copy ?? '');
+    button.dataset.label = button.textContent ?? 'Copy';
+    if (source) bindCopy(button, source);
+  });
+  document.querySelectorAll<HTMLPreElement>('.prose pre').forEach((source, index) => {
+    const shell = document.createElement('div');
+    shell.className = 'prose-code-shell';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'copy-button';
+    button.textContent = 'Copy code';
+    button.dataset.label = 'Copy code';
+    button.setAttribute('aria-label', 'Copy code example');
+    const toolbar = document.createElement('div');
+    toolbar.className = 'code-actions';
+    toolbar.append(button, createCodeViewControl({ pre: source, example: index + 1 }));
+    source.before(shell);
+    shell.append(toolbar, source);
+    bindCopy(button, source);
+  });
+</script>

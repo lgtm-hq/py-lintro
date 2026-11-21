@@ -1,51 +1,42 @@
+#!/usr/bin/env node
 /**
- * Pre-build: copy shared assets into public/.
+ * Copy Turbo Themes CSS assets into public/assets/css/.
+ * Copies only .css files (no .d.ts/.map/.js leaks) and strips external vendor font URLs
+ * since fonts are self-hosted via @fontsource-variable.
  */
-import { cpSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const siteRoot = resolve(__dirname, '..');
-const repoRoot = resolve(siteRoot, '..', '..');
-const publicAssets = join(siteRoot, 'public', 'assets');
-const _publicDir = join(siteRoot, 'public');
+const siteDir = resolve(__dirname, '..');
+const publicCss = join(siteDir, 'public', 'assets', 'css');
+const cssSrc = join(siteDir, 'node_modules', '@lgtm-hq', 'turbo-themes', 'packages', 'css', 'dist');
 
-mkdirSync(publicAssets, { recursive: true });
-
-const logo = join(repoRoot, 'assets', 'images', 'lintro.png');
-if (existsSync(logo)) {
-  cpSync(logo, join(publicAssets, 'lintro.png'));
-  console.log('Copied lintro.png');
+function sanitizeCss(css) {
+  return css
+    .replace(/@import\s+url\(\s*["']?https?:\/\/[^)]+\)\s*;/gi, '')
+    .replace(/@font-face\s*\{[^}]*url\(\s*["']?https?:\/\/[^}]*\}/gi, '');
 }
 
-const turboCssRoot = join(
-  siteRoot,
-  'node_modules',
-  '@lgtm-hq',
-  'turbo-themes',
-  'packages',
-  'css',
-  'dist'
-);
-
-function copyDir(src, dest) {
-  if (!existsSync(src)) return;
+function copyCssDir(src, dest) {
   mkdirSync(dest, { recursive: true });
   for (const entry of readdirSync(src, { withFileTypes: true })) {
     const srcPath = join(src, entry.name);
     const destPath = join(dest, entry.name);
     if (entry.isDirectory()) {
-      copyDir(srcPath, destPath);
-    } else {
-      cpSync(srcPath, destPath);
+      copyCssDir(srcPath, destPath);
+    } else if (entry.name.endsWith('.css')) {
+      const cleaned = sanitizeCss(readFileSync(srcPath, 'utf8'));
+      writeFileSync(destPath, cleaned);
     }
   }
 }
 
-if (existsSync(turboCssRoot)) {
-  copyDir(turboCssRoot, join(publicAssets, 'css'));
-  console.log('Copied turbo-themes CSS');
+if (existsSync(cssSrc)) {
+  rmSync(publicCss, { recursive: true, force: true });
+  copyCssDir(cssSrc, publicCss);
+  console.log('Copied sanitized Turbo Themes CSS assets (.css only)');
 } else {
-  throw new Error('turbo-themes CSS not found — run bun install in apps/site first');
+  console.warn('Warning: @lgtm-hq/turbo-themes CSS dist not found at', cssSrc);
 }

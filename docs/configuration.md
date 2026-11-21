@@ -13,13 +13,13 @@ Lintro for your project.
 
 Lintro uses a clear 5-tier configuration model that separates concerns:
 
-| Tier          | Purpose                                             | When Applied               |
-| ------------- | --------------------------------------------------- | -------------------------- |
-| **execution** | What tools run and how                              | Always                     |
-| **enforce**   | Cross-cutting settings (line_length, target_python) | Always (via CLI flags)     |
-| **defaults**  | Fallback config when no native config exists        | Only when no native config |
-| **tools**     | Per-tool enable/disable and config source           | Always                     |
-| **ai**        | AI-powered summaries and fixes                      | When enabled + API key set |
+| Tier          | Purpose                                             | When Applied                                                |
+| ------------- | --------------------------------------------------- | ----------------------------------------------------------- |
+| **execution** | What tools run and how                              | Always                                                      |
+| **enforce**   | Cross-cutting settings (line_length, target_python) | Always (via CLI flags)                                      |
+| **defaults**  | Fallback config when no native config exists        | Only when no native config                                  |
+| **tools**     | Per-tool enable/disable and config source           | Always                                                      |
+| **ai**        | AI-powered summaries and fixes                      | Explicit opt-in + configured provider/transport credentials |
 
 The five tiers above form the `LintroConfig` model's core configuration story
 (`lintro/config/lintro_config.py`). Additional optional sections — `review` (diff-review
@@ -140,25 +140,31 @@ The configuration system works in a specific order:
 
 2. **Enforce Tier** - Cross-cutting settings injected as CLI flags
    - These settings override native configs via CLI arguments
-   - Example: `line_length: 88` becomes `--line-length 88` for ruff/black
-   - Applied to all tools that support the setting
+   - Example: `line_length: 88` becomes `--line-length 88` for Ruff and Black
+   - In 0.180.34 only Ruff and Black receive `line_length`, and only Ruff, Black and
+     mypy receive `target_python`. Other tools, including Prettier, keep their native
+     width setting
 
 3. **Defaults Tier** - Fallback configuration when no native config exists
    - Only used if tool's native config file is not found
    - Example: If `.prettierrc` doesn't exist, use `defaults.prettier`
    - Generated as temporary config files when needed
 
-4. **Tools Tier** - Per-tool enable/disable, config source, and auto-install
+4. **Tools Tier** - Per-tool enable/disable, config metadata, and auto-install
    - `enabled`: Whether the tool is enabled
-   - `config_source`: Optional explicit path to native config file
+   - `config_source`: Parsed and displayed metadata only in 0.180.34; no execution
+     consumer uses this field to select a native configuration file. Use native
+     discovery or an explicitly documented per-wrapper option instead.
    - `auto_install`: Per-tool auto-install override (`true`/`false`/omit to inherit
      global)
 
 5. **AI Tier** - AI-powered summaries and fix suggestions (opt-in)
-   - `enabled`: Whether AI features are active (default: `false`)
+   - `enabled`: Master switch (default: `false`); `lint` and `review` are separate
+     opt-ins
    - `provider`: AI provider to use (`anthropic`, `cursor` or `openai`) — required once
      `ai.lint` or `ai.review` is enabled; there is no default
-   - Applied only when enabled and a valid API key is set
+   - Requires explicit AI feature opt-in and credentials for the selected
+     provider/transport (API key or CLI session)
 
 ### Configuration Resolution Example
 
@@ -168,14 +174,17 @@ For a tool like Prettier:
 2. Check for native config (`.prettierrc`, `.prettierrc.json`, etc.)
 3. If native config found:
    - Use native config
-   - Inject `enforce.line_length` as `--print-width` CLI flag
    - Ignore `defaults.prettier`
 4. If no native config found:
-   - Generate temp config from `defaults.prettier`
-   - Inject `enforce.line_length` as `--print-width` CLI flag
-   - Use generated config
+   - Generate a temporary config from Lintro's built-in Prettier default
+     (`proseWrap: always`) merged with `defaults.prettier`
+   - Pass it to Prettier with `--config`
 
-This ensures consistent behavior while respecting tool-specific configurations.
+`enforce.line_length` is not passed to Prettier in 0.180.34: the enforce flag table
+covers Ruff and Black only. Set Prettier's width with `printWidth` in its native
+configuration or under `defaults.prettier`. The wrapper's own `line_length` option adds
+`--print-width` only on a fallback path with no injected config and no native config,
+which the generated default config normally pre-empts.
 
 ### Configuration Source Precedence
 
@@ -266,7 +275,7 @@ enforce:
 ai:
   enabled: true
   provider: anthropic # or cursor / openai — required, no default
-  transport: api # or cli — no default; doctor flags it unset
+  transport: api # or cli; omitted: api for Anthropic/OpenAI, cli for Cursor
 ```
 
 ## Lintro Configuration
@@ -289,7 +298,7 @@ execution:
 # Tier 2: ENFORCE - Cross-cutting settings injected via CLI flags
 # These OVERRIDE native configs for consistency
 enforce:
-  line_length: 88 # Injected as --line-length, --print-width, etc.
+  line_length: 88 # Injected as --line-length for Ruff and Black
   target_python: py313 # Injected as --target-version
 
 # Tier 3: DEFAULTS - Fallback config when NO native config exists
@@ -301,13 +310,13 @@ defaults:
   yamllint:
     extends: default
 
-# Tier 4: TOOLS - Per-tool enable/disable, config source, and auto-install
+# Tier 4: TOOLS - Per-tool enable/disable, config metadata, and auto-install
 tools:
   ruff:
     enabled: true
   prettier:
     enabled: true
-    config_source: '.prettierrc' # Optional: explicit native config path
+    # Keep native formatting policy in a normally discovered .prettierrc file.
   tsc:
     auto_install: true # Override global auto_install for this tool only
 ```
@@ -701,9 +710,13 @@ See the [Docker Usage Guide](docker.md) for more details on container behavior.
 
 #### Tool-Specific Options
 
+Prettier formatting width belongs in native configuration as `printWidth`. The
+`prettier:print_width` spelling is accepted by the generic parser but is not consumed by
+this wrapper in 0.180.34.
+
 ```bash
 # Tool-specific options (key=value; lists use |)
-lintro check --tool-options "ruff:line_length=88,prettier:print_width=80"
+lintro check --tool-options "ruff:line_length=88,prettier:timeout=60"
 
 # Example with lists and booleans
 lintro check --tool-options "ruff:select=E|F|W,ruff:preview=True"
@@ -1190,26 +1203,31 @@ existing setups.
 
 ### Enforce Settings (Cross-Cutting Concerns)
 
-The `enforce` tier contains settings that MUST be consistent across tools. These are
-injected directly as CLI flags to each tool, overriding their native configs.
+The `enforce` tier contains settings that should be consistent across the tools that
+accept them. These are injected directly as CLI flags, overriding native configs.
 
 ```yaml
 enforce:
-  line_length: 88 # Injected as --line-length (ruff, black) or --print-width (prettier)
-  target_python: py313 # Injected as --target-version (ruff, black)
+  line_length: 88 # Injected as --line-length (Ruff, Black)
+  target_python: py313 # Injected as --target-version (Ruff, Black), --python-version (mypy)
 ```
 
-**How CLI injection works:**
+**How CLI injection works in 0.180.34:**
 
-| Tool     | CLI Flag for `line_length` | CLI Flag for `target_python` |
-| -------- | -------------------------- | ---------------------------- |
-| Ruff     | `--line-length 88`         | `--target-version py313`     |
-| Black    | `--line-length 88`         | `--target-version py313`     |
-| Prettier | `--print-width 88`         | N/A                          |
+| Tool  | CLI Flag for `line_length` | CLI Flag for `target_python` |
+| ----- | -------------------------- | ---------------------------- |
+| Ruff  | `--line-length 88`         | `--target-version py313`     |
+| Black | `--line-length 88`         | `--target-version py313`     |
+| mypy  | N/A                        | `--python-version 3.13`      |
+
+Prettier is not in this table: `enforce.line_length` is not injected as `--print-width`.
+Use `printWidth` in Prettier's native configuration, or under `defaults.prettier` when
+the project has no native Prettier config.
 
 **Tools without CLI support:**
 
-Some tools (Yamllint, Markdownlint) don't have CLI flags for line length. For these:
+Some tools (Yamllint, Markdownlint, Prettier) receive no enforce flag for line length.
+For these:
 
 - Use the `defaults` tier to provide fallback config
 - Or configure their native config files manually
@@ -1323,8 +1341,8 @@ Execution order (derived from tool claims)
 
 ### Format authority on Python
 
-`*.py` is the one pattern in the 42-tool set with two mutating claimants. Black holds
-`{FORMAT}` and ruff holds `{FIX, FORMAT}`, so black owns the format phase (fewest
+`*.py` is the one pattern in the selected tool set with two mutating claimants. Black
+holds `{FORMAT}` and ruff holds `{FIX, FORMAT}`, so black owns the format phase (fewest
 mutating capabilities wins) and ruff is demoted to its fix capability: when black is
 selected and its resolved binary passes the version gate, ruff's `format` /
 `format_check` stages are switched off unless you ask for them explicitly through
@@ -1931,6 +1949,7 @@ exclude = [
 ]
 
 # Rule selection
+[tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -1950,27 +1969,29 @@ ignore = [
 ]
 
 # Per-file ignores
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["D100", "D103"]
 "__init__.py" = ["F401"]
 
 # Import sorting
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 known-first-party = ["lintro"]
 force-single-line = true
 
 # Docstring configuration
-[tool.ruff.pydocstyle]
+[tool.ruff.lint.pydocstyle]
 convention = "google"
 ```
 
-**Alternative:** `setup.cfg`
+**Alternative:** `ruff.toml` or `.ruff.toml` (omit the `tool.ruff` prefix). Ruff does
+not read `setup.cfg`.
 
-```ini
-[tool:ruff]
+```toml
 line-length = 88
-select = E,W,F,I,N,D
-exclude = .git,__pycache__,.venv
+exclude = [".git", "__pycache__", ".venv"]
+
+[lint]
+select = ["E", "W", "F", "I", "N", "D"]
 ```
 
 If Ruff cannot run, for example because it cannot parse `pyproject.toml`, it exits 2 and
@@ -1997,9 +2018,21 @@ lintro check --tools mypy --tool-options mypy:strict=False
 # Surface missing-import errors (no ignore)
 lintro check --tools mypy --tool-options mypy:ignore_missing_imports=False
 
-# Pin target Python version
-lintro check --tools mypy --tool-options mypy:python_version=3.13
+# Run with the native target-version configuration below
+lintro check --tools mypy
 ```
+
+Set the target version as a string in `pyproject.toml`:
+
+```toml
+[tool.mypy]
+python_version = "3.13"
+```
+
+Alternatively, use `python_version = 3.13` under `[mypy]` in `mypy.ini`. This release's
+common `--tool-options` parser coerces a decimal version such as `3.13` to a float,
+while the mypy wrapper requires a string. Shell quoting does not prevent that internal
+conversion; use native configuration for this setting.
 
 #### Bandit Configuration
 
@@ -2008,13 +2041,8 @@ lintro check --tools mypy --tool-options mypy:python_version=3.13
 ```toml
 [tool.bandit]
 exclude_dirs = ["tests", "venv", ".git"]
-tests = ["B101,B102,B103"]  # Specific test IDs to run
-skips = ["B101"]            # Test IDs to skip
-confidence = "MEDIUM"       # Minimum confidence level
-severity = "LOW"           # Minimum severity level
-
-[tool.bandit.assert_used]
-exclude = ["test_*.py"]     # Files to exclude from assert_used test
+tests = ["B102", "B103"] # Specific test IDs to run
+skips = ["B101"] # Test IDs to skip
 ```
 
 **File:** `.bandit`
@@ -2022,24 +2050,38 @@ exclude = ["test_*.py"]     # Files to exclude from assert_used test
 ```ini
 [bandit]
 exclude = tests,venv,.git
-tests = B101,B102,B103
+tests = B102,B103
 skips = B101
-confidence = MEDIUM
-severity = LOW
-
-[[tool.bandit.assert_used]]
-exclude = test_*.py
 ```
 
-**Available Options:**
+Set severity and confidence thresholds at runtime:
 
-- `tests`: Comma-separated list of test IDs to run
-- `skips`: Comma-separated list of test IDs to skip
-- `exclude`: Comma-separated list of paths to exclude
-- `exclude_dirs`: List of directories to exclude (pyproject.toml only)
-- `severity`: Minimum severity level (`LOW`, `MEDIUM`, `HIGH`)
-- `confidence`: Minimum confidence level (`LOW`, `MEDIUM`, `HIGH`)
-- `baseline`: Path to baseline report for comparison
+```bash
+# Native Bandit with the INI file
+bandit -r src/ --ini .bandit --severity-level medium --confidence-level medium
+
+# Native Bandit with pyproject.toml
+bandit -r src/ -c pyproject.toml --severity-level medium --confidence-level medium
+
+# Lintro runtime options
+lintro check src/ --tools bandit --tool-options "bandit:severity=MEDIUM,bandit:confidence=MEDIUM"
+```
+
+`tests` and `skips` select known rule IDs; keep the two sets disjoint. `exclude` is a
+comma-separated INI path list; `exclude_dirs` is the TOML list. Use native CLI flags for
+thresholds with `.bandit`, rather than string-valued INI `confidence` or `severity`
+entries. Plugin-specific settings belong in supported TOML/YAML configuration, not
+TOML-style sections inside `.bandit`.
+
+Lintro also accepts `severity`, `confidence`, `tests`, `skips`, `configfile` and
+`baseline` as Bandit tool options. Severity and confidence accept `LOW`, `MEDIUM` or
+`HIGH`; a baseline is a path to a native Bandit JSON report.
+
+A file Bandit's own configuration excludes, for example through `exclude_dirs` in the
+file given as the `configfile` option, is not scanned and gets no per-file entry in
+Bandit's report metrics. When that is true of every file Lintro passed, the run is
+reported as "no files": it passes without claiming any file was inspected. When only
+some files are excluded, the run is an ordinary one.
 
 A file Bandit's own configuration excludes, for example through `exclude_dirs` in the
 file given as the `configfile` option, is not scanned and gets no per-file entry in
@@ -2049,8 +2091,8 @@ some files are excluded, the run is an ordinary one.
 
 #### Semgrep Configuration
 
-Semgrep is a fast, open-source static analysis tool for security scanning and code
-quality enforcement across 30+ languages.
+Semgrep is an open-source static analysis tool for security scanning and code quality
+enforcement across many languages.
 
 **File:** `.semgrep.yaml` or `.semgrep.yml`
 
@@ -2207,7 +2249,7 @@ lintro check --tools gitleaks --tool-options gitleaks:max_target_megabytes=10
 
 #### TruffleHog Configuration
 
-TruffleHog is a secrets scanner with 800+ provider-specific detectors and optional live
+TruffleHog is a secrets scanner with provider-specific detectors and optional live
 credential verification. Lintro runs it in `filesystem` mode. **Verification is disabled
 by default** (`--no-verification`) so default scans make no outbound network calls;
 verification can be re-enabled per run, in which case TruffleHog may contact third-party
@@ -2563,14 +2605,16 @@ bandit (which scans source code) by scanning the dependency surface. It audits
 
 **Install:** `pip install pip-audit`, `uv add pip-audit`, or `brew install pip-audit`.
 
-**File:** none. pip-audit has no native config file; suppressions are passed on the
-command line by upstream and are not exposed via lintro.
+**File:** none. pip-audit has no native config file. Lintro exposes advisory suppression
+through `ignore_vulns`; each accepted ID becomes a native `--ignore-vuln` argument. Keep
+suppressions reviewed and time-bounded.
 
 **Available Options:**
 
-| Option    | Type    | Description                            |
-| --------- | ------- | -------------------------------------- |
-| `timeout` | integer | Scan timeout in seconds (default: 120) |
+| Option         | Type                                          | Description                            |
+| -------------- | --------------------------------------------- | -------------------------------------- |
+| `timeout`      | integer                                       | Scan timeout in seconds (default: 120) |
+| `ignore_vulns` | list of advisory IDs or pipe-separated string | IDs forwarded with `--ignore-vuln`     |
 
 **Notes:**
 
@@ -2763,9 +2807,9 @@ Every message id and symbol is documented upstream at
 
 Prettier handles formatting for CSS, HTML, JSON, YAML, Markdown, and GraphQL files.
 
-> **Note:** JavaScript and TypeScript files are handled by **oxfmt** for better
-> performance (30x faster). See [Oxfmt Configuration](#oxfmt-configuration) for JS/TS
-> formatting options.
+> **Note:** JavaScript and TypeScript files are handled by **oxfmt** in this
+> integration. See [Oxfmt Configuration](#oxfmt-configuration) for JS/TS formatting
+> options.
 
 **File:** `.prettierrc`
 
@@ -2909,8 +2953,9 @@ lintro check src/ --tools tsc,oxlint,oxfmt
 
 #### Oxlint Configuration
 
-Oxlint is a fast JavaScript/TypeScript linter (50-100x faster than ESLint) with 661+
-built-in rules from ESLint, TypeScript, React, JSX-a11y, Unicorn, and more.
+Oxlint is a JavaScript/TypeScript linter with built-in rules drawn from ESLint,
+TypeScript, React, JSX-a11y, Unicorn, and more. Rule counts and speed depend on the
+installed Oxlint release; Lintro does not measure either.
 
 **Native Config Detection:**
 
@@ -2988,8 +3033,8 @@ lintro check --tools oxlint --tool-options "oxlint:tsconfig=tsconfig.app.json"
 
 #### Stylelint Configuration
 
-Stylelint is a mighty, configurable linter and fixer for CSS, SCSS, Sass, and Less
-stylesheets, with 100+ built-in rules and `--fix` support.
+Stylelint is a configurable linter and fixer for CSS, SCSS, Sass, and Less stylesheets,
+with built-in rules and `--fix` support.
 
 > Stylelint requires a configuration to run. When no config is resolvable, Lintro skips
 > stylelint as a non-error (rather than surfacing stylelint's hard
@@ -3074,8 +3119,8 @@ lintro check styles/ --tools stylelint --tool-options "stylelint:timeout=60"
 
 #### Oxfmt Configuration
 
-Oxfmt is a fast JavaScript/TypeScript formatter (30x faster than Prettier) that provides
-Prettier-compatible formatting with minimal configuration.
+Oxfmt formats JavaScript and TypeScript. Its native configuration controls the
+formatting style used by this integration.
 
 **Native Config Detection:**
 
@@ -3329,13 +3374,19 @@ configuration is needed for Lintro.
 
 **Available Options via `--tool-options`:**
 
-| Option              | Type    | Description                                      |
-| ------------------- | ------- | ------------------------------------------------ |
-| `project`           | string  | Path to tsconfig.json file                       |
-| `strict`            | boolean | Enable strict type checking mode                 |
-| `skip_lib_check`    | boolean | Skip checking declaration files (default: true)  |
-| `use_project_files` | boolean | Use tsconfig's include patterns (default: false) |
-| `timeout`           | integer | Execution timeout in seconds (default: 120)      |
+| Option              | Type    | Description                                                       |
+| ------------------- | ------- | ----------------------------------------------------------------- |
+| `project`           | string  | Path to tsconfig.json file; the native project selects the files  |
+| `strict`            | boolean | Enable strict type checking mode                                  |
+| `skip_lib_check`    | boolean | Skip checking declaration files (default: true)                   |
+| `use_project_files` | boolean | Request native project file selection (default: false; see below) |
+| `timeout`           | integer | Execution timeout in seconds (default: 120)                       |
+
+`use_project_files=false` does not guarantee that only the paths you pass are checked.
+An explicit `project` uses the native project. So does a discovered tsconfig that sets
+`include`, `files` or `exclude`, directly or through `extends`. Only when the discovered
+tsconfig has no such scoping does Lintro write a temporary tsconfig narrowed to the
+selected files; with no tsconfig at all, the files are passed directly.
 
 **Usage Examples:**
 
@@ -3608,7 +3659,7 @@ lintro format --tools sqlfluff
 lintro check --tools sqlfluff --tool-options sqlfluff:dialect=postgres
 
 # Exclude specific rules
-lintro check --tools sqlfluff --tool-options sqlfluff:exclude_rules=L010,L014
+lintro check --tools sqlfluff --tool-options "sqlfluff:exclude_rules=L010|L014"
 
 # Use jinja templater
 lintro check --tools sqlfluff --tool-options sqlfluff:templater=jinja
@@ -3915,11 +3966,10 @@ lintro check src/ --tools clippy
 
 #### golangci-lint Configuration
 
-golangci-lint is the de-facto Go meta-linter, running 100+ sub-linters in parallel.
-Lintro targets golangci-lint **v2** and automatically discovers Go modules by finding
-`go.mod` files; non-Go projects are skipped. It requires the Go toolchain to be
-installed. Linter selection and rule tuning are configured through the project's native
-config file.
+golangci-lint is a Go meta-linter that runs many sub-linters. Lintro targets
+golangci-lint **v2** and automatically discovers Go modules by finding `go.mod` files;
+non-Go projects are skipped. It requires the Go toolchain to be installed. Linter
+selection and rule tuning are configured through the project's native config file.
 
 **Installation:**
 
@@ -4706,19 +4756,21 @@ file_prefix = "lintro-report"
 
 ### Output System: Auto-Generated Reports
 
-Lintro now generates all output formats for every run in a timestamped directory under
-`.lintro/` (e.g., `.lintro/run-20240722-153000/`).
+During a logged check or format run, Lintro writes `report.md`, `report.html` and
+`summary.csv` under a timestamped `.lintro/run-…/` directory. `console.log` is written
+when there is captured console output.
 
-You do not need to specify output format or file options. Each run produces:
+JSON is available, but is not a default local run report. For an explicit JSON file:
 
-- `console.log`: The full console output
-- `results.json`: Machine-readable results
-- `report.md`: Human-readable Markdown report
-- `report.html`: Web-viewable HTML report
-- `summary.csv`: Spreadsheet-friendly summary
+```bash
+lintro check --output-format json --output lintro-results.json
+```
 
-This ensures you always have every format available for your workflow, CI, or reporting
-needs.
+For an additional JSON artifact, configure `execution.artifacts: [json]` in the Lintro
+configuration. It is written to `.lintro/artifacts/json/results.json`. When
+`GITHUB_ACTIONS=true`, JSON and SARIF artifacts are emitted automatically; this does not
+change the console output format. Other configured artifacts are written alongside them.
+An artifact is separate from the timestamped run reports.
 
 ## AI Configuration
 
@@ -4738,7 +4790,9 @@ uv sync --extra ai
 # Anthropic: ANTHROPIC_API_KEY
 # Cursor:    CURSOR_API_KEY
 # OpenAI:    OPENAI_API_KEY
-# Custom:    set ai.api_key_env in config to use any env var name
+# API transport: ai.api_key_env may rename its key variable.
+# CLI transport: use the provider CLI login/key; see the transport guide.
+# Cursor SDK: additionally install lintro[cursor].
 export ANTHROPIC_API_KEY=sk-ant-...   # whichever provider you chose
 ```
 
@@ -4749,15 +4803,19 @@ ai:
   lint: true # AI summaries / --fix on chk/fmt
   review: false # lintro review (opt-in separately)
   provider: anthropic # or cursor / openai — required, no default
-  transport: api # or cli — no default; doctor flags it unset
+  transport: api # or cli; omitted: api for Anthropic/OpenAI, cli for Cursor
 ```
+
+The AI dependency extra does not provide a paid account or provider login. CLI transport
+can use an authenticated provider session; Cursor SDK transport requires the separate
+`cursor` extra. See [authentication and cost-cap behavior](ai-review-transports.md).
 
 ### AI CLI Flags
 
-| Flag    | Effect                             |
-| ------- | ---------------------------------- |
-| (none)  | AI summary only (1 API call)       |
-| `--fix` | Add interactive AI fix suggestions |
+| Flag    | Effect                                       |
+| ------- | -------------------------------------------- |
+| (none)  | AI summary request (when AI lint is enabled) |
+| `--fix` | Add interactive AI fix suggestions           |
 
 ### Config Defaults for Flags
 
@@ -4776,37 +4834,37 @@ ai:
 
 ### Full AI Config Reference
 
-| Setting                  | Type   | Default        | Description                                                                                                      |
-| ------------------------ | ------ | -------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `enabled`                | bool   | `false`        | Master switch; ANDs with `lint` / `review`                                                                       |
-| `lint`                   | bool   | `false`        | Enable AI lint summaries on `chk`/`fmt`                                                                          |
-| `review`                 | bool   | `false`        | Enable the `lintro review` AI diff review                                                                        |
-| `provider`               | string | none           | AI provider (`anthropic`, `cursor`, or `openai`); required when `ai.lint` or `ai.review` is enabled              |
-| `transport`              | string | none           | Transport (`api` or `cli`); no default — `lintro doctor` flags it unset when `ai.lint` or `ai.review` is enabled |
-| `model`                  | string | (default)      | Model override                                                                                                   |
-| `api_key_env`            | string | (default)      | Custom env var for API key                                                                                       |
-| `default_fix`            | bool   | `false`        | Always run `--fix` in check                                                                                      |
-| `auto_apply`             | bool   | `false`        | Apply fixes without confirmation                                                                                 |
-| `auto_apply_safe_fixes`  | bool   | `true`         | Auto-apply safe-style fixes in non-interactive                                                                   |
-| `max_tokens`             | int    | `4096`         | Max tokens per request                                                                                           |
-| `max_fix_attempts`       | int    | `20`           | Max issues to attempt fixing per run                                                                             |
-| `max_parallel_calls`     | int    | `5`            | Concurrent AI calls (1-20); honored with a cost cap; n−1 overshoot possible                                      |
-| `max_retries`            | int    | `2`            | Max retries for transient errors (0-10)                                                                          |
-| `rate_limit_max_retries` | int    | `6`            | Retries for HTTP 429 only (0-20); waits `Retry-After` clamped to 300 s                                           |
-| `max_cost_usd`           | float  | `null`         | Legacy USD cap; prefer profiles. Overlay `uncapped` lifts; overlay `0` is an error                               |
-| `api_timeout`            | float  | `60.0`         | Legacy timeout (s); prefer `transports.*.timeout`                                                                |
-| `transports`             | object | empty profiles | Per-transport profiles (`api` / `cli`) — see [AI review transports](ai-review-transports.md)                     |
-| `validate_after_group`   | bool   | `false`        | Validate immediately after each accepted group                                                                   |
-| `show_cost_estimate`     | bool   | `true`         | Show token/cost info in output                                                                                   |
-| `context_lines`          | int    | `15`           | Lines of context sent for fix generation (1-100)                                                                 |
-| `fix_search_radius`      | int    | `5`            | Line search radius for fix application (1-50)                                                                    |
-| `checkpoint_retention`   | int    | `10`           | Git checkpoint refs kept (>=0; 0 = current only)                                                                 |
-| `checkpoint_fmt`         | bool   | `false`        | Git checkpoint before `lintro format` mutations                                                                  |
-| `retry_base_delay`       | float  | `1.0`          | Initial retry delay in seconds (min 0.1)                                                                         |
-| `retry_max_delay`        | float  | `30.0`         | Maximum retry delay in seconds (min 1.0)                                                                         |
-| `retry_backoff_factor`   | float  | `2.0`          | Retry delay multiplier (min 1.0)                                                                                 |
-| `transcript_logging`     | bool   | `false`        | Opt-in NDJSON logging of AI provider traffic                                                                     |
-| `transcript_retention`   | int    | `10`           | Max transcript files kept under `.lintro-cache`                                                                  |
+| Setting                  | Type   | Default        | Description                                                                                                                                                                                          |
+| ------------------------ | ------ | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`                | bool   | `false`        | Master switch; ANDs with `lint` / `review`                                                                                                                                                           |
+| `lint`                   | bool   | `false`        | Enable AI lint summaries on `chk`/`fmt`                                                                                                                                                              |
+| `review`                 | bool   | `false`        | Enable the `lintro review` AI diff review                                                                                                                                                            |
+| `provider`               | string | none           | AI provider (`anthropic`, `cursor`, or `openai`); required when `ai.lint` or `ai.review` is enabled                                                                                                  |
+| `transport`              | string | none           | Transport (`api` or `cli`); no default — `lintro doctor` flags it unset when `ai.lint` or `ai.review` is enabled                                                                                     |
+| `model`                  | string | (default)      | Model override                                                                                                                                                                                       |
+| `api_key_env`            | string | (default)      | Custom env var for API key                                                                                                                                                                           |
+| `default_fix`            | bool   | `false`        | Always run `--fix` in check                                                                                                                                                                          |
+| `auto_apply`             | bool   | `false`        | Apply fixes without confirmation                                                                                                                                                                     |
+| `auto_apply_safe_fixes`  | bool   | `true`         | Auto-apply safe-style fixes in non-interactive                                                                                                                                                       |
+| `max_tokens`             | int    | `4096`         | Max tokens per request                                                                                                                                                                               |
+| `max_fix_attempts`       | int    | `20`           | Max issues to attempt fixing per run                                                                                                                                                                 |
+| `max_parallel_calls`     | int    | `5`            | Concurrent AI lint/fix calls (1–20), including with a cap; in-flight calls can overshoot. Enforced diff-review caps serialize chunk calls; see [canonical cost policy](ai-features.md#cost-control). |
+| `max_retries`            | int    | `2`            | Max retries for transient errors (0-10)                                                                                                                                                              |
+| `rate_limit_max_retries` | int    | `6`            | Retries for HTTP 429 only (0-20); waits `Retry-After` clamped to 300 s                                                                                                                               |
+| `max_cost_usd`           | float  | `null`         | Legacy USD cap; prefer profiles. Overlay `uncapped` lifts; overlay `0` is an error                                                                                                                   |
+| `api_timeout`            | float  | `60.0`         | Legacy timeout (s); prefer `transports.*.timeout`                                                                                                                                                    |
+| `transports`             | object | empty profiles | Per-transport profiles (`api` / `cli`) — see [AI review transports](ai-review-transports.md)                                                                                                         |
+| `validate_after_group`   | bool   | `false`        | Validate immediately after each accepted group                                                                                                                                                       |
+| `show_cost_estimate`     | bool   | `true`         | Show token/cost info in output                                                                                                                                                                       |
+| `context_lines`          | int    | `15`           | Lines of context sent for fix generation (1-100)                                                                                                                                                     |
+| `fix_search_radius`      | int    | `5`            | Line search radius for fix application (1-50)                                                                                                                                                        |
+| `checkpoint_retention`   | int    | `10`           | Git checkpoint refs kept (>=0; 0 = current only)                                                                                                                                                     |
+| `checkpoint_fmt`         | bool   | `false`        | Git checkpoint before `lintro format` mutations                                                                                                                                                      |
+| `retry_base_delay`       | float  | `1.0`          | Initial retry delay in seconds (min 0.1)                                                                                                                                                             |
+| `retry_max_delay`        | float  | `30.0`         | Maximum retry delay in seconds (min 1.0)                                                                                                                                                             |
+| `retry_backoff_factor`   | float  | `2.0`          | Retry delay multiplier (min 1.0)                                                                                                                                                                     |
+| `transcript_logging`     | bool   | `false`        | Opt-in NDJSON logging of AI provider traffic                                                                                                                                                         |
+| `transcript_retention`   | int    | `10`           | Max transcript files kept under `.lintro-cache`                                                                                                                                                      |
 
 ### Idiom Review Tool (`idiom-review`)
 
@@ -4855,15 +4913,21 @@ skipped result rather than failing the run. Findings are cached by content hash 
 ai:
   enabled: true
   provider: anthropic # or cursor / openai — required, no default
-  transport: api # or cli — no default; doctor flags it unset
-tools:
-  idiom-review:
-    options:
-      enabled: true # opt-in gate (default: false)
-      mode: per-file # per-file | duplication | both
-      min_confidence: medium
-      max_files: 25 # cap files reviewed per run (cost bound)
+  transport: api # or cli; omitted: api for Anthropic/OpenAI, cli for Cursor
 ```
+
+```toml
+# pyproject.toml — persisted options for this tool
+[tool.lintro.idiom-review]
+enabled = true # opt-in gate (default: false)
+mode = "per-file" # per-file | duplication | both
+min_confidence = "medium"
+max_files = 25 # cap files reviewed per run (cost bound)
+```
+
+In 0.180.34 a `tools.idiom-review.options` mapping in `.lintro-config.yaml` is reported
+by `lintro config validate` as an unknown option and never reaches the tool, so the
+opt-in gate stays closed. Persist these options in the `pyproject.toml` table above.
 
 Or enable ad hoc from the CLI without modifying config:
 
@@ -4917,34 +4981,59 @@ lintro check --tools all --output full-report.txt
 
 ### Custom Output Formats
 
-#### JSON Output (planned)
+JSON and Markdown output are available in this release. Use `--output-format` to select
+the report format and `--output` to write the report to a file.
+
+#### JSON Output {#json-output-planned}
 
 ```bash
 lintro check --output-format json --output results.json
 ```
 
+Illustrative JSON file for one Ruff finding, using the shipped output writer:
+
 ```json
 {
+  "timestamp": "2026-11-15T12:00:00+00:00",
+  "action": "check",
   "summary": {
-    "total_issues": 15,
-    "tools_run": ["ruff", "pydoclint"],
-    "files_checked": 42
+    "total_issues": 1,
+    "total_net_resolved": 0,
+    "total_fixed": 0,
+    "tools_run": 1,
+    "timed_out_tools": []
   },
-  "issues": [
+  "results": [
     {
-      "file": "src/main.py",
-      "line": 12,
-      "column": 5,
       "tool": "ruff",
-      "code": "F401",
-      "message": "'os' imported but unused",
-      "severity": "error"
+      "success": false,
+      "issues_count": 1,
+      "skipped": false,
+      "skip_reason": null,
+      "timed_out": false,
+      "output": null,
+      "status": "failed",
+      "issues": [
+        {
+          "file": "src/main.py",
+          "line": 12,
+          "code": "F401",
+          "message": "`os` imported but unused"
+        }
+      ]
     }
   ]
 }
 ```
 
-#### Markdown Output (planned)
+`summary.tools_run` is a count. Findings belong to each tool entry in `results`; there
+is no top-level `issues` array or `summary.files_checked` field. The timestamp varies by
+run. `total_fixed` is a deprecated alias of `total_net_resolved`. Optional profiling,
+severity and baseline data add fields when enabled. See the
+[JSON file writer](https://github.com/lgtm-hq/py-lintro/blob/b9fd8c1740c1cfc209224d8257b51bcfed6ee778/lintro/utils/output/file_writer.py)
+for this release's complete file contract.
+
+#### Markdown Output {#markdown-output-planned}
 
 ```bash
 lintro check --output-format markdown --output QUALITY_REPORT.md
@@ -5145,8 +5234,22 @@ scripts. Use narrower CLI paths or Semgrep's existing `include`/`exclude` option
 restrict the scan further, for example:
 
 ```bash
-lintro check scripts --tools semgrep --tool-options 'semgrep:include=scripts/**'
+lintro check scripts --tools semgrep --tool-options 'semgrep:include=scripts/**|scripts/*'
 ```
+
+The directory globs are matched against paths relative to the project root: the nearest
+directory at or above the scanned files that holds `.git`, `pyproject.toml`,
+`package.json`, `setup.py`, `setup.cfg`, `go.mod`, or `Cargo.toml`. In a tree with no
+such marker, Semgrep runs from the files' common directory instead, the same directory
+your own `.semgrep.yaml`, a relative `config`, and rooted `paths` filters resolve
+against. Scanning only `scripts/` then hands Semgrep `fmt.sh` rather than
+`scripts/fmt.sh`, so `**/scripts/**` cannot match. Lintro does not move Semgrep to
+compensate. It fails the Semgrep result as incomplete instead: `status: "failed"` in
+JSON, with a message naming the pack and the files it did not check. Findings from other
+rules are still reported. This also covers a nested `scripts/sub/`, and starting inside
+`scripts/` to scan a subdirectory. A `scripts` directory counts when it is the directory
+you started `lintro check` in or lies between it and the scanned path; one above that
+directory does not. Add a project marker to scan these trees with the pack.
 
 The directory globs are matched against paths relative to the project root: the nearest
 directory at or above the scanned files that holds `.git`, `pyproject.toml`,

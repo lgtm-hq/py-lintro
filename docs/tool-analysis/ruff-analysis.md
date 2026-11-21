@@ -2,17 +2,18 @@
 
 ## Overview
 
-Ruff is an extremely fast Python linter and code formatter written in Rust that can
-replace multiple Python tools like flake8, black, isort, and more. This analysis
-compares Lintro's wrapper implementation with the core Ruff tool.
+Ruff is a Python linter and code formatter written in Rust that covers rules from
+flake8, isort, pyupgrade and other tools, with Black-compatible formatting. This
+analysis compares Lintro's wrapper implementation with the core Ruff tool.
 
 ## Core Tool Capabilities
 
 Ruff provides extensive linting and formatting capabilities including:
 
-- **Linting**: 700+ rules covering PEP 8, flake8, isort, pyupgrade, and more
+- **Linting**: Rules covering PEP 8, flake8, isort, pyupgrade, and more; the count
+  depends on the installed release
 - **Formatting**: Black-compatible code formatting with customization options
-- **Performance**: Extremely fast execution due to Rust implementation
+- **Implementation**: Rust-based; no timing is established by this analysis
 - **Configuration**: `pyproject.toml`, `ruff.toml`, or command-line options
 - **Rule selection**: `--select`, `--ignore`, `--extend-select`, `--extend-ignore`
 - **Formatting options**: `--line-length`, `--target-version`,
@@ -56,7 +57,12 @@ cmd = self._get_executable_command("ruff") + ["format"]
 
 ### Cooperation with Black (Policy)
 
-When Black is configured as a post-check in Lintro, Ruff focuses on linting by default:
+When Ruff and Black are both selected and Black is runnable, Ruff focuses on linting by
+default while Black owns Python formatting. If Black is unavailable or fails its version
+gate, Ruff's formatting stages stay enabled by default when Ruff is runnable. Explicit
+Ruff `format` and `format_check` overrides still apply. Use
+`lintro check --explain-order` to inspect resolved ownership. Legacy
+`[tool.lintro.post_checks]` configuration is ignored.
 
 - In `lintro format`, Ruff fixes lint issues while `format=False` unless explicitly
   overridden via `--tool-options ruff:format=True`.
@@ -93,11 +99,13 @@ lintro check --tool-options "ruff:format_check=True"
 - ❌ **Detailed formatting options**: No access to `--skip-magic-trailing-comma`,
   `--preview`
 - ❌ **Formatting configuration**: Limited line length and target version control
-- ❌ **Format-only mode**: Cannot run formatter without linter
+- **Format-only fixes:** Set `ruff:lint_fix=False,ruff:format=True` to skip the lint-fix
+  pass. Check mode still follows its separate lint/check workflow.
 
 **Advanced Features:**
 
-- ❌ **Watch mode**: No `--watch` functionality for continuous monitoring
+- ❌ **Watch mode**: No native watch-flag pass-through; repeated checks use
+  `lintro watch`
 - ❌ **Cache control**: No access to `--cache-dir`, `--no-cache`
 - ❌ **Statistics**: No access to `--statistics` output
 - ❌ **Exit codes**: Limited exit code customization
@@ -116,7 +124,10 @@ lintro check --tool-options "ruff:format_check=True"
 - ✅ **Structured output**: Issues formatted as standardized `Issue` objects
 - ✅ **Combined operations**: Runs both linting and formatting in single operation
 
-### 🔧 Proposed runtime pass-throughs
+### Unimplemented option ideas {#-proposed-runtime-pass-throughs}
+
+The following spellings are proposals, **not working commands in this release**. Use
+native configuration or the native CLI for the corresponding behavior.
 
 - `--tool-options ruff:config=path/to/ruff.toml`
 - `--tool-options ruff:per_file_ignores=A.py:E501|pkg/B.py:I001`
@@ -162,7 +173,7 @@ lintro check --tool-options "ruff:format_check=True"
 ruff check src/
 
 # With specific rules
-ruff check --select E501,W503,B006 src/
+ruff check --select E501,B006 src/
 
 # Auto-fixing
 ruff check --fix src/
@@ -176,21 +187,15 @@ ruff check --fix src/ && ruff format src/
 
 ### Lintro Wrapper
 
-```python
-# Basic checking (lint + format)
-ruff_tool = RuffTool()
-ruff_tool.set_files(["src/main.py"])
-issues = ruff_tool.check()
+```bash
+# Check Python lint and formatting through Lintro
+lintro check src/ --tools ruff
 
-# Auto-fixing
-ruff_tool.fix()
+# Apply Ruff fixes and formatting
+lintro format src/ --tools ruff
 
-# With specific options
-ruff_tool.set_options(
-    select=["E501", "W503", "B006"],
-    line_length=88,
-    unsafe_fixes=True
-)
+# Override selected rules and line length
+lintro check src/ --tools ruff --tool-options "ruff:select=E501|B006,ruff:line_length=88"
 ```
 
 ## Configuration Strategy
@@ -272,9 +277,9 @@ Lintro preserves all Ruff rule categories:
 ### When to Use Core Ruff
 
 - Need maximum configuration flexibility
-- Require specific output formats (SARIF, JUnit XML)
-- Want watch mode for continuous monitoring
-- Need custom rule definitions
+- Need Ruff’s native JUnit XML output; Lintro’s own output already includes SARIF
+- Need native Ruff watch behavior instead of Lintro’s repeated-check orchestration
+- Need native-only diagnostic and introspection flags
 - Require detailed statistics and caching control
 
 ### When to Use Lintro Wrapper
@@ -294,19 +299,23 @@ configuration files for complex setups, runtime options for overrides
 
 ### No Custom Rules
 
-**Problem**: Cannot define custom linting rules **Workaround**: Use Ruff's extensive
-built-in rule set (700+ rules)
+**Problem**: Cannot define custom linting rules **Workaround**: Use Ruff's built-in rule
+set
 
-### Limited Output Formats
+### Native parsing and public output {#limited-output-formats}
 
-**Problem**: Limited to JSON output for parsing **Workaround**: Lintro provides
-structured `Issue` objects and multiple output formats
+The Ruff integration reads native JSON into structured findings. This is the internal
+parser contract. Lintro's public output includes grid, JSON, Markdown, CSV and SARIF
+formats; select them with `--output-format`.
 
-## Future Enhancement Opportunities
+## Current orchestration and future work {#future-enhancement-opportunities}
+
+Watch is already available through `lintro watch --tools ruff`. It is Lintro's watch
+command, rather than a missing Ruff integration feature. The remaining items below are
+proposals, not promised or shipped capabilities.
 
 1. **Configuration Pass-through**: Support for all Ruff CLI options
 2. **Custom Rules**: Integration with Ruff's rule system
-3. **Watch Mode**: Continuous monitoring capabilities
-4. **Performance**: Leverage Ruff's parallel processing
-5. **Statistics**: Detailed performance and issue statistics
-6. **Cache Integration**: Intelligent caching for faster subsequent runs
+3. **Performance**: Leverage Ruff's parallel processing
+4. **Statistics**: Detailed performance and issue statistics
+5. **Cache Integration**: Intelligent caching for faster subsequent runs

@@ -11,17 +11,17 @@ compares Lintro's wrapper with the upstream `markdownlint-cli2` behavior.
   MD013 line length)
 - Config discovery: `.markdownlint.*` (`json`, `jsonc`, `yaml`, `yml`) and
   `.markdownlint-cli2.jsonc`
-- Ignore support via `.markdownlintignore`
-- Standard CLI options: `--config`, `--ignore`, `--fix` (not supported by cli2), glob
-  patterns for files
+- Ignore globs through native markdownlint-cli2 configuration
+- Native CLI options include `--config`, `--fix` and glob patterns. Native `--fix` is
+  not invoked by Lintro.
 
 ## Lintro Implementation Analysis
 
 ### ✅ Preserved Features
 
 - Standard linting via `markdownlint-cli2`
-- Native config discovery respected; `.markdownlintignore` honored by the underlying
-  tool
+- Native config discovery is respected; use the native cli2 configuration for ignore
+  globs.
 - File targeting for Markdown patterns (`*.md`, `*.markdown`)
 - Timeout control (default 30s) via `markdownlint:timeout`
 - Line-length handling through central `enforce.line_length` or tool option
@@ -29,7 +29,8 @@ compares Lintro's wrapper with the upstream `markdownlint-cli2` behavior.
 
 ### ⚠️ Limited / Missing
 
-- No auto-fix support (cli2 is lint-only)
+- No auto-fix support in this Lintro wrapper; fix() reports that Markdownlint cannot fix
+  issues.
 - No pass-through of advanced CLI flags (e.g., `--ignore-path`, custom rule toggles)
   beyond config files
 - No custom formatter selection; relies on default cli2 output
@@ -48,7 +49,7 @@ compares Lintro's wrapper with the upstream `markdownlint-cli2` behavior.
 
 ```bash
 # Core markdownlint-cli2
-npx markdownlint-cli2 \"**/*.md\"
+npx markdownlint-cli2 "**/*.md"
 
 # Lintro wrapper
 lintro check docs/ --tools markdownlint
@@ -59,7 +60,7 @@ lintro check docs/ --tools markdownlint --tool-options markdownlint:timeout=60
 
 - Prefers native configs: `.markdownlint.(json|jsonc|yaml|yml)` or
   `.markdownlint-cli2.jsonc`
-- Honors `.markdownlintignore` from upstream
+- Configure ignore globs in the native cli2 configuration
 - Fallback: injects MD013 line length from `.lintro-config.yaml` `enforce.line_length`
   or `markdownlint:line_length`
 - Excludes inherited from `--exclude` and tool options; respects `include_venv=False` by
@@ -67,7 +68,7 @@ lintro check docs/ --tools markdownlint --tool-options markdownlint:timeout=60
 
 ## Priority and Conflicts
 
-- **Priority:** 30 (runs after formatters like Prettier and before heavier linters)
+- **Ordering:** Derived from capability claims and tool-ordering configuration.
 - **Tool Type:** LINTER
 - **Conflicts:** None
 

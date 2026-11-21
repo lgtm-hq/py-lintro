@@ -110,10 +110,11 @@ result = subprocess.run(cmd, capture_output=True, text=True)
 
 **Error Parsing:**
 
-### 🔧 Proposed runtime pass-throughs
+### Supported options and unavailable proposals {#-proposed-runtime-pass-throughs}
 
-- `--tool-options hadolint:config=.hadolint.yaml`
-- `--tool-options hadolint:only=DL3006|SC2086`
+- An explicit `hadolint:config` override is unavailable; use native config discovery.
+- An `only` rule allowlist is unavailable; configure native rules or the supported
+  `ignore` option.
 - `--tool-options hadolint:no_color=False,hadolint:format=json`
 
 - ✅ **Regex-based parsing**: Robust parsing of Hadolint's output format
@@ -149,18 +150,8 @@ hadolint Dockerfile* *.dockerfile
 
 ### Lintro Wrapper
 
-```python
-# Basic checking
-hadolint_tool = HadolintTool()
-hadolint_tool.set_files(["Dockerfile"])
-issues = hadolint_tool.check()
-
-# With options
-hadolint_tool.set_options(
-    format="json",
-    failure_threshold="warning",
-    ignore=["DL3006", "SC2086"]
-)
+```bash
+lintro check Dockerfile --tools hadolint
 ```
 
 ## Configuration Strategy

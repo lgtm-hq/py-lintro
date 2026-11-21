@@ -31,7 +31,7 @@ behavior.
 
 **Watch Mode:**
 
-- No `--watch` mode (continuous type checking)
+- No native `--watch` pass-through; use `lintro watch` for repeated Lintro checks
 
 **Build Features:**
 

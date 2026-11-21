@@ -22,7 +22,9 @@ core mypy behavior.
 - Respects native configs and forwards `--config-file` when discovered
 - Defaults to `--strict` and `--ignore-missing-imports` unless overridden via
   `mypy:strict` / `mypy:ignore_missing_imports`
-- Supports `python_version`, `config_file`, `cache_dir` tool options
+- Supports `config_file` and `cache_dir` tool options. `python_version` requires a
+  string; use native configuration for decimal versions because the CLI option parser
+  coerces them to floats before validation.
 - File discovery for `*.py` and `*.pyi`; applies CLI excludes and tool-level excludes
 
 ### ⚠️ Limited / Missing
@@ -40,8 +42,7 @@ core mypy behavior.
   excludes
 - Auto config discovery in `__post_init__`, reloaded per run to honor project changes
 - Normalized `ToolResult` with parsed issues from `mypy_parser`
-- Priority 82, tool type `LINTER | TYPE_CHECKER`, keeping it after formatters/linters
-  but before tests
+- Type `LINTER | TYPE_CHECKER`; execution order follows claims and tool-ordering policy
 
 ## Usage Comparison
 
@@ -51,8 +52,19 @@ mypy --strict --ignore-missing-imports src/
 
 # Lintro wrapper
 lintro check src/ --tools mypy
-lintro check src/ --tools mypy --tool-options "mypy:strict=False,mypy:python_version=3.13"
+lintro check src/ --tools mypy --tool-options mypy:strict=False
 ```
+
+To set a Python target version, put a string in `pyproject.toml`:
+
+```toml
+[tool.mypy]
+python_version = "3.13"
+```
+
+Or use `python_version = 3.13` under `[mypy]` in `mypy.ini`. Shell quoting a decimal
+value in `--tool-options` does not preserve its string type: this release's common
+parser still converts it to a float, which the mypy wrapper refuses.
 
 ## Configuration Strategy
 
@@ -62,14 +74,15 @@ lintro check src/ --tools mypy --tool-options "mypy:strict=False,mypy:python_ver
 - Tool options override defaults:
   - `mypy:strict` (bool)
   - `mypy:ignore_missing_imports` (bool)
-  - `mypy:python_version` (string)
+  - `mypy:python_version` (string in programmatic/config input; decimal CLI values are
+    coerced to floats and refused, so use native mypy configuration)
   - `mypy:config_file` (path) — takes precedence over discovery
   - `mypy:cache_dir` (path)
 - Uses unified timeout (`mypy:timeout` via global mechanism) to avoid long runs
 
 ## Priority and Conflicts
 
-- **Priority:** 82
+- **Ordering:** Derived from capability claims and tool-ordering configuration.
 - **Tool Type:** LINTER | TYPE_CHECKER
 - **Conflicts:** None
 

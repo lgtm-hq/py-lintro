@@ -107,7 +107,7 @@ result = subprocess.run(cmd, capture_output=True, text=True)
 
 **File Management:**
 
-### 🔧 Proposed runtime pass-throughs
+### Runtime options {#-proposed-runtime-pass-throughs}
 
 - `--tool-options yamllint:format=standard` (switch output style)
 - `--tool-options yamllint:config_file=.yamllint` (explicit config path)
@@ -140,18 +140,8 @@ yamllint *.yml *.yaml
 
 ### Lintro Wrapper
 
-```python
-# Basic checking
-yamllint_tool = YamllintTool()
-yamllint_tool.set_files(["config.yml"])
-issues = yamllint_tool.check()
-
-# With options
-yamllint_tool.set_options(
-    format="parsable",
-    strict=True,
-    no_warnings=True
-)
+```bash
+lintro check config.yml --tools yamllint
 ```
 
 ## Configuration Strategy
