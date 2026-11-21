@@ -212,6 +212,7 @@ _SEMGREP_ONLY_ADVISORIES: dict[str, tuple[str, tuple[str, ...]]] = {
     "GHSA-rwrf-2pqf-9j8j": ("mcp", (">=1.10.0,<1.30.0", _MCP_V2_AFFECTED)),
     "GHSA-w4fh-qvv9-3v23": ("mcp", ("<1.30.0", _MCP_V2_AFFECTED)),
     "GHSA-qx49-fqc8-xw99": ("mcp", (">=1.9.1,<1.30.0", ">=2.0.0a1,<2.2.0")),
+    "GHSA-53pm-wgxf-c6qf": ("wcmatch", ("<11.2",)),
 }
 # Filenames the Python extractors of osv-scanner 2.7.1 (osv-scalibr 0.5.3)
 # accept. Its requirements extractor takes any ``.txt`` whose basename

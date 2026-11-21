@@ -6,9 +6,11 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.utils.file_cache import (
+    CACHE_FORMAT_VERSION,
     FileFingerprint,
     ToolCache,
     clear_all_caches,
@@ -26,13 +28,21 @@ def test_file_fingerprint_to_dict() -> None:
             "path": "/test/file.py",
             "mtime": 1234567890.0,
             "size": 1024,
+            "ctime_ns": 0,
+            "mode": 0,
         },
     )
 
 
 def test_file_fingerprint_from_dict() -> None:
     """Create fingerprint from dictionary."""
-    data = {"path": "/test/file.py", "mtime": 1234567890.0, "size": 1024}
+    data = {
+        "path": "/test/file.py",
+        "mtime": 1234567890.0,
+        "size": 1024,
+        "ctime_ns": 7,
+        "mode": 0o100644,
+    }
     fp = FileFingerprint.from_dict(data)
 
     assert_that(fp.path).is_equal_to("/test/file.py")
@@ -65,7 +75,7 @@ def test_tool_cache_empty_returns_all_files_as_changed(tmp_path: Path) -> None:
 
 
 def test_tool_cache_unchanged_file_not_returned(tmp_path: Path) -> None:
-    """File in cache with same mtime/size not returned as changed.
+    """File in cache with the same fingerprint not returned as changed.
 
     Args:
         tmp_path: Pytest fixture for temporary directory.
@@ -73,12 +83,10 @@ def test_tool_cache_unchanged_file_not_returned(tmp_path: Path) -> None:
     temp_file = tmp_path / "test.py"
     temp_file.write_text("test content")
 
-    stat = temp_file.stat()
     cache = ToolCache(tool_name="test")
-    cache.fingerprints[str(temp_file)] = FileFingerprint(
-        path=str(temp_file),
-        mtime=stat.st_mtime,
-        size=stat.st_size,
+    cache.fingerprints[str(temp_file)] = FileFingerprint.of(
+        str(temp_file),
+        temp_file.stat(),
     )
     changed = cache.get_changed_files([str(temp_file)])
     assert_that(changed).does_not_contain(str(temp_file))
@@ -131,18 +139,102 @@ def test_tool_cache_nonexistent_file_skipped() -> None:
     assert_that(changed).is_empty()
 
 
-def test_tool_cache_update_adds_fingerprints(tmp_path: Path) -> None:
-    """Update adds fingerprints for files.
+def test_tool_cache_record_keeps_checked_and_forgets_unchecked() -> None:
+    """Record adds the checked files and drops the handed, unproven ones."""
+    old = FileFingerprint(path="/p/a.py", mtime=1.5, size=1)
+    new = FileFingerprint(path="/p/b.py", mtime=2.5, size=2)
+    cache = ToolCache(tool_name="test", fingerprints={"/p/a.py": old})
+
+    cache.record({"/p/b.py": new}, unchecked=["/p/a.py", "/p/b.py"])
+
+    assert_that(cache.fingerprints).is_equal_to({"/p/b.py": new})
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"tool_name": "t", "fingerprints": {"/p/a.py": {}}},
+        {"format_version": 1, "tool_name": "t", "fingerprints": {}},
+        ["not", "an", "object"],
+    ],
+    ids=["unversioned", "version-1", "not-an-object"],
+)
+def test_tool_cache_load_discards_a_file_in_another_format(
+    tmp_path: Path,
+    payload: object,
+) -> None:
+    """A cache written by an earlier lintro is discarded, not trusted.
+
+    Args:
+        tmp_path: Pytest fixture for temporary directory.
+        payload: Cache file contents in a format this version does not write.
+    """
+    entry = {"path": "/p/a.py", "mtime": 1.5, "size": 1}
+    if isinstance(payload, dict) and "/p/a.py" in payload["fingerprints"]:
+        payload["fingerprints"]["/p/a.py"] = entry
+    (tmp_path / "t.json").write_text(json.dumps(payload))
+
+    with patch("lintro.utils.file_cache.CACHE_DIR", tmp_path):
+        loaded = ToolCache.load("t")
+
+    assert_that(loaded.fingerprints).is_empty()
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [b"\x80\xff\xfe", b"{not json"],
+    ids=["invalid-utf8", "malformed-json"],
+)
+def test_tool_cache_load_discards_an_unreadable_file(
+    tmp_path: Path,
+    raw: bytes,
+) -> None:
+    """A cache that cannot be decoded is discarded instead of raising.
+
+    Args:
+        tmp_path: Pytest fixture for temporary directory.
+        raw: Bytes written as the cache file.
+    """
+    (tmp_path / "t.json").write_bytes(raw)
+
+    with patch("lintro.utils.file_cache.CACHE_DIR", tmp_path):
+        loaded = ToolCache.load("t")
+
+    assert_that(loaded.fingerprints).is_empty()
+
+
+def test_tool_cache_save_leaves_no_temp_file_when_writing_fails(
+    tmp_path: Path,
+) -> None:
+    """A failed write removes its temp file and keeps the old cache.
 
     Args:
         tmp_path: Pytest fixture for temporary directory.
     """
-    temp_file = tmp_path / "test.py"
-    temp_file.write_text("test content")
+    (tmp_path / "t.json").write_text("old")
+    cache = ToolCache(tool_name="t")
 
-    cache = ToolCache(tool_name="test")
-    cache.update([str(temp_file)])
-    assert_that(cache.fingerprints).contains_key(str(temp_file))
+    with (
+        patch("lintro.utils.file_cache.CACHE_DIR", tmp_path),
+        patch("lintro.utils.file_cache.json.dump", side_effect=TypeError("boom")),
+    ):
+        cache.save()
+
+    assert_that(sorted(p.name for p in tmp_path.iterdir())).is_equal_to(["t.json"])
+    assert_that((tmp_path / "t.json").read_text()).is_equal_to("old")
+
+
+def test_tool_cache_save_writes_the_current_format(tmp_path: Path) -> None:
+    """A saved cache carries the format version that load accepts.
+
+    Args:
+        tmp_path: Pytest fixture for temporary directory.
+    """
+    with patch("lintro.utils.file_cache.CACHE_DIR", tmp_path):
+        ToolCache(tool_name="t").save()
+
+    data = json.loads((tmp_path / "t.json").read_text())
+    assert_that(data["format_version"]).is_equal_to(CACHE_FORMAT_VERSION)
 
 
 def test_tool_cache_clear_removes_all_fingerprints() -> None:

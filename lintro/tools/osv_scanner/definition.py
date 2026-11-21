@@ -156,6 +156,8 @@ class OsvScannerPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
+            # The verdict follows the OSV database, not only the lockfiles.
+            incremental_cacheable=False,
             native_configs=[".osv-scanner.toml"],
             version_command=["osv-scanner", "--version"],
             min_version=get_min_version(ToolName.OSV_SCANNER),

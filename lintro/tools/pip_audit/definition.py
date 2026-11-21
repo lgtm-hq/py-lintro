@@ -212,6 +212,8 @@ class PipAuditPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
+            # The verdict follows the PyPI advisory data, not only the requirements.
+            incremental_cacheable=False,
             native_configs=[],  # pip-audit has no native config file
             version_command=["pip-audit", "--version"],
             min_version=get_min_version(ToolName.PIP_AUDIT),

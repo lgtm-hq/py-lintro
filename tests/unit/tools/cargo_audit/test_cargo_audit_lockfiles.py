@@ -1631,34 +1631,6 @@ def test_a_verdict_change_without_a_lockfile_change_is_reported(
     assert_that(again.issues_count).is_equal_to(1)
 
 
-@pytest.mark.parametrize("incremental", [False, True], ids=["full", "incremental"])
-def test_the_incremental_note_appears_only_in_incremental_runs(
-    repo: Path,
-    fake: _FakeCargoAudit,
-    cache: Path,
-    incremental: bool,
-) -> None:
-    """An --incremental run says why every lockfile was audited.
-
-    Args:
-        repo: Repository root.
-        fake: The fake cargo-audit.
-        cache: Temporary incremental cache.
-        incremental: Whether the run asks for --incremental.
-    """
-    _crate(repo, "app")
-
-    result = _check(fake, ["."], options={"incremental": incremental})
-
-    note = (
-        "--incremental does not apply to cargo-audit: it checks every Cargo.lock "
-        "in scope on each run, because advisories change independently of the "
-        "lockfile."
-    )
-    assert_that(result.success).is_true()
-    assert_that(result.output).is_equal_to(note if incremental else None)
-
-
 @pytest.mark.parametrize("app", [False, True], ids=["only-copies", "with-app"])
 def test_nothing_in_scope_wins_over_a_refused_cargo_audit(
     repo: Path,

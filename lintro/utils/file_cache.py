@@ -2,11 +2,16 @@
 
 This module provides functionality to cache file metadata (mtime, size) to enable
 incremental linting - only checking files that have changed since the last run.
+
+A tool's cache holds only files that tool checked to completion with no
+findings. It is written after the tool has run
+(:mod:`lintro.utils.incremental_record`), never during discovery (#3578).
 """
 
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -15,10 +20,17 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
 # Cache directory location
 CACHE_DIR = Path.home() / ".lintro" / "cache"
+
+#: Format of a tool's cache file. Version 2 holds only files that were checked
+#: to completion; version 3 adds ``ctime_ns`` and ``mode`` to each fingerprint.
+#: Earlier files could hold files no tool had checked, or fingerprints a
+#: ``chmod`` or same-size copy would still match (#3578), so a file in any
+#: other format is discarded on load.
+CACHE_FORMAT_VERSION: int = 3
 
 
 @dataclass
@@ -29,11 +41,36 @@ class FileFingerprint:
         path: Absolute path to the file.
         mtime: Last modification time (seconds since epoch).
         size: File size in bytes.
+        ctime_ns: Inode change time. A chmod, a rename over the file or a
+            restored mtime all move it while leaving mtime and size alone.
+        mode: Permission and type bits, so a file made unreadable and
+            readable again is never taken as unchanged.
     """
 
     path: str
     mtime: float
     size: int
+    ctime_ns: int = 0
+    mode: int = 0
+
+    @classmethod
+    def of(cls, path: str, stat: os.stat_result) -> FileFingerprint:
+        """Fingerprint a file from its ``stat`` result.
+
+        Args:
+            path: The path the fingerprint is kept under.
+            stat: That path's ``os.stat`` result.
+
+        Returns:
+            The fingerprint.
+        """
+        return cls(
+            path=path,
+            mtime=stat.st_mtime,
+            size=stat.st_size,
+            ctime_ns=stat.st_ctime_ns,
+            mode=stat.st_mode,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization.
@@ -57,6 +94,8 @@ class FileFingerprint:
             path=data["path"],
             mtime=data["mtime"],
             size=data["size"],
+            ctime_ns=data["ctime_ns"],
+            mode=data["mode"],
         )
 
 
@@ -105,35 +144,30 @@ class ToolCache:
             if cached is None:
                 # New file not in cache
                 changed.append(file_path)
-            elif cached.mtime != stat.st_mtime or cached.size != stat.st_size:
+            elif cached != FileFingerprint.of(file_path, stat):
                 # File has been modified
                 changed.append(file_path)
             # else: file unchanged, skip it
 
         return changed
 
-    def update(self, files: list[str]) -> None:
-        """Update cache with current file states.
+    def record(
+        self,
+        checked: Mapping[str, FileFingerprint],
+        unchecked: Iterable[str] = (),
+    ) -> None:
+        """Record the files a run checked, and forget the ones it did not.
 
         Args:
-            files: List of file paths to update in cache.
+            checked: Fingerprints taken before the tool read each file, for
+                the files it checked to completion with no findings. A file
+                that changed while the tool ran no longer matches its
+                fingerprint, so the next run checks it again.
+            unchecked: Files the run was handed but did not prove clean.
         """
-        for file_path in files:
-            path = Path(file_path)
-            if not path.exists():
-                # Remove from cache if file no longer exists
-                self.fingerprints.pop(file_path, None)
-                continue
-
-            try:
-                stat = path.stat()
-                self.fingerprints[file_path] = FileFingerprint(
-                    path=file_path,
-                    mtime=stat.st_mtime,
-                    size=stat.st_size,
-                )
-            except OSError as e:
-                logger.debug(f"Could not update cache for {file_path}: {e}")
+        for file_path in unchecked:
+            self.fingerprints.pop(file_path, None)
+        self.fingerprints.update(checked)
 
     def save(self) -> None:
         """Persist cache to disk using atomic write.
@@ -141,10 +175,12 @@ class ToolCache:
         Uses temp file + rename pattern to prevent corruption if write fails.
         """
         cache_file = CACHE_DIR / f"{self.tool_name}.json"
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path: Path | None = None
 
         try:
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
             data = {
+                "format_version": CACHE_FORMAT_VERSION,
                 "tool_name": self.tool_name,
                 "fingerprints": {
                     path: fp.to_dict() for path, fp in self.fingerprints.items()
@@ -159,8 +195,8 @@ class ToolCache:
                 suffix=".tmp",
                 delete=False,
             ) as tmp_file:
-                json.dump(data, tmp_file, indent=2)
                 tmp_path = Path(tmp_file.name)
+                json.dump(data, tmp_file, indent=2)
 
             # Atomic rename (on POSIX systems)
             tmp_path.replace(cache_file)
@@ -171,7 +207,7 @@ class ToolCache:
         except (OSError, TypeError, ValueError) as e:
             logger.warning(f"Could not save cache for {self.tool_name}: {e}")
             # Clean up temp file if it exists
-            if "tmp_path" in locals() and tmp_path.exists():
+            if tmp_path is not None:
                 tmp_path.unlink(missing_ok=True)
 
     @classmethod
@@ -182,7 +218,8 @@ class ToolCache:
             tool_name: Name of the tool to load cache for.
 
         Returns:
-            Loaded cache, or empty cache if file doesn't exist.
+            Loaded cache, or an empty cache when the file does not exist,
+            cannot be read, or was written in another format.
         """
         cache_file = CACHE_DIR / f"{tool_name}.json"
 
@@ -193,6 +230,10 @@ class ToolCache:
             with cache_file.open("r", encoding="utf-8") as f:
                 data = json.load(f)
 
+            if data.get("format_version") != CACHE_FORMAT_VERSION:
+                logger.debug(f"Discarding {tool_name} cache in another format")
+                return cls(tool_name=tool_name)
+
             fingerprints = {
                 path: FileFingerprint.from_dict(fp_data)
                 for path, fp_data in data.get("fingerprints", {}).items()
@@ -201,7 +242,9 @@ class ToolCache:
             cache = cls(tool_name=tool_name, fingerprints=fingerprints)
             logger.debug(f"Loaded cache for {tool_name} ({len(fingerprints)} files)")
             return cache
-        except (OSError, json.JSONDecodeError, KeyError, TypeError) as e:
+        # ValueError covers JSONDecodeError and UnicodeDecodeError: a cache
+        # that cannot be read is discarded, and everything is checked.
+        except (OSError, ValueError, AttributeError, KeyError, TypeError) as e:
             logger.debug(f"Could not load cache for {tool_name}: {e}")
             return cls(tool_name=tool_name)
 
@@ -350,11 +393,7 @@ def snapshot_fingerprints(files: Sequence[str]) -> FingerprintSnapshot:
             logger.debug(f"Could not fingerprint {file_path}: {exc}")
             unreadable.append(file_path)
             continue
-        fingerprints[file_path] = FileFingerprint(
-            path=file_path,
-            mtime=stat.st_mtime,
-            size=stat.st_size,
-        )
+        fingerprints[file_path] = FileFingerprint.of(file_path, stat)
     return FingerprintSnapshot(
         fingerprints=fingerprints,
         unreadable=tuple(sorted(unreadable)),

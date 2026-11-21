@@ -636,6 +636,79 @@ any confirmation prompts that would otherwise pause execution.
 pipelines, Docker containers, scripts with redirected output), so `--yes` is typically
 only needed when running interactively and you want to avoid prompts.
 
+#### Incremental Checks (`--incremental`)
+
+`lintro check --incremental` hands each tool only the files that tool has not already
+checked clean since they last changed. Each tool keeps its own record under
+`~/.lintro/cache/<tool>.json`; a file counts as changed when its modification time,
+size, inode change time (`ctime`) or permission bits differ from the recorded ones, so a
+`chmod`, a restored mtime or a same-size replacement is checked again. `--no-cache`
+deletes every record.
+
+The rule for recording a file is fail closed:
+
+- **Only `lintro check` records.** A `lintro format` run never writes the record: its
+  final verdict comes from the verify pass, after every formatter has run.
+- **Every `lintro check` keeps the record honest, `--incremental` or not.** A finding in
+  any file removes that file's entry, even a file the run was not handed (pylint
+  reporting `a.py` after only `b.py` changed), and a full check that completed removes
+  the entries of files it did not prove clean. Only an `--incremental` run adds entries,
+  so a user who never passes `--incremental` gets no cache file; a full check whose tool
+  was unavailable, failed or was interrupted proved nothing and leaves the record as it
+  was.
+- **A file is recorded after the tool has run, never before.** Discovery only reads the
+  record. Nothing is written when the tool was not installed, its version was refused,
+  it was skipped, it timed out, its run failed or was incomplete, or the run was stopped
+  (Ctrl-C, an exception, a kill). The next incremental run checks those files again.
+- **A file is recorded only if the code that ran the tool states it handed that exact
+  discovered path to an invocation that completed.** The shared per-file and batch
+  runners state the list they pass; ruff, black, pylint (after `include`), taplo, typos
+  (text files only), spectral (per ruleset group) and bandit (the files its report says
+  it scanned) state their own. Every other tool states nothing and is never narrowed by
+  `--incremental`: mypy (a whole-project analyser), gitleaks (scans a directory or the
+  git history), golangci-lint, clippy and rustfmt (projects), import-linter (contracts),
+  tsc, vue-tsc, svelte-check and astro check, and the tools not yet audited (actionlint,
+  buf, html-validate, markdownlint, stylelint, trufflehog, vale, yamllint). A symlink
+  and its target are separate entries.
+- **A clean result needs evidence that files were read.** A successful run with no
+  finding records files only when the tool reports that it inspected them; a run in
+  which part of the check was skipped (black's E501 supplement without ruff) records
+  nothing.
+- **Only files checked with no finding are recorded.** A file with a finding stays
+  unrecorded, so every incremental run reports it again until it is fixed: an unchanged
+  file with findings never turns a later incremental run green.
+- **A result with findings records the other files only when the tool's report was
+  parsed in full.** Several tools cannot certify that (shellcheck, hadolint and other
+  per-file runners); for them a single finding means no file of that run is recorded,
+  and the next run checks them all again.
+- The recorded fingerprint is the one taken before the tool read the file. A file you
+  edited during the run is checked again next time.
+- **A file lintro itself cannot open for reading is never recorded**, whatever the tool
+  reported, because a tool may exit 0 without reading a file it could not open.
+- A record that cannot be read (invalid bytes, malformed JSON) is discarded and every
+  file is checked.
+- **Known gap: configuration is not part of the record.** A file lintro handed to a tool
+  that the tool's own ignore settings then skipped (`ignore:` in `.yamllint`, a
+  `.prettierignore` entry, ruff's `extend-exclude`) is recorded as clean, and removing
+  the ignore later does not re-check it; neither does any other change to a tool's
+  configuration or version. Run `lintro check --no-cache` after changing them.
+
+Tools whose result depends on data that changes independently of the files declare
+`incremental_cacheable=False` and are never narrowed: `cargo_audit`, `cargo_deny`,
+`osv_scanner` and `pip_audit` (advisory databases), `semgrep` (its default
+`--config auto` fetches registry rules) and `commitlint` (it checks the commit message,
+not files). Under `--incremental` they check every file in scope and their output says
+so. `--diff` still narrows them.
+
+Records written by lintro before this rule existed could list files no tool had checked.
+They carry no format version and are discarded the first time each tool runs, so the
+first incremental run after upgrading checks everything once.
+
+The rule lives in the executor that every run goes through, sequential or parallel, so
+it holds for the CLI and the Python API (`incremental=True`) alike. `lintro watch` and
+the MCP server use the same executor but never run incrementally. Calling a plugin's
+`check` directly, outside that executor, reads the record but never adds to it.
+
 #### Node.js Dependency Options
 
 ```bash
@@ -4036,15 +4109,17 @@ In a `--diff` run the scope is the changed lockfiles; a `--diff` run in which no
 lockfile changed reports "no files matched" without the lists, and the same scope
 applies to excluded, skipped and unreadable entries: only those in the diff are named.
 
-cargo_audit ignores lintro's incremental cache. Its verdict depends on the advisory
-database and on the deny settings as much as on the lockfile, so an unchanged lockfile
-can change verdict when a new advisory is published. With `--incremental`, cargo_audit
-therefore audits every `Cargo.lock` in scope, exactly as a full run does, and says so in
-its output; `--diff` still narrows the scope to the changed lockfiles. lintro's changed
-set holds only paths that resolve to a file, so in a `--diff` run an unreadable entry is
-caught when it is a changed `Cargo.lock` that cannot be read, but a dangling symlink,
-symlink loop or directory named `Cargo.lock` is only caught by a full run. Lists of
-lockfiles name the first ten and give a count of the rest.
+cargo_audit ignores lintro's incremental cache (its definition sets
+`incremental_cacheable=False`, see
+[Incremental Checks](#incremental-checks---incremental)). Its verdict depends on the
+advisory database and on the deny settings as much as on the lockfile, so an unchanged
+lockfile can change verdict when a new advisory is published. With `--incremental`,
+cargo_audit therefore audits every `Cargo.lock` in scope, exactly as a full run does,
+and says so in its output; `--diff` still narrows the scope to the changed lockfiles.
+lintro's changed set holds only paths that resolve to a file, so in a `--diff` run an
+unreadable entry is caught when it is a changed `Cargo.lock` that cannot be read, but a
+dangling symlink, symlink loop or directory named `Cargo.lock` is only caught by a full
+run. Lists of lockfiles name the first ten and give a count of the rest.
 
 **Fail closed.** A lockfile that was not audited fails the check and is named, whatever
 the other lockfiles found. Findings from a failed audit are still shown. A lockfile

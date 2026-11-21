@@ -396,6 +396,14 @@ class TyposPlugin(BaseToolPlugin):
 
         outcome = self._run_batched(files=files, ctx=ctx)
         issues = outcome.issues
+        if not outcome.timed_out and not outcome.fatal_outputs:
+            # Every batch ran; together they were handed ``files`` (#3578).
+            handed = set(files)
+            self._record_checked(
+                path
+                for path, rel in zip(ctx.files, ctx.rel_files, strict=True)
+                if rel in handed
+            )
 
         # A batch that failed outright (error record, or a non-zero exit with
         # nothing parseable) is a runtime problem. Report it even when another

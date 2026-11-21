@@ -88,6 +88,8 @@ class CargoDenyPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
+            # The verdict follows the RustSec advisory database, not only the lockfile.
+            incremental_cacheable=False,
             native_configs=["deny.toml"],
             version_command=["cargo", "deny", "--version"],
             min_version=get_min_version(ToolName.CARGO_DENY),

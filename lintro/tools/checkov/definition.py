@@ -36,6 +36,7 @@ from lintro.tools.core.batch_runner import (
     BatchCheckPolicy,
     BatchOutput,
     BatchSuccess,
+    record_handed,
     run_batch_check,
 )
 from lintro.tools.core.option_validators import (
@@ -267,20 +268,24 @@ class CheckovPlugin(BaseToolPlugin):
         # nothing parseable is a runtime error (bad argument, unparseable HCL),
         # and surfacing the raw output there fails closed instead of reporting
         # a silent security pass.
-        result = run_batch_check(
-            ctx,
-            plugin=self,
-            cmd=cmd,
-            parse=_parse,
-            policy=BatchCheckPolicy(
-                success=BatchSuccess.EXIT_AND_ISSUES,
-                output=BatchOutput.ON_EXIT_FAILURE_WITHOUT_ISSUES,
+        result = record_handed(
+            self,
+            run_batch_check(
+                ctx,
+                plugin=self,
+                cmd=cmd,
+                parse=_parse,
+                policy=BatchCheckPolicy(
+                    success=BatchSuccess.EXIT_AND_ISSUES,
+                    output=BatchOutput.ON_EXIT_FAILURE_WITHOUT_ISSUES,
+                ),
+                on_error=lambda exc: ToolResult.from_outcome(
+                    ToolOutcome(execution=Checked(success=False)),
+                    name=self.definition.name,
+                    output=f"Checkov failed: {exc}",
+                ),
             ),
-            on_error=lambda exc: ToolResult.from_outcome(
-                ToolOutcome(execution=Checked(success=False)),
-                name=self.definition.name,
-                output=f"Checkov failed: {exc}",
-            ),
+            ctx.files,
         )
         if parse_failures:
             # Exit zero with no report is the fail-open case: a soft-fail

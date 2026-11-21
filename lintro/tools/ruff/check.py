@@ -4,6 +4,7 @@ Functions for running ruff check commands and processing results.
 """
 
 import json
+import re
 import subprocess  # nosec B404 - subprocess used safely to execute ruff commands with controlled input
 from typing import TYPE_CHECKING
 
@@ -11,6 +12,7 @@ from loguru import logger
 
 from lintro.models.core.subprocess_result import SubprocessResult
 from lintro.models.core.tool_outcome import Checked, TimedOut, ToolOutcome
+from lintro.parsers.base_parser import strip_ansi_codes
 from lintro.parsers.ruff.ruff_format_coverage import (
     format_inspected_paths,
     format_report_parse_failures,
@@ -61,6 +63,29 @@ def _lint_parse_failures(output: str, issues: list[RuffIssue]) -> int:
         for issue in issues
     )
     return abs(len(records) - len(issues)) + invalid
+
+
+#: Ruff's stderr warning for an input it could not read; it still exits 0.
+_FAILED_TO_LINT = re.compile(r"^\s*warning: Failed to lint ")
+
+
+def _unlinted(process: SubprocessResult) -> bool:
+    """Report whether ``ruff check`` warned that it could not lint a file.
+
+    Ruff reports an unreadable or vanished input only as a stderr warning and
+    still exits 0 (``[]`` when E902 is not selected). Such a run did not
+    inspect every file it was handed, so it is not complete (#3578).
+
+    Args:
+        process: Result of the ``ruff check`` subprocess.
+
+    Returns:
+        True when stderr names a file Ruff failed to lint.
+    """
+    return any(
+        _FAILED_TO_LINT.match(strip_ansi_codes(line))
+        for line in process.stderr.splitlines()
+    )
 
 
 def _lint_execution_error(process: SubprocessResult) -> bool:
@@ -223,8 +248,10 @@ def execute_ruff_check(
     lint_failed_to_run = _lint_execution_error(lint_process)
     # The failed verdict and failure count stay; only the diagnosis differs.
     absent_report_failures = parse_failures if lint_failed_to_run else 0
-    lint_complete = not parse_failures and (
-        success_lint or (lint_process.returncode == 1 and bool(lint_issues))
+    lint_complete = (
+        not parse_failures
+        and not _unlinted(lint_process)
+        and (success_lint or (lint_process.returncode == 1 and bool(lint_issues)))
     )
 
     # Optional format check via `format_check` flag
@@ -337,6 +364,9 @@ def execute_ruff_check(
         # A single file set can certify both capabilities only over their
         # intersection. Each native command can have different exclusions.
         coverage &= format_coverage
+    # Every invocation was handed ctx.rel_files; state them once all of
+    # them finished with a verdict (#3578).
+    tool._record_checked(ctx.files if complete else ())
 
     return ToolResult.from_outcome(
         ToolOutcome(

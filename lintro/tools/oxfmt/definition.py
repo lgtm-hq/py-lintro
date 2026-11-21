@@ -28,6 +28,7 @@ from lintro.tools.core.batch_runner import (
     BatchCommands,
     BatchFixPolicy,
     BatchSuccess,
+    record_handed,
     run_batch_check,
     run_batch_fix,
 )
@@ -295,23 +296,27 @@ class OxfmtPlugin(BaseToolPlugin):
         cmd.extend(ctx.rel_files)
         logger.debug(f"[OxfmtPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
 
-        return run_batch_check(
-            ctx,
-            plugin=self,
-            cmd=cmd,
-            parse=lambda output: parse_oxfmt_output(output=output),
-            policy=BatchCheckPolicy(
-                success=BatchSuccess.ISSUES_ONLY,
-                findings_exit_codes=OXFMT_FINDINGS_EXIT_CODES,
-                parse_stdout=True,
-                no_files=_is_no_files_result,
-                report_cwd=True,
-            ),
-            cwd=ctx.cwd,
-            on_timeout=lambda: self._create_timeout_result(
-                timeout_val=ctx.timeout,
+        return record_handed(
+            self,
+            run_batch_check(
+                ctx,
+                plugin=self,
+                cmd=cmd,
+                parse=lambda output: parse_oxfmt_output(output=output),
+                policy=BatchCheckPolicy(
+                    success=BatchSuccess.ISSUES_ONLY,
+                    findings_exit_codes=OXFMT_FINDINGS_EXIT_CODES,
+                    parse_stdout=True,
+                    no_files=_is_no_files_result,
+                    report_cwd=True,
+                ),
                 cwd=ctx.cwd,
+                on_timeout=lambda: self._create_timeout_result(
+                    timeout_val=ctx.timeout,
+                    cwd=ctx.cwd,
+                ),
             ),
+            ctx.files,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

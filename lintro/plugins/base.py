@@ -64,9 +64,10 @@ from lintro.plugins.subprocess_executor import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from lintro.plugins.file_processor import AggregatedResult, FileProcessingResult
+    from lintro.utils.incremental_record import PendingCheck
 
 
 @dataclass
@@ -142,6 +143,10 @@ class BaseToolPlugin(ABC):
         exclude_patterns: Patterns to exclude from file discovery.
         include_venv: Whether to include virtual environment files.
         command_refusal: First command this instance refused to spawn, or None.
+        incremental_pending: Files ``--incremental`` handed this instance,
+            not yet recorded as checked.
+        incremental_checked: Discovered paths stated as handed to the tool
+            by a completed invocation; the only ones that may be recorded.
     """
 
     options: dict[str, object] = field(default_factory=dict, init=False)
@@ -152,6 +157,22 @@ class BaseToolPlugin(ABC):
     #: execution failure however the plugin handled the ``ValueError``.
     command_refusal: UnsafeCommandError | None = field(
         default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    #: Files ``--incremental`` discovery handed this instance. The executor
+    #: records the ones the run proved clean once the result is known (#3578).
+    incremental_pending: list[PendingCheck] = field(
+        default_factory=list,
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    #: Discovered paths the code that ran the tool stated it handed to the
+    #: tool and that invocation completed. Only these can be recorded (#3578).
+    incremental_checked: set[str] = field(
+        default_factory=set,
         init=False,
         repr=False,
         compare=False,
@@ -250,6 +271,8 @@ class BaseToolPlugin(ABC):
         clone.exclude_patterns = list(self.exclude_patterns)
         clone.include_venv = self.include_venv
         clone.command_refusal = None
+        clone.incremental_pending = []
+        clone.incremental_checked = set()
         clone._isolate_execution_state()
         return clone
 
@@ -593,6 +616,19 @@ class BaseToolPlugin(ABC):
             self._record_command_refusal(exc)
             raise
 
+    def _record_checked(self, paths: Iterable[str]) -> None:
+        """State that these discovered paths were handed to the tool and checked.
+
+        Under ``--incremental`` this statement is the only way a file can be
+        recorded as checked (#3578). Call it after an invocation completed,
+        with the exact entries of ``ctx.files`` that invocation was given; a
+        plugin that never calls it records nothing.
+
+        Args:
+            paths: Entries of ``ctx.files`` the completed invocation covered.
+        """
+        self.incremental_checked.update(paths)
+
     def _record_command_refusal(self, refusal: UnsafeCommandError) -> None:
         """Keep the first refusal of this run on :attr:`command_refusal`.
 
@@ -657,6 +693,8 @@ class BaseToolPlugin(ABC):
         if isinstance(result, ToolResult):
             logger.debug(f"[{self.name}] Early exit: {result.output}")
             return ExecutionContext(early_result=result)
+        if result.incremental is not None:
+            self.incremental_pending.append(result.incremental)
 
         logger.debug(
             f"[{self.name}] Ready: {len(result.files)} files, "

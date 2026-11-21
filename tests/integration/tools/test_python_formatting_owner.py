@@ -198,6 +198,8 @@ def test_incremental_check_does_not_consume_black_discovery(
         monkeypatch: Working-directory isolation.
     """
     monkeypatch.chdir(tmp_path)
+    # Keep the run away from the real ~/.lintro/cache.
+    monkeypatch.setattr("lintro.utils.file_cache.CACHE_DIR", tmp_path / "cache")
     (tmp_path / "pyproject.toml").write_text("[tool.ruff.lint]\nselect = []\n")
     (tmp_path / "a.py").write_text('x = {  "a":1 }\n')
     result = CliRunner().invoke(

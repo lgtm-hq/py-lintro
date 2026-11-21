@@ -358,6 +358,9 @@ def test_check_missing_ruff_preserves_black_verdict(
     )
     assert_that(result.timed_out).is_false()
     assert_that(result.skipped).is_false()
+    # E501 was not checked, so the result proves no complete inspection.
+    assert_that(result.findings_complete).is_false()
+    assert_that(result.inspected_files).is_none()
 
 
 def test_check_valid_empty_supplement_is_clean(

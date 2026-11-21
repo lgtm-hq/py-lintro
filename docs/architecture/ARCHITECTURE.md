@@ -100,6 +100,7 @@ class ToolDefinition:
     claims: list[Claim]         # Patterns plus what the tool does to them
     reads_tree: bool            # Runs after mutation settles
     partitionable: bool         # File set may be sharded
+    incremental_cacheable: bool # False: --incremental never narrows it
     native_configs: list[str]   # Config files the tool reads
     version_command: list[str]  # Command to check version
     min_version: str | None     # Minimum required version

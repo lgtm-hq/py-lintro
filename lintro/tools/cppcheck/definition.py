@@ -36,6 +36,7 @@ from lintro.tools.core.batch_runner import (
     BatchCheckPolicy,
     BatchOutput,
     BatchSuccess,
+    record_handed,
     run_batch_check,
 )
 from lintro.tools.core.option_validators import (
@@ -284,20 +285,24 @@ class CppcheckPlugin(BaseToolPlugin):
         # A non-zero exit with nothing parseable means the invocation itself
         # failed (bad argument, internal error); surfacing the raw output there
         # fails closed instead of reporting a silent pass.
-        return run_batch_check(
-            ctx,
-            plugin=self,
-            cmd=cmd,
-            parse=lambda output: parse_cppcheck_output(output),
-            policy=BatchCheckPolicy(
-                success=BatchSuccess.EXIT_AND_ISSUES,
-                output=BatchOutput.ON_EXIT_FAILURE_WITHOUT_ISSUES,
+        return record_handed(
+            self,
+            run_batch_check(
+                ctx,
+                plugin=self,
+                cmd=cmd,
+                parse=lambda output: parse_cppcheck_output(output),
+                policy=BatchCheckPolicy(
+                    success=BatchSuccess.EXIT_AND_ISSUES,
+                    output=BatchOutput.ON_EXIT_FAILURE_WITHOUT_ISSUES,
+                ),
+                on_error=lambda exc: ToolResult.from_outcome(
+                    ToolOutcome(execution=Checked(success=False)),
+                    name=self.definition.name,
+                    output=f"Cppcheck failed: {exc}",
+                ),
             ),
-            on_error=lambda exc: ToolResult.from_outcome(
-                ToolOutcome(execution=Checked(success=False)),
-                name=self.definition.name,
-                output=f"Cppcheck failed: {exc}",
-            ),
+            ctx.files,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

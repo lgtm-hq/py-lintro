@@ -372,6 +372,13 @@ class SpectralPlugin(BaseToolPlugin):
                     output=process.output or "Spectral output could not be parsed.",
                     cwd=ctx.cwd,
                 )
+            # This invocation was handed exactly this group's files (#3578).
+            handed = set(rel_files)
+            self._record_checked(
+                path
+                for path, rel in zip(ctx.files, ctx.rel_files, strict=True)
+                if rel in handed
+            )
             all_issues.extend(issues)
             if issues and process.output:
                 finding_outputs.append(process.output)
