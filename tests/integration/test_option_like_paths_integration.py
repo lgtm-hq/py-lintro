@@ -1,4 +1,4 @@
-"""A file named like an option cannot switch a real tool's checks off (#3584).
+"""A file named like an option or argument file cannot switch a real tool off (#3584).
 
 Each test plants a file whose name the tool would read as an option next to a
 file with a known finding. Before the fix the tool took the planted name as
@@ -7,6 +7,7 @@ an option, skipped the finding and the run passed.
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,7 @@ from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins import ToolRegistry
-from tests.integration._tools import require_tool
+from tests.integration._tools import require_command, require_tool
 
 # Built at runtime so the repository's own typos pass does not correct it.
 _MISSPELLING = "t" + "eh"
@@ -25,14 +26,17 @@ def _run(
     files: dict[str, str],
     root: Path,
     monkeypatch: pytest.MonkeyPatch,
+    paths: list[str] | None = None,
 ) -> ToolResult:
-    """Write ``files`` under ``root`` and check the project with a fresh plugin.
+    """Write ``files`` under ``root`` and check them with a fresh plugin.
 
     Args:
         tool_name: Registered plugin to run.
         files: Relative path to file content.
         root: Project directory.
         monkeypatch: Fixture restoring the working directory.
+        paths: Paths to check, as a user names them; the project root when
+            omitted.
 
     Returns:
         The plugin's check result.
@@ -41,7 +45,7 @@ def _run(
         (root / relative).write_text(content, encoding="utf-8")
     monkeypatch.chdir(root)
     plugin = type(ToolRegistry.get(tool_name))()
-    return plugin.check(["."], {})
+    return plugin.check(paths or ["."], {})
 
 
 def _reported(result: ToolResult) -> list[tuple[str, str]]:
@@ -141,4 +145,84 @@ def test_typos_dash_file_is_read_as_a_file_not_stdin(
         monkeypatch,
     )
     assert_that([file for file, _ in _reported(result)]).is_equal_to(["-"])
+    assert_that(result.success).is_false()
+
+
+# ``b`` holds the text of an option; ``@b`` would make an argument-file-aware
+# tool read ``b`` as its arguments and print its version instead of checking.
+_ARGUMENT_FILE_TRAP = {"b": "--version\n"}
+
+
+@require_tool("tsc")
+def test_tsc_at_file_is_checked_not_read_as_arguments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``@b.ts`` is a source file, not a tsc response file naming ``b.ts``.
+
+    Args:
+        tmp_path: Project directory without a tsconfig.json.
+        monkeypatch: Fixture restoring the working directory.
+    """
+    result = _run(
+        "tsc",
+        {
+            "a.ts": "const x: number = 's';\nexport {};\n",
+            "b.ts": _ARGUMENT_FILE_TRAP["b"],
+            "@b.ts": "export {};\n",
+        },
+        tmp_path,
+        monkeypatch,
+    )
+    files = [Path(file).name for file, _ in _reported(result)]
+    assert_that(files).contains("a.ts")
+    assert_that(result.success).is_false()
+
+
+@require_tool("mypy")
+def test_mypy_named_at_file_is_checked_not_read_as_arguments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Named explicitly, as the pre-commit hook does, ``@b.py`` stays a file.
+
+    Args:
+        tmp_path: Project directory.
+        monkeypatch: Fixture restoring the working directory.
+    """
+    result = _run(
+        "mypy",
+        {
+            "a.py": 'x: int = "s"\n',
+            "b.py": _ARGUMENT_FILE_TRAP["b"],
+            "@b.py": "x = 1\n",
+        },
+        tmp_path,
+        monkeypatch,
+        paths=["a.py", "b.py", "@b.py"],
+    )
+    files = [Path(file).name for file, _ in _reported(result)]
+    assert_that(files).contains("a.py")
+    assert_that(result.success).is_false()
+
+
+# lintro registers markdownlint-cli2 as ``markdownlint``; the pin applies the
+# right version floor (see test_markdownlint_integration.py).
+@require_command(
+    "markdownlint-cli2",
+    ["markdownlint-cli2"] if shutil.which("markdownlint-cli2") else None,
+    pin="markdownlint",
+)
+def test_markdownlint_hash_file_is_linted_not_negated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """markdownlint-cli2 reads a leading ``#`` as a negated glob; ``./`` stops it.
+
+    Args:
+        tmp_path: Project directory.
+        monkeypatch: Fixture restoring the working directory.
+    """
+    result = _run("markdownlint", {"#x.md": "#Title\n"}, tmp_path, monkeypatch)
+    assert_that({file for file, _ in _reported(result)}).is_equal_to({"#x.md"})
     assert_that(result.success).is_false()

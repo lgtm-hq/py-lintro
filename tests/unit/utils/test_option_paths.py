@@ -9,6 +9,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers import base_issue
 from lintro.parsers.base_issue import BaseIssue, strip_option_guard
 from lintro.parsers.pylint import parse_pylint_output
 from lintro.parsers.pylint.pylint_issue import PylintIssue
@@ -20,9 +21,56 @@ from lintro.plugins.execution_preparation import (
 from lintro.plugins.registry import ToolRegistry
 from lintro.utils.findings import finding_from_issue
 from lintro.utils.fingerprint_baseline import fingerprint
-from lintro.utils.option_paths import option_safe_path, option_safe_paths
+from lintro.utils.option_paths import (
+    SAFE_FIRST_CHARACTERS,
+    option_safe_path,
+    option_safe_paths,
+)
 from lintro.utils.output.sarif.bridge import standard_issues_from_results
 from lintro.utils.output.sarif.document import to_sarif
+
+# File names as projects really have them. Each must reach the tool and the
+# report byte for byte as today: the guard may only touch names whose first
+# character a tool could read specially.
+ORDINARY_NAMES = (
+    "a.py",
+    "src/pkg/mod.py",
+    "_private.py",
+    "__init__.py",
+    "9lives.ts",
+    "a=b.py",
+    "a-b.sh",
+    "a@b.ts",
+    "a+b.md",
+    ".env",
+    ".github/workflows/ci.yml",
+    "./a.py",
+    "../sibling/a.py",
+    "Dockerfile",
+    "Cargo.lock",
+    "+page.svelte",
+    "src/routes/+layout.ts",
+    "[slug].astro",
+    "(group)/page.tsx",
+    "{id}.ts",
+    "$id.tsx",
+    "\u00e9t\u00e9.md",
+    "/abs/-e.py",
+    "/abs/@b.ts",
+    "",
+)
+
+
+@pytest.mark.parametrize("name", ORDINARY_NAMES)
+def test_ordinary_names_pass_through_unchanged(name: str) -> None:
+    """An ordinary file is handed over and reported exactly as before.
+
+    Args:
+        name: A path that starts with a letter, digit, ``_``, ``.`` or ``/``.
+    """
+    assert_that(option_safe_path(name)).is_equal_to(name)
+    assert_that(strip_option_guard(name)).is_equal_to(name)
+    assert_that(BaseIssue(file=name).file).is_equal_to(name)
 
 
 @pytest.mark.parametrize(
@@ -33,16 +81,22 @@ from lintro.utils.output.sarif.document import to_sarif
         ("-e.sh", "./-e.sh"),
         ("--config=lint.ignore=['ALL']#.py", "./--config=lint.ignore=['ALL']#.py"),
         ("--dir=x/a.py", "./--dir=x/a.py"),
-        ("a.py", "a.py"),
+        ("@b.ts", "./@b.ts"),
+        ("@dir/b.py", "./@dir/b.py"),
+        ("#x.md", "./#x.md"),
+        ("!x.md", "./!x.md"),
+        (":x.md", "./:x.md"),
+        ("~x", "./~x"),
+        ("=x", "./=x"),
         ("src/-e.py", "src/-e.py"),
-        ("a=b.py", "a=b.py"),
-        ("/abs/-e.py", "/abs/-e.py"),
         ("./-e.py", "./-e.py"),
-        ("", ""),
     ],
 )
-def test_option_safe_path_guards_only_a_leading_dash(path: str, expected: str) -> None:
-    """Only a relative path starting with ``-`` is prefixed.
+def test_option_safe_path_guards_every_unsafe_first_character(
+    path: str,
+    expected: str,
+) -> None:
+    """A relative path that does not start safely is prefixed with ``./``.
 
     Args:
         path: Candidate argument.
@@ -57,29 +111,59 @@ def test_option_safe_path_guards_only_a_leading_dash(path: str, expected: str) -
         ("./-", "-"),
         ("./--", "--"),
         ("./--force-exclude=.py", "--force-exclude=.py"),
+        ("./@b.ts", "@b.ts"),
+        ("./#x.md", "#x.md"),
+        ("./+page.svelte", "./+page.svelte"),
         (".\\-e.py", "-e.py"),
-        ("./a.py", "./a.py"),
+        ("/proj/./-x.toml", "/proj/-x.toml"),
+        ("/proj/./@dir/b.py", "/proj/@dir/b.py"),
+        ("C:\\proj\\.\\@b.ts", "C:\\proj\\@b.ts"),
         ("./src/-e.py", "./src/-e.py"),
+        ("/proj/./a.py", "/proj/./a.py"),
+        ("/proj/../-x.toml", "/proj/../-x.toml"),
         ("-e.py", "-e.py"),
-        ("/abs/-e.py", "/abs/-e.py"),
     ],
 )
 def test_strip_option_guard_removes_only_lintros_guard(
     reported: str,
     expected: str,
 ) -> None:
-    """A tool's ``./-name`` maps back to ``-name``; other paths are untouched.
+    """Only the ``./`` lintro put before a guarded name is removed.
 
     Args:
-        reported: Path as the tool printed it.
+        reported: Path as the tool printed it, relative or joined to its
+            directory.
         expected: Path lintro records.
     """
     assert_that(strip_option_guard(reported)).is_equal_to(expected)
 
 
+def test_guard_and_strip_agree_on_every_first_character() -> None:
+    """The parser-side strip mirrors the guard for every character.
+
+    ``strip_option_guard`` cannot import the guard's rule (a parsers/utils
+    cycle), so this pins the two copies to one rule.
+    """
+    characters = [chr(code) for code in range(32, 127)] + ["\u00e9", "\u4e2d", "\u00a0"]
+    for character in characters:
+        if character in "/\\":
+            continue
+        name = f"{character}x.py"
+        guarded = option_safe_path(name)
+        assert_that(strip_option_guard(guarded)).described_as(name).is_equal_to(name)
+        assert_that(strip_option_guard(f"/proj/{guarded}")).described_as(
+            name,
+        ).is_equal_to(f"/proj/{name}")
+
+
+def test_parser_copy_of_the_safe_characters_matches_the_guard() -> None:
+    """The two copies of the safe first characters are the same set."""
+    assert_that(set(base_issue._SAFE_FIRST)).is_equal_to(set(SAFE_FIRST_CHARACTERS))
+
+
 def test_guard_round_trips_every_option_like_name() -> None:
     """Guarding then stripping returns the name the user sees."""
-    names = ["-", "--", "-n", "--config=x.py", "-e.sh", "-.toml"]
+    names = ["-", "--", "-n", "--config=x.py", "-e.sh", "-.toml", "@b.ts", "#x", "!x"]
     guarded = option_safe_paths(names)
     assert_that(guarded).does_not_contain(*names)
     assert_that([strip_option_guard(path) for path in guarded]).is_equal_to(names)

@@ -1,19 +1,26 @@
 """Registry-wide guard: a file named like an option never reaches a tool bare (#3584).
 
 Every registered plugin runs its real ``check`` (and ``fix`` where it has one)
-against a project holding files whose names start with ``-``. Only the stdlib
-process boundary is stubbed, so discovery, path preparation and command
-building all run. No recorded argv token may equal one of the planted names:
-a tool would read such a token as an option, so a pull request could switch
-the tool's checks off.
+against a project holding files whose names start with ``-`` (an option),
+``@`` (an argument file for tsc, mypy, pytest and trufflehog), ``#`` or ``!``
+(skipped by markdownlint-cli2). Only
+the stdlib process boundary is stubbed, so discovery, path preparation and
+command building all run. Two things must hold:
 
-The comparison is by exact token against the names this test plants; it does
-not reuse lintro's own path handling.
+- no recorded argv token equals a planted name, because a tool would read it
+  as an option or argument file; and
+- every planted file still reaches the tool, under a token that names it
+  without a special first character, so a plugin cannot pass by dropping its
+  file arguments.
+
+The comparisons use the names this test plants and the working directory of
+each recorded command; they do not reuse lintro's own path handling.
 """
 
 from __future__ import annotations
 
 import io
+import os
 import subprocess  # nosec B404 - process results only; no real subprocesses
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -23,15 +30,27 @@ from assertpy import assert_that
 
 from lintro.plugins.registry import ToolRegistry
 
-# Names a tool would parse as options or as stdin; ``{ext}`` takes the
-# extension of each plugin's first file pattern.
-_OPTION_STEMS = ("--config=x", "-e", "-", "--force-exclude=", "--ignore-patterns=x")
-# A directory named like an option covers plugins whose patterns are fixed
+# First characters a wrapped tool reads specially, as this test plants them.
+_SPECIAL_FIRST = ("-", "@", "#", "!")
+# Names a tool would parse as options, stdin or argument files; each takes the
+# extension of every ``*.ext`` pattern a plugin declares.
+_OPTION_STEMS = (
+    "--config=x",
+    "-e",
+    "-",
+    "--force-exclude=",
+    "--ignore-patterns=x",
+    "@args",
+    "#x",
+    "!x",
+)
+# Directories named like options cover plugins whose patterns are fixed
 # names (``Cargo.lock``, ``Dockerfile``): the relative path still starts with
-# ``-``.
-_OPTION_DIR = "--dir=x"
-# Names that are options on their own, whatever the extension.
-_BARE_NAMES = ("-", "--", "-n")
+# a special character.
+_OPTION_DIRS = ("--dir=x", "@dir")
+# Names that are options or argument files on their own, whatever the
+# extension.
+_BARE_NAMES = ("-", "--", "-n", "@args", "#x", "!x")
 
 _CARGO_PROJECT = {
     "Cargo.toml": '[package]\nname = "guard"\nversion = "0.1.0"\n',
@@ -55,6 +74,8 @@ _BASE_LAYOUTS: dict[str, dict[str, str]] = {
     "osv_scanner": {"requirements.txt": "requests==2.32.0\n"},
     "pip_audit": {"requirements.txt": "requests==2.32.0\n"},
     "spectral": {".spectral.yaml": "extends: spectral:oas\n"},
+    # A config at the root makes yamllint run from there on relative paths.
+    "yamllint": {".yamllint": "extends: default\n"},
     # Two sub-projects make the TypeScript checkers run per project; the
     # planted root files belong to neither and are passed on their own.
     "tsc": {
@@ -79,7 +100,7 @@ def _planted_names(patterns: list[str], base_layout: dict[str, str]) -> list[str
             option-like directory when the plugin declares no patterns.
 
     Returns:
-        Relative paths, each of which starts with ``-``.
+        Relative paths, each of which starts with a special character.
     """
     names: list[str] = []
     for pattern in patterns:
@@ -90,9 +111,15 @@ def _planted_names(patterns: list[str], base_layout: dict[str, str]) -> list[str
         elif bare.startswith("*.") and bare.count("*") == 1:
             names.extend(f"{stem}{bare[1:]}" for stem in _OPTION_STEMS)
         if "/" not in bare and not any(char in bare for char in "?[]"):
-            names.append(f"{_OPTION_DIR}/{bare.replace('*', 'guard')}")
+            names.extend(
+                f"{folder}/{bare.replace('*', 'guard')}" for folder in _OPTION_DIRS
+            )
     if not patterns:
-        names.extend(f"{_OPTION_DIR}/{relative}" for relative in base_layout)
+        names.extend(
+            f"{folder}/{relative}"
+            for folder in _OPTION_DIRS
+            for relative in base_layout
+        )
     return names
 
 
@@ -109,16 +136,36 @@ def _write(root: Path, relative: str, content: str) -> None:
     target.write_text(content, encoding="utf-8")
 
 
-def _stub_processes(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+def _stub_processes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[list[str], str]]:
     """Replace the stdlib process boundary with a recorder.
 
     Args:
         monkeypatch: Fixture restoring the patches.
 
     Returns:
-        The list that receives every argv a plugin tries to run.
+        The list that receives every argv a plugin tries to run, with the
+        working directory it would run in.
     """
-    commands: list[list[str]] = []
+    commands: list[tuple[list[str], str]] = []
+
+    def record(args: list[str], kwargs: dict[str, object]) -> None:
+        """Store argv and the directory relative tokens resolve against.
+
+        Args:
+            args: Command assembled by the plugin.
+            kwargs: Subprocess settings, including ``cwd``.
+        """
+        cwd = kwargs.get("cwd")
+        if "--report-path" in args:
+            # gitleaks reads its findings from this file; an empty report
+            # lets it go on to the next source.
+            report = Path(str(args[list(args).index("--report-path") + 1]))
+            report.write_text("[]", encoding="utf-8")
+        commands.append(
+            ([str(token) for token in args], str(cwd) if cwd else os.getcwd()),
+        )
 
     def completed(
         args: list[str],
@@ -133,7 +180,7 @@ def _stub_processes(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         Returns:
             A completed process with exit code zero and no output.
         """
-        commands.append([str(token) for token in args])
+        record(args, kwargs)
         text = kwargs.get("text", kwargs.get("universal_newlines", False))
         empty: str | bytes = "" if text else b""
         return subprocess.CompletedProcess[str | bytes](args, 0, empty, empty)
@@ -148,7 +195,7 @@ def _stub_processes(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         Returns:
             A process double that has already exited with code zero.
         """
-        commands.append([str(token) for token in args])
+        record(args, kwargs)
         text = kwargs.get("text", kwargs.get("universal_newlines", False))
         process = MagicMock()
         process.stdout = io.StringIO("") if text else io.BytesIO(b"")
@@ -221,6 +268,33 @@ _PLUGINS: dict[str, bool] = {
     "vue-tsc": False,
     "yamllint": False,
 }
+_BOTH = frozenset({"tree", "explicit"})
+_TREE = frozenset({"tree"})
+# Plugins that hand a directory over instead of naming each file, in the
+# scopes listed. Every other plugin must name each planted file.
+_NAMES_A_DIRECTORY: dict[str, tuple[frozenset[str], str]] = {
+    "gitleaks": (_TREE, "Scans the project as one --source directory."),
+    "mypy": (_TREE, "Passes the target directory and lets mypy find modules."),
+    "osv_scanner": (_BOTH, "Scans the project root recursively."),
+    "pip_audit": (_BOTH, "Audits project directories and requirements files."),
+    "trufflehog": (_TREE, "Scans the project directory."),
+}
+# Plugins that take no file arguments at all in the scopes listed; for them
+# only the absence of bare names is checked.
+_NAMES_NO_FILES: dict[str, tuple[frozenset[str], str]] = {
+    "astro-check": (_BOTH, "Checks the Astro project; no file arguments."),
+    "cargo_audit": (_BOTH, "Audits Cargo.lock files by --file=<absolute>."),
+    "cargo_deny": (_BOTH, "Runs cargo on one crate; skips a multi-crate tree."),
+    "clippy": (_BOTH, "Runs cargo on one crate; skips a multi-crate tree."),
+    "commitlint": (_BOTH, "Lints the last commit message (--last)."),
+    "golangci_lint": (_BOTH, "Runs on the Go module (./...)."),
+    "import-linter": (_BOTH, "Reads its contracts from the config file."),
+    "pytest": (_TREE, "Runs the default tests directory."),
+    "rustfmt": (_BOTH, "Runs cargo fmt on the crate."),
+    "svelte-check": (_BOTH, "Checks the Svelte project; no file arguments."),
+}
+# Plugins that only consider files under a fixed directory.
+_PLANT_UNDER = {"actionlint": ".github/workflows/"}
 _SCOPES = ("tree", "explicit")
 # ``check`` for every plugin, plus ``fix`` where offered, each run once on the
 # project root (``tree``) and once on the planted paths named one by one, as
@@ -236,6 +310,9 @@ _RUNS = [
 def test_every_plugin_is_covered_or_excluded_with_a_reason() -> None:
     """A new registration needs a guard decision; ``fix`` support must match."""
     registered = ToolRegistry.get_all()
+    for table in (_NAMES_A_DIRECTORY, _NAMES_NO_FILES):
+        assert_that(set(table) - set(_PLUGINS)).is_empty()
+        assert_that(all(reason.strip() for _, reason in table.values())).is_true()
     assert_that(set(_PLUGINS) & set(_NO_SUBPROCESS)).is_empty()
     assert_that(set(_PLUGINS) | set(_NO_SUBPROCESS)).is_equal_to(set(registered))
     assert_that(all(reason.strip() for reason in _NO_SUBPROCESS.values())).is_true()
@@ -270,20 +347,26 @@ def test_no_option_like_path_reaches_a_tool(
     base_layout = _BASE_LAYOUTS.get(tool_name, {})
     for relative, content in base_layout.items():
         _write(tmp_path, relative, content)
-    planted = _planted_names(list(plugin.definition.file_patterns), base_layout)
+    prefix = _PLANT_UNDER.get(tool_name, "")
+    planted = [
+        prefix + name
+        for name in _planted_names(list(plugin.definition.file_patterns), base_layout)
+    ]
     for relative in planted:
         _write(tmp_path, relative, "x = 1\n")
-    # Each planted path, its first component and an option-like basename are
-    # all tokens a tool would misread if handed over bare.
-    forbidden = set(planted)
-    forbidden |= {relative.split("/", 1)[0] for relative in planted}
+    # Each planted path and every special component of it are tokens a tool
+    # would misread if handed over bare.
+    forbidden = set(planted) - {""}
     forbidden |= {
-        base
+        part
         for relative in planted
-        if (base := relative.rsplit("/", 1)[-1]).startswith("-")
+        for part in relative.split("/")
+        if part.startswith(_SPECIAL_FIRST)
     }
     assert_that(planted).is_not_empty()
-    assert_that(all(name.startswith("-") for name in forbidden)).is_true()
+    assert_that(
+        all(name.removeprefix(prefix).startswith(_SPECIAL_FIRST) for name in forbidden),
+    ).is_true()
 
     commands = _stub_processes(monkeypatch)
     monkeypatch.chdir(tmp_path)
@@ -291,8 +374,68 @@ def test_no_option_like_path_reaches_a_tool(
     run(["."] if scope == "tree" else planted, {})
 
     leaked = sorted(
-        {token for argv in commands for token in argv if token in forbidden},
+        {token for argv, _ in commands for token in argv if token in forbidden},
     )
     assert_that(leaked).described_as(
         f"{tool_name} {action}: option-like paths handed over bare in {commands}",
     ).is_empty()
+    if scope in _NAMES_NO_FILES.get(tool_name, (frozenset(), ""))[0]:
+        return
+    runs = [argv for argv, _ in commands if not _VERSION_PROBES.intersection(argv)]
+    assert_that(runs).described_as(f"{tool_name} {action}: no tool ran").is_not_empty()
+    _assert_files_reach_the_tool(tool_name, scope, planted, commands, tmp_path)
+
+
+_VERSION_PROBES = frozenset({"--version", "-V", "version"})
+
+
+def _named_path(token: str, cwd: str) -> str | None:
+    """Return the real path a token names, if it can name a planted file.
+
+    Args:
+        token: One argv token, possibly ``--option=<path>``.
+        cwd: Directory the command runs in.
+
+    Returns:
+        The resolved path, or None when the token would be read specially.
+    """
+    if token.startswith("-") and "=" in token:
+        token = token.split("=", 1)[1]
+    if not token or token.startswith(_SPECIAL_FIRST):
+        return None
+    return os.path.realpath(os.path.join(cwd, token))
+
+
+def _assert_files_reach_the_tool(
+    tool_name: str,
+    scope: str,
+    planted: list[str],
+    commands: list[tuple[list[str], str]],
+    root: Path,
+) -> None:
+    """Require each planted file to reach the tool under a safe token.
+
+    Args:
+        tool_name: Plugin under test.
+        scope: ``tree`` or ``explicit``.
+        planted: Planted relative paths.
+        commands: Recorded argv and working directory pairs.
+        root: Project root.
+    """
+    named = {
+        path
+        for argv, cwd in commands
+        for token in argv
+        if (path := _named_path(token, cwd)) is not None
+    }
+    real_root = os.path.realpath(root)
+    for relative in planted:
+        target = os.path.join(real_root, relative)
+        if scope in _NAMES_A_DIRECTORY.get(tool_name, (frozenset(), ""))[0]:
+            ancestors = {real_root, os.path.dirname(target), target}
+            reached = bool(named & ancestors)
+        else:
+            reached = target in named
+        assert_that(reached).described_as(
+            f"{tool_name} {scope}: {relative!r} never reached the tool: {commands}",
+        ).is_true()

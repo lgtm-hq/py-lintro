@@ -16,23 +16,49 @@ from typing import ClassVar
 
 from lintro.enums.severity_level import SeverityLevel, normalize_severity_level
 
-#: Prefixes ``lintro.utils.option_paths.option_safe_path`` adds before a
-#: relative path starting with ``-`` (``.\\`` when a tool prints Windows paths).
-_OPTION_GUARDS: tuple[str, ...] = ("./", ".\\")
+_SEPARATORS = "/\\"
+#: ``lintro.utils.option_paths.SAFE_FIRST_CHARACTERS``; a test pins the copy.
+_SAFE_FIRST = "_.+[({$"
+
+
+def _guarded_name(rest: str) -> bool:
+    r"""Return whether ``rest`` is a name lintro would have prefixed with ``./``.
+
+    Mirrors ``lintro.utils.option_paths.starts_safely``; a test pins that the
+    two agree. A parser cannot import it without a parsers/utils cycle.
+
+    Args:
+        rest: The text after a ``./`` (or ``.\\``) in a reported path.
+
+    Returns:
+        True when the first character is not a letter, a digit, a safe first
+        character or a path separator.
+    """
+    first = rest[:1]
+    return bool(first) and not (first.isalnum() or first in _SAFE_FIRST + _SEPARATORS)
 
 
 def strip_option_guard(path: str) -> str:
     """Undo lintro's ``./`` guard on a path a tool reported back (#3584).
 
+    Lintro hands ``@b.ts`` over as ``./@b.ts``. Tools report that as given
+    (``./@b.ts``) or joined to their directory (``/proj/./@b.ts``). Only that
+    ``./`` is removed; nothing else is normalised, so ``..`` and symlinks stay
+    as the tool wrote them.
+
     Args:
         path: A path as a tool printed it.
 
     Returns:
-        ``path`` without a leading ``./`` that only guards a ``-`` name.
+        ``path`` without the ``./`` lintro added before a guarded name.
     """
-    for guard in _OPTION_GUARDS:
-        if path.startswith(guard) and path[len(guard) :].startswith("-"):
-            return path[len(guard) :]
+    for sep in _SEPARATORS:
+        guard = f".{sep}"
+        if path.startswith(guard) and _guarded_name(path[2:]):
+            return path[2:]
+        index = path.find(f"{sep}{guard}")
+        if index >= 0 and _guarded_name(path[index + 3 :]):
+            return path[: index + 1] + path[index + 3 :]
     return path
 
 
