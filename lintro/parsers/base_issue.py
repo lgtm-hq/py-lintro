@@ -11,12 +11,16 @@ The base class includes:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import ClassVar
 
 from lintro.enums.severity_level import SeverityLevel, normalize_severity_level
 
-_SEPARATORS = "/\\"
+#: Separators a tool may put around lintro's guard. A backslash separates
+#: path parts on Windows only; on POSIX it is an ordinary file-name
+#: character, so ``a\.\-x.txt`` is one name and must be reported unchanged.
+_SEPARATORS = "/\\" if os.sep == "\\" else "/"
 #: ``lintro.utils.option_paths.SAFE_FIRST_CHARACTERS``; a test pins the copy.
 _SAFE_FIRST = "_.+[({$"
 

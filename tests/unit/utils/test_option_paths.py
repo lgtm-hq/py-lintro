@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -114,10 +115,8 @@ def test_option_safe_path_guards_every_unsafe_first_character(
         ("./@b.ts", "@b.ts"),
         ("./#x.md", "#x.md"),
         ("./+page.svelte", "./+page.svelte"),
-        (".\\-e.py", "-e.py"),
         ("/proj/./-x.toml", "/proj/-x.toml"),
         ("/proj/./@dir/b.py", "/proj/@dir/b.py"),
-        ("C:\\proj\\.\\@b.ts", "C:\\proj\\@b.ts"),
         ("./src/-e.py", "./src/-e.py"),
         ("/proj/./a.py", "/proj/./a.py"),
         ("/proj/../-x.toml", "/proj/../-x.toml"),
@@ -136,6 +135,41 @@ def test_strip_option_guard_removes_only_lintros_guard(
         expected: Path lintro records.
     """
     assert_that(strip_option_guard(reported)).is_equal_to(expected)
+
+
+@pytest.mark.parametrize(
+    ("reported", "expected"),
+    [
+        (".\\-e.py", "-e.py"),
+        ("C:\\proj\\.\\@b.ts", "C:\\proj\\@b.ts"),
+    ],
+)
+@pytest.mark.skipif(os.sep != "\\", reason="a backslash separates paths on Windows")
+def test_strip_option_guard_reads_backslash_guards_on_windows(
+    reported: str,
+    expected: str,
+) -> None:
+    """On Windows a tool may echo the guard with backslashes.
+
+    Args:
+        reported: Path as the tool printed it.
+        expected: Path lintro records.
+    """
+    assert_that(strip_option_guard(reported)).is_equal_to(expected)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["a\\.\\-x.txt", "a\\.\\@y.py", ".\\-e.py", "/proj/a\\.\\#z.md"],
+)
+@pytest.mark.skipif(os.sep == "\\", reason="a backslash is a file-name character")
+def test_a_backslash_in_a_posix_file_name_is_left_alone(name: str) -> None:
+    r"""On POSIX ``\\`` is part of a file name, never lintro's guard (#3584).
+
+    Args:
+        name: A real file name containing a backslash-dot-backslash run.
+    """
+    assert_that(strip_option_guard(name)).is_equal_to(name)
 
 
 def test_guard_and_strip_agree_on_every_first_character() -> None:
