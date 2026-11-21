@@ -144,7 +144,7 @@ class AsyncToolExecutor:
         result = mark_refused_command(tool, result, fix=action == Action.FIX)
         # Recorded only once the result is known (#3578). A raised or
         # cancelled run never resumes here, so it records nothing.
-        result = finish_incremental_run(tool, result)
+        result = finish_incremental_run(tool, result, record=action == Action.CHECK)
         return replace(result, duration_seconds=time.monotonic() - started)
 
     async def run_tools_parallel(

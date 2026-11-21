@@ -5,6 +5,11 @@ hands the tool and fingerprints those files. It writes nothing. The executor
 calls :func:`finish_incremental_run` once it holds the tool's result, and only
 then are files recorded, and only the ones the run proved clean:
 
+* only a ``check`` run records; a ``format`` run's verdict is settled later by
+  the verify pass, so it records nothing;
+* only files the plugin named as arguments of a command it spawned can be
+  recorded (:func:`spawned_files`): a plugin that narrows its list after
+  ``prepare``, or hands files some other way, records nothing it did not pass;
 * nothing is recorded unless the result is complete: the tool ran and was not
   unavailable, refused, skipped, timed out or failed, and its verdict is
   either clean or carries findings from a report parsed in full
@@ -20,6 +25,7 @@ records nothing either.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -27,6 +33,8 @@ from lintro.utils.file_cache import FingerprintSnapshot, ToolCache
 from lintro.utils.refused_command import command_refusal
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from lintro.models.core.tool_result import ToolResult
     from lintro.utils.file_cache import FileFingerprint
 
@@ -65,7 +73,9 @@ def incremental_note(tool_name: str) -> str:
 def _complete(result: ToolResult) -> bool:
     """Report whether a result proves its run checked every handed file.
 
-    A clean verdict (success, no findings) is its own proof. A verdict with
+    A clean verdict (success, no findings) counts only with affirmative
+    inspection evidence (``inspected_files=True``): success alone does not
+    prove a file was read, as when part of a check was skipped. A verdict with
     findings proves the other files clean only when the producer certifies
     that its report was parsed in full (``findings_complete``): a parser may
     drop a malformed record, and with it a finding in another file.
@@ -89,19 +99,70 @@ def _complete(result: ToolResult) -> bool:
     ):
         return False
     if not result.issues:
-        return result.success
+        return result.success and result.inspected_files is True
     return result.findings_complete
+
+
+#: Option names whose value is a file the tool reads as input to the check
+#: (a config, ruleset or baseline) or writes (a report), not a file it checks.
+_FILE_VALUE_OPTION = re.compile(
+    r"^-{1,2}[a-z-]*(config|conf|rc|rule|setting|baseline|ignore|exclude|"
+    r"manifest|project|profile|output|report|cache|policy|style|schema)",
+    re.IGNORECASE,
+)
+#: Short options that take such a file (``-c .yamllint.yml``, ``-o out``).
+_SHORT_FILE_VALUE_OPTIONS = frozenset({"-c", "-o", "-p", "-r"})
+
+
+def _file_option_value(previous: str) -> bool:
+    """Report whether a token is the value of a config- or report-file option.
+
+    Args:
+        previous: The token before it.
+
+    Returns:
+        True when ``previous`` is such an option without an inline value.
+    """
+    if "=" in previous:
+        return False
+    return previous in _SHORT_FILE_VALUE_OPTIONS or bool(
+        _FILE_VALUE_OPTION.match(previous),
+    )
+
+
+def spawned_files(cmd: Sequence[str], cwd: str | None) -> set[str]:
+    """Return the real paths a command names as file arguments.
+
+    The program and option tokens are left out, and so is the value of an
+    option that names a config, ruleset, baseline or report file: a file
+    passed only that way is read or written by the tool, not checked.
+
+    Args:
+        cmd: Command about to be spawned.
+        cwd: Directory it runs in; None is lintro's own.
+
+    Returns:
+        Real paths of the candidate file arguments.
+    """
+    base = cwd or os.getcwd()
+    return {
+        os.path.realpath(os.path.join(base, token))
+        for previous, token in zip(cmd, cmd[1:], strict=False)
+        if token and not token.startswith("-") and not _file_option_value(previous)
+    }
 
 
 def checked_files(
     pending: PendingCheck,
     result: ToolResult,
+    spawned: set[str],
 ) -> dict[str, FileFingerprint]:
     """Return the handed files the run checked to completion with no finding.
 
     Args:
         pending: What discovery handed the tool.
         result: The tool's result.
+        spawned: Real paths the plugin named in the commands it spawned.
 
     Returns:
         Discovery-time fingerprints of the files to record, by path. Empty
@@ -127,7 +188,9 @@ def checked_files(
     return {
         path: pending.snapshot.fingerprints[path]
         for real, path in handed.items()
-        if real not in flagged and (inspected is None or real in inspected)
+        if real in spawned
+        and real not in flagged
+        and (inspected is None or real in inspected)
     }
 
 
@@ -136,7 +199,8 @@ def _merged(pending: list[PendingCheck]) -> PendingCheck | None:
 
     A plugin may prepare more than once in a run (a fix retry, or ruff's lint
     and format halves). The first fingerprint of a file wins, so a file the
-    run itself rewrote no longer matches and is checked again next time.
+    run itself rewrote no longer matches and is checked again next time. A
+    file any discovery could not read is never recorded.
 
     Args:
         pending: Discoveries in the order they happened.
@@ -151,6 +215,8 @@ def _merged(pending: list[PendingCheck]) -> PendingCheck | None:
     for check in reversed(pending):
         fingerprints.update(check.snapshot.fingerprints)
     unreadable = {path for check in pending for path in check.snapshot.unreadable}
+    for path in unreadable:
+        fingerprints.pop(path, None)
     return PendingCheck(
         tool_name=pending[0].tool_name,
         cwd=pending[0].cwd,
@@ -175,6 +241,23 @@ def _pending(tool: object) -> list[PendingCheck]:
     return taken
 
 
+def _spawned(tool: object) -> set[str]:
+    """Take the files a tool instance named in spawned commands.
+
+    Args:
+        tool: The plugin instance that ran; any object is accepted.
+
+    Returns:
+        Real paths; empty for an object that tracks none.
+    """
+    spawned = getattr(tool, "incremental_spawned", None)
+    if not isinstance(spawned, set):
+        return set()
+    taken = {path for path in spawned if isinstance(path, str)}
+    spawned.clear()
+    return taken
+
+
 def _record(pending: list[PendingCheck], checked: dict[str, FileFingerprint]) -> None:
     """Save the files a run proved clean and forget the rest it was handed.
 
@@ -195,7 +278,12 @@ def _record(pending: list[PendingCheck], checked: dict[str, FileFingerprint]) ->
     cache.save()
 
 
-def finish_incremental_run(tool: object, result: ToolResult) -> ToolResult:
+def finish_incremental_run(
+    tool: object,
+    result: ToolResult,
+    *,
+    record: bool,
+) -> ToolResult:
     """Record what the tool's run proved clean, after the run.
 
     Every executor calls this with the tool instance that ran and its result,
@@ -205,18 +293,24 @@ def finish_incremental_run(tool: object, result: ToolResult) -> ToolResult:
     Args:
         tool: The plugin instance that ran.
         result: Its result.
+        record: Whether the run was a check. Any other run leaves the cache
+            as it was.
 
     Returns:
         The result, with the ``--incremental`` note added for a tool that
         declares ``incremental_cacheable=False``.
     """
-    pending = _pending(tool)
-    if pending:
+    pending, spawned = _pending(tool), _spawned(tool)
+    if pending and record:
         merged = _merged(pending)
         refused = command_refusal(tool) is not None
         _record(
             pending,
-            {} if merged is None or refused else checked_files(merged, result),
+            (
+                {}
+                if merged is None or refused
+                else checked_files(merged, result, spawned)
+            ),
         )
     definition = getattr(tool, "definition", None)
     options = getattr(tool, "options", None)

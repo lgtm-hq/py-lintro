@@ -358,7 +358,11 @@ def _execute_tools_sequential(
             )
             # Only now, with the whole result known, are files recorded as
             # checked (#3578); a run that raises never gets here.
-            result = finish_incremental_run(tool, result)
+            result = finish_incremental_run(
+                tool,
+                result,
+                record=ctx.action == Action.CHECK,
+            )
             result = replace(result, duration_seconds=time.monotonic() - started)
 
             # Populate doc_url on each issue from the plugin

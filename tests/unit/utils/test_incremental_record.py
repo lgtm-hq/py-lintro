@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +23,8 @@ import lintro.utils.tool_executor as te
 from lintro.config.lintro_config import LintroConfig
 from lintro.enums.action import Action
 from lintro.enums.capability import Cap
+from lintro.enums.execution_class import ExecutionClass
+from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
 from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.tool_outcome import (
@@ -39,7 +42,14 @@ from lintro.tools import tool_manager
 from lintro.utils.execution import parallel_executor
 from lintro.utils.execution.run_context import RunContext
 from lintro.utils.execution.tool_configuration import ToolsToRunResult
-from lintro.utils.incremental_record import finish_incremental_run, incremental_note
+from lintro.utils.file_cache import FileFingerprint, FingerprintSnapshot
+from lintro.utils.incremental_record import (
+    PendingCheck,
+    _merged,
+    finish_incremental_run,
+    incremental_note,
+    spawned_files,
+)
 from tests.unit.conftest import FakeLogger
 
 #: What the fake tool does once it has been handed its files.
@@ -93,6 +103,9 @@ class _FakeTool(BaseToolPlugin):
     behaviour: Behaviour = _clean
     handed: list[list[str]] | None = None
     cacheable: bool = True
+    #: Which prepared files the plugin passes to the command it spawns;
+    #: None spawns nothing (an in-process or project-level tool).
+    passes: Callable[[list[str]], list[str]] | None = list
 
     @property
     def definition(self) -> ToolDefinition:
@@ -104,6 +117,7 @@ class _FakeTool(BaseToolPlugin):
         return ToolDefinition(
             name="fake",
             description="fake checker",
+            can_fix=True,
             file_patterns=["*.txt"],
             claims=[Claim(patterns=["*.txt"], capabilities={Cap.CHECK})],
             partitionable=True,
@@ -125,7 +139,34 @@ class _FakeTool(BaseToolPlugin):
             return prepared
         assert self.handed is not None
         self.handed.append(sorted(os.path.basename(f) for f in prepared.files))
+        if self.passes is not None:
+            self._run_subprocess_result(
+                [sys.executable, "-c", "pass", *self.passes(prepared.rel_files)],
+                cwd=prepared.cwd,
+            )
         return self.behaviour(prepared)
+
+    def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
+        """Format the same way the check runs, reporting nothing left.
+
+        Args:
+            paths: Paths to format.
+            options: Runtime options.
+
+        Returns:
+            A clean fix result, or preparation's early result.
+        """
+        checked = self.check(paths, options)
+        if checked.no_files or checked.unavailable:
+            return checked
+        return ToolResult(
+            name="fake",
+            success=True,
+            inspected_files=True,
+            initial_issues_count=0,
+            fixed_issues_count=0,
+            remaining_issues_count=0,
+        )
 
 
 @pytest.fixture
@@ -163,6 +204,8 @@ def _run(
     parallel: bool,
     handed: list[list[str]],
     cacheable: bool = True,
+    passes: Callable[[list[str]], list[str]] | None = list,
+    action: Action = Action.CHECK,
 ) -> RunArtifact:
     """Run the fake tool once through ``execute_run`` with ``--incremental``.
 
@@ -173,11 +216,18 @@ def _run(
         parallel: Whether to use the parallel dispatcher.
         handed: Collects the files each run was handed.
         cacheable: The fake definition's ``incremental_cacheable``.
+        passes: Which prepared files the plugin passes to its command.
+        action: ``CHECK`` or ``FIX``.
 
     Returns:
         The run artifact.
     """
-    tool = _FakeTool(behaviour=behaviour, handed=handed, cacheable=cacheable)
+    tool = _FakeTool(
+        behaviour=behaviour,
+        handed=handed,
+        cacheable=cacheable,
+        passes=passes,
+    )
 
     def configure(*, tool: Any, **_kwargs: Any) -> Any:
         clone = tool.copy_for_execution()
@@ -202,8 +252,8 @@ def _run(
     config.execution.max_workers = 2
     config.execution.auto_install_deps = False
     ctx = RunContext(
-        action=Action.CHECK,
-        selection_action=Action.CHECK,
+        action=action,
+        selection_action=action,
         dry_run_preview=False,
         output_manager=SimpleNamespace(run_dir=project, base_dir=project),
         logger=FakeLogger(),
@@ -483,7 +533,7 @@ def test_a_cache_from_an_earlier_lintro_is_discarded(
 
 @pytest.mark.parametrize(
     "name",
-    ["cargo_audit", "cargo_deny", "osv_scanner", "pip_audit", "semgrep"],
+    ["cargo_audit", "cargo_deny", "commitlint", "osv_scanner", "pip_audit", "semgrep"],
 )
 def test_scanners_on_outside_data_say_incremental_does_not_apply(name: str) -> None:
     """Each declared never-cache tool carries the note under ``--incremental``.
@@ -494,7 +544,11 @@ def test_scanners_on_outside_data_say_incremental_does_not_apply(name: str) -> N
     tool = tool_manager.get_tool(name).copy_for_execution()
     tool.set_options(incremental=True)
 
-    result = finish_incremental_run(tool, ToolResult(name=name, success=True))
+    result = finish_incremental_run(
+        tool,
+        ToolResult(name=name, success=True),
+        record=True,
+    )
 
     assert_that(result.output).is_equal_to(incremental_note(name))
 
@@ -508,5 +562,135 @@ def test_only_tools_on_outside_data_are_declared_never_cache() -> None:
     )
 
     assert_that(never).is_equal_to(
-        ["cargo_audit", "cargo_deny", "osv_scanner", "pip_audit", "semgrep"],
+        [
+            "cargo_audit",
+            "cargo_deny",
+            "commitlint",
+            "osv_scanner",
+            "pip_audit",
+            "semgrep",
+        ],
     )
+
+
+@PARALLEL
+def test_a_format_run_records_nothing_for_a_later_check(
+    monkeypatch: pytest.MonkeyPatch,
+    project: Path,
+    parallel: bool,
+) -> None:
+    """A clean ``fmt`` run leaves every file to the next incremental check.
+
+    Args:
+        monkeypatch: Isolates the executor.
+        project: Project directory.
+        parallel: Whether to use the parallel dispatcher.
+    """
+    handed: list[list[str]] = []
+    _run(
+        monkeypatch,
+        project,
+        behaviour=_clean,
+        parallel=parallel,
+        handed=handed,
+        action=Action.FIX,
+    )
+
+    _run(monkeypatch, project, behaviour=_clean, parallel=parallel, handed=handed)
+
+    assert_that(handed).is_equal_to([BOTH, BOTH])
+
+
+@PARALLEL
+@pytest.mark.parametrize(
+    ("passes", "rechecked"),
+    [
+        (lambda files: [f for f in files if f == "good.txt"], ["bad.txt"]),
+        (None, BOTH),
+    ],
+    ids=["narrowed-to-one-file", "spawns-nothing"],
+)
+def test_only_files_passed_to_the_tool_are_recorded(
+    monkeypatch: pytest.MonkeyPatch,
+    project: Path,
+    parallel: bool,
+    passes: Callable[[list[str]], list[str]] | None,
+    rechecked: list[str],
+) -> None:
+    """A plugin that narrows after ``prepare`` records only what it passed.
+
+    This is the guard for every plugin: one that names no file in a spawned
+    command, however clean its result, records nothing.
+
+    Args:
+        monkeypatch: Isolates the executor.
+        project: Project directory.
+        parallel: Whether to use the parallel dispatcher.
+        passes: Which prepared files the plugin passes to its command.
+        rechecked: Files the next run must be handed.
+    """
+    handed: list[list[str]] = []
+    _run(
+        monkeypatch,
+        project,
+        behaviour=_clean,
+        parallel=parallel,
+        handed=handed,
+        passes=passes,
+    )
+
+    _run(monkeypatch, project, behaviour=_clean, parallel=parallel, handed=handed)
+
+    assert_that(handed).is_equal_to([BOTH, rechecked])
+
+
+def test_an_option_value_is_not_taken_as_a_checked_file(tmp_path: Path) -> None:
+    """A file named only as an option's value was not handed for checking.
+
+    Args:
+        tmp_path: Directory holding the files.
+    """
+    for name in ("conf.txt", "a.txt", "b.txt"):
+        (tmp_path / name).write_text("x\n")
+    cmd = ["tool", "--config", "conf.txt", "--no-color", "a.txt", "-c", "b.txt"]
+
+    found = spawned_files(cmd, str(tmp_path))
+
+    real = os.path.realpath(tmp_path)
+    assert_that(found).contains(os.path.join(real, "a.txt"))
+    assert_that(found).does_not_contain(
+        os.path.join(real, "conf.txt"),
+        os.path.join(real, "b.txt"),
+    )
+
+
+def test_a_file_one_discovery_could_not_read_is_never_recorded() -> None:
+    """An unreadable path in a later discovery drops an earlier fingerprint."""
+    seen = FileFingerprint(path="/p/a.txt", mtime=1.5, size=1)
+    first = PendingCheck("fake", "/p", FingerprintSnapshot({"/p/a.txt": seen}))
+    second = PendingCheck("fake", "/p", FingerprintSnapshot({}, ("/p/a.txt",)))
+
+    merged = _merged([first, second])
+
+    assert merged is not None
+    assert_that(merged.snapshot.fingerprints).is_empty()
+    assert_that(merged.snapshot.unreadable).is_equal_to(("/p/a.txt",))
+
+
+def test_incremental_cacheable_does_not_shift_positional_definition_fields() -> None:
+    """External plugins passing fields positionally keep their meaning."""
+    definition = ToolDefinition(
+        "ext",
+        "external tool",
+        False,
+        ToolType.LINTER,
+        ExecutionClass.DETERMINISTIC,
+        ["*.ext"],
+        [],
+        True,
+        True,
+        ["ext.toml"],
+    )
+
+    assert_that(definition.native_configs).is_equal_to(["ext.toml"])
+    assert_that(definition.incremental_cacheable).is_true()

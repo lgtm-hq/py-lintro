@@ -263,7 +263,7 @@ The `ToolDefinition` dataclass defines your tool's metadata:
 | `claims`                | `list[Claim]`  | Patterns plus the capabilities applied to them       |
 | `reads_tree`            | `bool`         | Reads the working tree, so runs after mutation       |
 | `partitionable`         | `bool`         | File set may be sharded without changing the verdict |
-| `incremental_cacheable` | `bool`         | False: verdict depends on outside data, never cached |
+| `incremental_cacheable` | `bool`         | Keyword-only; False: verdict not from the files only |
 | `native_configs`        | `list[str]`    | Config file names                                    |
 | `version_command`       | `list[str]`    | Command to check version                             |
 | `min_version`           | `str`          | Minimum supported version                            |

@@ -645,10 +645,22 @@ size differs from the recorded one. `--no-cache` deletes every record.
 
 The rule for recording a file is fail closed:
 
+- **Only `lintro check` records.** A `lintro format` run never writes the record: its
+  final verdict comes from the verify pass, after every formatter has run.
 - **A file is recorded after the tool has run, never before.** Discovery only reads the
   record. Nothing is written when the tool was not installed, its version was refused,
   it was skipped, it timed out, its run failed or was incomplete, or the run was stopped
   (Ctrl-C, an exception, a kill). The next incremental run checks those files again.
+- **Only files lintro passed to the tool are recorded.** A file counts as passed when it
+  appears as a plain file argument of a command the plugin ran (not as the value of an
+  option such as `--config`). A plugin that narrows its list after discovery (a ruleset
+  or project-root lookup, an include list, a file cap) records only what it passed; a
+  tool that is handed a directory, a project or a manifest instead of files, or that
+  runs in-process, records nothing, so `--incremental` never narrows it.
+- **A clean result needs evidence that files were read.** A successful run with no
+  finding records files only when the tool reports that it inspected them; a run in
+  which part of the check was skipped (black's E501 supplement without ruff) records
+  nothing.
 - **Only files checked with no finding are recorded.** A file with a finding stays
   unrecorded, so every incremental run reports it again until it is fixed: an unchanged
   file with findings never turns a later incremental run green.
@@ -656,15 +668,17 @@ The rule for recording a file is fail closed:
   parsed in full.** Several tools cannot certify that (shellcheck, hadolint and other
   per-file runners); for them a single finding means no file of that run is recorded,
   and the next run checks them all again.
-- The recorded fingerprint is the one taken before the tool read the file. A file the
-  tool rewrote (under `lintro format`) or that you edited during the run is checked
-  again next time.
+- The recorded fingerprint is the one taken before the tool read the file. A file you
+  edited during the run is checked again next time.
+- A record that cannot be read (invalid bytes, malformed JSON) is discarded and every
+  file is checked.
 
 Tools whose result depends on data that changes independently of the files declare
 `incremental_cacheable=False` and are never narrowed: `cargo_audit`, `cargo_deny`,
-`osv_scanner` and `pip_audit` (advisory databases) and `semgrep` (its default
-`--config auto` fetches registry rules). Under `--incremental` they check every file in
-scope and their output says so. `--diff` still narrows them.
+`osv_scanner` and `pip_audit` (advisory databases), `semgrep` (its default
+`--config auto` fetches registry rules) and `commitlint` (it checks the commit message,
+not files). Under `--incremental` they check every file in scope and their output says
+so. `--diff` still narrows them.
 
 Records written by lintro before this rule existed could list files no tool had checked.
 They carry no format version and are discarded the first time each tool runs, so the

@@ -122,7 +122,8 @@ class ToolDefinition:
         incremental_cacheable: Whether the tool's verdict on a file depends
             only on that file and lintro's configuration. False for a tool
             whose verdict also depends on data that changes on its own, such
-            as an advisory database or a rule registry: ``--incremental``
+            as an advisory database, a rule registry or the commit message.
+            Keyword-only. When False, ``--incremental``
             never narrows it and never records its files as checked (#3578).
         native_configs: Config files the tool respects natively
             (Lintro won't interfere).
@@ -153,7 +154,7 @@ class ToolDefinition:
     claims: list[Claim] = field(default_factory=list)
     reads_tree: bool = True
     partitionable: bool = False
-    incremental_cacheable: bool = True
+    incremental_cacheable: bool = field(default=True, kw_only=True)
 
     # Native config files this tool respects (Lintro should NOT interfere)
     native_configs: list[str] = field(default_factory=list)

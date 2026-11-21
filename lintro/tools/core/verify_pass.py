@@ -506,10 +506,8 @@ class VerifyBaseline:
 def _incremental_subset(*, tool_name: str, files: Sequence[str]) -> list[str]:
     """Restrict a tool's file set to what its incremental cache calls changed.
 
-    Deliberately not ``walk_files_with_excludes(incremental=True)``: that call
-    *writes* the tool's cache as a side effect, and this runs before the
-    mutation phase, so it would tell every tool its own files were already
-    up to date. Reading the cache is enough.
+    Reads the cache and never writes it: files are recorded as checked only
+    by a ``check`` run, after the tool has run (#3578).
 
     Args:
         tool_name: Registry key whose cache to consult.

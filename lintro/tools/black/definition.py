@@ -79,6 +79,8 @@ class _LineLengthResult:
     note: str = ""
     failed: bool = False
     timed_out: bool = False
+    #: The supplement could not run (ruff missing): E501 was not checked.
+    skipped: bool = False
 
 
 @register_tool
@@ -260,7 +262,11 @@ class BlackPlugin(BaseToolPlugin):
         try:
             return _LineLengthResult(self._check_line_length_violations(files, cwd))
         except RuffNotFoundError as e:
-            return _LineLengthResult([], note=f"E501 supplement skipped: {e}")
+            return _LineLengthResult(
+                [],
+                note=f"E501 supplement skipped: {e}",
+                skipped=True,
+            )
         except LineLengthCheckUnavailableError as e:
             return _LineLengthResult(
                 [],
@@ -368,6 +374,8 @@ class BlackPlugin(BaseToolPlugin):
         if supplement.note:
             result_output = "\n".join(filter(None, (output.rstrip(), supplement.note)))
         complete = not (execution_failed or parse_failures or supplement.failed)
+        # A skipped E501 supplement is not a failure, but E501 was not checked.
+        measured = complete and not supplement.skipped
 
         return ToolResult.from_outcome(
             ToolOutcome(
@@ -376,13 +384,13 @@ class BlackPlugin(BaseToolPlugin):
                     if supplement.timed_out
                     else Checked(
                         success=process.success and count == 0 and complete,
-                        inspected_files=True if complete else None,
+                        inspected_files=True if measured else None,
                     )
                 ),
                 issues_count=count,
             ),
             name=self.definition.name,
-            findings_complete=complete,
+            findings_complete=measured,
             execution_failed=execution_failed or supplement.failed,
             parse_failures_count=parse_failures or None,
             inspected_paths=(

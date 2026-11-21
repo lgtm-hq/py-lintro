@@ -75,6 +75,8 @@ class CommitlintPlugin(BaseToolPlugin):
             claims=[],
             reads_tree=False,
             partitionable=False,
+            # It checks the commit message, not the files it is handed.
+            incremental_cacheable=False,
             native_configs=[
                 "commitlint.config.js",
                 "commitlint.config.cjs",

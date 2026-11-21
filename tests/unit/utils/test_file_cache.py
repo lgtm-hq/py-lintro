@@ -174,6 +174,50 @@ def test_tool_cache_load_discards_a_file_in_another_format(
     assert_that(loaded.fingerprints).is_empty()
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [b"\x80\xff\xfe", b"{not json"],
+    ids=["invalid-utf8", "malformed-json"],
+)
+def test_tool_cache_load_discards_an_unreadable_file(
+    tmp_path: Path,
+    raw: bytes,
+) -> None:
+    """A cache that cannot be decoded is discarded instead of raising.
+
+    Args:
+        tmp_path: Pytest fixture for temporary directory.
+        raw: Bytes written as the cache file.
+    """
+    (tmp_path / "t.json").write_bytes(raw)
+
+    with patch("lintro.utils.file_cache.CACHE_DIR", tmp_path):
+        loaded = ToolCache.load("t")
+
+    assert_that(loaded.fingerprints).is_empty()
+
+
+def test_tool_cache_save_leaves_no_temp_file_when_writing_fails(
+    tmp_path: Path,
+) -> None:
+    """A failed write removes its temp file and keeps the old cache.
+
+    Args:
+        tmp_path: Pytest fixture for temporary directory.
+    """
+    (tmp_path / "t.json").write_text("old")
+    cache = ToolCache(tool_name="t")
+
+    with (
+        patch("lintro.utils.file_cache.CACHE_DIR", tmp_path),
+        patch("lintro.utils.file_cache.json.dump", side_effect=TypeError("boom")),
+    ):
+        cache.save()
+
+    assert_that(sorted(p.name for p in tmp_path.iterdir())).is_equal_to(["t.json"])
+    assert_that((tmp_path / "t.json").read_text()).is_equal_to("old")
+
+
 def test_tool_cache_save_writes_the_current_format(tmp_path: Path) -> None:
     """A saved cache carries the format version that load accepts.
 

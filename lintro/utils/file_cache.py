@@ -145,6 +145,7 @@ class ToolCache:
         Uses temp file + rename pattern to prevent corruption if write fails.
         """
         cache_file = CACHE_DIR / f"{self.tool_name}.json"
+        tmp_path: Path | None = None
 
         try:
             cache_file.parent.mkdir(parents=True, exist_ok=True)
@@ -164,8 +165,8 @@ class ToolCache:
                 suffix=".tmp",
                 delete=False,
             ) as tmp_file:
-                json.dump(data, tmp_file, indent=2)
                 tmp_path = Path(tmp_file.name)
+                json.dump(data, tmp_file, indent=2)
 
             # Atomic rename (on POSIX systems)
             tmp_path.replace(cache_file)
@@ -176,7 +177,7 @@ class ToolCache:
         except (OSError, TypeError, ValueError) as e:
             logger.warning(f"Could not save cache for {self.tool_name}: {e}")
             # Clean up temp file if it exists
-            if "tmp_path" in locals() and tmp_path.exists():
+            if tmp_path is not None:
                 tmp_path.unlink(missing_ok=True)
 
     @classmethod
@@ -211,13 +212,9 @@ class ToolCache:
             cache = cls(tool_name=tool_name, fingerprints=fingerprints)
             logger.debug(f"Loaded cache for {tool_name} ({len(fingerprints)} files)")
             return cache
-        except (
-            OSError,
-            json.JSONDecodeError,
-            AttributeError,
-            KeyError,
-            TypeError,
-        ) as e:
+        # ValueError covers JSONDecodeError and UnicodeDecodeError: a cache
+        # that cannot be read is discarded, and everything is checked.
+        except (OSError, ValueError, AttributeError, KeyError, TypeError) as e:
             logger.debug(f"Could not load cache for {tool_name}: {e}")
             return cls(tool_name=tool_name)
 
