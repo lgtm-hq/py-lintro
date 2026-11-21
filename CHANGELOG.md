@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.183.3] - 2026-11-20
+
+### Fixed
+
+- **cargo_audit**: audit every project Cargo.lock, skip vendored copies by default
+  (#3572) (15275fe)
+
 ## [0.183.2] - 2026-11-20
 
 ### Fixed
